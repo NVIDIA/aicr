@@ -292,11 +292,28 @@ function remove_stale_nodewright_taints() {
   # queried alongside the count because status.availableReplicas is omitempty:
   # an existing Deployment with nothing available prints no count, which must
   # not be mistaken for no Deployment at all.
-  local deploys
+  local deploys legacy_deploys
   if ! deploys=$(kubectl get deploy -n "${ns}" -l app.kubernetes.io/name=nodewright,control-plane=controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
     _warn_line "could not query the nodewright-operator Deployment in ${ns}; skipping stale-taint cleanup: ${deploys}"
     return 0
   fi
+  # app.kubernetes.io/name carries the CHART name, which was skyhook-operator
+  # before the chart was renamed to nodewright, so the selector above cannot see
+  # an operator installed from a pre-rename bundle. Missing it would read as a
+  # fresh deploy and strip runtime-required taints out from under a live
+  # operator, uncordoning nodes mid-tuning. The Deployment NAME is stable across
+  # both chart eras because the bundle pins fullnameOverride, so a name lookup
+  # catches what the label misses. A field selector is used rather than a named
+  # get so an absent Deployment is an empty list rather than an error, keeping
+  # the two queries the same shape.
+  if ! legacy_deploys=$(kubectl get deploy -n "${ns}" --field-selector metadata.name=skyhook-operator-controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
+    _warn_line "could not query the nodewright-operator Deployment by name in ${ns}; skipping stale-taint cleanup: ${legacy_deploys}"
+    return 0
+  fi
+  # Concatenated, not deduplicated: the current install matches both queries and
+  # a duplicate row changes neither the emptiness test nor the active-replica
+  # scan below.
+  deploys=$(printf '%s\n%s' "${deploys}" "${legacy_deploys}")
   local fresh_deploy=false
   if [[ -z "${deploys//[[:space:]]/}" ]]; then
     fresh_deploy=true

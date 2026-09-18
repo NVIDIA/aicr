@@ -41,15 +41,24 @@ fi
 
 # --- Stub kubectl on PATH -----------------------------------------------------
 # Behaviour is driven by env vars so each case sets its own cluster shape:
-#   STUB_DEPLOY_RC / STUB_DEPLOY_OUT  -> `kubectl get deploy` exit code / stdout
+#   STUB_DEPLOY_RC / STUB_DEPLOY_OUT  -> label-selected `kubectl get deploy`
 #     (stdout is "<name> <availableReplicas>" per Deployment; the count is
 #     empty when availableReplicas is omitted, i.e. zero available)
+#   STUB_DEPLOY_BY_NAME_RC / STUB_DEPLOY_BY_NAME_OUT -> the --field-selector
+#     lookup by Deployment name, same stdout shape
 #   STUB_NODES_RC  / STUB_NODES_OUT   -> `kubectl get nodes`  exit code / stdout
 # Every `kubectl taint` call is appended to $KLOG.
 cat >"${WORK}/kubectl" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
-    "get deploy") printf '%s' "${STUB_DEPLOY_OUT:-}"; exit "${STUB_DEPLOY_RC:-0}" ;;
+    "get deploy")
+        # The cleanup issues two Deployment queries: one by label, one by name
+        # via --field-selector. They are stubbed separately so a case can model
+        # a pre-rename install, which the label cannot see but the name can.
+        if [[ "$*" == *--field-selector* ]]; then
+            printf '%s' "${STUB_DEPLOY_BY_NAME_OUT:-}"; exit "${STUB_DEPLOY_BY_NAME_RC:-0}"
+        fi
+        printf '%s' "${STUB_DEPLOY_OUT:-}"; exit "${STUB_DEPLOY_RC:-0}" ;;
     "get nodes")  printf '%s' "${STUB_NODES_OUT:-}";  exit "${STUB_NODES_RC:-0}" ;;
     "taint node") printf '%s\n' "$*" >>"${KLOG}"; exit 0 ;;
 esac
@@ -96,6 +105,24 @@ STUB_NODES_OUT="${NODES_LEGACY_TAINTED}" run "${NO_VALUES}"
 check_rc0       "deploy-read-error-rc0"
 check_out       "deploy-read-error-warns" "skipping stale-taint cleanup"
 check_no_taints "deploy-read-error-no-taint-calls"
+
+# 1a. A pre-rename install: app.kubernetes.io/name carries the old chart name
+#     (skyhook-operator), so the label query sees nothing while the operator is
+#     very much alive. Reading that as a fresh deploy would strip the gate out
+#     from under it and uncordon nodes mid-tuning.
+STUB_DEPLOY_OUT='' STUB_DEPLOY_BY_NAME_OUT=$'skyhook-operator-controller-manager 1\n' \
+STUB_NODES_OUT="${NODES_LEGACY_TAINTED}" run "${NO_VALUES}"
+check_rc0       "legacy-labelled-operator-rc0"
+check_no_taints "legacy-labelled-operator-no-taint-calls"
+
+# 1b. The name lookup failing is as opaque as the label one failing: skip the
+#     cleanup rather than guess the operator is gone.
+STUB_DEPLOY_OUT='' STUB_DEPLOY_BY_NAME_RC=1 \
+STUB_DEPLOY_BY_NAME_OUT='Unable to connect to the server: EOF' \
+STUB_NODES_OUT="${NODES_LEGACY_TAINTED}" run "${NO_VALUES}"
+check_rc0       "name-read-error-rc0"
+check_out       "name-read-error-warns" "skipping stale-taint cleanup"
+check_no_taints "name-read-error-no-taint-calls"
 
 # 2. A running operator (available replicas > 0) owns the taints: no cleanup.
 STUB_DEPLOY_OUT=$'skyhook-operator-controller-manager 1\n' STUB_NODES_OUT="${NODES_LEGACY_TAINTED}" run "${NO_VALUES}"

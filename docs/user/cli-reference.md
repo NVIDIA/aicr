@@ -1568,7 +1568,7 @@ Components whose version is identical on both sides produce no row. Added compon
 | Route | When | `reason` | Renders steps |
 |---|---|---|---|
 | A record describes this move and blocks it | One record is crossed and its `from` covers your source | `recorded` | yes |
-| You would skip a boundary | Two or more records that ask something of you are crossed, or a crossed `blocked` record was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
+| You would skip a boundary | Two or more records that ask something of you are crossed, or a crossed `blocked` record is not the only boundary in the way, or one was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
 | Nothing describes your starting version | One record is crossed, but its `from` does not cover your source, usually because you are below the lowest recorded starting point | `undefined-origin` | no |
 | Your target is past what the record assessed | One record is crossed and its `from` covers your source, but your target sits above the ceiling that record's `to` names | `beyond-record-ceiling` | no |
 

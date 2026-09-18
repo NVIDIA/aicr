@@ -21,7 +21,7 @@
 # asserts status.status is "complete" so that node-level customizations (e.g. tuning)
 # have been applied to all matching nodes.
 #
-# Kind (#2593): nodewright-operator v0.18.0 (the registry pin) renamed
+# Kind (#2593): nodewright-operator v0.18.0 renamed
 # skyhook.nvidia.com Skyhook to nodewright.nvidia.com NodeWright. The operator
 # mirrors each legacy Skyhook into a NodeWright and writes status ONLY on the
 # NodeWright, so asserting the legacy kind never sees "complete" even on a fully

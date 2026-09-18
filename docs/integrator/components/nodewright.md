@@ -1,6 +1,6 @@
 # What is it
 
-Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [Skyhook Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/skyhook-crd.yaml) that define one or more nodewright packages to deploy. Operator v0.18.0 (the pinned version) renames the kind to [NodeWright](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/nodewright-crd.yaml) (`nodewright.nvidia.com/v1alpha1`) and mirrors each Skyhook into a NodeWright of the same name, writing status only on the NodeWright; the manifests still declare Skyhook until the [upstream migration](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md) is adopted (tracked in [#2594](https://github.com/NVIDIA/aicr/issues/2594)). These packages were selected to provide two main functions:
+Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [Skyhook Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/skyhook-crd.yaml) that define one or more nodewright packages to deploy. Operator v0.18.0 renames the kind to [NodeWright](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/nodewright-crd.yaml) (`nodewright.nvidia.com/v1alpha1`) and mirrors each Skyhook into a NodeWright of the same name, writing status only on the NodeWright; the manifests still declare Skyhook until the [upstream migration](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md) is adopted (tracked in [#2594](https://github.com/NVIDIA/aicr/issues/2594)). The registry pins v0.19.0. These packages were selected to provide two main functions:
 1. Optimize a node for inference or training workloads via grub, sysctl and systemd service settings.
 2. Be able to install all of the necessary software to bring a vanilla Kubernetes node to the AICR spec.
 
@@ -138,16 +138,18 @@ value passed at bundle time is what the gate waits on, together with the legacy
 during its deprecation window. That check derives its expected names from the
 effective values, so a CR the values suppress is never waited on.
 
-Known limitation: the `nodewright-customizations` chainsaw health check asserts
-a `NodeWright` CR reaches `status.status: complete` and cannot see value gates.
-When the whole CR is suppressed — `tuningEnabled: false` on a
+Value-gated readiness: the chainsaw health check asserts a `NodeWright` CR
+reaches `status.status: complete` and cannot read effective values itself. The
+deployment validator renders those values and suppresses the assert only when
+they produce no CR at all — `tuningEnabled: false` on a
 `tuning-gke.yaml`/`tuning-generic.yaml`/`tuning-rke2.yaml`/`tuning-gb300.yaml`
-recipe, or `enabled: false` anywhere — `aicr validate --phase deployment`
-fails that check on the deliberately untuned cluster; skip it in that
-configuration. (AKS is unaffected by `tuningEnabled: false`: its `tuning` CR
-still renders with the `nvidia-setup` packages.) A value-aware health check
-that tolerates the intentionally-absent CR is tracked in
-[#1844](https://github.com/NVIDIA/aicr/issues/1844).
+recipe, or `enabled: false` anywhere — so a deliberately untuned cluster passes
+rather than failing on an intentionally absent CR
+([#1844](https://github.com/NVIDIA/aicr/issues/1844)). When a CR does render,
+completion is still required. The suppression is fail-closed: a render, read or
+discovery error propagates instead of being read as "nothing to assert". (AKS
+is unaffected by `tuningEnabled: false`: its `tuning` CR still renders with the
+`nvidia-setup` packages.)
 
 Workload-gate taint key: operator v0.18.0 changed the chart default
 `runtimeRequiredTaint` from `skyhook.nvidia.com=runtime-required:NoSchedule`

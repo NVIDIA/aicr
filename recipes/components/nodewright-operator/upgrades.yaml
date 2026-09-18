@@ -150,9 +150,6 @@ transitions:
   # from starts at 0.18.0 rather than reaching lower: this describes the drain
   # change relative to v0.18.0 behaviour, and anyone below that has the rename
   # to cross first.
-  # from starts at 0.18.0 rather than reaching lower: this describes the drain
-  # change relative to v0.18.0 behaviour, and anyone below that has the rename
-  # to cross first.
   - from: ">=0.18.0 <0.19.0"
     to: "=0.19.0"
     verdict: safe
