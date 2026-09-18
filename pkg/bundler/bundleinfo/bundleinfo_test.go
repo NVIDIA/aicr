@@ -124,11 +124,12 @@ func TestWriteIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestWriteRejectsAbsolutePaths guards the constraint that no absolute path
-// ever reaches bundle-info.yaml: downstream readers resolve emitted paths
-// with filepath.Join(outDir, path), which returns an absolute right-hand
-// argument unchanged, so an absolute value would silently escape outDir.
-func TestWriteRejectsAbsolutePaths(t *testing.T) {
+// TestWriteRejectsEscapingPaths guards the constraint that no path escaping
+// the bundle directory ever reaches bundle-info.yaml: downstream readers
+// resolve emitted paths with filepath.Join(outDir, path), which returns an
+// absolute right-hand argument unchanged and Cleans a leading "../" away, so
+// either shape would silently resolve outside outDir.
+func TestWriteRejectsEscapingPaths(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*bundleinfo.BundleInfo)
@@ -143,6 +144,30 @@ func TestWriteRejectsAbsolutePaths(t *testing.T) {
 			name: "absolute release path",
 			mutate: func(info *bundleinfo.BundleInfo) {
 				info.Layout.Releases[0].Path = "/etc/passwd"
+			},
+		},
+		{
+			name: "parent-traversal entrypoint",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Layout.Entrypoint = "../../../etc/passwd"
+			},
+		},
+		{
+			name: "parent-traversal release path",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Layout.Releases[0].Path = "../../../etc"
+			},
+		},
+		{
+			name: "parent-traversal release manifest",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Layout.Releases[0].Manifest = "001-cert-manager/../../../etc/passwd"
+			},
+		},
+		{
+			name: "parent-traversal recipe path",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Build.Recipe.Path = "../recipe.yaml"
 			},
 		},
 	}
@@ -197,6 +222,15 @@ func TestReadFailsClosed(t *testing.T) {
 			code:    errors.ErrCodeInvalidRequest,
 		},
 		{
+			// BundleInfo shipped at the ADR-022 stable target with no alpha
+			// predecessor, so this names a document that never legitimately
+			// existed — the generic stable-track predicate accepts it, which
+			// is why Read uses the BundleInfo-specific one.
+			name:    "superseded alpha apiVersion",
+			content: "apiVersion: " + header.GroupVersion + "\nkind: BundleInfo\n",
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
 			name:    "wrong kind",
 			content: "apiVersion: " + header.StableGroupVersion + "\nkind: RecipeResult\n",
 			code:    errors.ErrCodeInvalidRequest,
@@ -205,6 +239,23 @@ func TestReadFailsClosed(t *testing.T) {
 			name: "unknown field",
 			content: "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n" +
 				"somethingNobodyDeclared: true\n",
+			code: errors.ErrCodeInvalidRequest,
+		},
+		{
+			// The record on this side arrived from an OCI registry or a
+			// GitOps clone, so a path that resolves outside the bundle has to
+			// fail here — Write's guard never saw this file.
+			name: "parent-traversal release path",
+			content: "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n" +
+				"layout:\n  entrypoint: deploy.sh\n  releases:\n" +
+				"    - name: cert-manager\n      component: cert-manager\n" +
+				"      path: ../../../etc\n",
+			code: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "absolute entrypoint",
+			content: "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n" +
+				"layout:\n  entrypoint: /etc/passwd\n",
 			code: errors.ErrCodeInvalidRequest,
 		},
 	}

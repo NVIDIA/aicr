@@ -42,6 +42,9 @@ const FileName = "bundle-info.yaml"
 
 // Write serializes info deterministically to dir/bundle-info.yaml and returns
 // the byte count. Mode 0600 matches the bundler's recipe.yaml write.
+//
+// It overwrites info's APIVersion and Kind with the values this package emits,
+// which is what keeps the header out of a caller's hands.
 func Write(ctx context.Context, dir string, info *BundleInfo) (int64, error) {
 	if info == nil {
 		return 0, errors.New(errors.ErrCodeInvalidRequest, "bundle info is required")
@@ -121,26 +124,37 @@ func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s declares kind %q, want %q", FileName, info.Kind, header.KindBundleInfo))
 	}
-	if !header.IsSupportedAPIVersion(info.APIVersion) {
+	if !header.IsSupportedBundleInfoAPIVersion(info.APIVersion) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s declares apiVersion %q, which this binary does not understand",
 				FileName, info.APIVersion))
 	}
 
+	if err := validateRelativePaths(&info); err != nil {
+		return nil, err
+	}
+
 	return &info, nil
 }
 
-// validateRelativePaths rejects info when any path it emits is absolute.
-// bundle-info.yaml feeds downstream tooling that resolves these paths with
-// filepath.Join(outDir, path); Join returns an absolute path argument
-// unchanged, so an absolute value here would silently escape outDir instead
-// of failing. This is the only place that can close that off, since every
-// reader trusts the record once it parses.
+// validateRelativePaths rejects info when any path it carries points outside
+// the bundle directory. Both Write and Read call it: Write keeps a malformed
+// record from being produced, and Read is the side that matters, since the
+// file it parses arrived from an OCI registry or a GitOps clone.
+//
+// Downstream tooling resolves these paths with filepath.Join(outDir, path).
+// Join returns an absolute right-hand argument unchanged, and it Cleans the
+// result, which collapses a leading "../" into an escape from outDir — so
+// either shape would silently read or write outside the bundle instead of
+// failing. filepath.IsLocal rejects both, plus Windows reserved names, and
+// unlike a substring scan for ".." it accepts benign names like "foo..bak".
 func validateRelativePaths(info *BundleInfo) error {
 	check := func(field, value string) error {
-		if value != "" && filepath.IsAbs(value) {
+		// IsLocal("") is false, but an unset optional path is not a traversal;
+		// presence is each field's own contract, enforced elsewhere.
+		if value != "" && !filepath.IsLocal(value) {
 			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("%s must be a relative path, got %q", field, value))
+				fmt.Sprintf("%s must be a relative path inside the bundle, got %q", field, value))
 		}
 		return nil
 	}
