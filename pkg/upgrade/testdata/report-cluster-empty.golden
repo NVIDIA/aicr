@@ -28,6 +28,6 @@ AT RISK (advisory)
   them; removing a CRD takes its objects with it. Advisory only: this never
   changes the exit code.
 
-  not scanned: no cluster access requested
+  No crossed transition record names a resource kind, so nothing was examined.
 
 2 component changes, 0 need attention

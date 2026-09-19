@@ -241,6 +241,11 @@ func replacementReport(t *testing.T) *Report {
 // components. Every count differs from every other, so a renderer that crosses
 // two of them changes this golden: the Helm records and the Argo Applications
 // are the pair that matters, being in different units.
+//
+// It carries a scanned at-risk section because the two sections describe one
+// run: a report that names the cluster it read and then says no cluster access
+// was requested is a combination the facade does not produce, and a golden a
+// human reads must not be the one place it appears.
 func clusterSourceReport(t *testing.T) *Report {
 	t.Helper()
 	results := Match(syntheticSet(),
@@ -259,6 +264,13 @@ func clusterSourceReport(t *testing.T) *Report {
 			},
 			Argo: ReportSourceArgo{Applications: 5, Unattributed: 6, Unreadable: 7},
 		},
+		AtRisk: &AtRiskReport{
+			Scanned: true,
+			Kinds: []AtRiskKind{
+				{Group: "alpha.example.com", Kind: "AlphaTuning",
+					Components: []string{"alpha-operator"}, Present: true, Examined: 6},
+			},
+		},
 	})
 }
 
@@ -267,6 +279,11 @@ func clusterSourceReport(t *testing.T) *Report {
 // would conclude the cluster is bare. The stamped-but-unmatched count is
 // non-zero here because that is the realistic pairing — AICR wrote those
 // records and the mapping no longer recognizes them.
+//
+// The scan ran and had nothing to look for, which is the other half of that
+// pairing: every row is an addition, so no record was crossed and no kind was
+// named. Saying "no cluster access requested" under a block naming the cluster
+// it read would contradict itself.
 func emptyClusterReport(t *testing.T) *Report {
 	t.Helper()
 	results := Match(syntheticSet(),
@@ -285,6 +302,7 @@ func emptyClusterReport(t *testing.T) *Report {
 			},
 			Argo: ReportSourceArgo{},
 		},
+		AtRisk: &AtRiskReport{Scanned: true},
 	})
 }
 
@@ -348,6 +366,45 @@ func atRiskCleanReport(t *testing.T) *Report {
 	})
 }
 
+// atRiskNothingDeclaredReport is the vacuous scan: an artifact comparison the
+// caller asked to scan anyway, whose crossed records name no resource kind. It
+// is a state of its own rather than a clean scan — nothing was looked at, as
+// against looked at and found owned — and the two must not render alike.
+func atRiskNothingDeclaredReport(t *testing.T) *Report {
+	t.Helper()
+	results := Match(syntheticSet(),
+		map[string]string{"alpha-operator": "1.2.0"},
+		map[string]string{"alpha-operator": "1.2.3"})
+	return NewReport(results, ReportOptions{
+		From:     "./bundles-v0.16.0",
+		To:       "./bundles-v0.17.0",
+		Deployer: "helm",
+		AtRisk:   &AtRiskReport{Scanned: true},
+	})
+}
+
+// atRiskUnattributedKindReport is the kind no result named an owner for, which
+// AffectedKinds contributes rather than drops. The objects are at risk either
+// way, and this golden pins that the kind line renders without a parenthetical
+// instead of the warning being lost with the attribution.
+func atRiskUnattributedKindReport(t *testing.T) *Report {
+	t.Helper()
+	results := Match(syntheticSet(),
+		map[string]string{"alpha-operator": "1.2.0"},
+		map[string]string{"alpha-operator": "1.2.3"})
+	return NewReport(results, ReportOptions{
+		From:     "./bundles-v0.16.0",
+		To:       "./bundles-v0.17.0",
+		Deployer: "helm",
+		AtRisk: &AtRiskReport{
+			Scanned: true,
+			Kinds: []AtRiskKind{
+				{Group: "alpha.example.com", Kind: "AlphaTuning", Present: true, Examined: 3},
+			},
+		},
+	})
+}
+
 // atRiskNotScannedReport is the offline comparison, which every run without a
 // cluster produces. NewReport fills the section rather than the fixture, so
 // this golden also pins the default a caller cannot forget to set.
@@ -378,6 +435,8 @@ func TestWriteTableGolden(t *testing.T) {
 		{"cluster matched nothing", "report-cluster-empty.golden", emptyClusterReport},
 		{"at risk findings", "report-at-risk.golden", atRiskFindingsReport},
 		{"at risk scanned clean", "report-at-risk-clean.golden", atRiskCleanReport},
+		{"at risk nothing declared", "report-at-risk-nothing-declared.golden", atRiskNothingDeclaredReport},
+		{"at risk unattributed kind", "report-at-risk-unattributed.golden", atRiskUnattributedKindReport},
 		{"at risk not scanned", "report-at-risk-not-scanned.golden", atRiskNotScannedReport},
 	}
 	for _, tt := range tests {
