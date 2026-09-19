@@ -132,9 +132,14 @@ func TestHelmReleases(t *testing.T) {
 		failResource string
 		failErr      error
 		// within defaults to defaultTestScope when nil.
-		within           scope
-		cancelContext    bool
-		want             []installedRelease
+		within        scope
+		cancelContext bool
+		want          []installedRelease
+		// wantRecords is every object the walk examined, in scope or not. It
+		// is asserted on every case rather than where it looked interesting,
+		// because it is the denominator the other two counts are read against
+		// and a driver that stopped counting would otherwise pass.
+		wantRecords      int
 		wantUnattributed int
 		wantUnreadable   int
 		wantErr          bool
@@ -143,9 +148,10 @@ func TestHelmReleases(t *testing.T) {
 		wantErrContext   map[string]any
 	}{
 		{
-			name:    "single release",
-			objects: []runtime.Object{helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator)},
-			want:    []installedRelease{wantGPUOperator},
+			name:        "single release",
+			objects:     []runtime.Object{helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator)},
+			want:        []installedRelease{wantGPUOperator},
+			wantRecords: 1,
 		},
 		{
 			name: "newest revision wins without decoding superseded revisions",
@@ -165,6 +171,7 @@ func TestHelmReleases(t *testing.T) {
 				ChartVersion: "v25.10.0",
 				AppVersion:   "25.3.3",
 			}},
+			wantRecords: 3,
 		},
 		{
 			name: "revisions past nine sort numerically, not lexically",
@@ -183,6 +190,7 @@ func TestHelmReleases(t *testing.T) {
 				ChartVersion: "v25.10.0",
 				AppVersion:   "25.3.3",
 			}},
+			wantRecords: 2,
 		},
 		{
 			name: "releases in different namespaces, returned sorted by name",
@@ -190,7 +198,8 @@ func TestHelmReleases(t *testing.T) {
 				helmSecret("nvidia-network-operator", "network-operator", 1, "deployed", networkOperator),
 				helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator),
 			},
-			want: []installedRelease{wantGPUOperator, wantNetworkOperator},
+			want:        []installedRelease{wantGPUOperator, wantNetworkOperator},
+			wantRecords: 2,
 		},
 		{
 			name: "one release name installed in two namespaces stays two releases",
@@ -210,6 +219,7 @@ func TestHelmReleases(t *testing.T) {
 					ChartName: "gpu-operator", ChartVersion: "v25.10.0", AppVersion: "25.3.3",
 				},
 			},
+			wantRecords: 2,
 		},
 		{
 			name: "failed release is reported with its status",
@@ -228,6 +238,7 @@ func TestHelmReleases(t *testing.T) {
 				ChartVersion: "v25.10.0",
 				AppVersion:   "25.3.3",
 			}},
+			wantRecords: 2,
 		},
 		{
 			name: "secrets Helm does not own are ignored",
@@ -243,7 +254,8 @@ func TestHelmReleases(t *testing.T) {
 				},
 				helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator),
 			},
-			want: []installedRelease{wantGPUOperator},
+			want:        []installedRelease{wantGPUOperator},
+			wantRecords: 1,
 		},
 		{
 			name: "storage format this build has not been taught is refused",
@@ -280,6 +292,7 @@ func TestHelmReleases(t *testing.T) {
 					"other":                      "kept",
 				},
 			}},
+			wantRecords: 1,
 		},
 		{
 			// The storage labels are the one source of a release's identity.
@@ -291,12 +304,14 @@ func TestHelmReleases(t *testing.T) {
 					`{"name":"wrong","namespace":"wrong","version":99,"info":{"status":"deployed"},`+
 						`"chart":{"metadata":{"name":"gpu-operator","version":"v25.3.3","appVersion":"25.3.3"}}}`)),
 			},
-			want: []installedRelease{wantGPUOperator},
+			want:        []installedRelease{wantGPUOperator},
+			wantRecords: 1,
 		},
 		{
-			name:    "configmap storage driver",
-			objects: []runtime.Object{helmConfigMap("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator)},
-			want:    []installedRelease{wantGPUOperator},
+			name:        "configmap storage driver",
+			objects:     []runtime.Object{helmConfigMap("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator)},
+			want:        []installedRelease{wantGPUOperator},
+			wantRecords: 1,
 		},
 		{
 			name: "both storage drivers in one cluster, each picking its newest revision",
@@ -317,6 +332,7 @@ func TestHelmReleases(t *testing.T) {
 				ChartVersion: "v25.7.0",
 				AppVersion:   "25.3.3",
 			}},
+			wantRecords: 3,
 		},
 		{
 			// keepNewest keeps the incumbent on a revision tie, and the secret
@@ -338,6 +354,7 @@ func TestHelmReleases(t *testing.T) {
 				Status: "deployed", ChartName: "gpu-operator", ChartVersion: "v-from-secret",
 				AppVersion: "25.3.3",
 			}},
+			wantRecords: 2,
 		},
 		{
 			name:    "no releases",
@@ -377,6 +394,7 @@ func TestHelmReleases(t *testing.T) {
 			},
 			want:             []installedRelease{wantNetworkOperator},
 			wantUnattributed: 1,
+			wantRecords:      2,
 		},
 		{
 			// The payload is never touched, so a record that would fail every
@@ -392,6 +410,7 @@ func TestHelmReleases(t *testing.T) {
 			},
 			want:             nil,
 			wantUnattributed: 1,
+			wantRecords:      1,
 		},
 		{
 			// The cluster is full of releases this project knows nothing
@@ -406,7 +425,8 @@ func TestHelmReleases(t *testing.T) {
 				}(),
 				helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator),
 			},
-			want: []installedRelease{wantGPUOperator},
+			want:        []installedRelease{wantGPUOperator},
+			wantRecords: 2,
 		},
 		{
 			// Proves the skip precedes decoding, not merely reporting: an
@@ -417,7 +437,8 @@ func TestHelmReleases(t *testing.T) {
 				helmConfigMap("teamspace", "their-other-app", 2, "deployed", undecodablePayload),
 				helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator),
 			},
-			want: []installedRelease{wantGPUOperator},
+			want:        []installedRelease{wantGPUOperator},
+			wantRecords: 3,
 		},
 		{
 			// Both drivers, because each has its own loop and the ordering has
@@ -437,14 +458,16 @@ func TestHelmReleases(t *testing.T) {
 				}(),
 				helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator),
 			},
-			want: []installedRelease{wantGPUOperator},
+			want:        []installedRelease{wantGPUOperator},
+			wantRecords: 3,
 		},
 		{
 			name: "foreign record without a destination the scope names is skipped",
 			objects: []runtime.Object{
 				helmSecret("teamspace", "their-app", 1, "deployed", gpuOperator),
 			},
-			want: nil,
+			want:        nil,
+			wantRecords: 1,
 		},
 		{
 			// The bundle writer names an injected folder "<component>-<phase>",
@@ -472,6 +495,7 @@ func TestHelmReleases(t *testing.T) {
 					Status: "deployed", ChartName: "local-helm", ChartVersion: "0.1.0", AppVersion: "25.3.3",
 				},
 			},
+			wantRecords: 3,
 		},
 		{
 			// The stale-baseline trap. Dropping the unreadable newest revision
@@ -495,6 +519,7 @@ func TestHelmReleases(t *testing.T) {
 			},
 			want:           nil,
 			wantUnreadable: 1,
+			wantRecords:    2,
 		},
 		{
 			// Order must not matter: the superseded revision may already be in
@@ -514,6 +539,7 @@ func TestHelmReleases(t *testing.T) {
 			},
 			want:           nil,
 			wantUnreadable: 1,
+			wantRecords:    2,
 		},
 		{
 			// A poisoned release is one release however many of its revisions
@@ -534,6 +560,7 @@ func TestHelmReleases(t *testing.T) {
 			},
 			want:           []installedRelease{wantGPUOperator},
 			wantUnreadable: 1,
+			wantRecords:    3,
 		},
 		{
 			// The same release name in two namespaces is two releases, so
@@ -554,6 +581,7 @@ func TestHelmReleases(t *testing.T) {
 				Status: "deployed", ChartName: "gpu-operator", ChartVersion: "v25.10.0", AppVersion: "25.3.3",
 			}},
 			wantUnreadable: 1,
+			wantRecords:    2,
 		},
 		{
 			// Flux's "<targetNamespace>-<name>" is a possible match, not a
@@ -570,6 +598,7 @@ func TestHelmReleases(t *testing.T) {
 			},
 			want:           []installedRelease{wantGPUOperator},
 			wantUnreadable: 1,
+			wantRecords:    2,
 		},
 		{
 			name: "possible record with a malformed revision label is skipped and counted",
@@ -587,6 +616,7 @@ func TestHelmReleases(t *testing.T) {
 			},
 			want:           nil,
 			wantUnreadable: 2,
+			wantRecords:    2,
 		},
 		{
 			// Leniency has to reach decode time, not just the label checks.
@@ -597,6 +627,7 @@ func TestHelmReleases(t *testing.T) {
 			},
 			want:           []installedRelease{wantGPUOperator},
 			wantUnreadable: 1,
+			wantRecords:    2,
 		},
 		{
 			name: "possible record with an empty payload is skipped and counted",
@@ -605,6 +636,7 @@ func TestHelmReleases(t *testing.T) {
 			},
 			want:           nil,
 			wantUnreadable: 1,
+			wantRecords:    1,
 		},
 		{
 			// The confident tier is unchanged: an injected folder is a name
@@ -693,13 +725,17 @@ func TestHelmReleases(t *testing.T) {
 			wantErrContains: []string{"secrets"},
 		},
 		{
-			name:            "listing configmaps is canceled",
-			objects:         []runtime.Object{helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator)},
-			failResource:    "configmaps",
-			failErr:         fmt.Errorf("get %q: %w", "/api/v1/configmaps", context.Canceled),
-			wantErr:         true,
-			wantErrCode:     errors.ErrCodeTimeout,
-			wantErrContains: []string{"configmaps"},
+			name:         "listing configmaps is canceled",
+			objects:      []runtime.Object{helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator)},
+			failResource: "configmaps",
+			failErr:      fmt.Errorf("get %q: %w", "/api/v1/configmaps", context.Canceled),
+			wantErr:      true,
+			// Not ErrCodeTimeout: errors.IsTransient reports false for a
+			// cancellation and true for a timeout, so a Ctrl-C coded as the
+			// latter re-enters a caller's retry loop and exits with the wrong
+			// status. The deadline case above is the one that stays a timeout.
+			wantErrCode:     errors.ErrCodeCanceled,
+			wantErrContains: []string{"configmaps", "canceled"},
 		},
 		{
 			name:            "the paged list outlives the apiserver's window",
@@ -738,8 +774,8 @@ func TestHelmReleases(t *testing.T) {
 			objects:         []runtime.Object{helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator)},
 			cancelContext:   true,
 			wantErr:         true,
-			wantErrCode:     errors.ErrCodeTimeout,
-			wantErrContains: []string{"Helm release"},
+			wantErrCode:     errors.ErrCodeCanceled,
+			wantErrContains: []string{"Helm release", "canceled"},
 		},
 	}
 
@@ -793,6 +829,9 @@ func TestHelmReleases(t *testing.T) {
 			if read.Unreadable != tt.wantUnreadable {
 				t.Errorf("helmReleases() counted %d unreadable records, want %d",
 					read.Unreadable, tt.wantUnreadable)
+			}
+			if read.Records != tt.wantRecords {
+				t.Errorf("helmReleases() examined %d records, want %d", read.Records, tt.wantRecords)
 			}
 		})
 	}
@@ -877,7 +916,12 @@ func TestHelmReleasesCancellation(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected a canceled context to fail")
 			}
-			assertError(t, err, errors.ErrCodeTimeout, nil)
+			assertError(t, err, errors.ErrCodeCanceled, nil)
+			if errors.IsTransient(err) {
+				// The whole point of the code: an abort the operator asked for
+				// must not be reported as a retryable infrastructure fault.
+				t.Errorf("error %v is transient, want a canceled abort to be terminal", err)
+			}
 		})
 	}
 }
