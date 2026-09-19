@@ -181,7 +181,11 @@ costs tuning, not correctness, because `NCCL_NET=gIB` from the runtime is what
 selects the fabric.
 
 Overriding `command` replaces the `torchrun` invocation Trainer injects, so
-the override has to launch it:
+the override has to launch it. Pass no rendezvous flags. Trainer sets
+`PET_NNODES`, `PET_NPROC_PER_NODE`, `PET_NODE_RANK`, `PET_MASTER_ADDR` and
+`PET_MASTER_PORT` on the container, and `torchrun` reads each one as the
+default for the matching flag, so a hand-written flag can only contradict the
+job it was launched under.
 
 ```yaml
 spec:
@@ -192,7 +196,7 @@ spec:
         if [ -f /home/kubernetes/bin/gib/scripts/set_nccl_env.sh ]; then
           . /home/kubernetes/bin/gib/scripts/set_nccl_env.sh
         fi
-        exec torchrun --nnodes "$PET_NNODES" --nproc-per-node 4 train.py
+        exec torchrun train.py
 ```
 
 ## Driver Installer
