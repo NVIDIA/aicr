@@ -28,6 +28,18 @@ import (
 // it.
 const reportWrapWidth = 78
 
+// sourceLine is the label-and-value shape of the cluster-source block, padded
+// wide enough for its longest label ("kubeconfig").
+const sourceLine = "  %-10s  %s\n"
+
+// zeroMatchAdvice is what the banner says when the read matched nothing. It
+// names the causes rather than only the finding: "nothing was found" on its
+// own has no next action, and the action differs entirely by cause.
+const zeroMatchAdvice = "Nothing was compared, and every row below therefore reads \"added\". A cluster with " +
+	"none of these components installed reads this way, and so do the two likelier causes: this is not the " +
+	"cluster you meant, or these components were installed by a deployer other than the one this check was " +
+	"given, whose releases it does not look for."
+
 // errWriter retains the first write error so a renderer checks once rather than
 // after every line. Writes after an error are no-ops.
 type errWriter struct {
@@ -76,6 +88,10 @@ func WriteTable(w io.Writer, r *Report) error {
 	}
 	ew.println("")
 
+	if r.Source != nil {
+		writeSource(ew, r.Source)
+	}
+
 	if len(r.Components) == 0 {
 		ew.println("NO COMPONENT CHANGES")
 		return wrapTableErr(ew.err)
@@ -116,6 +132,50 @@ func writeRows(w io.Writer, rows []ReportComponent) error {
 		return wrapTableErr(ew.err)
 	}
 	return wrapTableErr(tw.Flush())
+}
+
+// writeSource states which cluster the `from` table was read from, above the
+// rows rather than below them.
+//
+// A cluster read that recognizes nothing is reported rather than failed, and
+// every row under a zero match then reads "added". This block is the only
+// thing that separates an empty cluster from a kubeconfig pointed at the wrong
+// context, so it has to be read before the rows and not after: a reader who
+// reaches a footnote under a long table has already drawn a conclusion from
+// it.
+//
+// The per-reader lines come before the banner, because they are the evidence
+// the banner's diagnosis rests on: records were read and none of them matched.
+func writeSource(ew *errWriter, s *ReportSource) {
+	ew.println("READ FROM CLUSTER")
+	// Rendered even when empty. Neither is always knowable — an in-cluster run
+	// has no kubeconfig file — and a dropped line reads as nothing to say
+	// rather than as not known.
+	ew.printf(sourceLine, "kubeconfig", cell(s.Kubeconfig))
+	ew.printf(sourceLine, "context", cell(s.Context))
+	ew.printf(sourceLine, "matched", plural(s.Matched, "component", "components"))
+	ew.printf(sourceLine, "helm", strings.Join([]string{
+		plural(s.Helm.Records, "storage record", "storage records"),
+		fmt.Sprintf("%d unattributed", s.Helm.Unattributed),
+		fmt.Sprintf("%d unreadable", s.Helm.Unreadable),
+		fmt.Sprintf("%d uninstalled", s.Helm.Uninstalled),
+		fmt.Sprintf("%d stamped but unmatched", s.Helm.StampedUnmatched),
+	}, ", "))
+	// The Argo line ends by saying the stamp check does not apply rather than
+	// reporting it as zero: see ReportSourceArgo.
+	ew.printf(sourceLine, "argo", strings.Join([]string{
+		plural(s.Argo.Applications, "application", "applications"),
+		fmt.Sprintf("%d unattributed", s.Argo.Unattributed),
+		fmt.Sprintf("%d unreadable", s.Argo.Unreadable),
+		"no stamp to check",
+	}, ", "))
+
+	if s.Matched == 0 {
+		ew.println("")
+		ew.println("  NOTHING INSTALLED WAS RECOGNIZED")
+		writeParagraph(ew, "  ", zeroMatchAdvice)
+	}
+	ew.println("")
 }
 
 // writeDetail renders the block below the table for a row the operator has to

@@ -25,6 +25,12 @@ type ReportOptions struct {
 	From     string
 	To       string
 	Deployer string
+
+	// Source is where the `from` table was read when it came from a cluster,
+	// and nil for an artifact comparison. NewReport copies it rather than
+	// retaining the pointer, so the report keeps the ownership contract the
+	// rest of its fields hold.
+	Source *ReportSource
 }
 
 // Report is the presentable form of a match: one row per component whose
@@ -35,11 +41,89 @@ type ReportOptions struct {
 // everything it carries, renders each semver distance as the phrase a reader
 // sees, and names its fields for JSON and YAML consumers.
 type Report struct {
-	From       string            `json:"from,omitempty" yaml:"from,omitempty"`
-	To         string            `json:"to,omitempty" yaml:"to,omitempty"`
-	Deployer   string            `json:"deployer,omitempty" yaml:"deployer,omitempty"`
+	From     string `json:"from,omitempty" yaml:"from,omitempty"`
+	To       string `json:"to,omitempty" yaml:"to,omitempty"`
+	Deployer string `json:"deployer,omitempty" yaml:"deployer,omitempty"`
+
+	// Source names where the `from` table was read when it came from a
+	// cluster. Nil for an artifact comparison, which needs no such statement.
+	Source *ReportSource `json:"source,omitempty" yaml:"source,omitempty"`
+
 	Components []ReportComponent `json:"components" yaml:"components"`
 	Summary    ReportSummary     `json:"summary" yaml:"summary"`
+}
+
+// ReportSource accounts for a cluster read: which cluster was read, how much
+// of it the two readers examined, and how much of that became a `from` entry.
+//
+// It restates pkg/inventory's SourceInfo rather than embedding it, for the
+// reason Component does: this package must not import pkg/inventory. The
+// caller that holds both adapts.
+//
+// The readers are accounted for in two types that share no field name, and
+// their counts must never be summed. The Helm side counts storage records, so
+// one release with ten retained revisions contributes ten; the Argo side
+// counts Applications, of which a component has one. A single total over the
+// two reads fine and means nothing, and separate types are what leave no `+`
+// to write by accident.
+type ReportSource struct {
+	// Kubeconfig is the file the read resolved to and Context the context
+	// within it. Either can be empty: an in-cluster run has no file, a merged
+	// multi-file KUBECONFIG has no single path, and the context is not always
+	// recoverable from the client the read was built on. WriteTable renders
+	// the gap rather than dropping the line, so an unknown reads as unknown
+	// rather than as a line the renderer skipped.
+	Kubeconfig string `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
+	Context    string `json:"context,omitempty" yaml:"context,omitempty"`
+
+	// Matched is how many components the read resolved to an installed
+	// version. It is carried rather than derived from Components, which cannot
+	// answer it: a component installed at the target version produces no row
+	// at all, so the rows do not distinguish "found, unchanged" from "never
+	// found".
+	Matched int `json:"matched" yaml:"matched"`
+
+	Helm ReportSourceHelm `json:"helm" yaml:"helm"`
+	Argo ReportSourceArgo `json:"argo" yaml:"argo"`
+}
+
+// ReportSourceHelm accounts for the Helm storage records a read examined.
+type ReportSourceHelm struct {
+	// Records is every storage object examined, including the ones belonging
+	// to no component. It is the denominator the other counts read against.
+	Records int `json:"records" yaml:"records"`
+
+	// Unattributed is records carrying no release name.
+	Unattributed int `json:"unattributed" yaml:"unattributed"`
+
+	// Unreadable is releases whose records could not be read.
+	Unreadable int `json:"unreadable" yaml:"unreadable"`
+
+	// Uninstalled is releases excluded because `helm uninstall
+	// --keep-history` left the record behind.
+	Uninstalled int `json:"uninstalled" yaml:"uninstalled"`
+
+	// StampedUnmatched is records carrying an AICR stamp that matched no
+	// component. Anything above zero means the release-name mapping is broken
+	// rather than that the cluster is bare: AICR wrote those records and no
+	// longer recognizes them.
+	StampedUnmatched int `json:"stampedUnmatched" yaml:"stampedUnmatched"`
+}
+
+// ReportSourceArgo accounts for the Argo CD Applications a read examined.
+//
+// There is deliberately no StampedUnmatched counterpart, and WriteTable says
+// so rather than printing a zero. The generated Application carries no AICR
+// stamp — it lives in the wrapper Chart.yaml the Application points at, which
+// the reader never opens — so a zero would report a mapping verified against
+// something nothing looked for.
+type ReportSourceArgo struct {
+	// Applications is every Application examined, including the ones belonging
+	// to no component.
+	Applications int `json:"applications" yaml:"applications"`
+
+	Unattributed int `json:"unattributed" yaml:"unattributed"`
+	Unreadable   int `json:"unreadable" yaml:"unreadable"`
 }
 
 // ReportComponent is one row.
@@ -156,6 +240,10 @@ func NewReport(results []ComponentResult, opts ReportOptions) *Report {
 		To:         opts.To,
 		Deployer:   opts.Deployer,
 		Components: make([]ReportComponent, 0, len(results)),
+	}
+	if opts.Source != nil {
+		source := *opts.Source
+		rep.Source = &source
 	}
 	for _, r := range results {
 		rep.Components = append(rep.Components, reportComponent(r, opts.Deployer))

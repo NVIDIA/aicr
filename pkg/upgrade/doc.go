@@ -106,6 +106,14 @@
 // computed from several records, or from none naming the operator's starting
 // point, renders no steps, so its detail block is the Explanation alone.
 //
+// A report built from a cluster read carries a Source block, which WriteTable
+// renders above the rows. A read that recognizes nothing is reported rather
+// than failed, so every row under it reads "added"; the block is what
+// separates that from a kubeconfig on the wrong context, and it is useless
+// below the table a reader has already drawn a conclusion from. The two
+// readers are accounted for in separate types whose counts are in different
+// units and must never be summed.
+//
 // The deployer cannot be inferred. ADR-021 Decision 5 would take it from a `to`
 // bundle, but no bundle artifact records which deployer built it, so
 // RequiresDeployer reports when a caller has to supply one. It is true for a
