@@ -36,6 +36,9 @@
 //   - ErrCodeConflict: Resource state conflict, e.g., already exists or
 //     version mismatch (HTTP 409). Distinct from ErrCodeInvalidRequest
 //     because the request itself is well-formed.
+//   - ErrCodeCanceled: The caller abandoned the operation (HTTP 408).
+//     Distinct from ErrCodeTimeout because nothing was slow and nothing
+//     should be retried; use WrapCtxErr to classify a dead context.
 //
 // # Usage
 //
