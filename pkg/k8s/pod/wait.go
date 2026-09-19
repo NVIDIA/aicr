@@ -28,16 +28,21 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// classifyReGetError preserves the timeout/cancel error code when a
-// re-Get races against context expiry. Without this guard, a context
-// deadline that fires between the watch-close and the re-Get would
-// surface as ErrCodeUnavailable instead of ErrCodeTimeout, breaking
-// upstream code that distinguishes transient API unavailability from
-// the caller's own deadline.
+// classifyReGetError preserves the dead-context error code when a re-Get
+// races against context expiry. Without this guard, a context that ended
+// between the watch-close and the re-Get would surface as ErrCodeUnavailable
+// instead of ErrCodeTimeout/ErrCodeCanceled, breaking upstream code that
+// distinguishes transient API unavailability from the caller's own deadline
+// or abort. Within that dead-context case, errors.WrapCtxErr further splits
+// ErrCodeCanceled (operator abort) from ErrCodeTimeout (deadline) — see its
+// doc comment.
 func classifyReGetError(ctx context.Context, message string, getErr error) error {
-	canceled := ctx.Err() != nil || stderrors.Is(getErr, context.DeadlineExceeded) || stderrors.Is(getErr, context.Canceled)
-	if canceled {
-		return errors.Wrap(errors.ErrCodeTimeout, message, getErr)
+	cause := ctx.Err()
+	if cause == nil {
+		cause = getErr
+	}
+	if stderrors.Is(cause, context.Canceled) || stderrors.Is(cause, context.DeadlineExceeded) {
+		return errors.WrapCtxErr(cause, errors.ErrCodeTimeout, message)
 	}
 	return errors.Wrap(errors.ErrCodeUnavailable, message, getErr)
 }
@@ -79,7 +84,7 @@ func WaitForPodSucceeded(ctx context.Context, client kubernetes.Interface, names
 	for {
 		select {
 		case <-timeoutCtx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "pod wait timeout", timeoutCtx.Err())
+			return errors.WrapCtxErr(timeoutCtx.Err(), errors.ErrCodeTimeout, "waiting for pod to succeed")
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				// Watch channels close routinely on apiserver rolling
@@ -87,7 +92,7 @@ func WaitForPodSucceeded(ctx context.Context, client kubernetes.Interface, names
 				// the pod and reclassify rather than treating a transient
 				// apiserver event as a permanent failure.
 				if rcErr := timeoutCtx.Err(); rcErr != nil {
-					return errors.Wrap(errors.ErrCodeTimeout, "pod wait timeout", rcErr)
+					return errors.WrapCtxErr(rcErr, errors.ErrCodeTimeout, "waiting for pod to succeed")
 				}
 				current, getErr := client.CoreV1().Pods(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
 				if getErr != nil {
@@ -195,7 +200,8 @@ func checkPodPhase(p *corev1.Pod) (bool, error) {
 // reaching a terminal state, an ErrCodeUnavailable error is returned so
 // callers can decide log severity rather than swallow the failure.
 //
-// Context cancellation/timeout is surfaced as an ErrCodeTimeout error.
+// Context cancellation surfaces as ErrCodeCanceled; deadline expiry surfaces
+// as ErrCodeTimeout.
 func WaitForTermination(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
 	// Fast path: pod may already be deleted or terminal.
 	current, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -240,7 +246,8 @@ func WaitForTermination(ctx context.Context, client kubernetes.Interface, namesp
 //   - the pod reaches a terminal state (returns terminal=true)
 //   - the pod is Deleted (returns terminal=true)
 //   - the watch channel closes (returns terminal=false, lastRV=most recent RV)
-//   - the context is canceled (returns ErrCodeTimeout)
+//   - the context ends (returns ErrCodeCanceled on an operator abort,
+//     ErrCodeTimeout on deadline expiry)
 //   - the Watch call itself fails (returns ErrCodeInternal)
 //
 // On a successful terminal observation, lastRV may be empty.
@@ -258,7 +265,7 @@ func watchUntilTerminal(ctx context.Context, client kubernetes.Interface, namesp
 	for {
 		select {
 		case <-ctx.Done():
-			return false, lastRV, errors.Wrap(errors.ErrCodeTimeout, "pod termination wait timeout", ctx.Err())
+			return false, lastRV, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "waiting for pod termination")
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				return false, lastRV, nil
@@ -314,13 +321,13 @@ func WaitForPodReady(ctx context.Context, client kubernetes.Interface, namespace
 	for {
 		select {
 		case <-timeoutCtx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "pod ready wait timeout", timeoutCtx.Err())
+			return errors.WrapCtxErr(timeoutCtx.Err(), errors.ErrCodeTimeout, "waiting for pod to become ready")
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				// Watch channels close routinely on apiserver hiccups;
 				// re-Get and reclassify instead of declaring failure.
 				if rcErr := timeoutCtx.Err(); rcErr != nil {
-					return errors.Wrap(errors.ErrCodeTimeout, "pod ready wait timeout", rcErr)
+					return errors.WrapCtxErr(rcErr, errors.ErrCodeTimeout, "waiting for pod to become ready")
 				}
 				current, getErr := client.CoreV1().Pods(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
 				if getErr != nil {
