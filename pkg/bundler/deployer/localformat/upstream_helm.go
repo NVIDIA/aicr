@@ -46,7 +46,9 @@ func shellSingleQuote(s string) string {
 }
 
 var upstreamHelmTmpl = template.Must(
-	template.ParseFS(upstreamHelmTemplates, "templates/install-upstream-helm.sh.tmpl"),
+	template.New("install-upstream-helm.sh.tmpl").
+		Funcs(deployer.TemplateFuncs).
+		ParseFS(upstreamHelmTemplates, "templates/install-upstream-helm.sh.tmpl"),
 )
 
 // applyCRDsTmpl registers shq so recipe-supplied names reach the generated
@@ -56,6 +58,7 @@ var upstreamHelmTmpl = template.Must(
 // safe to interpolate bare into a command.
 var applyCRDsTmpl = template.Must(
 	template.New("apply-crds.sh.tmpl").
+		Funcs(deployer.TemplateFuncs).
 		Funcs(template.FuncMap{"shq": shellSingleQuote}).
 		ParseFS(applyCRDsTemplates, "templates/apply-crds.sh.tmpl"),
 )

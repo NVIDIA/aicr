@@ -43,57 +43,93 @@ if ! command -v kubectl >/dev/null 2>&1; then
   exit 1
 fi
 
-# KUBECONFIG_FLAG holds helm's spelling of the connection options, because every
-# other consumer forwards it unexamined into `helm upgrade`.
-# kubectl spells one of them differently -- helm's --kube-context is kubectl's
-# --context -- so the value is translated here rather than forwarded.
+# ==============================================================================
+# Kubernetes connection resolution
+# ==============================================================================
+# Inputs, all optional:
+#   KUBE_CONTEXT     context name to act on.
+#   KUBECONFIG       path to a kubeconfig. Both helm and kubectl read it from
+#                    the environment, so no flag is derived from it.
+#   KUBECONFIG_FLAG  deprecated. A literal helm flag string, translated below.
 #
-# An option this step does not translate is refused. Forwarding it aborts the
-# deploy on an unknown flag, and dropping it is worse: the reads and the CRD
-# force-apply below would then land on whatever cluster the ambient context
-# names, which is the wrong-cluster write this script must never make.
+# helm and kubectl spell the same connection option differently -- helm's
+# --kube-context is kubectl's --context -- so a context resolves to two arrays
+# rather than one shared string. Forwarding helm's spelling to kubectl aborts on
+# an unknown flag; dropping it silently is worse, because the reads and the
+# cluster writes would then land on whatever context the ambient kubeconfig
+# names, which is the wrong-cluster write this contract exists to prevent.
+#
+# An option this contract does not translate is refused rather than guessed at.
+#
+# Every rejection below exits before the first cluster call. A connection
+# option that is merely dropped is indistinguishable from one never set, and
+# the fallback is the ambient context.
+#
+# Both arrays are always declared, but a given script calls only one of the two
+# binaries, so the other is legitimately unread here.
+# shellcheck disable=SC2034
+HELM_CONN=()
+# shellcheck disable=SC2034
 KUBECTL_CONN=()
+
 if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
+  echo "WARNING: KUBECONFIG_FLAG is deprecated; export KUBE_CONTEXT (and KUBECONFIG) instead." >&2
+
   # Deliberate word-split: this slot holds a flag list, not a single word.
   # shellcheck disable=SC2206
-  helm_conn=(${KUBECONFIG_FLAG})
-  while (( ${#helm_conn[@]} > 0 )); do
-    case "${helm_conn[0]}" in
+  _aicr_argv=(${KUBECONFIG_FLAG})
+  _aicr_i=0
+  _aicr_n=${#_aicr_argv[@]}
+  _aicr_ctx=""
+
+  # Indexed rather than reslicing: `arr=("${arr[@]:2}")` expands to nothing on
+  # the final pair, and bash 3.2 -- which stock macOS still ships -- errors on
+  # an empty array expansion under `set -u`.
+  while (( _aicr_i < _aicr_n )); do
+    _aicr_tok="${_aicr_argv[_aicr_i]}"
+    case "${_aicr_tok}" in
       --kube-context|--kubeconfig)
-        # An option-looking value is a malformed list, not a context named
-        # "--kubeconfig". Accepting it consumes the next real option as this
-        # one's argument, which silently discards a connection option the
-        # operator did set.
-        if (( ${#helm_conn[@]} < 2 )) || [[ "${helm_conn[1]}" == --* ]]; then
-          echo "ERROR: KUBECONFIG_FLAG gives ${helm_conn[0]} no usable value." >&2
+        if (( _aicr_i + 1 >= _aicr_n )); then
+          echo "ERROR: KUBECONFIG_FLAG ends with ${_aicr_tok} and no value." >&2
           exit 1
         fi
-        if [[ "${helm_conn[0]}" == "--kube-context" ]]; then
-          KUBECTL_CONN+=(--context "${helm_conn[1]}")
-        else
-          KUBECTL_CONN+=(--kubeconfig "${helm_conn[1]}")
+        _aicr_val="${_aicr_argv[_aicr_i+1]}"
+        # Another option where the value belongs means the value was omitted.
+        # Accepting it would name a flag as the context or the kubeconfig path,
+        # and the resulting lookup failure is not the error the operator would
+        # read as "you forgot a value".
+        # Names the offending option, never its argument, for the same reason
+        # the catch-all below does.
+        if [[ "${_aicr_val}" == --* ]]; then
+          echo "ERROR: KUBECONFIG_FLAG gives ${_aicr_tok} the value" >&2
+          echo "       '${_aicr_val%%=*}', which is another option rather than a value." >&2
+          exit 1
         fi
-        helm_conn=("${helm_conn[@]:2}")
+        if [[ "${_aicr_tok}" == "--kube-context" ]]; then
+          _aicr_ctx="${_aicr_val}"
+        else
+          HELM_CONN+=(--kubeconfig "${_aicr_val}")
+          KUBECTL_CONN+=(--kubeconfig "${_aicr_val}")
+        fi
+        _aicr_i=$(( _aicr_i + 2 ))
         ;;
-      # An empty joined value is refused rather than forwarded. Both helm and
-      # kubectl read an empty --context as "use the current context", so
-      # passing it through turns a stated target into the ambient one without
-      # saying so -- the silent retarget this step exists to prevent.
-      --kube-context=|--kubeconfig=)
-        echo "ERROR: KUBECONFIG_FLAG gives ${helm_conn[0]%=} an empty value." >&2
-        exit 1
-        ;;
-      --kube-context=*)
-        KUBECTL_CONN+=(--context "${helm_conn[0]#*=}")
-        helm_conn=("${helm_conn[@]:1}")
-        ;;
-      --kubeconfig=*)
-        KUBECTL_CONN+=("${helm_conn[0]}")
-        helm_conn=("${helm_conn[@]:1}")
+      --kube-context=*|--kubeconfig=*)
+        _aicr_val="${_aicr_tok#*=}"
+        if [[ -z "${_aicr_val}" ]]; then
+          echo "ERROR: KUBECONFIG_FLAG carries '${_aicr_tok}', whose value is empty." >&2
+          exit 1
+        fi
+        if [[ "${_aicr_tok}" == --kube-context=* ]]; then
+          _aicr_ctx="${_aicr_val}"
+        else
+          HELM_CONN+=("${_aicr_tok}")
+          KUBECTL_CONN+=("${_aicr_tok}")
+        fi
+        _aicr_i=$(( _aicr_i + 1 ))
         ;;
       # Names the option, never its argument. helm's --kube-token carries a
-      # bearer token in the joined form, and deploy.sh runs install.sh with its
-      # output attached to the terminal and to CI logs, then retries it. kubectl
+      # bearer token in the joined form, and these scripts run with their output
+      # attached to the terminal and to CI logs, then get retried. kubectl
       # reports an unknown flag by name alone, so echoing the whole token here
       # would disclose what the unpatched path did not.
       #
@@ -101,14 +137,34 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
       # --token, --kube-apiserver is --server -- so this is a scope boundary,
       # not an unknown mapping.
       *)
-        echo "ERROR: KUBECONFIG_FLAG carries '${helm_conn[0]%%=*}', which this" >&2
-        echo "       ${RELEASE} CRD step does not support; it translates only" >&2
+        echo "ERROR: KUBECONFIG_FLAG carries '${_aicr_tok%%=*}', which this" >&2
+        echo "       contract does not support; it translates only" >&2
         echo "       --kube-context and --kubeconfig. It stops here rather than" >&2
-        echo "       read and apply CRDs against an unintended cluster." >&2
+        echo "       act on an unintended cluster. Export KUBE_CONTEXT instead." >&2
         exit 1
         ;;
     esac
   done
+
+  if [[ -n "${_aicr_ctx}" ]]; then
+    if [[ -n "${KUBE_CONTEXT:-}" && "${KUBE_CONTEXT}" != "${_aicr_ctx}" ]]; then
+      echo "ERROR: KUBE_CONTEXT names '${KUBE_CONTEXT}' but KUBECONFIG_FLAG names" >&2
+      echo "       '${_aicr_ctx}'. Refusing to guess which cluster to act on;" >&2
+      echo "       set only KUBE_CONTEXT." >&2
+      exit 1
+    fi
+    KUBE_CONTEXT="${_aicr_ctx}"
+  fi
+
+  # Children resolve from the normalized variables, so the deprecated spelling
+  # stops here rather than being re-parsed (and re-warned) once per script.
+  unset KUBECONFIG_FLAG
+fi
+
+if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  export KUBE_CONTEXT
+  HELM_CONN+=(--kube-context "${KUBE_CONTEXT}")
+  KUBECTL_CONN+=(--context "${KUBE_CONTEXT}")
 fi
 
 # Every helm and kubectl call below runs through run_bounded. This script runs
@@ -263,7 +319,7 @@ collect_crds() { # $1 = chart .tgz, $2 = destination directory
 # set an upgrade would act on, so one spelling works against either binary.
 if ! capture_bounded helm list --namespace "${NAMESPACE}" \
   --filter "${RELEASE_FILTER}" --short --deployed --failed --pending \
-  ${KUBECONFIG_FLAG:-}; then
+  ${HELM_CONN[@]+"${HELM_CONN[@]}"}; then
   existing="$(cat "${BOUNDED_OUT}")"
   echo "ERROR: cannot determine whether release ${RELEASE} exists; refusing to" >&2
   echo "       skip the CRD step and risk leaving the previous schema in place: ${existing}" >&2

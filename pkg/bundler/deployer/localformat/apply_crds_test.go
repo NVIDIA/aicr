@@ -220,8 +220,8 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 		"bound kills a wedged client":               `  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null`,
 		"missing timeout fails closed":              "cannot be bounded",
 		"applies under helm's field manager":        `    --field-manager=helm -f "${doc}" ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"}; then`,
-		"helm's --kube-context is translated":       `        KUBECTL_CONN+=(--context "${helm_conn[1]}")`,
-		"unsupported flag fails closed, name only":  `echo "ERROR: KUBECONFIG_FLAG carries '${helm_conn[0]%%=*}', which this" >&2`,
+		"helm's --kube-context is translated":       `  KUBECTL_CONN+=(--context "${KUBE_CONTEXT}")`,
+		"unsupported flag fails closed, name only":  `echo "ERROR: KUBECONFIG_FLAG carries '${_aicr_tok%%=*}', which this" >&2`,
 		"both phases share one artifact":            `if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \`,
 		"CRDs come from the archive, not show crds": `if ! collect_crds "${PULLED_CHART}" "${CRD_DIR}"; then`,
 	}
@@ -567,6 +567,9 @@ func TestApplyCRDsScript_TranslatesHelmConnectionFlags(t *testing.T) {
 			cmd := exec.Command("bash", scriptPath)
 			cmd.Env = append(os.Environ(),
 				"PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"),
+				// The script reads KUBE_CONTEXT now, so an inherited one would
+				// add flags no row asked for.
+				"KUBE_CONTEXT=",
 				"KUBECTL_ARGLOG="+argLog)
 			if tt.setFlag {
 				cmd.Env = append(cmd.Env, "KUBECONFIG_FLAG="+tt.flag)
