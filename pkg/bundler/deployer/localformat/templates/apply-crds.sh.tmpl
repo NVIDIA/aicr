@@ -44,7 +44,7 @@ if ! command -v kubectl >/dev/null 2>&1; then
 fi
 
 # KUBECONFIG_FLAG holds helm's spelling of the connection options, because every
-# other consumer of it is a `helm upgrade` and deploy.sh documents it that way.
+# other consumer forwards it unexamined into `helm upgrade`.
 # kubectl spells one of them differently -- helm's --kube-context is kubectl's
 # --context -- so the value is translated here rather than forwarded.
 #
