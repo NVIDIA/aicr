@@ -339,6 +339,7 @@ func resolveRuntimeImageForBakedInPath(customRuntime string) (string, error) {
 // recipe-supplied runtime.
 func runNCCLPreflights(ctx *validators.Context, gpuConfig *gpuConfiguration, target ncclBenchmarkTarget,
 	variant ncclVariant, fabric ncclFabricType, customRuntime string, plan *benchmarkRuntimePlan) error {
+
 	if customRuntime == "" && fabric == fabricEFA && graceBlackwellNetPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
 			return pfErr
@@ -511,17 +512,6 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// Preflight cluster-side prerequisites before spending TrainJob time.
-	// On GB200/EKS, GB200/OKE, and GB300/EKS the NET variant needs GPUDirect RDMA. Before
-	// R595 that requires NVreg_GrdmaPciTopoCheckOverride=1 on the NVIDIA driver
-	// (R580 is the version AICR pins); R595 removed the parameter, substituting a
-	// topology requirement the preflight does not check, so there it fails rather
-	// than assume (#2459). Before R595, without the flag the PCIe-attached NIC (EFA on EKS, ConnectX
-	// IB on OKE) can't attach dma-buf to GPU HBM and NCCL silently falls back
-	// to Socket. Preflights key off
-	// the benchmark target: opting into a profile opts into that profile's
-	// environment contract, preflights included. (OKE takes the default
-	// fabric env here — AICR_NCCL_FABRIC's roce override is an EKS-only
-	// template concern.)
 	if pfErr := runNCCLPreflights(ctx, gpuConfig, target, variant, fabric, customRuntime, plan); pfErr != nil {
 		return "", false, pfErr
 	}
@@ -530,6 +520,13 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
 	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, runtimeImage, plan)
+	// Publish the derived-runtime audit record (stdout for --full, and the
+	// bounded carrier that survives minimal evidence) whether or not the run
+	// succeeded: the record describes the runtime that was applied, and a
+	// failed measurement of a delivered artifact is exactly the case where
+	// knowing which templates were compared matters. plan.provenance is set
+	// only after the TrainingRuntime create succeeded, so a run that failed
+	// before or at application publishes no record.
 	emitRuntimeProvenance(plan)
 	if err != nil {
 		return "", false, err
@@ -1439,9 +1436,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// path too (it carries plan.carrier, per resolveBenchmarkRuntimeSource),
 	// so the previous customRuntime == "" gate silently skipped the override
 	// there while actualValue still reported it as applied — false
-	// qualification evidence (yuanchen8911 review, item 2). recipeSupplied()
-	// is nil-safe so a test exercising the baked-in path with no plan still
-	// applies the override correctly.
+	// qualification evidence. recipeSupplied() is nil-safe so a test
+	// exercising the baked-in path with no plan still applies the override
+	// correctly.
 	if !plan.recipeSupplied() {
 		if overrideErr := applyNCCLRuntimeImageOverride(runtimeObj, runtimeImage); overrideErr != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL runtime image override", overrideErr)

@@ -460,10 +460,9 @@ spec:
 	}
 }
 
-// TestApplyNCCLResourcesRuntimeImageOverride is the CodeRabbit-requested
-// regression test: it exercises the actual override contract end to end,
-// distinct from TestApplyNCCLResourcesCustomRuntimeEKSNoClobber above, which
-// only ever passes "" for runtimeImage.
+// TestApplyNCCLResourcesRuntimeImageOverride exercises the override contract
+// end to end, distinct from TestApplyNCCLResourcesCustomRuntimeEKSNoClobber
+// above, which only ever passes "" for runtimeImage.
 func TestApplyNCCLResourcesRuntimeImageOverride(t *testing.T) {
 	const ns = "aicr-validation"
 	const runtimeWithSelector = `apiVersion: trainer.kubeflow.org/v1alpha1

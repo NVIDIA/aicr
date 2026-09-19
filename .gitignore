@@ -184,8 +184,8 @@ aicr-e2e.xml
 # so this only guards an accidental local build; the source stays tracked.
 /tlsproxy
 
-# Resolved MDX toolchain for tools/check-docs-mdx-parse. The manifest and
-# lockfile in tools/mdx/ ARE committed; only the installed tree is not.
+# Resolved docs parser toolchain. The manifest and lockfile in tools/mdx/ ARE
+# committed; the installed tree and temporary install lock are not.
 tools/mdx/node_modules/
 tools/mdx/.aicr-install-lock/
 *.pyc

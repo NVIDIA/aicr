@@ -100,11 +100,10 @@ func resolveNCCLRuntimeImage() (string, error) {
 // particular the GKE tcpxo-daemon sidecar, which is not part of the NCCL
 // workload contract this override governs.
 //
-// Deliberately unconditional on customRuntime: callers only invoke this for
-// the baked-in template path (customRuntime == ""); a recipe-supplied
-// nccl-benchmark-runtime owns its own image end to end, mirroring every other
-// service-specific override in this package (GKE NIC discovery, EKS EFA
-// wiring, AKS RDMA wiring — see applyNCCLResources).
+// Applied for the embedded capability fixture and for a runtime derived from
+// a delivered artifact (both AICR-owned templates), never for a
+// recipe-supplied nccl-benchmark-runtime, which owns its own image end to
+// end — see applyNCCLResources's plan.recipeSupplied() gate.
 func applyNCCLRuntimeImageOverride(obj *unstructured.Unstructured, image string) error {
 	if image == "" {
 		return nil

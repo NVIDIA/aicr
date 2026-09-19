@@ -104,7 +104,9 @@ This is a different setting from `aicr validate --image` /
 tags](../contributor/validator.md#validator-image-tags)): those control the
 **validator's own** container image (the snapshot/orchestration binary),
 never the inner NCCL workload. `AICR_NCCL_RUNTIME_IMAGE` only applies to the
-three NCCL all-reduce checks, and only to their embedded templates — it has
+three NCCL all-reduce checks, and only to the templates AICR owns — the
+embedded per-platform template and a runtime derived from a delivered
+artifact — it has
 no effect when a recipe [supplies its own benchmark
 runtime](#supplying-a-benchmark-runtime-for-a-private-service), since that
 runtime already owns its image end to end. For reproducible qualification
