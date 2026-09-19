@@ -15,4 +15,12 @@ COMPONENT        FROM   TO     VERDICT  NOTES
 alpha-operator   1.2.0  1.2.3  safe     3 patches, verified, safe across 1 minor
 lambda-operator  1.1.0  1.2.0  unknown  1 minor, record exists, no boundary here
 
+AT RISK (advisory)
+  Objects of the kinds the crossed transition records name that carry neither
+  Helm nor Argo CD ownership. AICR does not manage them and cannot restore
+  them; removing a CRD takes its objects with it. Advisory only: this never
+  changes the exit code.
+
+  not scanned: no cluster access requested
+
 2 component changes, 1 needs attention
