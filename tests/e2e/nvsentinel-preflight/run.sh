@@ -209,7 +209,7 @@ ensure_cluster() {
 install_component() {
   local dir="$1" label="$2"
   (cd "${dir}" && chmod +x install.sh &&
-    KUBECONFIG_FLAG="--kube-context ${KUBE_CONTEXT}" ./install.sh) ||
+    KUBE_CONTEXT="${KUBE_CONTEXT}" ./install.sh) ||
     err "${label} install failed"
 }
 

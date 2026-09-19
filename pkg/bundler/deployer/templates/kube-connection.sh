@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,12 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "${SCRIPT_DIR}"
-# shellcheck source=/dev/null
-source ./upstream.env
 
 # ==============================================================================
 # Kubernetes connection resolution
@@ -159,43 +152,3 @@ if [[ -n "${KUBE_CONTEXT:-}" ]]; then
   HELM_CONN+=(--kube-context "${KUBE_CONTEXT}")
   KUBECTL_CONN+=(--context "${KUBE_CONTEXT}")
 fi
-
-# Helm 4 uses server-side apply by default; --force-conflicts lets the
-# upgrade overwrite fields that operators (cert-manager, gpu-operator,
-# nvsentinel, ...) own on rotated webhook cert Secrets. Helm 3 uses
-# client-side apply (no field-manager conflicts) and does not recognize
-# the flag, so omit it on Helm 3.
-HELM_MAJOR=$(helm version --template '{{.Version}}' 2>/dev/null | sed -nE 's/^v([0-9]+)\..*/\1/p')
-FORCE_CONFLICTS_FLAG=""
-if [[ "${HELM_MAJOR:-0}" -ge 4 ]]; then
-  FORCE_CONFLICTS_FLAG="--force-conflicts"
-fi
-
-# Apply this chart's CRDs before upgrading. Helm installs a chart's crds/
-# directory on first install and never touches it again, so without this a
-# chart bump whose CRDs changed runs the new controller against the old
-# schema. Skipped under --dry-run, which must not touch the cluster.
-if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
-  bash ./apply-crds.sh
-fi
-
-# CHART carries the full OCI URI for OCI charts and just the chart name for
-# HTTP/HTTPS charts. REPO is non-empty only for HTTP/HTTPS charts; the
-# ${REPO:+--repo "${REPO}"} expansion adds --repo iff REPO is set.
-# When apply-crds.sh ran, it pulled the chart and read the CRDs it applied out
-# of that one file. Installing from the same file keeps both phases bound to a
-# single artifact; resolving CHART/VERSION again would be a second fetch that a
-# mutable tag does not promise returns the same bytes.
-CHART_REF="${CHART}"
-CHART_VERSION_ARGS=(--version "${VERSION}")
-if [[ -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
-  CHART_REF="${SCRIPT_DIR}/.aicr-chart.tgz"
-  CHART_VERSION_ARGS=()
-  REPO=""
-fi
-
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} k8s-aibom "${CHART_REF}" \
-  ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
-  --namespace k8s-aibom-system --create-namespace \
-  -f values.yaml -f cluster-values.yaml \
-  ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${HELM_CONN[@]+"${HELM_CONN[@]}"} ${HELM_DEBUG_FLAG:-}
