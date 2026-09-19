@@ -34,7 +34,7 @@ import (
 // every registry pin bump churn the suite.
 
 // syntheticRecipe writes a hydrated RecipeResult carrying the given
-// component-to-version table, which is all UpgradeCheck reads from either side.
+// component-to-version table, and no install namespace on either side.
 func syntheticRecipe(t *testing.T, path string, components map[string]string) string {
 	t.Helper()
 	doc := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n"
@@ -48,7 +48,7 @@ func syntheticRecipe(t *testing.T, path string, components map[string]string) st
 	return path
 }
 
-func sortedKeys(m map[string]string) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -406,6 +406,89 @@ func TestUpgradeCheckReportsKustomizeTagChanges(t *testing.T) {
 			}
 			if row.Change != upgrade.ChangeVersion {
 				t.Errorf("change = %q, want %q", row.Change, upgrade.ChangeVersion)
+			}
+		})
+	}
+}
+
+// syntheticComponent is one component of a namespace-bearing recipe fixture.
+type syntheticComponent struct {
+	version   string
+	namespace string
+}
+
+// syntheticNamespacedRecipe writes a hydrated RecipeResult whose components pin
+// an install namespace alongside their version.
+func syntheticNamespacedRecipe(t *testing.T, path string, components map[string]syntheticComponent) string {
+	t.Helper()
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n"
+	for _, name := range sortedKeys(components) {
+		c := components[name]
+		doc += fmt.Sprintf(
+			"  - name: %s\n    type: Helm\n    source: https://charts.invalid/synthetic\n"+
+				"    version: %s\n    namespace: %s\n",
+			name, c.version, c.namespace)
+	}
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("setup: write %s: %v", path, err)
+	}
+	return path
+}
+
+// A component's install namespace comes from the registry, and AICR requires the
+// recipe to be regenerated from scratch on every upgrade, so a moved default
+// relocates the install. Helm cannot move a release between namespaces, so
+// applying the new recipe installs a second copy beside the running one. A
+// version-only projection reports that as no change whatsoever.
+func TestUpgradeCheckReportsNamespaceChanges(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	client := upgradeCheckClient(t)
+
+	tests := []struct {
+		name     string
+		from, to map[string]syntheticComponent
+		wantRows int
+	}{
+		{
+			name:     "a moved namespace at an unchanged version is one row",
+			from:     map[string]syntheticComponent{"synthetic-alpha": {"1.2.0", "synthetic-old"}},
+			to:       map[string]syntheticComponent{"synthetic-alpha": {"1.2.0", "synthetic-new"}},
+			wantRows: 1,
+		},
+		{
+			name:     "an unchanged namespace is still no row",
+			from:     map[string]syntheticComponent{"synthetic-alpha": {"1.2.0", "synthetic-old"}},
+			to:       map[string]syntheticComponent{"synthetic-alpha": {"1.2.0", "synthetic-old"}},
+			wantRows: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fromPath := syntheticNamespacedRecipe(t, filepath.Join(dir, tt.name+"-from.yaml"), tt.from)
+			toPath := syntheticNamespacedRecipe(t, filepath.Join(dir, tt.name+"-to.yaml"), tt.to)
+
+			report, err := client.UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{From: fromPath, To: toPath})
+			if err != nil {
+				t.Fatalf("UpgradeCheck: %v", err)
+			}
+			if len(report.Components) != tt.wantRows {
+				t.Fatalf("report has %d rows, want %d: %+v", len(report.Components), tt.wantRows, report.Components)
+			}
+			if tt.wantRows == 0 {
+				return
+			}
+			row := report.Components[0]
+			if row.Change != upgrade.ChangeIdentity {
+				t.Errorf("change = %q, want %q", row.Change, upgrade.ChangeIdentity)
+			}
+			if row.Reason != upgrade.ReasonIdentityChanged {
+				t.Errorf("reason = %q, want %q", row.Reason, upgrade.ReasonIdentityChanged)
+			}
+			// A relocation is unassessable, so it must stop a strict run.
+			if !report.FailsRun() {
+				t.Error("FailsRun() = false for a report carrying a relocation")
 			}
 		})
 	}

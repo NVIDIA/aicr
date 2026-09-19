@@ -604,6 +604,36 @@ For a per-resolution Slurm accounting mode, use
 `aicr.WithAccountingMode("customer-managed")`. The original criteria and
 snapshot method signatures remain unchanged for source compatibility.
 
+### Keeping a prior artifact's namespaces
+
+A component's namespace is re-derived from the registry on every resolve, so
+a registry default that moved between two AICR releases relocates a component
+that is already running. Helm cannot move a release between namespaces, so the
+bundle installs a second copy beside it. Name the prior artifact to keep its
+namespaces instead:
+
+```go
+result, err := client.ResolveRecipe(ctx, aicr.RecipeRequest{
+	Service:     "eks",
+	Accelerator: "h100",
+	Intent:      "training",
+	InheritFrom: "./bundles-v0.17.0", // or a recipe file
+})
+```
+
+`RecipeRequest.InheritFrom` is honored by `ResolveRecipe`;
+`aicr.WithInheritFrom(ref)` is the equivalent for
+`ResolveRecipeFromCriteriaWithOptions` and
+`ResolveRecipeFromSnapshotWithOptions`. A bundle directory is read through the
+`recipe.yaml` at its root. A component the prior artifact does not name keeps
+the registry default.
+
+The reference is read when the resolve runs, and it fails closed rather than
+silently resolving as a first deploy: a path that does not exist, a directory
+holding no `recipe.yaml`, and a `cm://` URI (not supported yet) each return
+`ErrCodeInvalidRequest`. Nothing is read from a cluster, so no kubeconfig is
+involved.
+
 ### Criteria relaxation on the snapshot path
 
 A snapshot resolve is strict by default — every criteria dimension you state

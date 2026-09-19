@@ -273,6 +273,47 @@ func TestNewReportNotes(t *testing.T) {
 			},
 			want: "versions are not comparable",
 		},
+		{
+			// The FROM and TO columns carry the relocation on this row, so
+			// the held version is what the cell has left to say.
+			name: "a relocation states the version that did not move",
+			result: ComponentResult{
+				Component: "a", Change: ChangeIdentity, From: "2.1.0", To: "2.1.0",
+				IdentityChanges: []IdentityChange{{Field: "namespace", From: "a-system", To: "nvidia-a-system"}},
+				Verdict:         VerdictUnknown, Reason: ReasonIdentityChanged,
+			},
+			want: "2.1.0 unchanged, no record covers a relocation",
+		},
+		{
+			name: "a relocation without a version pin still reads as a move",
+			result: ComponentResult{
+				Component: "a", Change: ChangeIdentity,
+				IdentityChanges: []IdentityChange{{Field: "namespace", From: "a-system", To: "nvidia-a-system"}},
+				Verdict:         VerdictUnknown, Reason: ReasonIdentityChanged,
+			},
+			want: "version unchanged, no record covers a relocation",
+		},
+		{
+			// A withdrawn safe verdict must not say "no record", which is
+			// false here, nor restate the width of the claim it withdrew.
+			name: "a hop that moved on both axes names the relocation, not a missing record",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.4.0", To: "1.4.2",
+				IdentityChanges: []IdentityChange{{Field: "namespace", From: "a-system", To: "nvidia-a-system"}},
+				Verdict:         VerdictUnknown, Reason: ReasonIdentityChanged,
+				Jump: Span{Patches: 2}, Span: Span{Minors: 1},
+			},
+			want: "2 patches, namespace a-system -> nvidia-a-system",
+		},
+		{
+			name: "a manual hop that also relocated keeps both axes in the cell",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "0.17.2", To: "0.18.1",
+				IdentityChanges: []IdentityChange{{Field: "namespace", From: "a-system", To: "nvidia-a-system"}},
+				Verdict:         VerdictManual, Transition: stepped, Jump: Span{Minors: 1},
+			},
+			want: "1 minor, 2 steps, namespace a-system -> nvidia-a-system",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

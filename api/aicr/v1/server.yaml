@@ -53,6 +53,10 @@ info:
     - **External data overlays** (`aicr recipe --data`, `aicr bundle --data`) — overlays
       custom components and overlays from a local directory onto embedded recipe data.
 
+    - **Namespace inheritance** (`aicr recipe --inherit-from`) reads a prior recipe file or
+      bundle directory from the local filesystem, so the resolved recipe keeps the namespaces
+      that artifact already deployed into instead of re-deriving them from the registry.
+
 servers:
   - url: http://localhost:8080
     description: Local development server
