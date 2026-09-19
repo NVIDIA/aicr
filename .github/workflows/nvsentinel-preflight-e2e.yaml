@@ -27,8 +27,10 @@
 # a full image pull, and pkg/recipe/** or pkg/bundler/** would drag it onto
 # most core PRs; the allowlist machinery those packages own is already covered
 # by unit tests that run everywhere. The localformat template directory is the
-# one carve-out: this lane installs through the scripts those templates render,
-# so a change there reaches a live cluster in a way no unit test observes.
+# one carve-out: this lane installs through the scripts those templates render.
+# Unit tests cover those scripts as rendered text, against golden files and
+# stub binaries; what they cannot cover is the script driving a real apiserver,
+# which is the part that broke last time.
 
 name: NVSentinel Preflight E2E
 

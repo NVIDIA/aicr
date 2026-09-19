@@ -60,8 +60,12 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
   while (( ${#helm_conn[@]} > 0 )); do
     case "${helm_conn[0]}" in
       --kube-context|--kubeconfig)
-        if (( ${#helm_conn[@]} < 2 )); then
-          echo "ERROR: KUBECONFIG_FLAG ends with ${helm_conn[0]} and no value." >&2
+        # An option-looking value is a malformed list, not a context named
+        # "--kubeconfig". Accepting it consumes the next real option as this
+        # one's argument, which silently discards a connection option the
+        # operator did set.
+        if (( ${#helm_conn[@]} < 2 )) || [[ "${helm_conn[1]}" == --* ]]; then
+          echo "ERROR: KUBECONFIG_FLAG gives ${helm_conn[0]} no usable value." >&2
           exit 1
         fi
         if [[ "${helm_conn[0]}" == "--kube-context" ]]; then
@@ -70,6 +74,14 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
           KUBECTL_CONN+=(--kubeconfig "${helm_conn[1]}")
         fi
         helm_conn=("${helm_conn[@]:2}")
+        ;;
+      # An empty joined value is refused rather than forwarded. Both helm and
+      # kubectl read an empty --context as "use the current context", so
+      # passing it through turns a stated target into the ambient one without
+      # saying so -- the silent retarget this step exists to prevent.
+      --kube-context=|--kubeconfig=)
+        echo "ERROR: KUBECONFIG_FLAG gives ${helm_conn[0]%=} an empty value." >&2
+        exit 1
         ;;
       --kube-context=*)
         KUBECTL_CONN+=(--context "${helm_conn[0]#*=}")

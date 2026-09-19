@@ -508,6 +508,17 @@ func TestApplyCRDsScript_TranslatesHelmConnectionFlags(t *testing.T) {
 			wantErr: true},
 		{name: "option without a value fails closed", flag: "--kube-context", setFlag: true,
 			wantErr: true},
+		// Exactly two tokens on purpose. With a trailing third the list ends on
+		// an unrecognized token and the catch-all aborts anyway, so the row
+		// would pass with the option-shaped-value guard removed. Here removing
+		// it yields --context '--kubeconfig' and a clean exit, which is the
+		// silent retarget being guarded against.
+		{name: "option-shaped value fails closed", flag: "--kube-context --kubeconfig",
+			setFlag: true, wantErr: true},
+		{name: "empty joined context fails closed", flag: "--kube-context=", setFlag: true,
+			wantErr: true},
+		{name: "empty joined kubeconfig fails closed", flag: "--kubeconfig=", setFlag: true,
+			wantErr: true},
 	}
 
 	for _, tt := range tests {
