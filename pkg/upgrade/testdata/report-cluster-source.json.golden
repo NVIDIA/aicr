@@ -56,7 +56,17 @@
     "failing": 1
   },
   "atRisk": {
-    "scanned": false,
-    "reason": "no cluster access requested"
+    "scanned": true,
+    "kinds": [
+      {
+        "group": "alpha.example.com",
+        "kind": "AlphaTuning",
+        "components": [
+          "alpha-operator"
+        ],
+        "present": true,
+        "examined": 6
+      }
+    ]
   }
 }

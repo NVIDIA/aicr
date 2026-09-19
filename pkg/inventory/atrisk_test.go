@@ -404,7 +404,11 @@ func TestScanAtRiskFailsOnAListDenial(t *testing.T) {
 func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 	t.Parallel()
 
-	t.Run("pages through every object", func(t *testing.T) {
+	// The fake client's tracker answers every List with everything it holds
+	// and no continue token, whatever Limit asks for, so this case proves only
+	// that a response larger than one page is read whole. The paging loop
+	// itself is exercised by the two reactor cases below.
+	t.Run("reads a response larger than one page", func(t *testing.T) {
 		t.Parallel()
 
 		const total = int(defaults.AtRiskListPageSize) + 7
@@ -417,10 +421,54 @@ func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 			t.Fatalf("scanAtRisk: %v", err)
 		}
 		if got.Kinds[0].Examined != total {
-			t.Errorf("Examined = %d, want %d: the walk stopped at a page boundary", got.Kinds[0].Examined, total)
+			t.Errorf("Examined = %d, want %d: the walk dropped items it was handed", got.Kinds[0].Examined, total)
 		}
 		if len(got.Findings) != total {
 			t.Errorf("Findings = %d, want %d", len(got.Findings), total)
+		}
+	})
+
+	// The accumulation half of paging, which the case above cannot reach: a
+	// loop that returns the first page alone still counts and reports every
+	// object there, so only a second page carrying a different object shows
+	// whether what it holds survives into the result.
+	t.Run("keeps the findings from every page", func(t *testing.T) {
+		t.Parallel()
+
+		pages := []*unstructured.UnstructuredList{
+			{Items: []unstructured.Unstructured{*topologyObject("tenant-a", "first-page", nil, nil)}},
+			{Items: []unstructured.Unstructured{*topologyObject("tenant-b", "second-page", nil, nil)}},
+		}
+		pages[0].SetContinue("page-2")
+
+		listed := 0
+		client := scanClient()
+		client.PrependReactor("list", "clustertopologies",
+			func(k8stesting.Action) (bool, runtime.Object, error) {
+				page := pages[min(listed, len(pages)-1)]
+				listed++
+
+				return true, page, nil
+			})
+
+		got, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind()})
+		if err != nil {
+			t.Fatalf("scanAtRisk: %v", err)
+		}
+		if listed != len(pages) {
+			t.Errorf("listed %d times, want %d", listed, len(pages))
+		}
+		if got.Kinds[0].Examined != len(pages) {
+			t.Errorf("Examined = %d, want %d", got.Kinds[0].Examined, len(pages))
+		}
+		want := []AtRiskObject{
+			{Group: "grove.io", Kind: "ClusterTopology", Components: []string{"grove"},
+				Namespace: "tenant-a", Name: "first-page"},
+			{Group: "grove.io", Kind: "ClusterTopology", Components: []string{"grove"},
+				Namespace: "tenant-b", Name: "second-page"},
+		}
+		if !reflect.DeepEqual(got.Findings, want) {
+			t.Errorf("Findings = %#v, want %#v", got.Findings, want)
 		}
 	})
 
