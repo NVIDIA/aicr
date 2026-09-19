@@ -45,8 +45,8 @@ if [[ -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
   REPO=""
 fi
 
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} gpu-operator "${CHART_REF}" \
+helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'gpu-operator' "${CHART_REF}" \
   ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
-  --namespace privileged-gpu-operator --create-namespace \
+  --namespace 'privileged-gpu-operator' --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}
