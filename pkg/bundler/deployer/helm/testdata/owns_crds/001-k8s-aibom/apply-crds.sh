@@ -76,8 +76,17 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
   echo "WARNING: KUBECONFIG_FLAG is deprecated; export KUBE_CONTEXT (and KUBECONFIG) instead." >&2
 
   # Deliberate word-split: this slot holds a flag list, not a single word.
+  # Globbing is suppressed around it because the same unquoted expansion also
+  # performs pathname expansion, and a kubeconfig path is a value rather than a
+  # pattern: one match for /tmp/kc*.yaml silently substitutes a different file,
+  # and several append tokens that are then rejected as unsupported options.
+  # Restored only if this shell had it enabled, so an embedding script that
+  # deliberately runs with `set -f` keeps it.
   # shellcheck disable=SC2206
+  _aicr_reglob=0
+  [[ -o noglob ]] || { _aicr_reglob=1; set -f; }
   _aicr_argv=(${KUBECONFIG_FLAG})
+  (( _aicr_reglob == 0 )) || set +f
   _aicr_i=0
   _aicr_n=${#_aicr_argv[@]}
   _aicr_ctx=""
