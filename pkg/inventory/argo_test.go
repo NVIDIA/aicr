@@ -532,7 +532,19 @@ spec:
 			listErr:         fmt.Errorf("client rate limiter Wait: %w", context.DeadlineExceeded),
 			wantErr:         true,
 			wantErrCode:     errors.ErrCodeTimeout,
-			wantErrContains: []string{"Argo CD Application"},
+			wantErrContains: []string{"Argo CD Application", "timed out"},
+			wantErrContext:  map[string]any{"resource": "applications.argoproj.io"},
+		},
+		{
+			// The abort that arrives inside the request rather than between
+			// pages, which is the only way this reader's List-error path sees
+			// a cancellation at all. Without it the deadline case above passes
+			// under either classification, since both branches say Timeout.
+			name:            "listing applications is canceled",
+			listErr:         fmt.Errorf("get %q: %w", "/apis/argoproj.io/v1alpha1/applications", context.Canceled),
+			wantErr:         true,
+			wantErrCode:     errors.ErrCodeCanceled,
+			wantErrContains: []string{"Argo CD Application", "canceled"},
 			wantErrContext:  map[string]any{"resource": "applications.argoproj.io"},
 		},
 		{
@@ -714,8 +726,8 @@ spec: {source: {path: 001-alpha}, destination: {namespace: "alpha-ns"}}
 			objects:         []runtime.Object{argoApp(t, certManagerApp)},
 			cancelContext:   true,
 			wantErr:         true,
-			wantErrCode:     errors.ErrCodeTimeout,
-			wantErrContains: []string{"Argo CD Application"},
+			wantErrCode:     errors.ErrCodeCanceled,
+			wantErrContains: []string{"Argo CD Application", "canceled"},
 		},
 	}
 
@@ -927,7 +939,10 @@ func TestArgoApplicationsCancellationBetweenPages(t *testing.T) {
 	if listed != 1 {
 		t.Errorf("listed %d times after cancellation, want 1", listed)
 	}
-	assertError(t, err, errors.ErrCodeTimeout, nil)
+	assertError(t, err, errors.ErrCodeCanceled, nil)
+	if errors.IsTransient(err) {
+		t.Errorf("error %v is transient, want a canceled abort to be terminal", err)
+	}
 }
 
 // TestArgoApplicationsEchoesPagingOptions serves the Applications over HTTP,
