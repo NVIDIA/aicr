@@ -47,8 +47,13 @@ const (
 	// gcpDriverInstallerComponent is the values-gated GKE COS driver
 	// installer (issue #1716); rendered only under gpuStack=bundle-installer.
 	gcpDriverInstallerComponent = "gcp-driver-installer"
-	draDriverComponent          = "nvidia-dra-driver-gpu"
-	networkOperatorComponent    = "network-operator"
+	// draNodeLabelerComponent is the opt-in DRA eviction-label applier (issue
+	// #2676); declared on every recipe in base.yaml but rendered only when the
+	// eviction contract is opted into, so its health check is suppressed on the
+	// default path where the bundler drops it (issue #2846).
+	draNodeLabelerComponent  = "dra-node-labeler"
+	draDriverComponent       = "nvidia-dra-driver-gpu"
+	networkOperatorComponent = "network-operator"
 
 	// draKubeletPluginSuffix is the chart-template-defined name suffix for
 	// the NVIDIA DRA driver's kubelet-plugin DaemonSet. The upstream chart
@@ -915,6 +920,19 @@ func gatedHealthCheckSuppressed(goCtx context.Context, ref recipe.ComponentRef) 
 	case gcpDriverInstallerComponent:
 		suppressed, err := emptyRenderHealthCheckSuppressed(goCtx, ref)
 		return suppressed, "effective values gate the component off (installer.enabled=false); it renders no objects", err
+	case draNodeLabelerComponent:
+		// dra-node-labeler is opt-in: base.yaml declares it on every recipe so the
+		// dependency graph is authored once, but the bundler renders it only when
+		// the DRA eviction contract is opted into (--dra-eviction-node-label /
+		// scheduling.draEvictionNodeLabel), flipping the manifest's default-off
+		// enabled gate. The validator resolves the recipe's effective values
+		// WITHOUT that bundle-time flag, so on the default path (which no UAT
+		// config opts into) the manifest renders no objects and asserting its
+		// DaemonSet would fail NOT_FOUND against a bundle that never deployed it
+		// (issue #2846). Suppress exactly when the render is empty — same
+		// render-aware, fail-closed shape as gcp-driver-installer.
+		suppressed, err := emptyRenderHealthCheckSuppressed(goCtx, ref)
+		return suppressed, "DRA eviction is not opted in, so the labeler renders no objects (enabled=false); the bundler did not deploy it", err
 	default:
 		return false, "", nil
 	}
