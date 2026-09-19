@@ -32,7 +32,7 @@ a100-aks-ubuntu-training-kubeflow:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: 9af1107aaf68594781690edad4cb73e3ee725fceca6512876a09b0833ad9d0e7
+  006-nodewright-customizations/templates/tuning.yaml: 8e09b96e4795ce9875e5a771a04f0946a330bd67746be9f88ab81dd55c7ae3d8
   006-nodewright-customizations/values.yaml: ae08fea1fc22a1662a897b8479911684a156d03bdf53940494b26263b8d9482e
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -83,7 +83,7 @@ a100-aks-ubuntu-training-kubeflow:
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 900773779eb2b918ae2052fcdb4853c9edcc92f562f8d4e56b069fe9473ff974
   bundle-info.yaml: 6cafd5e38e686ed322a92055ad3b2e671549b39896ce193dfd503f0edc59ae76
-  checksums.txt: 735025fdb599b54bf5138b79803cc3d2932bcdb35e50723adfce5095f20aab71
+  checksums.txt: 581a31d477b424b985ea6d49535c8f48845d1dc56b0490e18844a8beef43e4ac
   deploy.sh: 4546193d0637527fefa15b7a5ea0707a92ebfc9aedc4b754972b21fa519199da
   recipe.yaml: a3378f2d5acde9d9bc16d41fb0ba710b899b3e8e76693359beb2baadd2f69ef9
 a100-any:
@@ -161,7 +161,7 @@ a100-eks-ubuntu-training-kubeflow:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: a0979f42c9dc3c65c09fe368fd9e8438b3b2cf46a135363260400a63750cf850
+  006-nodewright-customizations/templates/tuning.yaml: 67bdafb5522b9251ff9bd008936e1e3189904128e5b302a42c735b84199fd5f5
   006-nodewright-customizations/values.yaml: 8a82d857a462cc9a195280dc3d60ec4fae5990fd986df93ea90f7be37dc7363d
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -207,7 +207,7 @@ a100-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 7a55a189e0dd513bd39b152aa45ca10c52cf324ad85bdc5de64038f01e594888
   bundle-info.yaml: 9bc2a42d2ad57316ee04fa8031be7983cc0ea907851ab996c2374aa8325ffc80
-  checksums.txt: eebf47b8cfc998976ac70da1efed2feb620cdee5bfc0f426507ad687b9f20514
+  checksums.txt: 6bc3103a2c3b63ccea88a1f6f8de5d83de3ce91114d882f7621b813e1cb0060f
   deploy.sh: 5d717e240a807226aa2e0807430fc6ec4cb6ff264367124c5858a72e1325e570
   recipe.yaml: c0a021584dc5bcc5bab0291557097caa07a952685a1f1ef04a928734b4cf9d82
 a100-gke-cos-training-kubeflow:
@@ -230,7 +230,7 @@ a100-gke-cos-training-kubeflow:
   005-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   005-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  005-nodewright-customizations/templates/tuning-gke.yaml: d2d8d052c3e7139645f12d21ce390ff4600295216606ab7f97199ec0f5a770bf
+  005-nodewright-customizations/templates/tuning-gke.yaml: 60be9602d2ffae7a93247a74cca215e3bd649f5e04a50f9db0e57f9b340fe41b
   005-nodewright-customizations/values.yaml: a6bf20bf80ff99c7b41ae3832f9ead39bca68dc6c516cdf550ad5b62538a1c49
   006-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -281,7 +281,7 @@ a100-gke-cos-training-kubeflow:
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 88f3b00b76862179e63ceccf19c41e8614113d776398ae8379a8d839a07f027d
   bundle-info.yaml: a7eea592e3ef2e76c5a72509ec9c9dd766908d39c2efa00de26be58a011d8e8f
-  checksums.txt: 62103da85023b368413c0f7682bf43bb25a50fced6b69da8380c31491bc7554c
+  checksums.txt: 1135bc25e2a3d868d967a65af7c08b1cdc826d03cbc792260a32e9e0a20d3ba9
   deploy.sh: 7651f180b0d206cce8d7296c2e976b9ade9b898eefc7a1d3a67e668f062ab3a5
   recipe.yaml: 1590dbce1bdc8bebdcad2b2096b115f084bc4c56b631b80c725a66087ca1bee2
 a100-oke-ubuntu-training-kubeflow:
@@ -438,7 +438,7 @@ b200-gke-cos-inference-dynamo:
   010-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   010-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  010-nodewright-customizations/templates/tuning-gke.yaml: 9713d5a179ff627fc4c7a5dfeeaa960e38350d714e1cd57899c5ce60539edbd0
+  010-nodewright-customizations/templates/tuning-gke.yaml: 5af2382546d6246c017f63e4c65bb8a945f772c902db4c81c742c040e7d27e64
   010-nodewright-customizations/values.yaml: a172865940442fe5a9cec92c03a163620cd08cf4831e50769dacfe8d56e65354
   011-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -484,7 +484,7 @@ b200-gke-cos-inference-dynamo:
   020-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 302f083367e16fb810b1754cae7685152bd5ac897bc6fc8cbb68d2cd8756f786
   bundle-info.yaml: f4d171d6ed43321c641e3962b9cbadcf6fb1f8b3a0a89b3f5e9f073cd3026cb1
-  checksums.txt: 32763d6e401e8f7e26a93f08df1f40a2a85fbfa8781bd7d63535f9f26c67c7fb
+  checksums.txt: 42ce8faf0ceee2054cf28e31a523cf96d44b168dd4033d8296cc50cf894538ec
   deploy.sh: e74510cb259b0bf21a8b403180fa574fd32dbbab4842eb63de87caea1eb66582
   recipe.yaml: e48331405d6f8deaeae925ce0cbc95135b018b49ff9135205fcb770ce8f702d6
 b200-gke-cos-training-kubeflow:
@@ -507,7 +507,7 @@ b200-gke-cos-training-kubeflow:
   005-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   005-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  005-nodewright-customizations/templates/tuning-gke.yaml: 2b943d9dd230ff27114302286b6eef344f5957843aa1817ae605e5d27775dc16
+  005-nodewright-customizations/templates/tuning-gke.yaml: d48773d98f65f2abc08dabdeeb12638c9aeae325cf61ce0b243ff0ffcf3394f2
   005-nodewright-customizations/values.yaml: 4c0a2bdad39d3ef2efa070258deee67937e131700ed2088e3c59df393f4d0fe0
   006-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -558,7 +558,7 @@ b200-gke-cos-training-kubeflow:
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 9dc5c552a63dba541887b51c64d127537cae0bf007c6c0c36c1a49301da331eb
   bundle-info.yaml: f229fbbc1802aabf4aeec00a6a6735e27609a3b72e8e3acd750fc7de29c4ab34
-  checksums.txt: 636ba2958795fea3638d699566d4370867a81189fe874c2a1409d8eb6d4b13cb
+  checksums.txt: 5b3db68eab42f6b4bbb71e9567a957bcd657e878f79ca9ee29dcf2024ef10f38
   deploy.sh: 7651f180b0d206cce8d7296c2e976b9ade9b898eefc7a1d3a67e668f062ab3a5
   recipe.yaml: 37b804936971c9cc8a5196018506e87d7583398b9c1255c596bc05a448f7927d
 bcm-inference:
@@ -734,7 +734,7 @@ gb200-eks-ubuntu-inference-dynamo:
   011-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   011-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  011-nodewright-customizations/templates/tuning.yaml: 3a7b18101e61a314187dfeb1f5edae318645880d03b3d4d00278351e3b224e3b
+  011-nodewright-customizations/templates/tuning.yaml: e299552cbce65c1550ced2a2dc9a180efb72dc4ae3a984a447d711e2adaffab9
   011-nodewright-customizations/values.yaml: acf073c225ef77524d63765a36221f27acb610046837003d776ae264f7a364ef
   012-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -780,7 +780,7 @@ gb200-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 0fd0110481cbe17cb1b4dd9a07d0e3fabe23d39626d17560639665b65f84a99e
   bundle-info.yaml: d7a557bca56423a3786f5c14db602d07f3c85c593e1d2a1200100ab9b79e6274
-  checksums.txt: b3a7389d63257978380db50e66d3d587fc70840e0b42a61b70cd7e97f6739797
+  checksums.txt: 861259522d7edb8177341f31874090141b2955c1667ccce0e505004e6beef849
   deploy.sh: 0250b94c3113479d254fb93c906f83482f94f2c2b0817d70421d357718cd0b49
   recipe.yaml: 1878025afc2d0f73c56357245e7d38be3653dc567b0814a7cba8542a1a851e28
 gb200-eks-ubuntu-training-kubeflow:
@@ -807,7 +807,7 @@ gb200-eks-ubuntu-training-kubeflow:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: 49c33c7553b080dc8d1048c5a776c50f478dd9e93b4a17334ae8d500e62bbbb3
+  006-nodewright-customizations/templates/tuning.yaml: 3b7ff664d7ac7360851c750808257bf1911a0fffd8f2c14596a2cd4c57b73987
   006-nodewright-customizations/values.yaml: 079263741790412d389bf751125b546160458cbd417de66a85902dbe58fc21ad
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -858,7 +858,7 @@ gb200-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 197e78c8ff1e3d8474347f1fdb8ad32a14119bbfc6f2e17ee3d5987ea599d305
   bundle-info.yaml: 0943e4ead4c218986403bfdbda94ec7afff360536fa558616324ee608c8f0717
-  checksums.txt: 274ca5cbaa30424ecb0665675b5ee890135eeaae0b7e0fe40ff23a8abac2c8e2
+  checksums.txt: 76123a83c93858b1aef23c1d5c7fe685c6099672c42a3453fbef96cbf2603768
   deploy.sh: 5d717e240a807226aa2e0807430fc6ec4cb6ff264367124c5858a72e1325e570
   recipe.yaml: 0b6492c6c09fe7ede9535c61fb70bb6d8d251e5df6f674adc7589e163c28aecc
 gb200-eks-ubuntu-training-slurm:
@@ -885,7 +885,7 @@ gb200-eks-ubuntu-training-slurm:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: 49c33c7553b080dc8d1048c5a776c50f478dd9e93b4a17334ae8d500e62bbbb3
+  006-nodewright-customizations/templates/tuning.yaml: 3b7ff664d7ac7360851c750808257bf1911a0fffd8f2c14596a2cd4c57b73987
   006-nodewright-customizations/values.yaml: 079263741790412d389bf751125b546160458cbd417de66a85902dbe58fc21ad
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -945,7 +945,7 @@ gb200-eks-ubuntu-training-slurm:
   019-slinky-slurm/values.yaml: 36b3e905ded091f970dd6ad98389be8e4a6481afffb6682b66370558fa99a393
   README.md: 5a702972381d049091d661c4d102940786e22aeb10d52d95f9a7910f9140212a
   bundle-info.yaml: ae53d167918fae1df2b9abe04f1a2bb21a4597e95812def0a961b0ea6f9e3954
-  checksums.txt: 5d199ba983cd01227615e7709e68324e3c8d352551252a795b26f30fa5360899
+  checksums.txt: 35f03c332ec7b2417e5aa6387358740a5a30355790381e872f5cb9202e60816f
   deploy.sh: 3aff2338397036c2cf993aefe177089a562d4af5679614f84a43fb0a66965c0a
   recipe.yaml: 1407462f82ec027513f2cf40804764725cb79d0c0f1ffe1f3b29dea61f6d468c
 gb200-gke-cos-inference-dynamo:
@@ -996,7 +996,7 @@ gb200-gke-cos-inference-dynamo:
   011-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   011-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  011-nodewright-customizations/templates/tuning-gke.yaml: aec99f92bd6c0a2eb194d5b99e15e7c1b5a063d8cce2268cacb5d9acfe7849f3
+  011-nodewright-customizations/templates/tuning-gke.yaml: b9bf02c7eeda7d20759e302f55d7fdcc2827ba0d9f9ade2339fdbdba8f94f330
   011-nodewright-customizations/values.yaml: 436f2362960751ff5cb5d09e1c550b7d33b425f62567107a9b7e113acf47d696
   012-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -1048,7 +1048,7 @@ gb200-gke-cos-inference-dynamo:
   022-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 73c1c40167795cdfffbbc72a0c8d587682ba09c77c5402ca671f3b8b02dc1009
   bundle-info.yaml: 0f7bbb7bbbd83fed88c3d8d9adcd6beb97563c29cd0668e82c2b5aa87d2f3403
-  checksums.txt: 0d118603d3cc2d7c2619584f66fc876d48d33d19c3eca495d18b58d96b29216c
+  checksums.txt: 1eaf860c264a573c22a49445a53604f5e8e52e33f7129c674638e4726da0a273
   deploy.sh: 63713b7e1979b2df061ea1c5955c6b280fca98170970e800e8614c766cb54c06
   recipe.yaml: ade4bb983f4c4f64420b31c0584f670283e37f2549aee35db24828000adb8b17
 gb200-gke-cos-training-kubeflow:
@@ -1076,7 +1076,7 @@ gb200-gke-cos-training-kubeflow:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning-gke.yaml: 04c7b01af5869a6f631ea3ff85d8018c64481edcb84d9c8c79911804017f7c0f
+  006-nodewright-customizations/templates/tuning-gke.yaml: c6cc066e599fe4de3cd7670c6db541f0899a7d667b637ae986171fd8da8cd183
   006-nodewright-customizations/values.yaml: ceac6940cbf0c0d865cd9b34cd5502c7f3a28ba04bc1eec4f45586753a1c2541
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -1128,7 +1128,7 @@ gb200-gke-cos-training-kubeflow:
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 08535a5ceccdeb9dd52c0633c540e830d09e4e235a9308fb01b4c9590a0b46b9
   bundle-info.yaml: 0de847d4474eff823a0e05c556910689011ddbbee0c2a45db52b1b8a6e270599
-  checksums.txt: b4230f4dcf75ccca8747cf906054a97f22525f2c6390598f6eefae8393842297
+  checksums.txt: f75e209943d6dd5219b8456d22edfd5b4f9df09d64d5a0b53c7773365f61c18e
   deploy.sh: 5992e27664c96f8280215a1d4661e4b25ecfcd8d30abb75c7dd6a308dda3fc93
   recipe.yaml: 8aa7916d4e6430e47a9214f8a92547f3ed1af24f356edea2be079c023f360571
 gb200-gke-cos-training-slurm:
@@ -1156,7 +1156,7 @@ gb200-gke-cos-training-slurm:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning-gke.yaml: 04c7b01af5869a6f631ea3ff85d8018c64481edcb84d9c8c79911804017f7c0f
+  006-nodewright-customizations/templates/tuning-gke.yaml: c6cc066e599fe4de3cd7670c6db541f0899a7d667b637ae986171fd8da8cd183
   006-nodewright-customizations/values.yaml: ceac6940cbf0c0d865cd9b34cd5502c7f3a28ba04bc1eec4f45586753a1c2541
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -1217,7 +1217,7 @@ gb200-gke-cos-training-slurm:
   019-slinky-slurm/values.yaml: 36b3e905ded091f970dd6ad98389be8e4a6481afffb6682b66370558fa99a393
   README.md: bc35a57d0b6d92e21600c9d180f4640458213c219cf6cd9326b2101dfacabe51
   bundle-info.yaml: ce6ea7e28221ac9974efe38b37e496cef8aea6dd51fdcef65401ed380edbf722
-  checksums.txt: 6917bc9015f8593f7b4428ad8221f68b2b4650ae7c68cf63f538bbd3a53a1ba2
+  checksums.txt: 0f54956ea7dfedd6330b8432732c9aa5fd2ef06821f1bb7989006d86bbb79ed4
   deploy.sh: 8630dfe6091415c889b813004e2ce0fde38a0d5909819da92fa5c26564c29b97
   recipe.yaml: 12bd6b89f1b609a85b556f3f8e6705c5b8f173c8408736f61bb7bda7ce752fce
 gb200-oke-ubuntu-inference-dynamo:
@@ -1470,7 +1470,7 @@ gb300-eks-ubuntu-inference-dynamo:
   011-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   011-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  011-nodewright-customizations/templates/tuning.yaml: 1a35eef625dbb04593823078453d2bb6f70e2fa07417340698c7f2c5ff926d85
+  011-nodewright-customizations/templates/tuning.yaml: 22adcf39ce079c4716a62c5fff165dc11ae8f3e4c6a3d022c96a9113c799bfc0
   011-nodewright-customizations/values.yaml: 84af207e827ef4ef3c4739d7c815d042f40982f67bdc6b3326a420bcdecdd673
   012-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -1516,7 +1516,7 @@ gb300-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: c8d52b8474bb3b1e8a9aea4cfff3bbba0a4677809b98a6c63e603e0bd2fcca64
   bundle-info.yaml: 96ce3aa19a0d3c87bc37bd1267156698d71cf7bfbe9757a3bf08edd15424ce3a
-  checksums.txt: 9075f32d020754c1772624957074f959c2ed70939bdd888b41db9dc98fc28a93
+  checksums.txt: 02ac8bf77bc9526df79586a3b7d493c6d73dd00a35de4adae00435faaf1922ce
   deploy.sh: 0250b94c3113479d254fb93c906f83482f94f2c2b0817d70421d357718cd0b49
   recipe.yaml: a7fdf0ba23eca6d2b41bf7fbbc4da181328c0e39ad4e23d55bbc83e0d68b2e51
 gb300-eks-ubuntu-training-kubeflow:
@@ -1543,7 +1543,7 @@ gb300-eks-ubuntu-training-kubeflow:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: c946ea10373a16d29edd2e35e4facaad1c4ff8eabea03a3871f37f5f45679231
+  006-nodewright-customizations/templates/tuning.yaml: 9889e57fbf723a13f75aeedcec448452b6f397619fe94ff080b0e5a087d86741
   006-nodewright-customizations/values.yaml: 3c1f319fe6c08a1e40a0c37f401245a990f61c61ae815b5f0c67329ca997fab1
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -1594,7 +1594,7 @@ gb300-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 6c126c387e5b9a9c8b1831ec79e1f057eba50ea392b56169ca9bac33764ee141
   bundle-info.yaml: 5f31ac56217c579611ba8f365ce688d5a9c4190adb51695d4e739d3eb5d3eb29
-  checksums.txt: 8715488139b6c8a8d3fc91de492bc67ec9747c2d613b2b0be327835a60d0c946
+  checksums.txt: 653de334f26b3bbb1974180223c55dccade2518f87539c1351c4c9b156f0b851
   deploy.sh: 5d717e240a807226aa2e0807430fc6ec4cb6ff264367124c5858a72e1325e570
   recipe.yaml: cf2859aa2851ddaaf67c11d6f088f8e73252b6fe7b24c06a4a793ba7d07e8fd7
 gb300-eks-ubuntu-training-slurm:
@@ -1621,7 +1621,7 @@ gb300-eks-ubuntu-training-slurm:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: c946ea10373a16d29edd2e35e4facaad1c4ff8eabea03a3871f37f5f45679231
+  006-nodewright-customizations/templates/tuning.yaml: 9889e57fbf723a13f75aeedcec448452b6f397619fe94ff080b0e5a087d86741
   006-nodewright-customizations/values.yaml: 3c1f319fe6c08a1e40a0c37f401245a990f61c61ae815b5f0c67329ca997fab1
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -1681,7 +1681,7 @@ gb300-eks-ubuntu-training-slurm:
   019-slinky-slurm/values.yaml: ef75bbe2e03bc4b1cf4c4f4456b31d470a7bcce3ca243af1891f9dada650c6f6
   README.md: f9a2462961f380e17d33bedf48940af20221d741df3e9e99128f4248a4b11a9b
   bundle-info.yaml: 72a381dc5b28dadc7338d30a8bcf7a7731bc9379c7bb1a3efa70cfa8ce6a698c
-  checksums.txt: 9c1a8e2f98f9e9c14157ce93f0a62cb7b317b42901109b49debd07ff56a0b365
+  checksums.txt: 6fd14ac880882f65bc01f972690b6cd7c5a78b06bfa7c5b792aa55fbeeba5ed4
   deploy.sh: 3aff2338397036c2cf993aefe177089a562d4af5679614f84a43fb0a66965c0a
   recipe.yaml: c8385e82edae5ad95a1f82f789b99df16c2f66675b81ecfb3d1b71fdc05b2ed1
 gb300-generic-ubuntu-training:
@@ -1709,7 +1709,7 @@ gb300-generic-ubuntu-training:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning-gb300.yaml: 7b7fe5d8098e02ad53029b41a19ef7cf8baefba0c4545cf941cba6fc68a8c470
+  006-nodewright-customizations/templates/tuning-gb300.yaml: 439ad4a7e0f4bd7371e600b9e43d1f2286aac34778b9d236d0017394bce47f03
   006-nodewright-customizations/values.yaml: e394db9af9f703dac18a0339d6450f3016624601ba072b19abe20d04123778c2
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -1746,7 +1746,7 @@ gb300-generic-ubuntu-training:
   014-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 8d4b21e5ea2900e6589c10aa3f05f2bf70fa89ac7b575816ba767b8146e10de9
   bundle-info.yaml: eb3dfce2f9209425a42d9dad654d6da2f591351e204729f801fa3d0f899fdf75
-  checksums.txt: 1b9aaa1ccacf6353844d93f863413de27643da1466187a9ca2ec3ef400798542
+  checksums.txt: dd69c264333ee2dd37940bc2fdc574b6f94f3749097255f707699cf748f16924
   deploy.sh: 588b867309c45a951e4940a55c6461099f3e074d2eaa9ed7df2c6058271f26cc
   recipe.yaml: ec35ec0b0e446cf54a8a2a34fe98ae7b5aa27027106e50c7d5b90deef3c2a9da
 h100-aks-ubuntu-inference-dynamo:
@@ -1799,7 +1799,7 @@ h100-aks-ubuntu-inference-dynamo:
   011-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   011-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  011-nodewright-customizations/templates/tuning.yaml: 9af1107aaf68594781690edad4cb73e3ee725fceca6512876a09b0833ad9d0e7
+  011-nodewright-customizations/templates/tuning.yaml: 8e09b96e4795ce9875e5a771a04f0946a330bd67746be9f88ab81dd55c7ae3d8
   011-nodewright-customizations/values.yaml: e2887d3682bf2cac216069d5f9e93c5e874e9b4aaa793cde556d8db09aa06bbf
   012-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -1845,7 +1845,7 @@ h100-aks-ubuntu-inference-dynamo:
   021-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 2d2c684defec67d870fa3fa2bfa9be412bb19a4a258454445b5e1cb16a1a4474
   bundle-info.yaml: 390459bcef13d1f310e2515a1122937a8ae027b85e608e698f05d512d1a438f4
-  checksums.txt: 56aa4f81d7090b7d2388c88efa39c8eb83e6b97630dc9bc5d2db0dd2ec21ddf7
+  checksums.txt: 359253e76af11ebc82cb2df1175c4af03a8251eebd166ddf23a39c1a23d5d499
   deploy.sh: 6b84ce95a1cc555b99cf985e8f2991354cc8d5971176c25a67c082fb65ab5e4e
   recipe.yaml: 02255b0c6fc1c8157bf77985c25aba03067c3892f22945aa16ae3b935d92e121
 h100-aks-ubuntu-training-kubeflow:
@@ -1875,7 +1875,7 @@ h100-aks-ubuntu-training-kubeflow:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: 9af1107aaf68594781690edad4cb73e3ee725fceca6512876a09b0833ad9d0e7
+  006-nodewright-customizations/templates/tuning.yaml: 8e09b96e4795ce9875e5a771a04f0946a330bd67746be9f88ab81dd55c7ae3d8
   006-nodewright-customizations/values.yaml: ae08fea1fc22a1662a897b8479911684a156d03bdf53940494b26263b8d9482e
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -1926,7 +1926,7 @@ h100-aks-ubuntu-training-kubeflow:
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 00399d1938ee426d755cb2265946b40e974c463c0ba0b47b3830b3420f57be08
   bundle-info.yaml: 1cba1091457a24e09e2f2b90bde8956ce48f587acb398dd08243a1e46ee8faba
-  checksums.txt: 4ac246acd5ba2c30efe16252c6dc3b3555db641a242cbd52de1543d99336d87e
+  checksums.txt: 2a213d1613fc8b914e14c17504909301072c1991723291bc55975631470d8ed1
   deploy.sh: 4546193d0637527fefa15b7a5ea0707a92ebfc9aedc4b754972b21fa519199da
   recipe.yaml: 5a577fe337eaaeeae112428d9604f40f3388add225fc886abd6049bfbc593577
 h100-aks-ubuntu-training-slurm:
@@ -1956,7 +1956,7 @@ h100-aks-ubuntu-training-slurm:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: 9af1107aaf68594781690edad4cb73e3ee725fceca6512876a09b0833ad9d0e7
+  006-nodewright-customizations/templates/tuning.yaml: 8e09b96e4795ce9875e5a771a04f0946a330bd67746be9f88ab81dd55c7ae3d8
   006-nodewright-customizations/values.yaml: ae08fea1fc22a1662a897b8479911684a156d03bdf53940494b26263b8d9482e
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -2015,7 +2015,7 @@ h100-aks-ubuntu-training-slurm:
   019-slinky-slurm/values.yaml: 5643ef72841c8424adbe75cfb40f99691ec60c5e6498bb3a115824a3264bce9d
   README.md: 68fc45d8cec6b041f2329617cb5664f72f509b009a4466b0f8af4ce7e5ee9968
   bundle-info.yaml: 866f0e1c6e371daf1d82fb90604a6ae0dcfa09c0f2b8c1660d1f19bb77882649
-  checksums.txt: 82df4e89e99e1015bd1f5c08b422e759d768005fd54fc55d483caaf60586ff52
+  checksums.txt: 04b62e49c0df160eb6a9820bc24110f043eea1d3abe961d37783eedadcc43892
   deploy.sh: 73038b6e40f69ed29753482d33e0cb7da0d9e003307070824d6ec853ef71daab
   recipe.yaml: 1af0942d9a2cc110faaadffdd404f22aacfb7f4bbe902c7f56fa3bd670a204e3
 h100-any:
@@ -2181,7 +2181,7 @@ h100-eks-ubuntu-inference-dynamo:
   011-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   011-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  011-nodewright-customizations/templates/tuning.yaml: f24dc57fb1d4995b8daf0a239e6094b30bcce9fa3aa1f71bfe067bf783dc2298
+  011-nodewright-customizations/templates/tuning.yaml: 8418846e3e389890ec2a592bc1c792a46841093aa89ba5e008f58f8c09b356b4
   011-nodewright-customizations/values.yaml: f7717f874ba63f20996db371fc059ccad2238ee37ab901416bab2239a95fa7e8
   012-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -2222,7 +2222,7 @@ h100-eks-ubuntu-inference-dynamo:
   020-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 15e862342b2c5aa5af29dd9091697a5c6978ddbfaa8d8979ff8fbd80206b3b06
   bundle-info.yaml: d99b6d107cb52b106e54815ff5f1add78b7940fc946b3745a69ebcd5b7fac08f
-  checksums.txt: 6686123dbe1b3f26be2919ad2f580e81b465a7adb296b0108ed40546acc985f7
+  checksums.txt: 6d1c36516faaffa2938badaf37b64405cae9ea871ab86d33adecd7866f3d76fe
   deploy.sh: 0250b94c3113479d254fb93c906f83482f94f2c2b0817d70421d357718cd0b49
   recipe.yaml: 50bde8d4631767fd3c5b4655ae1a8588d7dcd1ce0adc9b82e3d77c308128f84f
 h100-eks-ubuntu-inference-nim:
@@ -2268,7 +2268,7 @@ h100-eks-ubuntu-inference-nim:
   010-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   010-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  010-nodewright-customizations/templates/tuning.yaml: f24dc57fb1d4995b8daf0a239e6094b30bcce9fa3aa1f71bfe067bf783dc2298
+  010-nodewright-customizations/templates/tuning.yaml: 8418846e3e389890ec2a592bc1c792a46841093aa89ba5e008f58f8c09b356b4
   010-nodewright-customizations/values.yaml: f7717f874ba63f20996db371fc059ccad2238ee37ab901416bab2239a95fa7e8
   011-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -2309,7 +2309,7 @@ h100-eks-ubuntu-inference-nim:
   019-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 557c64901389793c8a4baec1892cb264901ca99805e239b1c7d7bf00441c461d
   bundle-info.yaml: ee88a7ca5667f23e05b6bc2b8010cd80e0a974a3ae2a045f36916d82b1797e09
-  checksums.txt: daec29e6fd70233e1e2e44d9fa4b97a3af552263d7236206a19df305863e75d3
+  checksums.txt: aceda6326ab9ee586abc866503db54a5ca0d58f2a62af43c488d732c9eb6db40
   deploy.sh: 812cad748fa35e55f09348f0eb6821457cc4305057290fd8d7640930874ef324
   recipe.yaml: 6bb7f54d474003baeb8f87e0a4591efa9d1433c430d2f22446df0b55c63590e1
 h100-eks-ubuntu-training-kubeflow:
@@ -2336,7 +2336,7 @@ h100-eks-ubuntu-training-kubeflow:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: a0979f42c9dc3c65c09fe368fd9e8438b3b2cf46a135363260400a63750cf850
+  006-nodewright-customizations/templates/tuning.yaml: 67bdafb5522b9251ff9bd008936e1e3189904128e5b302a42c735b84199fd5f5
   006-nodewright-customizations/values.yaml: 8a82d857a462cc9a195280dc3d60ec4fae5990fd986df93ea90f7be37dc7363d
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -2382,7 +2382,7 @@ h100-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 709dcbbadce9223f31a47717952e2e145dc9f6245398f0bb4d9163ceb5880602
   bundle-info.yaml: ea342176d88d654e5fc9da5a1c65c04b15fe9e98a0db268d980ea901e51499c4
-  checksums.txt: de9a0109071f7b079be4b3c33fd87c45b7c887f7146de0f1eeda2016a3d78884
+  checksums.txt: 48850022b6fd830690855ef33970191f79a27c3430bf2e0167882632338336a9
   deploy.sh: 5d717e240a807226aa2e0807430fc6ec4cb6ff264367124c5858a72e1325e570
   recipe.yaml: b16274a3f73f978b7d5704e992cc5bc300f64300038c630ec4195fd889bc28ae
 h100-eks-ubuntu-training-slurm:
@@ -2409,7 +2409,7 @@ h100-eks-ubuntu-training-slurm:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: a0979f42c9dc3c65c09fe368fd9e8438b3b2cf46a135363260400a63750cf850
+  006-nodewright-customizations/templates/tuning.yaml: 67bdafb5522b9251ff9bd008936e1e3189904128e5b302a42c735b84199fd5f5
   006-nodewright-customizations/values.yaml: 8a82d857a462cc9a195280dc3d60ec4fae5990fd986df93ea90f7be37dc7363d
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -2463,7 +2463,7 @@ h100-eks-ubuntu-training-slurm:
   018-slinky-slurm/values.yaml: 5643ef72841c8424adbe75cfb40f99691ec60c5e6498bb3a115824a3264bce9d
   README.md: 7c284ebde381a514b6c78931f3d48278e56153c7a56a8880c795859da5dda5a7
   bundle-info.yaml: 1ae022b1b271ed06d221288d201639caa09c7fc0821ac695d48afe43f8fa7187
-  checksums.txt: 9c2f3156ec56d998c881eb108e82ded6d9faedf057ee838f8a0ab68f53388ed6
+  checksums.txt: 2fc064d90c2bd7a50d0257331c8f2277b9aa4cc0788fa3d8817c3b39f41ffd47
   deploy.sh: 3aff2338397036c2cf993aefe177089a562d4af5679614f84a43fb0a66965c0a
   recipe.yaml: 9d1566acf0fe361cc66ca157c98dcd3cb730c8683486d82104d01251e38d1b75
 h100-gke-cos-inference-dynamo:
@@ -2509,7 +2509,7 @@ h100-gke-cos-inference-dynamo:
   010-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   010-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  010-nodewright-customizations/templates/tuning-gke.yaml: b3f5c10706e9930545702b1b23d08848b4b2109b46a6dc2199c1e731641759d5
+  010-nodewright-customizations/templates/tuning-gke.yaml: 2a53d8154020fbcbf0409957cee8225d14fd9cb4dfe8d2a577cfaa3c0f839c8b
   010-nodewright-customizations/values.yaml: 8ae123be59ae383e6d07407326f7a5f0d0ea19a1c9f241c2623efaac309b6306
   011-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -2555,7 +2555,7 @@ h100-gke-cos-inference-dynamo:
   020-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 6539e36c37f90e0df5d5bcd64f3370be6672d06567fed1659bdae71a8c61b3c6
   bundle-info.yaml: 5d818c98e2e547ce731cd8f5b5339575c077f6a6d7ef96da79d308c7335a0c83
-  checksums.txt: 51afc8cb2191e5998527a8f87e44a47b5ef2041afb7b15e18620b524f29896c3
+  checksums.txt: 9ad5272c7a96b261d4273b33af16604bcf1008735187e1d7bd0550d621760e56
   deploy.sh: e74510cb259b0bf21a8b403180fa574fd32dbbab4842eb63de87caea1eb66582
   recipe.yaml: 3ff3d650b903005198c8241c13eac2cb02d76296b7986cb7bce35f1276c9c713
 h100-gke-cos-training-kubeflow:
@@ -2578,7 +2578,7 @@ h100-gke-cos-training-kubeflow:
   005-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   005-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  005-nodewright-customizations/templates/tuning-gke.yaml: d2d8d052c3e7139645f12d21ce390ff4600295216606ab7f97199ec0f5a770bf
+  005-nodewright-customizations/templates/tuning-gke.yaml: 60be9602d2ffae7a93247a74cca215e3bd649f5e04a50f9db0e57f9b340fe41b
   005-nodewright-customizations/values.yaml: a6bf20bf80ff99c7b41ae3832f9ead39bca68dc6c516cdf550ad5b62538a1c49
   006-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -2636,7 +2636,7 @@ h100-gke-cos-training-kubeflow:
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 9de7504fa5e0a3876f7539d46d126a46aa0c9eb6f3eae33a76d0c745b675ff66
   bundle-info.yaml: 88408db2ee673931b6534f38d564ae48e0cbc2155119b5da5522c788ebc113c7
-  checksums.txt: 8e266a58556a483d707b19cc58f628b177f0d65f3fc9c9a2afa6f2b776ff782f
+  checksums.txt: cf99d051bd94efd8917d43a77efd70115c0f7fdbef4fa0be73e245b1d619fd18
   deploy.sh: 38901b3523ec34a639a9daa9407b843e85160a54eb28eaf3d3e1644240bea08e
   recipe.yaml: 3c337fb5d56f468353cdd74516c8963cc103d36adabd5683fc6d8e07928bd739
 h100-gke-cos-training-slurm:
@@ -2659,7 +2659,7 @@ h100-gke-cos-training-slurm:
   005-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   005-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  005-nodewright-customizations/templates/tuning-gke.yaml: d2d8d052c3e7139645f12d21ce390ff4600295216606ab7f97199ec0f5a770bf
+  005-nodewright-customizations/templates/tuning-gke.yaml: 60be9602d2ffae7a93247a74cca215e3bd649f5e04a50f9db0e57f9b340fe41b
   005-nodewright-customizations/values.yaml: a6bf20bf80ff99c7b41ae3832f9ead39bca68dc6c516cdf550ad5b62538a1c49
   006-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -2728,7 +2728,7 @@ h100-gke-cos-training-slurm:
   020-slinky-topograph/values.yaml: 83a1582f2ab8f283e77367a998d5f5d8ea686466d42c2dd5645fba1fba96bcc6
   README.md: 1ae1622b3dd3cf448af227aec15acf8025cd857fea559f2466049a10144c693b
   bundle-info.yaml: 3eb6f9de846cc716affa45bd110e2101419d3923e5452e27c10cad5c7dfd0dd6
-  checksums.txt: 8e90a300e98bcc65665a40889129cc1cca79ace5994d7b24f0cc4f623117712f
+  checksums.txt: 8d52cde32e43f74bb5cbb0d3d6c73764633bfd7163f4a559b41895a4c4f0f0f7
   deploy.sh: bb69b44cb1a35863c79534a48a99d307913e86a9130fd56422b0ffd015f56bcf
   recipe.yaml: dbaccc75c3dc7d51cf542ac2aec6af4dc7e55dbd726aa8719692aeb7b9466050
 h100-kind-inference-dynamo:
@@ -3047,7 +3047,7 @@ h200-eks-inference:
   010-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   010-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  010-nodewright-customizations/templates/tuning.yaml: f24dc57fb1d4995b8daf0a239e6094b30bcce9fa3aa1f71bfe067bf783dc2298
+  010-nodewright-customizations/templates/tuning.yaml: 8418846e3e389890ec2a592bc1c792a46841093aa89ba5e008f58f8c09b356b4
   010-nodewright-customizations/values.yaml: f7717f874ba63f20996db371fc059ccad2238ee37ab901416bab2239a95fa7e8
   011-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -3084,7 +3084,7 @@ h200-eks-inference:
   018-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 0b31cdda6386ad60ed82c484710f678a9dfb2112d7b0c7e5bfff85ad9c5ce056
   bundle-info.yaml: c078bfad4f0ebcadadf6b5395a948606203ca06ec165feae685865afb10dcf59
-  checksums.txt: 4a7f1dc15167ecc9eb419c4086dbc40d01ef45f03eb29b5f72cb64aa696b9a3c
+  checksums.txt: 8212d819ad50eb29d25539f1d18dcd2f25691a822af0f6f118d9ab3b4c3b9a61
   deploy.sh: 167b94b2fc1890368ff06d272c146378b55ffc24f3187b7ddd8aa5880b0883e5
   recipe.yaml: c472b9dbe2723ee9cc568d783bfc31c83c19b27221271affd8b902bf90d4f63b
 h200-eks-training-kubeflow:
@@ -3111,7 +3111,7 @@ h200-eks-training-kubeflow:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning.yaml: a0979f42c9dc3c65c09fe368fd9e8438b3b2cf46a135363260400a63750cf850
+  006-nodewright-customizations/templates/tuning.yaml: 67bdafb5522b9251ff9bd008936e1e3189904128e5b302a42c735b84199fd5f5
   006-nodewright-customizations/values.yaml: 8a82d857a462cc9a195280dc3d60ec4fae5990fd986df93ea90f7be37dc7363d
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -3157,7 +3157,7 @@ h200-eks-training-kubeflow:
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 80fdd6259bcec9137194eb022a31b8437925b6dff85200ccf556441e394e1748
   bundle-info.yaml: a02a3afe92eb46c658472d3581236f7ceaa4ef446983484861c71cbafe49b182
-  checksums.txt: f6cb6495fb81ce5583cf227e01cd6ed0547485773420a8f0150453a3910ca0f8
+  checksums.txt: 96346277ac8d54e91ea83f25bc1d589b993acb7eaeb0fcf6d133d6c08f2c5a78
   deploy.sh: 5d717e240a807226aa2e0807430fc6ec4cb6ff264367124c5858a72e1325e570
   recipe.yaml: b81105cdb65c7538b93151e3575c330beac653510acf1d2327ccf338247411a6
 h200-k0s-ubuntu-training:
@@ -3760,7 +3760,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   011-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   011-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  011-nodewright-customizations/templates/tuning-generic.yaml: 65ddd8718bb6afbfc5e76b42fa657c8a13639f12a7028c180969e082bdc2c085
+  011-nodewright-customizations/templates/tuning-generic.yaml: 65cc133752eb7d34cfcf8c30c717e5caf3ebf25ac686e9c795ee425b926b63b4
   011-nodewright-customizations/values.yaml: 3c4865e4ef9af9210b3fbe0fcc13c4e36677488bf6e750ae047d1ded6816ec6d
   012-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -3801,7 +3801,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   020-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: ed5fc044448d58173107789f3e8da6f05017eae0faac31b0d82fe91493854548
   bundle-info.yaml: cff2dba5a7898b03ab9f4af04023bba7b379df064471780782a0aff8b5a2c67d
-  checksums.txt: b4dabb68f1b09aadd6338baa114a69942a6535c7701950d27720cfec51cc924e
+  checksums.txt: 415a10fb535bebd3d4717acfa0b902a8e4e1d880eb10f38903857dcaa54d36dd
   deploy.sh: 0250b94c3113479d254fb93c906f83482f94f2c2b0817d70421d357718cd0b49
   recipe.yaml: 715b570534dd52aa84e3ce8ec16b6c6df324872b544d487d5219661ab707dd9e
 rtx-pro-6000-eks-ubuntu-inference-nim:
@@ -3847,7 +3847,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   010-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   010-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  010-nodewright-customizations/templates/tuning-generic.yaml: 65ddd8718bb6afbfc5e76b42fa657c8a13639f12a7028c180969e082bdc2c085
+  010-nodewright-customizations/templates/tuning-generic.yaml: 65cc133752eb7d34cfcf8c30c717e5caf3ebf25ac686e9c795ee425b926b63b4
   010-nodewright-customizations/values.yaml: 3c4865e4ef9af9210b3fbe0fcc13c4e36677488bf6e750ae047d1ded6816ec6d
   011-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -3888,7 +3888,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   019-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 32e9428946b4a35a4b044d7b8eda21ad6cfbdc6fbbb35f479866e2984b944b8f
   bundle-info.yaml: eaf9e6cb331ec04dad875d8ec3bfd08fc0f1640031a347ea90ad20f8441648d3
-  checksums.txt: 8180ec610f5ba888bf59f09db43ba8808ba0284c89eb399d96f27d90e961451f
+  checksums.txt: 7e154ffaa215f4e9c3246415a9b1c165dbc0e816c2554902044fcdbe1a1e8e06
   deploy.sh: 812cad748fa35e55f09348f0eb6821457cc4305057290fd8d7640930874ef324
   recipe.yaml: 2d4faabcc4d36c468b7426573e4c3cca07ae822989fee7158be7f2467b2f4282
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
@@ -3915,7 +3915,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   006-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   006-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  006-nodewright-customizations/templates/tuning-generic.yaml: 136e3e669e4523b91f3e4614bd64a87e12c50703480a290263e661de3177e56e
+  006-nodewright-customizations/templates/tuning-generic.yaml: 81c4580eb368fda9df9f84ddc26b2c7db0d7aeea6cad65a4e74d403989fc6894
   006-nodewright-customizations/values.yaml: c336a8895af5a45a4bea55497e5c7e9be80878e7a009b9fed031510da50dc759
   007-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -3961,7 +3961,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: d682276a2130e0c28ad52d9c114f506d9c919201c3fc82fbe0957d342c0811a1
   bundle-info.yaml: 9a68014a20cebdf45569ad15efd53f869273a771cdde33511be07c8e523350d6
-  checksums.txt: 421fada5cfd87c59b06500d0897dbf44dfd6493ed9e3f1c7da6e491c6054ceb5
+  checksums.txt: 7e2644a159855d2be7bac17fd401fdceaeec8f6a7f6c75ceeec3d44674fcf6a0
   deploy.sh: 5d717e240a807226aa2e0807430fc6ec4cb6ff264367124c5858a72e1325e570
   recipe.yaml: 1d6e3006c9f8f7e8fb2d9a1fe31abfcec63e9203412ac2db65842104668425ce
 rtx-pro-6000-lke-ubuntu-inference:
@@ -4139,7 +4139,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   010-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   010-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  010-nodewright-customizations/templates/tuning-rke2.yaml: 067ab627ffbcb0e28f4336a794bac5916fc52d7afb241822108fa73726c63aae
+  010-nodewright-customizations/templates/tuning-rke2.yaml: 2f8bbb2816615ac069410deafe9af733ee3ef751a9d6a7477d10f261978e0a83
   010-nodewright-customizations/values.yaml: 1f04ef1afaaf02402631e1d11110c12197afd8427b01e5022aad81a763aaf0d3
   011-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -4181,11 +4181,11 @@ vr200-rke2-ubuntu-inference-dynamo:
   020-rdma-netns-exclusive/Chart.yaml: 69e89838b1100cae78e991f464d9898ba86b3ebd4a5192237df9bb203f4b064b
   020-rdma-netns-exclusive/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-rdma-netns-exclusive/install.sh: 415458418e5e080cc58daaa60012510be901eeb5579f02ab692e0bae5e695ac1
-  020-rdma-netns-exclusive/templates/skyhook.yaml: 86cfc50b17b81d33572c04daf0810d90050cb072408f68e6bc4d8b36737cde2a
+  020-rdma-netns-exclusive/templates/skyhook.yaml: fdcf5b2179700489b1035740390c495e0f6013c8ee42838571a6071c3fff0ada
   020-rdma-netns-exclusive/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: ed21b35db7806b6cc7bcd8e552db003610f2de744778a422e667d3a79c547493
   bundle-info.yaml: d3f151e04283c99fa06ef4ac8300535337a67e2982fc49f64528d99c4166235c
-  checksums.txt: 1c32407876eed1dafc990991c16fd5c76bc3737db9ebcd8a9c4e403d44e0adb6
+  checksums.txt: 58f7feda6954651ce80dc950aca1fef6f18c9ffe2f7befcd09053cea788920e2
   deploy.sh: e5f586556f18874e06e9bbfdf8ba76f2e9f5e9b45b1647bb421f46feefb99a6d
   recipe.yaml: a1551244c9d578211d0931481ed96f7522034db15fb35afb5ec101c520a11aeb
 vr200-rke2-ubuntu-training-kubeflow:
@@ -4209,7 +4209,7 @@ vr200-rke2-ubuntu-training-kubeflow:
   005-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   005-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-customizations/install.sh: 7a4fdf7a567f11d0a3e92ed75844e8afaa0b8f11bd2a028f2a27957827fccef9
-  005-nodewright-customizations/templates/tuning-rke2.yaml: 5e50134a0b66cbe04eab008e315850da8d2612f284d42e651dce59a127c36fdd
+  005-nodewright-customizations/templates/tuning-rke2.yaml: c790dba3a64187639d23834f7d09cc477946d84be301711c639a77dfae9909f6
   005-nodewright-customizations/values.yaml: 5f40bf32faf80baafdfbf50a7386510aef07ce7a1d697af84bd49c4b96db1a58
   006-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-prometheus-operator-crds/install.sh: 921179af3fe2aab9819ed4c251047420524f9716152fc89d249fa5628f5784e9
@@ -4256,10 +4256,10 @@ vr200-rke2-ubuntu-training-kubeflow:
   016-rdma-netns-exclusive/Chart.yaml: 69e89838b1100cae78e991f464d9898ba86b3ebd4a5192237df9bb203f4b064b
   016-rdma-netns-exclusive/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-rdma-netns-exclusive/install.sh: 415458418e5e080cc58daaa60012510be901eeb5579f02ab692e0bae5e695ac1
-  016-rdma-netns-exclusive/templates/skyhook.yaml: 86cfc50b17b81d33572c04daf0810d90050cb072408f68e6bc4d8b36737cde2a
+  016-rdma-netns-exclusive/templates/skyhook.yaml: fdcf5b2179700489b1035740390c495e0f6013c8ee42838571a6071c3fff0ada
   016-rdma-netns-exclusive/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: 1c4a933487fe6f2dddd1531f9e1b461d0d2317fd8fd1629b0d77ec0d839b0480
   bundle-info.yaml: eab3e0e2b25cd69f4490ba26fdea116436b2003457c55da2c6d140ab3e12f12b
-  checksums.txt: f7c1eacb236187f6078c0faae1f9ed1229c960156ed35aa062a2bb35e312fd0d
+  checksums.txt: 07d7a4272dc9a86b6cbaa7bda153d061cea3696422417c8a63ceb490738e62c9
   deploy.sh: f7c9b5bba833ab57a2498a285946ccb8b24f59425ed49dacffd81de9787aad74
   recipe.yaml: 04d4accdb457d95abfd5010b657fbf6c4cfaa9529e21e3a84d7aa8fb95d7cf43
