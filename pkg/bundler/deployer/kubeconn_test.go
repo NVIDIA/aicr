@@ -38,6 +38,13 @@ printf '%s\n' "$@" > "${ARGV_DIR}/${0##*/}.argv"
 // kubectl through stubs, runs it with env, and returns each binary's argv.
 func runKubeConn(t *testing.T, env []string) (helmArgv, kubectlArgv []string, stderr string, err error) {
 	t.Helper()
+	return runKubeConnIn(t, "", env)
+}
+
+// runKubeConnIn is runKubeConn with an explicit working directory, so a test
+// can put files where a glob in a flag value would match them.
+func runKubeConnIn(t *testing.T, workDir string, env []string) (helmArgv, kubectlArgv []string, stderr string, err error) {
+	t.Helper()
 
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, "bin")
@@ -63,6 +70,7 @@ kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get crd
 	}
 
 	cmd := exec.Command("bash", scriptPath)
+	cmd.Dir = workDir
 	cmd.Env = append([]string{
 		"PATH=" + binDir,
 		"ARGV_DIR=" + argvDir,
@@ -322,5 +330,34 @@ func TestKubeConnection_PropagatesToChildScripts(t *testing.T) {
 	}
 	if !strings.Contains(got, "/tmp/kc.yaml") {
 		t.Errorf("child helm lost the kubeconfig, so it would use the ambient one; saw:\n%s", got)
+	}
+}
+
+// A kubeconfig path is a value, not a pattern. `arr=($var)` performs pathname
+// expansion as well as the word-splitting it is there for, so a path holding
+// *, ? or [...] would otherwise be rewritten by whatever happens to sit in the
+// working directory: one match silently changes the path, and several append
+// tokens the parser then rejects as unsupported options.
+func TestKubeConnection_DoesNotGlobFlagValues(t *testing.T) {
+	workDir := t.TempDir()
+	for _, name := range []string{"kcA.yaml", "kcB.yaml"} {
+		if err := os.WriteFile(filepath.Join(workDir, name), []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	helmArgv, kubectlArgv, stderr, err := runKubeConnIn(t, workDir, []string{
+		"KUBECONFIG_FLAG=--kubeconfig kc*.yaml",
+	})
+	if err != nil {
+		t.Fatalf("harness failed: %v\nstderr: %s", err, stderr)
+	}
+	want := []string{"--kubeconfig", "kc*.yaml", "list"}
+	if !equalArgv(helmArgv, want) {
+		t.Errorf("helm argv = %q, want %q (the value was glob-expanded)", helmArgv, want)
+	}
+	wantKubectl := []string{"--kubeconfig", "kc*.yaml", "get", "crd"}
+	if !equalArgv(kubectlArgv, wantKubectl) {
+		t.Errorf("kubectl argv = %q, want %q (the value was glob-expanded)", kubectlArgv, wantKubectl)
 	}
 }
