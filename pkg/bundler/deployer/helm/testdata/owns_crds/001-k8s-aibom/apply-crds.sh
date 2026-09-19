@@ -48,7 +48,7 @@ fi
 # kubectl spells one of them differently -- helm's --kube-context is kubectl's
 # --context -- so the value is translated here rather than forwarded.
 #
-# An option with no known kubectl spelling is refused. Forwarding it aborts the
+# An option this step does not translate is refused. Forwarding it aborts the
 # deploy on an unknown flag, and dropping it is worse: the reads and the CRD
 # force-apply below would then land on whatever cluster the ambient context
 # names, which is the wrong-cluster write this script must never make.
@@ -91,10 +91,20 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
         KUBECTL_CONN+=("${helm_conn[0]}")
         helm_conn=("${helm_conn[@]:1}")
         ;;
+      # Names the option, never its argument. helm's --kube-token carries a
+      # bearer token in the joined form, and deploy.sh runs install.sh with its
+      # output attached to the terminal and to CI logs, then retries it. kubectl
+      # reports an unknown flag by name alone, so echoing the whole token here
+      # would disclose what the unpatched path did not.
+      #
+      # The rejected options do have kubectl equivalents -- --kube-token is
+      # --token, --kube-apiserver is --server -- so this is a scope boundary,
+      # not an unknown mapping.
       *)
-        echo "ERROR: KUBECONFIG_FLAG carries '${helm_conn[0]}', which has no known" >&2
-        echo "       kubectl spelling. The ${RELEASE} CRD step refuses to guess rather" >&2
-        echo "       than read and apply CRDs against an unintended cluster." >&2
+        echo "ERROR: KUBECONFIG_FLAG carries '${helm_conn[0]%%=*}', which this" >&2
+        echo "       ${RELEASE} CRD step does not support; it translates only" >&2
+        echo "       --kube-context and --kubeconfig. It stops here rather than" >&2
+        echo "       read and apply CRDs against an unintended cluster." >&2
         exit 1
         ;;
     esac
