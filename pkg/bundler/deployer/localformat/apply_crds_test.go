@@ -215,11 +215,13 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 	blocks := map[string]string{
 		"release gate queries helm":                 `if ! capture_bounded helm list --namespace "${NAMESPACE}" \`,
 		"indeterminate state aborts":                "  exit 1\nfi\nexisting=",
-		"absent release checks for retained CRDs":   `  if ! capture_bounded kubectl get -f "${CRD_DIR}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then`,
+		"absent release checks for retained CRDs":   "  if ! capture_bounded kubectl get -f \"${CRD_DIR}\" --ignore-not-found -o name \\\n    ${KUBECTL_CONN[@]+\"${KUBECTL_CONN[@]}\"}; then",
 		"only absent release AND no CRDs skips":     `    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."`,
 		"bound kills a wedged client":               `  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null`,
 		"missing timeout fails closed":              "cannot be bounded",
-		"applies under helm's field manager":        `    --field-manager=helm -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
+		"applies under helm's field manager":        `    --field-manager=helm -f "${doc}" ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"}; then`,
+		"helm's --kube-context is translated":       `        KUBECTL_CONN+=(--context "${helm_conn[1]}")`,
+		"an untranslatable helm flag fails closed":  `which has no known" >&2`,
 		"both phases share one artifact":            `if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \`,
 		"CRDs come from the archive, not show crds": `if ! collect_crds "${PULLED_CHART}" "${CRD_DIR}"; then`,
 	}
