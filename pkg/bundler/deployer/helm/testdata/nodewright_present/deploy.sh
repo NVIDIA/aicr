@@ -53,6 +53,135 @@ while [[ $# -gt 0 ]]; do
     *) echo "Error: unknown option: $1"; echo "Usage: ./deploy.sh [--no-wait] [--best-effort] [--retries N]"; exit 1 ;;
   esac
 done
+
+# ==============================================================================
+# Kubernetes connection resolution
+# ==============================================================================
+# Inputs, all optional:
+#   KUBE_CONTEXT     context name to act on.
+#   KUBECONFIG       path to a kubeconfig. Both helm and kubectl read it from
+#                    the environment, so no flag is derived from it.
+#   KUBECONFIG_FLAG  deprecated. A literal helm flag string, translated below.
+#
+# helm and kubectl spell the same connection option differently -- helm's
+# --kube-context is kubectl's --context -- so a context resolves to two arrays
+# rather than one shared string. Forwarding helm's spelling to kubectl aborts on
+# an unknown flag; dropping it silently is worse, because the reads and the
+# cluster writes would then land on whatever context the ambient kubeconfig
+# names, which is the wrong-cluster write this contract exists to prevent.
+#
+# An option this contract does not translate is refused rather than guessed at.
+#
+# Every rejection below exits before the first cluster call. A connection
+# option that is merely dropped is indistinguishable from one never set, and
+# the fallback is the ambient context.
+#
+# Both arrays are always declared, but a given script calls only one of the two
+# binaries, so the other is legitimately unread here.
+# shellcheck disable=SC2034
+HELM_CONN=()
+# shellcheck disable=SC2034
+KUBECTL_CONN=()
+
+if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
+  echo "WARNING: KUBECONFIG_FLAG is deprecated; export KUBE_CONTEXT (and KUBECONFIG) instead." >&2
+
+  # Deliberate word-split: this slot holds a flag list, not a single word.
+  # shellcheck disable=SC2206
+  _aicr_argv=(${KUBECONFIG_FLAG})
+  _aicr_i=0
+  _aicr_n=${#_aicr_argv[@]}
+  _aicr_ctx=""
+
+  # Indexed rather than reslicing: `arr=("${arr[@]:2}")` expands to nothing on
+  # the final pair, and bash 3.2 -- which stock macOS still ships -- errors on
+  # an empty array expansion under `set -u`.
+  while (( _aicr_i < _aicr_n )); do
+    _aicr_tok="${_aicr_argv[_aicr_i]}"
+    case "${_aicr_tok}" in
+      --kube-context|--kubeconfig)
+        if (( _aicr_i + 1 >= _aicr_n )); then
+          echo "ERROR: KUBECONFIG_FLAG ends with ${_aicr_tok} and no value." >&2
+          exit 1
+        fi
+        _aicr_val="${_aicr_argv[_aicr_i+1]}"
+        # Another option where the value belongs means the value was omitted.
+        # Accepting it would name a flag as the context or the kubeconfig path,
+        # and the resulting lookup failure is not the error the operator would
+        # read as "you forgot a value".
+        # Names the offending option, never its argument, for the same reason
+        # the catch-all below does.
+        if [[ "${_aicr_val}" == --* ]]; then
+          echo "ERROR: KUBECONFIG_FLAG gives ${_aicr_tok} the value" >&2
+          echo "       '${_aicr_val%%=*}', which is another option rather than a value." >&2
+          exit 1
+        fi
+        if [[ "${_aicr_tok}" == "--kube-context" ]]; then
+          _aicr_ctx="${_aicr_val}"
+        else
+          HELM_CONN+=(--kubeconfig "${_aicr_val}")
+          KUBECTL_CONN+=(--kubeconfig "${_aicr_val}")
+        fi
+        _aicr_i=$(( _aicr_i + 2 ))
+        ;;
+      --kube-context=*|--kubeconfig=*)
+        _aicr_val="${_aicr_tok#*=}"
+        if [[ -z "${_aicr_val}" ]]; then
+          echo "ERROR: KUBECONFIG_FLAG carries '${_aicr_tok}', whose value is empty." >&2
+          exit 1
+        fi
+        if [[ "${_aicr_tok}" == --kube-context=* ]]; then
+          _aicr_ctx="${_aicr_val}"
+        else
+          HELM_CONN+=("${_aicr_tok}")
+          KUBECTL_CONN+=("${_aicr_tok}")
+        fi
+        _aicr_i=$(( _aicr_i + 1 ))
+        ;;
+      # Names the option, never its argument. helm's --kube-token carries a
+      # bearer token in the joined form, and these scripts run with their output
+      # attached to the terminal and to CI logs, then get retried. kubectl
+      # reports an unknown flag by name alone, so echoing the whole token here
+      # would disclose what the unpatched path did not.
+      #
+      # The rejected options do have kubectl equivalents -- --kube-token is
+      # --token, --kube-apiserver is --server -- so this is a scope boundary,
+      # not an unknown mapping.
+      *)
+        echo "ERROR: KUBECONFIG_FLAG carries '${_aicr_tok%%=*}', which this" >&2
+        echo "       contract does not support; it translates only" >&2
+        echo "       --kube-context and --kubeconfig. It stops here rather than" >&2
+        echo "       act on an unintended cluster. Export KUBE_CONTEXT instead." >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  if [[ -n "${_aicr_ctx}" ]]; then
+    if [[ -n "${KUBE_CONTEXT:-}" && "${KUBE_CONTEXT}" != "${_aicr_ctx}" ]]; then
+      echo "ERROR: KUBE_CONTEXT names '${KUBE_CONTEXT}' but KUBECONFIG_FLAG names" >&2
+      echo "       '${_aicr_ctx}'. Refusing to guess which cluster to act on;" >&2
+      echo "       set only KUBE_CONTEXT." >&2
+      exit 1
+    fi
+    KUBE_CONTEXT="${_aicr_ctx}"
+  fi
+
+  # Children resolve from the normalized variables, so the deprecated spelling
+  # stops here rather than being re-parsed (and re-warned) once per script.
+  unset KUBECONFIG_FLAG
+fi
+
+if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  export KUBE_CONTEXT
+  HELM_CONN+=(--kube-context "${KUBE_CONTEXT}")
+  KUBECTL_CONN+=(--context "${KUBE_CONTEXT}")
+fi
+
+# Remediation commands printed below are meant to be copy-pasted, so they carry
+# the same context this script acts on rather than whatever the reader's
+# ambient kubeconfig happens to select.
+KUBECTL_HINT="kubectl${KUBE_CONTEXT:+ --context ${KUBE_CONTEXT}}"
 # ==============================================================================
 # Output helpers (respects NO_COLOR and non-TTY)
 # ==============================================================================
@@ -71,7 +200,7 @@ function _step_header() {
   local manual_dir
   printf -v manual_dir '%q' "$5"
   printf '\n%s┌─ [%s/%s] %s  →  %s%s\n' "${_B}" "$1" "$2" "$3" "$4" "${_X}"
-  printf '%s│  Manual (approx, set KUBECONFIG_FLAG/DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && bash install.sh%s\n' "${_D}" "${manual_dir}" "${_X}"
+  printf '%s│  Manual (approx, set KUBE_CONTEXT/DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && bash install.sh%s\n' "${_D}" "${manual_dir}" "${_X}"
 }
 
 function _step_ok() {
@@ -87,9 +216,9 @@ function _step_retry() {
 }
 
 # Export env vars consumed by each folder's install.sh (rendered by localformat).
-# DRY_RUN_FLAG / KUBECONFIG_FLAG / HELM_DEBUG_FLAG default to empty strings.
+# DRY_RUN_FLAG / HELM_DEBUG_FLAG default to empty strings; KUBE_CONTEXT and
+# KUBECONFIG are already exported by the connection block above.
 export DRY_RUN_FLAG="${DRY_RUN_FLAG:-}"
-export KUBECONFIG_FLAG="${KUBECONFIG_FLAG:-}"
 export HELM_DEBUG_FLAG="${HELM_DEBUG_FLAG:-}"
 
 function helm_failed() {
@@ -118,7 +247,7 @@ function backoff_seconds() {
 function cleanup_helm_hooks() {
   local namespace="$1"
   local job_names
-  job_names=$(kubectl get jobs -n "${namespace}" \
+  job_names=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get jobs -n "${namespace}" \
     --field-selector=status.successful=0 \
     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
     2>/dev/null || true)
@@ -129,7 +258,7 @@ function cleanup_helm_hooks() {
     [[ -z "${name}" ]] && continue
     # Get the full Job JSON to reliably check annotations and status
     local job_json
-    job_json=$(kubectl get job "${name}" -n "${namespace}" -o json 2>/dev/null || true)
+    job_json=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get job "${name}" -n "${namespace}" -o json 2>/dev/null || true)
     [[ -z "${job_json}" ]] && continue
     # Skip non-hook Jobs (no helm.sh/hook annotation)
     local hook_val
@@ -138,13 +267,13 @@ function cleanup_helm_hooks() {
     # Capture diagnostics before deleting. This helps diagnose transient hook
     # failures (e.g., dynamo ssh-keygen) that are otherwise lost after cleanup.
     echo "  --- Failed hook Job ${name} diagnostics ---"
-    kubectl describe job "${name}" -n "${namespace}" 2>/dev/null | tail -50 || true
+    kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} describe job "${name}" -n "${namespace}" 2>/dev/null | tail -50 || true
     local pod_names
-    pod_names=$(kubectl get pods -n "${namespace}" -l "job-name=${name}" \
+    pod_names=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get pods -n "${namespace}" -l "job-name=${name}" \
       -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
     for pod_name in ${pod_names}; do
       echo "  --- Hook pod ${pod_name} describe ---"
-      kubectl describe pod "${pod_name}" -n "${namespace}" 2>/dev/null | tail -50 || true
+      kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} describe pod "${pod_name}" -n "${namespace}" 2>/dev/null | tail -50 || true
     done
     echo "  --- End diagnostics for ${name} ---"
     # Delete any non-succeeded hook Job. This function only runs after a Helm
@@ -152,7 +281,7 @@ function cleanup_helm_hooks() {
     # retry — whether it failed, is stuck Pending (timed out before the pod
     # started), or is still active with a stuck container.
     echo "  Cleaning up stale Helm hook Job ${name} in ${namespace}..."
-    kubectl delete job "${name}" -n "${namespace}" --ignore-not-found 2>/dev/null || true
+    kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} delete job "${name}" -n "${namespace}" --ignore-not-found 2>/dev/null || true
   done <<< "${job_names}"
 }
 
@@ -164,15 +293,15 @@ function dump_kai_scheduler_helm_diagnostics() {
 
   echo "  --- ${namespace} diagnostics ---"
   echo "  Jobs:"
-  kubectl get jobs -n "${namespace}" 2>/dev/null || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get jobs -n "${namespace}" 2>/dev/null || true
   echo "  Job descriptions:"
-  kubectl describe jobs -n "${namespace}" 2>/dev/null || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} describe jobs -n "${namespace}" 2>/dev/null || true
   echo "  Pods:"
-  kubectl get pods -n "${namespace}" -o wide 2>/dev/null || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get pods -n "${namespace}" -o wide 2>/dev/null || true
   echo "  Pod descriptions:"
-  kubectl describe pods -n "${namespace}" 2>/dev/null || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} describe pods -n "${namespace}" 2>/dev/null || true
   echo "  Recent events:"
-  kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
   echo "  --- End ${namespace} diagnostics ---"
 }
 
@@ -197,11 +326,11 @@ BUNDLE_NAMESPACES=$(echo "skyhook " | tr ' ' '\n' | sort -u | tr '\n' ' ')
 
 # Check for terminating namespaces that overlap with our components
 for ns in ${BUNDLE_NAMESPACES}; do
-  phase=$(kubectl get ns "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+  phase=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get ns "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null || true)
   if [[ "${phase}" == "Terminating" ]]; then
     echo "ERROR: namespace '${ns}' is still terminating from a previous install."
     echo "  Wait for it to finish, or force-finalize with:"
-    echo "    kubectl get ns ${ns} -o json | jq '.spec.finalizers=[]' | kubectl replace --raw /api/v1/namespaces/${ns}/finalize -f -"
+    echo "    ${KUBECTL_HINT} get ns ${ns} -o json | jq '.spec.finalizers=[]' | ${KUBECTL_HINT} replace --raw /api/v1/namespaces/${ns}/finalize -f -"
     preflight_failed=true
   fi
 done
@@ -220,13 +349,13 @@ if command -v jq &>/dev/null; then
       [[ "${is_bundle_ns}" == "false" ]] && continue
 
       # Use explicit NotFound check to avoid false positives from transient errors
-      svc_check=$(kubectl get svc "${svc_name}" -n "${svc_ns}" 2>&1) || true
+      svc_check=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get svc "${svc_name}" -n "${svc_ns}" 2>&1) || true
       if echo "${svc_check}" | grep -q "NotFound\|not found"; then
         echo "ERROR: ${kind} '${wh_name}' references non-existent service ${svc_ns}/${svc_name}."
-        echo "  This will block pod/resource creation. Delete with: kubectl delete ${kind} ${wh_name}"
+        echo "  This will block pod/resource creation. Delete with: ${KUBECTL_HINT} delete ${kind} ${wh_name}"
         preflight_failed=true
       fi
-    done < <(kubectl get "${kind}" -o json 2>/dev/null | \
+    done < <(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get "${kind}" -o json 2>/dev/null | \
       jq -r '.items[] | .metadata.name as $wh | .webhooks[]? | select(.clientConfig.service != null) | [$wh, .clientConfig.service.namespace, .clientConfig.service.name] | @tsv' 2>/dev/null || true)
   done
 else
@@ -235,9 +364,9 @@ fi
 
 # Check for stale API services (e.g., custom.metrics.k8s.io from prometheus-adapter)
 if command -v jq &>/dev/null; then
-  for api_svc in $(kubectl get apiservices -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | .type == "Available" and .status == "False") | .metadata.name' 2>/dev/null || true); do
+  for api_svc in $(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get apiservices -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | .type == "Available" and .status == "False") | .metadata.name' 2>/dev/null || true); do
     echo "WARNING: API service '${api_svc}' is unavailable. This can block namespace deletion."
-    echo "  Delete with: kubectl delete apiservice ${api_svc}"
+    echo "  Delete with: ${KUBECTL_HINT} delete apiservice ${api_svc}"
     # API service issues are warnings, not hard failures — they don't block deployment directly
   done
 else
@@ -249,10 +378,10 @@ fi
 # false positives from unrelated platform installs on shared clusters.
 ORPHANED_CRD_GROUPS=""
 for group in ${ORPHANED_CRD_GROUPS}; do
-  orphaned=$(kubectl get crd -o name 2>/dev/null | grep "\.${group}$" || true)
+  orphaned=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get crd -o name 2>/dev/null | grep "\.${group}$" || true)
   if [[ -n "${orphaned}" ]]; then
     echo "WARNING: orphaned CRDs from previous deployment: ${orphaned}"
-    echo "  These may cause conflicts. Delete with: kubectl delete ${orphaned}"
+    echo "  These may cause conflicts. Delete with: ${KUBECTL_HINT} delete ${orphaned}"
   fi
 done
 
@@ -283,7 +412,7 @@ function remove_stale_nodewright_taints() {
   # an existing Deployment with nothing available prints no count, which must
   # not be mistaken for no Deployment at all.
   local deploys legacy_deploys
-  if ! deploys=$(kubectl get deploy -n "${ns}" -l app.kubernetes.io/name=nodewright,control-plane=controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
+  if ! deploys=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get deploy -n "${ns}" -l app.kubernetes.io/name=nodewright,control-plane=controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
     _warn_line "could not query the nodewright-operator Deployment in ${ns}; skipping stale-taint cleanup: ${deploys}"
     return 0
   fi
@@ -296,7 +425,7 @@ function remove_stale_nodewright_taints() {
   # catches what the label misses. A field selector is used rather than a named
   # get so an absent Deployment is an empty list rather than an error, keeping
   # the two queries the same shape.
-  if ! legacy_deploys=$(kubectl get deploy -n "${ns}" --field-selector metadata.name=skyhook-operator-controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
+  if ! legacy_deploys=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get deploy -n "${ns}" --field-selector metadata.name=skyhook-operator-controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
     _warn_line "could not query the nodewright-operator Deployment by name in ${ns}; skipping stale-taint cleanup: ${legacy_deploys}"
     return 0
   fi
@@ -337,7 +466,7 @@ function remove_stale_nodewright_taints() {
   fi
 
   local node_taints
-  if ! node_taints=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>&1); then
+  if ! node_taints=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>&1); then
     _warn_line "could not list node taints; skipping stale-taint cleanup: ${node_taints}"
     return 0
   fi
@@ -353,7 +482,7 @@ function remove_stale_nodewright_taints() {
     echo "  Removing stale taints to unblock scheduling..."
     while IFS= read -r node; do
       if [[ -n "${node}" ]]; then
-        kubectl taint node "${node}" "${key}-" 2>/dev/null || true
+        kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} taint node "${node}" "${key}-" 2>/dev/null || true
       fi
     done <<<"${stale}"
   done

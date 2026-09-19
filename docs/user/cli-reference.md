@@ -3019,6 +3019,31 @@ Unknown flags are rejected with an error to catch typos (e.g., `--bes-effort` or
 
 > **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Nodewright node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
 
+##### Cluster connection environment
+
+`deploy.sh` and each component's `install.sh` act on whichever cluster the
+environment selects. Both are standalone entry points, so the same variables
+apply whether you run the whole bundle or a single component by hand.
+
+| Variable | Effect |
+|----------|--------|
+| `KUBE_CONTEXT` | Context to act on. Rendered as `--kube-context` for `helm` and `--context` for `kubectl`, and exported to each component's `install.sh`. |
+| `KUBECONFIG` | Path to a kubeconfig. Read natively by both `helm` and `kubectl`, so no flag is derived from it. |
+| `KUBECONFIG_FLAG` | Deprecated. A literal `helm` flag string; only `--kube-context` and `--kubeconfig` are translated, with a warning. |
+
+```bash
+KUBE_CONTEXT=my-cluster ./deploy.sh
+
+# Or a single component, from its own folder:
+cd 001-gpu-operator && KUBE_CONTEXT=my-cluster bash install.sh
+```
+
+Set exactly one spelling for the context. A `KUBECONFIG_FLAG` carrying an
+option that is not translated, or naming a different context than
+`KUBE_CONTEXT`, fails before the first cluster call rather than falling back to
+the ambient context. Rejection messages name the offending option but never its
+argument, so a flag carrying a credential does not reach the log.
+
 **Retry behavior:**
 
 The deploy script retries failed `helm upgrade --install` and `kubectl apply` operations with exponential backoff. By default, each operation is retried up to 5 times (6 total attempts). The backoff delay increases quadratically: 5s, 20s, 45s, 80s, 120s (capped) between retries.

@@ -53,6 +53,12 @@ while [[ $# -gt 0 ]]; do
     *) echo "Error: unknown option: $1"; echo "Usage: ./deploy.sh [--no-wait] [--best-effort] [--retries N]"; exit 1 ;;
   esac
 done
+
+{{ kubeConn }}
+# Remediation commands printed below are meant to be copy-pasted, so they carry
+# the same context this script acts on rather than whatever the reader's
+# ambient kubeconfig happens to select.
+KUBECTL_HINT="kubectl${KUBE_CONTEXT:+ --context ${KUBE_CONTEXT}}"
 # ==============================================================================
 # Output helpers (respects NO_COLOR and non-TTY)
 # ==============================================================================
@@ -71,7 +77,7 @@ function _step_header() {
   local manual_dir
   printf -v manual_dir '%q' "$5"
   printf '\n%s┌─ [%s/%s] %s  →  %s%s\n' "${_B}" "$1" "$2" "$3" "$4" "${_X}"
-  printf '%s│  Manual (approx, set KUBECONFIG_FLAG/DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && bash install.sh%s\n' "${_D}" "${manual_dir}" "${_X}"
+  printf '%s│  Manual (approx, set KUBE_CONTEXT/DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && bash install.sh%s\n' "${_D}" "${manual_dir}" "${_X}"
 }
 
 function _step_ok() {
@@ -87,9 +93,9 @@ function _step_retry() {
 }
 
 # Export env vars consumed by each folder's install.sh (rendered by localformat).
-# DRY_RUN_FLAG / KUBECONFIG_FLAG / HELM_DEBUG_FLAG default to empty strings.
+# DRY_RUN_FLAG / HELM_DEBUG_FLAG default to empty strings; KUBE_CONTEXT and
+# KUBECONFIG are already exported by the connection block above.
 export DRY_RUN_FLAG="${DRY_RUN_FLAG:-}"
-export KUBECONFIG_FLAG="${KUBECONFIG_FLAG:-}"
 export HELM_DEBUG_FLAG="${HELM_DEBUG_FLAG:-}"
 
 function helm_failed() {
@@ -118,7 +124,7 @@ function backoff_seconds() {
 function cleanup_helm_hooks() {
   local namespace="$1"
   local job_names
-  job_names=$(kubectl get jobs -n "${namespace}" \
+  job_names=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get jobs -n "${namespace}" \
     --field-selector=status.successful=0 \
     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
     2>/dev/null || true)
@@ -129,7 +135,7 @@ function cleanup_helm_hooks() {
     [[ -z "${name}" ]] && continue
     # Get the full Job JSON to reliably check annotations and status
     local job_json
-    job_json=$(kubectl get job "${name}" -n "${namespace}" -o json 2>/dev/null || true)
+    job_json=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get job "${name}" -n "${namespace}" -o json 2>/dev/null || true)
     [[ -z "${job_json}" ]] && continue
     # Skip non-hook Jobs (no helm.sh/hook annotation)
     local hook_val
@@ -138,13 +144,13 @@ function cleanup_helm_hooks() {
     # Capture diagnostics before deleting. This helps diagnose transient hook
     # failures (e.g., dynamo ssh-keygen) that are otherwise lost after cleanup.
     echo "  --- Failed hook Job ${name} diagnostics ---"
-    kubectl describe job "${name}" -n "${namespace}" 2>/dev/null | tail -50 || true
+    kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} describe job "${name}" -n "${namespace}" 2>/dev/null | tail -50 || true
     local pod_names
-    pod_names=$(kubectl get pods -n "${namespace}" -l "job-name=${name}" \
+    pod_names=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get pods -n "${namespace}" -l "job-name=${name}" \
       -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
     for pod_name in ${pod_names}; do
       echo "  --- Hook pod ${pod_name} describe ---"
-      kubectl describe pod "${pod_name}" -n "${namespace}" 2>/dev/null | tail -50 || true
+      kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} describe pod "${pod_name}" -n "${namespace}" 2>/dev/null | tail -50 || true
     done
     echo "  --- End diagnostics for ${name} ---"
     # Delete any non-succeeded hook Job. This function only runs after a Helm
@@ -152,7 +158,7 @@ function cleanup_helm_hooks() {
     # retry — whether it failed, is stuck Pending (timed out before the pod
     # started), or is still active with a stuck container.
     echo "  Cleaning up stale Helm hook Job ${name} in ${namespace}..."
-    kubectl delete job "${name}" -n "${namespace}" --ignore-not-found 2>/dev/null || true
+    kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} delete job "${name}" -n "${namespace}" --ignore-not-found 2>/dev/null || true
   done <<< "${job_names}"
 }
 
@@ -164,15 +170,15 @@ function dump_kai_scheduler_helm_diagnostics() {
 
   echo "  --- ${namespace} diagnostics ---"
   echo "  Jobs:"
-  kubectl get jobs -n "${namespace}" 2>/dev/null || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get jobs -n "${namespace}" 2>/dev/null || true
   echo "  Job descriptions:"
-  kubectl describe jobs -n "${namespace}" 2>/dev/null || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} describe jobs -n "${namespace}" 2>/dev/null || true
   echo "  Pods:"
-  kubectl get pods -n "${namespace}" -o wide 2>/dev/null || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get pods -n "${namespace}" -o wide 2>/dev/null || true
   echo "  Pod descriptions:"
-  kubectl describe pods -n "${namespace}" 2>/dev/null || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} describe pods -n "${namespace}" 2>/dev/null || true
   echo "  Recent events:"
-  kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+  kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
   echo "  --- End ${namespace} diagnostics ---"
 }
 
@@ -197,11 +203,11 @@ BUNDLE_NAMESPACES=$(echo "{{ range .Components }}{{ .Namespace }} {{ end }}" | t
 
 # Check for terminating namespaces that overlap with our components
 for ns in ${BUNDLE_NAMESPACES}; do
-  phase=$(kubectl get ns "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+  phase=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get ns "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null || true)
   if [[ "${phase}" == "Terminating" ]]; then
     echo "ERROR: namespace '${ns}' is still terminating from a previous install."
     echo "  Wait for it to finish, or force-finalize with:"
-    echo "    kubectl get ns ${ns} -o json | jq '.spec.finalizers=[]' | kubectl replace --raw /api/v1/namespaces/${ns}/finalize -f -"
+    echo "    ${KUBECTL_HINT} get ns ${ns} -o json | jq '.spec.finalizers=[]' | ${KUBECTL_HINT} replace --raw /api/v1/namespaces/${ns}/finalize -f -"
     preflight_failed=true
   fi
 done
@@ -220,13 +226,13 @@ if command -v jq &>/dev/null; then
       [[ "${is_bundle_ns}" == "false" ]] && continue
 
       # Use explicit NotFound check to avoid false positives from transient errors
-      svc_check=$(kubectl get svc "${svc_name}" -n "${svc_ns}" 2>&1) || true
+      svc_check=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get svc "${svc_name}" -n "${svc_ns}" 2>&1) || true
       if echo "${svc_check}" | grep -q "NotFound\|not found"; then
         echo "ERROR: ${kind} '${wh_name}' references non-existent service ${svc_ns}/${svc_name}."
-        echo "  This will block pod/resource creation. Delete with: kubectl delete ${kind} ${wh_name}"
+        echo "  This will block pod/resource creation. Delete with: ${KUBECTL_HINT} delete ${kind} ${wh_name}"
         preflight_failed=true
       fi
-    done < <(kubectl get "${kind}" -o json 2>/dev/null | \
+    done < <(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get "${kind}" -o json 2>/dev/null | \
       jq -r '.items[] | .metadata.name as $wh | .webhooks[]? | select(.clientConfig.service != null) | [$wh, .clientConfig.service.namespace, .clientConfig.service.name] | @tsv' 2>/dev/null || true)
   done
 else
@@ -235,9 +241,9 @@ fi
 
 # Check for stale API services (e.g., custom.metrics.k8s.io from prometheus-adapter)
 if command -v jq &>/dev/null; then
-  for api_svc in $(kubectl get apiservices -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | .type == "Available" and .status == "False") | .metadata.name' 2>/dev/null || true); do
+  for api_svc in $(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get apiservices -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | .type == "Available" and .status == "False") | .metadata.name' 2>/dev/null || true); do
     echo "WARNING: API service '${api_svc}' is unavailable. This can block namespace deletion."
-    echo "  Delete with: kubectl delete apiservice ${api_svc}"
+    echo "  Delete with: ${KUBECTL_HINT} delete apiservice ${api_svc}"
     # API service issues are warnings, not hard failures — they don't block deployment directly
   done
 else
@@ -257,10 +263,10 @@ ORPHANED_CRD_GROUPS=""
 {{- if eq .Name "kubeflow-trainer" }} ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} trainer.kubeflow.org jobset.x-k8s.io"{{ end }}
 {{- end }}
 for group in ${ORPHANED_CRD_GROUPS}; do
-  orphaned=$(kubectl get crd -o name 2>/dev/null | grep "\.${group}$" || true)
+  orphaned=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get crd -o name 2>/dev/null | grep "\.${group}$" || true)
   if [[ -n "${orphaned}" ]]; then
     echo "WARNING: orphaned CRDs from previous deployment: ${orphaned}"
-    echo "  These may cause conflicts. Delete with: kubectl delete ${orphaned}"
+    echo "  These may cause conflicts. Delete with: ${KUBECTL_HINT} delete ${orphaned}"
   fi
 done
 
@@ -293,7 +299,7 @@ function remove_stale_nodewright_taints() {
   # an existing Deployment with nothing available prints no count, which must
   # not be mistaken for no Deployment at all.
   local deploys legacy_deploys
-  if ! deploys=$(kubectl get deploy -n "${ns}" -l app.kubernetes.io/name=nodewright,control-plane=controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
+  if ! deploys=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get deploy -n "${ns}" -l app.kubernetes.io/name=nodewright,control-plane=controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
     _warn_line "could not query the nodewright-operator Deployment in ${ns}; skipping stale-taint cleanup: ${deploys}"
     return 0
   fi
@@ -306,7 +312,7 @@ function remove_stale_nodewright_taints() {
   # catches what the label misses. A field selector is used rather than a named
   # get so an absent Deployment is an empty list rather than an error, keeping
   # the two queries the same shape.
-  if ! legacy_deploys=$(kubectl get deploy -n "${ns}" --field-selector metadata.name=skyhook-operator-controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
+  if ! legacy_deploys=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get deploy -n "${ns}" --field-selector metadata.name=skyhook-operator-controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
     _warn_line "could not query the nodewright-operator Deployment by name in ${ns}; skipping stale-taint cleanup: ${legacy_deploys}"
     return 0
   fi
@@ -347,7 +353,7 @@ function remove_stale_nodewright_taints() {
   fi
 
   local node_taints
-  if ! node_taints=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>&1); then
+  if ! node_taints=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>&1); then
     _warn_line "could not list node taints; skipping stale-taint cleanup: ${node_taints}"
     return 0
   fi
@@ -363,7 +369,7 @@ function remove_stale_nodewright_taints() {
     echo "  Removing stale taints to unblock scheduling..."
     while IFS= read -r node; do
       if [[ -n "${node}" ]]; then
-        kubectl taint node "${node}" "${key}-" 2>/dev/null || true
+        kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} taint node "${node}" "${key}-" 2>/dev/null || true
       fi
     done <<<"${stale}"
   done
@@ -512,14 +518,14 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     #      Waiting on every gpu.present=true node would block until the
     #      15-min timeout for any GPU node the operator deliberately
     #      excludes.
-    DRIVER_DS_NS=$(kubectl get daemonset -A -o jsonpath='{.items[?(@.metadata.name=="nvidia-driver-daemonset")].metadata.namespace}' 2>/dev/null | awk '{print $1}')
+    DRIVER_DS_NS=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get daemonset -A -o jsonpath='{.items[?(@.metadata.name=="nvidia-driver-daemonset")].metadata.namespace}' 2>/dev/null | awk '{print $1}')
     if [[ -z "${DRIVER_DS_NS}" ]]; then
       echo "  gpu-operator nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"
     else
-      MANAGED_NODES=$(kubectl get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>/dev/null | wc -l | tr -d ' ')
+      MANAGED_NODES=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>/dev/null | wc -l | tr -d ' ')
       if [[ "${MANAGED_NODES}" -gt 0 ]]; then
         echo "  Waiting for gpu-operator driver migration on ${MANAGED_NODES} managed GPU node(s) to reach upgrade-done (ns=${DRIVER_DS_NS})..."
-        if ! kubectl wait --for=jsonpath='{.metadata.labels.nvidia\.com/gpu-driver-upgrade-state}=upgrade-done' \
+        if ! kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} wait --for=jsonpath='{.metadata.labels.nvidia\.com/gpu-driver-upgrade-state}=upgrade-done' \
              nodes -l nvidia.com/gpu.deploy.driver=true --timeout=15m; then
           echo "  WARNING: not all managed GPU nodes reached upgrade-done within 15m; proceeding with restart anyway"
         fi
@@ -532,12 +538,12 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     # registration sockets. Restarting the plugin DS forces fresh socket creation.
     # This does NOT fix cases where kubelet itself has lost registration state —
     # a node reboot is required for that. See docs/user/cli-reference.md.
-    DRA_DS=$(kubectl get daemonset -n {{ .Namespace }} -o name 2>/dev/null | awk '/kubelet-plugin/{print; exit}' || true)
+    DRA_DS=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get daemonset -n {{ .Namespace }} -o name 2>/dev/null | awk '/kubelet-plugin/{print; exit}' || true)
     if [[ -n "${DRA_DS}" ]]; then
       echo "  Restarting DRA kubelet plugin (${DRA_DS##*/}) to ensure registration..."
-      if ! kubectl rollout restart "${DRA_DS}" -n {{ .Namespace }}; then
+      if ! kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} rollout restart "${DRA_DS}" -n {{ .Namespace }}; then
         echo "  WARNING: failed to restart DRA kubelet plugin daemonset"
-      elif ! kubectl rollout status "${DRA_DS}" -n {{ .Namespace }} --timeout=120s; then
+      elif ! kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} rollout status "${DRA_DS}" -n {{ .Namespace }} --timeout=120s; then
         # Always wait for the DRA plugin rollout regardless of --no-wait.
         # The restart+wait is a correctness gate (kubelet must re-register the
         # DRA plugin socket), not a readiness convenience like --wait.
