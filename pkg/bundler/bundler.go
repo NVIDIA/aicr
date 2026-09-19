@@ -3347,6 +3347,13 @@ const (
 	draNodeLabelerComponentName = "dra-node-labeler"
 	draNodeLabelerKeyPath       = "labelKey"
 	draNodeLabelerValuePath     = "labelValue"
+	// draNodeLabelerEnabledPath is the manifest's render gate. The manifest is
+	// default-off (values.yaml enabled: false) so the deployment validator,
+	// which resolves effective values without the bundle-time eviction flag,
+	// sees an empty render and suppresses the health check on the default path
+	// (issue #2846). The bundler flips it true here in the same opt-in path
+	// that keeps the component in the bundle, so bundle and gate never drift.
+	draNodeLabelerEnabledPath = "enabled"
 )
 
 var (
@@ -3577,6 +3584,10 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		}
 		values[draNodeLabelerKeyPath] = label.Key
 		values[draNodeLabelerValuePath] = label.Value
+		// Flip the manifest's default-off render gate: the labeler is kept in
+		// the bundle only on this opt-in path, so this is where its objects
+		// must start rendering (issue #2846).
+		values[draNodeLabelerEnabledPath] = true
 		b.warnDRAEvictionLabelDerived(draNames, label)
 		return nil
 	}
