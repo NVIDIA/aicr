@@ -521,10 +521,11 @@ spec:
 		fakeClient := newFakeDynamicClient()
 		ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient, Namespace: ns}
 
-		// A non-empty runtimeImage alongside a non-empty customRuntime should
-		// never happen in production (validateNcclAllReduceBw gates resolution
-		// on customRuntime == ""), but applyNCCLResources itself must not apply
-		// it if called this way — the recipe-supplied runtime owns its image.
+		// A non-empty runtimeImage alongside a non-empty customRuntime is
+		// exactly the delivered path (customRuntime carries plan.carrier),
+		// gated instead on plan.recipeSupplied() — this test exercises the
+		// recipe-supplied case, which must never apply the override since
+		// that runtime owns its own image.
 		if err := applyNCCLResources(ctx, fakeClient, config,
 			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
 			runtimeWithSelector, "example.com/should-be-ignored:v1", &benchmarkRuntimePlan{source: runtimeSourceRecipeSupplied}); err != nil {

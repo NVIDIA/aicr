@@ -2833,8 +2833,7 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), terminationWait)
 	defer waitCancel()
 	if err := waitForNamespaceGone(waitCtx, nsClient, namespace); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
-			fmt.Sprintf("NCCL benchmark namespace %q did not finish terminating within the wait bound", namespace), err)
+		return err
 	}
 
 	slog.Info("Deleted NCCL benchmark namespace", "namespace", namespace)
