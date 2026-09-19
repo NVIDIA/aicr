@@ -18,16 +18,18 @@
 // cluster`, whose other half is the at-risk scan, an advisory pass over live
 // resources that reports what an upgrade might disturb.
 //
-// Read is the entry point and the package's only exported function. It builds
-// both clients from one resolved kubeconfig — a second authentication path
-// could land on a different context, and an inventory assembled from two
-// clusters is a confident wrong answer — then reads two sources, each
-// answering for deployers the other cannot see, and both projected onto one
-// shape so the results merge. Helm's release records: one paged List per
-// storage driver, reduced to the newest revision of each release, decoded from
-// the stored payload. And Argo CD's Applications: one paged List of the CRD.
-// The comparison that consumes the table, and the at-risk scan, land with the
-// rest of the command.
+// Read is the entry point for the version table. It builds both clients from
+// one resolved kubeconfig — a second authentication path could land on a
+// different context, and an inventory assembled from two clusters is a
+// confident wrong answer — then reads two sources, each answering for
+// deployers the other cannot see, and both projected onto one shape so the
+// results merge. Helm's release records: one paged List per storage driver,
+// reduced to the newest revision of each release, decoded from the stored
+// payload. And Argo CD's Applications: one paged List of the CRD. The
+// comparison that consumes the table lands with the rest of the command.
+//
+// ScanAtRisk is the other half, and it answers a different question about the
+// same cluster. See "The at-risk scan" below.
 //
 // # What it answers for
 //
@@ -174,6 +176,28 @@
 // are how these records are meant to be read, and an object name is not a
 // format declaration.
 //
+// # The at-risk scan
+//
+// ScanAtRisk is advisory and asks what an upgrade might destroy rather than
+// what is installed. Given the group/kind pairs the crossed transition records
+// name, it resolves each through a RESTMapper and lists it cluster-wide,
+// reporting every object carrying neither Helm ownership (the managed-by label
+// together with a release-name annotation, because the label alone is written
+// by anything) nor Argo CD's tracking id.
+//
+// The check is positive, so an unrecognized object is at risk by default. The
+// failure it guards is an operator's own custom resources being
+// cascade-deleted when a CRD is removed, and over-warning about an object some
+// fourth tool owns costs a line of output while under-warning costs the
+// object. A kind the cluster does not serve is skipped rather than raised: the
+// CRD a record names may simply not be installed, which is the common case for
+// a component the operator does not run. A discovery failure is not skipped,
+// because it has not established that.
+//
+// Nothing it returns reaches the exit code, per ADR-021 Decision 3. AICR
+// blocking an upgrade over resources it does not own is a claim it has not
+// earned.
+//
 // # What it cannot tell you
 //
 // Helm records what it last applied, and an Argo Application records what it
@@ -181,5 +205,6 @@
 // hand-edited Deployment leaves either unchanged, and an Application that has
 // never synced looks no different from one that has. This answers the version
 // question authoritatively and nothing else. Live resource state is the
-// at-risk scan's job.
+// at-risk scan's job, and that scan in turn reports only what carries an
+// ownership marker, not whether an object is in use.
 package inventory
