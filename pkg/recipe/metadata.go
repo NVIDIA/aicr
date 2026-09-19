@@ -320,15 +320,18 @@ func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 		if !ok || ns == refs[i].Namespace {
 			continue
 		}
-		previous := refs[i].Namespace
-		refs[i].Namespace = ns
-		// The health check is static YAML loaded verbatim from the registry's
+		// Rebind before assigning, so a ref changes both fields or neither.
+		// Assigning first would leave the new namespace beside assertions
+		// still naming the old one on the error path, and the guard above
+		// would then skip the ref on a retry, stranding the stale YAML.
+		// The health check is static, loaded verbatim from the registry's
 		// assertFile, so its namespaces name wherever the registry currently
 		// puts the component. Leaving them behind would fail validation
 		// against a deployment this function just correctly preserved.
-		if err := rebindHealthCheckNamespace(&refs[i], previous, ns); err != nil {
+		if err := rebindHealthCheckNamespace(&refs[i], refs[i].Namespace, ns); err != nil {
 			return err
 		}
+		refs[i].Namespace = ns
 	}
 	return nil
 }

@@ -2284,6 +2284,30 @@ spec:
 	}
 }
 
+// TestApplyInheritedIdentityLeavesRefIntactOnRebindFailure pins the all-or-
+// nothing contract: a ref changes both its namespace and its health check, or
+// neither. Assigning the namespace first would leave the new value beside
+// assertions still naming the old one, and the "already inherited" guard would
+// then skip the ref on a retry, stranding the stale YAML permanently.
+func TestApplyInheritedIdentityLeavesRefIntactOnRebindFailure(t *testing.T) {
+	refs := []ComponentRef{{
+		Name:      "nodewright-operator",
+		Namespace: "nodewright",
+		// Not parseable as YAML, so rebinding cannot succeed.
+		HealthCheckAsserts: "spec:\n  steps:\n   - bad\n  indent: [oops\n",
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	err := ApplyInheritedIdentity(refs, prior)
+	if err == nil {
+		t.Fatal("ApplyInheritedIdentity() = nil error, want a parse failure")
+	}
+	if got := refs[0].Namespace; got != "nodewright" {
+		t.Errorf("namespace = %q, want it left at nodewright: a failed rebind must not "+
+			"half-apply the inheritance", got)
+	}
+}
+
 // TestComponentRefMergeWithPath verifies that the Path field is correctly merged
 // when merging ComponentRefs (overlay into base).
 func TestComponentRefMergeWithPath(t *testing.T) {
