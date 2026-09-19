@@ -28,6 +28,37 @@ import (
 // it.
 const reportWrapWidth = 78
 
+// sourceLine is the label-and-value shape of the cluster-source block, padded
+// wide enough for its longest label ("kubeconfig").
+const sourceLine = "  %-10s  %s\n"
+
+// zeroMatchAdvice is what the banner says when the read matched nothing. It
+// names the causes rather than only the finding: "nothing was found" on its
+// own has no next action, and the action differs entirely by cause.
+const zeroMatchAdvice = "Nothing was compared, and every row below therefore reads \"added\". A cluster with " +
+	"none of these components installed reads this way, and so do the two likelier causes: this is not the " +
+	"cluster you meant, or these components were installed by a deployer other than the one this check was " +
+	"given, whose releases it does not look for."
+
+// atRiskIntro states what the section is and what it is not, above whatever
+// the scan found. It is printed on every outcome including "not scanned",
+// because that outcome is the one a reader is most likely to mistake for an
+// all-clear.
+const atRiskIntro = "Objects of the kinds the crossed transition records name that carry neither Helm nor " +
+	"Argo CD ownership. AICR does not manage them and cannot restore them; removing a CRD takes its objects " +
+	"with it. Advisory only: this never changes the exit code."
+
+// atRiskNothingDeclared is the vacuous scan. Distinct from a clean one, which
+// examined objects and found them owned.
+const atRiskNothingDeclared = "No crossed transition record names a resource kind, so nothing was examined."
+
+// atRiskClean is a scan that read objects and found every one of them owned.
+const atRiskClean = "Nothing at risk: every object examined carries a Helm or Argo CD ownership marker."
+
+// atRiskKindLine is the label-and-value shape of the per-kind accounting,
+// padded to the width of its longest label ("not installed").
+const atRiskKindLine = "  %-13s  %s\n"
+
 // errWriter retains the first write error so a renderer checks once rather than
 // after every line. Writes after an error are no-ops.
 type errWriter struct {
@@ -76,8 +107,16 @@ func WriteTable(w io.Writer, r *Report) error {
 	}
 	ew.println("")
 
+	if r.Source != nil {
+		writeSource(ew, r.Source)
+	}
+
 	if len(r.Components) == 0 {
 		ew.println("NO COMPONENT CHANGES")
+		ew.println("")
+		if err := writeAtRisk(w, ew, &r.AtRisk); err != nil {
+			return err
+		}
 		return wrapTableErr(ew.err)
 	}
 
@@ -92,6 +131,10 @@ func WriteTable(w io.Writer, r *Report) error {
 	}
 
 	ew.println("")
+	if err := writeAtRisk(w, ew, &r.AtRisk); err != nil {
+		return err
+	}
+
 	needs := "need"
 	if r.Summary.Failing == 1 {
 		needs = "needs"
@@ -116,6 +159,150 @@ func writeRows(w io.Writer, rows []ReportComponent) error {
 		return wrapTableErr(ew.err)
 	}
 	return wrapTableErr(tw.Flush())
+}
+
+// writeSource states which cluster the `from` table was read from, above the
+// rows rather than below them.
+//
+// A cluster read that recognizes nothing is reported rather than failed, and
+// every row under a zero match then reads "added". This block is the only
+// thing that separates an empty cluster from a kubeconfig pointed at the wrong
+// context, so it has to be read before the rows and not after: a reader who
+// reaches a footnote under a long table has already drawn a conclusion from
+// it.
+//
+// The per-reader lines come before the banner, because they are the evidence
+// the banner's diagnosis rests on: records were read and none of them matched.
+func writeSource(ew *errWriter, s *ReportSource) {
+	ew.println("READ FROM CLUSTER")
+	// Rendered even when empty. Neither is always knowable — an in-cluster run
+	// has no kubeconfig file — and a dropped line reads as nothing to say
+	// rather than as not known.
+	ew.printf(sourceLine, "kubeconfig", cell(s.Kubeconfig))
+	ew.printf(sourceLine, "context", cell(s.Context))
+	ew.printf(sourceLine, "matched", plural(s.Matched, "component", "components"))
+	ew.printf(sourceLine, "helm", strings.Join([]string{
+		plural(s.Helm.Records, "storage record", "storage records"),
+		fmt.Sprintf("%d unattributed", s.Helm.Unattributed),
+		fmt.Sprintf("%d unreadable", s.Helm.Unreadable),
+		fmt.Sprintf("%d uninstalled", s.Helm.Uninstalled),
+		fmt.Sprintf("%d stamped but unmatched", s.Helm.StampedUnmatched),
+	}, ", "))
+	// The Argo line ends by saying the stamp check does not apply rather than
+	// reporting it as zero: see ReportSourceArgo.
+	ew.printf(sourceLine, "argo", strings.Join([]string{
+		plural(s.Argo.Applications, "application", "applications"),
+		fmt.Sprintf("%d unattributed", s.Argo.Unattributed),
+		fmt.Sprintf("%d unreadable", s.Argo.Unreadable),
+		"no stamp to check",
+	}, ", "))
+
+	if s.Matched == 0 {
+		ew.println("")
+		ew.println("  NOTHING INSTALLED WAS RECOGNIZED")
+		writeParagraph(ew, "  ", zeroMatchAdvice)
+	}
+	ew.println("")
+}
+
+// writeAtRisk renders the advisory scan, below the rows it is scoped to.
+//
+// Unlike every other section it is rendered on every run, including the ones
+// with nothing to say. An absent warning reads as an all-clear, and the
+// objects this covers are exactly the ones AICR cannot put back if it is
+// wrong, so "not scanned" has to be printed rather than skipped.
+func writeAtRisk(w io.Writer, ew *errWriter, a *AtRiskReport) error {
+	ew.println("AT RISK (advisory)")
+	writeParagraph(ew, "  ", atRiskIntro)
+	ew.println("")
+
+	if !a.Scanned {
+		writeParagraph(ew, "  ", "not scanned: "+a.Reason)
+		ew.println("")
+
+		return nil
+	}
+	if len(a.Kinds) == 0 {
+		writeParagraph(ew, "  ", atRiskNothingDeclared)
+		ew.println("")
+
+		return nil
+	}
+
+	for _, kind := range a.Kinds {
+		label, detail := "examined", plural(kind.Examined, "object", "objects")
+		if !kind.Present {
+			// Said rather than shown as a zero: "0 objects" on an uninstalled
+			// CRD reads as a kind that was checked and found empty, which is
+			// the one conclusion the scan did not reach.
+			label, detail = "not installed", "the cluster does not serve this kind"
+		}
+		ew.printf(atRiskKindLine, label, fmt.Sprintf("%s%s: %s",
+			safe(atRiskKindName(kind.Group, kind.Kind)), atRiskOwners(kind.Components), detail))
+	}
+	ew.println("")
+
+	if len(a.Findings) == 0 {
+		writeParagraph(ew, "  ", atRiskClean)
+		ew.println("")
+
+		return nil
+	}
+
+	if err := writeAtRiskRows(w, a.Findings); err != nil {
+		return err
+	}
+	ew.println("")
+	writeParagraph(ew, "  ", fmt.Sprintf(
+		"%s at risk. Confirm each is expected to survive this upgrade, or back it up, before applying.",
+		plural(len(a.Findings), "object", "objects")))
+	ew.println("")
+
+	return nil
+}
+
+// writeAtRiskRows is the findings table. It is written through its own
+// tabwriter rather than the rows', whose column widths are set by component
+// names and versions that share no scale with a namespaced object's identity.
+func writeAtRiskRows(w io.Writer, findings []AtRiskFinding) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	ew := &errWriter{w: tw}
+	ew.println("  COMPONENT\tKIND\tNAMESPACE\tNAME")
+	ew.println("  ---------\t----\t---------\t----")
+	for _, f := range findings {
+		// Every cell is cluster- or artifact-derived, and escaped for the same
+		// reason: a crafted object name is as able to forge a row as a crafted
+		// component name.
+		ew.printf("  %s\t%s\t%s\t%s\n", cell(strings.Join(f.Components, ", ")),
+			safe(atRiskKindName(f.Group, f.Kind)), cell(f.Namespace), safe(f.Name))
+	}
+	if ew.err != nil {
+		return wrapTableErr(ew.err)
+	}
+
+	return wrapTableErr(tw.Flush())
+}
+
+// atRiskOwners is the parenthetical naming whose upgrade reaches a kind, or
+// empty when the matcher attributed it to nobody. A kind line is the only
+// place an uninstalled kind is named at all, since it produces no finding row,
+// so the attribution has to appear here too and not only in the table.
+func atRiskOwners(components []string) string {
+	if len(components) == 0 {
+		return ""
+	}
+
+	return " (" + safe(strings.Join(components, ", ")) + ")"
+}
+
+// atRiskKindName is Kind.group, the form an operator writes into kubectl. The
+// core group has no suffix to write.
+func atRiskKindName(group, kind string) string {
+	if group == "" {
+		return kind
+	}
+
+	return kind + "." + group
 }
 
 // writeDetail renders the block below the table for a row the operator has to

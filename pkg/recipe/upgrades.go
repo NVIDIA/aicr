@@ -18,6 +18,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/NVIDIA/aicr/pkg/inventory"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
@@ -42,6 +43,36 @@ func UpgradeComponents(registry *ComponentRegistry) []upgrade.Component {
 			Name:          c.Name,
 			File:          c.Upgrades.File,
 			PinnedVersion: pinnedVersionFor(c),
+		})
+	}
+	sort.Slice(comps, func(i, j int) bool { return comps[i].Name < comps[j].Name })
+	return comps
+}
+
+// InventoryComponents projects every registry entry onto the facts
+// pkg/inventory needs to attribute a cluster record to a component and read a
+// version off it, sorted by name so a caller's output does not depend on
+// registry declaration order.
+//
+// Unlike UpgradeComponents next door, nothing is filtered. A component with no
+// transition record still has a release in the cluster, and the mapping layer
+// counts the records that match no component as its signal that the mapping
+// itself is broken — omitting the recordless entries here would turn that
+// signal into noise.
+func InventoryComponents(registry *ComponentRegistry) []inventory.Component {
+	if registry == nil {
+		return nil
+	}
+	comps := make([]inventory.Component, 0, len(registry.Components))
+	for i := range registry.Components {
+		c := &registry.Components[i]
+		comps = append(comps, inventory.Component{
+			Name:      c.Name,
+			Namespace: c.Helm.DefaultNamespace,
+			// Not pinnedVersionFor: a Kustomize defaultTag is the git ref of
+			// content AICR wraps in a chart of its own, so the wrapper's chart
+			// version is never the payload's and the fallback must not fire.
+			HasUpstreamChart: c.Helm.DefaultVersion != "",
 		})
 	}
 	sort.Slice(comps, func(i, j int) bool { return comps[i].Name < comps[j].Name })

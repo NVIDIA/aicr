@@ -1426,6 +1426,75 @@ const HelmTemplateTimeout = 90 * time.Second
 // preventing a malicious or buggy chart from exhausting memory.
 const HelmTemplateOutputLimit int64 = 100 * 1024 * 1024 // 100 MiB
 
+// HelmReleaseDecodeLimit caps the decompressed size of a single Helm release
+// record. The encoded record embeds the release's full rendered manifest and
+// every hook, none of which this project reads, so the cap bounds work the
+// decoder is obliged to do rather than data it wants. Exceeding it is an
+// error: a release whose metadata cannot be read must not go silently missing
+// from an upgrade comparison, where it would render as a new component.
+//
+// 32 MiB is derived, not a round number. A record has to fit one Kubernetes
+// Secret (~1 MiB serialized, so ~768 KiB of gzipped payload once base64
+// expansion is taken out), and measured gzip ratios on real content in this
+// repo run ~7x for dense CRD YAML
+// (recipes/components/agentgateway-crds/manifests/gateway-api-crds.yaml) and
+// ~32x for the most repetitive YAML in the tree. A maximal Secret holding
+// worst-case-compressible content therefore inflates to roughly 24 MiB, which
+// this clears without letting an arbitrary ratio through.
+const HelmReleaseDecodeLimit int64 = 32 * 1024 * 1024 // 32 MiB
+
+// HelmReleaseListPageSize caps how many Helm storage records one List pulls
+// while reading the installed inventory. The owner=helm selector matches every
+// retained revision, not only the current one, and each record carries the
+// release's full rendered manifest as base64(gzip(...)) up to the ~1 MiB
+// ceiling a Secret can hold: 300 releases at Helm's default 10 retained
+// revisions would materialize gigabytes in a single response. Paging bounds
+// the peak to one page, because the reduction to the newest revision per
+// release runs per page and keeps only the winners.
+//
+// 100 holds a worst-case page (every record at the ceiling) near
+// HelmTemplateOutputLimit, the largest single buffer this project already
+// tolerates, while a realistic page of tens-of-KiB records is a few MiB and
+// the round trips stay few. Paging bounds the page, not the peak: the winning
+// revision of every release is held until the walk finishes, so the high-water
+// mark is one page plus one record per release across both drivers.
+const HelmReleaseListPageSize int64 = 100
+
+// HelmInventoryTimeout bounds the whole read of the installed inventory: a
+// paged cluster-wide List per storage driver, plus decoding the newest
+// revision of each release. Longer than CollectorTopologyTimeout, whose
+// paginated node walk it otherwise resembles, because it makes that walk twice
+// over objects that carry rendered manifests rather than node metadata.
+//
+// It is also the backstop on a server that never stops paging: the per-page
+// continue-token check refuses a token it has already been handed, but only a
+// deadline bounds one that cycles.
+const HelmInventoryTimeout = 2 * time.Minute
+
+// ArgoApplicationListPageSize caps how many Argo CD Applications one List
+// pulls while reading the installed inventory. One Application exists per
+// deployed component, not one per revision, so the object count is small; the
+// objects are not. An Application's status carries an entry for every resource
+// it manages, which for a chart the size of gpu-operator or
+// kube-prometheus-stack is hundreds of entries, so a management cluster's
+// Applications add up to tens of megabytes in a single unpaged response.
+//
+// Larger than HelmReleaseListPageSize because no Application approaches the
+// ~1 MiB ceiling that sizes the Helm page, and the reduction there that keeps
+// only the newest revision has no counterpart here: every Application is
+// retained, so paging bounds the response rather than the peak.
+const ArgoApplicationListPageSize int64 = 200
+
+// ArgoInventoryTimeout bounds the whole read of the Applications Argo CD
+// deploys: one paged cluster-wide List, plus the projection of each item.
+// Shorter than HelmInventoryTimeout, which makes two such walks over objects
+// carrying rendered manifests and decompresses one record per release.
+//
+// It is also the backstop on a server that never stops paging, for the reason
+// HelmInventoryTimeout is: the per-page continue-token check refuses a token
+// it has already been handed, but only a deadline bounds one that cycles.
+const ArgoInventoryTimeout = 60 * time.Second
+
 // Helm chart-pull timeouts for the bundle-time --vendor-charts path.
 // Sized for one chart pull from a remote Helm or OCI registry, including
 // repo index fetch (HTTPS) or registry resolution (OCI), tarball download,
@@ -1574,3 +1643,24 @@ const (
 	// MaxOCIRecipeFiles caps all materialized filesystem nodes.
 	MaxOCIRecipeFiles = 4096
 )
+
+// AtRiskListPageSize caps how many objects one List pulls while scanning for
+// resources an upgrade could disturb. Sized between the two inventory page
+// sizes: the objects are ordinary custom resources rather than Helm storage
+// records carrying rendered manifests, but a tenant's CR can hold an arbitrary
+// spec, so the page stays well under the Argo ceiling.
+//
+// Nothing is retained across pages beyond the objects found at risk, which on
+// a healthy cluster is none, so the page bounds the peak as well as the
+// response.
+const AtRiskListPageSize int64 = 200
+
+// AtRiskScanTimeout bounds the whole advisory at-risk scan: one discovery
+// mapping and one paged cluster-wide List per affected kind. Shorter than
+// ArgoInventoryTimeout per kind is not expressible here, so the budget covers
+// the handful of kinds a single upgrade's records name.
+//
+// The scan is advisory and never changes the exit code, so it is bounded
+// tightly on purpose: an operator waiting on a warning has already been given
+// the verdict.
+const AtRiskScanTimeout = 60 * time.Second

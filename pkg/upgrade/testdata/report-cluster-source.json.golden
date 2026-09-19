@@ -1,0 +1,62 @@
+{
+  "from": "cluster",
+  "to": "./bundles-v0.17.0",
+  "deployer": "argocd",
+  "source": {
+    "kubeconfig": "/home/op/.kube/config",
+    "context": "prod-east",
+    "matched": 2,
+    "helm": {
+      "records": 37,
+      "unattributed": 2,
+      "unreadable": 1,
+      "uninstalled": 3,
+      "stampedUnmatched": 0
+    },
+    "argo": {
+      "applications": 5,
+      "unattributed": 6,
+      "unreadable": 7
+    }
+  },
+  "components": [
+    {
+      "component": "alpha-operator",
+      "change": "version",
+      "from": "1.2.0",
+      "to": "1.2.3",
+      "verdict": "safe",
+      "notes": "3 patches, verified, safe across 1 minor",
+      "reason": "recorded",
+      "explanation": "recorded safe: the record covering 1.2.1 describes the move from 1.2.0 to 1.2.3, verified by \"uat: synthetic lane\"",
+      "jump": "3 patches",
+      "covers": "1 minor",
+      "breaking": false,
+      "downgrade": false,
+      "summary": "Patch releases only. No schema or API changes.",
+      "failsRun": false
+    },
+    {
+      "component": "lambda-operator",
+      "change": "version",
+      "from": "1.1.0",
+      "to": "1.2.0",
+      "verdict": "unknown",
+      "notes": "1 minor, record exists, no boundary here",
+      "reason": "no-boundary-crossed",
+      "explanation": "a record exists for this component but says nothing about the range between 1.1.0 and 1.2.0, so no author flagged this move. This is not a pass: read the component's own upstream release notes and decide whether this range needs a boundary, then widen the record if it does",
+      "jump": "1 minor",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": true
+    }
+  ],
+  "summary": {
+    "components": 2,
+    "failing": 1
+  },
+  "atRisk": {
+    "scanned": false,
+    "reason": "no cluster access requested"
+  }
+}

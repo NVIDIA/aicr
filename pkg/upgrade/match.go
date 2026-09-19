@@ -115,6 +115,14 @@ type ComponentResult struct {
 	// one record's steps for a jump that record does not describe.
 	Transition *Transition
 
+	// Crossed is every record this jump passes a boundary of, ordered by that
+	// boundary. Unlike Transition it is set whatever the verdict turned out to
+	// be, including where no single record describes the whole jump, so it is
+	// what the at-risk scan reads: an intermediate record names resources the
+	// jump disturbs whether or not its guidance was written for this starting
+	// point. Empty on every result but a version transition.
+	Crossed []*Transition
+
 	// Replaces is the arriving component's declaration, set only on a
 	// ChangeReplaced row.
 	Replaces *Replaces
@@ -318,6 +326,9 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	r.Breaking = breaking(src, tgt)
 
 	crossed := crossings(u, src, tgt)
+	// Recorded before the verdict is decided, because every branch below
+	// returns r and only some of them keep a record around.
+	r.Crossed = transitionsOf(crossed)
 	if len(crossed) == 0 {
 		return unmatched(u, r, tgt)
 	}
@@ -578,6 +589,19 @@ func lowestBlocked(crossed []crossing) (crossing, bool) {
 		}
 	}
 	return crossing{}, false
+}
+
+// transitionsOf is the crossings' records, in the order crossings put them.
+func transitionsOf(crossed []crossing) []*Transition {
+	if len(crossed) == 0 {
+		return nil
+	}
+	out := make([]*Transition, len(crossed))
+	for i, c := range crossed {
+		out[i] = c.tr
+	}
+
+	return out
 }
 
 func floorNames(crossed []crossing) []string {
