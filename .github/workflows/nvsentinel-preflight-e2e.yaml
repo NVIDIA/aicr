@@ -26,7 +26,9 @@
 # The path filter is deliberately narrow. This lane costs a cluster spin-up and
 # a full image pull, and pkg/recipe/** or pkg/bundler/** would drag it onto
 # most core PRs; the allowlist machinery those packages own is already covered
-# by unit tests that run everywhere.
+# by unit tests that run everywhere. The localformat template directory is the
+# one carve-out: this lane installs through the scripts those templates render,
+# so a change there reaches a live cluster in a way no unit test observes.
 
 name: NVSentinel Preflight E2E
 
@@ -47,6 +49,7 @@ on:
       - 'recipes/components/kai-scheduler/**'
       - 'recipes/components/cert-manager/**'
       - 'tests/e2e/nvsentinel-preflight/**'
+      - 'pkg/bundler/deployer/localformat/templates/**'
       # run.sh sources tools/common and is invoked through a make target.
       - 'tools/common'
       - 'Makefile'
