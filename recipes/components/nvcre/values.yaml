@@ -17,10 +17,9 @@
 # Upstream: https://github.com/NVIDIA/cluster-readiness-engine
 # Chart:    oci://ghcr.io/nvidia/cluster-readiness-engine
 #
-# Chart and controller image are public on GHCR. The controller image
-# pulls anonymously. Helm OCI chart pulls may require GHCR credentials
-# depending on registry policy; tag-based `helm install` of v0.2.0 has
-# worked without a pull secret in UAT.
+# Chart and controller image are public on GHCR and both pull anonymously:
+# `helm pull oci://ghcr.io/nvidia/cluster-readiness-engine --version v0.2.0`
+# succeeds with an empty registry config, so no pull secret is required.
 #
 # This file applies only when a componentRef names it explicitly as
 # `valuesFile: components/nvcre/values.yaml`. Component values are not
@@ -36,6 +35,17 @@
 # aicr-stack-*. The health check asserts the Deployment by name, so this has to
 # stay in sync with checks/nvcre/health-check.yaml.
 fullnameOverride: nvcre
+
+manager:
+  image:
+    # Digest of the v0.2.0 multi-arch index, so the qualified bytes are the
+    # installed bytes even if the tag is repointed. The chart also exposes a
+    # `manager.image.digest` field, but that branch renders repository@digest
+    # and drops the version; the tag@digest form used here matches how every
+    # other pinned image in recipes/components/ is written and keeps v0.2.0
+    # legible in the BOM. Re-resolve on a defaultVersion bump:
+    #   crane digest ghcr.io/nvidia/cluster-readiness-engine/manager:<version>
+    tag: v0.2.0@sha256:b7f7a71a75353f6b87eccd21cf6ae75963b82939956d5c037f0a1da944b1a4ee
 
 # Chart default is true and requires prometheus-operator CRDs. NVCRE is not
 # on any shipped overlay, so keep the monitor off until a recipe that already

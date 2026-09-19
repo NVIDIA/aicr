@@ -311,7 +311,7 @@ _No images extracted._
 
 ### nvcre
 
-- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.2.0`
+- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.2.0@sha256:b7f7a71a75353f6b87eccd21cf6ae75963b82939956d5c037f0a1da944b1a4ee`
 
 ### nvidia-dra-driver-gpu
 
