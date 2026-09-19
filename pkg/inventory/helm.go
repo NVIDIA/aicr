@@ -438,9 +438,8 @@ func storageContext(object, namespace string) map[string]any {
 // wall clock goes, which makes this the timeout an operator meets most often.
 func listError(err error, resource string) error {
 	if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
-		return errors.WrapWithContext(errors.ErrCodeTimeout,
-			fmt.Sprintf("canceled while listing %s for Helm release records", resource),
-			err, map[string]any{ctxKeyResource: resource})
+		return abortError(err, fmt.Sprintf("%s for %s", resource, helmSubject),
+			map[string]any{ctxKeyResource: resource})
 	}
 
 	// A continue token outlives the apiserver's watch-cache window on a large
