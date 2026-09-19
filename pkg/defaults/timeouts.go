@@ -1643,3 +1643,24 @@ const (
 	// MaxOCIRecipeFiles caps all materialized filesystem nodes.
 	MaxOCIRecipeFiles = 4096
 )
+
+// AtRiskListPageSize caps how many objects one List pulls while scanning for
+// resources an upgrade could disturb. Sized between the two inventory page
+// sizes: the objects are ordinary custom resources rather than Helm storage
+// records carrying rendered manifests, but a tenant's CR can hold an arbitrary
+// spec, so the page stays well under the Argo ceiling.
+//
+// Nothing is retained across pages beyond the objects found at risk, which on
+// a healthy cluster is none, so the page bounds the peak as well as the
+// response.
+const AtRiskListPageSize int64 = 200
+
+// AtRiskScanTimeout bounds the whole advisory at-risk scan: one discovery
+// mapping and one paged cluster-wide List per affected kind. Shorter than
+// ArgoInventoryTimeout per kind is not expressible here, so the budget covers
+// the handful of kinds a single upgrade's records name.
+//
+// The scan is advisory and never changes the exit code, so it is bounded
+// tightly on purpose: an operator waiting on a warning has already been given
+// the verdict.
+const AtRiskScanTimeout = 60 * time.Second

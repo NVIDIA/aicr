@@ -17,8 +17,13 @@ package client
 import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 )
 
 // BoundedConfig returns a copy of restConfig with an explicit request timeout
@@ -53,4 +58,37 @@ func NewDynamicClientForConfig(restConfig *rest.Config) (dynamic.Interface, erro
 	}
 
 	return dynClient, nil
+}
+
+// NewRESTMapperForConfig builds the discovery-backed RESTMapper that resolves a
+// GroupVersionKind to a resource and its scope. Discovery is deferred: no API
+// call happens until the first mapping lookup.
+//
+// Callers wiring a chainsaw ResourceFetcher want chainsaw.NewClusterFetcherWithClient
+// instead, which also builds the partial-discovery probe a mapper alone cannot
+// carry.
+func NewRESTMapperForConfig(restConfig *rest.Config) (meta.RESTMapper, error) {
+	mapper, _, err := NewRESTMapperAndDiscovery(restConfig)
+
+	return mapper, err
+}
+
+// NewRESTMapperAndDiscovery builds the deferred RESTMapper together with the
+// cached discovery client backing it. Returning both is what lets a caller ask
+// the very cache the mapper resolved through whether a no-match came from a
+// group discovery could not enumerate; two independently-constructed caches
+// would drift across a Reset().
+func NewRESTMapperAndDiscovery(restConfig *rest.Config) (meta.RESTMapper, discovery.CachedDiscoveryInterface, error) {
+	if restConfig == nil {
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest, "no kubernetes client configuration available")
+	}
+
+	discoveryClient, err := kubernetes.NewForConfig(BoundedConfig(restConfig))
+	if err != nil {
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create discovery client", err)
+	}
+
+	cached := memory.NewMemCacheClient(discoveryClient.Discovery())
+
+	return restmapper.NewDeferredDiscoveryRESTMapper(cached), cached, nil
 }

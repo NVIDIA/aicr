@@ -31,6 +31,12 @@ type ReportOptions struct {
 	// retaining the pointer, so the report keeps the ownership contract the
 	// rest of its fields hold.
 	Source *ReportSource
+
+	// AtRisk is the advisory scan's answer, and nil for a run that did not
+	// scan. NewReport then fills the report's own section with NotScannedOffline
+	// rather than leaving it zero, so silence is never publishable as an
+	// all-clear. Copied for the reason Source is.
+	AtRisk *AtRiskReport
 }
 
 // Report is the presentable form of a match: one row per component whose
@@ -51,6 +57,15 @@ type Report struct {
 
 	Components []ReportComponent `json:"components" yaml:"components"`
 	Summary    ReportSummary     `json:"summary" yaml:"summary"`
+
+	// AtRisk is always present, never omitted. A run that did not scan says
+	// so: an absent warning reads as an all-clear, and the resources this
+	// section covers are exactly the ones AICR cannot fix if it is wrong.
+	//
+	// It is not part of Summary and never reaches FailsRun, per ADR-021
+	// Decision 3: AICR blocking an upgrade over resources it does not own is a
+	// claim it has not earned.
+	AtRisk AtRiskReport `json:"atRisk" yaml:"atRisk"`
 }
 
 // ReportSource accounts for a cluster read: which cluster was read, how much
@@ -256,6 +271,10 @@ func NewReport(results []ComponentResult, opts ReportOptions) *Report {
 	if opts.Source != nil {
 		source := *opts.Source
 		rep.Source = &source
+	}
+	rep.AtRisk = AtRiskReport{Reason: NotScannedOffline}
+	if opts.AtRisk != nil {
+		rep.AtRisk = opts.AtRisk.clone()
 	}
 	for _, r := range results {
 		rep.Components = append(rep.Components, reportComponent(r, opts.Deployer))
