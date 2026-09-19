@@ -24,7 +24,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
 | **gatekeeper** | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
-| **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. Pinned to `v0.17.x` on purpose: `v0.18.0` renamed the `Skyhook` API to `NodeWright` and writes status only on the new kind, which the readiness gate does not yet read — see [Upgrade Notes](#nodewright-operator-staying-on-v017x) below. | [Nodewright](https://github.com/NVIDIA/nodewright) |
+| **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. `v0.18.0` renamed the `Skyhook` API to `NodeWright`; crossing that boundary needs operator steps — see [Upgrade Notes](#nodewright-operator-v0180-renames-skyhook-to-nodewright) below. | [Nodewright](https://github.com/NVIDIA/nodewright) |
 | **nodewright-customizations** | Environment-specific node tuning profiles applied via Nodewright. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
 | **nvsentinel** | GPU health monitoring. Detects GPU errors and publishes health events; the components that cordon, drain, reboot or terminate a node are off by default — see [NVSentinel Deployment Posture](#nvsentinel-deployment-posture). On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
@@ -800,21 +800,33 @@ closed. Zero `AIBOM` objects is healthy before any namespace opts in.
 
 The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
 `aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version of
-the chart version pinned in the registry. It matters because Helm and Helmfile
-skip a chart's `crds/` directory on upgrade, so a cluster can run a new
-controller against the previous schema while the older version stays served
-and the controller keeps working.
+the chart version pinned in the registry. It matters because Helm skips a
+chart's `crds/` directory on upgrade, so a cluster that missed the CRD step can
+run a new controller against the previous schema while the older version stays
+served and the controller keeps working.
 
-Flux is the exception for this component: `k8s-aibom` is marked `ownsCRDs` in
-the registry, so its generated `HelmRelease` sets
-`spec.upgrade.crds: CreateReplace` and Flux applies the CRDs itself. Argo CD
-applies them as ordinary manifests each sync. The assertion is still worth
-making on every deployer, because it proves the deployed CRDs match the pinned
-chart rather than merely that some deployer was expected to update them.
+`k8s-aibom` is marked `ownsCRDs` in the registry, so the deployers update its
+CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` and
+`helmfile` through the generated `apply-crds.sh`, and Argo CD by applying them
+as ordinary manifests each sync.
+
+**That automation is tied to the registry-pinned coordinates, not to the
+component.** `ownsCRDs` records an audit of one specific chart, so Flux, `helm`,
+and `helmfile` all check that the componentRef still resolves to the registry's
+`source`, `chart`, and `version` before acting, and do nothing when any of the
+three is overridden. A recipe that overrides the version — including the
+override described under [Overriding the chart version](#overriding-the-chart-version-requires-overriding-this-assertion)
+below — therefore upgrades the controller with **no** CRD update on those three
+deployers, silently. Such a recipe needs its own audit of the chart it points
+at and its own CRD step; the fallback command below is the manual form. Argo CD
+is unaffected, since it applies whatever CRDs the rendered chart contains
+regardless of provenance. The assertion is still worth making on every
+deployer, because it proves the deployed CRDs match the pinned chart rather
+than merely that some deployer was expected to update them.
 
 Both CRDs are asserted separately, so a failure names which one is stranded
 and a partially applied CRD set cannot pass. If this check fails after a chart
-bump, the pre-upgrade CRD step in
+bump, the CRD command in
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
 is the thing to run.
 
@@ -915,67 +927,88 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**Apply CRDs before the bundle upgrade — `helm` and `helmfile` only.** The
-chart ships its CRDs under `crds/`. Helm installs that directory on first
-install and never touches it again on upgrade, so a chart bump whose CRDs
-changed leaves the previous schema in place and the API server silently prunes
-the new controller's writes to added fields.
+**CRDs are applied for you; the manual command is a fallback.** The chart
+ships its CRDs under `crds/`. Helm installs that directory on first install and
+never touches it again on upgrade, so a chart bump whose CRDs changed would
+leave the previous schema in place and the API server would silently prune the
+new controller's writes to added fields.
 
-The `flux`, `argocd`, and `argocd-helm` bundles handle this themselves for this
-component and need no manual step; see the deployer table below. For `helm` and
-`helmfile`, apply the CRDs from the exact qualified chart first, then upgrade:
+Every deployer closes that on its own, by a different route; see the deployer
+table below. `helm` and `helmfile` bundles carry an `apply-crds.sh` in the
+component's folder, run automatically before the upgrade; `flux` and Argo CD
+apply the CRDs through their own controllers.
+
+Run the command below by hand only when you are upgrading outside a generated
+bundle, or when `apply-crds.sh` failed and you are reproducing it:
 
 ```bash
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
 VERSION="1.3.0"   # replace with the version you are upgrading to
 
-helm show crds "${CHART}" --version "${VERSION}" \
-  | sed -n '/^---$/,$p' \
-  | kubectl apply --server-side --force-conflicts -f -
+work="$(mktemp -d)"
+helm pull "${CHART}" --version "${VERSION}" --destination "${work}"
+tar -xzf "${work}"/*.tgz -C "${work}"
+
+# One kubectl call per CRD file, create first and replace if it exists.
+find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \) \
+  | sort \
+  | while read -r crd; do
+      grep -q '[^[:space:]]' "${crd}" || continue
+      kubectl create -f "${crd}" 2>/dev/null || kubectl replace -f "${crd}"
+    done
 ```
 
-Three details in that command are load-bearing. The obvious shorter form —
-piping `helm show crds` straight into `kubectl apply --server-side` — fails on
-the first two:
+Three details are load-bearing, and the obvious shorter forms fail on them:
 
-- **`sed -n '/^---$/,$p'`** drops `helm`'s progress output. For an OCI chart,
-  `helm show crds` writes `Pulled:` and `Digest:` lines to *stdout*, and those
-  two lines parse as a valid YAML mapping, so `kubectl` rejects the stream with
-  `error validating data: [apiVersion not set, kind not set]`.
-- **`--force-conflicts`** is required because Helm created these CRDs on
-  install and owns their fields. Without it, server-side apply refuses with a
-  field-manager conflict.
-- **`--server-side`** is required because the CRDs exceed the annotation size
-  limit that client-side apply depends on.
+- **Create-or-replace, not `kubectl apply`.** Server-side apply deletes a field
+  the manifest omits only when no other manager owns it, and Helm created these
+  CRDs. A schema field or `spec.versions` entry that the new chart *removes*
+  therefore survives an apply that exits 0, leaving the controller and the
+  schema out of step. Replace makes the chart authoritative for the whole
+  object. This is why `ownsCRDs` requires that no CRD use
+  `spec.conversion.strategy: Webhook`: replace discards a `caBundle` injected at
+  runtime.
+- **Read the CRDs from the chart archive, not from `helm show crds`.** That
+  command's output shape differs by major version: Helm 4 prepends `---` before
+  every CRD, Helm 3 prepends one only for `show all` and emits nothing between
+  documents. Any separator-based filter silently yields nothing on Helm 3.
+- **Pull once and work from that archive.** Repository, chart, and version are
+  coordinates, not content. Reading CRDs through them and letting the upgrade
+  resolve them again is two fetches, and a mutable tag does not promise the same
+  bytes.
 
-Verified against a live GKE cluster across a 1.2.0 to 1.3.0 upgrade.
+The generated `apply-crds.sh` does exactly this, with each call bounded; it is
+the reference if you need the details.
 
 Which deployers need that step differs, so check yours:
 
-| Deployer | CRD behavior on upgrade | Pre-upgrade step needed |
+| Deployer | CRD behavior on upgrade | Manual step needed |
 |---|---|---|
-| `helm` | `helm upgrade` skips `crds/` | Yes |
-| `helmfile` | `helmfile apply` upgrades through Helm, so it also skips `crds/` | Yes |
+| `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs` |
+| `helmfile` | Upgrades through Helm, so it skips `crds/` too; the release carries a `presync` hook running the same `apply-crds.sh` | Only for components without `ownsCRDs` |
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
+
+Argo CD is the one deployer that upgrades CRDs for *every* component rather
+than only the opted-in ones, because including them is how it renders a Helm
+source at all. Suppressing that per component is not available: `skipCrds`
+would also drop the CRDs on first install.
 
 `ownsCRDs` is opt-in, and narrow on purpose. Of the 15 registry components
 that ship CRDs under `crds/`, 11 share at least one CRD with another
 component: `nfd`, `gpu-operator`, and `network-operator` all ship the
 NodeFeature CRDs, and `nfd`, `gpu-operator`, and `kai-scheduler` all appear
 together in `base.yaml`. If every release replaced CRDs on upgrade, two or
-three `HelmRelease` objects would rewrite the same CRD on every reconcile,
-each with the schema its own chart pins. The `Skip` default is what prevents
-that today, so it stays the default.
+three releases would rewrite the same CRD on every reconcile or redeploy,
+each with the schema its own chart pins. Requiring the opt-in is what
+prevents that, so it stays opt-in.
 
 A component qualifies only if it solely owns every CRD it ships and ships none
 using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`
 injected at runtime. `kubeflow-trainer` is excluded for that second reason.
-Currently `gatekeeper`, `k8s-aibom`, `nvcre`, and `nvsentinel` qualify.
-
-`helm` and `helmfile` always need the step, because skipping `crds/` on
-upgrade is Helm's own behavior rather than something the generated bundle can
-change.
+Currently `gatekeeper`, `k8s-aibom`, `nvcre`, and `nvsentinel` qualify; the
+audited chart version for each is pinned in `pkg/recipe/ownscrds_audit_test.go`,
+so bumping a pin without re-auditing fails CI.
 
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the
@@ -1049,6 +1082,8 @@ New components are added declaratively in `recipes/registry.yaml` — no Go code
 Migration steps when upgrading from a prior AICR-generated bundle to a newer one that changes how a component delivers its Kubernetes resources.
 
 A generated recipe is a point-in-time artifact of the AICR binary that produced it: the embedded registry, overlays, manifest paths, and chart pins are part of that binary's surface. When upgrading AICR, regenerate the recipe from scratch with the new binary (`aicr recipe ...`) before re-bundling. `aicr bundle --recipe <old-file>` against a newer binary may fail if the saved recipe references manifest paths the new release has moved or removed (see [Bundle Generation Fails](cli-reference.md#bundle-generation-fails) for the specific error).
+
+**Regenerating also re-derives each component's namespace.** The namespace comes from the registry in the binary doing the regenerating, so if a component's default namespace moved between the two AICR releases, the new recipe names the new one. Helm cannot move a release between namespaces, so the resulting bundle installs a second copy of the component beside the one already running. Pass `aicr recipe --inherit-from <prior recipe or bundle directory>` to keep the namespaces the prior artifact deployed into, and run [`aicr upgrade-check`](upgrading.md#when-a-component-moves-namespace) to see whether any component moved in the first place.
 
 ### `gpu-operator`: `dcgm-exporter` ConfigMap moved into the main release
 
@@ -1579,39 +1614,22 @@ the path is resolved inside the controller's own filesystem.
 upstream expects to turn it on later, so prefer `locationType: Secret` or
 `ClusterProfile` rather than taking that dependency.
 
-### `nodewright-operator`: staying on `v0.17.x`
+### `nodewright-operator`: `v0.18.0` renames `Skyhook` to `NodeWright`
 
-AICR pins `nodewright-operator` at `v0.17.1` and deliberately does **not** track
-upstream's latest. Upstream `v0.18.0` renamed the `skyhook.nvidia.com/v1alpha1
-Skyhook` API to `nodewright.nvidia.com/v1alpha1 NodeWright`, migrates each
-existing `Skyhook` into a `NodeWright`, and writes completion status **only** on
-the new kind. Its attempt to mirror status back to the legacy object fails in a
-reconcile conflict loop, so `Skyhook.status` stays empty on a cluster where node
-tuning has genuinely finished.
+Upstream `v0.18.0` renames the `skyhook.nvidia.com/v1alpha1 Skyhook` API to
+`nodewright.nvidia.com/v1alpha1 NodeWright`, moves `DeploymentPolicy` to the
+same group, and shifts the on-node annotation, label and finalizer prefix. An
+operator-side mirror migrates each existing object for you, but completion
+status is then written **only** on the new kind: the attempt to mirror it back
+to the legacy object fails in a reconcile conflict loop, so `Skyhook.status`
+stays empty on a cluster where tuning has genuinely finished.
 
-That matters because AICR's deployment-phase readiness gate and the
-`nodewright-customizations` health check both poll the legacy `Skyhook` CR. On a
-`v0.18.0` or newer operator they wait on a status that never populates and time
-out, failing the deployment phase while tuning has completed. This was observed
-live on a bare-metal GB300 cluster, where `NodeWright` reported `complete` with
-`completeNodes 2/2` while `Skyhook.status` was `{}`. AICR briefly pinned
-`v0.18.0` and rolled back; no released AICR version ever shipped it.
-
-`v0.19.0` carries no fix for the status mirror, so the same applies there.
-
-**Do not bump this pin ahead of the readiness path.** Moving to `v0.19.x`
-requires, at minimum:
-
-1. The deployment validator and the `nodewright-customizations` health check
-   read `NodeWright`, with a `Skyhook` fallback for older operators. The
-   fallback is needed regardless of the pin, since `Skyhook` is deprecated and
-   the API server already warns that it will be removed.
-2. The `Skyhook` CRs AICR ships under `nodewright-customizations` move to
-   `NodeWright`.
-3. The runtime-required taint key tracks the operator's default, which `v0.18.0`
-   changed from `skyhook.nvidia.com` to `nodewright.nvidia.com`.
-4. Deployment-phase validation passes on a live cluster carrying
-   `nodewright-customizations`.
+AICR resolves the served API group by discovery rather than assuming either
+one, so a bundle validates against an operator from either side of the rename.
+The runtime-required taint is read from the operator's own Deployment for the
+same reason: `v0.18.0` moved its default key from `skyhook.nvidia.com` to
+`nodewright.nvidia.com`, and a gate that assumed the old key passed silently
+instead of waiting for the taint to clear.
 
 Upstream's own account of the rename is
 [`docs/getting-started/migration.md`](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md),
@@ -1628,28 +1646,36 @@ kubectl get skyhooks.skyhook.nvidia.com \
   -o custom-columns=NAME:.metadata.name,STATUS:.status.status,INPROGRESS:.status.nodesInProgress
 ```
 
-Tracked in [#2593](https://github.com/NVIDIA/aicr/issues/2593) and
-[#2594](https://github.com/NVIDIA/aicr/issues/2594).
-
-`aicr upgrade-check` reports all of this. The transition record at
-`recipes/components/nodewright-operator/upgrades.yaml` describes the `v0.18.0`
-boundary itself — the rename, the prerequisite above, and per-deployer steps —
-and stops its `to` ceiling there. So crossing `v0.18.0` is `manual` with steps,
-while any target above it is `blocked` and told to take the rename on its own:
+`aicr upgrade-check` reports both boundaries. The transition record at
+`recipes/components/nodewright-operator/upgrades.yaml` describes `v0.18.0` —
+the rename, the prerequisite above, and per-deployer steps — and `v0.19.0`
+separately, which is `safe`: it changes when a drain is considered complete but
+asks nothing of an operator on upgrade. Crossing the rename is `manual`
+whatever you land on, and you do **not** have to stop at `v0.18.0` to get past
+it:
 
 ```console
 $ aicr upgrade-check --from old.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.17.1  v0.18.0  manual   1 minor, 5 steps
+nodewright-operator  v0.17.1  v0.18.0  manual   1 minor, 4 steps
 
-$ aicr upgrade-check --from old.yaml --to newer.yaml --deployer helm
+$ aicr upgrade-check --from older.yaml --to newer.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.17.1  v0.19.0  blocked  2 minors, stops at =0.18.0
+nodewright-operator  v0.16.0  v0.19.0  manual   3 minors, 4 steps
+
+$ aicr upgrade-check --from cur.yaml --to newer.yaml --deployer helm
+COMPONENT            FROM     TO       VERDICT  NOTES
+nodewright-operator  v0.18.0  v0.19.0  safe     1 minor, verified
 ```
 
-The record sits above the pin deliberately. Only a `safe` verdict is held to the
-pinned version, so upgrade guidance can be written before the bump it describes
-— which is the order that qualifies a bump in the first place. The steps
-therefore tell you how upstream's migration works *and* that AICR's own
-readiness gate does not yet survive it; the prerequisites above are what moving
-the pin needs.
+`v0.19.0` also changes drain timing: an interrupt now begins roughly the
+longest `terminationGracePeriodSeconds` on the node later than before, and
+`spec.drainConfig.timeout` — which has no default — bounds time-to-drain rather
+than time-to-accept-evictions. AICR's tuning CRs declare interrupts and set no
+timeout, so an undrainable pod holds its node in `in_progress` without bound.
+Set a timeout on the CRs you author if you need that wait bounded.
+
+The legacy `Skyhook` group is removed upstream in `v0.20.0`, so the CRs AICR
+ships under `nodewright-customizations` still need renaming before a pin at or
+above that is reachable. Tracked in
+[#2594](https://github.com/NVIDIA/aicr/issues/2594).

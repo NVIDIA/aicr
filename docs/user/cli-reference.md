@@ -503,6 +503,7 @@ Generate recipes using direct system parameters:
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
+| `--inherit-from` | | string | Prior recipe file, or bundle directory, whose component namespaces the resolved recipe keeps instead of re-deriving them from the registry. Use on an AICR upgrade so a moved registry default does not relocate a component that is already running; see [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). A component the prior artifact does not name keeps the registry default. `cm://` locations are not supported yet |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
@@ -936,7 +937,7 @@ aicr query --selector <path> [flags]
 
 **Flags:**
 
-All `aicr recipe` flags are supported, plus:
+All `aicr recipe` flags are supported, including `--profile` and `--inherit-from`, plus:
 
 | Flag | Type | Description |
 |------|------|-------------|
@@ -1509,7 +1510,7 @@ aicr diff --baseline ./golden.yaml --target cm://default/aicr-snapshot
 
 ### aicr upgrade-check
 
-Compare two recipes or bundles component by component and report, for each version that changed, whether moving between them is safe to apply. Verdicts come from the [transition records](../contributor/upgrade-records.md) the running `aicr` release ships. No cluster state is inspected, which makes this the CI and GitOps path: the comparison reads two artifacts and nothing else. A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.
+Compare two recipes or bundles component by component and report, for each component whose version or namespace changed, whether moving between them is safe to apply. Verdicts come from the [transition records](../contributor/upgrade-records.md) the running `aicr` release ships. No cluster state is inspected, which makes this the CI and GitOps path: the comparison reads two artifacts and nothing else. A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.
 
 **Synopsis:**
 ```shell
@@ -1549,34 +1550,46 @@ Anything other than `safe` exits non-zero. `unknown` is included deliberately: a
 
 The report still reports a **breaking boundary** (a major bump, a minor bump while the major version is `0`, or a changed prerelease identifier over an otherwise unchanged `major.minor.patch`) in the NOTES cell and the JSON `breaking` field, because the size of a move tells you how hard to look. It no longer affects the exit code.
 
-**Three kinds of `unknown`.** They differ in what would close the gap, so they carry different `reason` codes and different report text:
+**Four kinds of `unknown`.** They differ in what would close the gap, so they carry different `reason` codes and different report text:
 
 | `reason` | Situation | Closed by |
 |---|---|---|
 | `no-record` | No record exists for this component | Somebody authoring the first record |
 | `no-boundary-crossed` | A record exists but says nothing about this range | Widening it, or confirming no boundary belongs there |
 | `downgrade` | You are rolling back | Nothing. Records describe forward moves only, so this can never become known |
+| `identity-changed` | The component's namespace moved between the two artifacts | Performing the relocation as its own piece of work, or resolving the target recipe with `aicr recipe --inherit-from` so it does not happen |
 
 `blocked` and `unknown` say opposite things. `blocked` means AICR has something to tell you and a version to stop at: read it and act on it. `unknown` means AICR has nothing for you: read the component's own upstream release notes and decide. Neither is a pass.
 
 **Rollout note: expect red today.** Only two registry components ship a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
 
-Components whose version is identical on both sides produce no row. Added components are reported with nothing to do; removed components are reported and **stay installed**, because AICR does not uninstall them.
+Components whose version *and* namespace are identical on both sides produce no row. Added components are reported with nothing to do; removed components are reported and **stay installed**, because AICR does not uninstall them.
+
+**Namespaces are compared too.** A recipe is regenerated from scratch on every AICR upgrade, and each component's namespace comes from `recipes/registry.yaml`, so a moved registry default lands in the regenerated recipe. Helm cannot move a release between namespaces, so applying the resulting bundle installs a **second copy** of the component beside the running one, and nothing reconciles the two. A version-only comparison reports that as no change at all, so the namespace is compared as its own axis:
+
+| What moved | Change kind | What the row says |
+|---|---|---|
+| Namespace only | `identity` | A row where a version comparison produced none. Verdict `unknown`, reason `identity-changed`, and it fails a strict run. |
+| Version and namespace in the same hop | `version` | The relocation rides on the version row. A `safe` verdict there is **withdrawn** to `unknown`; every other verdict stands, because it already stops the run and already sends you to the row. |
+
+`unknown` rather than `blocked` is deliberate. `blocked` is an author's judgement recorded against a version boundary, and the record vocabulary has no way to express one about where a release lives, so no author can record it. `--format json` and `--format yaml` carry the move as `identityChanges`, a list of `{field, from, to}` objects, on both kinds of row.
+
+The remedy is not an upgrade step. Either move the release deliberately and re-run the check, or resolve the target recipe with [`aicr recipe --inherit-from`](#aicr-recipe) so it keeps the namespaces the prior artifact deployed into and the relocation never enters the hop. See [Upgrading a Deployed Stack](upgrading.md#when-a-component-moves-namespace).
 
 **The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. That is a property of the jump alone, so a record still counts even when the jump flies straight over it:
 
 | Route | When | `reason` | Renders steps |
 |---|---|---|---|
 | A record describes this move and blocks it | One record is crossed and its `from` covers your source | `recorded` | yes |
-| You would skip a boundary | Two or more records are crossed, or a crossed `blocked` record was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
+| You would skip a boundary | Two or more records that ask something of you are crossed, or a crossed `blocked` record is not the only boundary in the way, or one was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
 | Nothing describes your starting version | One record is crossed, but its `from` does not cover your source, usually because you are below the lowest recorded starting point | `undefined-origin` | no |
 | Your target is past what the record assessed | One record is crossed and its `from` covers your source, but your target sits above the ceiling that record's `to` names | `beyond-record-ceiling` | no |
 
-The first renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other three render none, because the record that carries them describes a different move than the one you asked about. All four name a stopping point.
+A crossed `safe` boundary does not count toward the second row: it carries no steps by construction, so crossing one composes nothing and skips nothing, and a jump whose only *substantive* boundary describes the whole move reports that record rather than stopping. The first row renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other three render none, because the record that carries them describes a different move than the one you asked about. All four name a stopping point.
 
 The fourth exists because a record vouches only as far as its own `to` ceiling. A record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened. This is also how a component deliberately held below a breaking release reports: its record's ceiling sits at that release, so any target above it is told to stop there and take the boundary on its own.
 
-Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `beyond-record-ceiling`, `no-record`, `no-boundary-crossed`, `downgrade`, `not-comparable`) plus `explanation`, the sentence naming your versions.
+Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `beyond-record-ceiling`, `no-record`, `no-boundary-crossed`, `downgrade`, `identity-changed`, `not-comparable`) plus `explanation`, the sentence naming your versions.
 
 **Why `--deployer` is required rather than defaulted:**
 
@@ -1637,6 +1650,7 @@ aicr upgrade-check --from old.yaml --to new.yaml \
 
 - **A bundle is read through the `recipe.yaml` at its root.** Every deployer writes one as of [#2759](https://github.com/NVIDIA/aicr/pull/2759); a directory without it is neither a recipe nor a bundle and is rejected rather than misread.
 - **Coverage starts near zero.** Every transition without an authored record reports `unknown`. See the [authoring guide](../contributor/upgrade-records.md).
+- **A namespace move is seen only when both artifacts state one.** An absent namespace is read as a field the artifact did not carry, not as the default, so a component that gains or loses an explicit namespace between the two artifacts produces no relocation row. Reading it the other way would report a move nobody performed for every component the moment one side stopped carrying the field.
 - **No cluster comparison yet.** `--from cluster`, which reads installed Helm release inventory, is tracked in [#2531](https://github.com/NVIDIA/aicr/issues/2531).
 
 ---
@@ -2663,7 +2677,7 @@ Manifest-only components (e.g., `nodewright-customizations`) and mixed-component
 
 The `--workload-gate` and `--workload-selector` flags are day 2 operational options for cluster scaling operations:
 
-- **`--workload-gate`**: Specifies a taint for nodewright-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the nodewright-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. For more information about runtime required, see the [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs/runtime_required.md).
+- **`--workload-gate`**: Specifies a taint for nodewright-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the nodewright-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. When the flag is omitted the chart default applies: `nodewright.nvidia.com=runtime-required:NoSchedule` from operator v0.18.0 (previously `skyhook.nvidia.com=runtime-required:NoSchedule`, which the operator still recognizes and removes until v0.20.0). Node pools that pre-taint with the legacy key should pass `--workload-gate skyhook.nvidia.com=runtime-required:NoSchedule` so auto-tainted and pre-tainted nodes carry the same key. `aicr validate --phase deployment` reads the configured taint from the operator Deployment, so whatever value is passed here is what the readiness gate waits to see cleared. For more information about runtime required, see the [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs/runtime_required.md).
 
 - **`--workload-selector`**: Specifies a label selector for nodewright-customizations to prevent nodewright from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
 
@@ -3214,6 +3228,7 @@ aicr mirror list [flags]
 | `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |
 | `--platform` | | string | | Optional platform specialization (e.g., `kubeflow`). |
 | `--profile` | | string | | Profile selection in exact `name=value` form when resolving from criteria. Cannot be combined with `--recipe`. |
+| `--inherit-from` | | string | | Prior recipe file, or bundle directory, whose component namespaces the resolved recipe keeps instead of re-deriving them from the registry. Applies to criteria-based resolution only, and cannot be combined with `--recipe`: that file already records the namespaces it resolved to. See [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). |
 | `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
 | `--data` | | string | | External data directory to overlay on embedded data. Overlay-provided component values and manifests both feed image discovery (see [External Data](#external-data-directory)). |
 | `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |

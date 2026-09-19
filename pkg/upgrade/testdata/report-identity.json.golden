@@ -1,0 +1,117 @@
+{
+  "from": "./bundles-v0.17.0",
+  "to": "./bundles-v0.18.0",
+  "deployer": "argocd",
+  "components": [
+    {
+      "component": "phi-operator",
+      "change": "identity",
+      "identityChanges": [
+        {
+          "field": "namespace",
+          "from": "phi-system",
+          "to": "nvidia-phi-system"
+        }
+      ],
+      "verdict": "unknown",
+      "notes": "version unchanged, no record covers a relocation",
+      "reason": "identity-changed",
+      "explanation": "phi-operator does not change version, but its namespace moves from phi-system to nvidia-phi-system. Transition records assess version boundaries, so none assesses a relocation. Helm cannot move a release between namespaces either, so applying the new recipe installs a second copy beside the running one: move the release deliberately, then re-run this check",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": true
+    },
+    {
+      "component": "rho-operator",
+      "change": "identity",
+      "from": "2.1.0",
+      "to": "2.1.0",
+      "identityChanges": [
+        {
+          "field": "namespace",
+          "from": "rho-system",
+          "to": "nvidia-rho-system"
+        }
+      ],
+      "verdict": "unknown",
+      "notes": "2.1.0 unchanged, no record covers a relocation",
+      "reason": "identity-changed",
+      "explanation": "rho-operator stays at 2.1.0, but its namespace moves from rho-system to nvidia-rho-system. Transition records assess version boundaries, so none assesses a relocation. Helm cannot move a release between namespaces either, so applying the new recipe installs a second copy beside the running one: move the release deliberately, then re-run this check",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": true
+    },
+    {
+      "component": "sigma-operator",
+      "change": "version",
+      "from": "1.4.0",
+      "to": "1.4.2",
+      "identityChanges": [
+        {
+          "field": "namespace",
+          "from": "sigma-system",
+          "to": "nvidia-sigma-system"
+        }
+      ],
+      "verdict": "unknown",
+      "notes": "2 patches, namespace sigma-system -\u003e nvidia-sigma-system",
+      "reason": "identity-changed",
+      "explanation": "the move from 1.4.0 to 1.4.2 is recorded safe, but its namespace moves from sigma-system to nvidia-sigma-system, and no record assessed that. Transition records assess version boundaries, so none assesses a relocation. Helm cannot move a release between namespaces either, so applying the new recipe installs a second copy beside the running one: move the release deliberately, then re-run this check",
+      "jump": "2 patches",
+      "covers": "1 minor",
+      "breaking": false,
+      "downgrade": false,
+      "summary": "Patch releases only.",
+      "failsRun": true
+    },
+    {
+      "component": "tau-operator",
+      "change": "version",
+      "from": "0.17.2",
+      "to": "0.18.1",
+      "identityChanges": [
+        {
+          "field": "namespace",
+          "from": "tau-system",
+          "to": "nvidia-tau-system"
+        }
+      ],
+      "verdict": "manual",
+      "notes": "1 minor, 1 step, manual across 3 minors, namespace tau-system -\u003e nvidia-tau-system",
+      "reason": "recorded",
+      "explanation": "recorded manual: the record covering 0.18.0 describes the move from 0.17.2 to 0.18.1. Follow the steps below, then apply",
+      "jump": "1 minor",
+      "covers": "3 minors",
+      "breaking": true,
+      "downgrade": false,
+      "summary": "The legacy API group is renamed. A mirror controller copies existing objects.",
+      "precondition": "No object is mid-rollout.",
+      "steps": [
+        {
+          "id": "rename-crs",
+          "description": "Rewrite apiVersion and kind, then apply."
+        }
+      ],
+      "failsRun": true
+    },
+    {
+      "component": "upsilon-operator",
+      "change": "version",
+      "from": "3.0.0",
+      "to": "3.0.7",
+      "verdict": "safe",
+      "notes": "7 patches, verified, safe across 1 minor",
+      "reason": "recorded",
+      "explanation": "recorded safe: the record covering 3.0.5 describes the move from 3.0.0 to 3.0.7, verified by \"uat: synthetic lane\"",
+      "jump": "7 patches",
+      "covers": "1 minor",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": false
+    }
+  ],
+  "summary": {
+    "components": 5,
+    "failing": 4
+  }
+}

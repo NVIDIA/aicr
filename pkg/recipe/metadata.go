@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // RecipeMetadataKind is the kind value for RecipeMetadata resources.
@@ -279,6 +280,47 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 	// produced this result. Hydration is performed by hydrateHealthCheckAsserts
 	// in metadata_store.go after the per-ref defaults pass, where the bound
 	// DataProvider is available. See issue #1219.
+}
+
+// ApplyInheritedIdentity overwrites each ref's namespace with the one a prior
+// recipe resolved for the same component, so an AICR upgrade does not silently
+// relocate a running component when a registry default moves. A component the
+// prior recipe does not name keeps its default: it is a first deploy as far as
+// that artifact knows.
+//
+// Runs after ApplyRegistryDefaults rather than inside it, because that method is
+// exported and called from four packages.
+// A prior artifact is operator-supplied input that no loader validates for
+// Kubernetes namespace syntax, and this assignment lands after the current
+// recipe has already been validated. Deployers interpolate the namespace into
+// generated install scripts, so a value carrying shell metacharacters would
+// reach a shell the operator runs. Every inherited value is therefore checked
+// before it is copied, and one bad value rejects the whole artifact rather
+// than being skipped: a silently ignored pin is the relocation this function
+// exists to prevent.
+func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
+	if len(prior) == 0 {
+		return nil
+	}
+	namespaces := make(map[string]string, len(prior))
+	for _, p := range prior {
+		if p.Namespace == "" {
+			continue
+		}
+		// A namespace is a DNS-1123 label, not a subdomain: no dots, 63 chars.
+		if errs := validation.IsDNS1123Label(p.Namespace); len(errs) > 0 {
+			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"inherited namespace %q for component %q is not a valid Kubernetes namespace: %s",
+				p.Namespace, p.Name, strings.Join(errs, "; ")))
+		}
+		namespaces[p.Name] = p.Namespace
+	}
+	for i := range refs {
+		if ns, ok := namespaces[refs[i].Name]; ok {
+			refs[i].Namespace = ns
+		}
+	}
+	return nil
 }
 
 // coherenceProblem reports why a resolved ComponentRef's deployment-shape

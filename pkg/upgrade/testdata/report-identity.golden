@@ -1,0 +1,32 @@
+UPGRADE CHECK
+  from      ./bundles-v0.17.0
+  to        ./bundles-v0.18.0
+  deployer  argocd
+
+COMPONENT         FROM                  TO                           VERDICT  NOTES
+---------         ----                  --                           -------  -----
+phi-operator      namespace=phi-system  namespace=nvidia-phi-system  unknown  version unchanged, no record covers a relocation
+rho-operator      namespace=rho-system  namespace=nvidia-rho-system  unknown  2.1.0 unchanged, no record covers a relocation
+sigma-operator    1.4.0                 1.4.2                        unknown  2 patches, namespace sigma-system -> nvidia-sigma-system
+tau-operator      0.17.2                0.18.1                       manual   1 minor, 1 step, manual across 3 minors, namespace tau-system -> nvidia-tau-system
+upsilon-operator  3.0.0                 3.0.7                        safe     7 patches, verified, safe across 1 minor
+
+tau-operator 0.17.2 -> 0.18.1  (manual)
+  The legacy API group is renamed. A mirror controller copies existing
+  objects.
+
+  recorded manual: the record covering 0.18.0 describes the move from 0.17.2
+  to 0.18.1. Follow the steps below, then apply
+
+  This hop also relocates the component: namespace tau-system ->
+  nvidia-tau-system. No record assesses a relocation, and the steps below
+  neither perform it nor account for it.
+
+  PRECONDITION
+    No object is mid-rollout.
+
+  STEPS (deployer: argocd)
+    1. rename-crs
+       Rewrite apiVersion and kind, then apply.
+
+5 component changes, 4 need attention

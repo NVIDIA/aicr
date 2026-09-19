@@ -85,6 +85,43 @@ func TestGenerate_Scenarios(t *testing.T) {
 			goldens: []string{"helmfile.yaml", "level-0.yaml", "level-1.yaml", "README.md"},
 		},
 		{
+			// k8s-aibom is marked ownsCRDs, and this deployer still emits no
+			// CRD step for it. A presync hook fires only for releases
+			// helmfile decides to sync, and `helmfile apply` selects on
+			// detected change, so the step would hold on a chart bump and
+			// silently not hold on an unchanged rerun. The golden pins the
+			// absence: no hooks key on the release (#2525).
+			name: "owns_crds_no_hook",
+			gen: &Generator{
+				RecipeResult: recipeWith(
+					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.3.0",
+						"oci://ghcr.io/googlecloudplatform/charts"),
+				),
+				ComponentValues: map[string]map[string]any{
+					"k8s-aibom": {"replicaCount": 1},
+				},
+				Version: testBundlerVersion,
+			},
+			goldens: []string{"helmfile.yaml"},
+		},
+		{
+			// The same component with its version overridden away from the
+			// registry pin, kept as the sibling case so the two goldens stay
+			// comparable if a CRD step is ever added back here.
+			name: "owns_crds_version_override",
+			gen: &Generator{
+				RecipeResult: recipeWith(
+					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.2.0",
+						"oci://ghcr.io/googlecloudplatform/charts"),
+				),
+				ComponentValues: map[string]map[string]any{
+					"k8s-aibom": {"replicaCount": 1},
+				},
+				Version: testBundlerVersion,
+			},
+			goldens: []string{"helmfile.yaml"},
+		},
+		{
 			// cluster-values.yaml must be referenced in the release's
 			// values: list whenever the component has dynamic paths.
 			name: "with_dynamic_values",

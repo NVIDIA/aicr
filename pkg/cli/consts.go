@@ -39,6 +39,7 @@ const (
 	flagSlurmAccountingMode = "slurm-accounting-mode"
 	flagRuntimeInventory    = "runtime-inventory"
 	flagGKETCPXOInterfaces  = "gke-tcpxo-interfaces"
+	flagInheritFrom         = "inherit-from"
 	flagNoHealth            = "no-health"
 
 	// flagAddRolesToSA switches `aicr snapshot` into a generate-and-exit
