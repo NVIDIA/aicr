@@ -20,8 +20,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -75,6 +77,79 @@ func TestWrite_UpstreamHelmOnly(t *testing.T) {
 	// Golden-file compare for install.sh + upstream.env
 	assertGolden(t, outDir, "testdata/upstream_helm_only", "001-nfd/install.sh")
 	assertGolden(t, outDir, "testdata/upstream_helm_only", "001-nfd/upstream.env")
+}
+
+// TestWrite_UpstreamHelmInstallScript_RejectsInjectedRecipeValues runs the
+// rendered install.sh for an upstream-helm folder with a hostile component
+// name and namespace and asserts helm receives each as a single, unevaluated
+// argv element.
+//
+// A strings.Contains on the rendered script proves nothing about quoting: it
+// would pass whether or not the value is actually safe to hand to bash. Only
+// running the script and inspecting what the invoked command received
+// answers that. Component names are validated only as path components
+// (deployer.IsSafePathComponent rejects separators, not shell
+// metacharacters) and the namespace is not validated at all on this path, so
+// install.sh has to neutralize both itself.
+func TestWrite_UpstreamHelmInstallScript_RejectsInjectedRecipeValues(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	// Each payload embeds a space (proves no word-splitting) and a command
+	// substitution (proves no evaluation) behind one interpolation.
+	nameCanary := "pwned-upstream-name"
+	namespaceCanary := "pwned-upstream-namespace"
+	hostileName := "nfd evil$(touch " + nameCanary + ")"
+	hostileNamespace := "ns evil$(touch " + namespaceCanary + ")"
+
+	outDir := t.TempDir()
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: outDir,
+		Components: []localformat.Component{{
+			Name:       hostileName,
+			Namespace:  hostileNamespace,
+			Repository: "https://kubernetes-sigs.github.io/node-feature-discovery/charts",
+			ChartName:  "node-feature-discovery",
+			Version:    "v0.16.1",
+			Values:     map[string]any{"image": map[string]any{"tag": "v0.16.1"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	scriptPath := filepath.Join(outDir, res.Folders[0].Dir, "install.sh")
+
+	// Syntactic validity first: a bad escape surfacing as an unbalanced
+	// quote is a clearer failure here than as a confusing runtime error.
+	if out, perr := exec.Command("bash", "-n", scriptPath).CombinedOutput(); perr != nil {
+		t.Fatalf("generated script is not valid bash: %v\n%s", perr, out)
+	}
+
+	stub := t.TempDir()
+	argvFile := filepath.Join(stub, "argv")
+	if werr := os.WriteFile(filepath.Join(stub, "helm"), []byte(helmArgvStub(argvFile)), 0o755); werr != nil {
+		t.Fatalf("write helm stub: %v", werr)
+	}
+
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, runErr := cmd.CombinedOutput()
+	t.Logf("script output (exit=%v):\n%s", runErr, out)
+	if runErr != nil {
+		t.Fatalf("install.sh failed (exit %v); it must reach the helm upgrade call for the "+
+			"injection assertion below to mean anything\n%s", runErr, out)
+	}
+
+	assertHelmReceivedAsSingleArg(t, argvFile, hostileName, out)
+	assertHelmReceivedAsSingleArg(t, argvFile, hostileNamespace, out)
+
+	for _, canary := range []string{nameCanary, namespaceCanary} {
+		canaryPath := filepath.Join(outDir, res.Folders[0].Dir, canary)
+		if _, statErr := os.Stat(canaryPath); !os.IsNotExist(statErr) {
+			t.Errorf("injected command executed: %s exists (stat err %v)\nscript output:\n%s",
+				canaryPath, statErr, out)
+		}
+	}
 }
 
 func TestWrite_OmitsPreFolderWhenAllManifestsRenderEmpty(t *testing.T) {
@@ -252,6 +327,105 @@ metadata:
 	assertGolden(t, outDir, "testdata/local_helm_manifest_only", "001-skyhook-customizations/install.sh")
 	assertGolden(t, outDir, "testdata/local_helm_manifest_only", "001-skyhook-customizations/Chart.yaml")
 	assertGolden(t, outDir, "testdata/local_helm_manifest_only", "001-skyhook-customizations/templates/customization.yaml")
+}
+
+// TestWrite_LocalHelmInstallScript_RejectsInjectedRecipeValues is the
+// local-helm counterpart to
+// TestWrite_UpstreamHelmInstallScript_RejectsInjectedRecipeValues: same
+// hostile-value/argv-capture technique, against install-local-helm.sh.tmpl's
+// `helm upgrade --install ... ./` line instead of the upstream-helm one.
+func TestWrite_LocalHelmInstallScript_RejectsInjectedRecipeValues(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	nameCanary := "pwned-local-name"
+	namespaceCanary := "pwned-local-namespace"
+	hostileName := "skyhook evil$(touch " + nameCanary + ")"
+	hostileNamespace := "ns evil$(touch " + namespaceCanary + ")"
+
+	outDir := t.TempDir()
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir:   outDir,
+		AICRVersion: "v1.0.0",
+		Components: []localformat.Component{{
+			Name:       hostileName,
+			Namespace:  hostileNamespace,
+			Repository: "", // empty: manifest-only, routes through writeLocalHelmFolder
+		}},
+		ComponentPostManifests: map[string]map[string][]byte{
+			hostileName: {
+				"components/skyhook-customizations/manifests/customization.yaml": []byte(
+					"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	scriptPath := filepath.Join(outDir, res.Folders[0].Dir, "install.sh")
+
+	if out, perr := exec.Command("bash", "-n", scriptPath).CombinedOutput(); perr != nil {
+		t.Fatalf("generated script is not valid bash: %v\n%s", perr, out)
+	}
+
+	stub := t.TempDir()
+	argvFile := filepath.Join(stub, "argv")
+	if werr := os.WriteFile(filepath.Join(stub, "helm"), []byte(helmArgvStub(argvFile)), 0o755); werr != nil {
+		t.Fatalf("write helm stub: %v", werr)
+	}
+
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, runErr := cmd.CombinedOutput()
+	t.Logf("script output (exit=%v):\n%s", runErr, out)
+	if runErr != nil {
+		t.Fatalf("install.sh failed (exit %v); it must reach the helm upgrade call for the "+
+			"injection assertion below to mean anything\n%s", runErr, out)
+	}
+
+	assertHelmReceivedAsSingleArg(t, argvFile, hostileName, out)
+	assertHelmReceivedAsSingleArg(t, argvFile, hostileNamespace, out)
+
+	for _, canary := range []string{nameCanary, namespaceCanary} {
+		canaryPath := filepath.Join(outDir, res.Folders[0].Dir, canary)
+		if _, statErr := os.Stat(canaryPath); !os.IsNotExist(statErr) {
+			t.Errorf("injected command executed: %s exists (stat err %v)\nscript output:\n%s",
+				canaryPath, statErr, out)
+		}
+	}
+}
+
+// helmArgvStub returns a helm stub that records every argument following an
+// `upgrade` invocation into argvFile as a NUL-separated list, then exits 0.
+// Any other subcommand (install.sh's `helm version` probe) is a silent
+// no-op; HELM_MAJOR's `${:-0}` default handles the resulting empty output.
+func helmArgvStub(argvFile string) string {
+	return "#!/usr/bin/env bash\n" +
+		"if [[ \"$1\" == upgrade ]]; then\n" +
+		"  shift\n" +
+		"  printf '%s\\0' \"$@\" > \"" + argvFile + "\"\n" +
+		"fi\n" +
+		"exit 0\n"
+}
+
+// assertHelmReceivedAsSingleArg fails the test unless argvFile (written by
+// helmArgvStub) contains want as one exact, NUL-delimited element — proof
+// bash passed it through as a single opaque token rather than word-splitting
+// or evaluating a command substitution inside it. scriptOutput is included in
+// the failure so a syntax or early-exit problem is visible alongside the
+// mismatch.
+func assertHelmReceivedAsSingleArg(t *testing.T, argvFile, want string, scriptOutput []byte) {
+	t.Helper()
+	raw, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("helm stub never recorded an `upgrade` invocation; install.sh did not reach "+
+			"the point under test\nscript output:\n%s", scriptOutput)
+	}
+	args := strings.Split(strings.TrimSuffix(string(raw), "\x00"), "\x00")
+	if !slices.Contains(args, want) {
+		t.Errorf("helm upgrade did not receive %q as a single argv element.\ngot argv: %#v\n"+
+			"script output:\n%s", want, args, scriptOutput)
+	}
 }
 
 // TestWrite_ReadinessGate verifies that a component carrying ComponentReadiness
@@ -500,19 +674,19 @@ func TestWrite_PreFolderInstallOmitsCreateNamespace(t *testing.T) {
 			name:                 "pre folder omits --create-namespace",
 			installPath:          "001-foo-pre/install.sh",
 			wantCreateNamespace:  false,
-			wantNamespaceLiteral: "--namespace privileged-foo \\",
+			wantNamespaceLiteral: "--namespace 'privileged-foo' \\",
 		},
 		{
 			name:                 "primary folder keeps --create-namespace",
 			installPath:          "002-foo/install.sh",
 			wantCreateNamespace:  true,
-			wantNamespaceLiteral: "--namespace privileged-foo --create-namespace \\",
+			wantNamespaceLiteral: "--namespace 'privileged-foo' --create-namespace \\",
 		},
 		{
 			name:                 "post folder keeps --create-namespace",
 			installPath:          "003-foo-post/install.sh",
 			wantCreateNamespace:  true,
-			wantNamespaceLiteral: "--namespace privileged-foo --create-namespace \\",
+			wantNamespaceLiteral: "--namespace 'privileged-foo' --create-namespace \\",
 		},
 	}
 	for _, tc := range tests {

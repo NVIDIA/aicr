@@ -45,8 +45,8 @@ if [[ -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
   REPO=""
 fi
 
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} k8s-aibom "${CHART_REF}" \
+helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'k8s-aibom' "${CHART_REF}" \
   ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
-  --namespace k8s-aibom-system --create-namespace \
+  --namespace 'k8s-aibom-system' --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}

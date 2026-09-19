@@ -45,8 +45,8 @@ if [[ -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
   REPO=""
 fi
 
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} kai-scheduler "${CHART_REF}" \
+helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'kai-scheduler' "${CHART_REF}" \
   ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
-  --namespace kai-scheduler --create-namespace \
+  --namespace 'kai-scheduler' --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}
