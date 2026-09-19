@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -751,12 +752,23 @@ func TestCombineSurfacesAmbiguityFromEitherReader(t *testing.T) {
 	}}
 
 	tests := []struct {
-		name       string
-		deployer   Deployer
-		helm, argo inventoryRead
+		name              string
+		deployer          Deployer
+		helm, argo        inventoryRead
+		wantErrContains   []string
+		rejectErrContains []string
 	}{
-		{"from the helm reader", DeployerHelm, helmAmbiguous, inventoryRead{}},
-		{"from the argo reader", DeployerArgoCD, inventoryRead{}, argoAmbiguous},
+		{
+			name: "from the helm reader", deployer: DeployerHelm, helm: helmAmbiguous,
+			wantErrContains: []string{"tenant-a, tenant-b"},
+		},
+		{
+			// One destination namespace, two Applications. The count of
+			// installs and the list of namespaces are different facts here.
+			name: "from the argo reader", deployer: DeployerArgoCD, argo: argoAmbiguous,
+			wantErrContains:   []string{"blue-gpu-operator, green-gpu-operator", "(nvidia-gpu-operator)"},
+			rejectErrContains: []string{"nvidia-gpu-operator, nvidia-gpu-operator"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -767,6 +779,81 @@ func TestCombineSurfacesAmbiguityFromEitherReader(t *testing.T) {
 			}
 			if !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
 				t.Errorf("combine() error = %v, want CONFLICT", err)
+			}
+			for _, want := range tt.wantErrContains {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+			for _, reject := range tt.rejectErrContains {
+				if strings.Contains(err.Error(), reject) {
+					t.Errorf("error %q unexpectedly contains %q", err, reject)
+				}
+			}
+		})
+	}
+}
+
+// TestResolveInstallReportsNamespacesOnce is the Argo shape from the test
+// above, read for what it says rather than only for its code.
+//
+// Two Applications under different name prefixes share one destination
+// namespace. Listing a namespace per record made that read "installed in 2
+// namespaces (nvidia-gpu-operator, nvidia-gpu-operator)", which asserts a
+// namespace conflict that does not exist and points an operator at the wrong
+// thing: the discriminator is the two Application names.
+func TestResolveInstallReportsNamespacesOnce(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		records []installedRelease
+		want    []string
+		reject  []string
+	}{
+		{
+			name: "two installs sharing one namespace",
+			records: []installedRelease{
+				argoRec("green-gpu-operator", "nvidia-gpu-operator", "v23.6.0", nil),
+				argoRec("blue-gpu-operator", "nvidia-gpu-operator", "v24.9.0", nil),
+			},
+			want: []string{
+				"2 installs (blue-gpu-operator, green-gpu-operator)",
+				"in namespaces (nvidia-gpu-operator)",
+				"2 of them are in the \"nvidia-gpu-operator\"",
+			},
+			reject: []string{"nvidia-gpu-operator, nvidia-gpu-operator"},
+		},
+		{
+			name: "two installs in two namespaces",
+			records: []installedRelease{
+				helmRec("gpu-operator", "tenant-b", "deployed", "v23.6.0", nil),
+				helmRec("gpu-operator", "tenant-a", "deployed", "v24.9.0", nil),
+			},
+			want: []string{
+				"2 installs (gpu-operator, gpu-operator)",
+				"in namespaces (tenant-a, tenant-b)",
+				"0 of them are in the \"nvidia-gpu-operator\"",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := resolveInstall(fixtureGPUOperator, tt.records)
+			if err == nil {
+				t.Fatal("resolveInstall() = nil, want an error")
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not say %q", err, want)
+				}
+			}
+			for _, reject := range tt.reject {
+				if strings.Contains(err.Error(), reject) {
+					t.Errorf("error %q repeats a namespace: %q", err, reject)
+				}
 			}
 		})
 	}

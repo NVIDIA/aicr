@@ -390,15 +390,28 @@ func installedVersions(d Deployer, comps []Component,
 // namespace is the registry default and a recipe may legitimately deploy
 // elsewhere, so demanding it of an unambiguous install would fail a check that
 // has nothing ambiguous about it.
+//
+// Ambiguity is not always a namespace conflict, which is why the message
+// counts installs and namespaces separately and lists each namespace once. Two
+// Argo CD Applications under different name prefixes point at one destination
+// namespace, so that shape is two installs in one namespace; repeating the
+// namespace per record, as this once did, asserted a conflict that does not
+// exist and hid the names that are the actual discriminator.
 func resolveInstall(c Component, records []installedRelease) (installedRelease, error) {
 	if len(records) == 1 {
 		return records[0], nil
 	}
 
 	var expected []installedRelease
+	names := make([]string, 0, len(records))
+	seen := make(map[string]struct{}, len(records))
 	namespaces := make([]string, 0, len(records))
 	for _, record := range records {
-		namespaces = append(namespaces, record.Namespace)
+		names = append(names, record.Name)
+		if _, duplicate := seen[record.Namespace]; !duplicate {
+			seen[record.Namespace] = struct{}{}
+			namespaces = append(namespaces, record.Namespace)
+		}
 		if record.Namespace == c.Namespace {
 			expected = append(expected, record)
 		}
@@ -406,12 +419,17 @@ func resolveInstall(c Component, records []installedRelease) (installedRelease, 
 	if len(expected) == 1 {
 		return expected[0], nil
 	}
+	sort.Strings(names)
 	sort.Strings(namespaces)
 
+	// len(records) is always above one here, so the plural never has to be
+	// conditioned; the namespaces are listed rather than counted for the same
+	// reason in reverse.
 	return installedRelease{}, errors.NewWithContext(errors.ErrCodeConflict,
-		fmt.Sprintf("component %q is installed in %d namespaces (%s), and %d of them match the %q the registry "+
-			"declares, so which install to compare cannot be decided here",
-			c.Name, len(records), strings.Join(namespaces, ", "), len(expected), c.Namespace),
+		fmt.Sprintf("component %q resolves to %d installs (%s) in namespaces (%s), and %d of them are in the %q "+
+			"the registry declares, so which install to compare cannot be decided here",
+			c.Name, len(records), strings.Join(names, ", "), strings.Join(namespaces, ", "),
+			len(expected), c.Namespace),
 		map[string]any{"component": c.Name, ctxKeyNamespace: c.Namespace})
 }
 

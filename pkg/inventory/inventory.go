@@ -16,6 +16,7 @@ package inventory
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
@@ -136,14 +137,38 @@ func advance(opts *metav1.ListOptions, next, resource string) error {
 	return nil
 }
 
-// ctxErr reports cancellation as a structured error, naming the subject the
+// ctxErr reports a context abort as a structured error, naming the subject the
 // caller was reading. Paging and decoding both outlive a single round trip,
-// and a canceled run must return an error rather than the short list it had
+// and an aborted run must return an error rather than the short list it had
 // reached.
 func ctxErr(ctx context.Context, subject string) error {
 	if err := ctx.Err(); err != nil {
-		return errors.Wrap(errors.ErrCodeTimeout, "canceled while reading "+subject, err)
+		return abortError(err, subject, nil)
 	}
 
 	return nil
+}
+
+// abortError shapes a context abort so a deliberate operator cancellation
+// stays distinguishable from an environmental deadline.
+//
+// The distinction is load-bearing rather than cosmetic. errors.IsTransient
+// reports true for ErrCodeTimeout and false for ErrCodeCanceled, so coding a
+// Ctrl-C as a timeout puts an operator's abort into a caller's retry loop and
+// into the transient-infrastructure bucket, and hands the CLI ExitTimeout
+// where ExitCanceled is owed. Mirrors serializer.abortError and
+// boundedio.boundaryError; this package carries its own because each of its
+// call sites names a different subject and publishes different error context.
+//
+// The verb moves with the code. "canceled" on a deadline would report an
+// environmental fault as something the operator did, which is the same
+// conflation one level down.
+func abortError(cause error, subject string, errCtx map[string]any) error {
+	if stderrors.Is(cause, context.Canceled) {
+		return errors.WrapWithContext(errors.ErrCodeCanceled,
+			"canceled while reading "+subject, cause, errCtx)
+	}
+
+	return errors.WrapWithContext(errors.ErrCodeTimeout,
+		"timed out reading "+subject, cause, errCtx)
 }

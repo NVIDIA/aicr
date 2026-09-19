@@ -286,8 +286,7 @@ func argoListError(err error) error {
 	errCtx := map[string]any{ctxKeyResource: argoApplicationResource}
 
 	if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
-		return errors.WrapWithContext(errors.ErrCodeTimeout,
-			"canceled while listing Argo CD Applications", err, errCtx)
+		return abortError(err, argoSubject, errCtx)
 	}
 
 	if apierrors.IsResourceExpired(err) {
