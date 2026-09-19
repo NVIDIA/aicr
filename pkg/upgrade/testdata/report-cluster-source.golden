@@ -21,6 +21,9 @@ AT RISK (advisory)
   them; removing a CRD takes its objects with it. Advisory only: this never
   changes the exit code.
 
-  not scanned: no cluster access requested
+  examined       AlphaTuning.alpha.example.com (alpha-operator): 6 objects
+
+  Nothing at risk: every object examined carries a Helm or Argo CD ownership
+  marker.
 
 2 component changes, 1 needs attention
