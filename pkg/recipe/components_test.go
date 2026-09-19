@@ -1262,7 +1262,7 @@ func TestHelmConfig_DefaultNamespace(t *testing.T) {
 		{"network-operator", "nvidia-network-operator"},
 		{"cert-manager", "cert-manager"},
 		{"nvsentinel", "nvsentinel"},
-		{"nodewright-operator", "skyhook"},
+		{"nodewright-operator", "nodewright"},
 		{"kube-prometheus-stack", "monitoring"},
 	}
 

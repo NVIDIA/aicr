@@ -230,7 +230,7 @@ components:
     helm:
       # Manifest-only component - no external Helm chart, uses manifestFiles
       defaultRepository: ""
-      defaultNamespace: skyhook
+      defaultNamespace: nodewright
 
   # GKE COS NVIDIA driver installer (issue #1716): Google's cos-gpu-installer
   # DaemonSet as an AICR-managed, values-gated component. Present
@@ -376,7 +376,7 @@ components:
       # renamed (#2594).
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
       defaultVersion: v0.19.0
-      defaultNamespace: skyhook
+      defaultNamespace: nodewright
     nodeScheduling:
       nodeCountPaths:
         - estimatedNodeCount
@@ -399,7 +399,7 @@ components:
     helm:
       # Manifest-only component - no external Helm chart, uses manifestFiles
       defaultRepository: ""
-      defaultNamespace: skyhook
+      defaultNamespace: nodewright
     nodeScheduling:
       accelerated:
         nodeSelectorPaths:

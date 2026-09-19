@@ -40,7 +40,7 @@ status:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: skyhook
+  name: nodewright
 status:
   phase: Active
 ---

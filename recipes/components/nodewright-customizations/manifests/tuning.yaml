@@ -22,8 +22,8 @@
 {{- $cust := index .Values "nodewright-customizations" }}
 {{- if ne (toString (index $cust "enabled")) "false" }}
 ---
-apiVersion: skyhook.nvidia.com/v1alpha1
-kind: Skyhook
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
 metadata:
   annotations:
     # No Helm hooks: this Skyhook CR is release-managed so that disabling tuning
