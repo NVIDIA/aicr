@@ -127,7 +127,7 @@ componentRefs:
       topologyUpdater:
         enable: true
   - name: nodewright-customizations
-    namespace: skyhook
+    namespace: nodewright
     type: Helm
     source: ""
     overrides:
@@ -140,7 +140,7 @@ componentRefs:
     manifestFiles:
       - components/nodewright-customizations/manifests/tuning.yaml
   - name: nodewright-operator
-    namespace: skyhook
+    namespace: nodewright
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts

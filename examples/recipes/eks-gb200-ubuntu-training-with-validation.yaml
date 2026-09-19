@@ -145,7 +145,7 @@ componentRefs:
       - cert-manager
 
   - name: nodewright-operator
-    namespace: skyhook
+    namespace: nodewright
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts

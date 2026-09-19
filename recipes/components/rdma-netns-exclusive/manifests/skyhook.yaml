@@ -30,8 +30,8 @@
 # Node-wide change (affects every RDMA user on the host) and interrupting: nodes
 # reboot one at a time (interruptionBudget). Requires the Skyhook operator
 # (nodewright-operator) — declared as a dependencyRef on the componentRef.
-apiVersion: skyhook.nvidia.com/v1alpha1
-kind: Skyhook
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
 metadata:
   annotations:
     # Helm hooks ensure this CR is applied after the Skyhook CRD is installed

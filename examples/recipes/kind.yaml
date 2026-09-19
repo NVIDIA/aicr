@@ -33,7 +33,7 @@ componentRefs:
     version: v1.20.2
     valuesFile: components/cert-manager/values.yaml
   - name: nodewright-operator
-    namespace: skyhook
+    namespace: nodewright
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
