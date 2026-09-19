@@ -72,7 +72,7 @@ a100-aks-ubuntu-training-kubeflow:
   015-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   015-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   015-nvidia-dra-driver-gpu/values.yaml: 40ee0682cb6a6f80e7e1d919d9716829fc893e46da2a79b39215de405b38db82
-  016-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  016-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   016-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -81,9 +81,9 @@ a100-aks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: bebd204c3a13d809511e01d1dec091239772b3c101a8a323f08564e10a5fe99e
+  README.md: 29e3520c912d703cdd7e984314b8d6c80cb111b43db8ed3c7c689405df61d031
   bundle-info.yaml: 390ee15a3c869a0995683166dafe82f70b2eec8fb632cd4ff8da59de10055d9e
-  checksums.txt: 94df190ccf36cf706064a9423d9a0aa7962dcc0e164782d440cd40f980df8ec6
+  checksums.txt: 3645c8dad4fe6420cac00b8bc47d9ae7288be979e85d31f64d412b0f006c10b4
   deploy.sh: 5731eba1a0a0d53e46ed2cfee9d91e4ecec06196d0f3c0a0eae8db8d60fa3f32
   recipe.yaml: efd2d44f0730e6ee93d6af21015d83e4ce1a544ace644df2c456ca7ee34e34a3
 a100-any:
@@ -123,7 +123,7 @@ a100-any:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -132,9 +132,9 @@ a100-any:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 7e78ec3fc35a5dbe832148718979cb07c5cefc475a16e6a54306d8c6e3b8370c
+  README.md: 0bac5ab03c316d59be13adefbe31b0b6814b627fd6a3a86f957cd48158302a5a
   bundle-info.yaml: c59b88dd121b66f72cec83355fb93436747a362ab8a1fd86cb72eb1e34d646b0
-  checksums.txt: ed2d1222be0665f97c9840491a9652d90adae1ea33e5a59d3cdf1f81bbf36dd7
+  checksums.txt: c11b79fbe32263c17b4b38bce6dfd2bf90e5eac3bb7993d56f9fadbe37461fce
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: f63d67bfe389d79330414baeffef8db78bdad75efd9c834fc26283ee1eb4c193
 a100-eks-ubuntu-training-kubeflow:
@@ -196,7 +196,7 @@ a100-eks-ubuntu-training-kubeflow:
   014-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   014-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  015-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  015-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   015-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -205,9 +205,9 @@ a100-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: d912d74d3eec68fb9529b4f3f53222a426ae4e11ef6d4035a3321ea0ef58f6ae
+  README.md: f5e58e3ed16b5c989de453e44822933731647ff118aa3030395c41433466cc73
   bundle-info.yaml: edd9b69d8a982f6d7a1df5d314e119e933d458fcaa65468a8a7f9d018a874c29
-  checksums.txt: 5be18f362f697f86913b516075db3e24b68b4b06319ae83602e50d2865b2c168
+  checksums.txt: 9c3009e1ea79dcf31c9f710a42c93d522a5b7d7442b19ae63b6e338180449313
   deploy.sh: 544307ec690a0c643cb5a6d414642454c79cad9929eafb5239ffb93905ab102c
   recipe.yaml: 3f0390ad3a08698c0a9d0217178e9db0dea4c787435b2d25dde9034ace715ea9
 a100-gke-cos-training-kubeflow:
@@ -270,7 +270,7 @@ a100-gke-cos-training-kubeflow:
   014-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   014-nvidia-dra-driver-gpu/values.yaml: a77c9e293b1357b07843a4b58cffd4f6febf70d34f6ddb003689510fd65d3f5a
-  015-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  015-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   015-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -279,9 +279,9 @@ a100-gke-cos-training-kubeflow:
   016-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 2afe4b4738d435d9318692ceaa94b461465506f32079513a60407b1b064f50a1
+  README.md: 59a2507b3f6c2ac2d6968ec0e002139e01f7d3a361abf800bba614e085ad4ac7
   bundle-info.yaml: 372f76c8a13581683dff0f8a5cf4c25f283fa6c4910d736696b34f2b27702175
-  checksums.txt: 004eb31c2d10f26b232f4553ea7ddb686f49cf8b05c24f8184bf3580ea4d528a
+  checksums.txt: 850afefecb6f3131ddf676b391c5ebbf021d6f2d1e1a632786f3ed48a466bd7d
   deploy.sh: 9d5f0a3103786404a3ed2d4bfdf7dbde62cbb777ce26d12b59a4764568260c1a
   recipe.yaml: 7e19a45ad3e29de030345976a02b0ce7fa3423525984a5987afb95faca15c973
 a100-oke-ubuntu-training-kubeflow:
@@ -330,7 +330,7 @@ a100-oke-ubuntu-training-kubeflow:
   011-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   011-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   011-nvidia-dra-driver-gpu/values.yaml: 40ee0682cb6a6f80e7e1d919d9716829fc893e46da2a79b39215de405b38db82
-  012-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  012-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   012-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   012-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -339,9 +339,9 @@ a100-oke-ubuntu-training-kubeflow:
   013-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   013-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 6238ba5e9a5793c2bc277380cab214f9218804a54071e1953cabcd5984130d1f
+  README.md: f1f917d65563766613ed9bba1ce2b285ca9e60143ec5da3817ad454cdea0dbe6
   bundle-info.yaml: 1ef90d6731888f260135d2763faa9826a69b0157ba7f1064ab5927f6b3519282
-  checksums.txt: 965ba92aa0c7fc29c3a599cb08ddadb745e0e74374bcccd56db29a686d74c26d
+  checksums.txt: e153faf6c33c9e3958a7eb3e343aa3ebc52b662c14aacbbcbb5db544d841af24
   deploy.sh: fe6edeae9865351aca04aac4b33dd5ea80a51134a548558246f6099ede248310
   recipe.yaml: 05f3d16a71bffa2c48399bf8c4462d4ac6f7f9b5971eae1bb3bbf81813d35960
 b200-any:
@@ -381,7 +381,7 @@ b200-any:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -390,9 +390,9 @@ b200-any:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: d904fe109dd8ab8d65b070931b8b20f1a04356bdfac75d6c5128ba9fef05d300
+  README.md: 808416acfa55a00b9b1b35c22d2f194cdb21b946335d4cf2c6f77fa2cd7103a2
   bundle-info.yaml: 31978e391e9ec02ef20fce202694442c07dd131a9e7f0e5cb612eeac7ce9adfa
-  checksums.txt: 39c65d0832b2b79f94de3f0350f1b084bdd8eb1f5a7623f5d137b9bc276403b5
+  checksums.txt: e66e18d581d3d83ee854febe75e2ef812c4cb3707a22b3e2d0d8b9606915b30b
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: 601d4c996bdf41474107a88764ac56d8f278c9a8bf63bfac6728ab092b17ff75
 b200-gke-cos-inference-dynamo:
@@ -473,7 +473,7 @@ b200-gke-cos-inference-dynamo:
   018-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   018-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   018-nvidia-dra-driver-gpu/values.yaml: a77c9e293b1357b07843a4b58cffd4f6febf70d34f6ddb003689510fd65d3f5a
-  019-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  019-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   019-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -482,9 +482,9 @@ b200-gke-cos-inference-dynamo:
   020-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 3705f3f2bddda88a269242b51be6a4eb0b2fc095b69592754ed576a8217be31d
+  README.md: 6e33db20221e3bbd7a1fde5ee55032bacc0286e2279cbba8e0ba1ce2c3945809
   bundle-info.yaml: 42ba7c079c73bce33aac1ad24900ce6365d509bd41534c2691f1eae53ccb2a7d
-  checksums.txt: 3ae2b47e1a27dff816e2a6701a0bfa149141a4e90be40245a7eaec7471e3200b
+  checksums.txt: 288473a884f1a90c5ce2f1128b6bc28744159780bfd546e3bbe4ef80663b7807
   deploy.sh: 14be9701760ce38aefaa8590a0a14c175016ef5832ed37ae7899f91b5cf8f961
   recipe.yaml: 31a154e32bd9e64ac00bd0401aad1a48c69628300d00c240f9ff2f4e5a382e6d
 b200-gke-cos-training-kubeflow:
@@ -547,7 +547,7 @@ b200-gke-cos-training-kubeflow:
   014-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   014-nvidia-dra-driver-gpu/values.yaml: a77c9e293b1357b07843a4b58cffd4f6febf70d34f6ddb003689510fd65d3f5a
-  015-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  015-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   015-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -556,9 +556,9 @@ b200-gke-cos-training-kubeflow:
   016-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 24756dac1b3108ad6210867bd64b6e628deb2ae9b84e422733c14194f5f5d63b
+  README.md: 8703c89a3ae4e22a691d19267dd7cb2ef11c32fc9a6df84d8ed029c020cde7a5
   bundle-info.yaml: 950eb2709997e7dffede64f14804ca1f08d93c986255ffe316cf9f6da2dd82a6
-  checksums.txt: 92adf3ddff93b06bc3620225a54c41de0866aab3ccb5662dad3b0b75b400acd5
+  checksums.txt: 932e9ab02a5e39c8a902c19a0a15c872ac79c35a93bc407256e8d57261dd853b
   deploy.sh: 9d5f0a3103786404a3ed2d4bfdf7dbde62cbb777ce26d12b59a4764568260c1a
   recipe.yaml: 619195cb5431317a9e9f4ea1bb48a15672baddba2b28cd839d9884e93e827d38
 bcm-inference:
@@ -622,7 +622,7 @@ bcm-inference:
   014-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   014-nvidia-dra-driver-gpu/values.yaml: 7772b44e5da4a333c2535e37213c52138a4a9612dc3fa732d424558ede2a1a08
-  015-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  015-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   015-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -631,9 +631,9 @@ bcm-inference:
   016-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 88c45692451f0b341d488f5461f12a10e31f3373284e2584ee856fd2ada39d96
+  README.md: 1d0880781c8a50c0b019bba81b6e25092198c67e1faa0df758e29a73125626ff
   bundle-info.yaml: b1c7d56e8522d16ab30a2946c2e1bbb568ef67e92822d777a345024a104ae3f1
-  checksums.txt: 3089b7499a3da30cfaa82512d78d47076e07d837720c70de5d3cc17f87617ec1
+  checksums.txt: 8632ea4fd0bc45d32c6467c2cf2bc93fc464a561a6b55cb3db1a22020081a72c
   deploy.sh: 68aa2704ce906e229bb9b5789b66924825f0e78716cb09bd1b4fe422625d196b
   recipe.yaml: bf15171ac37a5e7090e193299df959090b90374d396751cce5c02ff64885e00a
 gb200-any:
@@ -673,7 +673,7 @@ gb200-any:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -682,9 +682,9 @@ gb200-any:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: fb66a5ac98ba8d37bd61ce0927b934a4167a45e7c2e63512ffc3b0ef3c30f4d7
+  README.md: 055e8fa7d299aa7e0972237346db3914cb0184e62406ca1dc73e01415b8e1a5e
   bundle-info.yaml: 99b28edc6c548a2ade8ba15da458c36036dc9860e6a76024630afd61a312bcf6
-  checksums.txt: cc3713f2d3fb5f60a6d0d50148cd267cc4df83f5d0decd646f00d0e4b7508009
+  checksums.txt: 447d1aa98690b0763af418c2529e235835ad7f361a1845da18c2958f8c7c39d7
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: 633c5b869e301f024e872b06db33e193b63a1fd38a63e6e883f912366094eba9
 gb200-eks-ubuntu-inference-dynamo:
@@ -769,7 +769,7 @@ gb200-eks-ubuntu-inference-dynamo:
   019-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   019-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   019-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  020-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  020-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   020-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   020-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -778,9 +778,9 @@ gb200-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   021-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 4bd4b3cc613537d501dd339e49c6fed22bb92e4fd7dd345e646ec6d9f8ebf9ad
+  README.md: 0df27ef82e220a3c6b6e51a29aa1decd8f3e4015065d5ee46761d6b3e7bf14f5
   bundle-info.yaml: 3d300d221f04d9d8fc6de46a9bc2873bafdc0d4cc2d7f1bfda1908ea1068f991
-  checksums.txt: c7e125e6736465fcdfff2d1415ccea891873de0e35d0d20bdbed2715f550535d
+  checksums.txt: 8dd1eccda32633ab30d4a5f609c5711d0d9d02b1706bff229706bfe4d5efbb5d
   deploy.sh: d1d2d2a9652bc5a1558bda6e05ed50b91db958eb9855a29c0005e5f673a9548c
   recipe.yaml: 80c0f42124a87e8a300b4305cb6d139f3324d4aa8de8dc8686c036270158c9ab
 gb200-eks-ubuntu-training-kubeflow:
@@ -847,7 +847,7 @@ gb200-eks-ubuntu-training-kubeflow:
   015-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   015-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   015-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  016-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  016-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   016-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -856,9 +856,9 @@ gb200-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 18d01af5eaf14ee6c5da81a7ecf8e9ef023b30d20a377b6de3823817962196f9
+  README.md: 7191a93979f3792bc6a99f3de6ec31b9626a5260ba6ffddcad626483f2caa1f4
   bundle-info.yaml: f9e5386c5ed90395626eb44181201d31582376df4dbf0325b448fdfd5208aef0
-  checksums.txt: 23a00b11094788b5fbc32e49560265ae6ccb23d09ca307304b10380e03ae94d1
+  checksums.txt: 61c36ff3cba6b644c7c438363ae3d783eef9cfcd3e6a797f6292806eac58b849
   deploy.sh: 544307ec690a0c643cb5a6d414642454c79cad9929eafb5239ffb93905ab102c
   recipe.yaml: 4f55c15a9b5669c0180a76c89cd038c686597206293026535f35e15e8a00c9c8
 gb200-eks-ubuntu-training-slurm:
@@ -916,7 +916,7 @@ gb200-eks-ubuntu-training-slurm:
   013-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   013-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   013-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  014-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  014-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   014-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -943,9 +943,9 @@ gb200-eks-ubuntu-training-slurm:
   019-slinky-slurm/install.sh: fec9df093a7111d2f10150364ff457f685985780e1b7e13b31bdf8f1e8b2802e
   019-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
   019-slinky-slurm/values.yaml: 36b3e905ded091f970dd6ad98389be8e4a6481afffb6682b66370558fa99a393
-  README.md: 24b86a3f061aa62b5dce74a64e8a2c078f41704df6c8b7c0ab771159ae976519
+  README.md: 21586ecfc6d38a950a4a3edde106102ca2299f7721c95f1185a86ee4bac727b7
   bundle-info.yaml: 2bd9023e1ca2ae6dbb4f0f730dae29f07cd2bcacba35a251fb4249735ba5f590
-  checksums.txt: d9b7edb23f524215dbd419da22498f18f01b3ef7ec2ae0a2b0ddefec2656e75b
+  checksums.txt: e8d7ce76d9d028018cf0bc4e48721526b2028451b393552f2066bfb5cb13f1bf
   deploy.sh: dc9a8e5756cdde5251602ee9fa6f6fdc3a41d707a914449c549cf81db4ec165c
   recipe.yaml: 277df08f84f52086ebc5bd37b61b5b550cecd3e2ee1105231d17c095988fb095
 gb200-gke-cos-inference-dynamo:
@@ -1037,7 +1037,7 @@ gb200-gke-cos-inference-dynamo:
   020-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   020-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   020-nvidia-dra-driver-gpu/values.yaml: a77c9e293b1357b07843a4b58cffd4f6febf70d34f6ddb003689510fd65d3f5a
-  021-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  021-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   021-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   021-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1046,9 +1046,9 @@ gb200-gke-cos-inference-dynamo:
   022-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   022-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   022-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: afaab5c9ec68b5602c546208cc5ab8f0831d6801e4604cf782cbfdbacc8bdd14
+  README.md: 1bfe8dde43cee0e2d70974656a013905ffe3766ea15964d5142d0e936085995a
   bundle-info.yaml: 2a0f844e28109bf385a0d6166b2e8133116ea83f6dd1c306a1af04663756ae35
-  checksums.txt: 010e9cd64d3250bba3d0de06d10b22747ac8e0263d47f8159ff61405ba77314c
+  checksums.txt: c051609f42678a8682de09fdf39c4e0bd1f564cc550940266f6f4dd30b1ef534
   deploy.sh: b558d8bac57b377443d07fbcbe9b0ecad355577e8ddee9468e9548bfc05f6ca8
   recipe.yaml: 6a7e1c7445fc61fc4e514dff7331e303a7af0c4e867d89e1ed1357caa645c5f6
 gb200-gke-cos-training-kubeflow:
@@ -1117,7 +1117,7 @@ gb200-gke-cos-training-kubeflow:
   015-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   015-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   015-nvidia-dra-driver-gpu/values.yaml: a77c9e293b1357b07843a4b58cffd4f6febf70d34f6ddb003689510fd65d3f5a
-  016-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  016-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   016-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1126,9 +1126,9 @@ gb200-gke-cos-training-kubeflow:
   017-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 16567064d2381551604fe4e30b150cd03d8a641249d9a1d597f96af50daa1bad
+  README.md: 2669baa4e46cfc1a52426f40b928b3d2d8b2d37e42d37f9c3cd1e656be970a14
   bundle-info.yaml: f918c2e7e12d3f24e7c47e09c5a686db49b816afa52e0d2036e703ce31ec439a
-  checksums.txt: 41dd96ddceff227d4a6f70f2e5df6fd463b49517f1acfcb3bd1d1f3db8fc29cd
+  checksums.txt: 1214ac1fc46d8a6dc4e9489f24891587666d313fd03e08f457ef93140350c122
   deploy.sh: c0c889de8a99691121e733b28f3e442dd71b34d297855b0441189d697bf32d40
   recipe.yaml: 874293e41da4aac73c66b10fdf4c68d2d8b038b26005e152bba6db199a7c0a3a
 gb200-gke-cos-training-slurm:
@@ -1188,7 +1188,7 @@ gb200-gke-cos-training-slurm:
   013-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   013-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   013-nvidia-dra-driver-gpu/values.yaml: a77c9e293b1357b07843a4b58cffd4f6febf70d34f6ddb003689510fd65d3f5a
-  014-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  014-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   014-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1215,9 +1215,9 @@ gb200-gke-cos-training-slurm:
   019-slinky-slurm/install.sh: fec9df093a7111d2f10150364ff457f685985780e1b7e13b31bdf8f1e8b2802e
   019-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
   019-slinky-slurm/values.yaml: 36b3e905ded091f970dd6ad98389be8e4a6481afffb6682b66370558fa99a393
-  README.md: 64ab39c95628d0698f8fe87489b7e917e5eededf73263bade71a0bffdde68d84
+  README.md: 83b9867ea0e3be4b5f1b761c0eaa34d04aa5c7b3629c7a255f1cbb407d1b8de5
   bundle-info.yaml: 1d56cdb5c022817b83cd3a8ed27c8cd92bf75246b09e1dc5d246fa6138fd206e
-  checksums.txt: 8947eba301330126c22f26ed39748ba96ab1fa359e5e5595d04c41426a9db324
+  checksums.txt: 8689e47672f84cf598ddcacd611dd683f6a4010d86248ca894fec72b216ab0d0
   deploy.sh: 8b7defedb1c031fa8b558a98a8d2ba78045ea347bad0758131559afde04cf6ff
   recipe.yaml: 2d059f388c493f586b4982bd707350a0d1216f43d5393e29b09dbcb62280969c
 gb200-oke-ubuntu-inference-dynamo:
@@ -1284,7 +1284,7 @@ gb200-oke-ubuntu-inference-dynamo:
   015-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   015-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   015-nvidia-dra-driver-gpu/values.yaml: 40ee0682cb6a6f80e7e1d919d9716829fc893e46da2a79b39215de405b38db82
-  016-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  016-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   016-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1293,9 +1293,9 @@ gb200-oke-ubuntu-inference-dynamo:
   017-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 0f7de364c74fa3c236838e2c38639b7b16a6d6494ce06b383ac2ee3907bdf664
+  README.md: 72a6853167db1d3871af3f1c3b3a2441a395426da4a32562df86ebf025ec3f38
   bundle-info.yaml: 1961fe99df9a8ca59e51ee8f501e63a0f278b7b81fa91c72777e7012e04f566f
-  checksums.txt: 9346f47f55b13d3600a39b6ac1148e32faa981d63da61d96c02573870209b2a9
+  checksums.txt: dbbbc913523798d651ae8fb9d2c32a44133a4ce5ede0c50b6482deb565eaed91
   deploy.sh: 9e2435e3912a86bf1344530ddcedd32936ab2808624b099b14991c5871b87bf5
   recipe.yaml: a49bfde2f97cdbbde60de93e26ccd483bc41ca9fbc59ee0bc69ef67cd50e0ec7
 gb200-oke-ubuntu-training-kubeflow:
@@ -1358,7 +1358,7 @@ gb200-oke-ubuntu-training-kubeflow:
   014-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   014-nvidia-dra-driver-gpu/values.yaml: 40ee0682cb6a6f80e7e1d919d9716829fc893e46da2a79b39215de405b38db82
-  015-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  015-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   015-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1367,9 +1367,9 @@ gb200-oke-ubuntu-training-kubeflow:
   016-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: fe8de40008ecd437f40c6e2b4b0c790594eec2d8458ea776a6e6f6a3695ca38b
+  README.md: 39e9d3c1454c0d76f181455ac3a5304b9ff74e36de3cef9b2bb2e62b72b253a7
   bundle-info.yaml: 8fef2c7f15c9e5953086bbacdde21005843c0b4c9d72972c042822e59e013b9d
-  checksums.txt: c252708f7dee2725cd29bdd9f98245b5c15bdf0a0754cbb4c7385cd9a4b348b5
+  checksums.txt: 8e3878b5eaf5b7b0a6d35ce0449a5b6d57d05fdc1172834c28758280bff6f91c
   deploy.sh: 88a0df43b7207b1bbfc52919e7cc55a77fbbd11363fb00eb40deaae9d68b475e
   recipe.yaml: e25a034a24dc2456d9617f03944b173a7509972cbdaffaf5415d4d3ef281d000
 gb300-any:
@@ -1409,7 +1409,7 @@ gb300-any:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1418,9 +1418,9 @@ gb300-any:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: f32dab3bd4245d67ed969ff5f58028705a8f8e44bb5a7184fc82e8826bbbb935
+  README.md: 05bf8274e596889abf9e79072aa4bbb861c62e6d3e0ea6f13c2151ef64a799a4
   bundle-info.yaml: dd3d607ce409f39c84ad8ea7a6f1776a44940488035c1609de39f9f47cc3fe32
-  checksums.txt: c5fe6598b611f8f118e6bc5e940129e81a3813d6431d548dd95281e0b529d096
+  checksums.txt: ab1512c9750b424f28f13e8fe199f31e4c5c6bf624252267ea68c3c81bbddabe
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: 766f644900ca751f7ebfdaa470e3b35f14a3eb062d17dac651d0d2226a486420
 gb300-eks-ubuntu-inference-dynamo:
@@ -1505,7 +1505,7 @@ gb300-eks-ubuntu-inference-dynamo:
   019-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   019-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   019-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  020-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  020-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   020-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   020-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1514,9 +1514,9 @@ gb300-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   021-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 2c87298b881e61fbf7363c763c623778f2029123fa96e7d895772db72c39df08
+  README.md: 872a92a029f57df7d059effe5cd8b0320ad0c80b95ad283390125e4eb982fbd7
   bundle-info.yaml: 1b1c7e59d2a0b147c374bf1fd448fba5367775e0182c69b69d1f2f15f5907d9a
-  checksums.txt: bfc1b10b4cf1a10d8ee3277f9d9b03e2c4cbbb0e108d938930a8154696e20c76
+  checksums.txt: 870a933b46c694e148ec3e65c0fe84522e567e51bb0aff2b744b970511fc4c56
   deploy.sh: d1d2d2a9652bc5a1558bda6e05ed50b91db958eb9855a29c0005e5f673a9548c
   recipe.yaml: c0d4016b4569da9318c340c595418d5158a04f2256c0f5a0ab448da3335f446a
 gb300-eks-ubuntu-training-kubeflow:
@@ -1583,7 +1583,7 @@ gb300-eks-ubuntu-training-kubeflow:
   015-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   015-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   015-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  016-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  016-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   016-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1592,9 +1592,9 @@ gb300-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 45166e288f5143f885d894eaa21da155a8aa97d4f73ad098fdbe3dd12ccd32e7
+  README.md: 662b06a348853d44cf56d9cc1dbf885e2eacf0cc188da1539bd10d3b127793ff
   bundle-info.yaml: 8bfd318d64f94e1229360129d73022925728ce0f85dcd9f6de733a1e5d414e9c
-  checksums.txt: db7c75b2e1d4f3db68250d7691cf5e99e61a78b2bad9cc768593cee99dd1cb38
+  checksums.txt: c74eb8e12ef1cb0197a50a65a6892b8c0e375800b87333f5114162773c768a1e
   deploy.sh: 544307ec690a0c643cb5a6d414642454c79cad9929eafb5239ffb93905ab102c
   recipe.yaml: b4ef5b2b48871617876964736ac7c96d72ba5e6ae7baccde8faaaa6890418455
 gb300-eks-ubuntu-training-slurm:
@@ -1652,7 +1652,7 @@ gb300-eks-ubuntu-training-slurm:
   013-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   013-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   013-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  014-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  014-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   014-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1679,9 +1679,9 @@ gb300-eks-ubuntu-training-slurm:
   019-slinky-slurm/install.sh: fec9df093a7111d2f10150364ff457f685985780e1b7e13b31bdf8f1e8b2802e
   019-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
   019-slinky-slurm/values.yaml: ef75bbe2e03bc4b1cf4c4f4456b31d470a7bcce3ca243af1891f9dada650c6f6
-  README.md: e6260fbc8ef57766e2328c09fc2014cac21d45fa12d17a2d1d85f4e74c7b85a9
+  README.md: bfdee55eada1a744f5a89dfe1ffd514aec5785012b35827aea70e69ffd7c0067
   bundle-info.yaml: 16e68d2926a292254bb0f598556f34526c81905ad343f9ae051940bd2c2a9b65
-  checksums.txt: 29298a10198ea6b0ee7ea60a74de3e8f9f7aeaa6232dc6b2ec6b910122a77cac
+  checksums.txt: f0ae2616959ee4d5a6fb66c81b19cd522f6f66906124eeb63881147fd2c01e2e
   deploy.sh: dc9a8e5756cdde5251602ee9fa6f6fdc3a41d707a914449c549cf81db4ec165c
   recipe.yaml: 69b76265dd7fc59a65f3f0a10f231a3267a5ec67df54e0eca3cbf1127bdcd8b3
 gb300-generic-ubuntu-training:
@@ -1735,7 +1735,7 @@ gb300-generic-ubuntu-training:
   012-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   012-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   012-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  013-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  013-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   013-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1744,9 +1744,9 @@ gb300-generic-ubuntu-training:
   014-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 3c52a7adf006869c5c867dd5ac02f87bc7ee7e899fcc83900dd296cc5367c0c0
+  README.md: 1a2852768ca9f20c431e87c34665b477675c9e0a7c4bb9992d23b4f2a36ffabd
   bundle-info.yaml: 3351faddcf501d40a8c6ddcb0bffaca30d6242a5d475fc4d4df1130ff640d8f1
-  checksums.txt: f0026a3ca11b1b3829a3b2cc01a5f27f0dd987753bec2492f4bc9d6e91b30ded
+  checksums.txt: e525dccab4ef5ed3023a4478b2f8ab18068f1c71e68e3dfac0bec2ac7be6c7e3
   deploy.sh: 942e5de9b3b2af1bf68368248901a5d677b91d32923cdacc402eeaeb5e46b5cb
   recipe.yaml: 71782b9faf74b27c0db925cbf1d730c6902af03dd59229724473f1edb2fe5b0c
 h100-aks-ubuntu-inference-dynamo:
@@ -1834,7 +1834,7 @@ h100-aks-ubuntu-inference-dynamo:
   019-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   019-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   019-nvidia-dra-driver-gpu/values.yaml: 40ee0682cb6a6f80e7e1d919d9716829fc893e46da2a79b39215de405b38db82
-  020-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  020-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   020-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   020-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1843,9 +1843,9 @@ h100-aks-ubuntu-inference-dynamo:
   021-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   021-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 0288e98cb445c254e84c7e1dee44b31aa0a5b16d9f75f077b0255a025fa02fd1
+  README.md: dec4f13844d5279d4ecd639228b34b7b9ba28545943891a3c7804f2960202a42
   bundle-info.yaml: 857096ce5768288fcedae672100b0de8bbeb41caf78a71d9cb1368cab57ad83e
-  checksums.txt: 6209f53025ecf0e2a334f4c1ffecf3dd3cf69484afd8121197cd308e36943eff
+  checksums.txt: f861442cee8b5f4358e4e24ea49161156d84c08b72851ec53d6c084d3e7d4c99
   deploy.sh: 191eea7ccc98a041a97c059a5ab5c5e751dd3e25039c3612b903cb79abc9b118
   recipe.yaml: 000dc5dc1968ea407f9f119f0506cf208cf9b4fbf7c124c727a8d2186077b0dd
 h100-aks-ubuntu-training-kubeflow:
@@ -1915,7 +1915,7 @@ h100-aks-ubuntu-training-kubeflow:
   015-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   015-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   015-nvidia-dra-driver-gpu/values.yaml: 40ee0682cb6a6f80e7e1d919d9716829fc893e46da2a79b39215de405b38db82
-  016-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  016-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   016-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -1924,9 +1924,9 @@ h100-aks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 5264c2ddfdb07bf5eae7917541d16474a18e2586c623f42e37597ca8b85a09a6
+  README.md: b82b91bc609422eb0e1b75db73248ba885bce1f7841f1b7ce0da6c6455defbcd
   bundle-info.yaml: ae230f04cba46c396641ceaefa74e227452097d46a3d352b7946201faf325698
-  checksums.txt: eceb1ada082ae617ac6020bd5b976bde2f2a0be4fcacb903d5dbbabb7e079615
+  checksums.txt: 1b10f3793ae87d4ae843e78fc8179a2160de1bfac2b1e57f2b122a55ffeb396e
   deploy.sh: 5731eba1a0a0d53e46ed2cfee9d91e4ecec06196d0f3c0a0eae8db8d60fa3f32
   recipe.yaml: 601597afc2cff382717113cf6d201f0cd505c89f50127ad3dd3ca2ae18ad3c34
 h100-aks-ubuntu-training-slurm:
@@ -1987,7 +1987,7 @@ h100-aks-ubuntu-training-slurm:
   013-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   013-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   013-nvidia-dra-driver-gpu/values.yaml: 40ee0682cb6a6f80e7e1d919d9716829fc893e46da2a79b39215de405b38db82
-  014-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  014-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   014-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2013,9 +2013,9 @@ h100-aks-ubuntu-training-slurm:
   019-slinky-slurm/install.sh: fec9df093a7111d2f10150364ff457f685985780e1b7e13b31bdf8f1e8b2802e
   019-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
   019-slinky-slurm/values.yaml: 5643ef72841c8424adbe75cfb40f99691ec60c5e6498bb3a115824a3264bce9d
-  README.md: 0807d07bafe7ac34c8f8c468a26ad8e6fa2ac0843179311427288dad5b5e5247
+  README.md: 51c8af46554723f8dc4fd1f5a0010b01d9ced129cda830bb5a24dec3b9b850f3
   bundle-info.yaml: 71e04797d83f3c69fd310004d72b62b0d5832cc844cca985953d38dc74e9a63c
-  checksums.txt: a236a1f31157c7266994e7118faaaad0c5d4c2b98d6f6541e091df5e73733a36
+  checksums.txt: 05113429268d98c7bae2dd43ee3896f173d6f313b1902225a09837ec399843b5
   deploy.sh: 68ba80506d41ff3a5248ec074d7d64b4c956fffa93d3673c1065584349c9047f
   recipe.yaml: 1e432e5ee1cf669f65e3306b6dbfe0756b3bdbc24c22842c455c4e2db15bf957
 h100-any:
@@ -2055,7 +2055,7 @@ h100-any:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2064,9 +2064,9 @@ h100-any:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: aaf515914d6ab633c6e073537c7743e07dec5c632d849c1ed217bf718763c5e5
+  README.md: 245a3f72cc90b6056ffe9affd58608af10f4bfafd30541cbba28f39228089bac
   bundle-info.yaml: 54cae5d83dd6f494f6a56ad9872acc879687aff0d02d45701bb50f1b8f25c58a
-  checksums.txt: 6f651ce847fe5b297901b06e2a208686b9ed8c4bd8553f999e7e91e9d3a5ffdf
+  checksums.txt: b90efdf39f5b9d5164212505cf331082d26dd5c326371600e65b8a650683f81e
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: 303f322fd683f13dc295138f87ca26e8dede954085837eba00b2fc9d9b87fb87
 h100-bcm-ubuntu-training-kubeflow:
@@ -2120,7 +2120,7 @@ h100-bcm-ubuntu-training-kubeflow:
   012-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   012-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   012-nvidia-dra-driver-gpu/values.yaml: 7772b44e5da4a333c2535e37213c52138a4a9612dc3fa732d424558ede2a1a08
-  013-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  013-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   013-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2129,9 +2129,9 @@ h100-bcm-ubuntu-training-kubeflow:
   014-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 8ba77ae1faa95bea2ce9baddf5e20c68bb91a65806c6b0bab138ca43477aff96
+  README.md: 6b88471fc7ec54466f4167ba4c582da979fe4d47ae43fb5877b39013de92b4ee
   bundle-info.yaml: 2f89345231d6434a8903adf349140778c2b110d2b0c26e9b498ff233770619b2
-  checksums.txt: 05deddea5725c09fb8e3912fededbf9d4f8d2f7262cc8973f09a79e540f37a4e
+  checksums.txt: c209ea49b5c673ca7aff93bdbc4a555b12a1847435e7af81e7110f2f2e744a08
   deploy.sh: afc5e63ea4f88e292fb58c5eea9bbbe5884b5bab66d25c585e2ed23b04d2e25d
   recipe.yaml: 2dbbc3199b37161c45a55db3a7befc7e545172594a27c951d5cbf85b6f22c89b
 h100-eks-ubuntu-inference-dynamo:
@@ -2211,7 +2211,7 @@ h100-eks-ubuntu-inference-dynamo:
   018-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   018-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   018-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  019-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  019-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   019-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2220,9 +2220,9 @@ h100-eks-ubuntu-inference-dynamo:
   020-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: b868d0e5538b967e5d7fa8bf96de03b9073b2ecd62b07e6029e0924bf69c967d
+  README.md: 77b4fd31538e6167060a2e93f12316f568e07702b66a7cbd6b163f32a2cdb2df
   bundle-info.yaml: dd7344db517078686a2a9cc8051a0a7d3f26f9669b0255663e9f2d49d1925aba
-  checksums.txt: f001d7cbfc3a62e1f769895696b5d6b2d423716aaba404fe6bf761ffe4f1c0d4
+  checksums.txt: 902cdef9f91d438f1b6044fcb7c02a91031cab1f6a5c1eaea772f0778a1a4386
   deploy.sh: d1d2d2a9652bc5a1558bda6e05ed50b91db958eb9855a29c0005e5f673a9548c
   recipe.yaml: 591872b28af1eafcee5b22a8136bab03415cdb3b953adb80eb6e742b0c7b66bc
 h100-eks-ubuntu-inference-nim:
@@ -2298,7 +2298,7 @@ h100-eks-ubuntu-inference-nim:
   017-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   017-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   017-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  018-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  018-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   018-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   018-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2307,9 +2307,9 @@ h100-eks-ubuntu-inference-nim:
   019-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: c2813f594616299fe25ba080708e761f2dcf29e0ad9ad3bdccbb67af3ab37c55
+  README.md: 13d08ba79fa20de0d9514afe6358624995f71c7863246452a8b1c078e991e64c
   bundle-info.yaml: c7771c5064c055b26423fa759d2a7b31d4eb79e1d75379a7fd566444a30d3ce5
-  checksums.txt: d1ad60a5ded38d6a00ddd061270e6f612cd954b2356f5564bcd8da7124e62093
+  checksums.txt: fa4dbfa0afcf1128be7eb14839de2609125682c98e6f7a41d940a64564e91aaf
   deploy.sh: d5b6945556651d73f7ab32fcdb44e4b06e0be41780f5e43133804a1890f0bda9
   recipe.yaml: e34b482a281571b21a1c90c0eed1957d038e0a2dc1cd89a383eff2b250521642
 h100-eks-ubuntu-training-kubeflow:
@@ -2371,7 +2371,7 @@ h100-eks-ubuntu-training-kubeflow:
   014-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   014-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  015-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  015-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   015-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2380,9 +2380,9 @@ h100-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 97ddd3320482c1bd3fc98b8c969d763124ac1f222466151a9da586927ec1fd63
+  README.md: 08716933c7abe7f974913958149796d2ee425e41831103104c31f3d3b4fdd3fa
   bundle-info.yaml: c069d372853c7f35f24b171b54ab471f4d50f355b7e6ef0e874d4d017b9b58a6
-  checksums.txt: 831981ee2cea7e53d67429d3e688c2197f237dcdbe4fdd3eda6c3a88224e46a7
+  checksums.txt: 07ec44854459b8e009c19003e48aafee965e9584603069b3e98a1df73d6beae7
   deploy.sh: 544307ec690a0c643cb5a6d414642454c79cad9929eafb5239ffb93905ab102c
   recipe.yaml: df08c364b497c622a398ba76f3266cbf22d7166a6b60c480cf9be39cb28c872f
 h100-eks-ubuntu-training-slurm:
@@ -2435,7 +2435,7 @@ h100-eks-ubuntu-training-slurm:
   012-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   012-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   012-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  013-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  013-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   013-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2461,9 +2461,9 @@ h100-eks-ubuntu-training-slurm:
   018-slinky-slurm/install.sh: fec9df093a7111d2f10150364ff457f685985780e1b7e13b31bdf8f1e8b2802e
   018-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
   018-slinky-slurm/values.yaml: 5643ef72841c8424adbe75cfb40f99691ec60c5e6498bb3a115824a3264bce9d
-  README.md: 6ad73b52defa61e725f880cce77c2a8751392e7bf20828f0bb7bfeb5b97f941f
+  README.md: bd4ea05f7f992b45a43b094466540b761fa0b72c5d8afcd2d73c0f5a9d010d18
   bundle-info.yaml: 41a5dca572a907992814108918216266b9a099e5fc1540248fbed72c430fdfa6
-  checksums.txt: 2bdc37b17937c4babe332793ffd3ff5b2e1606035cf1a561b273045039a83b99
+  checksums.txt: d81c6f32ed89078a94233762866fa2d9f40040a386f242c83e95fc84287e09f8
   deploy.sh: dc9a8e5756cdde5251602ee9fa6f6fdc3a41d707a914449c549cf81db4ec165c
   recipe.yaml: 6c5b82adf91ce4a52135bd5ce8c7c1e42fdfbd6be55c40a7ef49550ae644e0ba
 h100-gke-cos-inference-dynamo:
@@ -2544,7 +2544,7 @@ h100-gke-cos-inference-dynamo:
   018-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   018-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   018-nvidia-dra-driver-gpu/values.yaml: a77c9e293b1357b07843a4b58cffd4f6febf70d34f6ddb003689510fd65d3f5a
-  019-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  019-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   019-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2553,9 +2553,9 @@ h100-gke-cos-inference-dynamo:
   020-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 983bf60b855c94c6096bad234a1b9034564b42270b99d7357507b24062901c8c
+  README.md: 28770039a3d4945bf098f21b4202bd0226ebb0025aad67b3497282c535404193
   bundle-info.yaml: 2e3822be1dcfa2ee114107922951e4571433c266a176a8535949ec63002a9c43
-  checksums.txt: ba58313308a32fc48eeda2efbb2a0ea32a11650db3858669e3eb08e057bdef5c
+  checksums.txt: 9041cac532dbe07d25a0e56e1e0c12394c2e1ea37175ab66ba6c72dadb22a99e
   deploy.sh: 14be9701760ce38aefaa8590a0a14c175016ef5832ed37ae7899f91b5cf8f961
   recipe.yaml: 958dead7f43616bab48da48c22a8263cb1622ae15adcffba745140ea5c448370
 h100-gke-cos-training-kubeflow:
@@ -2625,7 +2625,7 @@ h100-gke-cos-training-kubeflow:
   015-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   015-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   015-nvidia-dra-driver-gpu/values.yaml: a77c9e293b1357b07843a4b58cffd4f6febf70d34f6ddb003689510fd65d3f5a
-  016-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  016-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   016-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2634,9 +2634,9 @@ h100-gke-cos-training-kubeflow:
   017-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: e389d520c52e0a67b3f8a315f2418ad97c038938fef1bd1084f3f1ab92260f2d
+  README.md: d4d306febb94de3a6a62493069b8597067f79010da23f8b9e129a1c19ac7d272
   bundle-info.yaml: 129a4bb6db5f27eee29c4ccea87ffbd64fd0caed6a1ac1deead36d0da23d18d3
-  checksums.txt: 80eade2d1a7c9e23fdfc580b8a41c02cb8bf9886daa09beaaf55fa2fc1d11309
+  checksums.txt: 7e282bd800f5ff10a4b5cc10fb906da4fdcb308dd39a980441ca1d09b3dec767
   deploy.sh: 2a32fb0a3d09e5f2439e420caae57d9a43a6aba8a8cc9e2ecfac205372ebe927
   recipe.yaml: 238777c5e060aafc56515e92e4a6f58254115668ac186d8d57db30f3d0f0f792
 h100-gke-cos-training-slurm:
@@ -2696,7 +2696,7 @@ h100-gke-cos-training-slurm:
   013-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   013-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   013-nvidia-dra-driver-gpu/values.yaml: a77c9e293b1357b07843a4b58cffd4f6febf70d34f6ddb003689510fd65d3f5a
-  014-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  014-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   014-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2726,9 +2726,9 @@ h100-gke-cos-training-slurm:
   020-slinky-topograph/install.sh: 10b2b9ee4119abb379b58009c6dbe6c5fbc4817844dd78d15893eaad1929852f
   020-slinky-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
   020-slinky-topograph/values.yaml: 83a1582f2ab8f283e77367a998d5f5d8ea686466d42c2dd5645fba1fba96bcc6
-  README.md: dbb6fa26d6cafd3f74cc59c744680033a37d501ff00697f6ec55215f3db6e9b8
+  README.md: d7fd6d2b90771875312ac3869702112f4afd0c466d09382472d6277e5202bdb9
   bundle-info.yaml: 197e9a88dab1bd09f3eafb0e73dd1adf2cd268e7be141cf34e298b896a3cb01a
-  checksums.txt: 1edcf9a338b59a046d62ac82486752b9783bf0921b2859e2a89a0ea6bc688477
+  checksums.txt: 224f390193812d8de81c6ee6d21ce789c9ae66b17338f0e54faa71927e25a05b
   deploy.sh: e1b11b88450a970214bff7c63d181e118b9358e4f2b5182e8dc8c078e61f9ed3
   recipe.yaml: 2dae69811caa76b875edfdb68f8bdf966ed9a3e987dc1ef6e4d68412b78d57fa
 h100-kind-inference-dynamo:
@@ -2799,7 +2799,7 @@ h100-kind-inference-dynamo:
   016-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   016-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   016-nvidia-dra-driver-gpu/values.yaml: 00b7aa3c37aa1c596df65d88134ea1dafa5e86ae394eb62899b2d4664f29e702
-  017-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  017-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   017-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   017-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2808,9 +2808,9 @@ h100-kind-inference-dynamo:
   018-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 21d4451b8d873374309d23a3da488ad06102976ceec887089085a36c29606307
+  README.md: b3ce5a03899f39513f89d16f3148402c6cbfe724c66aed98a190a883f955b26a
   bundle-info.yaml: 94c3307fbc52c39b3a7d1abcf190abf72eff40bd6723d866671e8d0a831391bf
-  checksums.txt: 7d1b59dc1ba9bf0bd4fb29e92ebc3b4321c846b31190c553e7b8fde12516b3bb
+  checksums.txt: 8cefae5de6f51b766583e4dbf0c4894ac74478c632f5928fc7855b89e10ca164
   deploy.sh: 890359e55bb3f2e434616a5b56b4a3af8a7a7397c04acc2cad816dc294f7dd04
   recipe.yaml: df95700dc82ed47aabb7c5233dd74e3d8cad65478967781f325d09182939fdd0
 h100-kind-training-kubeflow:
@@ -2863,7 +2863,7 @@ h100-kind-training-kubeflow:
   012-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   012-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   012-nvidia-dra-driver-gpu/values.yaml: 00b7aa3c37aa1c596df65d88134ea1dafa5e86ae394eb62899b2d4664f29e702
-  013-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  013-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   013-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2872,9 +2872,9 @@ h100-kind-training-kubeflow:
   014-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: bbe226aceb16b67a4cd495cb17b04e952119aae5af10a05a6924cf07e7f3b4a2
+  README.md: 7754f96ead2294267b0f03ba0393fae18e7017fb02da31042b9269b90f7ef024
   bundle-info.yaml: 26b9dbb32f5f5e4f51709a753939bf65b57aa483a772e8d3461e0817b805f9d9
-  checksums.txt: 7a151491015fd1c6947576e494eda62b8ee233bcae21331ec9b49d4886f21608
+  checksums.txt: d7cc34d7db3f98f0127537089577da64c715ed6170afe2185ea924c4e94fd8f0
   deploy.sh: 88a0df43b7207b1bbfc52919e7cc55a77fbbd11363fb00eb40deaae9d68b475e
   recipe.yaml: 1c5e12a758eb0e106b751ffbdbfa50967a284cc4a3bd5b2e784f54a973daffc8
 h100-kind-training-slurm:
@@ -2918,7 +2918,7 @@ h100-kind-training-slurm:
   010-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   010-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   010-nvidia-dra-driver-gpu/values.yaml: 00b7aa3c37aa1c596df65d88134ea1dafa5e86ae394eb62899b2d4664f29e702
-  011-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  011-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   011-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   011-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2948,9 +2948,9 @@ h100-kind-training-slurm:
   017-slinky-topograph/install.sh: 10b2b9ee4119abb379b58009c6dbe6c5fbc4817844dd78d15893eaad1929852f
   017-slinky-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
   017-slinky-topograph/values.yaml: ead36c362fbd40fa1257039e02155764f59bd28d38f41ee478a6005aa9184bae
-  README.md: af213b19438203fe92b735038f103c7b990a3b57691d3e75296915efe8b17639
+  README.md: 784347651c15010f7caf32dd64c3d2b4469746c804a469f301d0da49954c2701
   bundle-info.yaml: d7f010b8b48e50d87e88cd3fd375d7cff540851f40396e05ba49dc130c3c162c
-  checksums.txt: fae2c034259927bb744a04343fed39f295c5d5ebe12c2d62aa02c7dd6533bdc7
+  checksums.txt: 8a59d3df48f3cf9dfd4fbe27f991999bc6147583aea7d73095c91acae97b9f6c
   deploy.sh: 04c97afeff3de898697fc7cd6aefd1830e9dedb4cfb06bd1e4ad62e5f8930827
   recipe.yaml: 96f637e34c7c15f03d31781563a8f5587147399fec6336367a756852500cf4c5
 h200-any:
@@ -2990,7 +2990,7 @@ h200-any:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -2999,9 +2999,9 @@ h200-any:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 6a52a92ee332a5362cb59f060feca601fc6c5df6a059e79b62ed31fed15fb8d5
+  README.md: 1ec9b60c761f89e5a1c17f2a9410ec5c81d53feca45b98e34055aa2382bd52f4
   bundle-info.yaml: 796c6f561524cddf19e7dfe425c3a4c2a4740353c4b8dcdd6d38b1cc8d6bccf8
-  checksums.txt: c4c46d37d156c146626ea03156a183078b594d0ae1cdf678ab07086ad5e75ad6
+  checksums.txt: dab9b77e40d64aad476d77b96b023c08050f5e4146f0d5591e0bb03df5ae6a5a
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: e9fb915726fc68972f900a194a73b7747255516aa181df23a216f206c4cecd43
 h200-eks-inference:
@@ -3073,7 +3073,7 @@ h200-eks-inference:
   016-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   016-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   016-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  017-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  017-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   017-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   017-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3082,9 +3082,9 @@ h200-eks-inference:
   018-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 6636b8cd3c7ba350ed33c3e5b8fe3798fb887d661fe2382aa569da0a61c6bc87
+  README.md: 2d31ef97126b4585d29ab11b9826374fa7f10a1cf41f7c62b0bd6c245f60e9c4
   bundle-info.yaml: 1073145f2a51b38c438ad30763705bd16ecf9c4b434a847a6142bc1c5595c15d
-  checksums.txt: 86af547ba0c15940caea2c9c4fe3e3eda4cddb6098e30985a20a92f61692151e
+  checksums.txt: 1c5eb645a041f76d74ae542856738f8b978ca688ac964d6eab138e2f12193427
   deploy.sh: b64b07653e0e2f4d546929ec0b5b2ced925f7e06416e1bf750f3d6edab49bc2a
   recipe.yaml: 2a1ae7a5c7d89f3c436a86a36a3d7ab5e1bb5b368054bf6b367ff726fef66d72
 h200-eks-training-kubeflow:
@@ -3146,7 +3146,7 @@ h200-eks-training-kubeflow:
   014-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   014-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  015-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  015-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   015-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3155,9 +3155,9 @@ h200-eks-training-kubeflow:
   016-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: d3036bdc2f619248092eddaacfd44f28c2b71a711b0eab113f3dd3683e7e4f64
+  README.md: c279d04f93cccd1cbbfbe55f834b12083d672919866686367e1b6d7016fd3039
   bundle-info.yaml: dc03725791a1f1b6f73081f1fe1827ac3970c06dd2f505d2270496f262c21c9e
-  checksums.txt: c1ad51af59004381035ce1c8fa6df85f1b58296dff11eac08ee9266126d328b1
+  checksums.txt: 56a93633cfd434042140ab842efd071e365586bc57c0bd7b6ef1e6f612f81e60
   deploy.sh: 544307ec690a0c643cb5a6d414642454c79cad9929eafb5239ffb93905ab102c
   recipe.yaml: 29f104029c24ab66e64f87a478c28c3701ca8587731e8205c317a7ca51a27f8b
 h200-k0s-ubuntu-training:
@@ -3197,7 +3197,7 @@ h200-k0s-ubuntu-training:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 00b7aa3c37aa1c596df65d88134ea1dafa5e86ae394eb62899b2d4664f29e702
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3206,9 +3206,9 @@ h200-k0s-ubuntu-training:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 6aa9a5bfc63def44cc2ffdb7c0c30672ac76de849b99f4a546deb2c3e58f8835
+  README.md: 1e41ef75dfbf00e9ce5a572c572fb878c130cb29d336f752cccc6ef6303253cd
   bundle-info.yaml: 12b47d93c9e5b8c5ce757f119474ea0cb599aa1c8d44766f81b79323c52d1ea6
-  checksums.txt: b4ef60eea5cb8e21b04e5ef946525356d45f7d49bce551a9c55404f2c7021eda
+  checksums.txt: 05b023ef9b11f740d5237f913bec92f2b2f78163deba399452c496a01eb4bef9
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: 9d50f41d0d6a60af87a3d051bf46176ace792063777f69b00b083ae21ee5d9bd
 l40-any:
@@ -3248,7 +3248,7 @@ l40-any:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3257,9 +3257,9 @@ l40-any:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: b9cce81782a5816a9f98b03d985ec31b269332e10c67d02d39783aa20c70116f
+  README.md: c2dedd10f78bbb65ddc58cce4f6ae7b13b38d6c64d47d78706ad29c10370277f
   bundle-info.yaml: 94e57f8e4f100aaa7d4c54501e7bbdbae78c04f1d104d53d886015eb59e4e454
-  checksums.txt: 61753537dd2c381bc1420a26dc546b3e067610678c6ecbbe2609a74b0d1b4a5d
+  checksums.txt: 59550a806519d2bfbf8470aaeee9320b40852c923da8b1850ee7f37c1993de28
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: 02569715faf34a74c3c6bcd5673371ba50ecdb57a6c63a0a480751b6da2198b2
 l40s-any:
@@ -3299,7 +3299,7 @@ l40s-any:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3308,9 +3308,9 @@ l40s-any:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: ab3f2e9e6d94856036ae815667acb8d7888fc3ff21ec61a0de7e4ab09ea809a8
+  README.md: 4227aa0977b69d0111edb19552cc4138a9dc10e5b285cfc6c4b4d96941b45a93
   bundle-info.yaml: 4af04e1f2dcd80d5f9e0ca97280a257ee7023d7ec8603db66bc62d9ce766e253
-  checksums.txt: a1269cbacf98046492592dff5705573f29e1b107223829c711ed0605df9d86f4
+  checksums.txt: c8d2793373bec03e53028c77467fb137bab8a5a9d6a960dfc9f535595d7b9213
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: 9728259072d9959fef9a2d28394e1699a19260d85bd6d1777eec15cff9048e8c
 l40s-oke-inference:
@@ -3369,7 +3369,7 @@ l40s-oke-inference:
   013-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   013-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   013-nvidia-dra-driver-gpu/values.yaml: 40ee0682cb6a6f80e7e1d919d9716829fc893e46da2a79b39215de405b38db82
-  014-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  014-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   014-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3378,9 +3378,9 @@ l40s-oke-inference:
   015-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 4128bf5a9bfa4de71a5ee9c11e43d0976a20b3d8e253cc647769b32a3fbfe516
+  README.md: 5451732151bdc5e02fd503178efbcf3ff9b4d275ca1d5b893271e05d8eb8ba32
   bundle-info.yaml: fefa3dd7334d2fe72abf30cd7c90b9c12947cf72700b1c1f677cc2b78b15c9e9
-  checksums.txt: 22ba217bfe1ea14dbb3f73b2827d3213fd4da5a0c222ac73fac104f0a600eb63
+  checksums.txt: de3948c7105360de30a9c631c13d69f39db30340b500b012a9e5e1f53b39b15e
   deploy.sh: 959b146c9849cf7fb59dc2b8c0c84e390559fc0d90efe19a4a36d4c89fb8b839
   recipe.yaml: c0df5442857ae3a53b7ef1bcf32a3925b13db41d7c8c1d005787030af092ed28
 l40s-oke-training-kubeflow:
@@ -3438,7 +3438,7 @@ l40s-oke-training-kubeflow:
   013-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   013-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   013-nvidia-dra-driver-gpu/values.yaml: 40ee0682cb6a6f80e7e1d919d9716829fc893e46da2a79b39215de405b38db82
-  014-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  014-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   014-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3447,9 +3447,9 @@ l40s-oke-training-kubeflow:
   015-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: e1c8b537ee8cba2e947a11762def3442ec784d26c5104b406c146dc744e9aa0c
+  README.md: 9a65b23654da0beb3ab45c4f2a222a6e35a9311ed1ebc57cef50402316663a21
   bundle-info.yaml: 9635007ec238552ff075a2dbc947bbe53c22cf4d61bfcdd72d2f0877846dd732
-  checksums.txt: b25c6eb31a591d626a30d46bc15854a99e79171166436af24ae3219731998130
+  checksums.txt: 2e6c6ed4a8bbcf908a1d0b48b45936432d4a7184e241b14f08fd7f5fb999e2d0
   deploy.sh: 88a0df43b7207b1bbfc52919e7cc55a77fbbd11363fb00eb40deaae9d68b475e
   recipe.yaml: 221a44a660929cf037233618d2530610521a4e5cccf4f08cade04e2eafecfee5
 monitoring-hpa:
@@ -3489,7 +3489,7 @@ monitoring-hpa:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3498,9 +3498,9 @@ monitoring-hpa:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 4921ed22f8a880fd019ee9adeb9f134ee76532c6f13296a4c7577bfdbd6789a8
+  README.md: bf1883ade0c9d2f99c1db159c441dfa2ea1da4c66ed2349bcc02ae989b2f23d7
   bundle-info.yaml: 2cf4f0fe021cf21fde68f2ca1c9b2449eaa83c8f4cecbded7709157a7805ef79
-  checksums.txt: 87948adcc4ca1329bbe84daad628ebbb83219d30c7f1cc0103d5a070fc136a69
+  checksums.txt: 774d5f092d12868eeb513cfc6f48a1768afc83d1d94681c6fe97606cd731f049
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: 9d9cd30469017106aba689cdfb50a0fb6b1a2be806212ae5518b05334d4b42c9
 ocp-inference-nim:
@@ -3582,9 +3582,9 @@ ocp-inference-nim:
   015-prometheus-adapter-ocp-post/install.sh: 63cb0a63c576af93f6eff85b050efb96ade24e84fd2b83b3b47f201efcad3559
   015-prometheus-adapter-ocp-post/templates/rbac.yaml: 92814ddf5e61c955d4552123c5f2985f788e223875ca04ee441547d8a53216ed
   015-prometheus-adapter-ocp-post/values.yaml: 4b424b0499653496b19f128ee249ae6ec84d113c87786af22a73315056e558c9
-  README.md: b9fbacea1ef0da03f3139a957742a901e600529683306c9b8066f15356d6da19
+  README.md: 5985683fca9d711bda32d09584a87e0047322a610232493c78eb85e587cffa6b
   bundle-info.yaml: 867dcd5523ffcac5983948d5951a92566cef561b4f4712333375f303616f5394
-  checksums.txt: 283e226badc1d59c3c429c80ed677e924dd740df8eda815d8ff5fadb162b8c59
+  checksums.txt: c0de0a92e70442fb1c4bb4ae8f902e59142c91518ef5a16d4d661c4b76608e10
   deploy.sh: 1d3a70c78facc969797752908d4e7a133e349fba8955bf35d36e2d347679dc24
   recipe.yaml: b4b646b39d7705617b4bbf4c272eac65a02e2781ca5da593c6ab2715c95fb54a
 ocp-training:
@@ -3657,9 +3657,9 @@ ocp-training:
   013-prometheus-adapter-ocp-post/install.sh: 63cb0a63c576af93f6eff85b050efb96ade24e84fd2b83b3b47f201efcad3559
   013-prometheus-adapter-ocp-post/templates/rbac.yaml: 92814ddf5e61c955d4552123c5f2985f788e223875ca04ee441547d8a53216ed
   013-prometheus-adapter-ocp-post/values.yaml: 4b424b0499653496b19f128ee249ae6ec84d113c87786af22a73315056e558c9
-  README.md: efb059d6c2f7c90f7cfc2665e37136a47891396ab4b0227572334c9499245c7e
+  README.md: a01ac28e2d4da373c7a30b8fc60726ace7f7297be9700a2d70884e856a9c6e2f
   bundle-info.yaml: 5896360f8e8f55c3284676d13799c7c13c8aff8709e2c9ada7932d7b4caf3d5b
-  checksums.txt: 68df09d88b0da12af0b3076a08b75bd2fdd83dcbb84c7f62bc58732c7edffd22
+  checksums.txt: 78ceb5c84bb31a6302a8b19c367695028a4a4164310407e25adcc1398d6c96fb
   deploy.sh: 483cc4e641084b09655f2a21d69375d3944204c2495314796811930ad3a8b823
   recipe.yaml: be82f14aba09224250a0cdfba0af51aadb4719d346f35bd3ac14b8e0724de710
 rtx-pro-6000-any:
@@ -3699,7 +3699,7 @@ rtx-pro-6000-any:
   009-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   009-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  010-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  010-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   010-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3708,9 +3708,9 @@ rtx-pro-6000-any:
   011-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 8daae4b1a1a69ea4006a394f872109d3b1276ec8ec7d2dad824958421a5e4da3
+  README.md: f981193601fa35d554ede549a10b3fda3f7464be4dd5b2209c01e6db9ebb98a5
   bundle-info.yaml: e32dd08d5888dc6553b2c08da2a53133b0df100184e81e4ed8d25b7c25b0699e
-  checksums.txt: 23491de790fd6b61d77880530b49ebfc08dedd9251fdf0d961a028c1cba50dd8
+  checksums.txt: 473334470bd306e3e24b1513a38e40128614c1bb4f873bee2c76f04f0e7985a9
   deploy.sh: ce1c1a2221ec72d940b3d970a995719d1ee105f30d0df5dafd447474ddd20258
   recipe.yaml: 442d0b34d81a0700832bdf544712c865704d9cb2144b2d3314bab2860317424e
 rtx-pro-6000-eks-ubuntu-inference-dynamo:
@@ -3790,7 +3790,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   018-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   018-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   018-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  019-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  019-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   019-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3799,9 +3799,9 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   020-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 249ddc27d1c78a68dc6ad11df0c5ceaf32f946b3f7db6525426b73314c31c29a
+  README.md: 25d49581c13994a7eea5a0b780ff48856989bcc381959594c9c25f1a2e92b062
   bundle-info.yaml: f8c86ad9f4ae879936196a4f84fad8852ce7fbad01f167012bfe2bd312bce20f
-  checksums.txt: 8c1e33e3ed25a50a2944086feca551cbbe54e44f0f5236fbe542d049245142f8
+  checksums.txt: fed8cbb3089bfda97b3d6987036a72c71364fbd23bb32c586636f57b3845a7ce
   deploy.sh: d1d2d2a9652bc5a1558bda6e05ed50b91db958eb9855a29c0005e5f673a9548c
   recipe.yaml: ee1a85f6c142a295ddae0749043b45232a3c882903d5a46c5185715e904c73ee
 rtx-pro-6000-eks-ubuntu-inference-nim:
@@ -3877,7 +3877,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   017-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   017-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   017-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  018-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  018-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   018-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   018-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3886,9 +3886,9 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   019-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 96cb06af1f4b7c6af975a405b4d9132231f0674fae3d2f4915bcd08074cf1495
+  README.md: 01729e7603146a9cd629229ed461b0e03e0c0cb5548344b42cf58a438290db7b
   bundle-info.yaml: 6c889c54de49fd7e5d09791807850b27206078ee38edae1eee2ec0020233b64b
-  checksums.txt: 5f81d63022fb2ac57985dbca0ad633969235123ac5d2e28c113d61916d224130
+  checksums.txt: 682d645c0ef685d0c838b3229e7b7c61e85488c294696d9d2b9b76be7ae6c66f
   deploy.sh: d5b6945556651d73f7ab32fcdb44e4b06e0be41780f5e43133804a1890f0bda9
   recipe.yaml: c2ea45d6a6e205500434fbeec7bbe6f5f61652547dcb937f1ea8481e905b4b07
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
@@ -3950,7 +3950,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   014-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   014-nvidia-dra-driver-gpu/values.yaml: 7ca9dfc055e83f3b644f18a1da968614bd457e41fcbd1505941a1acf110f4c30
-  015-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  015-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   015-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -3959,9 +3959,9 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 3bea09d2ec19e8e92d70174a6f3b67cb045bb97e3a4492d02aadd4f504a8a023
+  README.md: a7715a03905d8b6d523eb0ce291018a01b6f8c169ffc2213b36b780a0c6ac97d
   bundle-info.yaml: 7a450024c9c0cac2fe0817298fdd2b6635bedea06d0438717628acab39d501da
-  checksums.txt: 774136d5386864dda6dd3b5e687a24a271fec50a928157692e0e2e54b0da58f0
+  checksums.txt: c32db4550b5b56acbffd99e44558e43a7ee6fd04f7d03c9bc32bb6de8f2c18dd
   deploy.sh: 544307ec690a0c643cb5a6d414642454c79cad9929eafb5239ffb93905ab102c
   recipe.yaml: 084e3c61bf695ae0dff82731e7f1fbe51270baf2f95691fe9e18066772664d39
 rtx-pro-6000-lke-ubuntu-inference:
@@ -4020,7 +4020,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   013-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   013-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   013-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  014-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  014-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   014-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -4029,9 +4029,9 @@ rtx-pro-6000-lke-ubuntu-inference:
   015-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 54864b5de23de89aebfeddfbc131da9efea0cfea49f66738546b5c699805fc38
+  README.md: 1cdce4897b430129005a807c4ee826e7eec78d7cbe0fa75ec492e5ad0f9fb87b
   bundle-info.yaml: 9941923c5db8170b1e00173c31c32582d0bf1091d11386b648183c916391d023
-  checksums.txt: 12ce4a79bbf1642d1fb5ac5d5f02c93f26903b9a75442d01f20910d11eebd3d4
+  checksums.txt: 9d92c37bcf9500ae58cd7c9b2c8f54efd36d5cec296c63847d2272122ebe477c
   deploy.sh: 959b146c9849cf7fb59dc2b8c0c84e390559fc0d90efe19a4a36d4c89fb8b839
   recipe.yaml: 4b42a1a11b77dc41e209bcf152345099d565c9be6f07a09976841e571ac43726
 rtx-pro-6000-lke-ubuntu-training-kubeflow:
@@ -4080,7 +4080,7 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   011-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   011-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   011-nvidia-dra-driver-gpu/values.yaml: 4ac4223971cbd29af3f08dc1b74ef67c2de63180cc1c41fe6c1408c8ae31e1f3
-  012-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  012-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   012-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   012-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -4089,9 +4089,9 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   013-prometheus-adapter/install.sh: 554bfbc6aa0dd9619279b9b0b79e0c4c804c3df96f2f66a7a94db0ddfde85714
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   013-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: f540870ae697126a2a9dd728c7c1fbd9dfc64cd13344bb1c9af97fa3426a136e
+  README.md: 729479277f40f76804500fcff2947845e71e9080a59f074b536aa80c0df2a7da
   bundle-info.yaml: a7fb1b4fc6ceda2a60485105501d28a7424706843306b43ba0831cddd56a9d3d
-  checksums.txt: f588db1df20e0b46e9ec11ec25ed9c201f8751512db9a52e8c3ea5d18f0c7cd7
+  checksums.txt: e1aa088917f0b51e6d0f78c8b02210b8790e356ebaf76c3176de37eac1638383
   deploy.sh: fe6edeae9865351aca04aac4b33dd5ea80a51134a548558246f6099ede248310
   recipe.yaml: b7ad7d9787a73c3f6c4d86fca7ff0f4366b8c20ad6d0eecdc7474170094e8616
 vr200-rke2-ubuntu-inference-dynamo:
@@ -4169,7 +4169,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   017-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   017-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   017-nvidia-dra-driver-gpu/values.yaml: 00b7aa3c37aa1c596df65d88134ea1dafa5e86ae394eb62899b2d4664f29e702
-  018-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  018-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   018-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   018-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -4183,9 +4183,9 @@ vr200-rke2-ubuntu-inference-dynamo:
   020-rdma-netns-exclusive/install.sh: 8dbe2f28a30fafc5cdc17bf48f16490c89009dff5925dd80bc3bdc49122479db
   020-rdma-netns-exclusive/templates/skyhook.yaml: 264a41be17a21a51e915e3406de36c320fe2b76148c648dbce25f3e43ddd1530
   020-rdma-netns-exclusive/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  README.md: e0fa8b38afae2258ffba8f1e9ff5c154329b63b6fad08c27f49b2856dde973d8
+  README.md: d2ba9ac616b666170f3f1df91efad52406c08773d02e44d28eae8bb2c1b491c9
   bundle-info.yaml: 556df791295d057061e984f1954dae9246f32d271674657d405969271dd81a0c
-  checksums.txt: 5b4357de66b08534e8b0efb407c3c56514f56acf0725fcd4c2f00e3b3c010052
+  checksums.txt: 96f9b1f3c36ad641160e74473554fa3a77a557ccc979e53365b6128a56439934
   deploy.sh: fc0e83a0c1e9f0fb9b248f0bf38db02448323a407faa63dd2d733a1ff0bd7612
   recipe.yaml: e133c9d2e9f843bea53f5bc21af8629ac2db3b6e67f13bf37c5dd7a596f65d41
 vr200-rke2-ubuntu-training-kubeflow:
@@ -4244,7 +4244,7 @@ vr200-rke2-ubuntu-training-kubeflow:
   013-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
   013-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
   013-nvidia-dra-driver-gpu/values.yaml: 00b7aa3c37aa1c596df65d88134ea1dafa5e86ae394eb62899b2d4664f29e702
-  014-nvsentinel/apply-crds.sh: 78b288e0a879c7960ef1d344326c35a9460309d3c3cde76f9d4267f42b23a6ad
+  014-nvsentinel/apply-crds.sh: cf3e8d4599064a6b10c9b00dd54e30d5952b1d60b771943e4236a7fa8c303bcc
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: d5720c7907bd5034123a0e81fc5bbfcfcc1e9862930d031fd0479d038ef26c98
   014-nvsentinel/upstream.env: e00fedffd0b90a5d1a36a5809dd8eb3eb2522f56666e394cec3fa2c4572971fb
@@ -4258,8 +4258,8 @@ vr200-rke2-ubuntu-training-kubeflow:
   016-rdma-netns-exclusive/install.sh: 8dbe2f28a30fafc5cdc17bf48f16490c89009dff5925dd80bc3bdc49122479db
   016-rdma-netns-exclusive/templates/skyhook.yaml: 264a41be17a21a51e915e3406de36c320fe2b76148c648dbce25f3e43ddd1530
   016-rdma-netns-exclusive/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  README.md: dd08482e4da0665930ee8718795d7f27a668d190e10f498cc58a2de76bd08b78
+  README.md: 4cc8d725ffa042cae3d9c2dab8c2c3dcc86687ec7c4982879bf960a177809461
   bundle-info.yaml: 118e6e514bc9d24ce255a0040a7488b8498a317aa62cba52392fcab5b5228294
-  checksums.txt: 768a3873546d69d50d2fa8717161b2214ccbbd6475147d07cf7ce7336c4a3759
+  checksums.txt: 74352e9a2a2d26ec1fdb3fe75638d5ac8a18d8a88bba3b3c81735f1ac703e05a
   deploy.sh: 5f9c51bc4f458dad5b1a7880bb5754330605cb5149cb7f63014aecccc4724cdd
   recipe.yaml: 041f436812d943ba76c4c3ea8ac522734827033e482f06d57385e163aae42902

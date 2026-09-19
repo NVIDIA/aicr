@@ -215,11 +215,13 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 	blocks := map[string]string{
 		"release gate queries helm":                 `if ! capture_bounded helm list --namespace "${NAMESPACE}" \`,
 		"indeterminate state aborts":                "  exit 1\nfi\nexisting=",
-		"absent release checks for retained CRDs":   `  if ! capture_bounded kubectl get -f "${CRD_DIR}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then`,
+		"absent release checks for retained CRDs":   "  if ! capture_bounded kubectl get -f \"${CRD_DIR}\" --ignore-not-found -o name \\\n    ${KUBECTL_CONN[@]+\"${KUBECTL_CONN[@]}\"}; then",
 		"only absent release AND no CRDs skips":     `    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."`,
 		"bound kills a wedged client":               `  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null`,
 		"missing timeout fails closed":              "cannot be bounded",
-		"applies under helm's field manager":        `    --field-manager=helm -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
+		"applies under helm's field manager":        `    --field-manager=helm -f "${doc}" ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"}; then`,
+		"helm's --kube-context is translated":       `        KUBECTL_CONN+=(--context "${helm_conn[1]}")`,
+		"an untranslatable helm flag fails closed":  `which has no known" >&2`,
 		"both phases share one artifact":            `if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \`,
 		"CRDs come from the archive, not show crds": `if ! collect_crds "${PULLED_CHART}" "${CRD_DIR}"; then`,
 	}
@@ -460,6 +462,143 @@ func stubPATH(t *testing.T, stubs map[string]string) string {
 // chartArchiveWithCRD builds a real chart .tgz containing one CRD whose file
 // does not begin with "---", which is the shape Helm 3 produces and the shape
 // that silently applied nothing before CRDs were read from the archive.
+// TestApplyCRDsScript_TranslatesHelmConnectionFlags runs the generated script
+// against a recording kubectl and asserts the argv it actually received.
+//
+// A text assertion cannot settle this. KUBECONFIG_FLAG carries helm's spelling
+// of the connection options, kubectl rejects --kube-context outright, and
+// forwarding the value untranslated is what broke three e2e lanes. A substring
+// pin still matches a loop that was reverted to forward it, because the pinned
+// lines survive the revert; only running the script and reading kubectl's argv
+// distinguishes the two.
+//
+// The fail-closed rows are the load-bearing half. An unrecognized option must
+// stop the script before any kubectl call rather than be dropped, because a
+// dropped connection option sends the cluster-scoped CRD apply to whatever the
+// ambient context names.
+func TestApplyCRDsScript_TranslatesHelmConnectionFlags(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	tests := []struct {
+		name     string
+		flag     string
+		setFlag  bool
+		wantArgs []string
+		denyArgs []string
+		wantErr  bool
+	}{
+		{name: "unset adds nothing", setFlag: false,
+			denyArgs: []string{"--context", "--kubeconfig", "--kube-context"}},
+		{name: "empty adds nothing", flag: "", setFlag: true,
+			denyArgs: []string{"--context", "--kubeconfig", "--kube-context"}},
+		{name: "kube-context becomes context", flag: "--kube-context kind-aicr", setFlag: true,
+			wantArgs: []string{"--context kind-aicr"}, denyArgs: []string{"--kube-context"}},
+		{name: "joined kube-context becomes context", flag: "--kube-context=kind-aicr", setFlag: true,
+			wantArgs: []string{"--context kind-aicr"}, denyArgs: []string{"--kube-context"}},
+		{name: "kubeconfig passes through", flag: "--kubeconfig /tmp/kc.yaml", setFlag: true,
+			wantArgs: []string{"--kubeconfig /tmp/kc.yaml"}, denyArgs: []string{"--kube-context"}},
+		{name: "joined kubeconfig passes through", flag: "--kubeconfig=/tmp/kc.yaml", setFlag: true,
+			wantArgs: []string{"--kubeconfig=/tmp/kc.yaml"}},
+		{name: "both are translated", flag: "--kubeconfig=/tmp/kc.yaml --kube-context kind-aicr", setFlag: true,
+			wantArgs: []string{"--kubeconfig=/tmp/kc.yaml", "--context kind-aicr"},
+			denyArgs: []string{"--kube-context"}},
+		{name: "unknown option fails closed", flag: "--kube-apiserver https://x", setFlag: true,
+			wantErr: true},
+		{name: "option without a value fails closed", flag: "--kube-context", setFlag: true,
+			wantErr: true},
+		// Exactly two tokens on purpose. With a trailing third the list ends on
+		// an unrecognized token and the catch-all aborts anyway, so the row
+		// would pass with the option-shaped-value guard removed. Here removing
+		// it yields --context '--kubeconfig' and a clean exit, which is the
+		// silent retarget being guarded against.
+		{name: "option-shaped value fails closed", flag: "--kube-context --kubeconfig",
+			setFlag: true, wantErr: true},
+		{name: "empty joined context fails closed", flag: "--kube-context=", setFlag: true,
+			wantErr: true},
+		{name: "empty joined kubeconfig fails closed", flag: "--kubeconfig=", setFlag: true,
+			wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outDir := t.TempDir()
+			res, err := localformat.Write(context.Background(), localformat.Options{
+				OutputDir:  outDir,
+				Components: []localformat.Component{ownsCRDsComponent(true)},
+			})
+			if err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			scriptPath := filepath.Join(outDir, res.Folders[0].Dir, "apply-crds.sh")
+
+			stub := t.TempDir()
+			argLog := filepath.Join(t.TempDir(), "kubectl.args")
+			// Records argv, then reports an existing CRD so the script proceeds
+			// past the retained-CRD gate and the apply is exercised too.
+			recording := "#!/usr/bin/env bash\n" +
+				"printf '%s\\n' \"$*\" >>\"${KUBECTL_ARGLOG}\"\n" +
+				"case \"$1\" in\n" +
+				"  get) echo 'customresourcedefinition.apiextensions.k8s.io/things.example.com' ;;\n" +
+				"esac\nexit 0\n"
+			for name, body := range map[string]string{
+				"kubectl": recording,
+				"helm":    helmStub(":", chartArchiveWithCRD(t)),
+				"timeout": passthroughTimeoutStub,
+			} {
+				if werr := os.WriteFile(filepath.Join(stub, name), []byte(body), 0o755); werr != nil {
+					t.Fatalf("write %s stub: %v", name, werr)
+				}
+			}
+
+			cmd := exec.Command("bash", scriptPath)
+			cmd.Env = append(os.Environ(),
+				"PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"KUBECTL_ARGLOG="+argLog)
+			if tt.setFlag {
+				cmd.Env = append(cmd.Env, "KUBECONFIG_FLAG="+tt.flag)
+			}
+			out, runErr := cmd.CombinedOutput()
+			if (runErr != nil) != tt.wantErr {
+				t.Fatalf("exit = %v, wantErr %v\n%s", runErr, tt.wantErr, out)
+			}
+
+			logged, _ := os.ReadFile(argLog)
+			got := string(logged)
+
+			if tt.wantErr {
+				// Fail closed means fail *early*. A non-zero exit after the
+				// apply already ran would satisfy wantErr while having written
+				// CRDs to an unintended cluster.
+				if strings.TrimSpace(got) != "" {
+					t.Errorf("kubectl ran before the script failed closed; argv:\n%s", got)
+				}
+				return
+			}
+
+			// Guard against a vacuous pass: both calls must have happened, or
+			// an assertion about their flags proves nothing.
+			for _, verb := range []string{"get ", "apply "} {
+				if !strings.Contains(got, verb) {
+					t.Fatalf("kubectl %q never ran, so the flag assertions are vacuous; argv:\n%s\nscript output:\n%s",
+						strings.TrimSpace(verb), got, out)
+				}
+			}
+			for _, want := range tt.wantArgs {
+				if !strings.Contains(got, want) {
+					t.Errorf("kubectl argv missing %q; got:\n%s", want, got)
+				}
+			}
+			for _, deny := range tt.denyArgs {
+				if strings.Contains(got, deny) {
+					t.Errorf("kubectl argv carries helm-only %q; got:\n%s", deny, got)
+				}
+			}
+		})
+	}
+}
+
 func chartArchiveWithCRD(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("tar"); err != nil {

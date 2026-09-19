@@ -43,6 +43,64 @@ if ! command -v kubectl >/dev/null 2>&1; then
   exit 1
 fi
 
+# KUBECONFIG_FLAG holds helm's spelling of the connection options, because every
+# other consumer forwards it unexamined into `helm upgrade`.
+# kubectl spells one of them differently -- helm's --kube-context is kubectl's
+# --context -- so the value is translated here rather than forwarded.
+#
+# An option with no known kubectl spelling is refused. Forwarding it aborts the
+# deploy on an unknown flag, and dropping it is worse: the reads and the CRD
+# force-apply below would then land on whatever cluster the ambient context
+# names, which is the wrong-cluster write this script must never make.
+KUBECTL_CONN=()
+if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
+  # Deliberate word-split: this slot holds a flag list, not a single word.
+  # shellcheck disable=SC2206
+  helm_conn=(${KUBECONFIG_FLAG})
+  while (( ${#helm_conn[@]} > 0 )); do
+    case "${helm_conn[0]}" in
+      --kube-context|--kubeconfig)
+        # An option-looking value is a malformed list, not a context named
+        # "--kubeconfig". Accepting it consumes the next real option as this
+        # one's argument, which silently discards a connection option the
+        # operator did set.
+        if (( ${#helm_conn[@]} < 2 )) || [[ "${helm_conn[1]}" == --* ]]; then
+          echo "ERROR: KUBECONFIG_FLAG gives ${helm_conn[0]} no usable value." >&2
+          exit 1
+        fi
+        if [[ "${helm_conn[0]}" == "--kube-context" ]]; then
+          KUBECTL_CONN+=(--context "${helm_conn[1]}")
+        else
+          KUBECTL_CONN+=(--kubeconfig "${helm_conn[1]}")
+        fi
+        helm_conn=("${helm_conn[@]:2}")
+        ;;
+      # An empty joined value is refused rather than forwarded. Both helm and
+      # kubectl read an empty --context as "use the current context", so
+      # passing it through turns a stated target into the ambient one without
+      # saying so -- the silent retarget this step exists to prevent.
+      --kube-context=|--kubeconfig=)
+        echo "ERROR: KUBECONFIG_FLAG gives ${helm_conn[0]%=} an empty value." >&2
+        exit 1
+        ;;
+      --kube-context=*)
+        KUBECTL_CONN+=(--context "${helm_conn[0]#*=}")
+        helm_conn=("${helm_conn[@]:1}")
+        ;;
+      --kubeconfig=*)
+        KUBECTL_CONN+=("${helm_conn[0]}")
+        helm_conn=("${helm_conn[@]:1}")
+        ;;
+      *)
+        echo "ERROR: KUBECONFIG_FLAG carries '${helm_conn[0]}', which has no known" >&2
+        echo "       kubectl spelling. The ${RELEASE} CRD step refuses to guess rather" >&2
+        echo "       than read and apply CRDs against an unintended cluster." >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+
 # Every helm and kubectl call below runs through run_bounded. This script runs
 # inside the deploy path, where a command that never returns hangs the whole
 # rollout rather than failing it: deploy.sh retries a component that exits
@@ -273,7 +331,8 @@ fi
 # rather than an error. A failure here is indeterminate and fails closed, for
 # the same reason the release lookup does.
 if [[ "${RELEASE_EXISTS}" == "false" ]]; then
-  if ! capture_bounded kubectl get -f "${CRD_DIR}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then
+  if ! capture_bounded kubectl get -f "${CRD_DIR}" --ignore-not-found -o name \
+    ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"}; then
     echo "ERROR: cannot determine whether ${RELEASE} CRDs are already present; refusing" >&2
     echo "       to skip and risk pairing a new controller with a retained schema: $(cat "${BOUNDED_OUT}")" >&2
     exit 1
@@ -314,7 +373,7 @@ while IFS= read -r doc; do
   # sorted it can do so before the real CRDs are ever reached.
   grep -q '[^[:space:]]' "${doc}" || continue
   if ! capture_bounded kubectl apply --server-side --force-conflicts \
-    --field-manager=helm -f "${doc}" ${KUBECONFIG_FLAG:-}; then
+    --field-manager=helm -f "${doc}" ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"}; then
     echo "ERROR: could not apply a ${RELEASE} CRD: $(cat "${BOUNDED_OUT}")" >&2
     exit 1
   fi
