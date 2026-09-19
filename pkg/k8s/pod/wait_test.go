@@ -31,11 +31,12 @@ import (
 
 func TestWaitForPodSucceeded(t *testing.T) {
 	tests := []struct {
-		name    string
-		pod     corev1.Pod
-		cancel  bool
-		timeout time.Duration
-		wantErr bool
+		name     string
+		pod      corev1.Pod
+		cancel   bool
+		timeout  time.Duration
+		wantErr  bool
+		wantCode aicrerrors.ErrorCode // checked only when wantErr and non-empty
 	}{
 		{
 			name: "already succeeded",
@@ -60,14 +61,26 @@ func TestWaitForPodSucceeded(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "context cancelled",
+			// Deliberately not canceled: a real deadline must classify as
+			// ErrCodeTimeout, distinct from the "context canceled" case below
+			// which classifies as ErrCodeCanceled — pinning both directions of
+			// the wait-loop split (pkg/k8s/pod/wait.go's timeoutCtx.Done() case).
+			name:     "timeout on pending",
+			pod:      corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"}, Status: corev1.PodStatus{Phase: corev1.PodPending}},
+			timeout:  200 * time.Millisecond,
+			wantErr:  true,
+			wantCode: aicrerrors.ErrCodeTimeout,
+		},
+		{
+			name: "context canceled",
 			pod: corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
 				Status:     corev1.PodStatus{Phase: corev1.PodPending},
 			},
-			cancel:  true,
-			timeout: 5 * time.Second,
-			wantErr: true,
+			cancel:   true,
+			timeout:  5 * time.Second,
+			wantErr:  true,
+			wantCode: aicrerrors.ErrCodeCanceled,
 		},
 	}
 
@@ -87,17 +100,27 @@ func TestWaitForPodSucceeded(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("WaitForPodSucceeded() error = %v, wantErr %v", err, tt.wantErr)
 			}
+			if tt.wantErr && tt.wantCode != "" {
+				var se *aicrerrors.StructuredError
+				if !stderrors.As(err, &se) {
+					t.Fatalf("expected *errors.StructuredError, got %T", err)
+				}
+				if se.Code != tt.wantCode {
+					t.Errorf("code = %q, want %q", se.Code, tt.wantCode)
+				}
+			}
 		})
 	}
 }
 
 func TestWaitForPodReady(t *testing.T) {
 	tests := []struct {
-		name    string
-		pod     corev1.Pod
-		cancel  bool
-		timeout time.Duration
-		wantErr bool
+		name     string
+		pod      corev1.Pod
+		cancel   bool
+		timeout  time.Duration
+		wantErr  bool
+		wantCode aicrerrors.ErrorCode // checked only when wantErr and non-empty
 	}{
 		{
 			name: "already ready",
@@ -126,23 +149,27 @@ func TestWaitForPodReady(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// Deliberately not canceled: pins the ErrCodeTimeout side of the
+			// wait-loop split, distinct from "context canceled" below.
 			name: "timeout on pending",
 			pod: corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
 				Status:     corev1.PodStatus{Phase: corev1.PodPending},
 			},
-			timeout: 500 * time.Millisecond,
-			wantErr: true,
+			timeout:  500 * time.Millisecond,
+			wantErr:  true,
+			wantCode: aicrerrors.ErrCodeTimeout,
 		},
 		{
-			name: "context cancelled",
+			name: "context canceled",
 			pod: corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
 				Status:     corev1.PodStatus{Phase: corev1.PodPending},
 			},
-			cancel:  true,
-			timeout: 5 * time.Second,
-			wantErr: true,
+			cancel:   true,
+			timeout:  5 * time.Second,
+			wantErr:  true,
+			wantCode: aicrerrors.ErrCodeCanceled,
 		},
 	}
 
@@ -161,6 +188,15 @@ func TestWaitForPodReady(t *testing.T) {
 			err := pod.WaitForPodReady(ctx, client, "default", "test-pod", tt.timeout)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("WaitForPodReady() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && tt.wantCode != "" {
+				var se *aicrerrors.StructuredError
+				if !stderrors.As(err, &se) {
+					t.Fatalf("expected *errors.StructuredError, got %T", err)
+				}
+				if se.Code != tt.wantCode {
+					t.Errorf("code = %q, want %q", se.Code, tt.wantCode)
+				}
 			}
 		})
 	}

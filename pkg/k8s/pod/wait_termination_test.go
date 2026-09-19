@@ -270,6 +270,36 @@ func TestWaitForTermination_ContextTimeout(t *testing.T) {
 	}
 }
 
+// TestWaitForTermination_ContextCanceled is the operator-abort counterpart to
+// TestWaitForTermination_ContextTimeout: an explicitly canceled context must
+// report ErrCodeCanceled rather than the ErrCodeTimeout the deadline case
+// asserts, pinning the watchUntilTerminal ctx.Done() split.
+func TestWaitForTermination_ContextCanceled(t *testing.T) {
+	p := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	client := fake.NewSimpleClientset(p)
+	w := watch.NewFake()
+	client.PrependWatchReactor("pods", fakeWatchReactor(w))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := pod.WaitForTermination(ctx, client, "default", "test-pod")
+	if err == nil {
+		t.Fatal("expected error on canceled context")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is not StructuredError: %v", err)
+	}
+	if se.Code != errors.ErrCodeCanceled {
+		t.Errorf("error code = %q, want %q", se.Code, errors.ErrCodeCanceled)
+	}
+}
+
 func TestWaitForJobTerminal(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -300,6 +330,17 @@ func TestWaitForJobTerminal(t *testing.T) {
 			timeout:  100 * time.Millisecond,
 			wantErr:  true,
 			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			// Counterpart to "timeout while running": an already-canceled
+			// context must report ErrCodeCanceled, not ErrCodeTimeout,
+			// pinning the WaitForJobTerminal timeoutCtx.Done() split.
+			name:      "canceled while running",
+			startObj:  jobWithCondition(),
+			timeout:   2 * time.Second,
+			ctxCancel: true,
+			wantErr:   true,
+			wantCode:  errors.ErrCodeCanceled,
 		},
 		{
 			name:       "becomes complete via watch",
