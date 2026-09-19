@@ -59,7 +59,7 @@ componentRefs:
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.17.1
+    version: v0.19.0
     valuesFile: components/nodewright-operator/values.yaml
   - name: prometheus-operator-crds
     namespace: monitoring
