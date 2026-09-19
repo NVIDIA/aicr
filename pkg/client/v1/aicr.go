@@ -160,6 +160,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"github.com/NVIDIA/aicr/pkg/inventory"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/ocisource"
@@ -256,6 +257,14 @@ type clientDependencies struct {
 		context.Context,
 		*snapshotter.AgentConfig,
 	) (*snapshotter.Snapshot, []byte, error)
+
+	// readInventory and scanAtRisk are the two cluster reads UpgradeCheck
+	// makes. They are seams for the reason deployAndCollect is: what the
+	// facade decides about each call, namely the deployer the release names
+	// are mapped under and that the scan looks only for the kinds the match
+	// actually crossed, is otherwise observable only from a live apiserver.
+	readInventory func(context.Context, inventory.Options) (inventory.Result, error)
+	scanAtRisk    func(context.Context, inventory.AtRiskOptions) (inventory.AtRiskResult, error)
 }
 
 func defaultClientDependencies() clientDependencies {
@@ -269,6 +278,8 @@ func defaultClientDependencies() clientDependencies {
 			return ocisource.New(ctx, embedded, config)
 		},
 		deployAndCollect: snapshotter.DeployAndCollect,
+		readInventory:    inventory.Read,
+		scanAtRisk:       inventory.ScanAtRisk,
 	}
 }
 
