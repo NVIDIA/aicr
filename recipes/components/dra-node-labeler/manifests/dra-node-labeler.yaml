@@ -30,6 +30,15 @@
 # Tolerations come from the registry's accelerated toleration injection.
 # Labeling therefore waits for GFD, which lands with the GPU Operator.
 {{- $vals := index .Values "dra-node-labeler" }}
+# Values-gated (ADR-015): renders nothing unless enabled is true. The bundler
+# flips it in the --dra-eviction-node-label opt-in path that also keeps this
+# component in the bundle; the validator resolves effective values without that
+# flag, so on the default path the render is empty and the deployment validator
+# suppresses this component's health check (issue #2846). toString guards a nil
+# or non-bool value the same way gcp-driver-installer's installer.enabled gate
+# does — an unparseable gate fails closed to "renders nothing".
+{{- $gate := toString (index $vals "enabled") }}
+{{- if eq $gate "true" }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -197,3 +206,4 @@ spec:
             runAsUser: 65534
             seccompProfile:
               type: RuntimeDefault
+{{- end }}

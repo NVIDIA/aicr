@@ -2365,6 +2365,35 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 			},
 			wantSuppressed: false,
 		},
+		{
+			// Regression for issue #2846: on the default path the eviction
+			// contract is not opted in, the bundler drops dra-node-labeler, and
+			// its default-off manifest renders no objects — so the deployment
+			// validator must suppress the health check instead of failing
+			// NOT_FOUND on a DaemonSet that was never deployed.
+			name: "dra-node-labeler not opted in (default values) suppresses the assert",
+			ref: recipe.ComponentRef{
+				Name:          "dra-node-labeler",
+				Type:          recipe.ComponentTypeHelm,
+				ValuesFile:    "components/dra-node-labeler/values.yaml",
+				ManifestFiles: []string{"components/dra-node-labeler/manifests/dra-node-labeler.yaml"},
+			},
+			wantSuppressed: true,
+		},
+		{
+			// The bundler flips enabled=true in the --dra-eviction-node-label
+			// opt-in path that keeps the component in the bundle; then the
+			// labeler renders objects and its health check must run.
+			name: "dra-node-labeler opted in (enabled=true) keeps the assert",
+			ref: recipe.ComponentRef{
+				Name:          "dra-node-labeler",
+				Type:          recipe.ComponentTypeHelm,
+				ValuesFile:    "components/dra-node-labeler/values.yaml",
+				ManifestFiles: []string{"components/dra-node-labeler/manifests/dra-node-labeler.yaml"},
+				Overrides:     map[string]any{"enabled": true},
+			},
+			wantSuppressed: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
