@@ -95,3 +95,53 @@ func TestNewDynamicClientForConfig(t *testing.T) {
 		}
 	})
 }
+
+// TestNewRESTMapperForConfig covers the mapper half of the pair above. Both
+// constructors are here rather than in pkg/chainsaw so a caller wanting only a
+// mapper does not have to depend on an in-process test executor to get one.
+func TestNewRESTMapperForConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := NewRESTMapperForConfig(nil)
+		if err == nil {
+			t.Fatal("expected an error for a nil rest config")
+		}
+		if got != nil {
+			t.Errorf("mapper = %v, want nil on error", got)
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+
+	t.Run("valid config yields a mapper without contacting the apiserver", func(t *testing.T) {
+		t.Parallel()
+
+		// Discovery is deferred, so construction against an unreachable host
+		// still succeeds; the first mapping lookup is what would reach out.
+		got, err := NewRESTMapperForConfig(&rest.Config{Host: "https://127.0.0.1:6443"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Error("mapper = nil, want a constructed mapper")
+		}
+	})
+
+	t.Run("the discovery client is returned alongside the mapper", func(t *testing.T) {
+		t.Parallel()
+
+		mapper, disco, err := NewRESTMapperAndDiscovery(&rest.Config{Host: "https://127.0.0.1:6443"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Both, and from one cache: a caller that built the probe separately
+		// would hold a view that drifts from the mapper's across a Reset().
+		if mapper == nil || disco == nil {
+			t.Errorf("mapper = %v, discovery = %v, want both", mapper, disco)
+		}
+	})
+}

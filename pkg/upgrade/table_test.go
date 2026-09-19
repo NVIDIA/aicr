@@ -358,6 +358,81 @@ func emptyClusterReport(t *testing.T) *Report {
 	})
 }
 
+// atRiskFindingsReport is the scan that found something. The two kinds differ
+// in every way the renderer can express — one installed and holding objects,
+// one the cluster does not serve — so a renderer that printed an uninstalled
+// kind as "0 objects examined" changes this golden.
+func atRiskFindingsReport(t *testing.T) *Report {
+	t.Helper()
+	results := Match(syntheticSet(),
+		map[string]string{"beta-operator": "0.17.2"},
+		map[string]string{"beta-operator": "0.18.1"})
+	return NewReport(results, ReportOptions{
+		From:     "cluster",
+		To:       "./bundles-v0.17.0",
+		Deployer: "argocd",
+		AtRisk: &AtRiskReport{
+			Scanned: true,
+			Kinds: []AtRiskKind{
+				{Group: "beta.example.com", Kind: "LegacyPolicy",
+					Components: []string{"beta-operator"}, Present: true, Examined: 4},
+				// Two owners, so the joined cell and the kind line's
+				// parenthetical are both exercised, and an uninstalled kind is
+				// still attributed even though it produces no finding row.
+				{Group: "beta.example.com", Kind: "LegacyBinding",
+					Components: []string{"beta-operator", "gamma-operator"}, Present: false},
+			},
+			Findings: []AtRiskFinding{
+				{Group: "beta.example.com", Kind: "LegacyPolicy", Components: []string{"beta-operator"},
+					Namespace: "tenant-a", Name: "nightly-training"},
+				{Group: "beta.example.com", Kind: "LegacyPolicy", Components: []string{"beta-operator"},
+					Namespace: "tenant-b", Name: "inference-pool"},
+				// Cluster-scoped and unattributed: both the NAMESPACE and the
+				// COMPONENT cell fall back to the placeholder rather than to
+				// blank, so an empty column is never a missing value.
+				{Group: "", Kind: "PersistentVolume", Name: "beta-store-pv"},
+			},
+		},
+	})
+}
+
+// atRiskCleanReport is the scan that examined objects and found every one of
+// them owned. It is a separate golden from the one above because "found
+// nothing" and "looked at nothing" must not render alike.
+func atRiskCleanReport(t *testing.T) *Report {
+	t.Helper()
+	results := Match(syntheticSet(),
+		map[string]string{"alpha-operator": "1.2.0"},
+		map[string]string{"alpha-operator": "1.2.3"})
+	return NewReport(results, ReportOptions{
+		From:     "cluster",
+		To:       "./bundles-v0.17.0",
+		Deployer: "helm",
+		AtRisk: &AtRiskReport{
+			Scanned: true,
+			Kinds: []AtRiskKind{
+				{Group: "alpha.example.com", Kind: "AlphaTuning",
+					Components: []string{"alpha-operator"}, Present: true, Examined: 2},
+			},
+		},
+	})
+}
+
+// atRiskNotScannedReport is the offline comparison, which every run without a
+// cluster produces. NewReport fills the section rather than the fixture, so
+// this golden also pins the default a caller cannot forget to set.
+func atRiskNotScannedReport(t *testing.T) *Report {
+	t.Helper()
+	results := Match(syntheticSet(),
+		map[string]string{"alpha-operator": "1.2.0"},
+		map[string]string{"alpha-operator": "1.2.3"})
+	return NewReport(results, ReportOptions{
+		From:     "./bundles-v0.16.0",
+		To:       "./bundles-v0.17.0",
+		Deployer: "helm",
+	})
+}
+
 func TestWriteTableGolden(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -372,6 +447,9 @@ func TestWriteTableGolden(t *testing.T) {
 		}},
 		{"cluster source", "report-cluster-source.golden", clusterSourceReport},
 		{"cluster matched nothing", "report-cluster-empty.golden", emptyClusterReport},
+		{"at risk findings", "report-at-risk.golden", atRiskFindingsReport},
+		{"at risk scanned clean", "report-at-risk-clean.golden", atRiskCleanReport},
+		{"at risk not scanned", "report-at-risk-not-scanned.golden", atRiskNotScannedReport},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -481,6 +559,29 @@ type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) {
 	return 0, stderrors.New("synthetic write failure")
+}
+
+// TestWriteAtRiskRowsPropagatesWriteFailure covers the findings table's own
+// writer, which the whole-report test above cannot reach: WriteTable returns
+// on the component rows long before the at-risk section is written.
+//
+// It is called directly rather than through WriteTable because the tabwriter
+// is the point. A tabwriter buffers, so a failed Flush loses a whole block
+// while every later write to the same destination may still succeed, and the
+// shared errWriter would then report a complete report that is missing rows.
+func TestWriteAtRiskRowsPropagatesWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	err := writeAtRiskRows(failingWriter{}, []AtRiskFinding{
+		{Group: "beta.example.com", Kind: "LegacyPolicy", Components: []string{"beta-operator"},
+			Namespace: "tenant-a", Name: "nightly-training"},
+	})
+	if err == nil {
+		t.Fatal("writeAtRiskRows on a failing writer returned nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Errorf("error = %v, want ErrCodeInternal", err)
+	}
 }
 
 // TestWriteTableEscapesArtifactControlCharacters pins that no artifact-derived
@@ -593,6 +694,18 @@ func TestReportClusterSourceJSONGolden(t *testing.T) {
 		t.Fatalf("marshal report: %v", err)
 	}
 	compareGolden(t, "report-cluster-source.json.golden", append(got, '\n'))
+}
+
+// TestAtRiskJSONGolden pins the machine-readable shape of the at-risk section,
+// which a pipeline reads instead of the table. The table goldens cannot cover
+// it: the renderer collapses a present-and-empty kind list and an absent one
+// into the same prose.
+func TestAtRiskJSONGolden(t *testing.T) {
+	got, err := json.MarshalIndent(atRiskFindingsReport(t), "", "  ")
+	if err != nil {
+		t.Fatalf("marshal report: %v", err)
+	}
+	compareGolden(t, "report-at-risk.json.golden", append(got, '\n'))
 }
 
 // TestWriteTableRendersSourceAboveTheRows pins the ordering the banner's whole

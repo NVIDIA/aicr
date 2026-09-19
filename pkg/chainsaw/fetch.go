@@ -30,11 +30,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
 )
 
 // groupDiscoverer is the subset of discovery.DiscoveryInterface the fetcher
@@ -145,33 +142,23 @@ func NewDynamicClientForConfig(restConfig *rest.Config) (dynamic.Interface, erro
 }
 
 // NewRESTMapperForConfig builds the discovery-backed RESTMapper the fetcher
-// uses to resolve a GroupVersionKind to a resource and its scope. Discovery is
-// deferred: no API call happens until the first mapping lookup.
+// uses to resolve a GroupVersionKind to a resource and its scope.
 //
 // Prefer NewClusterFetcherWithClient when the mapper is destined for a fetcher:
 // it also wires the partial-discovery probe, which a mapper alone cannot carry.
+//
+// Construction itself lives in pkg/k8s/client, for the reason
+// NewDynamicClientForConfig gives.
 func NewRESTMapperForConfig(restConfig *rest.Config) (meta.RESTMapper, error) {
-	mapper, _, err := newRESTMapperAndDiscovery(restConfig)
-	return mapper, err
+	return k8sclient.NewRESTMapperForConfig(restConfig)
 }
 
-// newRESTMapperAndDiscovery builds the deferred RESTMapper together with the
-// cached discovery client backing it. Returning both is what lets the fetcher
-// ask the very cache the mapper resolved through whether a no-match came from
-// a group discovery could not enumerate; two independently-constructed caches
-// would drift across a Reset().
+// newRESTMapperAndDiscovery is NewRESTMapperForConfig also returning the cached
+// discovery client the mapper resolves through, which is what lets the fetcher
+// ask that very cache whether a no-match came from a group discovery could not
+// enumerate.
 func newRESTMapperAndDiscovery(restConfig *rest.Config) (meta.RESTMapper, discovery.CachedDiscoveryInterface, error) {
-	if restConfig == nil {
-		return nil, nil, errors.New(errors.ErrCodeInvalidRequest, "no kubernetes client configuration available")
-	}
-
-	discoveryClient, err := kubernetes.NewForConfig(boundedConfig(restConfig))
-	if err != nil {
-		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create discovery client", err)
-	}
-
-	cached := memory.NewMemCacheClient(discoveryClient.Discovery())
-	return restmapper.NewDeferredDiscoveryRESTMapper(cached), cached, nil
+	return k8sclient.NewRESTMapperAndDiscovery(restConfig)
 }
 
 // boundedConfig applies the shared per-request bound to restConfig. The

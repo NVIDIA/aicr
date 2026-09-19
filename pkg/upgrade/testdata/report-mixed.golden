@@ -61,4 +61,12 @@ mu-operator 1.17.0 -> 1.25.0  (blocked)
   last version below 1.19.0 and re-run this check, or widen a record's `to`
   range to cover 1.25.0
 
+AT RISK (advisory)
+  Objects of the kinds the crossed transition records name that carry neither
+  Helm nor Argo CD ownership. AICR does not manage them and cannot restore
+  them; removing a CRD takes its objects with it. Advisory only: this never
+  changes the exit code.
+
+  not scanned: no cluster access requested
+
 11 component changes, 8 need attention
