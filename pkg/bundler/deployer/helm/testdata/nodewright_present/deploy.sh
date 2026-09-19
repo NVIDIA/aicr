@@ -119,6 +119,12 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
         if [[ "${_aicr_tok}" == "--kube-context" ]]; then
           _aicr_ctx="${_aicr_val}"
         else
+          # Exported as well as passed: bash cannot export an array, and the
+          # deprecated variable is unset once translated, so a child script
+          # re-running this prologue would otherwise see no kubeconfig at all
+          # and fall back to the ambient one.
+          KUBECONFIG="${_aicr_val}"
+          export KUBECONFIG
           HELM_CONN+=(--kubeconfig "${_aicr_val}")
           KUBECTL_CONN+=(--kubeconfig "${_aicr_val}")
         fi
@@ -133,6 +139,8 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
         if [[ "${_aicr_tok}" == --kube-context=* ]]; then
           _aicr_ctx="${_aicr_val}"
         else
+          KUBECONFIG="${_aicr_val}"
+          export KUBECONFIG
           HELM_CONN+=("${_aicr_tok}")
           KUBECTL_CONN+=("${_aicr_tok}")
         fi
