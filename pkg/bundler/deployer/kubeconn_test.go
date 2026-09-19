@@ -256,3 +256,71 @@ func equalArgv(got, want []string) bool {
 	}
 	return true
 }
+
+// deploy.sh runs each component as its own process (`cd dir && bash install.sh`)
+// and install.sh runs `bash ./apply-crds.sh`, so every child re-runs this
+// prologue from the environment alone. Bash cannot export an array, and the
+// deprecated variable is unset once translated, so anything held only in
+// HELM_CONN/KUBECTL_CONN is gone by the first child. The kubeconfig has to
+// survive as an exported variable or the child's helm silently falls back to
+// the ambient one.
+func TestKubeConnection_PropagatesToChildScripts(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	argvDir := filepath.Join(dir, "argv")
+	for _, d := range []string{binDir, argvDir} {
+		if err := os.MkdirAll(d, 0o750); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	// Records the connection as the child binary would actually resolve it:
+	// the flags it was handed plus the kubeconfig it inherits from the env.
+	stub := `#!/bin/sh
+{ printf 'KUBECONFIG=%s\n' "${KUBECONFIG:-}"; printf 'ARGV=%s\n' "$*"; } > "${ARGV_DIR}/${0##*/}.seen"
+`
+	for _, name := range []string{"helm", "kubectl"} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(stub), 0o700); err != nil {
+			t.Fatalf("write stub %s: %v", name, err)
+		}
+	}
+
+	child := filepath.Join(dir, "child.sh")
+	if err := os.WriteFile(child, []byte("#!/usr/bin/env bash\nset -euo pipefail\n\n"+
+		KubeConnection()+"\nhelm ${HELM_CONN[@]+\"${HELM_CONN[@]}\"} upgrade\n"), 0o700); err != nil {
+		t.Fatalf("write child: %v", err)
+	}
+	// PATH holds only the stubs, so the child is spawned by absolute path.
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	parent := filepath.Join(dir, "parent.sh")
+	if err := os.WriteFile(parent, []byte("#!/usr/bin/env bash\nset -euo pipefail\n\n"+
+		KubeConnection()+"\n"+bashPath+" "+child+"\n"), 0o700); err != nil {
+		t.Fatalf("write parent: %v", err)
+	}
+
+	cmd := exec.Command("bash", parent)
+	cmd.Env = []string{
+		"PATH=" + binDir,
+		"ARGV_DIR=" + argvDir,
+		"KUBECONFIG_FLAG=--kubeconfig /tmp/kc.yaml --kube-context kind-aicr",
+	}
+	var errBuf strings.Builder
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("parent failed: %v\nstderr: %s", err, errBuf.String())
+	}
+
+	seen, readErr := os.ReadFile(filepath.Join(argvDir, "helm.seen"))
+	if readErr != nil {
+		t.Fatalf("child helm never ran: %v\nstderr: %s", readErr, errBuf.String())
+	}
+	got := string(seen)
+	if !strings.Contains(got, "--kube-context kind-aicr") {
+		t.Errorf("child helm lost the context; saw:\n%s", got)
+	}
+	if !strings.Contains(got, "/tmp/kc.yaml") {
+		t.Errorf("child helm lost the kubeconfig, so it would use the ambient one; saw:\n%s", got)
+	}
+}

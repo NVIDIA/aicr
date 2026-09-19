@@ -3039,11 +3039,16 @@ KUBE_CONTEXT=my-cluster ./deploy.sh
 cd 001-gpu-operator && KUBE_CONTEXT=my-cluster bash install.sh
 ```
 
-Set exactly one spelling for the context. A `KUBECONFIG_FLAG` carrying an
-option that is not translated, or naming a different context than
-`KUBE_CONTEXT`, fails before the first cluster call rather than falling back to
-the ambient context. Rejection messages name the offending option but never its
-argument, so a flag carrying a credential does not reach the log.
+Prefer `KUBE_CONTEXT`. Setting it alongside `KUBECONFIG_FLAG=--kube-context` is
+accepted while both name the same context; only a mismatch is rejected. A
+`KUBECONFIG_FLAG` carrying an option that is not translated, or naming a
+different context than `KUBE_CONTEXT`, fails before the first cluster call
+rather than falling back to the ambient context.
+
+When an unsupported or malformed option is rejected, the message names the
+option but not its argument, so a flag carrying a credential does not reach the
+log. The context-mismatch message is the exception: it names both contexts,
+which identify clusters rather than authenticate to them.
 
 **Retry behavior:**
 
