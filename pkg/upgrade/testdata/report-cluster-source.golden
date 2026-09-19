@@ -1,0 +1,18 @@
+UPGRADE CHECK
+  from      cluster
+  to        ./bundles-v0.17.0
+  deployer  argocd
+
+READ FROM CLUSTER
+  kubeconfig  /home/op/.kube/config
+  context     prod-east
+  matched     2 components
+  helm        37 storage records, 2 unattributed, 1 unreadable, 3 uninstalled, 0 stamped but unmatched
+  argo        5 applications, 6 unattributed, 7 unreadable, no stamp to check
+
+COMPONENT        FROM   TO     VERDICT  NOTES
+---------        ----   --     -------  -----
+alpha-operator   1.2.0  1.2.3  safe     3 patches, verified, safe across 1 minor
+lambda-operator  1.1.0  1.2.0  unknown  1 minor, record exists, no boundary here
+
+2 component changes, 1 needs attention

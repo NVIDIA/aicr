@@ -1,0 +1,25 @@
+UPGRADE CHECK
+  from      cluster
+  to        ./bundles-v0.17.0
+  deployer  helm
+
+READ FROM CLUSTER
+  kubeconfig  /home/op/.kube/config
+  context     staging-west
+  matched     0 components
+  helm        12 storage records, 1 unattributed, 2 unreadable, 4 uninstalled, 5 stamped but unmatched
+  argo        0 applications, 0 unattributed, 0 unreadable, no stamp to check
+
+  NOTHING INSTALLED WAS RECOGNIZED
+  Nothing was compared, and every row below therefore reads "added". A cluster
+  with none of these components installed reads this way, and so do the two
+  likelier causes: this is not the cluster you meant, or these components were
+  installed by a deployer other than the one this check was given, whose
+  releases it does not look for.
+
+COMPONENT       FROM  TO     VERDICT  NOTES
+---------       ----  --     -------  -----
+alpha-operator  -     1.2.3  -        new component, nothing to do
+zeta-operator   -     0.4.0  -        new component, nothing to do
+
+2 component changes, 0 need attention
