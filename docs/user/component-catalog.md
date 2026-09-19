@@ -885,8 +885,9 @@ that claims a decision it never applied.
 The same selection is available in an `AICRConfig` document as
 `spec.recipe.configuration.runtimeInventory.mode`.
 
-**Overriding the chart version requires overriding this assertion.** Assert
-content is static YAML with no templating, so the expected storage version is
+#### Overriding the chart version requires overriding this assertion
+
+Assert content is static YAML with no templating, so the expected storage version is
 a literal tied to the registry's pinned chart, currently `v1beta1` for chart
 1.3.0. Charts 1.2.0 and earlier declare only `v1alpha1`. A recipe that sets
 `version` on the `k8s-aibom` componentRef to a chart with a different storage
