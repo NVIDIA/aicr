@@ -70,7 +70,7 @@ Options:
 
 Exclusions fence out-of-band / platform-owned installs that AICR does not own.
 Example: nodewright/skyhook installed out-of-band, excluded from the recipe:
-  tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com
+  tools/cleanup --exclude-ns skyhook --exclude-crd 'skyhook.nvidia.com, nodewright.nvidia.com'
 EOF
 }
 
@@ -165,6 +165,7 @@ AICR_CRD_PATTERNS=(
     mellanox.com
     cert-manager.io
     skyhook.nvidia.com
+    nodewright.nvidia.com
     nvsentinel.nvidia.com
     monitoring.coreos.com
     scheduling.run.ai

@@ -244,8 +244,12 @@ CLOUD_REFRESH_INTERVAL_SECONDS="${CLOUD_REFRESH_INTERVAL_SECONDS:-999999999}"
 #     across polls is the caller's job in assert_gpu_census)
 #   - every present node must be Ready, else `node <name> not Ready`, return 1
 #   - no present node may be cordoned: spec.unschedulable==true OR a NoSchedule
-#     taint whose key starts with `skyhook.nvidia.com` (the exact incident state:
-#     present but cordoned+driverless) -> `node <name> cordoned ...`, return 1
+#     taint whose key starts with `nodewright.nvidia.com` or the legacy
+#     `skyhook.nvidia.com` (the exact incident state: present but
+#     cordoned+driverless) -> `node <name> cordoned ...`, return 1.
+#     Both prefixes are matched because the operator's default runtime-required
+#     taint key moved to nodewright.nvidia.com in v0.18.0, and a node pool may
+#     still be pre-tainted with the legacy key.
 #   - otherwise print `ok (<present> gpu-worker nodes ready)`, return 0
 # Robust to missing fields (jq `// empty` / `// false`); unparseable JSON -> 1.
 gpu_census_verdict() {
@@ -274,11 +278,13 @@ gpu_census_verdict() {
                     | select( (.spec.unschedulable // false) == true
                               or ( [ .spec.taints[]?
                                      | select(.effect == "NoSchedule"
-                                              and ((.key // "") | startswith("skyhook.nvidia.com"))) ]
+                                              and ((.key // "")
+                                                   | (startswith("nodewright.nvidia.com")
+                                                      or startswith("skyhook.nvidia.com")))) ]
                                    | length > 0 ) )
                     | .metadata.name ] | first ) as $cordoned
                 | if $cordoned != null then
-                    { ok: false, reason: "node \($cordoned) cordoned by skyhook (tuning in progress)" }
+                    { ok: false, reason: "node \($cordoned) cordoned by nodewright (tuning in progress)" }
                   else
                     { ok: true, reason: "ok (\($present) gpu-worker nodes ready)" }
                   end

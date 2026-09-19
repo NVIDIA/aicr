@@ -71,7 +71,7 @@ func TestCheckExpectedResources_IncludesDeploymentCompletenessAndGPUReadiness(t 
 			activeNamespace("skyhook"),
 			activeNamespace("nvidia-dra-driver"),
 			activeNamespace("app-ns"),
-			readyDeployment("app-ns", "app-deployment", 1),
+			readyDeployment("app-ns", "app-deployment"),
 			readyDaemonSet("nvidia-dra-driver", testDefaultDRADSName, 2),
 		},
 		[]runtime.Object{
@@ -155,7 +155,7 @@ func TestCheckExpectedResources_SkipsDisabledComponents(t *testing.T) {
 	ctx := newDeploymentTestContext(t,
 		[]runtime.Object{
 			activeNamespace("app-ns"),
-			readyDeployment("app-ns", "app-deployment", 1),
+			readyDeployment("app-ns", "app-deployment"),
 		},
 		nil,
 		[]recipe.ComponentRef{
@@ -739,6 +739,18 @@ spec:
 			want: []string{"tuning"},
 		},
 		{
+			name: "renamed kind (nodewright-operator v0.18.0) is captured too",
+			content: []byte(`---
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
+metadata:
+  name: tuning
+spec:
+  runtimeRequired: true
+`),
+			want: []string{"tuning"},
+		},
+		{
 			name: "multi-document manifest — both Skyhook names captured",
 			content: []byte(`---
 apiVersion: skyhook.nvidia.com/v1alpha1
@@ -986,17 +998,22 @@ func TestVerifyNodewrightReady_TolerantWhenAllCRsSuppressed(t *testing.T) {
 	ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")}, nil,
 		[]recipe.ComponentRef{ref})
 
-	if err := verifyNodewrightReady(ctx, ref); err != nil {
+	if err := verifyNodewrightReady(ctx, ref, []corev1.Taint{legacyRuntimeRequiredTaint}); err != nil {
 		t.Fatalf("verifyNodewrightReady() error = %v, want nil (all CRs suppressed by effective values)", err)
 	}
 }
 
-// TestIsRuntimeRequiredTaint pins the matcher: only the exact key+value with the
-// NoSchedule effect gates. A taint that shares the key but differs in value or
-// effect must not be mistaken for an in-flight tuning (or the gate would block
-// forever on an unrelated taint).
+// TestIsRuntimeRequiredTaint pins the matcher: only an exact key+value+effect
+// match against the gate counts. A taint that shares the key but differs in
+// value or effect must not be mistaken for an in-flight tuning (or the gate
+// would block forever on an unrelated taint).
 func TestIsRuntimeRequiredTaint(t *testing.T) {
 	t.Parallel()
+
+	// A custom configured taint (as --workload-gate would set) plus the legacy
+	// default: the shape runtimeRequiredTaints produces.
+	custom := corev1.Taint{Key: "custom.io/gate", Value: "true", Effect: corev1.TaintEffectNoExecute}
+	gate := []corev1.Taint{custom, legacyRuntimeRequiredTaint}
 
 	tests := []struct {
 		name  string
@@ -1004,18 +1021,28 @@ func TestIsRuntimeRequiredTaint(t *testing.T) {
 		want  bool
 	}{
 		{
-			name:  "exact runtime-required NoSchedule",
-			taint: corev1.Taint{Key: runtimeRequiredTaintKey, Value: runtimeRequiredTaintValue, Effect: corev1.TaintEffectNoSchedule},
+			name:  "exact legacy runtime-required NoSchedule",
+			taint: legacyRuntimeRequiredTaint,
 			want:  true,
 		},
 		{
-			name:  "right key+value but NoExecute effect",
-			taint: corev1.Taint{Key: runtimeRequiredTaintKey, Value: runtimeRequiredTaintValue, Effect: corev1.TaintEffectNoExecute},
+			name:  "exact configured taint, including its non-NoSchedule effect",
+			taint: custom,
+			want:  true,
+		},
+		{
+			name:  "legacy key+value but NoExecute effect",
+			taint: corev1.Taint{Key: legacyRuntimeRequiredTaint.Key, Value: legacyRuntimeRequiredTaint.Value, Effect: corev1.TaintEffectNoExecute},
 			want:  false,
 		},
 		{
-			name:  "right key but different value",
-			taint: corev1.Taint{Key: runtimeRequiredTaintKey, Value: "something-else", Effect: corev1.TaintEffectNoSchedule},
+			name:  "legacy key but different value",
+			taint: corev1.Taint{Key: legacyRuntimeRequiredTaint.Key, Value: "something-else", Effect: corev1.TaintEffectNoSchedule},
+			want:  false,
+		},
+		{
+			name:  "chart default is not gated once a custom taint is configured",
+			taint: defaultRuntimeRequiredTaint,
 			want:  false,
 		},
 		{
@@ -1028,7 +1055,7 @@ func TestIsRuntimeRequiredTaint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := isRuntimeRequiredTaint(&tt.taint); got != tt.want {
+			if got := isRuntimeRequiredTaint(&tt.taint, gate); got != tt.want {
 				t.Errorf("isRuntimeRequiredTaint(%+v) = %v, want %v", tt.taint, got, tt.want)
 			}
 		})
@@ -1177,6 +1204,471 @@ func TestRunGPUReadinessProbesOverlap(t *testing.T) {
 	}
 }
 
+// TestRuntimeRequiredTaints pins the gate derivation: the operator Deployment's
+// RUNTIME_REQUIRED_TAINT env plus the legacy default; the chart defaults when
+// the Deployment or env is absent; fail closed on any other read error or an
+// unparseable value.
+func TestRuntimeRequiredTaints(t *testing.T) {
+	t.Parallel()
+
+	const ns = "skyhook"
+	custom := corev1.Taint{Key: "custom.io/gate", Value: "true", Effect: corev1.TaintEffectNoExecute}
+	defaultsGate := []corev1.Taint{defaultRuntimeRequiredTaint, legacyRuntimeRequiredTaint}
+
+	tests := []struct {
+		name       string
+		objects    []runtime.Object
+		refs       []recipe.ComponentRef
+		getErr     error
+		want       []corev1.Taint
+		wantErrSub string
+	}{
+		{
+			name:    "custom env value gates that taint plus the legacy default",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, custom.ToString())},
+			refs:    []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want:    []corev1.Taint{custom, legacyRuntimeRequiredTaint},
+		},
+		{
+			name:    "legacy env value is not duplicated",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, legacyRuntimeRequiredTaint.ToString())},
+			refs:    []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want:    []corev1.Taint{legacyRuntimeRequiredTaint},
+		},
+		{
+			name:    "operator ref namespace wins over the fallback namespace",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv("operator-ns", custom.ToString())},
+			refs:    []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: "operator-ns"}},
+			want:    []corev1.Taint{custom, legacyRuntimeRequiredTaint},
+		},
+		{
+			name:    "no operator ref falls back to the customizations namespace",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, custom.ToString())},
+			want:    []corev1.Taint{custom, legacyRuntimeRequiredTaint},
+		},
+		{
+			name:    "env absent uses the chart defaults",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, "")},
+			refs:    []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want:    defaultsGate,
+		},
+		{
+			name: "deployment absent uses the chart defaults",
+			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want: defaultsGate,
+		},
+		{
+			name:       "unparseable env value fails closed",
+			objects:    []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, "not-a-taint")},
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "is not a valid taint",
+		},
+		{
+			// Distinct from an unparseable value: the operator's own options
+			// validation requires a runtime-required taint, so an empty one
+			// means it is not running rather than that the gate cannot read it.
+			name: "empty env value names the operator config, not a parse failure",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnvVar(ns,
+				corev1.EnvVar{Name: runtimeRequiredTaintEnv, Value: ""})},
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "refuses to start without one",
+		},
+		{
+			// The gate reads the Deployment spec, so an indirected value is
+			// unreadable rather than invalid. Fails closed either way.
+			name: "valueFrom env fails closed as unresolvable",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnvVar(ns, corev1.EnvVar{
+				Name: runtimeRequiredTaintEnv,
+				ValueFrom: &corev1.EnvVarSource{
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "cm"},
+						Key:                  "taint",
+					},
+				},
+			})},
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "valueFrom",
+		},
+		{
+			// The VR reference clusters install nodewright out of band with no
+			// fullnameOverride, so the chart's own Deployment name is what is
+			// live. Reading only the bundle name would fall back to chart
+			// defaults and gate on a taint this operator never applies.
+			name: "out-of-band Deployment name is honored",
+			objects: []runtime.Object{nodewrightOperatorDeploymentNamed(ns,
+				nodewrightOperatorDeploymentOutOfBand, "custom.io/gate=true:NoExecute")},
+			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want: dedupeTaints(custom, legacyRuntimeRequiredTaint),
+		},
+		{
+			// Neither can be shown to own the taint the nodes carry, and
+			// picking one would gate on a value the other never applies.
+			name: "both Deployment names present fails closed",
+			objects: []runtime.Object{
+				nodewrightOperatorDeploymentWithEnv(ns, "custom.io/gate=true:NoExecute"),
+				nodewrightOperatorDeploymentNamed(ns, nodewrightOperatorDeploymentOutOfBand,
+					"other.io/gate=true:NoSchedule"),
+			},
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "cannot tell which operator governs",
+		},
+		{
+			name:       "non-NotFound read error fails closed",
+			getErr:     apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, nodewrightOperatorDeployment, stderrors.New("forbidden")),
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "failed to read Deployment",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			clientset := k8sfake.NewClientset(tt.objects...)
+			if tt.getErr != nil {
+				clientset.PrependReactor("get", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.getErr
+				})
+			}
+			ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+
+			got, err := runtimeRequiredTaints(ctx, tt.refs, ns)
+			if tt.wantErrSub != "" {
+				if err == nil {
+					t.Fatalf("runtimeRequiredTaints() error = nil, want error containing %q", tt.wantErrSub)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("runtimeRequiredTaints() error = %v, want substring %q", err, tt.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("runtimeRequiredTaints() error = %v, want nil", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("runtimeRequiredTaints() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("runtimeRequiredTaints()[%d] = %+v, want %+v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestCheckExpectedResources_GatesOnConfiguredTaint proves the end-to-end
+// wiring: with the operator configured for a custom --workload-gate taint, a
+// node carrying that taint keeps the gate closed even though the CR is
+// complete, and a node carrying only the (now unconfigured) chart default does
+// not.
+func TestCheckExpectedResources_GatesOnConfiguredTaint(t *testing.T) {
+	t.Parallel()
+
+	custom := corev1.Taint{Key: "custom.io/gate", Value: "true", Effect: corev1.TaintEffectNoSchedule}
+	refs := []recipe.ComponentRef{
+		{Name: nodewrightOperatorComponent, Namespace: "skyhook"},
+		{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
+	}
+
+	tests := []struct {
+		name       string
+		node       *corev1.Node
+		wantErrSub string
+	}{
+		{
+			name:       "node carrying the configured taint blocks",
+			node:       nodeWithTaints("gpu-node-0", custom),
+			wantErrSub: "node gpu-node-0: still carries the runtime-required taint custom.io/gate=true:NoSchedule",
+		},
+		{
+			name:       "node carrying the legacy taint still blocks",
+			node:       nodeWithRuntimeRequiredTaint("gpu-node-0"),
+			wantErrSub: "node gpu-node-0: still carries the runtime-required taint",
+		},
+		{
+			name: "node carrying only the unconfigured chart default passes",
+			node: nodeWithTaints("gpu-node-0", defaultRuntimeRequiredTaint),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := newDeploymentTestContext(t,
+				[]runtime.Object{
+					activeNamespace("skyhook"),
+					nodewrightOperatorDeploymentWithEnv("skyhook", custom.ToString()),
+					tt.node,
+				},
+				[]runtime.Object{nodeWrightWithStatus("tuning", nodewrightCompleteState)},
+				refs,
+			)
+
+			err := checkExpectedResources(ctx)
+			if tt.wantErrSub == "" {
+				if err != nil {
+					t.Fatalf("checkExpectedResources() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("checkExpectedResources() error = nil, want error containing %q", tt.wantErrSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Fatalf("checkExpectedResources() error = %v, want substring %q", err, tt.wantErrSub)
+			}
+		})
+	}
+}
+
+// testNodewrightAssertYAML is the shape of the registry health check for
+// nodewright-customizations: a nameless assert on the NodeWright kind.
+const testNodewrightAssertYAML = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nodewright-customizations-health-check
+spec:
+  steps:
+    - name: validate-nodewright-cr-complete
+      try:
+        - assert:
+            resource:
+              apiVersion: nodewright.nvidia.com/v1alpha1
+              kind: NodeWright
+              status:
+                status: complete
+`
+
+// TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert is the exact
+// pre-v0.18.0 regression: the registry assert is hydrated independently of the
+// resolved chart version and names the NodeWright kind, which a v0.17.x
+// operator does not serve. On such a cluster the static assert must be skipped
+// (the Go check verifies the Skyhook by name) so a healthy legacy cluster
+// passes; on a v0.18.0 cluster the assert stays queued; and a discovery
+// failure fails closed rather than skipping.
+func TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert(t *testing.T) {
+	t.Parallel()
+
+	ref := recipe.ComponentRef{
+		Name:               nodewrightCustomizationsComponent,
+		Namespace:          "skyhook",
+		ManifestFiles:      []string{testNodewrightManifest},
+		HealthCheckAsserts: testNodewrightAssertYAML,
+	}
+	legacyOperator := recipe.ComponentRef{Name: nodewrightOperatorComponent, Namespace: "skyhook", Version: "v0.17.1"}
+
+	t.Run("legacy-only cluster passes with the assert skipped", func(t *testing.T) {
+		t.Parallel()
+		// Only skyhook.nvidia.com is registered (inferred from the Skyhook
+		// object); a queued chainsaw assert would need a fetcher and fail. The
+		// v0.17.1 operator pin is the explicit pre-rename signal.
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{legacyOperator, ref})
+		if err := checkExpectedResources(ctx); err != nil {
+			t.Fatalf("checkExpectedResources() error = %v, want nil on a healthy v0.17 cluster", err)
+		}
+	})
+
+	t.Run("v0.18 pin on a legacy-only cluster fails closed", func(t *testing.T) {
+		t.Parallel()
+		// A stale complete Skyhook must not certify readiness when the recipe
+		// pins an operator that is required to serve nodewright.nvidia.com.
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{
+				{Name: nodewrightOperatorComponent, Namespace: "skyhook", Version: "v0.18.0"},
+				ref,
+			})
+		err := checkExpectedResources(ctx)
+		if err == nil {
+			t.Fatal("checkExpectedResources() error = nil, want the fail-closed legacy refusal")
+		}
+		if !strings.Contains(err.Error(), "refusing the legacy") {
+			t.Fatalf("expected the legacy-fallback refusal, got: %v", err)
+		}
+	})
+
+	t.Run("v0.18 cluster keeps the assert queued", func(t *testing.T) {
+		t.Parallel()
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodeWrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{ref})
+		suppressed, _, err := gatedHealthCheckSuppressed(ctx, ref)
+		if err != nil {
+			t.Fatalf("gatedHealthCheckSuppressed() error = %v", err)
+		}
+		if suppressed {
+			t.Fatal("assert must stay queued when the cluster serves nodewright.nvidia.com")
+		}
+	})
+
+	t.Run("discovery failure fails closed", func(t *testing.T) {
+		t.Parallel()
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{ref})
+		// FakeDiscovery synthesizes the action with Resource "resource"; see
+		// TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError.
+		ctx.Clientset.(*k8sfake.Clientset).PrependReactor("get", "resource", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: nodewrightGVR.Group}, "", stderrors.New("forbidden"))
+		})
+		if _, _, err := gatedHealthCheckSuppressed(ctx, ref); err == nil {
+			t.Fatal("gatedHealthCheckSuppressed() error = nil, want the discovery failure (must not skip)")
+		}
+	})
+}
+
+// TestResolveNodewrightGVR_VersionGate pins the fallback contract: the new
+// group always wins when served; the legacy group is read only when the recipe
+// pins nodewright-operator below the rename, or carries no usable pin at all;
+// a rename-or-later pin on a legacy-only cluster fails closed; neither group
+// served skips (#607).
+// resolveNodewrightGVR runs ahead of pollUntilStable, so a discovery call that
+// ignores the validator context would outlive both cancellation and the
+// readiness budget and hang until the Job is killed. client-go's
+// DiscoveryInterface.ServerResourcesForGroupVersion issues its request with
+// context.TODO() internally, which is why the probe goes through
+// helper.GroupVersionResources instead. The fake clientset exposes no
+// RESTClient, so this exercises that helper's guard rather than a real
+// in-flight cancellation, which is the reachable half here.
+func TestResolveNodewrightGVRHonorsCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContextWithDiscovery(t, nil, nil,
+		[]schema.GroupVersion{nodewrightGVR.GroupVersion()}, nil, nil)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctx.Ctx = canceled
+
+	_, registered, err := resolveNodewrightGVR(ctx)
+	if err == nil {
+		t.Fatal("resolveNodewrightGVR() error = nil, want the cancellation to surface")
+	}
+	if registered {
+		t.Error("registered = true, want false — a discovery that never completed cannot report a served group")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("error = %v, want ErrCodeTimeout so the phase fails closed on the budget", err)
+	}
+}
+
+func TestResolveNodewrightGVR_VersionGate(t *testing.T) {
+	t.Parallel()
+
+	operator := func(version string) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: nodewrightOperatorComponent, Namespace: "skyhook", Version: version}
+	}
+	legacyOnly := []runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)}
+	bothGroups := []runtime.Object{
+		nodewrightWithStatus("tuning", nodewrightCompleteState),
+		nodeWrightWithStatus("tuning", nodewrightCompleteState),
+	}
+
+	tests := []struct {
+		name           string
+		objects        []runtime.Object
+		refs           []recipe.ComponentRef
+		wantGVR        schema.GroupVersionResource
+		wantRegistered bool
+		wantErrSub     string
+	}{
+		{name: "both served, v0.18.0 pin → NodeWright", objects: bothGroups, refs: []recipe.ComponentRef{operator("v0.18.0")}, wantGVR: nodewrightGVR, wantRegistered: true},
+		{name: "both served, v0.17.1 pin → NodeWright still preferred", objects: bothGroups, refs: []recipe.ComponentRef{operator("v0.17.1")}, wantGVR: nodewrightGVR, wantRegistered: true},
+		{name: "legacy only, v0.17.1 pin → Skyhook", objects: legacyOnly, refs: []recipe.ComponentRef{operator("v0.17.1")}, wantGVR: legacySkyhookGVR, wantRegistered: true},
+		{name: "legacy only, no operator ref → Skyhook", objects: legacyOnly, wantGVR: legacySkyhookGVR, wantRegistered: true},
+		{name: "legacy only, unparseable pin → Skyhook", objects: legacyOnly, refs: []recipe.ComponentRef{operator("latest")}, wantGVR: legacySkyhookGVR, wantRegistered: true},
+		{name: "legacy only, v0.18.0 pin → fail closed", objects: legacyOnly, refs: []recipe.ComponentRef{operator("v0.18.0")}, wantErrSub: "refusing the legacy"},
+		{name: "legacy only, v0.19.2 pin → fail closed", objects: legacyOnly, refs: []recipe.ComponentRef{operator("v0.19.2")}, wantErrSub: "refusing the legacy"},
+		{name: "neither served, v0.18.0 pin → skip", refs: []recipe.ComponentRef{operator("v0.18.0")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")}, tt.objects, tt.refs)
+			gvr, registered, err := resolveNodewrightGVR(ctx)
+			if tt.wantErrSub != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("resolveNodewrightGVR() error = %v, want substring %q", err, tt.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveNodewrightGVR() error = %v", err)
+			}
+			if registered != tt.wantRegistered || gvr != tt.wantGVR {
+				t.Fatalf("resolveNodewrightGVR() = (%v, %v), want (%v, %v)", gvr, registered, tt.wantGVR, tt.wantRegistered)
+			}
+		})
+	}
+}
+
+// TestVerifyNodewrightReady_PrefersNodeWrightOverLegacySkyhook pins the #2593
+// fix. nodewright-operator v0.18.0 mirrors each legacy Skyhook into a
+// NodeWright and writes status only there; the legacy status stays empty. With
+// both groups registered the gate must read the NodeWright, so a fully tuned
+// cluster passes instead of timing out on the never-populated legacy status.
+// The legacy-only row proves the fallback for older operators.
+func TestVerifyNodewrightReady_PrefersNodeWrightOverLegacySkyhook(t *testing.T) {
+	t.Parallel()
+
+	ref := recipe.ComponentRef{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}
+
+	tests := []struct {
+		name       string
+		objects    []runtime.Object
+		wantErrSub string
+	}{
+		{
+			name: "v0.18.0 shape: NodeWright complete, legacy Skyhook status empty",
+			objects: []runtime.Object{
+				nodeWrightWithStatus("tuning", nodewrightCompleteState),
+				nodewrightWithStatus("tuning", ""),
+			},
+		},
+		{
+			name: "v0.18.0 shape: NodeWright in_progress is what gates, not the legacy copy",
+			objects: []runtime.Object{
+				nodeWrightWithStatus("tuning", "in_progress"),
+				nodewrightWithStatus("tuning", nodewrightCompleteState),
+			},
+			wantErrSub: "Nodewright tuning: status=in_progress (want complete)",
+		},
+		{
+			name:    "legacy-only operator: falls back to the Skyhook",
+			objects: []runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")}, tt.objects, []recipe.ComponentRef{ref})
+			err := verifyNodewrightReady(ctx, ref, []corev1.Taint{legacyRuntimeRequiredTaint})
+			if tt.wantErrSub == "" {
+				if err != nil {
+					t.Fatalf("verifyNodewrightReady() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("verifyNodewrightReady() error = nil, want error containing %q", tt.wantErrSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Fatalf("verifyNodewrightReady() error = %v, want substring %q", err, tt.wantErrSub)
+			}
+		})
+	}
+}
+
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -1319,8 +1811,10 @@ func newFakeDynamicClient(objects []runtime.Object, unregistered ...schema.Group
 
 func gvrForTestObject(gvk schema.GroupVersionKind) schema.GroupVersionResource {
 	switch {
-	case gvk.Group == nodewrightGVR.Group && gvk.Version == nodewrightGVR.Version && gvk.Kind == "Skyhook":
+	case gvk.Group == nodewrightGVR.Group && gvk.Version == nodewrightGVR.Version && gvk.Kind == "NodeWright":
 		return nodewrightGVR
+	case gvk.Group == legacySkyhookGVR.Group && gvk.Version == legacySkyhookGVR.Version && gvk.Kind == "Skyhook":
+		return legacySkyhookGVR
 	default:
 		return schema.GroupVersionResource{
 			Group:    gvk.Group,
@@ -1348,7 +1842,8 @@ func (f *fakeDynamicClient) Resource(resource schema.GroupVersionResource) dynam
 // (which real k8s answers with a 404 "server could not find the requested
 // resource", not a silently empty list).
 var clusterScopedGVRs = map[schema.GroupVersionResource]bool{
-	nodewrightGVR: true,
+	nodewrightGVR:    true,
+	legacySkyhookGVR: true,
 }
 
 type fakeResourceClient struct {
@@ -1494,7 +1989,8 @@ func inactiveNamespace(name string) *corev1.Namespace {
 	}
 }
 
-func readyDeployment(namespace, name string, replicas int32) *appsv1.Deployment {
+func readyDeployment(namespace, name string) *appsv1.Deployment {
+	replicas := int32(1)
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -1544,19 +2040,42 @@ func nodeWithTaints(name string, taints ...corev1.Taint) *corev1.Node {
 	}
 }
 
-// nodeWithRuntimeRequiredTaint builds a Node fixture carrying the nodewright
-// runtime-required NoSchedule taint the readiness gate blocks on.
+// nodeWithRuntimeRequiredTaint builds a Node fixture carrying the legacy
+// nodewright runtime-required NoSchedule taint the readiness gate blocks on.
 func nodeWithRuntimeRequiredTaint(name string) *corev1.Node {
-	return nodeWithTaints(name, corev1.Taint{
-		Key:    runtimeRequiredTaintKey,
-		Value:  runtimeRequiredTaintValue,
-		Effect: corev1.TaintEffectNoSchedule,
-	})
+	return nodeWithTaints(name, legacyRuntimeRequiredTaint)
 }
 
-// nodewrightWithStatus builds a Nodewright fixture. Nodewright is a cluster-scoped CR,
-// so metadata.namespace is intentionally not set.
-// nodewrightTerminatingWithStatus builds a Skyhook that is mid-deletion
+// nodewrightOperatorDeploymentWithEnv builds the operator's controller-manager
+// Deployment fixture with the given RUNTIME_REQUIRED_TAINT env value; an empty
+// value omits the env entirely (an older chart).
+func nodewrightOperatorDeploymentNamed(namespace, name, taintStr string) *appsv1.Deployment {
+	d := nodewrightOperatorDeploymentWithEnv(namespace, taintStr)
+	d.Name = name
+	return d
+}
+
+func nodewrightOperatorDeploymentWithEnv(namespace, taintStr string) *appsv1.Deployment {
+	d := readyDeployment(namespace, nodewrightOperatorDeployment)
+	container := corev1.Container{Name: "manager"}
+	if taintStr != "" {
+		container.Env = []corev1.EnvVar{{Name: runtimeRequiredTaintEnv, Value: taintStr}}
+	}
+	d.Spec.Template.Spec.Containers = []corev1.Container{container}
+	return d
+}
+
+// nodewrightOperatorDeploymentWithEnvVar builds the operator Deployment with a
+// RUNTIME_REQUIRED_TAINT entry supplied verbatim, so a test can express the
+// shapes nodewrightOperatorDeploymentWithEnv cannot: present but empty, and
+// sourced from valueFrom. Both are distinct from the env being absent.
+func nodewrightOperatorDeploymentWithEnvVar(namespace string, env corev1.EnvVar) *appsv1.Deployment {
+	d := readyDeployment(namespace, nodewrightOperatorDeployment)
+	d.Spec.Template.Spec.Containers = []corev1.Container{{Name: "manager", Env: []corev1.EnvVar{env}}}
+	return d
+}
+
+// nodewrightTerminatingWithStatus builds a legacy Skyhook that is mid-deletion
 // (deletionTimestamp set, as Nodewright's finalizer leaves it) while still
 // reporting the given status. The combination is the trap: status.status alone
 // says "ready" about a CR that is on its way out.
@@ -1568,10 +2087,24 @@ func nodewrightTerminatingWithStatus(name, status string) *unstructured.Unstruct
 	return sk
 }
 
+// nodeWrightWithStatus builds a nodewright.nvidia.com NodeWright fixture (the
+// kind nodewright-operator v0.18.0+ writes status on). Cluster-scoped, so
+// metadata.namespace is intentionally not set.
+//
+//nolint:unparam // name is a meaningful test input even if current call sites all use the manifest's "tuning"
+func nodeWrightWithStatus(name, status string) *unstructured.Unstructured {
+	nw := nodewrightWithStatus(name, status)
+	nw.Object["apiVersion"] = nodewrightGVR.GroupVersion().String()
+	nw.Object["kind"] = "NodeWright"
+	return nw
+}
+
+// nodewrightWithStatus builds a legacy skyhook.nvidia.com Skyhook fixture.
+// Cluster-scoped, so metadata.namespace is intentionally not set.
 func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]any{
-			"apiVersion": "skyhook.nvidia.com/v1alpha1",
+			"apiVersion": legacySkyhookGVR.GroupVersion().String(),
 			"kind":       "Skyhook",
 			"metadata": map[string]any{
 				"name": name,
@@ -1865,7 +2398,8 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			suppressed, reason, err := gatedHealthCheckSuppressed(t.Context(), tt.ref)
+			suppressed, reason, err := gatedHealthCheckSuppressed(
+				&validators.Context{Ctx: t.Context(), Clientset: k8sfake.NewClientset()}, tt.ref)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("gatedHealthCheckSuppressed() error = nil, want failure")
@@ -1888,7 +2422,7 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, _, err := gatedHealthCheckSuppressed(ctx, recipe.ComponentRef{
+		_, _, err := gatedHealthCheckSuppressed(&validators.Context{Ctx: ctx, Clientset: k8sfake.NewClientset()}, recipe.ComponentRef{
 			Name:          "gcp-driver-installer",
 			Type:          recipe.ComponentTypeHelm,
 			ManifestFiles: []string{installerManifest},

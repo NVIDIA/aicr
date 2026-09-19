@@ -365,13 +365,17 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
-      # v0.18.0 renames Skyhook to NodeWright and writes status only on the new
-      # kind, which the deployment readiness gate does not read; v0.19.0 carries
-      # no fix. Do not bump past v0.17.x before the prerequisites in
-      # "Upgrade Notes" > nodewright-operator in docs/user/component-catalog.md.
-      # See #2593 and #2594.
+      # v0.18.0 renamed Skyhook to NodeWright and writes completion status only
+      # on the new kind; the deployment readiness gate resolves the served group
+      # by discovery rather than assuming either one (#2593). v0.19.0 then made
+      # drain wait for evicted pods to terminate rather than to be accepted, so
+      # interrupts start later and an undrainable pod holds a node in
+      # in_progress without bound. Both boundaries carry transition records.
+      # v0.20.0 removes the legacy skyhook.nvidia.com group outright and is not
+      # reachable until the CRs shipped under nodewright-customizations are
+      # renamed (#2594).
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
-      defaultVersion: v0.17.1
+      defaultVersion: v0.19.0
       defaultNamespace: skyhook
     nodeScheduling:
       nodeCountPaths:

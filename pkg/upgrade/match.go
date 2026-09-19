@@ -362,6 +362,42 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		return r
 	}
 	if len(crossed) > 1 {
+		// A safe boundary asks nothing of the operator, so crossing it composes
+		// nothing and skips nothing. When it is the only thing standing beside
+		// one substantive record that does describe this jump, defer to that
+		// record rather than stopping a move whose extra boundary is "nothing
+		// to do". Reached only after the blocked checks above, so an authored
+		// block still outranks everything here.
+		// N safe boundaries compose exactly as one does: none carries steps,
+		// so there is no work to skip and no origin whose guidance could be
+		// wrong. Coverage (rule 3) is what makes the chain trustworthy, since
+		// it leaves no hole below the pin, so the only question left is
+		// whether the assessment reaches the target.
+		// crossings orders by floor, so crossed[0] is the boundary that has to
+		// own the origin while top is the one that has to reach the target.
+		// Both must hold: skipping the origin check let a jump from a version
+		// no record assessed come back safe purely because it crossed two
+		// boundaries instead of one.
+		if top, ok := everySafeCrossing(crossed); ok && fromCovers(crossed[0].tr, src) {
+			if _, past := beyondCeiling(top.tr, tgt); !past {
+				r.Verdict = VerdictSafe
+				r.Transition = top.tr
+				r.Span = claimSpan(src, top.tr)
+				r.Reason = ReasonRecorded
+				r.Explanation = recordedExplanation(r, top)
+				return r
+			}
+		}
+		if only, ok := loneSubstantive(crossed); ok && fromCovers(only.tr, src) {
+			if _, past := beyondCeiling(only.tr, tgt); !past {
+				r.Verdict = only.tr.Verdict
+				r.Transition = only.tr
+				r.Span = claimSpan(src, only.tr)
+				r.Reason = ReasonRecorded
+				r.Explanation = recordedExplanation(r, only)
+				return r
+			}
+		}
 		// Composing both records' steps would be wrong rather than merely
 		// cautious: an intermediate record's work never runs on a jump straight
 		// past it, so the report names where to stop instead.
@@ -384,6 +420,50 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	r.StoppedAt = only.tr.To
 	r.Explanation = undefinedOriginExplanation(u, r, only, src)
 	return r
+}
+
+// everySafeCrossing returns the boundary nearest the target when every crossed
+// boundary is safe, so the caller can lend that verdict instead of blocking a
+// jump across boundaries that each ask nothing. crossings orders by floor, so
+// the last is the one whose ceiling has to reach the target.
+//
+// If one safe boundary composes nothing and skips nothing, N of them compose
+// nothing either: rule 4 forbids a safe record carrying steps, so there is no
+// intermediate work a jump past it could miss. Blocking such a jump names a
+// stopping point where nothing happens, which is the false-confidence
+// direction rather than the cautious one.
+//
+// This answers only "does anything ask something of the operator". The origin
+// and the ceiling are separate questions the call site still has to ask, and
+// conflating them is a mistake worth naming: a safe record carrying no steps
+// says nothing about whether the starting version was ever assessed, which is
+// what undefined-origin is about.
+func everySafeCrossing(crossed []crossing) (crossing, bool) {
+	if len(crossed) == 0 {
+		return crossing{}, false
+	}
+	for _, c := range crossed {
+		if c.tr.Verdict != VerdictSafe {
+			return crossing{}, false
+		}
+	}
+	return crossed[len(crossed)-1], true
+}
+
+// loneSubstantive returns the single crossed boundary that asks something of
+// the operator, when every other one crossed is safe. A safe record carries no
+// steps by construction (rule 4 forbids them), so it is never the skipped
+// migration multiple-boundaries exists to prevent.
+func loneSubstantive(crossed []crossing) (crossing, bool) {
+	var only crossing
+	found := 0
+	for _, c := range crossed {
+		if c.tr.Verdict == VerdictSafe {
+			continue
+		}
+		only, found = c, found+1
+	}
+	return only, found == 1
 }
 
 // crossing pairs a transition with the floor its `to` names.

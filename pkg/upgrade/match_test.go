@@ -637,6 +637,114 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 // every Reason they can produce, including the invariants a blocked result must
 // hold: no Transition to render another record's steps from, and a StoppedAt
 // the report can name.
+// A safe boundary carries no steps, so crossing one composes nothing and skips
+// nothing. It must not stop a jump whose only substantive boundary describes
+// the whole move -- the nodewright shape, where a manual rename is followed by
+// a safe release and a jump spanning both should land on the rename's steps.
+func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
+	rename := trans("<0.18.0", ">=0.18.0 <=0.19.0", VerdictManual, "rename")
+	drain := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictSafe, "drain")
+	secondManual := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictManual, "second")
+	firstSafe := trans("<0.18.0", ">=0.18.0 <=0.18.0", VerdictSafe, "first-safe")
+	boundedA := trans(">=1.0.0 <1.1.0", ">=1.1.0 <=1.1.0", VerdictSafe, "bounded-A")
+	boundedB := trans(">=1.1.0 <1.2.0", ">=1.2.0 <=1.2.0", VerdictSafe, "bounded-B")
+
+	tests := []struct {
+		name        string
+		set         Set
+		from, to    string
+		wantVerdict Verdict
+		wantReason  Reason
+		wantMatched string
+	}{
+		{
+			// Crosses both boundaries. The safe one asks nothing, so the
+			// rename's own verdict and steps carry the jump.
+			name:        "manual plus safe defers to the manual record",
+			set:         oneComponent(rename, drain),
+			from:        "0.16.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "rename",
+		},
+		{
+			// Crosses only the safe boundary.
+			name:        "the safe boundary alone still reads safe",
+			set:         oneComponent(rename, drain),
+			from:        "0.18.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "drain",
+		},
+		{
+			// N safe boundaries compose exactly as one does. Blocking here
+			// would tell an operator to stop at a version where nothing
+			// happens, which is the outcome this reduction exists to prevent.
+			name:        "a crossing that is entirely safe reads safe",
+			set:         oneComponent(firstSafe, drain),
+			from:        "0.17.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "drain",
+		},
+		{
+			// An origin no record assessed stays refused however many
+			// boundaries the jump crosses. Before the fromCovers guard this
+			// came back safe on two crossings while the identical origin was
+			// refused on one, so asking to go further bought a verdict that
+			// vouches. The floors are bounded below, which is the ADR's
+			// ordinary shape and the only one that exercises this.
+			name:        "an unassessed origin is not rescued by crossing more boundaries",
+			set:         oneComponent(boundedA, boundedB),
+			from:        "0.9.0",
+			to:          "1.2.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
+		},
+		{
+			// The same origin across a single boundary, for the comparison the
+			// case above exists to hold: one crossing already refused it.
+			name:        "an unassessed origin across one boundary is refused",
+			set:         oneComponent(boundedA, boundedB),
+			from:        "0.9.0",
+			to:          "1.1.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonUndefinedOrigin,
+		},
+		{
+			// The control: two boundaries that both ask something still block,
+			// because composing them is the failure the rule exists to prevent.
+			name:        "two substantive boundaries still block",
+			set:         oneComponent(rename, secondManual),
+			from:        "0.16.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchVersions(tt.set["c"], "c", tt.from, tt.to)
+			if got.Verdict != tt.wantVerdict {
+				t.Errorf("verdict = %q, want %q", got.Verdict, tt.wantVerdict)
+			}
+			if got.Reason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", got.Reason, tt.wantReason)
+			}
+			matched := ""
+			if got.Transition != nil {
+				matched = got.Transition.Summary
+			}
+			if matched != tt.wantMatched {
+				t.Errorf("matched record = %q, want %q", matched, tt.wantMatched)
+			}
+		})
+	}
+}
+
 func TestMatchVerdictSelection(t *testing.T) {
 	safeLow := trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S")
 	blockedHigh := trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B")
@@ -686,13 +794,22 @@ func TestMatchVerdictSelection(t *testing.T) {
 			wantStoppedAt: ">=2.5.0 <2.6.0",
 		},
 		{
-			name:          "two non-blocking boundaries still block the jump",
-			set:           oneComponent(safeLow, trans("<2.5.0", ">=2.5.0 <2.6.0", VerdictSafe, "S2")),
-			from:          "1.5.0",
-			to:            "2.5.1",
-			wantVerdict:   VerdictBlocked,
-			wantReason:    ReasonMultipleBoundaries,
-			wantStoppedAt: ">=2.0.0 <2.1.0",
+			// Reversed in #2829: this used to expect blocked /
+			// multiple-boundaries. That rule exists because an intermediate
+			// record's steps never run on a jump straight past it, and a safe
+			// record has no steps by construction, so crossing two of them
+			// skips nothing. Blocking named 2.0.0 as somewhere to stop when
+			// landing there asks nothing of anyone, which is the
+			// false-confidence direction rather than the cautious one. The
+			// furthest crossed record still has to reach the target, which is
+			// what keeps this from vouching past anyone's assessment.
+			name:        "two non-blocking boundaries do not block the jump",
+			set:         oneComponent(safeLow, trans("<2.5.0", ">=2.5.0 <2.6.0", VerdictSafe, "S2")),
+			from:        "1.5.0",
+			to:          "2.5.1",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "S2",
 		},
 		{
 			name:        "one crossed record whose from covers the source lends its verdict",

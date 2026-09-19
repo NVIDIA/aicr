@@ -87,7 +87,7 @@ CLUSTER_DEBUG_LOG_NAMESPACES="${CLUSTER_DEBUG_LOG_NAMESPACES:-skyhook gpu-operat
 # gate keys off of, and its full YAML carries the per-package/per-node status
 # history that explains a re-tuning race. Best-effort — a kind absent on this
 # cloud/recipe just no-ops.
-CLUSTER_DEBUG_CLUSTER_RESOURCES="${CLUSTER_DEBUG_CLUSTER_RESOURCES:-skyhooks.skyhook.nvidia.com clusterpolicies.nvidia.com nodefeatures.nfd.k8s-sigs.io resourceslices.resource.k8s.io deviceclasses.resource.k8s.io}"
+CLUSTER_DEBUG_CLUSTER_RESOURCES="${CLUSTER_DEBUG_CLUSTER_RESOURCES:-nodewrights.nodewright.nvidia.com skyhooks.skyhook.nvidia.com clusterpolicies.nvidia.com nodefeatures.nfd.k8s-sigs.io resourceslices.resource.k8s.io deviceclasses.resource.k8s.io}"
 
 # Per-command wall-clock bound. A single slow/unreachable kubectl call (stale
 # creds, an apiserver hiccup, describe over many nodes) must not consume the whole
@@ -165,6 +165,12 @@ capture_skyhook_snapshot() {
       echo "# teardown-time reading."
       echo
       echo "----- Skyhook CRs (full YAML: per-package/per-node status) -----"
+      # NodeWright first: from operator v0.18.0 it is the reconciled object and
+      # the only one carrying status, while the mirrored Skyhook stays empty.
+      # Both are dumped because either kind may be absent depending on the
+      # operator version, and `|| true` keeps a missing kind from ending the
+      # capture.
+      _cd_bounded kubectl get nodewrights.nodewright.nvidia.com -A -o yaml 2>&1 || true
       _cd_bounded kubectl get skyhooks.skyhook.nvidia.com -A -o yaml 2>&1 || true
       echo
       echo "----- node reboot fingerprint (bootID / kernel / Ready transition / taints) -----"

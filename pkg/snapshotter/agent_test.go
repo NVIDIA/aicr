@@ -291,14 +291,32 @@ func TestParseTaint(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:     "taint with value containing equals",
+			// '=' is not a legal label-value character, so the second '='
+			// makes the value invalid rather than part of it.
+			name:     "invalid value - contains equals",
 			taintStr: "key=value=with=equals:NoSchedule",
-			want: &corev1.Taint{
-				Key:    "key",
-				Value:  "value=with=equals",
-				Effect: corev1.TaintEffectNoSchedule,
-			},
-			wantErr: false,
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			// A key with whitespace would word-split in the generated
+			// deploy.sh stale-taint cleanup and select unrelated taints.
+			name:     "invalid key - contains whitespace",
+			taintStr: "foo bar=true:NoSchedule",
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid key - bad prefix",
+			taintStr: "not_a_dns/gate=true:NoSchedule",
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid value - too long",
+			taintStr: "gate=" + strings.Repeat("v", 64) + ":NoSchedule",
+			want:     nil,
+			wantErr:  true,
 		},
 		{
 			name:     "empty taint string",
