@@ -2875,9 +2875,10 @@ func TestResolveRecipe_InheritFrom(t *testing.T) {
 }
 
 // TestResolveRecipe_InheritFromRejects covers the fail-closed inputs: an
-// artifact that is not there must not resolve as a first deploy, and cm://
-// must be refused at the facade rather than reaching a loader that would try
-// to contact a cluster for it.
+// artifact that is not there must not resolve as a first deploy, one that is
+// there but names no component must not either, and cm:// must be refused at
+// the facade rather than reaching a loader that would try to contact a cluster
+// for it.
 func TestResolveRecipe_InheritFromRejects(t *testing.T) {
 	t.Parallel()
 
@@ -2886,6 +2887,11 @@ func TestResolveRecipe_InheritFromRejects(t *testing.T) {
 	if err := os.Mkdir(emptyDir, 0o750); err != nil {
 		t.Fatalf("setup: mkdir: %v", err)
 	}
+	// Loads cleanly and resolves non-nil, so only an explicit length check
+	// stops it: ApplyInheritedIdentity returns immediately for an empty list,
+	// which would re-derive every namespace from the registry while reporting
+	// success.
+	noComponents := priorRecipe(t, filepath.Join(dir, "no-components.yaml"), nil)
 
 	tests := []struct {
 		name        string
@@ -2895,6 +2901,10 @@ func TestResolveRecipe_InheritFromRejects(t *testing.T) {
 		{"missing path", filepath.Join(dir, "absent.yaml"), "is not readable"},
 		{"directory without a recipe.yaml", emptyDir, "neither a recipe nor a bundle"},
 		{"configmap uri", "cm://gpu-operator/aicr-recipe", "does not support cm:// locations yet"},
+		// Loads and validates cleanly: nothing on the load path requires a
+		// component list, so this is the one rejected shape that reaches the
+		// inheritance step rather than failing before it.
+		{"recipe with no componentRefs", noComponents, "carries no components to inherit namespaces from"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

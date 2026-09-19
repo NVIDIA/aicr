@@ -890,8 +890,13 @@ func (c *Client) inheritIdentity(ctx context.Context, inheritFrom string, resolv
 		// LoadRecipe already returns structured errors with the right code.
 		return err
 	}
+	// Empty is the reachable half of this guard, not nil: nothing on the load
+	// path rejects a recipe whose componentRefs list is empty, and
+	// ApplyInheritedIdentity returns immediately for one. Letting that through
+	// would re-derive every namespace from the current registry while reporting
+	// success, which is the relocation this flag exists to prevent.
 	priorInternal := prior.Resolved()
-	if priorInternal == nil {
+	if priorInternal == nil || len(priorInternal.ComponentRefs) == 0 {
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"inherit-from %s carries no components to inherit namespaces from", inheritFrom))
 	}
