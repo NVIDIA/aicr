@@ -2227,6 +2227,63 @@ func TestApplyInheritedIdentity(t *testing.T) {
 	}
 }
 
+// TestApplyInheritedIdentityRebindsHealthCheck pins the interaction between the
+// two halves of --inherit-from: a health check is static YAML naming wherever
+// the registry currently puts the component, so a preserved namespace that left
+// the assertions behind would fail validation against the very deployment
+// inheritance just kept in place.
+//
+// The kube-system assertion is the control. A check may legitimately assert
+// against a namespace the component does not live in, and those must survive.
+func TestApplyInheritedIdentityRebindsHealthCheck(t *testing.T) {
+	const check = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+spec:
+  steps:
+    - name: validate-deployment-exists
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: skyhook-operator-controller-manager
+                namespace: nodewright
+    - name: validate-unrelated-namespace
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: kube-proxy
+                namespace: kube-system
+`
+
+	refs := []ComponentRef{{
+		Name:               "nodewright-operator",
+		Namespace:          "nodewright",
+		HealthCheckAsserts: check,
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	if got := refs[0].Namespace; got != "skyhook" {
+		t.Fatalf("namespace = %q, want skyhook", got)
+	}
+	if strings.Contains(refs[0].HealthCheckAsserts, "namespace: nodewright") {
+		t.Errorf("health check still asserts the registry namespace:\n%s", refs[0].HealthCheckAsserts)
+	}
+	if !strings.Contains(refs[0].HealthCheckAsserts, "namespace: skyhook") {
+		t.Errorf("health check does not assert the inherited namespace:\n%s", refs[0].HealthCheckAsserts)
+	}
+	if !strings.Contains(refs[0].HealthCheckAsserts, "namespace: kube-system") {
+		t.Errorf("unrelated namespace assertion was rewritten:\n%s", refs[0].HealthCheckAsserts)
+	}
+}
+
 // TestComponentRefMergeWithPath verifies that the Path field is correctly merged
 // when merging ComponentRefs (overlay into base).
 func TestComponentRefMergeWithPath(t *testing.T) {

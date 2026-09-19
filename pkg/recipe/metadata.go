@@ -316,11 +316,79 @@ func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 		namespaces[p.Name] = p.Namespace
 	}
 	for i := range refs {
-		if ns, ok := namespaces[refs[i].Name]; ok {
-			refs[i].Namespace = ns
+		ns, ok := namespaces[refs[i].Name]
+		if !ok || ns == refs[i].Namespace {
+			continue
+		}
+		previous := refs[i].Namespace
+		refs[i].Namespace = ns
+		// The health check is static YAML loaded verbatim from the registry's
+		// assertFile, so its namespaces name wherever the registry currently
+		// puts the component. Leaving them behind would fail validation
+		// against a deployment this function just correctly preserved.
+		if err := rebindHealthCheckNamespace(&refs[i], previous, ns); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// rebindHealthCheckNamespace retargets a component's health-check assertions
+// from one namespace to another.
+//
+// Only values equal to `from` are rewritten. A check may legitimately assert
+// against a namespace the component does not live in (kube-system, a CRD's
+// owner), and rewriting every namespace it mentions would break those.
+func rebindHealthCheckNamespace(ref *ComponentRef, from, to string) error {
+	if strings.TrimSpace(ref.HealthCheckAsserts) == "" || from == "" {
+		return nil
+	}
+	var check map[string]any
+	if err := yaml.Unmarshal([]byte(ref.HealthCheckAsserts), &check); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"failed to parse health check for component %q while inheriting its namespace", ref.Name), err)
+	}
+	if !retargetNamespace(check, from, to) {
+		return nil
+	}
+	data, err := serializer.MarshalYAMLDeterministic(check)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf(
+			"failed to serialize health check for component %q after inheriting its namespace", ref.Name))
+	}
+	ref.HealthCheckAsserts = string(data)
+	return nil
+}
+
+// retargetNamespace walks a decoded document rewriting every `namespace: from`
+// to `namespace: to`, and reports whether anything changed. Walking rather than
+// reaching for a fixed path because the assertion shape is chainsaw's, not
+// ours, and a path that assumed spec.steps[].try[].assert would silently miss
+// a namespace nested anywhere else.
+func retargetNamespace(node any, from, to string) bool {
+	changed := false
+	switch n := node.(type) {
+	case map[string]any:
+		for k, v := range n {
+			if k == "namespace" {
+				if s, ok := v.(string); ok && s == from {
+					n[k] = to
+					changed = true
+				}
+				continue
+			}
+			if retargetNamespace(v, from, to) {
+				changed = true
+			}
+		}
+	case []any:
+		for _, v := range n {
+			if retargetNamespace(v, from, to) {
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 // coherenceProblem reports why a resolved ComponentRef's deployment-shape
