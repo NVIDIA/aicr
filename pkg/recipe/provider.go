@@ -174,15 +174,15 @@ func (p *EmbeddedDataProvider) ReadFile(ctx context.Context, path string) ([]byt
 	if err := ctx.Err(); err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, fmt.Sprintf("context canceled before reading %q", path), err)
 	}
-	fullPath := filepath.Join(p.prefix, path)
+	fullPath := filepath.ToSlash(filepath.Clean(filepath.Join(p.prefix, path)))
 	slog.Debug("reading file from embedded provider", "path", path, "fullPath", fullPath)
 	return p.fs.ReadFile(fullPath)
 }
 
 // WalkDir walks the embedded filesystem.
 func (p *EmbeddedDataProvider) WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error {
-	fullRoot := filepath.Join(p.prefix, root)
-	if fullRoot == "" {
+	fullRoot := filepath.ToSlash(filepath.Clean(filepath.Join(p.prefix, root)))
+	if fullRoot == "" || fullRoot == "." {
 		fullRoot = "." // embed.FS expects "." for root
 	}
 	slog.Debug("walking embedded filesystem", "root", root, "fullRoot", fullRoot)
@@ -195,11 +195,12 @@ func (p *EmbeddedDataProvider) WalkDir(ctx context.Context, root string, fn fs.W
 		}
 		// Strip the prefix before passing to callback
 		var relPath string
-		if p.prefix == "" {
+		normalizedPrefix := filepath.ToSlash(p.prefix)
+		if normalizedPrefix == "" || normalizedPrefix == "." {
 			relPath = path
 		} else {
-			relPath = strings.TrimPrefix(path, p.prefix+"/")
-			if relPath == p.prefix {
+			relPath = strings.TrimPrefix(path, normalizedPrefix+"/")
+			if relPath == normalizedPrefix {
 				relPath = ""
 			}
 		}
@@ -374,7 +375,7 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 				fmt.Sprintf("file too large (%d bytes, max %d): %s", info.Size(), config.MaxFileSize, relPath))
 		}
 
-		externalFiles[relPath] = true
+		externalFiles[filepath.ToSlash(relPath)] = true
 		slog.Debug("discovered external file",
 			"path", relPath,
 			"size", info.Size())
@@ -427,21 +428,23 @@ func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte
 	}
 	slog.Debug("reading file from layered provider", "path", path)
 
+	lookupPath := filepath.ToSlash(path)
+
 	// Special handling for registry file - merge instead of replace
-	if path == registryFileName {
+	if lookupPath == registryFileName {
 		slog.Debug("reading merged registry file")
 		return p.getMergedRegistry(ctx)
 	}
 
 	// Special handling for catalog file - merge instead of replace (when external exists)
-	if path == catalogFileName && p.externalFiles[catalogFileName] {
+	if lookupPath == catalogFileName && p.externalFiles[catalogFileName] {
 		slog.Debug("reading merged catalog file")
 		return p.getMergedCatalog(ctx)
 	}
 
 	// Check external directory first
-	if p.externalFiles[path] {
-		data, err := readExternalFile(p.externalDir, path, p.maxFileSize, p.allowSymlinks)
+	if p.externalFiles[lookupPath] {
+		data, err := readExternalFile(p.externalDir, lookupPath, p.maxFileSize, p.allowSymlinks)
 		if err != nil {
 			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", path))
 		}
@@ -451,7 +454,7 @@ func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte
 
 	// Fall back to embedded
 	slog.Debug("falling back to embedded data", "path", path)
-	return p.embedded.ReadFile(ctx, path)
+	return p.embedded.ReadFile(ctx, lookupPath)
 }
 
 // WalkDir walks both embedded and external directories.
@@ -484,18 +487,11 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 			if relErr != nil {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to compute relative path", relErr)
 			}
+			slashRelPath := filepath.ToSlash(relPath)
 
-			// Strip root prefix if present
-			if root != "" {
-				relPath = strings.TrimPrefix(relPath, root+"/")
-				if relPath == root {
-					relPath = ""
-				}
-			}
-
-			visited[relPath] = true
-			slog.Debug("visiting external file", "path", relPath, "isDir", d.IsDir())
-			return fn(relPath, d, nil)
+			visited[slashRelPath] = true
+			slog.Debug("visiting external file", "path", slashRelPath, "isDir", d.IsDir())
+			return fn(slashRelPath, d, nil)
 		})
 		if err != nil {
 			return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal,
@@ -521,15 +517,16 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 
 // Source returns "external" or "embedded" depending on where the file comes from.
 func (p *LayeredDataProvider) Source(path string) string {
+	normalizedPath := filepath.ToSlash(path)
 	var source string
 	switch {
-	case path == registryFileName:
+	case normalizedPath == registryFileName:
 		// Always merged: registry.yaml is required in external dir (enforced by constructor).
 		source = sourceMerged
-	case path == catalogFileName && p.externalFiles[catalogFileName]:
+	case normalizedPath == catalogFileName && p.externalFiles[catalogFileName]:
 		// Merged only when external catalog exists (catalog is optional).
 		source = sourceMerged
-	case p.externalFiles[path]:
+	case p.externalFiles[normalizedPath]:
 		source = sourceExternal
 	default:
 		source = sourceEmbedded
