@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -289,21 +290,37 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 //
 // Runs after ApplyRegistryDefaults rather than inside it, because that method is
 // exported and called from four packages.
-func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) {
+// A prior artifact is operator-supplied input that no loader validates for
+// Kubernetes namespace syntax, and this assignment lands after the current
+// recipe has already been validated. Deployers interpolate the namespace into
+// generated install scripts, so a value carrying shell metacharacters would
+// reach a shell the operator runs. Every inherited value is therefore checked
+// before it is copied, and one bad value rejects the whole artifact rather
+// than being skipped: a silently ignored pin is the relocation this function
+// exists to prevent.
+func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 	if len(prior) == 0 {
-		return
+		return nil
 	}
 	namespaces := make(map[string]string, len(prior))
 	for _, p := range prior {
-		if p.Namespace != "" {
-			namespaces[p.Name] = p.Namespace
+		if p.Namespace == "" {
+			continue
 		}
+		// A namespace is a DNS-1123 label, not a subdomain: no dots, 63 chars.
+		if errs := validation.IsDNS1123Label(p.Namespace); len(errs) > 0 {
+			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"inherited namespace %q for component %q is not a valid Kubernetes namespace: %s",
+				p.Namespace, p.Name, strings.Join(errs, "; ")))
+		}
+		namespaces[p.Name] = p.Namespace
 	}
 	for i := range refs {
 		if ns, ok := namespaces[refs[i].Name]; ok {
 			refs[i].Namespace = ns
 		}
 	}
+	return nil
 }
 
 // coherenceProblem reports why a resolved ComponentRef's deployment-shape

