@@ -2284,6 +2284,67 @@ spec:
 	}
 }
 
+// TestApplyInheritedIdentityRebindsEveryDocument pins that rebinding preserves
+// a multi-document health check. Nothing restricts the field to one document,
+// and decoding only the first would silently drop the rest on re-serialization,
+// leaving a check that passes without verifying what it claims to. The second
+// document also holds the only matching namespace, so a first-document-only
+// implementation would additionally fail to rebind at all.
+func TestApplyInheritedIdentityRebindsEveryDocument(t *testing.T) {
+	const check = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: first-doc
+spec:
+  steps:
+    - name: unrelated
+      try:
+        - assert:
+            resource:
+              kind: DaemonSet
+              metadata:
+                namespace: kube-system
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: second-doc
+spec:
+  steps:
+    - name: operator
+      try:
+        - assert:
+            resource:
+              kind: Deployment
+              metadata:
+                namespace: nodewright
+`
+
+	refs := []ComponentRef{{
+		Name:               "nodewright-operator",
+		Namespace:          "nodewright",
+		HealthCheckAsserts: check,
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	got := refs[0].HealthCheckAsserts
+	if !strings.Contains(got, "first-doc") {
+		t.Errorf("the first document was dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "second-doc") {
+		t.Errorf("the second document was dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "namespace: skyhook") {
+		t.Errorf("the second document's namespace was not rebound:\n%s", got)
+	}
+	if !strings.Contains(got, "namespace: kube-system") {
+		t.Errorf("an unrelated namespace was rewritten:\n%s", got)
+	}
+}
+
 // TestApplyInheritedIdentityLeavesRefIntactOnRebindFailure pins the all-or-
 // nothing contract: a ref changes both its namespace and its health check, or
 // neither. Assigning the namespace first would leave the new value beside

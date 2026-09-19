@@ -18,7 +18,9 @@ package recipe
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"sort"
@@ -346,20 +348,49 @@ func rebindHealthCheckNamespace(ref *ComponentRef, from, to string) error {
 	if strings.TrimSpace(ref.HealthCheckAsserts) == "" || from == "" {
 		return nil
 	}
-	var check map[string]any
-	if err := yaml.Unmarshal([]byte(ref.HealthCheckAsserts), &check); err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"failed to parse health check for component %q while inheriting its namespace", ref.Name), err)
+	// Decoded as a stream, not a single value. Nothing restricts this field to
+	// one document, and yaml.Unmarshal reads only the first: re-serializing
+	// that alone would silently drop every later assertion, leaving a check
+	// that passes without verifying what it claims to.
+	dec := yaml.NewDecoder(strings.NewReader(ref.HealthCheckAsserts))
+	var (
+		docs    []any
+		changed bool
+	)
+	for {
+		var doc any
+		err := dec.Decode(&doc)
+		if stderrors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"failed to parse health check for component %q while inheriting its namespace", ref.Name), err)
+		}
+		if doc == nil {
+			continue
+		}
+		if retargetNamespace(doc, from, to) {
+			changed = true
+		}
+		docs = append(docs, doc)
 	}
-	if !retargetNamespace(check, from, to) {
+	if !changed {
 		return nil
 	}
-	data, err := serializer.MarshalYAMLDeterministic(check)
-	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf(
-			"failed to serialize health check for component %q after inheriting its namespace", ref.Name))
+	var out bytes.Buffer
+	for i, doc := range docs {
+		data, err := serializer.MarshalYAMLDeterministic(doc)
+		if err != nil {
+			return errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to serialize health check for component %q after inheriting its namespace", ref.Name))
+		}
+		if i > 0 {
+			out.WriteString("---\n")
+		}
+		out.Write(data)
 	}
-	ref.HealthCheckAsserts = string(data)
+	ref.HealthCheckAsserts = out.String()
 	return nil
 }
 
