@@ -307,6 +307,57 @@ func identityReport(t *testing.T) *Report {
 	})
 }
 
+// clusterSourceReport is a `--from cluster` run whose read found its
+// components. Every count differs from every other, so a renderer that crosses
+// two of them changes this golden: the Helm records and the Argo Applications
+// are the pair that matters, being in different units.
+func clusterSourceReport(t *testing.T) *Report {
+	t.Helper()
+	results := Match(syntheticSet(),
+		map[string]string{"alpha-operator": "1.2.0", "lambda-operator": "1.1.0"},
+		map[string]string{"alpha-operator": "1.2.3", "lambda-operator": "1.2.0"})
+	return NewReport(results, ReportOptions{
+		From:     "cluster",
+		To:       "./bundles-v0.17.0",
+		Deployer: "argocd",
+		Source: &ReportSource{
+			Kubeconfig: "/home/op/.kube/config",
+			Context:    "prod-east",
+			Matched:    2,
+			Helm: ReportSourceHelm{
+				Records: 37, Unattributed: 2, Unreadable: 1, Uninstalled: 3, StampedUnmatched: 0,
+			},
+			Argo: ReportSourceArgo{Applications: 5, Unattributed: 6, Unreadable: 7},
+		},
+	})
+}
+
+// emptyClusterReport is the case the banner exists for: the read matched
+// nothing, so every row reads "added" and a reader skimming the rows alone
+// would conclude the cluster is bare. The stamped-but-unmatched count is
+// non-zero here because that is the realistic pairing — AICR wrote those
+// records and the mapping no longer recognizes them.
+func emptyClusterReport(t *testing.T) *Report {
+	t.Helper()
+	results := Match(syntheticSet(),
+		map[string]string{},
+		map[string]string{"alpha-operator": "1.2.3", "zeta-operator": "0.4.0"})
+	return NewReport(results, ReportOptions{
+		From:     "cluster",
+		To:       "./bundles-v0.17.0",
+		Deployer: "helm",
+		Source: &ReportSource{
+			Kubeconfig: "/home/op/.kube/config",
+			Context:    "staging-west",
+			Matched:    0,
+			Helm: ReportSourceHelm{
+				Records: 12, Unattributed: 1, Unreadable: 2, Uninstalled: 4, StampedUnmatched: 5,
+			},
+			Argo: ReportSourceArgo{},
+		},
+	})
+}
+
 func TestWriteTableGolden(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -319,6 +370,8 @@ func TestWriteTableGolden(t *testing.T) {
 		{"no changes", "report-empty.golden", func(*testing.T) *Report {
 			return NewReport(nil, ReportOptions{From: "a.yaml", To: "b.yaml"})
 		}},
+		{"cluster source", "report-cluster-source.golden", clusterSourceReport},
+		{"cluster matched nothing", "report-cluster-empty.golden", emptyClusterReport},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -526,6 +579,253 @@ func TestWriteTableEscapesDetailBlock(t *testing.T) {
 		}
 	}
 	for _, want := range []string{`\x07`, `\x1b`, `\x00`, `\r`, `\n`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("control character not rendered visibly as %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestReportClusterSourceJSONGolden pins the machine-readable shape of the
+// source block, which a pipeline reads instead of the table.
+func TestReportClusterSourceJSONGolden(t *testing.T) {
+	got, err := json.MarshalIndent(clusterSourceReport(t), "", "  ")
+	if err != nil {
+		t.Fatalf("marshal report: %v", err)
+	}
+	compareGolden(t, "report-cluster-source.json.golden", append(got, '\n'))
+}
+
+// TestWriteTableRendersSourceAboveTheRows pins the ordering the banner's whole
+// purpose rests on. A source block rendered below a long table is read after
+// the reader has already drawn a conclusion from rows that all say "added".
+func TestWriteTableRendersSourceAboveTheRows(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	if err := WriteTable(&buf, emptyClusterReport(t)); err != nil {
+		t.Fatalf("WriteTable: %v", err)
+	}
+	got := buf.String()
+
+	source := strings.Index(got, "READ FROM CLUSTER")
+	banner := strings.Index(got, "NOTHING INSTALLED WAS RECOGNIZED")
+	rows := strings.Index(got, "\nCOMPONENT")
+	if source < 0 || banner < 0 || rows < 0 {
+		t.Fatalf("missing section: source=%d banner=%d rows=%d\n%s", source, banner, rows, got)
+	}
+	if source > rows {
+		t.Errorf("the source block renders below the rows, at %d against %d:\n%s", source, rows, got)
+	}
+	if banner > rows {
+		t.Errorf("the zero-match banner renders below the rows, at %d against %d:\n%s", banner, rows, got)
+	}
+}
+
+// TestWriteTableZeroMatchBanner pins that the banner fires exactly when the
+// read matched nothing, and that it names the two causes an operator acts on.
+// Without it an empty cluster and a kubeconfig on the wrong context render
+// identically: every row reads "added" either way.
+func TestWriteTableZeroMatchBanner(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		report     func(*testing.T) *Report
+		wantBanner bool
+	}{
+		{"matched nothing", emptyClusterReport, true},
+		{"matched something", clusterSourceReport, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var buf bytes.Buffer
+			if err := WriteTable(&buf, tt.report(t)); err != nil {
+				t.Fatalf("WriteTable: %v", err)
+			}
+			got := buf.String()
+			if strings.Contains(got, "NOTHING INSTALLED WAS RECOGNIZED") != tt.wantBanner {
+				t.Fatalf("zero-match banner present = %v, want %v:\n%s",
+					!tt.wantBanner, tt.wantBanner, got)
+			}
+			if !tt.wantBanner {
+				return
+			}
+			// The two causes are the point of the banner: an operator who
+			// reads only "nothing was found" has no next action.
+			for _, want := range []string{"not the cluster you meant", "deployer"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("the banner does not name %q as a cause:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+// TestWriteTableArgoStampIsNotApplicable pins that the Argo line never reports
+// a stamped-but-unmatched count.
+//
+// Argo has no such count to report: the generated Application carries only a
+// sync-wave annotation, and the AICR stamp lives in the wrapper Chart.yaml the
+// Application points at, which the reader never opens. Printing a zero there
+// would read as "the mapping checked out" when nothing was checked.
+func TestWriteTableArgoStampIsNotApplicable(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	if err := WriteTable(&buf, emptyClusterReport(t)); err != nil {
+		t.Fatalf("WriteTable: %v", err)
+	}
+	argo := lineWithPrefix(t, buf.String(), "  argo ")
+	if strings.Contains(argo, "stamped but unmatched") {
+		t.Errorf("the argo line reports a stamped-unmatched count it never measured: %q", argo)
+	}
+	if !strings.Contains(argo, "no stamp to check") {
+		t.Errorf("the argo line does not say the stamp check does not apply: %q", argo)
+	}
+
+	// The Helm line does carry the count, so the absence above is a statement
+	// about Argo rather than the renderer dropping the field everywhere.
+	helm := lineWithPrefix(t, buf.String(), "  helm ")
+	if !strings.Contains(helm, "5 stamped but unmatched") {
+		t.Errorf("the helm line does not report its stamped-unmatched count: %q", helm)
+	}
+}
+
+// TestWriteTableSourceCountsAreNotInterchangeable pins each reader's count to
+// its own label and its own unit. The two must never be summed — a Helm
+// storage record is one revision of one release, an Argo Application is one
+// component — and rendering them through one shared field name is how that
+// distinction is lost.
+func TestWriteTableSourceCountsAreNotInterchangeable(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	if err := WriteTable(&buf, clusterSourceReport(t)); err != nil {
+		t.Fatalf("WriteTable: %v", err)
+	}
+	out := buf.String()
+
+	tests := []struct {
+		name   string
+		prefix string
+		want   []string
+		reject []string
+	}{
+		{
+			name:   "helm",
+			prefix: "  helm ",
+			want: []string{
+				"37 storage records", "2 unattributed", "1 unreadable",
+				"3 uninstalled", "0 stamped but unmatched",
+			},
+			reject: []string{"application"},
+		},
+		{
+			name:   "argo",
+			prefix: "  argo ",
+			want:   []string{"5 applications", "6 unattributed", "7 unreadable"},
+			reject: []string{"storage record", "uninstalled"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			line := lineWithPrefix(t, out, tt.prefix)
+			for _, want := range tt.want {
+				if !strings.Contains(line, want) {
+					t.Errorf("%q missing from the %s line: %q", want, tt.name, line)
+				}
+			}
+			for _, bad := range tt.reject {
+				if strings.Contains(line, bad) {
+					t.Errorf("%q leaked into the %s line from the other reader: %q", bad, tt.name, line)
+				}
+			}
+		})
+	}
+}
+
+func lineWithPrefix(t *testing.T, out, prefix string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	t.Fatalf("no line starting %q in:\n%s", prefix, out)
+	return ""
+}
+
+// TestWriteTableOmitsSourceForArtifactComparison pins that a recipe-to-recipe
+// or bundle-to-bundle run says nothing about a cluster it never read.
+func TestWriteTableOmitsSourceForArtifactComparison(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	if err := WriteTable(&buf, mixedReport(t)); err != nil {
+		t.Fatalf("WriteTable: %v", err)
+	}
+	if got := buf.String(); strings.Contains(got, "READ FROM CLUSTER") {
+		t.Errorf("an artifact comparison rendered a cluster source block:\n%s", got)
+	}
+}
+
+// TestWriteTableRendersUnknownSourceFieldsVisibly pins that a kubeconfig or
+// context the caller could not resolve renders as an explicit gap rather than
+// as a dropped line. An in-cluster run has no file and a merged multi-file
+// KUBECONFIG has no single path, and a silently missing line reads as "nothing
+// to say" rather than "not known".
+func TestWriteTableRendersUnknownSourceFieldsVisibly(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	report := NewReport(nil, ReportOptions{From: "cluster", Source: &ReportSource{Matched: 3}})
+	if err := WriteTable(&buf, report); err != nil {
+		t.Fatalf("WriteTable: %v", err)
+	}
+	out := buf.String()
+	for _, prefix := range []string{"  kubeconfig ", "  context    "} {
+		line := lineWithPrefix(t, out, prefix)
+		if !strings.HasSuffix(line, "-") {
+			t.Errorf("unresolved field did not render as a gap: %q", line)
+		}
+	}
+}
+
+// TestWriteTableEscapesSourceBlock covers the fields the cluster read adds to
+// the terminal surface. A context name comes out of a kubeconfig the operator
+// may not have written, and the source block sits above the verdicts, which is
+// the best place in the output from which to forge one.
+func TestWriteTableEscapesSourceBlock(t *testing.T) {
+	t.Parallel()
+
+	report := NewReport(nil, ReportOptions{
+		From: "cluster",
+		Source: &ReportSource{
+			Kubeconfig: "/tmp/kc\nFORGED LINE",
+			Context:    "ctx\x1b[31m red\r",
+			Matched:    1,
+		},
+	})
+	var buf bytes.Buffer
+	if err := WriteTable(&buf, report); err != nil {
+		t.Fatalf("WriteTable: %v", err)
+	}
+	got := buf.String()
+
+	for _, bad := range []struct{ name, seq string }{
+		{"ESC", "\x1b"},
+		{"carriage return", "\r"},
+	} {
+		if strings.Contains(got, bad.seq) {
+			t.Errorf("%s survived into the source block:\n%s", bad.name, got)
+		}
+	}
+	if strings.Contains(got, "\nFORGED LINE") {
+		t.Errorf("an injected newline forged a line in the source block:\n%s", got)
+	}
+	for _, want := range []string{`\n`, `\r`, `\x1b`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("control character not rendered visibly as %q:\n%s", want, got)
 		}

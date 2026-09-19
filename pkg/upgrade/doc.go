@@ -127,6 +127,17 @@
 // The deployer is not inferred. ADR-021 Decision 5 would take it from a `to`
 // bundle, which does record it in bundle-info.yaml, but the check does not read
 // that file, so RequiresDeployer reports when a caller has to supply one. It is true for a
+// A report built from a cluster read carries a Source block, which WriteTable
+// renders above the rows. A read that recognizes nothing is reported rather
+// than failed, so every row under it reads "added"; the block is what
+// separates that from a kubeconfig on the wrong context, and it is useless
+// below the table a reader has already drawn a conclusion from. The two
+// readers are accounted for in separate types whose counts are in different
+// units and must never be summed.
+//
+// The deployer cannot be inferred. ADR-021 Decision 5 would take it from a `to`
+// bundle, but no bundle artifact records which deployer built it, so
+// RequiresDeployer reports when a caller has to supply one. It is true for a
 // manual row, and for a blocked row that carries a record; the step-less
 // blocked rows do not make it true, because a deployer would name a scope
 // nothing renders.
