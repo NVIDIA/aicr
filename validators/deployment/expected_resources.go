@@ -1171,7 +1171,7 @@ func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef
 		// DaemonSet would fail NOT_FOUND against a bundle that never deployed it
 		// (issue #2846). Suppress exactly when the render is empty — same
 		// render-aware, fail-closed shape as gcp-driver-installer.
-		suppressed, err := emptyRenderHealthCheckSuppressed(goCtx, ref)
+		suppressed, err := emptyRenderHealthCheckSuppressed(ctx.Ctx, ref)
 		return suppressed, "DRA eviction is not opted in, so the labeler renders no objects (enabled=false); the bundler did not deploy it", err
 	default:
 		return false, "", nil
