@@ -26,15 +26,22 @@ import (
 
 // ChangeKind says what a component did between the two tables.
 //
-// Only ChangeVersion and ChangeReplaced carry a Verdict: the verdict vocabulary
-// describes a version transition, and a component that merely arrived or
-// departed did not make one. A departing component stays installed, because
-// AICR dropping it from a recipe is a statement about what AICR now ships
-// rather than an instruction to tear down a running workload.
+// ChangeAdded and ChangeRemoved carry no Verdict: the verdict vocabulary
+// describes a transition, and a component that merely arrived or departed did
+// not make one. A departing component stays installed, because AICR dropping it
+// from a recipe is a statement about what AICR now ships rather than an
+// instruction to tear down a running workload.
+//
+// ChangeIdentity is the kind a version comparison cannot produce at all: the
+// component held its version and moved anyway. It is its own kind rather than a
+// flag on ChangeVersion because the remedy has nothing to do with a version
+// bump, and a report that showed it as one would send the reader to the
+// component's release notes for an answer they do not contain.
 type ChangeKind string
 
 const (
 	ChangeVersion  ChangeKind = "version"
+	ChangeIdentity ChangeKind = "identity"
 	ChangeAdded    ChangeKind = "added"
 	ChangeRemoved  ChangeKind = "removed"
 	ChangeReplaced ChangeKind = "replaced"
@@ -57,13 +64,16 @@ type Span struct {
 // Verdict is: on a ChangeAdded or ChangeRemoved row, where nothing was
 // assessed because no transition was made.
 //
-// The three reasons that produce unknown stay distinct because they differ in
+// The four reasons that produce unknown stay distinct because they differ in
 // what would close the gap, which is the same test that keeps unknown separate
 // from unversioned: ReasonNoRecord needs somebody to author the first record,
 // ReasonNoBoundaryCrossed needs an existing one widened (or confirmation that
-// no boundary belongs there), and ReasonDowngrade needs nothing because nothing
-// can close it. Rule 7 rejects every reverse record, so a downgrade is
-// unassessable rather than merely unassessed.
+// no boundary belongs there), ReasonDowngrade needs nothing because nothing
+// can close it, and ReasonIdentityChanged needs the relocation performed as its
+// own piece of work, because no record can close it either: the vocabulary
+// describes version boundaries and says nothing about where a release lives.
+// Rule 7 rejects every reverse record, so a downgrade is unassessable rather
+// than merely unassessed.
 //
 // ReasonBeyondRecordCeiling is not one of them. A record exists, what it covers
 // is known, and the target is known to sit past that, which is a fact about
@@ -79,8 +89,28 @@ const (
 	ReasonNoBoundaryCrossed   Reason = "no-boundary-crossed"
 	ReasonBeyondRecordCeiling Reason = "beyond-record-ceiling"
 	ReasonDowngrade           Reason = "downgrade"
+	ReasonIdentityChanged     Reason = "identity-changed"
 	ReasonNotComparable       Reason = "not-comparable"
 )
+
+// Identity is what a recipe pins for a component beyond its version. A move
+// here is invisible to a version comparison but relocates running objects, and
+// Helm cannot move a release between namespaces.
+type Identity struct {
+	Version   string
+	Namespace string
+}
+
+// IdentityChange names one field that moved between the compared artifacts.
+//
+// Field is the Identity field's name lowercased ("namespace"), so a consumer
+// branches on it without parsing prose. Version is never one of them: the
+// version axis is ComponentResult.From and To, and the records assess it.
+type IdentityChange struct {
+	Field string
+	From  string
+	To    string
+}
 
 // ComponentResult is one row of an upgrade check.
 //
@@ -104,6 +134,11 @@ type ComponentResult struct {
 	// empty for ChangeAdded and ChangeReplaced, To for ChangeRemoved.
 	From string
 	To   string
+
+	// IdentityChanges are moves no version comparison can see. Non-empty on a
+	// row whose Change is ChangeIdentity, and on a ChangeVersion row when both
+	// axes moved in the same hop.
+	IdentityChanges []IdentityChange
 
 	// Verdict is empty for ChangeAdded and ChangeRemoved.
 	Verdict Verdict
@@ -168,6 +203,14 @@ func (r ComponentResult) FailsRun() bool {
 	if r.Change == ChangeAdded || r.Change == ChangeRemoved {
 		return false
 	}
+	if len(r.IdentityChanges) > 0 {
+		// Stated independently of the verdict rather than relying on
+		// MatchIdentities having withdrawn a safe one, because a result can be
+		// built without going through the matcher at all and a relocation that
+		// slipped through as safe is the whole failure this axis exists to
+		// catch.
+		return true
+	}
 	// Only safe passes. A transition nobody assessed is not a transition anyone
 	// approved, so unknown fails however far the versions moved; Breaking once
 	// calibrated that and no longer does. A verdict outside the vocabulary is
@@ -176,29 +219,57 @@ func (r ComponentResult) FailsRun() bool {
 	return r.Verdict != VerdictSafe
 }
 
-// Match compares two component-to-version tables against the set's records and
-// returns one result per component whose deployment changes, sorted by
-// component name.
+// Match compares two component-to-version tables, for callers that hold only
+// versions.
+//
+// It is MatchIdentities over identities that state a version and nothing else,
+// which leaves the identity axis with nothing to compare, so the results are
+// exactly the version results.
+func Match(set Set, from, to map[string]string) []ComponentResult {
+	return MatchIdentities(set, versionsOnly(from), versionsOnly(to))
+}
+
+func versionsOnly(versions map[string]string) map[string]Identity {
+	out := make(map[string]Identity, len(versions))
+	for name, v := range versions {
+		out[name] = Identity{Version: v}
+	}
+	return out
+}
+
+// MatchIdentities compares two component-to-identity tables against the set's
+// records and returns one result per component whose deployment changes, sorted
+// by component name.
 //
 // It is pure: tables in, results out, with no filesystem, cluster or registry
-// access. A component at the same version on both sides produces no row.
+// access. A component whose identity is the same on both sides produces no row.
 //
-// A record is crossed when the source sits below the floor its `to` names and
-// the target reaches it. Verdict selection then runs in this order: nothing
-// crossed is unknown; one crossed record whose `from` covers the source lends
-// its verdict, blocked included, because it describes this exact move, unless
-// the target lands past the ceiling that record's `to` names, which blocks the
-// jump at that ceiling; any other crossed record authored blocked blocks the
-// jump; two or more crossed records block it; one crossed record whose `from`
-// does not cover the source blocks it, because nothing describes an upgrade
-// from where the operator is. Every result carries a Reason and an Explanation
-// saying which of those it was.
+// The two axes move independently, and only one of them is assessed by anybody.
 //
-// set must already have passed Validate; Match does not re-run it. A malformed
-// record cannot panic here either: a transition whose ranges do not parse, or
-// whose `to` names no floor, simply never applies, leaving the component at
-// unknown rather than lending it a verdict the record cannot support.
-func Match(set Set, from, to map[string]string) []ComponentResult {
+// On the version axis a record is crossed when the source sits below the floor
+// its `to` names and the target reaches it. Verdict selection then runs in this
+// order: nothing crossed is unknown; one crossed record whose `from` covers the
+// source lends its verdict, blocked included, because it describes this exact
+// move, unless the target lands past the ceiling that record's `to` names,
+// which blocks the jump at that ceiling; any other crossed record authored
+// blocked blocks the jump; two or more crossed records block it; one crossed
+// record whose `from` does not cover the source blocks it, because nothing
+// describes an upgrade from where the operator is. Every result carries a
+// Reason and an Explanation saying which of those it was.
+//
+// On the identity axis nothing is recorded, so nothing lends a verdict. A
+// component that moved there alone produces a ChangeIdentity row, which a
+// version comparison reports as no change whatsoever; one that moved on both
+// axes in the same hop carries the moves on its ChangeVersion row, and a safe
+// verdict is withdrawn there, because the record vouched for a version hop and
+// was never asked about a relocation.
+//
+// set must already have passed Validate; MatchIdentities does not re-run it. A
+// malformed record cannot panic here either: a transition whose ranges do not
+// parse, or whose `to` names no floor, simply never applies, leaving the
+// component at unknown rather than lending it a verdict the record cannot
+// support.
+func MatchIdentities(set Set, from, to map[string]Identity) []ComponentResult {
 	arrivals, superseded := replacements(set, from, to)
 
 	names := make([]string, 0, len(from)+len(to))
@@ -214,27 +285,120 @@ func Match(set Set, from, to map[string]string) []ComponentResult {
 
 	results := make([]ComponentResult, 0, len(names))
 	for _, name := range names {
-		fromVer, inFrom := from[name]
-		toVer, inTo := to[name]
+		src, inFrom := from[name]
+		tgt, inTo := to[name]
 		switch {
 		case inFrom && inTo:
-			// Compared as written rather than as parsed semver: two pins
-			// differing only in build metadata order as equal, and silence
-			// there reads as safe.
-			if fromVer == toVer {
+			moved := identityChanges(src, tgt)
+			// Versions compared as written rather than as parsed semver: two
+			// pins differing only in build metadata order as equal, and
+			// silence there reads as safe.
+			if src.Version == tgt.Version {
+				if len(moved) == 0 {
+					continue
+				}
+				results = append(results, relocation(name, src.Version, moved))
 				continue
 			}
-			results = append(results, matchVersions(set[name], name, fromVer, toVer))
+			r := matchVersions(set[name], name, src.Version, tgt.Version)
+			results = append(results, withIdentityChanges(r, moved))
 		case inTo:
-			results = append(results, arrival(name, toVer, arrivals[name]))
+			results = append(results, arrival(name, tgt.Version, arrivals[name]))
 		default:
 			if superseded[name] {
 				continue // joined into the arriving component's row
 			}
-			results = append(results, ComponentResult{Component: name, Change: ChangeRemoved, From: fromVer})
+			results = append(results, ComponentResult{Component: name, Change: ChangeRemoved, From: src.Version})
 		}
 	}
 	return results
+}
+
+// identityChanges lists the non-version fields that moved.
+//
+// A field counts only when both sides state it. An empty string is a fact the
+// artifact did not carry rather than a move to the default namespace, so
+// treating it as a value would report a relocation nobody performed for every
+// component the moment one of the two artifacts stops carrying the field.
+func identityChanges(from, to Identity) []IdentityChange {
+	var moved []IdentityChange
+	if from.Namespace != "" && to.Namespace != "" && from.Namespace != to.Namespace {
+		moved = append(moved, IdentityChange{
+			Field: "namespace",
+			From:  from.Namespace,
+			To:    to.Namespace,
+		})
+	}
+	return moved
+}
+
+// identityAdvice is the tail both identity explanations share: why no record
+// covers the move, and why it cannot ride along with an upgrade.
+const identityAdvice = "Transition records assess version boundaries, so none assesses a relocation. " +
+	"Helm cannot move a release between namespaces either, so applying the new recipe installs a " +
+	"second copy beside the running one: move the release deliberately, then re-run this check"
+
+// relocation is the row for a component that held its version and moved anyway.
+//
+// Unknown rather than blocked, for the reason that separates the two: nobody
+// was asked. A block is an author's judgement, and no author can record one
+// here, so this is a gap in what the vocabulary covers rather than a boundary
+// somebody drew.
+func relocation(name, version string, moved []IdentityChange) ComponentResult {
+	return ComponentResult{
+		Component:       name,
+		Change:          ChangeIdentity,
+		From:            version,
+		To:              version,
+		IdentityChanges: moved,
+		Verdict:         VerdictUnknown,
+		Reason:          ReasonIdentityChanged,
+		Explanation: fmt.Sprintf("%s %s, but %s. %s",
+			name, heldPhrase(version), movedPhrase(moved), identityAdvice),
+	}
+}
+
+// heldPhrase says what the component held still at, for a component that may
+// not pin a version at all. An unpinned one reaches here with an empty string,
+// and naming a version that the artifact never stated would invent one.
+func heldPhrase(version string) string {
+	if version == "" {
+		return "does not change version"
+	}
+	return "stays at " + version
+}
+
+// withIdentityChanges attaches the moves the version comparison could not see
+// and withdraws a safe verdict that no longer covers the whole hop.
+//
+// The record assessed a version boundary and nothing else: reading its safe
+// verdict as covering the relocation that shipped in the same hop would take a
+// claim about one axis as evidence about another, which is the false confidence
+// a wrong safe buys. Only safe is withdrawn, because every other verdict
+// already stops a strict run and already sends the reader to the row.
+func withIdentityChanges(r ComponentResult, moved []IdentityChange) ComponentResult {
+	if len(moved) == 0 {
+		return r
+	}
+	r.IdentityChanges = moved
+	if r.Verdict != VerdictSafe {
+		return r
+	}
+	r.Verdict = VerdictUnknown
+	r.Reason = ReasonIdentityChanged
+	r.Explanation = fmt.Sprintf(
+		"the move from %s to %s is recorded safe, but %s, and no record assessed that. %s",
+		r.From, r.To, movedPhrase(moved), identityAdvice)
+	return r
+}
+
+// movedPhrase states the moves as the clause both explanations embed.
+func movedPhrase(moved []IdentityChange) string {
+	parts := make([]string, len(moved))
+	for i, c := range moved {
+		parts[i] = fmt.Sprintf("its %s moves from %s to %s", c.Field, c.From, c.To)
+	}
+	return strings.Join(parts, " and ")
 }
 
 // replacements resolves the declarations that join a departure and an arrival
@@ -244,7 +408,7 @@ func Match(set Set, from, to map[string]string) []ComponentResult {
 // The matcher cannot derive a replacement: nothing in the tables tells "A was
 // replaced by B" from "A went away and B arrived", so the arriving component's
 // record says so.
-func replacements(set Set, from, to map[string]string) (map[string]*Replaces, map[string]bool) {
+func replacements(set Set, from, to map[string]Identity) (map[string]*Replaces, map[string]bool) {
 	names := make([]string, 0, len(set))
 	for name := range set {
 		names = append(names, name)
@@ -362,6 +526,42 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		return r
 	}
 	if len(crossed) > 1 {
+		// A safe boundary asks nothing of the operator, so crossing it composes
+		// nothing and skips nothing. When it is the only thing standing beside
+		// one substantive record that does describe this jump, defer to that
+		// record rather than stopping a move whose extra boundary is "nothing
+		// to do". Reached only after the blocked checks above, so an authored
+		// block still outranks everything here.
+		// N safe boundaries compose exactly as one does: none carries steps,
+		// so there is no work to skip and no origin whose guidance could be
+		// wrong. Coverage (rule 3) is what makes the chain trustworthy, since
+		// it leaves no hole below the pin, so the only question left is
+		// whether the assessment reaches the target.
+		// crossings orders by floor, so crossed[0] is the boundary that has to
+		// own the origin while top is the one that has to reach the target.
+		// Both must hold: skipping the origin check let a jump from a version
+		// no record assessed come back safe purely because it crossed two
+		// boundaries instead of one.
+		if top, ok := everySafeCrossing(crossed); ok && fromCovers(crossed[0].tr, src) {
+			if _, past := beyondCeiling(top.tr, tgt); !past {
+				r.Verdict = VerdictSafe
+				r.Transition = top.tr
+				r.Span = claimSpan(src, top.tr)
+				r.Reason = ReasonRecorded
+				r.Explanation = recordedExplanation(r, top)
+				return r
+			}
+		}
+		if only, ok := loneSubstantive(crossed); ok && fromCovers(only.tr, src) {
+			if _, past := beyondCeiling(only.tr, tgt); !past {
+				r.Verdict = only.tr.Verdict
+				r.Transition = only.tr
+				r.Span = claimSpan(src, only.tr)
+				r.Reason = ReasonRecorded
+				r.Explanation = recordedExplanation(r, only)
+				return r
+			}
+		}
 		// Composing both records' steps would be wrong rather than merely
 		// cautious: an intermediate record's work never runs on a jump straight
 		// past it, so the report names where to stop instead.
@@ -384,6 +584,50 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	r.StoppedAt = only.tr.To
 	r.Explanation = undefinedOriginExplanation(u, r, only, src)
 	return r
+}
+
+// everySafeCrossing returns the boundary nearest the target when every crossed
+// boundary is safe, so the caller can lend that verdict instead of blocking a
+// jump across boundaries that each ask nothing. crossings orders by floor, so
+// the last is the one whose ceiling has to reach the target.
+//
+// If one safe boundary composes nothing and skips nothing, N of them compose
+// nothing either: rule 4 forbids a safe record carrying steps, so there is no
+// intermediate work a jump past it could miss. Blocking such a jump names a
+// stopping point where nothing happens, which is the false-confidence
+// direction rather than the cautious one.
+//
+// This answers only "does anything ask something of the operator". The origin
+// and the ceiling are separate questions the call site still has to ask, and
+// conflating them is a mistake worth naming: a safe record carrying no steps
+// says nothing about whether the starting version was ever assessed, which is
+// what undefined-origin is about.
+func everySafeCrossing(crossed []crossing) (crossing, bool) {
+	if len(crossed) == 0 {
+		return crossing{}, false
+	}
+	for _, c := range crossed {
+		if c.tr.Verdict != VerdictSafe {
+			return crossing{}, false
+		}
+	}
+	return crossed[len(crossed)-1], true
+}
+
+// loneSubstantive returns the single crossed boundary that asks something of
+// the operator, when every other one crossed is safe. A safe record carries no
+// steps by construction (rule 4 forbids them), so it is never the skipped
+// migration multiple-boundaries exists to prevent.
+func loneSubstantive(crossed []crossing) (crossing, bool) {
+	var only crossing
+	found := 0
+	for _, c := range crossed {
+		if c.tr.Verdict == VerdictSafe {
+			continue
+		}
+		only, found = c, found+1
+	}
+	return only, found == 1
 }
 
 // crossing pairs a transition with the floor its `to` names.

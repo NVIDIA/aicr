@@ -16,6 +16,7 @@ package upgrade
 
 import (
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -519,6 +520,19 @@ func TestComponentResultFailsRun(t *testing.T) {
 			ComponentResult{Change: ChangeVersion, Verdict: Verdict("dubious")},
 			true,
 		},
+		{
+			"a relocation stops the run",
+			ComponentResult{Change: ChangeIdentity, Verdict: VerdictUnknown, IdentityChanges: nsMove},
+			true,
+		},
+		{
+			// The matcher withdraws this verdict, so the pairing only reaches
+			// FailsRun on a hand-built result. It fails there too, so the
+			// guarantee does not rest on the matcher remembering.
+			"a safe verdict paired with a relocation fails anyway",
+			ComponentResult{Change: ChangeVersion, Verdict: VerdictSafe, IdentityChanges: nsMove},
+			true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -637,6 +651,114 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 // every Reason they can produce, including the invariants a blocked result must
 // hold: no Transition to render another record's steps from, and a StoppedAt
 // the report can name.
+// A safe boundary carries no steps, so crossing one composes nothing and skips
+// nothing. It must not stop a jump whose only substantive boundary describes
+// the whole move -- the nodewright shape, where a manual rename is followed by
+// a safe release and a jump spanning both should land on the rename's steps.
+func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
+	rename := trans("<0.18.0", ">=0.18.0 <=0.19.0", VerdictManual, "rename")
+	drain := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictSafe, "drain")
+	secondManual := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictManual, "second")
+	firstSafe := trans("<0.18.0", ">=0.18.0 <=0.18.0", VerdictSafe, "first-safe")
+	boundedA := trans(">=1.0.0 <1.1.0", ">=1.1.0 <=1.1.0", VerdictSafe, "bounded-A")
+	boundedB := trans(">=1.1.0 <1.2.0", ">=1.2.0 <=1.2.0", VerdictSafe, "bounded-B")
+
+	tests := []struct {
+		name        string
+		set         Set
+		from, to    string
+		wantVerdict Verdict
+		wantReason  Reason
+		wantMatched string
+	}{
+		{
+			// Crosses both boundaries. The safe one asks nothing, so the
+			// rename's own verdict and steps carry the jump.
+			name:        "manual plus safe defers to the manual record",
+			set:         oneComponent(rename, drain),
+			from:        "0.16.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "rename",
+		},
+		{
+			// Crosses only the safe boundary.
+			name:        "the safe boundary alone still reads safe",
+			set:         oneComponent(rename, drain),
+			from:        "0.18.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "drain",
+		},
+		{
+			// N safe boundaries compose exactly as one does. Blocking here
+			// would tell an operator to stop at a version where nothing
+			// happens, which is the outcome this reduction exists to prevent.
+			name:        "a crossing that is entirely safe reads safe",
+			set:         oneComponent(firstSafe, drain),
+			from:        "0.17.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "drain",
+		},
+		{
+			// An origin no record assessed stays refused however many
+			// boundaries the jump crosses. Before the fromCovers guard this
+			// came back safe on two crossings while the identical origin was
+			// refused on one, so asking to go further bought a verdict that
+			// vouches. The floors are bounded below, which is the ADR's
+			// ordinary shape and the only one that exercises this.
+			name:        "an unassessed origin is not rescued by crossing more boundaries",
+			set:         oneComponent(boundedA, boundedB),
+			from:        "0.9.0",
+			to:          "1.2.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
+		},
+		{
+			// The same origin across a single boundary, for the comparison the
+			// case above exists to hold: one crossing already refused it.
+			name:        "an unassessed origin across one boundary is refused",
+			set:         oneComponent(boundedA, boundedB),
+			from:        "0.9.0",
+			to:          "1.1.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonUndefinedOrigin,
+		},
+		{
+			// The control: two boundaries that both ask something still block,
+			// because composing them is the failure the rule exists to prevent.
+			name:        "two substantive boundaries still block",
+			set:         oneComponent(rename, secondManual),
+			from:        "0.16.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchVersions(tt.set["c"], "c", tt.from, tt.to)
+			if got.Verdict != tt.wantVerdict {
+				t.Errorf("verdict = %q, want %q", got.Verdict, tt.wantVerdict)
+			}
+			if got.Reason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", got.Reason, tt.wantReason)
+			}
+			matched := ""
+			if got.Transition != nil {
+				matched = got.Transition.Summary
+			}
+			if matched != tt.wantMatched {
+				t.Errorf("matched record = %q, want %q", matched, tt.wantMatched)
+			}
+		})
+	}
+}
+
 func TestMatchVerdictSelection(t *testing.T) {
 	safeLow := trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S")
 	blockedHigh := trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B")
@@ -686,13 +808,22 @@ func TestMatchVerdictSelection(t *testing.T) {
 			wantStoppedAt: ">=2.5.0 <2.6.0",
 		},
 		{
-			name:          "two non-blocking boundaries still block the jump",
-			set:           oneComponent(safeLow, trans("<2.5.0", ">=2.5.0 <2.6.0", VerdictSafe, "S2")),
-			from:          "1.5.0",
-			to:            "2.5.1",
-			wantVerdict:   VerdictBlocked,
-			wantReason:    ReasonMultipleBoundaries,
-			wantStoppedAt: ">=2.0.0 <2.1.0",
+			// Reversed in #2829: this used to expect blocked /
+			// multiple-boundaries. That rule exists because an intermediate
+			// record's steps never run on a jump straight past it, and a safe
+			// record has no steps by construction, so crossing two of them
+			// skips nothing. Blocking named 2.0.0 as somewhere to stop when
+			// landing there asks nothing of anyone, which is the
+			// false-confidence direction rather than the cautious one. The
+			// furthest crossed record still has to reach the target, which is
+			// what keeps this from vouching past anyone's assessment.
+			name:        "two non-blocking boundaries do not block the jump",
+			set:         oneComponent(safeLow, trans("<2.5.0", ">=2.5.0 <2.6.0", VerdictSafe, "S2")),
+			from:        "1.5.0",
+			to:          "2.5.1",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "S2",
 		},
 		{
 			name:        "one crossed record whose from covers the source lends its verdict",
@@ -1087,5 +1218,187 @@ func TestMatchTargetPastTheRecordCeiling(t *testing.T) {
 				t.Errorf("span = %+v, want zero: no record's claim covers this move", r.Span)
 			}
 		})
+	}
+}
+
+// nsMove is the one identity move these tables exercise, named once so a row
+// states its expectation without restating the struct.
+var nsMove = []IdentityChange{{Field: "namespace", From: "gpu-operator", To: "nvidia"}}
+
+func TestMatchIdentitiesIdentityAxis(t *testing.T) {
+	// Under safeHop the version move 1.0.0 -> 1.1.0 is recorded safe, so a row
+	// that does not come back safe came back that way for the other axis.
+	safeHop := oneComponent(trans("<1.1.0", ">=1.1.0 <=1.1.9", VerdictSafe, "S"))
+	manualHop := oneComponent(trans("<1.1.0", ">=1.1.0 <=1.1.9", VerdictManual, "M"))
+
+	tests := []struct {
+		name         string
+		set          Set
+		from         Identity
+		to           Identity
+		wantRows     int
+		change       ChangeKind
+		wantFrom     string
+		wantTo       string
+		verdict      Verdict
+		reason       Reason
+		moved        []IdentityChange
+		explainNames []string
+	}{
+		{
+			name:         "a namespace move while the version holds is its own row",
+			set:          safeHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.0.0", Namespace: "nvidia"},
+			wantRows:     1,
+			change:       ChangeIdentity,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.0.0",
+			verdict:      VerdictUnknown,
+			reason:       ReasonIdentityChanged,
+			moved:        nsMove,
+			explainNames: []string{"gpu-operator", "nvidia", "1.0.0"},
+		},
+		{
+			name:         "both axes moving in one hop produce one row carrying both",
+			set:          safeHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.1.0", Namespace: "nvidia"},
+			wantRows:     1,
+			change:       ChangeVersion,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.1.0",
+			verdict:      VerdictUnknown,
+			reason:       ReasonIdentityChanged,
+			moved:        nsMove,
+			explainNames: []string{"gpu-operator", "nvidia", "1.0.0", "1.1.0"},
+		},
+		{
+			name:         "a non-safe verdict keeps its own reason and still carries the move",
+			set:          manualHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.1.0", Namespace: "nvidia"},
+			wantRows:     1,
+			change:       ChangeVersion,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.1.0",
+			verdict:      VerdictManual,
+			reason:       ReasonRecorded,
+			moved:        nsMove,
+			explainNames: []string{"1.0.0", "1.1.0"},
+		},
+		{
+			name:         "an unchanged namespace records no identity change",
+			set:          safeHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.1.0", Namespace: "gpu-operator"},
+			wantRows:     1,
+			change:       ChangeVersion,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.1.0",
+			verdict:      VerdictSafe,
+			reason:       ReasonRecorded,
+			explainNames: []string{"1.0.0", "1.1.0"},
+		},
+		{
+			name:     "an identical identity emits no row",
+			set:      safeHop,
+			from:     Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:       Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			wantRows: 0,
+		},
+		{
+			// An artifact that does not carry the field states no namespace,
+			// which is not the same as moving to one.
+			name:         "an unstated namespace on one side is not a move",
+			set:          safeHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.1.0"},
+			wantRows:     1,
+			change:       ChangeVersion,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.1.0",
+			verdict:      VerdictSafe,
+			reason:       ReasonRecorded,
+			explainNames: []string{"1.0.0", "1.1.0"},
+		},
+		{
+			name:     "an unstated namespace on both sides of a held version emits no row",
+			set:      safeHop,
+			from:     Identity{Version: "1.0.0"},
+			to:       Identity{Version: "1.0.0"},
+			wantRows: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchIdentities(tt.set,
+				map[string]Identity{"c": tt.from},
+				map[string]Identity{"c": tt.to})
+			if len(got) != tt.wantRows {
+				t.Fatalf("MatchIdentities() returned %d rows, want %d: %+v", len(got), tt.wantRows, got)
+			}
+			if tt.wantRows == 0 {
+				return
+			}
+			r := got[0]
+			if r.Change != tt.change {
+				t.Errorf("change = %q, want %q", r.Change, tt.change)
+			}
+			if r.From != tt.wantFrom || r.To != tt.wantTo {
+				t.Errorf("from/to = %q/%q, want %q/%q", r.From, r.To, tt.wantFrom, tt.wantTo)
+			}
+			if r.Verdict != tt.verdict {
+				t.Errorf("verdict = %q, want %q", r.Verdict, tt.verdict)
+			}
+			if r.Reason != tt.reason {
+				t.Errorf("reason = %q, want %q", r.Reason, tt.reason)
+			}
+			if !reflect.DeepEqual(r.IdentityChanges, tt.moved) {
+				t.Errorf("identityChanges = %+v, want %+v", r.IdentityChanges, tt.moved)
+			}
+			for _, want := range tt.explainNames {
+				if !strings.Contains(r.Explanation, want) {
+					t.Errorf("explanation %q does not name %q", r.Explanation, want)
+				}
+			}
+			if len(tt.moved) == 0 {
+				return
+			}
+			if r.Verdict == VerdictSafe {
+				t.Error("verdict = safe on a row whose identity moved; the record assessed a version hop only")
+			}
+			if !r.FailsRun() {
+				t.Error("FailsRun() = false on a row whose identity moved, want true")
+			}
+		})
+	}
+}
+
+func TestMatchIdentitiesDoesNotSplitAComponentAcrossAxes(t *testing.T) {
+	got := MatchIdentities(Set{},
+		map[string]Identity{"c": {Version: "1.0.0", Namespace: "gpu-operator"}},
+		map[string]Identity{"c": {Version: "2.0.0", Namespace: "nvidia"}})
+	if len(got) != 1 {
+		t.Fatalf("MatchIdentities() returned %d rows, want 1: %+v", len(got), got)
+	}
+	if got[0].Change != ChangeVersion || !reflect.DeepEqual(got[0].IdentityChanges, nsMove) {
+		t.Errorf("got %+v, want a single version row carrying the namespace move", got[0])
+	}
+}
+
+func TestMatchIsMatchIdentitiesWithoutTheIdentityAxis(t *testing.T) {
+	set := oneComponent(blockA, blockB)
+	from := map[string]string{"c": "0.17.2", "gone": "1.0.0"}
+	to := map[string]string{"c": "0.20.1", "new": "1.0.0"}
+
+	want := MatchIdentities(set, versionsOnly(from), versionsOnly(to))
+	if got := Match(set, from, to); !reflect.DeepEqual(got, want) {
+		t.Errorf("Match() = %+v, want %+v", got, want)
+	}
+	for _, r := range want {
+		if r.IdentityChanges != nil {
+			t.Errorf("%s carries identity changes, but a version table states no identity to move", r.Component)
+		}
 	}
 }
