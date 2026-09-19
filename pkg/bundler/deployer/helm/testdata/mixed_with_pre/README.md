@@ -94,9 +94,10 @@ bash install.sh
 > overridable with `AICR_CRD_STEP_TIMEOUT`. The bound is per call and
 > `deploy.sh` retries a failing component, so the budget it consumes is a
 > multiple of that. `KUBECONFIG_FLAG` reaches this step as well, but only
-> `--kube-context` and `--kubeconfig` are understood there: helm's remaining
-> connection flags have no `kubectl` spelling, so the step stops with an error
-> naming the flag rather than apply CRDs to an unintended cluster. The step is
+> `--kube-context` and `--kubeconfig` are supported there; any other helm
+> connection flag stops the step rather than apply CRDs to an unintended
+> cluster. The error names the option only, never its argument, so a flag
+> carrying a credential does not reach the log. The step is
 > skipped when `DRY_RUN_FLAG` is set, and when
 > neither the release nor any of the chart's CRDs exist yet, since only then
 > does `helm install` create them. A release that was uninstalled leaves its

@@ -221,7 +221,7 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 		"missing timeout fails closed":              "cannot be bounded",
 		"applies under helm's field manager":        `    --field-manager=helm -f "${doc}" ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"}; then`,
 		"helm's --kube-context is translated":       `        KUBECTL_CONN+=(--context "${helm_conn[1]}")`,
-		"an untranslatable helm flag fails closed":  `which has no known" >&2`,
+		"unsupported flag fails closed, name only":  `echo "ERROR: KUBECONFIG_FLAG carries '${helm_conn[0]%%=*}', which this" >&2`,
 		"both phases share one artifact":            `if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \`,
 		"CRDs come from the archive, not show crds": `if ! collect_crds "${PULLED_CHART}" "${CRD_DIR}"; then`,
 	}
@@ -482,12 +482,18 @@ func TestApplyCRDsScript_TranslatesHelmConnectionFlags(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		flag     string
-		setFlag  bool
-		wantArgs []string
-		denyArgs []string
-		wantErr  bool
+		name string
+		flag string
+		// denyOutput holds strings the script must never print. An option's
+		// argument can be a credential -- helm's --kube-token carries a bearer
+		// token -- and deploy.sh runs this with its output attached to the
+		// terminal and to CI logs, so rejecting an option must not echo what
+		// came with it.
+		setFlag    bool
+		wantArgs   []string
+		denyArgs   []string
+		denyOutput []string
+		wantErr    bool
 	}{
 		{name: "unset adds nothing", setFlag: false,
 			denyArgs: []string{"--context", "--kubeconfig", "--kube-context"}},
@@ -519,6 +525,12 @@ func TestApplyCRDsScript_TranslatesHelmConnectionFlags(t *testing.T) {
 			wantErr: true},
 		{name: "empty joined kubeconfig fails closed", flag: "--kubeconfig=", setFlag: true,
 			wantErr: true},
+		{name: "rejected option does not echo its argument", flag: "--kube-token=s3cr3t-marker",
+			setFlag: true, wantErr: true,
+			denyOutput: []string{"s3cr3t-marker"}},
+		{name: "rejected separated option does not echo its argument",
+			flag: "--kube-token s3cr3t-marker", setFlag: true, wantErr: true,
+			denyOutput: []string{"s3cr3t-marker"}},
 	}
 
 	for _, tt := range tests {
@@ -566,6 +578,15 @@ func TestApplyCRDsScript_TranslatesHelmConnectionFlags(t *testing.T) {
 
 			logged, _ := os.ReadFile(argLog)
 			got := string(logged)
+
+			// Checked on every row, not only the failing ones: a value must not
+			// surface in the script's own output whether it is rejected or
+			// accepted.
+			for _, secret := range tt.denyOutput {
+				if strings.Contains(string(out), secret) {
+					t.Errorf("script echoed an option's argument; %q appears in:\n%s", secret, out)
+				}
+			}
 
 			if tt.wantErr {
 				// Fail closed means fail *early*. A non-zero exit after the
