@@ -857,7 +857,7 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	// emitted recipe, the Components view and anything bundled from them all
 	// name the namespace the prior artifact deployed into.
 	if req.InheritFrom != "" {
-		if inheritErr := c.inheritIdentity(ctx, req.InheritFrom, internal); inheritErr != nil {
+		if inheritErr := c.inheritIdentity(ctx, req.InheritFrom, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
 	}
@@ -880,22 +880,33 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 //
 // No kubeconfig is threaded through: inheritedRecipePath rejects the only
 // artifact form that would need one.
-func (c *Client) inheritIdentity(ctx context.Context, inheritFrom string, resolved *recipe.RecipeResult) error {
+// dp is the provider the outer operation already captured under mu, and the
+// prior artifact loads through it directly rather than through the public
+// LoadRecipe. LoadRecipe re-runs the closed-client check, so a concurrent Close
+// that cleared c.builder after the outer call was admitted would fail this
+// nested load with "already closed" while Close itself is still waiting on that
+// same call's inflight count to drain.
+func (c *Client) inheritIdentity(
+	ctx context.Context, inheritFrom string, dp recipe.DataProvider, resolved *recipe.RecipeResult,
+) error {
+
 	path, err := inheritedRecipePath(inheritFrom)
 	if err != nil {
 		return err
 	}
-	// Checked before loading, because LoadRecipe auto-hydrates a RecipeMetadata
+	// Checked before loading, because the loader auto-hydrates a RecipeMetadata
 	// overlay against the CURRENT data provider. That hydration would succeed
 	// and hand back namespaces derived from the registry this binary ships,
 	// which are the values inheritance exists to override, so the flag would
 	// silently do the opposite of what it promises.
-	if err := requireHydratedRecipe(path, inheritFrom); err != nil {
-		return err
+	if kindErr := requireHydratedRecipe(path, inheritFrom); kindErr != nil {
+		return kindErr
 	}
-	prior, err := c.LoadRecipe(ctx, path, "")
+	// Empty kubeconfig is safe: inheritedRecipePath rejects cm://, the only
+	// artifact form whose load would contact a cluster.
+	priorInternal, err := recipe.LoadFromFileWithProvider(ctx, path, "", c.version, dp)
 	if err != nil {
-		// LoadRecipe already returns structured errors with the right code.
+		// The loader already returns structured errors with the right code.
 		return err
 	}
 	// Empty is the reachable half of this guard, not nil: nothing on the load
@@ -903,7 +914,6 @@ func (c *Client) inheritIdentity(ctx context.Context, inheritFrom string, resolv
 	// ApplyInheritedIdentity returns immediately for one. Letting that through
 	// would re-derive every namespace from the current registry while reporting
 	// success, which is the relocation this flag exists to prevent.
-	priorInternal := prior.Resolved()
 	if priorInternal == nil || len(priorInternal.ComponentRefs) == 0 {
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"inherit-from %s carries no components to inherit namespaces from", inheritFrom))
@@ -1098,7 +1108,7 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 		return nil, err
 	}
 	if cfg.inheritFrom != "" {
-		if inheritErr := c.inheritIdentity(ctx, cfg.inheritFrom, internal); inheritErr != nil {
+		if inheritErr := c.inheritIdentity(ctx, cfg.inheritFrom, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
 	}
@@ -1302,7 +1312,8 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	// Last write to the refs before the facade projection, so the emitted
 	// recipe and the Components view agree on where each component lives.
 	if resolveCfg.inheritFrom != "" {
-		if inheritErr := c.inheritIdentity(ctx, resolveCfg.inheritFrom, internal); inheritErr != nil {
+		if inheritErr := c.inheritIdentity(
+			ctx, resolveCfg.inheritFrom, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
 	}

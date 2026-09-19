@@ -27,8 +27,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // RecipeMetadataKind is the kind value for RecipeMetadata resources.
