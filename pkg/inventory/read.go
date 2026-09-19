@@ -23,7 +23,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/NVIDIA/aicr/pkg/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
@@ -185,7 +184,7 @@ func Read(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	dyn, err := chainsaw.NewDynamicClientForConfig(restConfig)
+	dyn, err := k8sclient.NewDynamicClientForConfig(restConfig)
 	if err != nil {
 		return Result{}, err
 	}
