@@ -390,7 +390,8 @@ func TestUpgradeCheckScanSeesOnlyTheCrossedKinds(t *testing.T) {
 
 // TestUpgradeCheckScanIsImpliedByClusterAndAvailableToArtifacts pins ADR-021
 // Decision 5's two axes: the scan needs a cluster regardless of where the
-// `from` table came from.
+// `from` table came from, and ScanAtRisk's three states say whether the caller
+// left that implication alone, asked for the scan, or refused it.
 func TestUpgradeCheckScanIsImpliedByClusterAndAvailableToArtifacts(t *testing.T) {
 	t.Parallel()
 
@@ -403,19 +404,26 @@ func TestUpgradeCheckScanIsImpliedByClusterAndAvailableToArtifacts(t *testing.T)
 		req         UpgradeCheckRequest
 		wantCalls   []string
 		wantScanned bool
+		wantReason  string
 		wantSource  bool
 	}{
 		{
-			name:        "two artifacts, no scan",
-			req:         UpgradeCheckRequest{From: from, To: to},
-			wantCalls:   nil,
-			wantScanned: false,
+			name:       "two artifacts, unset",
+			req:        UpgradeCheckRequest{From: from, To: to},
+			wantCalls:  nil,
+			wantReason: upgrade.NotScannedOffline,
 		},
 		{
 			name:        "two artifacts scanning a live cluster",
-			req:         UpgradeCheckRequest{From: from, To: to, ScanAtRisk: true},
+			req:         UpgradeCheckRequest{From: from, To: to, ScanAtRisk: boolPtr(true)},
 			wantCalls:   []string{"scan"},
 			wantScanned: true,
+		},
+		{
+			name:       "two artifacts, refused",
+			req:        UpgradeCheckRequest{From: from, To: to, ScanAtRisk: boolPtr(false)},
+			wantCalls:  nil,
+			wantReason: upgrade.NotScannedDeclined,
 		},
 		{
 			name:        "cluster implies the scan",
@@ -423,6 +431,27 @@ func TestUpgradeCheckScanIsImpliedByClusterAndAvailableToArtifacts(t *testing.T)
 			wantCalls:   []string{"read", "scan"},
 			wantScanned: true,
 			wantSource:  true,
+		},
+		{
+			name: "cluster with the scan asked for as well",
+			req: UpgradeCheckRequest{
+				From: FromCluster, To: to, Deployer: "helm", ScanAtRisk: boolPtr(true),
+			},
+			wantCalls:   []string{"read", "scan"},
+			wantScanned: true,
+			wantSource:  true,
+		},
+		{
+			// The case a plain bool cannot express. The implication is stated
+			// by the source, so only an explicit refusal can override it, and
+			// the section has to say which of the two silences this is.
+			name: "cluster with the scan refused",
+			req: UpgradeCheckRequest{
+				From: FromCluster, To: to, Deployer: "helm", ScanAtRisk: boolPtr(false),
+			},
+			wantCalls:  []string{"read"},
+			wantReason: upgrade.NotScannedDeclined,
+			wantSource: true,
 		},
 	}
 	for _, tt := range tests {
@@ -443,8 +472,8 @@ func TestUpgradeCheckScanIsImpliedByClusterAndAvailableToArtifacts(t *testing.T)
 			if report.AtRisk.Scanned != tt.wantScanned {
 				t.Errorf("AtRisk.Scanned = %v, want %v", report.AtRisk.Scanned, tt.wantScanned)
 			}
-			if !tt.wantScanned && report.AtRisk.Reason != upgrade.NotScannedOffline {
-				t.Errorf("AtRisk.Reason = %q, want %q", report.AtRisk.Reason, upgrade.NotScannedOffline)
+			if report.AtRisk.Reason != tt.wantReason {
+				t.Errorf("AtRisk.Reason = %q, want %q", report.AtRisk.Reason, tt.wantReason)
 			}
 			if (report.Source != nil) != tt.wantSource {
 				t.Errorf("report.Source set = %v, want %v", report.Source != nil, tt.wantSource)
@@ -452,6 +481,10 @@ func TestUpgradeCheckScanIsImpliedByClusterAndAvailableToArtifacts(t *testing.T)
 		})
 	}
 }
+
+// boolPtr names ScanAtRisk's set states. A bare literal is not addressable,
+// and nil being a third value is the whole reason the field is a pointer.
+func boolPtr(v bool) *bool { return &v }
 
 // TestUpgradeCheckScanFailureDoesNotFailTheRun keeps the advisory feature from
 // taking down the primary one: an RBAC gap or an unreachable apiserver on the
