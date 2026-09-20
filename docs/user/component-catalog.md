@@ -1083,6 +1083,8 @@ Migration steps when upgrading from a prior AICR-generated bundle to a newer one
 
 A generated recipe is a point-in-time artifact of the AICR binary that produced it: the embedded registry, overlays, manifest paths, and chart pins are part of that binary's surface. When upgrading AICR, regenerate the recipe from scratch with the new binary (`aicr recipe ...`) before re-bundling. `aicr bundle --recipe <old-file>` against a newer binary may fail if the saved recipe references manifest paths the new release has moved or removed (see [Bundle Generation Fails](cli-reference.md#bundle-generation-fails) for the specific error).
 
+**Regenerating also re-derives each component's namespace.** The namespace comes from the registry in the binary doing the regenerating, so if a component's default namespace moved between the two AICR releases, the new recipe names the new one. Helm cannot move a release between namespaces, so the resulting bundle installs a second copy of the component beside the one already running. Pass `aicr recipe --inherit-from <prior recipe or bundle directory>` to keep the namespaces the prior artifact deployed into, and run [`aicr upgrade-check`](upgrading.md#when-a-component-moves-namespace) to see whether any component moved in the first place.
+
 ### `gpu-operator`: `dcgm-exporter` ConfigMap moved into the main release
 
 Earlier bundles shipped the `dcgm-exporter` ConfigMap as a post-manifest in a separate Helm release named `gpu-operator-post`. The in-cluster ConfigMap therefore carries ownership annotations pointing at that release:
@@ -1621,6 +1623,13 @@ operator-side mirror migrates each existing object for you, but completion
 status is then written **only** on the new kind: the attempt to mirror it back
 to the legacy object fails in a reconcile conflict loop, so `Skyhook.status`
 stays empty on a cluster where tuning has genuinely finished.
+
+The legacy object also becomes **read-only**. The post-rename admission webhook
+rejects any spec, `pause` or `disable` change to a `Skyhook`, so the first
+attempt to alter tuning after the upgrade fails outright rather than the
+cluster merely reporting a stale status. Deletions and identical re-applies are
+still accepted, which is why a steady-state sync keeps working and the break
+surfaces only on a real edit. Operate the `NodeWright` instead.
 
 AICR resolves the served API group by discovery rather than assuming either
 one, so a bundle validates against an operator from either side of the rename.

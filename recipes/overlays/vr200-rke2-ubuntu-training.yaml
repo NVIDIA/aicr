@@ -224,7 +224,7 @@ spec:
                       apiVersion: apps/v1
                       kind: Deployment
                       metadata:
-                        namespace: skyhook
+                        namespace: nodewright
                       status:
                         (availableReplicas > `0`): true
             - name: validate-all-pods-healthy
@@ -234,7 +234,7 @@ spec:
                       apiVersion: v1
                       kind: Pod
                       metadata:
-                        namespace: skyhook
+                        namespace: nodewright
                       status:
                         phase: Pending
                 - error:
@@ -242,7 +242,7 @@ spec:
                       apiVersion: v1
                       kind: Pod
                       metadata:
-                        namespace: skyhook
+                        namespace: nodewright
                       status:
                         phase: Failed
                 - error:
@@ -250,7 +250,7 @@ spec:
                       apiVersion: v1
                       kind: Pod
                       metadata:
-                        namespace: skyhook
+                        namespace: nodewright
                       status:
                         phase: Unknown
                 - error:
@@ -258,7 +258,7 @@ spec:
                       apiVersion: v1
                       kind: Pod
                       metadata:
-                        namespace: skyhook
+                        namespace: nodewright
                       status:
                         ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
                 - error:
@@ -266,7 +266,7 @@ spec:
                       apiVersion: v1
                       kind: Pod
                       metadata:
-                        namespace: skyhook
+                        namespace: nodewright
                       status:
                         ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
     # Native vr200/rke2 node tuning, replacing the bcm-profile stopgap this

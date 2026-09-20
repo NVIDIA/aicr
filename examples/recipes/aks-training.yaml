@@ -127,7 +127,7 @@ componentRefs:
       topologyUpdater:
         enable: true
   - name: nodewright-customizations
-    namespace: skyhook
+    namespace: nodewright
     type: Helm
     source: ""
     overrides:
@@ -140,11 +140,11 @@ componentRefs:
     manifestFiles:
       - components/nodewright-customizations/manifests/tuning.yaml
   - name: nodewright-operator
-    namespace: skyhook
+    namespace: nodewright
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.17.1
+    version: v0.19.0
     valuesFile: components/nodewright-operator/values.yaml
   - name: nvidia-dra-driver-gpu
     namespace: nvidia-dra-driver

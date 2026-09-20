@@ -176,10 +176,16 @@ capture_skyhook_snapshot() {
       echo "----- node reboot fingerprint (bootID / kernel / Ready transition / taints) -----"
       _cd_node_reboot_fingerprint
       echo
-      echo "----- skyhook namespace pods (tuning package pods) -----"
-      _cd_bounded kubectl get pods -n skyhook -o wide 2>&1 || true
-      echo "----- skyhook namespace events (by time) -----"
-      _cd_bounded kubectl get events -n skyhook --sort-by=.lastTimestamp 2>&1 || true
+      # Both namespaces: the registry default is nodewright, but a cluster
+      # deployed before that move still runs in skyhook and Helm cannot
+      # relocate a release. Collecting only one would come back empty on
+      # exactly the cluster whose upgrade is being debugged.
+      for _cd_nw_ns in nodewright skyhook; do
+        echo "----- ${_cd_nw_ns} namespace pods (tuning package pods) -----"
+        _cd_bounded kubectl get pods -n "${_cd_nw_ns}" -o wide 2>&1 || true
+        echo "----- ${_cd_nw_ns} namespace events (by time) -----"
+        _cd_bounded kubectl get events -n "${_cd_nw_ns}" --sort-by=.lastTimestamp 2>&1 || true
+      done
     } | tee "${out}"
     echo "::endgroup::"
     exit 0

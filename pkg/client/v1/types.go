@@ -368,6 +368,11 @@ type RecipeRequest struct {
 	// for newly resolved Slurm recipes.
 	AccountingMode string
 
+	// InheritFrom is a prior recipe file or bundle directory whose resolved
+	// namespaces this resolution preserves. Empty means resolve from the
+	// registry alone. A cm:// URI is rejected: not supported yet (#2830).
+	InheritFrom string
+
 	// PinnedName reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable; set the criteria
 	// fields above instead.
@@ -390,6 +395,7 @@ type RecipeResolveOption func(*recipeResolveConfig)
 
 type recipeResolveConfig struct {
 	profile              string
+	inheritFrom          string
 	accountingMode       *recipe.AccountingMode
 	runtimeInventoryMode *recipe.RuntimeInventoryMode
 	tcpxoInterfaces      *[]recipe.NetworkInterfaceMapping
@@ -419,6 +425,20 @@ func (cfg *recipeResolveConfig) recordOptErr(err error) {
 func WithProfile(profile string) RecipeResolveOption {
 	return func(cfg *recipeResolveConfig) {
 		cfg.profile = profile
+	}
+}
+
+// WithInheritFrom names a prior recipe file or bundle directory whose resolved
+// namespaces this resolve keeps, so a moved registry default does not relocate
+// a component that is already running. A component the prior artifact does not
+// name keeps its registry default. Empty resolves from the registry alone.
+//
+// The reference is read when the resolve runs: a cm:// URI, an unreadable
+// path, or a directory holding no recipe is rejected with
+// ErrCodeInvalidRequest rather than silently resolving as a first deploy.
+func WithInheritFrom(ref string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		cfg.inheritFrom = ref
 	}
 }
 

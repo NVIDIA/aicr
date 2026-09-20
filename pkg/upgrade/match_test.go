@@ -16,6 +16,7 @@ package upgrade
 
 import (
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -517,6 +518,19 @@ func TestComponentResultFailsRun(t *testing.T) {
 		{
 			"an unrecognized verdict fails closed",
 			ComponentResult{Change: ChangeVersion, Verdict: Verdict("dubious")},
+			true,
+		},
+		{
+			"a relocation stops the run",
+			ComponentResult{Change: ChangeIdentity, Verdict: VerdictUnknown, IdentityChanges: nsMove},
+			true,
+		},
+		{
+			// The matcher withdraws this verdict, so the pairing only reaches
+			// FailsRun on a hand-built result. It fails there too, so the
+			// guarantee does not rest on the matcher remembering.
+			"a safe verdict paired with a relocation fails anyway",
+			ComponentResult{Change: ChangeVersion, Verdict: VerdictSafe, IdentityChanges: nsMove},
 			true,
 		},
 	}
@@ -1204,5 +1218,187 @@ func TestMatchTargetPastTheRecordCeiling(t *testing.T) {
 				t.Errorf("span = %+v, want zero: no record's claim covers this move", r.Span)
 			}
 		})
+	}
+}
+
+// nsMove is the one identity move these tables exercise, named once so a row
+// states its expectation without restating the struct.
+var nsMove = []IdentityChange{{Field: "namespace", From: "gpu-operator", To: "nvidia"}}
+
+func TestMatchIdentitiesIdentityAxis(t *testing.T) {
+	// Under safeHop the version move 1.0.0 -> 1.1.0 is recorded safe, so a row
+	// that does not come back safe came back that way for the other axis.
+	safeHop := oneComponent(trans("<1.1.0", ">=1.1.0 <=1.1.9", VerdictSafe, "S"))
+	manualHop := oneComponent(trans("<1.1.0", ">=1.1.0 <=1.1.9", VerdictManual, "M"))
+
+	tests := []struct {
+		name         string
+		set          Set
+		from         Identity
+		to           Identity
+		wantRows     int
+		change       ChangeKind
+		wantFrom     string
+		wantTo       string
+		verdict      Verdict
+		reason       Reason
+		moved        []IdentityChange
+		explainNames []string
+	}{
+		{
+			name:         "a namespace move while the version holds is its own row",
+			set:          safeHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.0.0", Namespace: "nvidia"},
+			wantRows:     1,
+			change:       ChangeIdentity,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.0.0",
+			verdict:      VerdictUnknown,
+			reason:       ReasonIdentityChanged,
+			moved:        nsMove,
+			explainNames: []string{"gpu-operator", "nvidia", "1.0.0"},
+		},
+		{
+			name:         "both axes moving in one hop produce one row carrying both",
+			set:          safeHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.1.0", Namespace: "nvidia"},
+			wantRows:     1,
+			change:       ChangeVersion,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.1.0",
+			verdict:      VerdictUnknown,
+			reason:       ReasonIdentityChanged,
+			moved:        nsMove,
+			explainNames: []string{"gpu-operator", "nvidia", "1.0.0", "1.1.0"},
+		},
+		{
+			name:         "a non-safe verdict keeps its own reason and still carries the move",
+			set:          manualHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.1.0", Namespace: "nvidia"},
+			wantRows:     1,
+			change:       ChangeVersion,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.1.0",
+			verdict:      VerdictManual,
+			reason:       ReasonRecorded,
+			moved:        nsMove,
+			explainNames: []string{"1.0.0", "1.1.0"},
+		},
+		{
+			name:         "an unchanged namespace records no identity change",
+			set:          safeHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.1.0", Namespace: "gpu-operator"},
+			wantRows:     1,
+			change:       ChangeVersion,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.1.0",
+			verdict:      VerdictSafe,
+			reason:       ReasonRecorded,
+			explainNames: []string{"1.0.0", "1.1.0"},
+		},
+		{
+			name:     "an identical identity emits no row",
+			set:      safeHop,
+			from:     Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:       Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			wantRows: 0,
+		},
+		{
+			// An artifact that does not carry the field states no namespace,
+			// which is not the same as moving to one.
+			name:         "an unstated namespace on one side is not a move",
+			set:          safeHop,
+			from:         Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.1.0"},
+			wantRows:     1,
+			change:       ChangeVersion,
+			wantFrom:     "1.0.0",
+			wantTo:       "1.1.0",
+			verdict:      VerdictSafe,
+			reason:       ReasonRecorded,
+			explainNames: []string{"1.0.0", "1.1.0"},
+		},
+		{
+			name:     "an unstated namespace on both sides of a held version emits no row",
+			set:      safeHop,
+			from:     Identity{Version: "1.0.0"},
+			to:       Identity{Version: "1.0.0"},
+			wantRows: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchIdentities(tt.set,
+				map[string]Identity{"c": tt.from},
+				map[string]Identity{"c": tt.to})
+			if len(got) != tt.wantRows {
+				t.Fatalf("MatchIdentities() returned %d rows, want %d: %+v", len(got), tt.wantRows, got)
+			}
+			if tt.wantRows == 0 {
+				return
+			}
+			r := got[0]
+			if r.Change != tt.change {
+				t.Errorf("change = %q, want %q", r.Change, tt.change)
+			}
+			if r.From != tt.wantFrom || r.To != tt.wantTo {
+				t.Errorf("from/to = %q/%q, want %q/%q", r.From, r.To, tt.wantFrom, tt.wantTo)
+			}
+			if r.Verdict != tt.verdict {
+				t.Errorf("verdict = %q, want %q", r.Verdict, tt.verdict)
+			}
+			if r.Reason != tt.reason {
+				t.Errorf("reason = %q, want %q", r.Reason, tt.reason)
+			}
+			if !reflect.DeepEqual(r.IdentityChanges, tt.moved) {
+				t.Errorf("identityChanges = %+v, want %+v", r.IdentityChanges, tt.moved)
+			}
+			for _, want := range tt.explainNames {
+				if !strings.Contains(r.Explanation, want) {
+					t.Errorf("explanation %q does not name %q", r.Explanation, want)
+				}
+			}
+			if len(tt.moved) == 0 {
+				return
+			}
+			if r.Verdict == VerdictSafe {
+				t.Error("verdict = safe on a row whose identity moved; the record assessed a version hop only")
+			}
+			if !r.FailsRun() {
+				t.Error("FailsRun() = false on a row whose identity moved, want true")
+			}
+		})
+	}
+}
+
+func TestMatchIdentitiesDoesNotSplitAComponentAcrossAxes(t *testing.T) {
+	got := MatchIdentities(Set{},
+		map[string]Identity{"c": {Version: "1.0.0", Namespace: "gpu-operator"}},
+		map[string]Identity{"c": {Version: "2.0.0", Namespace: "nvidia"}})
+	if len(got) != 1 {
+		t.Fatalf("MatchIdentities() returned %d rows, want 1: %+v", len(got), got)
+	}
+	if got[0].Change != ChangeVersion || !reflect.DeepEqual(got[0].IdentityChanges, nsMove) {
+		t.Errorf("got %+v, want a single version row carrying the namespace move", got[0])
+	}
+}
+
+func TestMatchIsMatchIdentitiesWithoutTheIdentityAxis(t *testing.T) {
+	set := oneComponent(blockA, blockB)
+	from := map[string]string{"c": "0.17.2", "gone": "1.0.0"}
+	to := map[string]string{"c": "0.20.1", "new": "1.0.0"}
+
+	want := MatchIdentities(set, versionsOnly(from), versionsOnly(to))
+	if got := Match(set, from, to); !reflect.DeepEqual(got, want) {
+		t.Errorf("Match() = %+v, want %+v", got, want)
+	}
+	for _, r := range want {
+		if r.IdentityChanges != nil {
+			t.Errorf("%s carries identity changes, but a version table states no identity to move", r.Component)
+		}
 	}
 }

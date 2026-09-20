@@ -18,7 +18,9 @@ package recipe
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"sort"
@@ -28,6 +30,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // RecipeMetadataKind is the kind value for RecipeMetadata resources.
@@ -279,6 +282,147 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 	// produced this result. Hydration is performed by hydrateHealthCheckAsserts
 	// in metadata_store.go after the per-ref defaults pass, where the bound
 	// DataProvider is available. See issue #1219.
+}
+
+// ApplyInheritedIdentity overwrites each ref's namespace with the one a prior
+// recipe resolved for the same component, so an AICR upgrade does not silently
+// relocate a running component when a registry default moves. A component the
+// prior recipe does not name keeps its default: it is a first deploy as far as
+// that artifact knows.
+//
+// Runs after ApplyRegistryDefaults rather than inside it, because that method is
+// exported and called from four packages.
+// A prior artifact is operator-supplied input that no loader validates for
+// Kubernetes namespace syntax, and this assignment lands after the current
+// recipe has already been validated. Deployers interpolate the namespace into
+// generated install scripts, so a value carrying shell metacharacters would
+// reach a shell the operator runs. Every inherited value is therefore checked
+// before it is copied, and one bad value rejects the whole artifact rather
+// than being skipped: a silently ignored pin is the relocation this function
+// exists to prevent.
+func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
+	if len(prior) == 0 {
+		return nil
+	}
+	namespaces := make(map[string]string, len(prior))
+	for _, p := range prior {
+		if p.Namespace == "" {
+			continue
+		}
+		// A namespace is a DNS-1123 label, not a subdomain: no dots, 63 chars.
+		if errs := validation.IsDNS1123Label(p.Namespace); len(errs) > 0 {
+			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"inherited namespace %q for component %q is not a valid Kubernetes namespace: %s",
+				p.Namespace, p.Name, strings.Join(errs, "; ")))
+		}
+		namespaces[p.Name] = p.Namespace
+	}
+	for i := range refs {
+		ns, ok := namespaces[refs[i].Name]
+		if !ok || ns == refs[i].Namespace {
+			continue
+		}
+		// Rebind before assigning, so a ref changes both fields or neither.
+		// Assigning first would leave the new namespace beside assertions
+		// still naming the old one on the error path, and the guard above
+		// would then skip the ref on a retry, stranding the stale YAML.
+		// The health check is static, loaded verbatim from the registry's
+		// assertFile, so its namespaces name wherever the registry currently
+		// puts the component. Leaving them behind would fail validation
+		// against a deployment this function just correctly preserved.
+		if err := rebindHealthCheckNamespace(&refs[i], refs[i].Namespace, ns); err != nil {
+			return err
+		}
+		refs[i].Namespace = ns
+	}
+	return nil
+}
+
+// rebindHealthCheckNamespace retargets a component's health-check assertions
+// from one namespace to another.
+//
+// Only values equal to `from` are rewritten. A check may legitimately assert
+// against a namespace the component does not live in (kube-system, a CRD's
+// owner), and rewriting every namespace it mentions would break those.
+func rebindHealthCheckNamespace(ref *ComponentRef, from, to string) error {
+	if strings.TrimSpace(ref.HealthCheckAsserts) == "" || from == "" {
+		return nil
+	}
+	// Decoded as a stream, not a single value. Nothing restricts this field to
+	// one document, and yaml.Unmarshal reads only the first: re-serializing
+	// that alone would silently drop every later assertion, leaving a check
+	// that passes without verifying what it claims to.
+	dec := yaml.NewDecoder(strings.NewReader(ref.HealthCheckAsserts))
+	var (
+		docs    []any
+		changed bool
+	)
+	for {
+		var doc any
+		err := dec.Decode(&doc)
+		if stderrors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"failed to parse health check for component %q while inheriting its namespace", ref.Name), err)
+		}
+		if doc == nil {
+			continue
+		}
+		if retargetNamespace(doc, from, to) {
+			changed = true
+		}
+		docs = append(docs, doc)
+	}
+	if !changed {
+		return nil
+	}
+	var out bytes.Buffer
+	for i, doc := range docs {
+		data, err := serializer.MarshalYAMLDeterministic(doc)
+		if err != nil {
+			return errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to serialize health check for component %q after inheriting its namespace", ref.Name))
+		}
+		if i > 0 {
+			out.WriteString("---\n")
+		}
+		out.Write(data)
+	}
+	ref.HealthCheckAsserts = out.String()
+	return nil
+}
+
+// retargetNamespace walks a decoded document rewriting every `namespace: from`
+// to `namespace: to`, and reports whether anything changed. Walking rather than
+// reaching for a fixed path because the assertion shape is chainsaw's, not
+// ours, and a path that assumed spec.steps[].try[].assert would silently miss
+// a namespace nested anywhere else.
+func retargetNamespace(node any, from, to string) bool {
+	changed := false
+	switch n := node.(type) {
+	case map[string]any:
+		for k, v := range n {
+			if k == "namespace" {
+				if s, ok := v.(string); ok && s == from {
+					n[k] = to
+					changed = true
+				}
+				continue
+			}
+			if retargetNamespace(v, from, to) {
+				changed = true
+			}
+		}
+	case []any:
+		for _, v := range n {
+			if retargetNamespace(v, from, to) {
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 // coherenceProblem reports why a resolved ComponentRef's deployment-shape

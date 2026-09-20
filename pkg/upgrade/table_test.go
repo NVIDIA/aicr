@@ -182,7 +182,8 @@ func syntheticTables() (from, to map[string]string) {
 	return from, to
 }
 
-// mixedReport covers every verdict and every change kind in one render: safe,
+// mixedReport covers every verdict and every change kind a version comparison
+// can produce, in one render (the identity axis has its own golden): safe,
 // manual, three shapes of blocked (gamma-operator, where two records are
 // crossed and neither describes the jump, kappa-operator, where one record
 // does, and mu-operator, where the one record that covers the source stops
@@ -237,6 +238,75 @@ func replacementReport(t *testing.T) *Report {
 	return NewReport(results, ReportOptions{Deployer: "helm"})
 }
 
+// identityReport is its own golden because the identity axis is invisible to a
+// version comparison: every row below renders from MatchIdentities, and the
+// version-only Match the mixed golden uses cannot produce one.
+//
+// It covers a component that held its version and relocated (rho-operator),
+// one that did so without a version pin at all (phi-operator), one that moved
+// on both axes in the same hop with its safe verdict withdrawn
+// (sigma-operator), one that moved on both with a manual verdict that stands
+// and a detail block to carry the relocation (tau-operator), and one that
+// moved on the version axis alone while stating the same namespace on both
+// sides (upsilon-operator), which must read exactly as it did before.
+func identityReport(t *testing.T) *Report {
+	t.Helper()
+	set := Set{
+		"sigma-operator": {
+			Component: "sigma-operator",
+			Transitions: []Transition{{
+				From: "<1.5.0", To: ">=1.4.1 <1.5.0", Verdict: VerdictSafe,
+				VerifiedBy: "uat: synthetic lane",
+				Summary:    "Patch releases only.",
+			}},
+		},
+		"tau-operator": {
+			Component: "tau-operator",
+			Transitions: []Transition{{
+				From:         "<0.18.0",
+				To:           ">=0.18.0 <0.20.0",
+				Verdict:      VerdictManual,
+				Summary:      "The legacy API group is renamed. A mirror controller copies existing objects.",
+				Precondition: "No object is mid-rollout.",
+				StepsByDeployer: []StepGroup{{Steps: []Step{{
+					ID:          "rename-crs",
+					Description: "Rewrite apiVersion and kind, then apply.",
+				}}}},
+			}},
+		},
+		"upsilon-operator": {
+			Component: "upsilon-operator",
+			Transitions: []Transition{{
+				From: "<3.1.0", To: ">=3.0.5 <3.1.0", Verdict: VerdictSafe,
+				VerifiedBy: "uat: synthetic lane",
+			}},
+		},
+	}
+	from := map[string]Identity{
+		"rho-operator":     {Version: "2.1.0", Namespace: "rho-system"},
+		"phi-operator":     {Namespace: "phi-system"},
+		"sigma-operator":   {Version: "1.4.0", Namespace: "sigma-system"},
+		"tau-operator":     {Version: "0.17.2", Namespace: "tau-system"},
+		"upsilon-operator": {Version: "3.0.0", Namespace: "upsilon-system"},
+	}
+	to := map[string]Identity{
+		"rho-operator":     {Version: "2.1.0", Namespace: "nvidia-rho-system"},
+		"phi-operator":     {Namespace: "nvidia-phi-system"},
+		"sigma-operator":   {Version: "1.4.2", Namespace: "nvidia-sigma-system"},
+		"tau-operator":     {Version: "0.18.1", Namespace: "nvidia-tau-system"},
+		"upsilon-operator": {Version: "3.0.7", Namespace: "upsilon-system"},
+	}
+	results := MatchIdentities(set, from, to)
+	if !RequiresDeployer(results) {
+		t.Fatal("fixture no longer needs a deployer; it is supposed to contain a manual verdict")
+	}
+	return NewReport(results, ReportOptions{
+		From:     "./bundles-v0.17.0",
+		To:       "./bundles-v0.18.0",
+		Deployer: "argocd",
+	})
+}
+
 func TestWriteTableGolden(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -244,6 +314,7 @@ func TestWriteTableGolden(t *testing.T) {
 		report func(*testing.T) *Report
 	}{
 		{"mixed", "report-mixed.golden", mixedReport},
+		{"identity", "report-identity.golden", identityReport},
 		{"replacement", "report-replacement.golden", replacementReport},
 		{"no changes", "report-empty.golden", func(*testing.T) *Report {
 			return NewReport(nil, ReportOptions{From: "a.yaml", To: "b.yaml"})
@@ -263,12 +334,27 @@ func TestWriteTableGolden(t *testing.T) {
 // TestReportJSONGolden pins the machine-readable shape a pipeline consumes.
 // The CLI hands the same struct to pkg/serializer, which indents JSON with two
 // spaces, so the golden is what a `--format json` run writes.
+//
+// The identity case is here because prose is not a consumable surface: a
+// pipeline has to read which field moved and its two values off named keys.
 func TestReportJSONGolden(t *testing.T) {
-	got, err := json.MarshalIndent(mixedReport(t), "", "  ")
-	if err != nil {
-		t.Fatalf("marshal report: %v", err)
+	tests := []struct {
+		name   string
+		golden string
+		report func(*testing.T) *Report
+	}{
+		{"mixed", "report-mixed.json.golden", mixedReport},
+		{"identity", "report-identity.json.golden", identityReport},
 	}
-	compareGolden(t, "report-mixed.json.golden", append(got, '\n'))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := json.MarshalIndent(tt.report(t), "", "  ")
+			if err != nil {
+				t.Fatalf("marshal report: %v", err)
+			}
+			compareGolden(t, tt.golden, append(got, '\n'))
+		})
+	}
 }
 
 func compareGolden(t *testing.T, name string, got []byte) {

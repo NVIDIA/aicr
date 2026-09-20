@@ -107,15 +107,39 @@ func writeRows(w io.Writer, rows []ReportComponent) error {
 	ew.println("COMPONENT\tFROM\tTO\tVERDICT\tNOTES")
 	ew.println("---------\t----\t--\t-------\t-----")
 	for _, c := range rows {
+		from, to := rowCells(c)
 		// Component and Notes go through safe() too: every field in this row
 		// is artifact-derived, and one unescaped cell is enough to forge a row.
 		ew.printf("%s\t%s\t%s\t%s\t%s\n",
-			safe(c.Component), cell(c.From), cell(c.To), cell(string(c.Verdict)), safe(c.Notes))
+			safe(c.Component), from, to, cell(string(c.Verdict)), safe(c.Notes))
 	}
 	if ew.err != nil {
 		return wrapTableErr(ew.err)
 	}
 	return wrapTableErr(tw.Flush())
+}
+
+// rowCells renders the FROM and TO columns, which name whatever axis the row
+// moved on.
+//
+// An identity row held its version, so printing that version in both columns
+// is the one rendering that reads as nothing having happened, on the row where
+// something did. The columns carry the fields that moved instead, as
+// field=value so a reader is never left guessing what a bare namespace is.
+// That substitution is the same one a replaced row makes when its FROM holds a
+// component name: these two columns describe the move, not the version line.
+// The displaced version moves into NOTES.
+func rowCells(c ReportComponent) (from, to string) {
+	if c.Change != ChangeIdentity || len(c.IdentityChanges) == 0 {
+		return cell(c.From), cell(c.To)
+	}
+	fromFields := make([]string, len(c.IdentityChanges))
+	toFields := make([]string, len(c.IdentityChanges))
+	for i, ch := range c.IdentityChanges {
+		fromFields[i] = ch.Field + "=" + ch.From
+		toFields[i] = ch.Field + "=" + ch.To
+	}
+	return cell(strings.Join(fromFields, ", ")), cell(strings.Join(toFields, ", "))
 }
 
 // writeDetail renders the block below the table for a row the operator has to
@@ -137,6 +161,17 @@ func writeDetail(ew *errWriter, c *ReportComponent, deployer string) error {
 			ew.println("")
 		}
 		writeParagraph(ew, "  ", c.Explanation)
+	}
+	if len(c.IdentityChanges) > 0 {
+		// A row reaches this block on its version verdict, and the steps below
+		// were authored for that boundary alone. Without this line an operator
+		// works through them and ships the relocation unannounced.
+		if c.Summary != "" || c.Explanation != "" {
+			ew.println("")
+		}
+		writeParagraph(ew, "  ", "This hop also relocates the component: "+
+			movedFieldsPhrase(c.IdentityChanges)+". No record assesses a relocation, and the "+
+			"steps below neither perform it nor account for it.")
 	}
 
 	if c.Verdict == VerdictBlocked && c.Reason != ReasonRecorded {

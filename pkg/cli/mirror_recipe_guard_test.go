@@ -94,3 +94,26 @@ spec:
 		}
 	})
 }
+
+// TestResolveRecipeForMirrorRejectsInheritFromWithRecipe pins the guard for
+// --inherit-from. It has no config-document half, unlike the mapping guard
+// above: the flag names a prior artifact on the invoking machine's disk, so it
+// has no AICRConfig fallback to conflict with.
+func TestResolveRecipeForMirrorRejectsInheritFromWithRecipe(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cli.Command{
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "recipe"},
+			&cli.StringFlag{Name: flagInheritFrom},
+		},
+	}
+	if err := cmd.Run(context.Background(), []string{"mirror", "--recipe", "r.yaml",
+		"--inherit-from", "prior.yaml"}); err != nil {
+		t.Fatalf("command parse: %v", err)
+	}
+	_, err := resolveRecipeForMirror(context.Background(), cmd, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined with --recipe") {
+		t.Fatalf("resolveRecipeForMirror() error = %v, want the conflict rejection", err)
+	}
+}
