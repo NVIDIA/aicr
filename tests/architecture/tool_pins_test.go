@@ -287,14 +287,23 @@ func TestToolPinScanIgnoresInheritedGitDir(t *testing.T) {
 
 	// A decoy repository holding exactly one file, so a hijacked listing is
 	// unmistakable rather than merely different.
+	//
+	// Build it with the sanitized environment too. These commands run before
+	// the t.Setenv calls below, but the ambient environment may already carry
+	// GIT_DIR -- which is the situation this test exists for. `git init` would
+	// then initialize that repository instead of the decoy, and worse, `git
+	// config` would write into it: a test leaving its fixture's identity in
+	// the developer's real repository.
+	cleanEnv := gitScanEnv(t)
 	decoy := t.TempDir()
 	for _, args := range [][]string{
 		{"init", "-q"},
 		{"config", "user.email", "test@example.com"},
 		{"config", "user.name", "test"},
 	} {
-		if out, err := exec.Command("git", append([]string{"-C", decoy}, args...)...).
-			CombinedOutput(); err != nil {
+		setup := exec.Command("git", append([]string{"-C", decoy}, args...)...)
+		setup.Env = cleanEnv
+		if out, err := setup.CombinedOutput(); err != nil {
 			t.Fatalf("git %v in decoy: %v: %s", args, err, out)
 		}
 	}
