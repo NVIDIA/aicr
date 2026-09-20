@@ -19,10 +19,19 @@ import (
 	"strings"
 )
 
-// NotScannedOffline is why an artifact comparison carries no at-risk findings.
-// It is the default a report is built with, so a caller that never asked for a
-// scan cannot accidentally publish an all-clear.
-const NotScannedOffline = "no cluster access requested"
+// NotScannedOffline and NotScannedDeclined are the two ways a run reaches the
+// at-risk section with nothing to report, and they are separate strings
+// because they are opposite facts about the same empty section: nobody offered
+// this run a cluster, against a run that had one and was told not to look.
+// Reporting the second as the first would credit an operator's own opt-out to
+// an absence of access.
+//
+// NotScannedOffline is the default a report is built with, so a caller that
+// never asked for a scan cannot accidentally publish an all-clear.
+const (
+	NotScannedOffline  = "no cluster access requested"
+	NotScannedDeclined = "the at-risk scan was explicitly turned off"
+)
 
 // ResourceKind is one group and kind an upgrade's records name as affected,
 // with the components whose crossed transitions named it. An empty Group is

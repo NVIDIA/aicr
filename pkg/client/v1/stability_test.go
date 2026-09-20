@@ -214,7 +214,10 @@ func TestStability_UpgradeCheck(t *testing.T) {
 	_ = req.To
 	_ = req.Deployer
 	_ = req.Kubeconfig
-	_ = req.ScanAtRisk
+	// Pinned as a pointer, not merely as present: a bool cannot express
+	// "do not scan" against the scan FromCluster implies, and widening
+	// the field after v1 ships is a break api-diff would refuse.
+	requireType[*bool](req.ScanAtRisk)
 
 	// The cluster source is a From value rather than a flag of its own, so the
 	// constant naming it is part of the request contract.

@@ -96,6 +96,12 @@ func upgradeCheckCmdFlags() []cli.Flag {
 			Category: catInput,
 		}, config.GetDeployerTypes),
 		&cli.BoolFlag{
+			Name: "scan-cluster",
+			Usage: "Also report objects an upgrade could disturb that carry no deployer ownership marker. " +
+				"Implied by --from cluster; pass --scan-cluster=false there to skip the scan",
+			Category: catInput,
+		},
+		&cli.BoolFlag{
 			Name:  "fail-on-error",
 			Value: true,
 			Usage: "Exit with non-zero status if any component needs attention (any verdict " +
@@ -113,7 +119,8 @@ func upgradeCheckCmdFlags() []cli.Flag {
 
 // runUpgradeCheckCmd executes the upgrade-check command.
 func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
-	if err := validateSingleValueFlags(cmd, "from", "to", "deployer", "output", "format", "kubeconfig"); err != nil {
+	if err := validateSingleValueFlags(cmd,
+		"from", "to", "deployer", "scan-cluster", "output", "format", "kubeconfig"); err != nil {
 		return err
 	}
 
@@ -125,22 +132,20 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	from := cmd.String("from")
-	if from == "" {
+	req := upgradeCheckRequestFrom(cmd)
+	if req.From == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "--from is required")
 	}
-	deployer := cmd.String("deployer")
-	if deployer != "" {
+	if req.Deployer != "" {
 		// Reject a typo here rather than letting it silently select no step
 		// group, which would render a manual verdict with no steps under it.
-		if _, parseErr := config.ParseDeployerType(deployer); parseErr != nil {
+		if _, parseErr := config.ParseDeployerType(req.Deployer); parseErr != nil {
 			return parseErr
 		}
 	}
 
-	to := cmd.String("to")
-	kubeconfig := cmd.String("kubeconfig")
-	slog.Debug("upgrade check", slog.String("from", from), slog.String("to", to), slog.String("deployer", deployer))
+	slog.Debug("upgrade check", slog.String("from", req.From), slog.String("to", req.To),
+		slog.String("deployer", req.Deployer), slog.Any("scanCluster", req.ScanAtRisk))
 
 	client, err := embeddedClient(ctx)
 	if err != nil {
@@ -148,12 +153,7 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	report, err := client.UpgradeCheck(ctx, aicr.UpgradeCheckRequest{
-		From:       from,
-		To:         to,
-		Deployer:   deployer,
-		Kubeconfig: kubeconfig,
-	})
+	report, err := client.UpgradeCheck(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 		slog.Int("components", report.Summary.Components),
 		slog.Int("failing", report.Summary.Failing))
 
-	if err := writeUpgradeReport(ctx, cmd, outFormat, kubeconfig, report); err != nil {
+	if err := writeUpgradeReport(ctx, cmd, outFormat, req.Kubeconfig, report); err != nil {
 		return err
 	}
 
@@ -173,6 +173,27 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 			"upgrade check failed: %d component change(s) need attention", report.Summary.Failing))
 	}
 	return nil
+}
+
+// upgradeCheckRequestFrom projects the parsed flags onto the facade request.
+//
+// --scan-cluster reaches the request only when the operator actually typed it.
+// The flag defaults to false, so a false urfave invented is indistinguishable
+// from one somebody meant, and sending it unconditionally would cancel the
+// scan --from cluster implies on every run that never mentioned it.
+func upgradeCheckRequestFrom(cmd *cli.Command) aicr.UpgradeCheckRequest {
+	req := aicr.UpgradeCheckRequest{
+		From:       cmd.String("from"),
+		To:         cmd.String("to"),
+		Deployer:   cmd.String("deployer"),
+		Kubeconfig: cmd.String("kubeconfig"),
+	}
+	if cmd.IsSet("scan-cluster") {
+		scan := cmd.Bool("scan-cluster")
+		req.ScanAtRisk = &scan
+	}
+
+	return req
 }
 
 // writeUpgradeReport serializes the report, using the package's own table

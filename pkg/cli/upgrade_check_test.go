@@ -16,7 +16,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +26,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
 // Component names below are synthetic and match no registry entry, so nothing
@@ -110,6 +114,14 @@ func TestUpgradeCheckCmd_Validation(t *testing.T) {
 			args:       []string{"--from", recipePath, "--to", recipePath, "--format", "toml"},
 			errContain: "unknown output format",
 		},
+		{
+			// urfave takes the last spelling, so --scan-cluster --scan-cluster=false
+			// parses to false: the first flag is silently discarded. Rejected
+			// rather than resolved, like every other repeatable-looking flag.
+			name:       "repeated scan-cluster",
+			args:       []string{"--from", recipePath, "--to", recipePath, "--scan-cluster", "--scan-cluster=false"},
+			errContain: "flag --scan-cluster can only be specified once",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -186,5 +198,129 @@ func TestUpgradeCheckCmd_TableRejectsConfigMapOutput(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ConfigMap") {
 		t.Errorf("error = %v, want it to name the ConfigMap destination", err)
+	}
+}
+
+// captureUpgradeCheckRequest parses args through the real command and returns
+// the request the facade would receive, without running the check.
+func captureUpgradeCheckRequest(t *testing.T, args ...string) aicr.UpgradeCheckRequest {
+	t.Helper()
+
+	var got aicr.UpgradeCheckRequest
+	cmd := upgradeCheckCmd()
+	cmd.Action = func(_ context.Context, c *cli.Command) error {
+		got = upgradeCheckRequestFrom(c)
+
+		return nil
+	}
+	app := &cli.Command{Name: "aicr", Writer: io.Discard, Commands: []*cli.Command{cmd}}
+	if err := app.Run(t.Context(), append([]string{"aicr", "upgrade-check"}, args...)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	return got
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+// TestUpgradeCheckCmd_ScanClusterIsSentOnlyWhenTyped pins the projection onto
+// the facade request. --scan-cluster defaults to false, so a false the parser
+// invented is indistinguishable from one the operator meant; sending it
+// unconditionally would cancel the scan --from cluster implies on every run,
+// which is the same defect from the other side.
+func TestUpgradeCheckCmd_ScanClusterIsSentOnlyWhenTyped(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantFrom string
+		want     *bool
+	}{
+		{
+			name:     "not typed",
+			args:     []string{"--from", "a.yaml"},
+			wantFrom: "a.yaml",
+			want:     nil,
+		},
+		{
+			name:     "bare",
+			args:     []string{"--from", "a.yaml", "--scan-cluster"},
+			wantFrom: "a.yaml",
+			want:     boolPtr(true),
+		},
+		{
+			name:     "explicit true",
+			args:     []string{"--from", "a.yaml", "--scan-cluster=true"},
+			wantFrom: "a.yaml",
+			want:     boolPtr(true),
+		},
+		{
+			name:     "explicit false",
+			args:     []string{"--from", "a.yaml", "--scan-cluster=false"},
+			wantFrom: "a.yaml",
+			want:     boolPtr(false),
+		},
+		{
+			name:     "cluster source, not typed",
+			args:     []string{"--from", "cluster", "--deployer", "helm"},
+			wantFrom: aicr.FromCluster,
+			want:     nil,
+		},
+		{
+			name:     "cluster source, refused",
+			args:     []string{"--from", "cluster", "--deployer", "helm", "--scan-cluster=false"},
+			wantFrom: aicr.FromCluster,
+			want:     boolPtr(false),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := captureUpgradeCheckRequest(t, tt.args...)
+			if got.From != tt.wantFrom {
+				t.Errorf("From = %q, want %q", got.From, tt.wantFrom)
+			}
+			switch {
+			case tt.want == nil && got.ScanAtRisk != nil:
+				t.Errorf("ScanAtRisk = &%v, want nil: the flag was never typed", *got.ScanAtRisk)
+			case tt.want != nil && got.ScanAtRisk == nil:
+				t.Errorf("ScanAtRisk = nil, want &%v", *tt.want)
+			case tt.want != nil && *got.ScanAtRisk != *tt.want:
+				t.Errorf("ScanAtRisk = &%v, want &%v", *got.ScanAtRisk, *tt.want)
+			}
+		})
+	}
+}
+
+// TestUpgradeCheckCmd_ScanOptOutRendersItsOwnReason closes the loop the
+// projection leaves open: an operator reads the table, and the two silences
+// have to be told apart there. "no cluster access requested" is the wrong
+// account of a run that had access and declined it.
+func TestUpgradeCheckCmd_ScanOptOutRendersItsOwnReason(t *testing.T) {
+	dir := t.TempDir()
+	from := syntheticRecipeFile(t, filepath.Join(dir, "from.yaml"), map[string]string{"synthetic-alpha": "1.2.0"})
+	to := syntheticRecipeFile(t, filepath.Join(dir, "to.yaml"), map[string]string{"synthetic-alpha": "1.2.3"})
+
+	offline, err := runUpgradeCheck(t, "--from", from, "--to", to, "--fail-on-error=false")
+	if err != nil {
+		t.Fatalf("upgrade-check: %v", err)
+	}
+	declined, err := runUpgradeCheck(t,
+		"--from", from, "--to", to, "--scan-cluster=false", "--fail-on-error=false")
+	if err != nil {
+		t.Fatalf("upgrade-check --scan-cluster=false: %v", err)
+	}
+
+	if !strings.Contains(offline, upgrade.NotScannedOffline) {
+		t.Errorf("a run that asked for no cluster does not say so:\n%s", offline)
+	}
+	if !strings.Contains(declined, upgrade.NotScannedDeclined) {
+		t.Errorf("an opted-out run does not say why:\n%s", declined)
+	}
+	if strings.Contains(declined, upgrade.NotScannedOffline) {
+		t.Errorf("an opted-out run reuses the offline reason:\n%s", declined)
+	}
+	// The section must still be printed: an absent warning reads as an
+	// all-clear, which is the one thing a skipped scan has not established.
+	if !strings.Contains(declined, "not scanned") {
+		t.Errorf("the at-risk section is missing from an opted-out run:\n%s", declined)
 	}
 }
