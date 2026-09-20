@@ -119,6 +119,11 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 	if len(opts.Kinds) == 0 {
 		return AtRiskResult{}, nil
 	}
+	// Before any client is built, so a caller who asked for something
+	// malformed is told that rather than told their kubeconfig is broken.
+	if err := validateKinds(opts.Kinds); err != nil {
+		return AtRiskResult{}, err
+	}
 
 	_, restConfig, err := k8sclient.GetKubeClientWithConfig(opts.Kubeconfig)
 	if err != nil {
@@ -143,11 +148,8 @@ func scanAtRisk(ctx context.Context, client dynamic.Interface, mapper meta.RESTM
 	if len(kinds) == 0 {
 		return AtRiskResult{}, nil
 	}
-	for _, kind := range kinds {
-		if strings.TrimSpace(kind.Kind) == "" {
-			return AtRiskResult{}, errors.New(errors.ErrCodeInvalidRequest,
-				"the at-risk scan was asked for a resource with no kind, which names nothing to look for")
-		}
+	if err := validateKinds(kinds); err != nil {
+		return AtRiskResult{}, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, defaults.AtRiskScanTimeout)
@@ -183,6 +185,20 @@ func scanAtRisk(ctx context.Context, client dynamic.Interface, mapper meta.RESTM
 	}
 
 	return out, nil
+}
+
+// validateKinds rejects a request naming a resource the scan cannot look for.
+// Both entry points call it, so scanAtRisk stays self-checking for the callers
+// that supply their own client.
+func validateKinds(kinds []ResourceKind) error {
+	for _, kind := range kinds {
+		if strings.TrimSpace(kind.Kind) == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"the at-risk scan was asked for a resource with no kind, which names nothing to look for")
+		}
+	}
+
+	return nil
 }
 
 // resolveKind maps a kind onto the resource the apiserver serves it as,
