@@ -40,25 +40,54 @@ func init() {
 	jobWatchResumeBackoff = time.Millisecond
 }
 
-// TestResumeJobWatch_ContextCanceledDuringBackoff pins the backoff guard: when
-// the context is already done, resumeJobWatch must abandon the resume during the
-// backoff wait and report ErrCodeTimeout rather than issuing a List/Watch
-// against an apiserver the caller has already given up on.
-func TestResumeJobWatch_ContextCanceledDuringBackoff(t *testing.T) {
-	canceledCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client.PrependReactor("list", "jobs", func(_ k8stesting.Action) (bool, runtime.Object, error) {
-		t.Error("List must not be attempted once the context is canceled")
-		return true, &batchv1.JobList{}, nil
-	})
-
-	terminal, w, err := resumeJobWatch(canceledCtx, client, "default", "j")
-	if w != nil || terminal != nil {
-		t.Fatalf("expected no watcher/terminal on canceled context, got w=%v terminal=%v", w, terminal)
+// TestResumeJobWatch_ContextEndsDuringBackoff pins the backoff guard: when the
+// context is already done, resumeJobWatch must abandon the resume during the
+// backoff wait rather than issuing a List/Watch against an apiserver the
+// caller has already given up on — and it must distinguish why the context
+// ended: an operator abort reports ErrCodeCanceled, a deadline reports
+// ErrCodeTimeout. A test asserting only one of the two would not catch a
+// regression that collapses them back together.
+func TestResumeJobWatch_ContextEndsDuringBackoff(t *testing.T) {
+	tests := []struct {
+		name     string
+		ctx      func() context.Context
+		wantCode errors.ErrorCode
+	}{
+		{
+			name: "canceled",
+			ctx: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			wantCode: errors.ErrCodeCanceled,
+		},
+		{
+			name: "deadline exceeded",
+			ctx: func() context.Context {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				defer cancel()
+				return ctx
+			},
+			wantCode: errors.ErrCodeTimeout,
+		},
 	}
-	assertStructuredCode(t, err, errors.ErrCodeTimeout)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			client.PrependReactor("list", "jobs", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+				t.Error("List must not be attempted once the context has ended")
+				return true, &batchv1.JobList{}, nil
+			})
+
+			terminal, w, err := resumeJobWatch(tt.ctx(), client, "default", "j")
+			if w != nil || terminal != nil {
+				t.Fatalf("expected no watcher/terminal on ended context, got w=%v terminal=%v", w, terminal)
+			}
+			assertStructuredCode(t, err, tt.wantCode)
+		})
+	}
 }
 
 // TestResumeJobWatch_ListFailsTransient covers the resync-List failure branch:
@@ -128,11 +157,13 @@ func assertStructuredCode(t *testing.T, err error, want errors.ErrorCode) {
 	}
 }
 
-// TestClassifyReGetError pins the wait-loop re-Get classifier so a deadline
-// race between watch-channel close and the re-Get surfaces as ErrCodeTimeout,
-// not ErrCodeUnavailable. Without this, an upstream caller distinguishing
-// transient apiserver unavailability from its own deadline would misroute
-// the failure.
+// TestClassifyReGetError pins the wait-loop re-Get classifier so a dead-context
+// race between watch-channel close and the re-Get surfaces as ErrCodeCanceled
+// or ErrCodeTimeout (never ErrCodeUnavailable) — and, within that dead-context
+// case, that an operator abort and a deadline are reported with different
+// codes rather than both collapsing onto ErrCodeTimeout. Without this, an
+// upstream caller distinguishing transient apiserver unavailability, its own
+// deadline, and a caller-initiated abort would misroute the failure.
 func TestClassifyReGetError(t *testing.T) {
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -148,7 +179,7 @@ func TestClassifyReGetError(t *testing.T) {
 			name:    "context already canceled",
 			ctx:     canceledCtx,
 			getErr:  stderrors.New("get failed"),
-			wantTo:  errors.ErrCodeTimeout,
+			wantTo:  errors.ErrCodeCanceled,
 			wantMsg: "ctx canceled",
 		},
 		{
@@ -162,7 +193,7 @@ func TestClassifyReGetError(t *testing.T) {
 			name:    "getErr is Canceled",
 			ctx:     context.Background(),
 			getErr:  context.Canceled,
-			wantTo:  errors.ErrCodeTimeout,
+			wantTo:  errors.ErrCodeCanceled,
 			wantMsg: "canceled",
 		},
 		{
