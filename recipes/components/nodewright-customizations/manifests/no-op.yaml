@@ -26,7 +26,7 @@ apiVersion: nodewright.nvidia.com/v1alpha1
 kind: NodeWright
 metadata:
   annotations:
-    # Helm hooks ensure this CR is applied after the Skyhook CRD is installed
+    # Helm hooks ensure this CR is applied after the NodeWright CRD is installed
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "10"
     "helm.sh/hook-delete-policy": before-hook-creation
