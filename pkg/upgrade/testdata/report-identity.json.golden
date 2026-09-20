@@ -113,5 +113,9 @@
   "summary": {
     "components": 5,
     "failing": 4
+  },
+  "atRisk": {
+    "scanned": false,
+    "reason": "no cluster access requested"
   }
 }

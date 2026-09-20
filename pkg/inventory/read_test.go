@@ -296,6 +296,35 @@ func TestVersionFor(t *testing.T) {
 			want:      "",
 		},
 		{
+			// localformat.stampFor writes the AICR build version to both
+			// annotations when a component pins neither a chart version nor
+			// a Kustomize tag. That agreement is the fallback's signature,
+			// and reading it as a payload version makes an unchanged
+			// component report as changed: the artifact side answers "" for
+			// the same component.
+			name: "a stamp that repeats the generated-by version is no payload version",
+			record: helmRec("dra-node-labeler", "kube-system", "deployed", "0.0.0-dev",
+				map[string]string{
+					header.AnnotationComponentVersion: "0.0.0-dev",
+					header.AnnotationGeneratedBy:      "0.0.0-dev",
+				}),
+			component: fixtureDRALabeler,
+			want:      "",
+		},
+		{
+			// The discriminator is not equality alone. A component pinned to
+			// the string AICR happens to be released at would collide; an
+			// upstream chart pin is exactly what the fallback is not.
+			name: "an upstream pin that coincides with the AICR version still answers",
+			record: helmRec("gpu-operator", "nvidia-gpu-operator", "deployed", "0.1.0",
+				map[string]string{
+					header.AnnotationComponentVersion: "0.23.0",
+					header.AnnotationGeneratedBy:      "0.23.0",
+				}),
+			component: fixtureGPUOperator,
+			want:      "0.23.0",
+		},
+		{
 			name:      "an argo application ignores annotations it could not have carried",
 			record:    argoRec("gpu-operator", "nvidia-gpu-operator", "v25.3.3", stamp("v9.9.9")),
 			component: fixtureGPUOperator,
