@@ -238,15 +238,15 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 				}
 
 				defaultRender := renderNodewrightTuningRaw(t, content, values)
-				if !strings.Contains(defaultRender, "kind: Skyhook") {
-					t.Fatalf("default rendering must produce the Skyhook CR:\n%s", defaultRender)
+				if !strings.Contains(defaultRender, "kind: NodeWright") {
+					t.Fatalf("default rendering must produce the NodeWright CR:\n%s", defaultRender)
 				}
 
 				disabled := make(map[string]any, len(values)+1)
 				maps.Copy(disabled, values)
 				disabled["tuningEnabled"] = false
-				if got := renderNodewrightTuningRaw(t, content, disabled); strings.Contains(got, "kind: Skyhook") {
-					t.Errorf("tuningEnabled=false must suppress the whole Skyhook CR:\n%s", got)
+				if got := renderNodewrightTuningRaw(t, content, disabled); strings.Contains(got, "kind: NodeWright") {
+					t.Errorf("tuningEnabled=false must suppress the whole NodeWright CR:\n%s", got)
 				}
 
 				enabled := make(map[string]any, len(values)+1)

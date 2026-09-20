@@ -1624,6 +1624,13 @@ status is then written **only** on the new kind: the attempt to mirror it back
 to the legacy object fails in a reconcile conflict loop, so `Skyhook.status`
 stays empty on a cluster where tuning has genuinely finished.
 
+The legacy object also becomes **read-only**. The post-rename admission webhook
+rejects any spec, `pause` or `disable` change to a `Skyhook`, so the first
+attempt to alter tuning after the upgrade fails outright rather than the
+cluster merely reporting a stale status. Deletions and identical re-applies are
+still accepted, which is why a steady-state sync keeps working and the break
+surfaces only on a real edit. Operate the `NodeWright` instead.
+
 AICR resolves the served API group by discovery rather than assuming either
 one, so a bundle validates against an operator from either side of the rename.
 The runtime-required taint is read from the operator's own Deployment for the

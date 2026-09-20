@@ -40,7 +40,13 @@ transitions:
       to mirror it back to the legacy object fails in a reconcile conflict
       loop, so Skyhook.status stays empty forever on a cluster where tuning
       has genuinely finished. Anything still reading the legacy status waits
-      on a value that never arrives.
+      on a value that never arrives. The legacy object also goes read-only:
+      the post-rename admission webhook rejects any spec, pause or disable
+      change to it, so the first attempt to alter tuning after the upgrade
+      fails rather than the cluster merely reporting the wrong status.
+      Deletions and identical re-applies are still accepted, which is why a
+      steady-state sync keeps working and the break only surfaces on a real
+      edit.
     precondition: >-
       Every Skyhook is complete with no nodes in progress. Upstream makes this
       a requirement rather than a recommendation: the migration relabels the
@@ -62,6 +68,22 @@ transitions:
     stepsByDeployer:
       - deployers: [argocd, argocd-helm, flux]
         steps:
+          - id: expect-operator-downtime-during-the-hook
+            description: >-
+              The chart runs a selector-migration pre-upgrade hook that DELETES
+              the operator Deployment before it is recreated, because
+              spec.selector is immutable and the rename changes it. If that
+              hook fails, the sync can stop with the Deployment already gone
+              and no operator running. Re-sync to recover.
+            reason: >-
+              Verified on the helm path, where a hook Job that tripped its
+              deadline left the namespace with zero operator pods and the
+              release in `failed`. The deletion itself is correct: it avoids a
+              release wedged on "Pending termination" when the running operator
+              predates label-based webhook discovery. The hook ships in the
+              chart rather than the deployer, so any path that runs the chart's
+              hooks carries the same gap between delete and recreate; the
+              failure was not reproduced on argocd or flux specifically.
           - id: upgrade-operator
             description: >-
               Bump the operator's chart version in its own Application or
@@ -99,6 +121,28 @@ transitions:
               Confirms the mirror adopted live lifecycle position rather than
               handing the new object a fresh rollout.
       - steps:
+          - id: expect-operator-downtime-during-the-hook
+            description: >-
+              The chart runs a selector-migration pre-upgrade hook that DELETES
+              the operator Deployment before helm recreates it. If that hook's
+              Job fails or exceeds its deadline, helm aborts the upgrade with
+              the Deployment already gone, so the namespace is left with no
+              operator at all and the release sits in `failed`. Re-run the same
+              helm upgrade to recover; it completes once the hook Job passes.
+            reason: >-
+              Observed on a kind cluster crossing v0.17.1 to v0.19.0: the hook
+              pod exited 0 having deleted the Deployment, but the Job tripped
+              its activeDeadlineSeconds while its image was still being pulled,
+              and helm treated the Job failure as an aborted upgrade. The
+              deletion is deliberate: the hook deletes when the live selector
+              would have to change (spec.selector is immutable) or when the
+              running operator predates label-based webhook discovery, which is
+              what fired here. Such an operator looks its webhook
+              configurations up by name, the upgrade renames them, so it never
+              goes Ready, never releases the webhook bootstrap lease and is
+              never terminated by the rolling update, wedging the release on
+              "Pending termination". A short operator gap is the cheaper
+              failure. The exposure is that gap widening, not the deletion.
           - id: upgrade-operator
             description: >-
               helm upgrade the operator chart, before touching any CR.
