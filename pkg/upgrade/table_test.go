@@ -307,6 +307,53 @@ func identityReport(t *testing.T) *Report {
 	})
 }
 
+// objectNameReport is the object-name limb of the identity axis, kept separate
+// from identityReport because the two axes carry different consequences and
+// the prose that states them is the point of the golden.
+//
+// It covers a component that held its version and dropped its fullnameOverride
+// (chi-operator, the nodewright case), one that acquired a name it never had
+// (psi-operator), one whose nested subchart name moved while the top-level one
+// held (omega-operator), and one that moved on both the version and the
+// object-name axis in a single hop with its safe verdict withdrawn
+// (theta-operator).
+func objectNameReport(t *testing.T) *Report {
+	t.Helper()
+	set := Set{
+		"theta-operator": {
+			Component: "theta-operator",
+			Transitions: []Transition{{
+				From: "<1.5.0", To: ">=1.4.1 <1.5.0", Verdict: VerdictSafe,
+				VerifiedBy: "uat: synthetic lane",
+				Summary:    "Patch releases only.",
+			}},
+		},
+	}
+	from := map[string]Identity{
+		"chi-operator": {Version: "0.19.0", ObjectNames: map[string]string{"fullnameOverride": "legacy-operator"}},
+		"psi-operator": {Version: "1.0.0"},
+		"omega-operator": {Version: "2.0.0", ObjectNames: map[string]string{
+			"fullnameOverride":         "omega",
+			"grafana.fullnameOverride": "grafana",
+		}},
+		"theta-operator": {Version: "1.4.0", ObjectNames: map[string]string{"nameOverride": "theta"}},
+	}
+	to := map[string]Identity{
+		"chi-operator": {Version: "0.19.0", ObjectNames: map[string]string{}},
+		"psi-operator": {Version: "1.0.0", ObjectNames: map[string]string{"fullnameOverride": "psi"}},
+		"omega-operator": {Version: "2.0.0", ObjectNames: map[string]string{
+			"fullnameOverride":         "omega",
+			"grafana.fullnameOverride": "omega-grafana",
+		}},
+		"theta-operator": {Version: "1.4.2", ObjectNames: map[string]string{"nameOverride": "theta-new"}},
+	}
+	return NewReport(MatchIdentities(set, from, to), ReportOptions{
+		From:                "./bundles-v0.19.0",
+		To:                  "./recipe.yaml",
+		ObjectNamesCompared: true,
+	})
+}
+
 func TestWriteTableGolden(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -315,9 +362,22 @@ func TestWriteTableGolden(t *testing.T) {
 	}{
 		{"mixed", "report-mixed.golden", mixedReport},
 		{"identity", "report-identity.golden", identityReport},
+		{"object names", "report-objectnames.golden", objectNameReport},
 		{"replacement", "report-replacement.golden", replacementReport},
 		{"no changes", "report-empty.golden", func(*testing.T) *Report {
 			return NewReport(nil, ReportOptions{From: "a.yaml", To: "b.yaml"})
+		}},
+		// The note has to survive the no-changes early return: "NO COMPONENT
+		// CHANGES" with nothing beside it is exactly where a reader would
+		// conclude that object names held.
+		{"object names skipped", "report-objectnames-skipped.golden", func(*testing.T) *Report {
+			return NewReport(nil, ReportOptions{
+				From: "from.yaml",
+				To:   "to.yaml",
+				ObjectNamesSkipped: "a recipe file records its values by reference, not by value, " +
+					"so it does not state the object names it deployed with. Compare against the " +
+					"bundle directory instead",
+			})
 		}},
 	}
 	for _, tt := range tests {
@@ -345,6 +405,7 @@ func TestReportJSONGolden(t *testing.T) {
 	}{
 		{"mixed", "report-mixed.json.golden", mixedReport},
 		{"identity", "report-identity.json.golden", identityReport},
+		{"object names", "report-objectnames.json.golden", objectNameReport},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

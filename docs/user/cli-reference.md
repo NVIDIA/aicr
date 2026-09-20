@@ -503,7 +503,7 @@ Generate recipes using direct system parameters:
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
-| `--inherit-from` | | string | Prior recipe file, or bundle directory, whose component namespaces the resolved recipe keeps instead of re-deriving them from the registry. Use on an AICR upgrade so a moved registry default does not relocate a component that is already running; see [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). A component the prior artifact does not name keeps the registry default. `cm://` locations are not supported yet |
+| `--inherit-from` | | string | Prior recipe file, or bundle directory, whose component namespaces the resolved recipe keeps instead of re-deriving them from the registry. Given a bundle directory it also keeps that bundle's `fullnameOverride` / `nameOverride` object names, writing an override only where one differs. Use on an AICR upgrade so a moved registry default does not relocate or rename a component that is already running; see [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). A component the prior artifact does not name keeps the registry default. `cm://` locations are not supported yet |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
@@ -1558,13 +1558,13 @@ The report still reports a **breaking boundary** (a major bump, a minor bump whi
 | `no-record` | No record exists for this component | Somebody authoring the first record |
 | `no-boundary-crossed` | A record exists but says nothing about this range | Widening it, or confirming no boundary belongs there |
 | `downgrade` | You are rolling back | Nothing. Records describe forward moves only, so this can never become known |
-| `identity-changed` | The component's namespace moved between the two artifacts | Performing the relocation as its own piece of work, or resolving the target recipe with `aicr recipe --inherit-from` so it does not happen |
+| `identity-changed` | The component's namespace moved, or the values naming the objects its chart owns did | Performing the relocation or rename as its own piece of work, or resolving the target recipe with `aicr recipe --inherit-from` so it does not happen |
 
 `blocked` and `unknown` say opposite things. `blocked` means AICR has something to tell you and a version to stop at: read it and act on it. `unknown` means AICR has nothing for you: read the component's own upstream release notes and decide. Neither is a pass.
 
 **Rollout note: expect red today.** Only two registry components ship a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
 
-Components whose version *and* namespace are identical on both sides produce no row. Added components are reported with nothing to do; removed components are reported and **stay installed**, because AICR does not uninstall them.
+Components whose version, namespace *and* object names are identical on both sides produce no row. Added components are reported with nothing to do; removed components are reported and **stay installed**, because AICR does not uninstall them.
 
 **Namespaces are compared too.** A recipe is regenerated from scratch on every AICR upgrade, and each component's namespace comes from `recipes/registry.yaml`, so a moved registry default lands in the regenerated recipe. Helm cannot move a release between namespaces, so applying the resulting bundle installs a **second copy** of the component beside the running one, and nothing reconciles the two. A version-only comparison reports that as no change at all, so the namespace is compared as its own axis:
 
@@ -1576,6 +1576,12 @@ Components whose version *and* namespace are identical on both sides produce no 
 `unknown` rather than `blocked` is deliberate. `blocked` is an author's judgement recorded against a version boundary, and the record vocabulary has no way to express one about where a release lives, so no author can record it. `--format json` and `--format yaml` carry the move as `identityChanges`, a list of `{field, from, to}` objects, on both kinds of row.
 
 The remedy is not an upgrade step. Either move the release deliberately and re-run the check, or resolve the target recipe with [`aicr recipe --inherit-from`](#aicr-recipe) so it keeps the namespaces the prior artifact deployed into and the relocation never enters the hop. See [Upgrading a Deployed Stack](upgrading.md#when-a-component-moves-namespace).
+
+**Object names are compared too, from a bundle.** Half the registry's components pin the names of the objects their chart creates, with `fullnameOverride` or `nameOverride` in their values file. Those are the only values that rename an object rather than reconfigure it, so they are compared as their own axis and reported on the same rows, with `field` carrying the dotted value path (`fullnameOverride`, `grafana.fullnameOverride`) instead of `namespace`. An empty `from` or `to` means the name appeared or disappeared, which is a rename either way — the opposite of how the namespace axis reads an empty value, because a chart with no `fullnameOverride` names its objects after itself.
+
+Renaming is applied by Helm as delete-and-recreate: expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key feeds the chart's selector labels, `spec.selector` is immutable and the upgrade fails outright instead.
+
+This axis needs a **bundle** as `--from`. A resolved recipe records `valuesFile` as a path resolved against whichever binary reads it, so comparing two recipe files would read today's values twice and see nothing move; only a bundle writes the merged result down. When the source cannot supply them, the report says so once above the table rather than reporting that nothing moved, and `--format json` carries `objectNamesCompared: false` with `objectNamesSkipped` naming the reason. See [Upgrading a Deployed Stack](upgrading.md#when-a-components-objects-are-renamed).
 
 **The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. That is a property of the jump alone, so a record still counts even when the jump flies straight over it:
 
@@ -3229,7 +3235,7 @@ aicr mirror list [flags]
 | `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |
 | `--platform` | | string | | Optional platform specialization (e.g., `kubeflow`). |
 | `--profile` | | string | | Profile selection in exact `name=value` form when resolving from criteria. Cannot be combined with `--recipe`. |
-| `--inherit-from` | | string | | Prior recipe file, or bundle directory, whose component namespaces the resolved recipe keeps instead of re-deriving them from the registry. Applies to criteria-based resolution only, and cannot be combined with `--recipe`: that file already records the namespaces it resolved to. See [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). |
+| `--inherit-from` | | string | | Prior recipe file, or bundle directory, whose component namespaces the resolved recipe keeps instead of re-deriving them from the registry; a bundle directory also supplies its object names. Applies to criteria-based resolution only, and cannot be combined with `--recipe`: that file already records the namespaces it resolved to. See [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). |
 | `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
 | `--data` | | string | | External data directory to overlay on embedded data. Overlay-provided component values and manifests both feed image discovery (see [External Data](#external-data-directory)). |
 | `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |

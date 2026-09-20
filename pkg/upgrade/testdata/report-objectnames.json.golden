@@ -1,0 +1,94 @@
+{
+  "from": "./bundles-v0.19.0",
+  "to": "./recipe.yaml",
+  "objectNamesCompared": true,
+  "components": [
+    {
+      "component": "chi-operator",
+      "change": "identity",
+      "from": "0.19.0",
+      "to": "0.19.0",
+      "identityChanges": [
+        {
+          "field": "fullnameOverride",
+          "from": "legacy-operator",
+          "to": ""
+        }
+      ],
+      "verdict": "unknown",
+      "notes": "0.19.0 unchanged, no record covers a rename",
+      "reason": "identity-changed",
+      "explanation": "chi-operator stays at 0.19.0, but its fullnameOverride is no longer set, dropping legacy-operator. Transition records assess version boundaries, so none assesses this move. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key feeds the chart's selector labels, spec.selector is immutable and the upgrade fails outright instead. Make the move deliberately, then re-run this check.",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": true
+    },
+    {
+      "component": "omega-operator",
+      "change": "identity",
+      "from": "2.0.0",
+      "to": "2.0.0",
+      "identityChanges": [
+        {
+          "field": "grafana.fullnameOverride",
+          "from": "grafana",
+          "to": "omega-grafana"
+        }
+      ],
+      "verdict": "unknown",
+      "notes": "2.0.0 unchanged, no record covers a rename",
+      "reason": "identity-changed",
+      "explanation": "omega-operator stays at 2.0.0, but its grafana.fullnameOverride moves from grafana to omega-grafana. Transition records assess version boundaries, so none assesses this move. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key feeds the chart's selector labels, spec.selector is immutable and the upgrade fails outright instead. Make the move deliberately, then re-run this check.",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": true
+    },
+    {
+      "component": "psi-operator",
+      "change": "identity",
+      "from": "1.0.0",
+      "to": "1.0.0",
+      "identityChanges": [
+        {
+          "field": "fullnameOverride",
+          "from": "",
+          "to": "psi"
+        }
+      ],
+      "verdict": "unknown",
+      "notes": "1.0.0 unchanged, no record covers a rename",
+      "reason": "identity-changed",
+      "explanation": "psi-operator stays at 1.0.0, but its fullnameOverride is now set to psi. Transition records assess version boundaries, so none assesses this move. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key feeds the chart's selector labels, spec.selector is immutable and the upgrade fails outright instead. Make the move deliberately, then re-run this check.",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": true
+    },
+    {
+      "component": "theta-operator",
+      "change": "version",
+      "from": "1.4.0",
+      "to": "1.4.2",
+      "identityChanges": [
+        {
+          "field": "nameOverride",
+          "from": "theta",
+          "to": "theta-new"
+        }
+      ],
+      "verdict": "unknown",
+      "notes": "2 patches, nameOverride theta -\u003e theta-new",
+      "reason": "identity-changed",
+      "explanation": "the move from 1.4.0 to 1.4.2 is recorded safe, but its nameOverride moves from theta to theta-new, and no record assessed that. Transition records assess version boundaries, so none assesses this move. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key feeds the chart's selector labels, spec.selector is immutable and the upgrade fails outright instead. Make the move deliberately, then re-run this check.",
+      "jump": "2 patches",
+      "covers": "1 minor",
+      "breaking": false,
+      "downgrade": false,
+      "summary": "Patch releases only.",
+      "failsRun": true
+    }
+  ],
+  "summary": {
+    "components": 4,
+    "failing": 4
+  }
+}

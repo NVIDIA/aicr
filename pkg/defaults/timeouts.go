@@ -943,6 +943,13 @@ const (
 	// for parity across bundle-root metadata reads.
 	MaxBundleInfoBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
+	// MaxBundleValuesBytes caps a single rendered per-release values file read
+	// back out of a bundle. The largest the shipped registry produces is the
+	// gpu-operator's, at roughly 6 KiB; 1 MiB matches MaxBundleInfoBytes for
+	// parity across bundle reads. The bound matters because the file arrives
+	// from an OCI registry or a GitOps clone alongside the record naming it.
+	MaxBundleValuesBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxManifestFileBytes caps the size of an in-bundle manifest.json
 	// file read by the verifier. A manifest entry is ~150 bytes (path +
 	// size + sha256); 1 MiB allows ~6k entries — well above any realistic

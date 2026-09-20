@@ -25,6 +25,23 @@ type ReportOptions struct {
 	From     string
 	To       string
 	Deployer string
+
+	// ObjectNamesCompared says the object-name axis was assessed, and
+	// ObjectNamesSkipped says why it was not.
+	//
+	// Stated rather than derived from the other being empty, because the zero
+	// value has to mean "not compared": Match and every other versions-only
+	// caller sets neither, and defaulting those to compared would claim an
+	// axis was checked that nothing looked at.
+	//
+	// They are report-level rather than per-row because an unread axis is one
+	// fact about the run, not one fact per component; a row each would bury
+	// the rows that did find something. Saying nothing at all is not an
+	// option: a source artifact that cannot state its object names is
+	// indistinguishable from one whose names held, and reporting the second
+	// when the first is true is the failure this axis exists to prevent.
+	ObjectNamesCompared bool
+	ObjectNamesSkipped  string
 }
 
 // Report is the presentable form of a match: one row per component whose
@@ -35,9 +52,16 @@ type ReportOptions struct {
 // everything it carries, renders each semver distance as the phrase a reader
 // sees, and names its fields for JSON and YAML consumers.
 type Report struct {
-	From       string            `json:"from,omitempty" yaml:"from,omitempty"`
-	To         string            `json:"to,omitempty" yaml:"to,omitempty"`
-	Deployer   string            `json:"deployer,omitempty" yaml:"deployer,omitempty"`
+	From     string `json:"from,omitempty" yaml:"from,omitempty"`
+	To       string `json:"to,omitempty" yaml:"to,omitempty"`
+	Deployer string `json:"deployer,omitempty" yaml:"deployer,omitempty"`
+
+	// ObjectNamesCompared reports whether the object-name axis was assessed at
+	// all. False means no row can be read as evidence that object names held:
+	// they were never looked at. ObjectNamesSkipped says why.
+	ObjectNamesCompared bool   `json:"objectNamesCompared" yaml:"objectNamesCompared"`
+	ObjectNamesSkipped  string `json:"objectNamesSkipped,omitempty" yaml:"objectNamesSkipped,omitempty"`
+
 	Components []ReportComponent `json:"components" yaml:"components"`
 	Summary    ReportSummary     `json:"summary" yaml:"summary"`
 }
@@ -164,10 +188,12 @@ func RequiresDeployer(results []ComponentResult) bool {
 // the Set the results point into.
 func NewReport(results []ComponentResult, opts ReportOptions) *Report {
 	rep := &Report{
-		From:       opts.From,
-		To:         opts.To,
-		Deployer:   opts.Deployer,
-		Components: make([]ReportComponent, 0, len(results)),
+		From:                opts.From,
+		To:                  opts.To,
+		Deployer:            opts.Deployer,
+		ObjectNamesCompared: opts.ObjectNamesCompared,
+		ObjectNamesSkipped:  opts.ObjectNamesSkipped,
+		Components:          make([]ReportComponent, 0, len(results)),
 	}
 	for _, r := range results {
 		rep.Components = append(rep.Components, reportComponent(r, opts.Deployer))
@@ -289,14 +315,15 @@ func notes(r ComponentResult, c ReportComponent) string {
 		}
 		return strings.Join(parts, ", ")
 	case ChangeIdentity:
-		// The FROM and TO columns carry the relocation on this row, so the
-		// version they displaced is stated here. No coverage gap is named
-		// alongside it: none can be closed, because the record vocabulary
-		// describes version boundaries and this row crossed none.
-		if r.From == "" {
-			return "version unchanged, no record covers a relocation"
+		// The FROM and TO columns carry the move on this row, so the version
+		// they displaced is stated here. No coverage gap is named alongside
+		// it: none can be closed, because the record vocabulary describes
+		// version boundaries and this row crossed none.
+		version := r.From
+		if version == "" {
+			version = "version"
 		}
-		return r.From + " unchanged, no record covers a relocation"
+		return version + " unchanged, no record covers " + identityNoun(c.IdentityChanges)
 	case ChangeVersion:
 		// Composed below: a version change is the only kind whose notes
 		// depend on the verdict.
@@ -365,9 +392,42 @@ func notes(r ComponentResult, c ReportComponent) string {
 func movedFieldsPhrase(changes []ReportIdentityChange) string {
 	parts := make([]string, len(changes))
 	for i, c := range changes {
-		parts[i] = fmt.Sprintf("%s %s -> %s", c.Field, c.From, c.To)
+		parts[i] = fmt.Sprintf("%s %s -> %s", c.Field, identityValue(c.From), identityValue(c.To))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// identityValue renders one side of an identity move for the table and the
+// notes. An object name that appeared or disappeared has an empty side, and
+// printing nothing there leaves a dangling "fullnameOverride=" on the row
+// where the rename is the whole finding.
+func identityValue(v string) string {
+	if v == "" {
+		return "(unset)"
+	}
+	return v
+}
+
+// identityNoun names the kind of move a row carries, so the notes do not call
+// a rename a relocation. The two remedies differ, and the notes cell is the
+// only thing many readers see.
+func identityNoun(changes []ReportIdentityChange) string {
+	var namespace, objectName bool
+	for _, c := range changes {
+		if c.Field == identityFieldNamespace {
+			namespace = true
+			continue
+		}
+		objectName = true
+	}
+	switch {
+	case namespace && !objectName:
+		return "a relocation"
+	case objectName && !namespace:
+		return "a rename"
+	default:
+		return "this move"
+	}
 }
 
 // spanPhrase names a semver distance at the one level it is measured on.

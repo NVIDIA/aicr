@@ -28,9 +28,10 @@ func TestComponentIdentities(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
-		in   *RecipeResult
-		want map[string]upgrade.Identity
+		name        string
+		in          *RecipeResult
+		objectNames map[string]map[string]string
+		want        map[string]upgrade.Identity
 	}{
 		{
 			name: "nil recipe",
@@ -64,11 +65,29 @@ func TestComponentIdentities(t *testing.T) {
 				"synthetic-unpinned": {Namespace: "synthetic-ns"},
 			},
 		},
+		{
+			name: "object names attach to the component that pins them",
+			in: &RecipeResult{Components: []ComponentRef{
+				{Name: "synthetic-alpha", Kind: "Helm", Version: "1.2.0", Namespace: "synthetic-ns"},
+				{Name: "synthetic-beta", Kind: "Helm", Version: "2.0.0", Namespace: "synthetic-ns"},
+			}},
+			objectNames: map[string]map[string]string{
+				"synthetic-alpha": {"fullnameOverride": "alpha"},
+			},
+			want: map[string]upgrade.Identity{
+				"synthetic-alpha": {
+					Version:     "1.2.0",
+					Namespace:   "synthetic-ns",
+					ObjectNames: map[string]string{"fullnameOverride": "alpha"},
+				},
+				"synthetic-beta": {Version: "2.0.0", Namespace: "synthetic-ns"},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := componentIdentities(tt.in)
+			got := componentIdentities(tt.in, tt.objectNames)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("componentIdentities() = %+v, want %+v", got, tt.want)
 			}

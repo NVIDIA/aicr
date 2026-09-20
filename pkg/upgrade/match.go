@@ -94,18 +94,35 @@ const (
 )
 
 // Identity is what a recipe pins for a component beyond its version. A move
-// here is invisible to a version comparison but relocates running objects, and
-// Helm cannot move a release between namespaces.
+// here is invisible to a version comparison but relocates or renames running
+// objects, and Helm can do neither in place.
 type Identity struct {
 	Version   string
 	Namespace string
+
+	// ObjectNames are the merged values naming the objects the chart owns,
+	// keyed by dotted value path ("fullnameOverride",
+	// "grafana.fullnameOverride").
+	//
+	// Empty is not the same as a component pinning none: it is also what a
+	// caller that could not read the values hands over, because a resolved
+	// recipe records them by reference rather than by value. The caller
+	// reports that gap once for the whole run rather than per component, so
+	// nothing here distinguishes the two.
+	ObjectNames map[string]string
 }
 
 // IdentityChange names one field that moved between the compared artifacts.
 //
-// Field is the Identity field's name lowercased ("namespace"), so a consumer
-// branches on it without parsing prose. Version is never one of them: the
-// version axis is ComponentResult.From and To, and the records assess it.
+// Field is either an Identity field's name lowercased ("namespace") or a dotted
+// value path into the merged values ("fullnameOverride",
+// "grafana.fullnameOverride"), so a consumer branches on it without parsing
+// prose. Version is never one of them: the version axis is
+// ComponentResult.From and To, and the records assess it.
+//
+// From or To is empty where the move is an object name appearing or
+// disappearing, which is a rename rather than a missing observation. Namespace
+// never reports an empty side; see identityChanges for why the two differ.
 type IdentityChange struct {
 	Field string
 	From  string
@@ -314,12 +331,17 @@ func MatchIdentities(set Set, from, to map[string]Identity) []ComponentResult {
 	return results
 }
 
-// identityChanges lists the non-version fields that moved.
+// identityChanges lists the non-version fields that moved, namespace first and
+// then the object-name paths in sorted order.
 //
-// A field counts only when both sides state it. An empty string is a fact the
-// artifact did not carry rather than a move to the default namespace, so
-// treating it as a value would report a relocation nobody performed for every
-// component the moment one of the two artifacts stops carrying the field.
+// The two axes treat an empty value oppositely, and the difference is what each
+// absence means. A namespace counts only when both sides state it: an empty
+// string is a fact the artifact did not carry rather than a move to the default
+// namespace, so treating it as a value would report a relocation nobody
+// performed for every component the moment one artifact stops carrying the
+// field. An absent object name is the other thing entirely — a chart with no
+// fullnameOverride names its objects after itself — so dropping one renames
+// every object it held, and both directions are moves.
 func identityChanges(from, to Identity) []IdentityChange {
 	var moved []IdentityChange
 	if from.Namespace != "" && to.Namespace != "" && from.Namespace != to.Namespace {
@@ -329,14 +351,78 @@ func identityChanges(from, to Identity) []IdentityChange {
 			To:    to.Namespace,
 		})
 	}
+	paths := make([]string, 0, len(from.ObjectNames)+len(to.ObjectNames))
+	for path := range from.ObjectNames {
+		paths = append(paths, path)
+	}
+	for path := range to.ObjectNames {
+		if _, inBoth := from.ObjectNames[path]; !inBoth {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		src, tgt := from.ObjectNames[path], to.ObjectNames[path]
+		if src == tgt {
+			continue
+		}
+		moved = append(moved, IdentityChange{Field: path, From: src, To: tgt})
+	}
 	return moved
 }
 
 // identityAdvice is the tail both identity explanations share: why no record
-// covers the move, and why it cannot ride along with an upgrade.
-const identityAdvice = "Transition records assess version boundaries, so none assesses a relocation. " +
-	"Helm cannot move a release between namespaces either, so applying the new recipe installs a " +
-	"second copy beside the running one: move the release deliberately, then re-run this check"
+// covers the move, and what the axes that moved will actually do.
+//
+// The clauses are selected rather than fixed. The two axes fail differently —
+// a relocation leaves a second copy running, a rename replaces objects — and
+// this sentence is what an operator reads at the moment they decide whether to
+// upgrade, so naming the wrong consequence sends them to the wrong remedy.
+//
+// The selector clause is deliberately conditional. fullnameOverride renames
+// objects without touching the selector in the standard chart scaffold;
+// nameOverride feeds app.kubernetes.io/name, which does sit in spec.selector.
+// Which applies is a property of the chart, so the text says where to look
+// rather than promising a failure that may not happen.
+func identityAdvice(moved []IdentityChange) string {
+	parts := []string{"Transition records assess version boundaries, so none assesses this move."}
+	if movedNamespace(moved) {
+		parts = append(parts, "Helm cannot move a release between namespaces, so applying the new "+
+			"recipe installs a second copy beside the running one.")
+	}
+	if movedObjectName(moved) {
+		parts = append(parts, "Renaming the objects a chart owns is applied as delete-and-recreate, "+
+			"so expect a service gap, and an orphan for anything referenced by name or not owned by "+
+			"the release. Where the moved key feeds the chart's selector labels, spec.selector is "+
+			"immutable and the upgrade fails outright instead.")
+	}
+	return strings.Join(append(parts, "Make the move deliberately, then re-run this check."), " ")
+}
+
+// movedNamespace reports whether the component was relocated.
+func movedNamespace(moved []IdentityChange) bool {
+	for _, c := range moved {
+		if c.Field == identityFieldNamespace {
+			return true
+		}
+	}
+	return false
+}
+
+// movedObjectName reports whether any object the chart owns was renamed. Every
+// field that is not the namespace is a value path, so this is the complement.
+func movedObjectName(moved []IdentityChange) bool {
+	for _, c := range moved {
+		if c.Field != identityFieldNamespace {
+			return true
+		}
+	}
+	return false
+}
+
+// identityFieldNamespace is the one IdentityChange.Field value that is not a
+// dotted value path.
+const identityFieldNamespace = "namespace"
 
 // relocation is the row for a component that held its version and moved anyway.
 //
@@ -354,7 +440,7 @@ func relocation(name, version string, moved []IdentityChange) ComponentResult {
 		Verdict:         VerdictUnknown,
 		Reason:          ReasonIdentityChanged,
 		Explanation: fmt.Sprintf("%s %s, but %s. %s",
-			name, heldPhrase(version), movedPhrase(moved), identityAdvice),
+			name, heldPhrase(version), movedPhrase(moved), identityAdvice(moved)),
 	}
 }
 
@@ -388,15 +474,26 @@ func withIdentityChanges(r ComponentResult, moved []IdentityChange) ComponentRes
 	r.Reason = ReasonIdentityChanged
 	r.Explanation = fmt.Sprintf(
 		"the move from %s to %s is recorded safe, but %s, and no record assessed that. %s",
-		r.From, r.To, movedPhrase(moved), identityAdvice)
+		r.From, r.To, movedPhrase(moved), identityAdvice(moved))
 	return r
 }
 
 // movedPhrase states the moves as the clause both explanations embed.
+//
+// An object name appearing or disappearing gets its own wording, because the
+// from-to form degenerates to "moves from skyhook-operator to" on exactly the
+// row where the rename is the whole finding.
 func movedPhrase(moved []IdentityChange) string {
 	parts := make([]string, len(moved))
 	for i, c := range moved {
-		parts[i] = fmt.Sprintf("its %s moves from %s to %s", c.Field, c.From, c.To)
+		switch {
+		case c.From == "":
+			parts[i] = fmt.Sprintf("its %s is now set to %s", c.Field, c.To)
+		case c.To == "":
+			parts[i] = fmt.Sprintf("its %s is no longer set, dropping %s", c.Field, c.From)
+		default:
+			parts[i] = fmt.Sprintf("its %s moves from %s to %s", c.Field, c.From, c.To)
+		}
 	}
 	return strings.Join(parts, " and ")
 }

@@ -2,6 +2,7 @@
   "from": "./bundles-v0.17.0",
   "to": "./bundles-v0.18.0",
   "deployer": "argocd",
+  "objectNamesCompared": false,
   "components": [
     {
       "component": "phi-operator",
@@ -16,7 +17,7 @@
       "verdict": "unknown",
       "notes": "version unchanged, no record covers a relocation",
       "reason": "identity-changed",
-      "explanation": "phi-operator does not change version, but its namespace moves from phi-system to nvidia-phi-system. Transition records assess version boundaries, so none assesses a relocation. Helm cannot move a release between namespaces either, so applying the new recipe installs a second copy beside the running one: move the release deliberately, then re-run this check",
+      "explanation": "phi-operator does not change version, but its namespace moves from phi-system to nvidia-phi-system. Transition records assess version boundaries, so none assesses this move. Helm cannot move a release between namespaces, so applying the new recipe installs a second copy beside the running one. Make the move deliberately, then re-run this check.",
       "breaking": false,
       "downgrade": false,
       "failsRun": true
@@ -36,7 +37,7 @@
       "verdict": "unknown",
       "notes": "2.1.0 unchanged, no record covers a relocation",
       "reason": "identity-changed",
-      "explanation": "rho-operator stays at 2.1.0, but its namespace moves from rho-system to nvidia-rho-system. Transition records assess version boundaries, so none assesses a relocation. Helm cannot move a release between namespaces either, so applying the new recipe installs a second copy beside the running one: move the release deliberately, then re-run this check",
+      "explanation": "rho-operator stays at 2.1.0, but its namespace moves from rho-system to nvidia-rho-system. Transition records assess version boundaries, so none assesses this move. Helm cannot move a release between namespaces, so applying the new recipe installs a second copy beside the running one. Make the move deliberately, then re-run this check.",
       "breaking": false,
       "downgrade": false,
       "failsRun": true
@@ -56,7 +57,7 @@
       "verdict": "unknown",
       "notes": "2 patches, namespace sigma-system -\u003e nvidia-sigma-system",
       "reason": "identity-changed",
-      "explanation": "the move from 1.4.0 to 1.4.2 is recorded safe, but its namespace moves from sigma-system to nvidia-sigma-system, and no record assessed that. Transition records assess version boundaries, so none assesses a relocation. Helm cannot move a release between namespaces either, so applying the new recipe installs a second copy beside the running one: move the release deliberately, then re-run this check",
+      "explanation": "the move from 1.4.0 to 1.4.2 is recorded safe, but its namespace moves from sigma-system to nvidia-sigma-system, and no record assessed that. Transition records assess version boundaries, so none assesses this move. Helm cannot move a release between namespaces, so applying the new recipe installs a second copy beside the running one. Make the move deliberately, then re-run this check.",
       "jump": "2 patches",
       "covers": "1 minor",
       "breaking": false,

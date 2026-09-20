@@ -20,10 +20,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
@@ -491,5 +495,268 @@ func TestUpgradeCheckReportsNamespaceChanges(t *testing.T) {
 				t.Error("FailsRun() = false for a report carrying a relocation")
 			}
 		})
+	}
+}
+
+// syntheticBundle writes the minimum a bundle needs for the object-name axis
+// to be readable: the recipe.yaml that makes the directory a bundle, the
+// bundle-info.yaml that locates each release, and the rendered values.yaml the
+// deployer wrote. Values are supplied as raw YAML so a test can express an
+// absent key, which is the state that matters here.
+func syntheticBundle(t *testing.T, dir string, components map[string]string, values map[string]string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("setup: mkdir %s: %v", dir, err)
+	}
+	syntheticRecipe(t, filepath.Join(dir, "recipe.yaml"), components)
+
+	releases := make([]bundleinfo.Release, 0, len(components))
+	for i, name := range sortedKeys(components) {
+		path := fmt.Sprintf("%03d-%s", i+1, name)
+		releases = append(releases, bundleinfo.Release{Name: name, Component: name, Path: path})
+		if doc, ok := values[name]; ok {
+			if err := os.MkdirAll(filepath.Join(dir, path), 0o750); err != nil {
+				t.Fatalf("setup: mkdir %s: %v", path, err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, path, "values.yaml"), []byte(doc), 0o600); err != nil {
+				t.Fatalf("setup: write values for %s: %v", name, err)
+			}
+		}
+	}
+
+	info := &bundleinfo.BundleInfo{
+		APIVersion: header.StableGroupVersion,
+		Kind:       string(header.KindBundleInfo),
+		Build: bundleinfo.Build{
+			Deployer: "helm",
+			Recipe: bundleinfo.Recipe{
+				Path:   "recipe.yaml",
+				Digest: "sha256:3b1f8c2ad9e7546102bb8f4c7d0e9a1358cc4f6b2e8d70a94f1c5b3e6d820947",
+			},
+		},
+		Layout: bundleinfo.Layout{Entrypoint: "deploy.sh", Releases: releases},
+	}
+	if _, err := bundleinfo.Write(t.Context(), dir, info); err != nil {
+		t.Fatalf("setup: write bundle info: %v", err)
+	}
+	return dir
+}
+
+// A component's object names come from its merged Helm values, which a
+// resolved recipe records by REFERENCE: `valuesFile` is a path resolved
+// against whichever binary reads it. Only a bundle wrote the merged result
+// down, so only a bundle can say what a running install was named. Dropping a
+// fullnameOverride renames every object the chart owns, which Helm applies as
+// delete-and-recreate.
+func TestUpgradeCheckReportsObjectNameChanges(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	client := upgradeCheckClient(t)
+
+	components := map[string]string{"synthetic-alpha": "1.2.0"}
+
+	t.Run("a dropped fullnameOverride at an unchanged version is one row", func(t *testing.T) {
+		t.Parallel()
+		from := syntheticBundle(t, filepath.Join(dir, "dropped"), components,
+			map[string]string{"synthetic-alpha": "fullnameOverride: legacy-alpha\n"})
+		// The target is a recipe file, which is faithful on this side: it asks
+		// what deploys now, and the synthetic ref pins no values at all.
+		to := syntheticRecipe(t, filepath.Join(dir, "dropped-to.yaml"), components)
+
+		report, err := client.UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{From: from, To: to})
+		if err != nil {
+			t.Fatalf("UpgradeCheck: %v", err)
+		}
+		if !report.ObjectNamesCompared {
+			t.Fatalf("ObjectNamesCompared = false, want true: %s", report.ObjectNamesSkipped)
+		}
+		if len(report.Components) != 1 {
+			t.Fatalf("report has %d rows, want 1: %+v", len(report.Components), report.Components)
+		}
+		row := report.Components[0]
+		if row.Change != upgrade.ChangeIdentity {
+			t.Errorf("change = %q, want %q", row.Change, upgrade.ChangeIdentity)
+		}
+		want := []upgrade.ReportIdentityChange{
+			{Field: "fullnameOverride", From: "legacy-alpha", To: ""},
+		}
+		if !reflect.DeepEqual(row.IdentityChanges, want) {
+			t.Errorf("identityChanges = %+v, want %+v", row.IdentityChanges, want)
+		}
+		// Deliberately not asserting a Verdict for this row beyond what
+		// FailsRun implies: no synthetic record applies, and ADR-021's testing
+		// strategy keeps verdicts out of the unit suite.
+		if !report.FailsRun() {
+			t.Error("FailsRun() = false for a report carrying a rename")
+		}
+	})
+
+	t.Run("an unchanged fullnameOverride is still no row", func(t *testing.T) {
+		t.Parallel()
+		values := map[string]string{"synthetic-alpha": "fullnameOverride: stable-alpha\n"}
+		from := syntheticBundle(t, filepath.Join(dir, "held-from"), components, values)
+		to := syntheticBundle(t, filepath.Join(dir, "held-to"), components, values)
+
+		report, err := client.UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{From: from, To: to})
+		if err != nil {
+			t.Fatalf("UpgradeCheck: %v", err)
+		}
+		if !report.ObjectNamesCompared {
+			t.Fatalf("ObjectNamesCompared = false, want true: %s", report.ObjectNamesSkipped)
+		}
+		if len(report.Components) != 0 {
+			t.Fatalf("report has %d rows, want 0: %+v", len(report.Components), report.Components)
+		}
+	})
+
+	t.Run("a nested subchart name is compared too", func(t *testing.T) {
+		t.Parallel()
+		from := syntheticBundle(t, filepath.Join(dir, "nested-from"), components,
+			map[string]string{"synthetic-alpha": "grafana:\n  fullnameOverride: old-grafana\n"})
+		to := syntheticBundle(t, filepath.Join(dir, "nested-to"), components,
+			map[string]string{"synthetic-alpha": "grafana:\n  fullnameOverride: new-grafana\n"})
+
+		report, err := client.UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{From: from, To: to})
+		if err != nil {
+			t.Fatalf("UpgradeCheck: %v", err)
+		}
+		if len(report.Components) != 1 {
+			t.Fatalf("report has %d rows, want 1: %+v", len(report.Components), report.Components)
+		}
+		want := []upgrade.ReportIdentityChange{
+			{Field: "grafana.fullnameOverride", From: "old-grafana", To: "new-grafana"},
+		}
+		if !reflect.DeepEqual(report.Components[0].IdentityChanges, want) {
+			t.Errorf("identityChanges = %+v, want %+v", report.Components[0].IdentityChanges, want)
+		}
+	})
+}
+
+// A recipe file on the SOURCE side cannot state the object names it deployed
+// with, and reporting "nothing moved" there would be the same false assurance
+// this axis exists to remove. It has to say it did not look.
+func TestUpgradeCheckSkipsObjectNamesWithoutABundle(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	client := upgradeCheckClient(t)
+
+	components := map[string]string{"synthetic-alpha": "1.2.0"}
+
+	tests := []struct {
+		name       string
+		from       func(t *testing.T) string
+		wantReason string
+	}{
+		{
+			name: "a recipe file records values by reference",
+			from: func(t *testing.T) string {
+				return syntheticRecipe(t, filepath.Join(dir, "plain.yaml"), components)
+			},
+			wantReason: "by reference",
+		},
+		{
+			name: "a bundle built before build-record stamping has nothing to locate them through",
+			from: func(t *testing.T) string {
+				bundle := filepath.Join(dir, "unstamped")
+				if err := os.MkdirAll(bundle, 0o750); err != nil {
+					t.Fatalf("setup: mkdir: %v", err)
+				}
+				syntheticRecipe(t, filepath.Join(bundle, "recipe.yaml"), components)
+				return bundle
+			},
+			wantReason: bundleinfo.FileName,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			to := syntheticRecipe(t, filepath.Join(dir, tt.name+"-to.yaml"),
+				map[string]string{"synthetic-alpha": "1.3.0"})
+
+			report, err := client.UpgradeCheck(t.Context(),
+				aicr.UpgradeCheckRequest{From: tt.from(t), To: to})
+			assertObjectNamesSkipped(t, report, err, tt.wantReason)
+		})
+	}
+}
+
+// An UNREADABLE target bundle must skip the axis rather than fall back to
+// resolving that artifact's values against this binary. The fallback is
+// correct for a recipe target, which asks what deploys now; for a bundle it
+// would answer a question nobody asked, and could invent a rename or hide one.
+func TestUpgradeCheckSkipsObjectNamesForAnUnreadableTargetBundle(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	client := upgradeCheckClient(t)
+	components := map[string]string{"synthetic-alpha": "1.2.0"}
+
+	from := syntheticBundle(t, filepath.Join(dir, "from"), components,
+		map[string]string{"synthetic-alpha": "fullnameOverride: legacy-alpha\n"})
+
+	// A bundle in every respect except the build record that locates its
+	// values, which is what an AICR predating stamping produced.
+	to := filepath.Join(dir, "unstamped-to")
+	if err := os.MkdirAll(to, 0o750); err != nil {
+		t.Fatalf("setup: mkdir: %v", err)
+	}
+	syntheticRecipe(t, filepath.Join(to, "recipe.yaml"), map[string]string{"synthetic-alpha": "1.3.0"})
+
+	report, err := client.UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{From: from, To: to})
+	assertObjectNamesSkipped(t, report, err, bundleinfo.FileName)
+}
+
+// A target recipe can name a values file this binary does not ship — a
+// component's values file renamed between releases is enough. That must
+// withdraw the object-name axis, not the whole command: the version
+// comparison is what the check was for before this axis existed, and it is
+// still answerable.
+func TestUpgradeCheckSkipsObjectNamesWhenTargetValuesAreUnreadable(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	client := upgradeCheckClient(t)
+	components := map[string]string{"synthetic-alpha": "1.2.0"}
+
+	from := syntheticBundle(t, filepath.Join(dir, "from"), components,
+		map[string]string{"synthetic-alpha": "fullnameOverride: legacy-alpha\n"})
+
+	// A hydrated recipe naming a values file that is not in the embedded data.
+	to := filepath.Join(dir, "missing-values.yaml")
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\n" +
+		"componentRefs:\n  - name: synthetic-alpha\n    type: Helm\n" +
+		"    source: https://charts.invalid/synthetic\n    version: 1.3.0\n" +
+		"    valuesFile: components/synthetic-alpha/nonexistent-values.yaml\n"
+	if err := os.WriteFile(to, []byte(doc), 0o600); err != nil {
+		t.Fatalf("setup: write %s: %v", to, err)
+	}
+
+	report, err := client.UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{From: from, To: to})
+	assertObjectNamesSkipped(t, report, err, "could not be resolved")
+}
+
+// assertObjectNamesSkipped checks the report withheld the object-name axis for
+// the stated reason, still reported the version axis, and attributed no
+// identity change to an axis nothing looked at.
+func assertObjectNamesSkipped(t *testing.T, report *aicr.UpgradeReport, err error, wantReason string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("UpgradeCheck: %v", err)
+	}
+	if report.ObjectNamesCompared {
+		t.Error("ObjectNamesCompared = true, want false")
+	}
+	if !strings.Contains(report.ObjectNamesSkipped, wantReason) {
+		t.Errorf("ObjectNamesSkipped = %q, want it to mention %q", report.ObjectNamesSkipped, wantReason)
+	}
+	// The version axis still reports: an unread axis withdraws its own claim,
+	// not the whole run.
+	if len(report.Components) != 1 {
+		t.Fatalf("report has %d rows, want the version row: %+v", len(report.Components), report.Components)
+	}
+	for _, c := range report.Components {
+		if len(c.IdentityChanges) != 0 {
+			t.Errorf("%s carries identity changes from an axis that was not compared: %+v",
+				c.Component, c.IdentityChanges)
+		}
 	}
 }

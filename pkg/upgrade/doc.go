@@ -56,14 +56,23 @@
 // component-to-identity tables, and is pure: no filesystem, no cluster, no
 // registry. Match is the same question for a caller holding versions alone.
 //
-// An identity moves on two axes. Only the version axis is assessed by anybody,
-// because that is what a record describes; a namespace move is invisible to a
-// version comparison yet relocates running objects, and Helm cannot move a
-// release between namespaces. So a component that moved on the identity axis
+// An identity moves on three axes, and only the version one is assessed by
+// anybody, because that is what a record describes. The other two are
+// invisible to a version comparison and both act on running objects: a
+// namespace move relocates them, and Helm cannot move a release between
+// namespaces; an object-name move renames them, which Helm applies as
+// delete-and-recreate, or refuses outright where the moved value feeds an
+// immutable spec.selector. So a component that moved on the identity axis
 // alone gets a ChangeIdentity row that a version comparison would not report at
 // all, a component that moved on both gets one row carrying both, and a safe
 // verdict is withdrawn to unknown wherever the identity moved: the record
-// vouched for a version hop and was never asked about a relocation.
+// vouched for a version hop and was never asked about either.
+//
+// The two identity axes read an empty value oppositely, which is the one thing
+// to hold onto here. An absent namespace is a fact the artifact did not
+// record, so it is not compared; an absent object name is a fact it did
+// record, because a chart with no fullnameOverride names its objects after
+// itself. Dropping one is therefore a rename, and reporting it is the point.
 //
 // On the version axis, a record is *crossed* when the source sits below the
 // floor its `to` names and the target reaches it. Crossing is a property of the
@@ -120,9 +129,15 @@
 // An identity row held its version, so its FROM and TO columns carry the fields
 // that moved rather than the version printed twice, which is the one rendering
 // that would read as nothing having happened. A row that moved on both axes
-// keeps its versions in those columns and names the relocation in its notes,
-// and in its detail block where it has one: the steps there were authored for a
-// version boundary and neither perform the relocation nor account for it.
+// keeps its versions in those columns and names the move in its notes, and in
+// its detail block where it has one: the steps there were authored for a
+// version boundary and neither perform the move nor account for it.
+//
+// A caller that could not read an axis says so on the Report rather than on
+// every row, because an unread axis is one fact about the run and not one fact
+// per component. ObjectNamesCompared is that flag, and it is stated rather
+// than inferred: every versions-only caller leaves it false, which is the
+// reading that claims nothing.
 //
 // The deployer is not inferred. ADR-021 Decision 5 would take it from a `to`
 // bundle, which does record it in bundle-info.yaml, but the check does not read

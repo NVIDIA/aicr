@@ -1,0 +1,9 @@
+UPGRADE CHECK
+  from      from.yaml
+  to        to.yaml
+
+  Object names were not compared: a recipe file records its values by
+  reference, not by value, so it does not state the object names it deployed
+  with. Compare against the bundle directory instead
+
+NO COMPONENT CHANGES

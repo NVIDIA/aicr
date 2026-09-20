@@ -1402,3 +1402,161 @@ func TestMatchIsMatchIdentitiesWithoutTheIdentityAxis(t *testing.T) {
 		}
 	}
 }
+
+// TestIdentityChangesObjectNames covers the object-name axis directly rather
+// than through MatchIdentities, because its asymmetry with namespace is the
+// point and it lives here: an absent namespace is a fact the artifact did not
+// record, while an absent object name is a fact it did.
+func TestIdentityChangesObjectNames(t *testing.T) {
+	tests := []struct {
+		name string
+		from Identity
+		to   Identity
+		want []IdentityChange
+	}{
+		{
+			name: "object name dropped",
+			from: Identity{Version: "v0.19.0", ObjectNames: map[string]string{"fullnameOverride": "op"}},
+			to:   Identity{Version: "v0.19.0", ObjectNames: map[string]string{}},
+			want: []IdentityChange{{Field: "fullnameOverride", From: "op", To: ""}},
+		},
+		{
+			name: "object name added",
+			from: Identity{Version: "v0.19.0", ObjectNames: map[string]string{}},
+			to:   Identity{Version: "v0.19.0", ObjectNames: map[string]string{"fullnameOverride": "op"}},
+			want: []IdentityChange{{Field: "fullnameOverride", From: "", To: "op"}},
+		},
+		{
+			name: "object name changed",
+			from: Identity{ObjectNames: map[string]string{"fullnameOverride": "old"}},
+			to:   Identity{ObjectNames: map[string]string{"fullnameOverride": "new"}},
+			want: []IdentityChange{{Field: "fullnameOverride", From: "old", To: "new"}},
+		},
+		{
+			name: "an unchanged object name records nothing",
+			from: Identity{ObjectNames: map[string]string{"fullnameOverride": "same"}},
+			to:   Identity{ObjectNames: map[string]string{"fullnameOverride": "same"}},
+			want: nil,
+		},
+		{
+			name: "nil on both sides records nothing",
+			from: Identity{Version: "v1"},
+			to:   Identity{Version: "v1"},
+			want: nil,
+		},
+		{
+			name: "namespace leads, object names follow in path order",
+			from: Identity{
+				Namespace:   "skyhook",
+				ObjectNames: map[string]string{"grafana.fullnameOverride": "g1", "fullnameOverride": "f1"},
+			},
+			to: Identity{
+				Namespace:   "nodewright",
+				ObjectNames: map[string]string{"grafana.fullnameOverride": "g2", "fullnameOverride": "f2"},
+			},
+			want: []IdentityChange{
+				{Field: "namespace", From: "skyhook", To: "nodewright"},
+				{Field: "fullnameOverride", From: "f1", To: "f2"},
+				{Field: "grafana.fullnameOverride", From: "g1", To: "g2"},
+			},
+		},
+		{
+			name: "only the paths that moved are reported",
+			from: Identity{ObjectNames: map[string]string{"a.fullnameOverride": "x", "b.nameOverride": "y"}},
+			to:   Identity{ObjectNames: map[string]string{"a.fullnameOverride": "x", "b.nameOverride": "z"}},
+			want: []IdentityChange{{Field: "b.nameOverride", From: "y", To: "z"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := identityChanges(tt.from, tt.to)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("identityChanges() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIdentityAdviceMatchesAxis pins the advice to the axis that earned it.
+// The two consequences differ, and this prose is what an operator reads at the
+// moment they decide whether to upgrade: a namespace move leaves a second copy
+// running, a rename is applied as delete-and-recreate.
+func TestIdentityAdviceMatchesAxis(t *testing.T) {
+	nsOnly := []IdentityChange{{Field: "namespace", From: "skyhook", To: "nodewright"}}
+	nameOnly := []IdentityChange{{Field: "fullnameOverride", From: "skyhook-operator", To: ""}}
+	both := []IdentityChange{nsOnly[0], nameOnly[0]}
+
+	tests := []struct {
+		name       string
+		moved      []IdentityChange
+		wantSubstr []string
+		wantAbsent []string
+	}{
+		{
+			name:       "namespace only names the duplicate install",
+			moved:      nsOnly,
+			wantSubstr: []string{"second copy"},
+			wantAbsent: []string{"delete-and-recreate", "spec.selector"},
+		},
+		{
+			name:       "object name only names the recreate",
+			moved:      nameOnly,
+			wantSubstr: []string{"delete-and-recreate", "spec.selector"},
+			wantAbsent: []string{"second copy"},
+		},
+		{
+			name:       "both axes name both",
+			moved:      both,
+			wantSubstr: []string{"second copy", "delete-and-recreate"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := relocation("nodewright-operator", "v0.19.0", tt.moved).Explanation
+			for _, want := range tt.wantSubstr {
+				if !strings.Contains(got, want) {
+					t.Errorf("explanation %q is missing %q", got, want)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(got, absent) {
+					t.Errorf("explanation %q should not mention %q", got, absent)
+				}
+			}
+		})
+	}
+}
+
+// TestMovedPhraseNamesAnAppearingOrDisappearingName keeps the prose readable
+// where one side is empty. "moves from skyhook-operator to" names nothing, on
+// the row where the rename is the whole finding.
+func TestMovedPhraseNamesAnAppearingOrDisappearingName(t *testing.T) {
+	tests := []struct {
+		name  string
+		moved []IdentityChange
+		want  string
+	}{
+		{
+			name:  "dropped",
+			moved: []IdentityChange{{Field: "fullnameOverride", From: "skyhook-operator", To: ""}},
+			want:  "its fullnameOverride is no longer set, dropping skyhook-operator",
+		},
+		{
+			name:  "added",
+			moved: []IdentityChange{{Field: "fullnameOverride", From: "", To: "nodewright"}},
+			want:  "its fullnameOverride is now set to nodewright",
+		},
+		{
+			name:  "changed",
+			moved: []IdentityChange{{Field: "namespace", From: "skyhook", To: "nodewright"}},
+			want:  "its namespace moves from skyhook to nodewright",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := movedPhrase(tt.moved); got != tt.want {
+				t.Errorf("movedPhrase() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
