@@ -146,6 +146,45 @@ func TestAffectedKindsOnlyCrossedTransitions(t *testing.T) {
 	}
 }
 
+// TestAffectedKindsIgnoresTheIdentityAxis pins where the two features meet.
+//
+// The scan is scoped to the boundaries a jump crosses, and a relocation
+// crosses none: the component held its version, so no record's floor sits
+// between the endpoints and no AffectedResources of theirs describes anything
+// this hop does. Listing them anyway would name objects a namespace move does
+// not touch, under a heading that says a CRD removal may take them with it.
+//
+// A hop that moved on both axes is the other half. Withdrawing its verdict for
+// the relocation must not also drop the crossings the version half really
+// made, which is what the scan is scoped to.
+func TestAffectedKindsIgnoresTheIdentityAxis(t *testing.T) {
+	t.Parallel()
+
+	relocated := MatchIdentities(affectedSet(),
+		map[string]Identity{"omega-operator": {Version: "1.5.0", Namespace: "omega-system"}},
+		map[string]Identity{"omega-operator": {Version: "1.5.0", Namespace: "nvidia-omega"}})
+	if len(relocated) != 1 || relocated[0].Change != ChangeIdentity {
+		t.Fatalf("MatchIdentities() = %+v, want one identity row", relocated)
+	}
+	if relocated[0].Crossed != nil {
+		t.Errorf("Crossed = %+v on a row that held its version, want nil", relocated[0].Crossed)
+	}
+	if got := AffectedKinds(relocated); got != nil {
+		t.Errorf("AffectedKinds() = %#v on a relocation, want nil", got)
+	}
+
+	bothAxes := MatchIdentities(affectedSet(),
+		map[string]Identity{"omega-operator": {Version: "1.5.0", Namespace: "omega-system"}},
+		map[string]Identity{"omega-operator": {Version: "2.1.0", Namespace: "nvidia-omega"}})
+	if len(bothAxes) != 1 || len(bothAxes[0].IdentityChanges) != 1 {
+		t.Fatalf("MatchIdentities() = %+v, want one row carrying the relocation", bothAxes)
+	}
+	want := []ResourceKind{{Group: "omega.io", Kind: "AlphaThing", Components: []string{"omega-operator"}}}
+	if got := AffectedKinds(bothAxes); !reflect.DeepEqual(got, want) {
+		t.Errorf("AffectedKinds() = %#v, want %#v: the version half still crossed a boundary", got, want)
+	}
+}
+
 // TestAffectedKindsBlockedMultipleBoundariesHasNoDescribingRecord pins the
 // premise the case above rests on, so a matcher change that starts setting
 // Transition there cannot quietly turn that case into a weaker one.
