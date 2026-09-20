@@ -225,6 +225,7 @@ func TestNoFileReadsTheRemovedToolPins(t *testing.T) {
 	// quotes such paths instead, which would not resolve as a filename.
 	cmd := exec.Command("git", "-C", root, "ls-files", "--cached", "--others",
 		"--exclude-standard", "-z")
+	cmd.Env = gitScanEnv(t)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -271,4 +272,104 @@ func TestNoFileReadsTheRemovedToolPins(t *testing.T) {
 		t.Fatal("git ls-files yielded no readable files; discovery is broken and this scan " +
 			"would pass without having examined anything")
 	}
+}
+
+// TestToolPinScanIgnoresInheritedGitDir pins the hazard gitScanEnv exists for:
+// an inherited GIT_DIR retargets `git -C root ls-files` at another repository,
+// and the scan above would then examine that repository's files and report a
+// clean result for this one.
+//
+// Both directions are asserted. Checking only that the sanitized listing is
+// correct would still pass if -C already beat the environment, leaving the
+// sanitizing dead code that no one could safely remove.
+func TestToolPinScanIgnoresInheritedGitDir(t *testing.T) {
+	root := repoRoot(t)
+
+	// A decoy repository holding exactly one file, so a hijacked listing is
+	// unmistakable rather than merely different.
+	decoy := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "test"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", decoy}, args...)...).
+			CombinedOutput(); err != nil {
+			t.Fatalf("git %v in decoy: %v: %s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(decoy, "decoy.txt"), []byte("decoy\n"), 0o600); err != nil {
+		t.Fatalf("write decoy file: %v", err)
+	}
+
+	t.Setenv("GIT_DIR", filepath.Join(decoy, ".git"))
+	t.Setenv("GIT_WORK_TREE", decoy)
+
+	list := func(env []string) string {
+		t.Helper()
+		cmd := exec.Command("git", "-C", root, "ls-files", "--cached", "--others",
+			"--exclude-standard", "-z")
+		cmd.Env = env
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git ls-files: %v", err)
+		}
+		return string(out)
+	}
+
+	// The environment wins over -C: without sanitizing, the scan reads the
+	// decoy. If this stops holding, gitScanEnv is no longer load-bearing.
+	if raw := list(os.Environ()); strings.Contains(raw, "go.mod") {
+		t.Error("an inherited GIT_DIR no longer retargets the listing, so gitScanEnv " +
+			"guards nothing; confirm before deleting it")
+	}
+
+	if sanitized := list(gitScanEnv(t)); !strings.Contains(sanitized, "go.mod") {
+		t.Error("sanitized listing does not contain go.mod, so the scan is still reading " +
+			"the repository the environment points at rather than the one under test")
+	}
+}
+
+// gitScanEnv returns the process environment with git's repository-local
+// variables stripped, so `git -C root` resolves the repository by ordinary
+// discovery from root.
+//
+// -C only changes the directory git starts in. GIT_DIR, GIT_WORK_TREE,
+// GIT_INDEX_FILE and their siblings override discovery outright and win over
+// it. Git sets several of them for hooks, and `git bisect run`, `git rebase
+// --exec`, and CI wrappers all propagate them into child processes -- so a
+// scan inheriting them silently reads a different repository. Measured here:
+// an inherited GIT_DIR took the listing from 2523 files to 1, which this test
+// would then have reported as a clean scan.
+//
+// The names come from git rather than a literal list, for the same reason the
+// scan above no longer keeps a literal list of directories to skip: the set
+// grows, and `git rev-parse --local-env-vars` is the maintained answer. It
+// reports names only, needing no repository of its own, so it is safe to call
+// before the environment has been cleaned.
+func gitScanEnv(t *testing.T) []string {
+	t.Helper()
+
+	out, err := exec.Command("git", "rev-parse", "--local-env-vars").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --local-env-vars: %v", err)
+	}
+	local := make(map[string]bool)
+	for name := range strings.FieldsSeq(string(out)) {
+		local[name] = true
+	}
+	if len(local) == 0 {
+		t.Fatal("git rev-parse --local-env-vars named nothing; the sanitizing step below " +
+			"would be a no-op and an inherited GIT_DIR would retarget the scan")
+	}
+
+	env := os.Environ()
+	kept := make([]string, 0, len(env))
+	for _, entry := range env {
+		if name, _, ok := strings.Cut(entry, "="); ok && local[name] {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
 }
