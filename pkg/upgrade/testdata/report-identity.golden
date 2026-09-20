@@ -18,9 +18,9 @@ tau-operator 0.17.2 -> 0.18.1  (manual)
   recorded manual: the record covering 0.18.0 describes the move from 0.17.2
   to 0.18.1. Follow the steps below, then apply
 
-  This hop also relocates the component: namespace tau-system ->
-  nvidia-tau-system. No record assesses a relocation, and the steps below
-  neither perform it nor account for it.
+  This hop also carries a relocation: namespace tau-system ->
+  nvidia-tau-system. No record assesses it, and the steps below neither
+  perform it nor account for it.
 
   PRECONDITION
     No object is mid-rollout.

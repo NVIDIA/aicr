@@ -114,6 +114,14 @@ func WriteTable(w io.Writer, r *Report) error {
 		writeSource(ew, r.Source)
 	}
 
+	// Above the rows rather than below them, and before the no-changes early
+	// return, because "NO COMPONENT CHANGES" is exactly where a reader would
+	// otherwise conclude that object names held.
+	if r.ObjectNamesSkipped != "" {
+		writeParagraph(ew, "  ", "Object names were not compared: "+r.ObjectNamesSkipped)
+		ew.println("")
+	}
+
 	if len(r.Components) == 0 {
 		ew.println("NO COMPONENT CHANGES")
 		ew.println("")
@@ -182,8 +190,8 @@ func rowCells(c ReportComponent) (from, to string) {
 	fromFields := make([]string, len(c.IdentityChanges))
 	toFields := make([]string, len(c.IdentityChanges))
 	for i, ch := range c.IdentityChanges {
-		fromFields[i] = ch.Field + "=" + ch.From
-		toFields[i] = ch.Field + "=" + ch.To
+		fromFields[i] = ch.Field + "=" + identityValue(ch.Field, ch.From)
+		toFields[i] = ch.Field + "=" + identityValue(ch.Field, ch.To)
 	}
 	return cell(strings.Join(fromFields, ", ")), cell(strings.Join(toFields, ", "))
 }
@@ -370,8 +378,8 @@ func writeDetail(ew *errWriter, c *ReportComponent, deployer string) error {
 		if c.Summary != "" || c.Explanation != "" {
 			ew.println("")
 		}
-		writeParagraph(ew, "  ", "This hop also relocates the component: "+
-			movedFieldsPhrase(c.IdentityChanges)+". No record assesses a relocation, and the "+
+		writeParagraph(ew, "  ", "This hop also carries "+identityNoun(c.IdentityChanges)+": "+
+			movedFieldsPhrase(c.IdentityChanges)+". No record assesses it, and the "+
 			"steps below neither perform it nor account for it.")
 	}
 

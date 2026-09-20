@@ -58,14 +58,23 @@
 //
 // An identity moves on two axes. Only the version axis is assessed by anybody,
 // because that is what a record describes. A move of namespace, chart, source,
-// kustomize path, deployment type, manifest file set or pre-manifest file set
-// is invisible to a version comparison yet relocates or replaces running
-// objects, and Helm cannot move a release between namespaces. So a component
-// that moved on the identity axis alone gets a ChangeIdentity row that a
-// version comparison would not report at all, a component that moved on both
-// gets one row carrying both, and a safe verdict is withdrawn to unknown
-// wherever the identity moved. The record vouched for a version hop and was
-// never asked about a relocation.
+// kustomize path, deployment type, manifest file set, pre-manifest file set or
+// object name is invisible to a version comparison yet relocates, replaces or
+// renames running objects. Helm cannot move a release between namespaces, and
+// it applies a rename as delete-and-recreate, or refuses it outright where the
+// moved value feeds an immutable spec.selector. So a component that moved on
+// the identity axis alone gets a ChangeIdentity row that a version comparison
+// would not report at all, a component that moved on both gets one row
+// carrying both, and a safe verdict is withdrawn to unknown wherever the
+// identity moved. The record vouched for a version hop and was never asked
+// about the rest.
+//
+// The identity fields do not all read an empty value the same way, which is
+// the one thing to hold onto here. An absent scalar field is a fact the
+// artifact did not record, so it is not compared. An empty manifest set and an
+// absent object name are facts it did record — a chart with no
+// fullnameOverride names its objects after itself — so dropping one is a move,
+// and reporting it is the point.
 //
 // On the version axis, a record is *crossed* when the source sits below the
 // floor its `to` names and the target reaches it. Crossing is a property of the
@@ -130,9 +139,15 @@
 // An identity row held its version, so its FROM and TO columns carry the fields
 // that moved rather than the version printed twice, which is the one rendering
 // that would read as nothing having happened. A row that moved on both axes
-// keeps its versions in those columns and names the relocation in its notes,
-// and in its detail block where it has one: the steps there were authored for a
-// version boundary and neither perform the relocation nor account for it.
+// keeps its versions in those columns and names the move in its notes, and in
+// its detail block where it has one: the steps there were authored for a
+// version boundary and neither perform the move nor account for it.
+//
+// A caller that could not read an axis says so on the Report rather than on
+// every row, because an unread axis is one fact about the run and not one fact
+// per component. ObjectNamesCompared is that flag, and it is stated rather
+// than inferred: every versions-only caller leaves it false, which is the
+// reading that claims nothing.
 //
 // Below the rows, the at-risk section reports objects of the kinds the crossed
 // records name that carry no deployer ownership marker. It is the one section

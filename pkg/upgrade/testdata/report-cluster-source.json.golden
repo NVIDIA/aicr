@@ -22,6 +22,7 @@
       "remote": 8
     }
   },
+  "objectNamesCompared": false,
   "components": [
     {
       "component": "alpha-operator",
