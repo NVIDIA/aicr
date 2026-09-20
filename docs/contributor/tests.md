@@ -294,6 +294,56 @@ overlays. The `flux-git` and `argocd-git` lanes cover the filesystem
 [#963](https://github.com/NVIDIA/aicr/issues/963) for both GitOps
 controllers, sharing the same in-cluster Gitea infrastructure.
 
+### Inventory Read-Back
+
+Every matrix cell ends by reading the bundle it just deployed back out of
+the cluster and requiring the two answers to agree. `validate-scheduling.sh`
+step 7 runs `aicr upgrade-check` twice against the same target recipe, once
+with `--from cluster` and once with `--from <bundle-dir>`, and diffs the
+per-component rows of the two JSON reports.
+
+The bundle is the oracle. The `recipe.yaml` at its root lists exactly the
+releases the bundler emitted, at exactly the versions it pinned, so there is
+no golden to maintain and nothing to drift against: a per-component
+divergence is by construction a defect in the cluster read. That matters
+most for the deployers whose release naming is not the component's own name
+(Flux composes `<targetNamespace>-<name>` and Argo CD prepends a settable
+prefix), where a mapping that no longer matches reports an empty inventory
+and a confident "every component is new". This is ADR-021 acceptance
+criterion 4, and running it on the existing `{recipe, deployer}` matrix is
+what makes the criterion's per-deployer requirement free.
+
+Compared: the component name, the kind of change, the `from` and `to`
+versions, and the verdict with the reason that produced it, plus the summary
+counts. Excluded, because they differ by construction: the top-level `from`
+(the literal `cluster` on one side, a path on the other), the `source` block
+(a cluster read has one, an artifact comparison does not), and `atRisk` (the
+cluster read implies the scan, the artifact comparison does not perform it).
+The `source` block is asserted on separately, since a read that matched
+nothing produces the same table a broken artifact read would and two
+degenerate reads must not agree their way to a pass.
+
+Both invocations pass `--fail-on-error=false`: the question is whether the
+two paths agree, not whether the upgrade is safe, so a verdict-driven
+non-zero exit must not stand in for the comparison. A non-zero exit with
+that flag set is a real failure of the command.
+
+On a mismatch the lane prints a unified diff of the two projections and
+leaves both reports under `/tmp/kwok-debug-artifacts/upgrade-check/<recipe>-<deployer>/`,
+which the composite action uploads. The comparison itself lives in
+`kwok/scripts/lib/upgrade-readback.sh` and is unit-tested against fixture
+reports by `upgrade-readback_test.sh`; the matrix-deployer to `--deployer`
+mapping (`argocd-git` → `argocd`, `argocd-helm-oci` → `argocd-helm`) lives
+once in `kwok/scripts/lib/deployer-map.sh`.
+
+Readiness is deliberately not a precondition, so KWOK never producing a
+Ready workload cannot affect it. The read needs release records to exist,
+which the deploy step has already established: Helm writes its storage
+record before any pod runs, the Argo CD gate asserts the root Application
+reached `operationState.phase==Succeeded` (so every child Application is
+materialized), and the Flux gate asserts every HelmRelease reached
+`deployed`.
+
 ### Running KWOK Locally
 
 ```bash

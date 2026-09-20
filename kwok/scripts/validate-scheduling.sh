@@ -109,7 +109,11 @@
 # 2. Generates a bundle from the recipe
 # 3. Deploys the bundle to the KWOK cluster (Helm, Argo CD, or Flux per --deployer)
 # 4. Verifies all pods reach Running state (KWOK auto-transitions them)
-# 5. Reports success/failure
+# 5. Reads the installed inventory back with `aicr upgrade-check --from
+#    cluster` and requires it to agree, component for component, with the
+#    same check run against the bundle on disk (ADR-021 acceptance criterion
+#    4, issue #2531)
+# 6. Reports success/failure
 #
 # Exit codes:
 #    0  success
@@ -137,6 +141,15 @@ REPO_ROOT="$(cd "${KWOK_DIR}/.." && pwd)"
 # shellcheck source=lib/cleanup.sh
 source "${SCRIPT_DIR}/lib/cleanup.sh"
 source "${SCRIPT_DIR}/lib/sync-budget.sh"
+# aicr_deployer_for: the matrix deployer name (argocd-git, flux-oci) is a
+# {deployer, source} pair; aicr's --deployer names only the deployer. Every
+# site below that shells out to aicr reads the mapping from there.
+# shellcheck source=lib/deployer-map.sh
+source "${SCRIPT_DIR}/lib/deployer-map.sh"
+# Comparison half of the inventory read-back; kept out of this script so the
+# negative cases can be exercised against fixture reports without a cluster.
+# shellcheck source=lib/upgrade-readback.sh
+source "${SCRIPT_DIR}/lib/upgrade-readback.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -607,7 +620,10 @@ find_aicr_binary() {
 # Check dependencies
 check_deps() {
     local missing=()
-    local required=(kubectl helm yq jq)
+    # diff and comm are the inventory read-back's comparison (step 7).
+    # Checked here rather than there so a runner image missing one fails in
+    # the first second of the lane instead of after the deploy.
+    local required=(kubectl helm yq jq diff comm)
     # flux-git pushes the filesystem bundle to the in-cluster Gitea.
     [[ "$DEPLOYER" == "flux-git" ]] && required+=(git)
     for cmd in "${required[@]}"; do
@@ -1019,6 +1035,12 @@ generate_bundle() {
     # CheckNVSentinelRuntimeClassCoherence / #2176) unaided. Re-adding
     # the overrides would let the lanes pass without proving that.
 
+    # Resolved once for every branch, from lib/deployer-map.sh, so the
+    # matrix name -> aicr --deployer transform has a single definition that
+    # the bundle and the upgrade-check read-back both read.
+    local deployer_arg
+    deployer_arg=$(aicr_deployer_for "$DEPLOYER") || return 1
+
     local bundle_output
     case "$DEPLOYER" in
         helm)
@@ -1129,10 +1151,6 @@ generate_bundle() {
             fi
             local in_cluster_repo="$OCI_IN_CLUSTER_REF"
 
-            # Map our deployer-matrix name to aicr's --deployer value.
-            local deployer_arg="argocd"
-            [[ "$DEPLOYER" == "argocd-helm-oci" ]] && deployer_arg="argocd-helm"
-
             log_info "Bundling for ${deployer_arg}, pushing to ${OCI_REF}"
             if [[ "$DEPLOYER" == "argocd-helm-oci" ]]; then
                 log_info "Argo CD will pull from ${in_cluster_repo}/${recipe}:${tag} (parent App template appends .Chart.Name at helm render time)"
@@ -1205,7 +1223,7 @@ generate_bundle() {
             # (relative ./bundle output path under `--output oci://...`).
             if ! bundle_output=$(cd "${WORK_DIR}" && "$AICR_BIN" bundle \
                 --recipe "${WORK_DIR}/recipe.yaml" \
-                --deployer flux \
+                --deployer "$deployer_arg" \
                 --output "$OCI_REF" \
                 --plain-http \
                 --system-node-selector "aicr.run/node-type=system" \
@@ -1249,7 +1267,7 @@ generate_bundle() {
             # push below MUST target main.
             if ! bundle_output=$("$AICR_BIN" bundle \
                 --recipe "${WORK_DIR}/recipe.yaml" \
-                --deployer flux \
+                --deployer "$deployer_arg" \
                 --output "${WORK_DIR}/bundle" \
                 --repo "$GIT_IN_CLUSTER_URL" \
                 --system-node-selector "aicr.run/node-type=system" \
@@ -1307,7 +1325,7 @@ generate_bundle() {
             # the push below MUST target main.
             if ! bundle_output=$("$AICR_BIN" bundle \
                 --recipe "${WORK_DIR}/recipe.yaml" \
-                --deployer argocd \
+                --deployer "$deployer_arg" \
                 --output "${WORK_DIR}/bundle" \
                 --repo "$GIT_IN_CLUSTER_URL" \
                 --system-node-selector "aicr.run/node-type=system" \
@@ -2093,6 +2111,90 @@ verify_pods() {
     return 0
 }
 
+# Differential read-back of the installed inventory (ADR-021 acceptance
+# criterion 4, issue #2531).
+#
+# `aicr upgrade-check --from cluster` and `--from <bundle>` answer the same
+# question from two places. The artifact side reads the recipe.yaml at the
+# bundle's root, which lists exactly the releases the bundler emitted at
+# exactly the versions it pinned, so it is an oracle with no golden to
+# maintain and nothing to drift against. Any per-component divergence is by
+# construction a defect in the cluster read, most likely in the
+# per-deployer release-name mapping (pkg/inventory/read.go matchComponent),
+# which for flux is otherwise asserted only against fixtures written from
+# reading helm-controller's templates rather than from watching one run.
+#
+# Readiness is deliberately not a precondition, and KWOK never producing a
+# Ready workload therefore cannot affect this. The read needs release
+# records to exist, which is weaker and already established: helm writes
+# its storage record before any pod runs, the argocd gate has asserted the
+# root Application reached operationState.phase==Succeeded (so every child
+# Application is materialized), and the flux gate has asserted every
+# HelmRelease reached `deployed`.
+#
+# --fail-on-error=false on both sides: the question is whether the two
+# agree, not whether the upgrade is safe, and a verdict-driven non-zero
+# exit would hide the comparison behind it. A non-zero exit with that flag
+# set is therefore a real failure of the command and is treated as one.
+verify_upgrade_inventory() {
+    local deployer_arg
+    deployer_arg=$(aicr_deployer_for "$DEPLOYER") || return 1
+
+    local recipe_file="${WORK_DIR}/recipe.yaml"
+    local bundle_dir="${WORK_DIR}/bundle"
+
+    # Reports land under the directory the composite action uploads on
+    # failure, keyed by recipe and deployer so matrix cells cannot overwrite
+    # each other. Falls back to WORK_DIR when that path is not writable (a
+    # local run outside CI), which keeps the comparison running rather than
+    # failing over where its evidence goes.
+    local out_dir="${KWOK_DEBUG_ARTIFACTS_DIR:-/tmp/kwok-debug-artifacts}/upgrade-check/${RECIPE_UNDER_TEST:-unknown-recipe}-${DEPLOYER}"
+    if ! mkdir -p "$out_dir" 2>/dev/null; then
+        log_warn "Cannot write ${out_dir}; keeping upgrade-check reports in ${WORK_DIR}"
+        out_dir="$WORK_DIR"
+    fi
+
+    local installed_file="${out_dir}/installed-components.txt"
+    readback_installed_components "${bundle_dir}/recipe.yaml" "$installed_file" || return 1
+    log_info "Bundle installed $(wc -l < "$installed_file" | tr -d ' ') component(s)"
+
+    local cluster_json="${out_dir}/from-cluster.json"
+    local artifact_json="${out_dir}/from-artifact.json"
+
+    log_info "Reading the installed inventory: aicr upgrade-check --from cluster --deployer ${deployer_arg}"
+    local rc=0
+    "$AICR_BIN" upgrade-check \
+        --from cluster \
+        --to "$recipe_file" \
+        --deployer "$deployer_arg" \
+        --format json \
+        --fail-on-error=false \
+        --output "$cluster_json" || rc=$?
+    if (( rc != 0 )); then
+        log_error "aicr upgrade-check --from cluster failed (exit ${rc})"
+        return 1
+    fi
+
+    log_info "Reading the same inventory from the bundle: aicr upgrade-check --from ${bundle_dir}"
+    rc=0
+    "$AICR_BIN" upgrade-check \
+        --from "$bundle_dir" \
+        --to "$recipe_file" \
+        --deployer "$deployer_arg" \
+        --format json \
+        --fail-on-error=false \
+        --output "$artifact_json" || rc=$?
+    if (( rc != 0 )); then
+        log_error "aicr upgrade-check --from ${bundle_dir} failed (exit ${rc})"
+        return 1
+    fi
+
+    compare_upgrade_readback \
+        "$artifact_json" "$cluster_json" "$installed_file" "$out_dir" "$deployer_arg" || return 1
+
+    log_info "Inventory read-back PASSED: the cluster and the bundle agree on every component"
+}
+
 # Print usage to stderr and exit non-zero.
 usage() {
     cat >&2 <<'EOF'
@@ -2230,6 +2332,9 @@ main() {
 
     log_debug "Step 6: Verifying pod scheduling..."
     verify_pods
+
+    log_debug "Step 7: Reading the installed inventory back..."
+    verify_upgrade_inventory
 
     log_info "=========================================="
     log_info "✓ Validation PASSED for recipe: $recipe (deployer=$DEPLOYER)"
