@@ -2193,6 +2193,19 @@ verify_upgrade_inventory() {
         "$artifact_json" "$cluster_json" "$installed_file" "$out_dir" "$deployer_arg" || return 1
 
     log_info "Inventory read-back PASSED: the cluster and the bundle agree on every component"
+
+    # What the agreement was built on, logged after the verdict it supports.
+    # Assigned before the loop so a jq that finds nothing cannot reach `set
+    # -e` through a failed test in the loop body.
+    local accounting="" summary_line
+    accounting=$(readback_source_summary "$cluster_json") || accounting=""
+    if [[ -n "$accounting" ]]; then
+        while IFS= read -r summary_line; do
+            if [[ -n "$summary_line" ]]; then
+                log_info "$summary_line"
+            fi
+        done <<< "$accounting"
+    fi
 }
 
 # Print usage to stderr and exit non-zero.
