@@ -3333,11 +3333,13 @@ const draChartVersionAnnotation = header.Domain + "/gpu-operator-chart-version"
 // filtered resolved recipe before derived values are written; recipes that
 // disable either remain untouched.
 const (
-	gpuOperatorComponentName      = "gpu-operator"
-	draComponentName              = "nvidia-dra-driver-gpu"
-	draEvictionEnvName            = "NODE_LABEL_FOR_GPU_POD_EVICTION"
-	draEvictionNodeSelectorPath   = "kubeletPlugin.nodeSelector"
-	gpuOperatorDRAEvictionEnvPath = "driver.manager.env"
+	gpuOperatorComponentName       = "gpu-operator"
+	gpuOperatorOCPComponentName    = "gpu-operator-ocp"
+	gpuOperatorOCPOLMComponentName = "gpu-operator-ocp-olm"
+	draComponentName               = "nvidia-dra-driver-gpu"
+	draEvictionEnvName             = "NODE_LABEL_FOR_GPU_POD_EVICTION"
+	draEvictionNodeSelectorPath    = "kubeletPlugin.nodeSelector"
+	gpuOperatorDRAEvictionEnvPath  = "driver.manager.env"
 
 	// draNodeLabelerComponentName is the manifest-only component that mirrors
 	// GFD's nvidia.com/gpu.present onto the eviction label, so the label is
@@ -3354,13 +3356,6 @@ const (
 	// (issue #2846). The bundler flips it true here in the same opt-in path
 	// that keeps the component in the bundle, so bundle and gate never drift.
 	draNodeLabelerEnabledPath = "enabled"
-	gpuOperatorComponentName       = "gpu-operator"
-	gpuOperatorOCPComponentName    = "gpu-operator-ocp"
-	gpuOperatorOCPOLMComponentName = "gpu-operator-ocp-olm"
-	draComponentName               = "nvidia-dra-driver-gpu"
-	draEvictionEnvName             = "NODE_LABEL_FOR_GPU_POD_EVICTION"
-	draEvictionNodeSelectorPath    = "kubeletPlugin.nodeSelector"
-	gpuOperatorDRAEvictionEnvPath  = "driver.manager.env"
 )
 
 var (
