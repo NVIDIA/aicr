@@ -155,7 +155,9 @@ type ComponentResult struct {
 	// be, including where no single record describes the whole jump, so it is
 	// what the at-risk scan reads: an intermediate record names resources the
 	// jump disturbs whether or not its guidance was written for this starting
-	// point. Empty on every result but a version transition.
+	// point. Empty on every result but a version transition, ChangeIdentity
+	// included: a component that held its version passed no boundary, so the
+	// scan draws nothing from a relocation however far it moves the release.
 	Crossed []*Transition
 
 	// Replaces is the arriving component's declaration, set only on a
@@ -298,14 +300,24 @@ func MatchIdentities(set Set, from, to map[string]Identity) []ComponentResult {
 		switch {
 		case inFrom && inTo:
 			moved := identityChanges(src, tgt)
-			// Versions compared as written rather than as parsed semver: two
-			// pins differing only in build metadata order as equal, and
-			// silence there reads as safe.
-			if src.Version == tgt.Version {
+			// Versions compared as written but for a leading "v", which semver
+			// assigns no meaning and the deployers apply inconsistently:
+			// deployer.NormalizeVersion strips it from an Argo CD
+			// targetRevision, so a cluster pinned at "v26.7.0" reads back
+			// "26.7.0" and a bare comparison reports it as changed. Nothing
+			// else is normalized, so two pins differing only in build metadata
+			// still report: semver orders those as equal, and silence there
+			// reads as safe.
+			//
+			// The identity axis is decided against the same test, so a hop
+			// that respells the version and relocates the component is the one
+			// ChangeIdentity row it is, rather than a ChangeVersion row whose
+			// columns would print the two spellings and read as a bump.
+			if trimVPrefix(src.Version) == trimVPrefix(tgt.Version) {
 				if len(moved) == 0 {
 					continue
 				}
-				results = append(results, relocation(name, src.Version, moved))
+				results = append(results, relocation(name, src.Version, tgt.Version, moved))
 				continue
 			}
 			r := matchVersions(set[name], name, src.Version, tgt.Version)
@@ -352,17 +364,22 @@ const identityAdvice = "Transition records assess version boundaries, so none as
 // was asked. A block is an author's judgement, and no author can record one
 // here, so this is a gap in what the vocabulary covers rather than a boundary
 // somebody drew.
-func relocation(name, version string, moved []IdentityChange) ComponentResult {
+//
+// Both spellings of the held version are carried. The equality test ignores a
+// leading "v", so the two sides can write one version two ways, and printing
+// either side's spelling in both columns would attribute to an artifact a
+// string it does not contain.
+func relocation(name, fromVer, toVer string, moved []IdentityChange) ComponentResult {
 	return ComponentResult{
 		Component:       name,
 		Change:          ChangeIdentity,
-		From:            version,
-		To:              version,
+		From:            fromVer,
+		To:              toVer,
 		IdentityChanges: moved,
 		Verdict:         VerdictUnknown,
 		Reason:          ReasonIdentityChanged,
 		Explanation: fmt.Sprintf("%s %s, but %s. %s",
-			name, heldPhrase(version), movedPhrase(moved), identityAdvice),
+			name, heldPhrase(fromVer), movedPhrase(moved), identityAdvice),
 	}
 }
 
@@ -407,6 +424,13 @@ func movedPhrase(moved []IdentityChange) string {
 		parts[i] = fmt.Sprintf("its %s moves from %s to %s", c.Field, c.From, c.To)
 	}
 	return strings.Join(parts, " and ")
+}
+
+// trimVPrefix drops the leading "v" a version may or may not be written with.
+// It normalizes the same-version decision only; every reported version keeps
+// the form the table it came from used.
+func trimVPrefix(v string) string {
+	return strings.TrimPrefix(v, "v")
 }
 
 // replacements resolves the declarations that join a departure and an arrival

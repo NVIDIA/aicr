@@ -543,6 +543,10 @@ func nameIs(recordName, want string, suffix bool) bool {
 func versionFor(record installedRelease, c Component) string {
 	if record.Source == sourceHelm {
 		if version, ok := record.Annotations[header.AnnotationComponentVersion]; ok {
+			if stampsWrapperVersion(record, c) {
+				return ""
+			}
+
 			return version
 		}
 	}
@@ -551,6 +555,29 @@ func versionFor(record installedRelease, c Component) string {
 	}
 
 	return ""
+}
+
+// stampsWrapperVersion reports a component-version stamp that carries the
+// wrapper's own version rather than the payload's.
+//
+// The wrapper writer has no payload version to stamp for a component that pins
+// neither a chart version nor a Kustomize tag, and stamps the AICR build
+// version in its place — into generated-by as well, which is what makes the
+// fallback detectable. Reading it as a payload version reports an unchanged
+// component as changed, because the recipe side answers nothing at all for the
+// same component.
+//
+// Equality alone would also catch a component genuinely pinned to whatever
+// string AICR is released at. An upstream chart pin is what rules that out: it
+// is precisely what the fallback lacks, so a component that has one is never
+// the case this is looking for.
+func stampsWrapperVersion(record installedRelease, c Component) bool {
+	if c.HasUpstreamChart {
+		return false
+	}
+	generatedBy, ok := record.Annotations[header.AnnotationGeneratedBy]
+
+	return ok && generatedBy == record.Annotations[header.AnnotationComponentVersion]
 }
 
 // stamped reports a record AICR wrote. Either annotation counts: a wrapper
