@@ -64,8 +64,8 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
 | h100-bcm-ubuntu-training-kubeflow | bcm | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:6 | pending |
 | a100-eks-ubuntu-training-kubeflow | eks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
-| gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | pending |
+| gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/gb200-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb200-ubuntu/inference-dynamo) |
+| gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | [eks/gb200-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb200-ubuntu/training-kubeflow) |
 | gb200-eks-ubuntu-training-slurm | eks | gb200 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | gb300-eks-ubuntu-inference-dynamo | eks | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/gb300-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb300-ubuntu/inference-dynamo) |
 | gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | [eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) |
