@@ -118,6 +118,44 @@ readback_assert_cluster_source() {
     fi
 }
 
+# readback_source_summary <cluster-report>
+#
+# Prints the cluster read's own accounting on stdout, one line per reader.
+#
+# This is the evidence a passing leg otherwise throws away. The read-back
+# exists to validate the per-deployer release-name mapping against a real
+# deployment, and a leg that prints only "PASSED" leaves no record that the
+# mapping matched anything at all.
+#
+# Helm and Argo get a line each because they count different units: a
+# release retaining ten revisions contributes ten storage records, an
+# Application contributes one, so a total over both would be a number that
+# means nothing. Argo's line says the stamp check does not apply rather than
+# printing a zero, for the reason on pkg/upgrade.ReportSourceArgo: the
+# generated Application carries no AICR stamp for the reader to look for.
+#
+# Always returns 0, printing nothing when the report, the block, or jq is
+# unavailable. It runs on the path where the comparison already passed, so
+# rendering evidence must not be able to change that verdict.
+readback_source_summary() {
+    local cluster_json="${1:-}"
+    [[ -f "${cluster_json}" ]] || return 0
+    # `select` yields nothing for an absent block, so jq exits 0 with no
+    # output rather than non-zero: a missing field is silence, not a failure.
+    jq -r '
+        select(.source != null) | .source |
+        "cluster read: matched \(.matched // 0) component(s)",
+        ("  helm: \(.helm.records // 0) storage record(s), "
+         + "\(.helm.unattributed // 0) unattributed, "
+         + "\(.helm.unreadable // 0) unreadable, "
+         + "\(.helm.uninstalled // 0) uninstalled, "
+         + "\(.helm.stampedUnmatched // 0) stamped but unmatched"),
+        ("  argo: \(.argo.applications // 0) application(s), "
+         + "\(.argo.unattributed // 0) unattributed, "
+         + "\(.argo.unreadable // 0) unreadable, no stamp to check")
+    ' "${cluster_json}" 2>/dev/null || return 0
+}
+
 # readback_assert_none_added <report> <installed-file> <label>
 #
 # Fails when <report> calls a component the bundle installed "added". An

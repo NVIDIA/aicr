@@ -188,6 +188,34 @@ printf 'apiVersion: aicr.run/v1\nkind: Recipe\ncomponentRefs: []\n' > "${WORK}/e
 readback_installed_components "${WORK}/empty.yaml" "${WORK}/out.txt" >/dev/null 2>&1
 check_rc "installed-components-empty-recipe-fails" 1 "$?"
 
+# 13-15. readback_source_summary: the accounting a passing leg logs. It runs
+# after the verdict is already decided, so the cases that matter are the ones
+# where it has nothing to say — silence must stay rc=0 rather than take an
+# otherwise-green leg down with it.
+report "${WORK}/from-cluster.json" "${AGREED}" "${SOURCE_OK}"
+summary=$(readback_source_summary "${WORK}/from-cluster.json"); rc=$?
+check_rc "source-summary-rc-zero" 0 "${rc}"
+check_eq "source-summary-matched-line" \
+    "cluster read: matched 2 component(s)" "$(sed -n 1p <<< "${summary}")"
+check_eq "source-summary-helm-line" \
+    "  helm: 4 storage record(s), 0 unattributed, 0 unreadable, 0 uninstalled, 0 stamped but unmatched" \
+    "$(sed -n 2p <<< "${summary}")"
+# Counted units differ between the readers, so the two lines stay separate
+# and neither is a total: storage records are per revision, Applications are
+# per component.
+check_eq "source-summary-argo-line" \
+    "  argo: 0 application(s), 0 unattributed, 0 unreadable, no stamp to check" \
+    "$(sed -n 3p <<< "${summary}")"
+
+report "${WORK}/from-artifact.json" "${AGREED}"
+summary=$(readback_source_summary "${WORK}/from-artifact.json"); rc=$?
+check_rc "source-summary-no-block-rc-zero" 0 "${rc}"
+check_eq "source-summary-no-block-is-silent" "" "${summary}"
+
+summary=$(readback_source_summary "${WORK}/absent.json"); rc=$?
+check_rc "source-summary-missing-report-rc-zero" 0 "${rc}"
+check_eq "source-summary-missing-report-is-silent" "" "${summary}"
+
 if ((fails > 0)); then
     echo "upgrade-readback_test.sh: ${fails} failure(s)"
     exit 1
