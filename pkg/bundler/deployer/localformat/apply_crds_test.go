@@ -1211,3 +1211,90 @@ func TestApplyCRDsScript_FailsClosedWhenCollectionLosesFiles(t *testing.T) {
 		t.Fatalf("CRDs were applied from an incomplete collection\n%s", out)
 	}
 }
+
+// writeInstallScript renders a bundle for c and returns its component
+// folder's absolute directory and install.sh path.
+func writeInstallScript(t *testing.T, c localformat.Component) (folderDir, installPath string) {
+	t.Helper()
+	outDir := t.TempDir()
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir:  outDir,
+		Components: []localformat.Component{c},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	folderDir = filepath.Join(outDir, res.Folders[0].Dir)
+	return folderDir, filepath.Join(folderDir, "install.sh")
+}
+
+// TestInstallScript_DryRunIgnoresStaleChartArchive pins the dry-run half of
+// the apply-crds.sh/install.sh handoff.
+//
+// apply-crds.sh (re)pulls .aicr-chart.tgz, and is the only thing that ever
+// writes it, and it only runs when DRY_RUN_FLAG is unset. A dry run therefore
+// performs no pull, so an archive found on disk at that moment is leftover
+// from an earlier real deploy; if the pinned coordinates have since moved,
+// that archive no longer matches what a real run would fetch. Before the fix,
+// install.sh selected the file on existence alone and previewed those stale
+// bytes instead of resolving CHART/VERSION.
+func TestInstallScript_DryRunIgnoresStaleChartArchive(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	folderDir, installPath := writeInstallScript(t, ownsCRDsComponent(true))
+
+	stalePath := filepath.Join(folderDir, ".aicr-chart.tgz")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write stale archive: %v", err)
+	}
+
+	// Records every helm invocation, not just `upgrade`: HELM_MAJOR detection
+	// also calls helm, and a stub answering only `upgrade` would pass whether
+	// or not the script ever reached that call.
+	callsFile := filepath.Join(t.TempDir(), "helm-calls")
+	helm := "#!/usr/bin/env bash\n" +
+		"printf '%s\\n' \"$*\" >> " + callsFile + "\n" +
+		"exit 0\n"
+	path := stubPATH(t, map[string]string{"helm": helm})
+
+	cmd := exec.Command("bash", installPath)
+	cmd.Env = append(os.Environ(), "PATH="+path, "DRY_RUN_FLAG=--dry-run")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("dry-run install failed: %v\n%s", err, out)
+	}
+
+	body, readErr := os.ReadFile(callsFile)
+	if readErr != nil {
+		t.Fatalf("helm was never invoked (%v)\n%s", readErr, out)
+	}
+	var upgradeCall string
+	for _, line := range strings.Split(strings.TrimRight(string(body), "\n"), "\n") {
+		if strings.HasPrefix(line, "upgrade ") {
+			upgradeCall = line
+			break
+		}
+	}
+	// Guard against a vacuous pass: the assertion below only means something if
+	// the upgrade call was actually reached and captured.
+	if upgradeCall == "" {
+		t.Fatalf("helm was never invoked with upgrade\ncalls:\n%s\nscript output:\n%s", body, out)
+	}
+	if strings.Contains(upgradeCall, ".aicr-chart.tgz") {
+		t.Fatalf("dry-run install used the stale cached archive instead of resolving "+
+			"the pinned chart coordinates: %s", upgradeCall)
+	}
+	// Positive assertions, not just absence: the reuse branch also clears
+	// CHART_VERSION_ARGS and REPO, so a stale-archive selection would drop
+	// --version too. Pin that a dry run resolves both CHART and VERSION the
+	// way the next real run would.
+	wantChart := "oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
+	if !strings.Contains(upgradeCall, wantChart) {
+		t.Fatalf("dry-run install did not resolve the pinned chart ref %q: %s", wantChart, upgradeCall)
+	}
+	if !strings.Contains(upgradeCall, "--version 1.3.0") {
+		t.Fatalf("dry-run install dropped --version, which only happens on the stale-archive "+
+			"branch: %s", upgradeCall)
+	}
+}
