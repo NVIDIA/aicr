@@ -52,7 +52,26 @@ case "$1" in
             pass) : > snapshot.yaml; exit 0 ;;
             fail) echo "stub: agent pod never became ready" >&2; exit 3 ;;
             nofile) exit 0 ;;
-            hang) touch "${AICR_STUB_STARTED:?}"; sleep 2149 ;;   # unusual duration so the test can find this exact process
+            # The sleep stays a CHILD of this stub, and `wait` keeps the stub
+            # in the foreground, because that grandchild is the point: the
+            # phase tears the tree down by signalling the snapshot's process
+            # group (phases.sh, uat_snapshot_on_signal), and only a child can
+            # show that the group -- not just the direct process -- was
+            # reached. Backgrounding does not create a new process group here,
+            # job control being off in a non-interactive shell, so the group
+            # signal still reaches it.
+            #
+            # Its PID is recorded so the test can follow this exact process. A
+            # command-line pattern cannot: it matches any process on the
+            # machine, including one an earlier run left behind.
+            # Order matters: the PID is written first and the readiness marker
+            # published last. The test waits on the marker and then reads the
+            # PID, so anything it gates on must already be on disk when the
+            # marker appears. Touching first leaves a window -- however brief,
+            # and a preemption between the two lines is enough -- in which the
+            # test proceeds and reads a PID that is not there yet.
+            hang) sleep 2149 & echo $! > "${AICR_STUB_STARTED:?}.pid"
+                  touch "${AICR_STUB_STARTED}"; wait $! ;;
         esac ;;
     recipe) exit 7 ;;
     *) exit 0 ;;
@@ -73,6 +92,12 @@ run_prep() {
     mkdir -p "${dir}"
     (
         cd "${dir}" || exit 99
+        # This subshell is the process a signal must reach. Publish its PID so
+        # the interruption case below need not go looking for it: deriving it
+        # with `pgrep -P` fails wherever process enumeration is restricted
+        # (macOS sandboxes return "Cannot get process list"), and the empty
+        # result there silently retargets the signal at the wrong process.
+        echo "${BASHPID}" > "${dir}/phase.pid"
         # The per-cloud runners run the phase library under set -euo pipefail.
         set -euo pipefail
         local kv; for kv in "$@"; do export "${kv?}"; done
@@ -114,17 +139,39 @@ if [[ ! -f "${started}" ]]; then
     fail "interrupted snapshot: stub never started"; kill "${prep_pid}" 2>/dev/null || true
 else
     # run_prep is a function in this shell; the phase runs in its subshell,
-    # which is the process that must receive the signal.
-    phase_pid="$(pgrep -P "${prep_pid}" | head -n1 || true)"
+    # which is the process that must receive the signal. Both PIDs are read
+    # from files the processes wrote themselves. Deriving the phase's with
+    # `pgrep -P` fails wherever process enumeration is restricted -- a macOS
+    # sandbox answers "Cannot get process list" -- and because that only
+    # produced an empty string, the signal silently went to this shell's child
+    # instead, leaving the agent behind to fail some later run.
+    phase_pid="$(cat "${d}/phase.pid" 2>/dev/null || true)"
+    agent_pid="$(cat "${started}.pid" 2>/dev/null || true)"
     kill -TERM "${phase_pid:-${prep_pid}}"
     rc=0; wait "${prep_pid}" || rc=$?
     [[ "${rc}" == 143 ]] && pass "interrupted snapshot terminates with 143" || fail "interrupted snapshot: want rc 143, got ${rc}"
-    sleep 1
-    if pgrep -f "sleep 2149" >/dev/null 2>&1; then fail "interrupted snapshot left the agent's child process running"; else pass "interrupted snapshot stops the agent's process tree"; fi
+    # Wait for the teardown instead of sampling once after a fixed sleep:
+    # signal delivery and reaping are asynchronous, so a fixed delay is a
+    # guess. `kill -0` asks about the one process this run started, so a
+    # stray sleep belonging to anything else cannot answer for it.
+    if [[ -z "${agent_pid}" ]]; then
+        fail "interrupted snapshot: agent never recorded its PID"
+    else
+        for _ in $(seq 1 100); do kill -0 "${agent_pid}" 2>/dev/null || break; sleep 0.2; done
+        if kill -0 "${agent_pid}" 2>/dev/null; then
+            fail "interrupted snapshot left the agent's child process running"
+        else
+            pass "interrupted snapshot stops the agent's process tree"
+        fi
+    fi
+    # The record is written by the phase's trap, after the signal arrives.
+    for _ in $(seq 1 100); do [[ -s "${d}/snapshot-result.json" ]] && break; sleep 0.2; done
     record_ok "${d}" '.results.summary.other == 1 and (.results.tests[0].message | test("interrupted by SIGTERM"))' \
         && pass "interrupted snapshot records other" || fail "interrupted snapshot record wrong: $(cat "${d}/snapshot-result.json" 2>/dev/null)"
 fi
-pkill -f "sleep 2149" 2>/dev/null || true   # belt and braces if the assertion above failed
+# Belt and braces if an assertion above failed. Scoped to this run's PID: the
+# old `pkill -f "sleep 2149"` would also have killed another run's agent.
+[[ -n "${agent_pid:-}" ]] && kill "${agent_pid}" 2>/dev/null || true
 
 # --- unwritable report ---------------------------------------------------
 d="${WORK}/unwritable"; mkdir -p "${d}/snapshot-result.json"   # a directory blocks the write
