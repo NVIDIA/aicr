@@ -718,7 +718,7 @@ func TestProvenanceRecordedOnlyAfterRuntimeApplied(t *testing.T) {
 		plan := deliveredPlan(t)
 		ctx := &validators.Context{Ctx: t.Context(), DynamicClient: client, Namespace: ns}
 		err := applyNCCLResources(ctx, client, config, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
-			variantDefault, fabricEFA, plan.carrier, plan)
+			variantDefault, fabricEFA, plan.carrier, "", plan)
 		return plan, err
 	}
 	t.Run("create rejected -> no provenance", func(t *testing.T) {
