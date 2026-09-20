@@ -611,6 +611,28 @@ func TestScanAtRiskRejectsAnEmptyKind(t *testing.T) {
 	}
 }
 
+// TestScanAtRiskRejectsAnEmptyKindBeforeDialing pins caller error winning over
+// environment error. The kubeconfig names nothing, so a scan that builds its
+// clients first would answer a malformed request with an infrastructure
+// failure and bury the input the operator has to fix.
+func TestScanAtRiskRejectsAnEmptyKindBeforeDialing(t *testing.T) {
+	t.Parallel()
+
+	_, err := ScanAtRisk(t.Context(), AtRiskOptions{
+		Kubeconfig: "/nonexistent/kubeconfig",
+		Kinds:      []ResourceKind{{Group: "grove.io"}},
+	})
+	if err == nil {
+		t.Fatal("ScanAtRisk accepted a kind with no name")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "no kind") {
+		t.Errorf("error = %v, want the empty-kind message rather than a client failure", err)
+	}
+}
+
 // TestScanAtRiskWithNoKindsContactsNothing covers the ordinary case of an
 // upgrade whose crossed records name no resources: a nil client would panic if
 // the scan reached for one.

@@ -39,18 +39,31 @@ func upgradeCheckCmd() *cli.Command {
 		Usage:    "Report whether moving between two recipes or bundles is safe to apply",
 		Description: `Compare two artifacts component by component and report a verdict for
 each version that changed, from the transition records this aicr release
-ships. No cluster state is read: the comparison is between two artifacts, and
-nothing is inspected, deployed or modified. A cm:// path is an artifact
-location like a file path, so reading or writing one does contact that
-cluster's API to fetch or store the ConfigMap.
+ships. That comparison is the default and it reads no cluster state: the two
+artifacts are all it looks at, and nothing is inspected, deployed or modified.
+A cm:// path is an artifact location like a file path, so reading or writing
+one does contact that cluster's API to fetch or store the ConfigMap.
 
 Either side may be a recipe file or a bundle directory; a bundle is read
 through the recipe.yaml at its root. Omitting --to re-resolves the --from artifact's own
 criteria against this binary's registry, which answers "am I behind, and does
 catching up hurt?" rather than "is this move safe?".
 
+Two flags do read a cluster. --from cluster takes the source side from what
+Helm and Argo CD each recorded they last applied. That answers which version
+is installed and answers nothing else: a resource somebody edited by hand
+leaves the record untouched, and reading the record will not say so. It is not
+a view of live state.
+
+--scan-cluster is an advisory pass for objects an upgrade could disturb that
+carry no deployer ownership marker. It warns and never changes the exit code.
+--from cluster implies it; pass --scan-cluster=false there to skip it.
+
 Operator steps are deployer-scoped, so --deployer is required whenever any
-component needs steps.
+component carries steps. A cluster read is stricter: it requires --deployer
+whatever the records turn out to hold, because a release name encodes the
+deployer that wrote it and attribution cannot run without one. It requires
+--to as well, a cluster carrying no criteria to re-resolve.
 
 Exits non-zero on any verdict other than safe, unknown included: a
 transition nobody assessed is not a transition anyone approved. Records are
@@ -68,6 +81,9 @@ Examples:
   # Am I behind, and does catching up hurt?
   aicr upgrade-check --from ./bundles-v0.16.0 --deployer helm
 
+  # What is actually installed, rather than what an artifact claims
+  aicr upgrade-check --from cluster --to new-recipe.yaml --deployer helm
+
   # JSON for a pipeline, reporting only
   aicr upgrade-check --from old.yaml --to new.yaml --format json --fail-on-error=false`,
 		Flags:  upgradeCheckCmdFlags(),
@@ -79,26 +95,31 @@ Examples:
 func upgradeCheckCmdFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
-			Name:     "from",
-			Aliases:  []string{"f"},
-			Usage:    "source artifact: recipe file, bundle directory, or ConfigMap URI",
+			Name:    "from",
+			Aliases: []string{"f"},
+			Usage: fmt.Sprintf("source: recipe file, bundle directory, ConfigMap URI, or the literal "+
+				"%s to read the installed inventory instead of an artifact", aicr.FromCluster),
 			Category: catInput,
 		},
 		&cli.StringFlag{
-			Name:     "to",
-			Usage:    "target artifact (default: re-resolve --from's criteria against this binary's registry)",
+			Name: "to",
+			Usage: fmt.Sprintf("target artifact (default: re-resolve --from's criteria against this "+
+				"binary's registry; required with --from %s)", aicr.FromCluster),
 			Category: catInput,
 		},
 		withCompletions(&cli.StringFlag{
-			Name:     "deployer",
-			Aliases:  []string{"d"},
-			Usage:    fmt.Sprintf("deployer the reported steps are scoped to (%s)", strings.Join(config.GetDeployerTypes(), ", ")),
+			Name:    "deployer",
+			Aliases: []string{"d"},
+			Usage: fmt.Sprintf("deployer the reported steps are scoped to (%s); required whenever a "+
+				"component carries steps, and always with --from %s",
+				strings.Join(config.GetDeployerTypes(), ", "), aicr.FromCluster),
 			Category: catInput,
 		}, config.GetDeployerTypes),
 		&cli.BoolFlag{
 			Name: "scan-cluster",
-			Usage: "Also report objects an upgrade could disturb that carry no deployer ownership marker. " +
-				"Implied by --from cluster; pass --scan-cluster=false there to skip the scan",
+			Usage: fmt.Sprintf("Also report objects an upgrade could disturb that carry no deployer "+
+				"ownership marker. Implied by --from %s; pass --scan-cluster=false there to skip the scan",
+				aicr.FromCluster),
 			Category: catInput,
 		},
 		&cli.BoolFlag{

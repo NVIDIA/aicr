@@ -94,6 +94,42 @@ func TestUpgradeCheckCmd_CommandStructure(t *testing.T) {
 	}
 }
 
+// TestUpgradeCheckCmd_HelpNamesTheClusterSentinel keeps the help text and the
+// facade constant from drifting apart, and keeps the description from denying
+// the cluster reads the flags below it ship. The sentinel is read from
+// aicr.FromCluster rather than spelled out, so renaming the constant fails
+// here instead of leaving the help quietly wrong.
+func TestUpgradeCheckCmd_HelpNamesTheClusterSentinel(t *testing.T) {
+	cmd := upgradeCheckCmd()
+
+	sentinel := "--from " + aicr.FromCluster
+	if !strings.Contains(cmd.Description, sentinel) {
+		t.Errorf("description does not mention %q:\n%s", sentinel, cmd.Description)
+	}
+	// The old description opened by denying any cluster read at all.
+	if strings.Contains(cmd.Description, "No cluster state is read") {
+		t.Error("description still claims no cluster state is read, which --from cluster contradicts")
+	}
+
+	usages := map[string]string{}
+	for _, f := range cmd.Flags {
+		for _, name := range []string{"from", "to", "deployer", "scan-cluster"} {
+			if hasFlag(f, name) {
+				usages[name] = f.(cli.DocGenerationFlag).GetUsage()
+			}
+		}
+	}
+	for _, name := range []string{"from", "to", "deployer", "scan-cluster"} {
+		usage, ok := usages[name]
+		if !ok {
+			t.Fatalf("missing flag: %s", name)
+		}
+		if !strings.Contains(usage, aicr.FromCluster) {
+			t.Errorf("--%s usage does not name the %q sentinel: %s", name, aicr.FromCluster, usage)
+		}
+	}
+}
+
 func TestUpgradeCheckCmd_Validation(t *testing.T) {
 	dir := t.TempDir()
 	recipePath := syntheticRecipeFile(t, filepath.Join(dir, "recipe.yaml"), map[string]string{"synthetic-alpha": "1.0.0"})
