@@ -200,7 +200,7 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to walk data directory", err)
 		}
 		if ctx.Err() != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "context canceled during metadata load", ctx.Err())
+			return aicrerrors.WrapCtxErr(ctx.Err(), aicrerrors.ErrCodeTimeout, "loading recipe metadata")
 		}
 		if d.IsDir() {
 			return nil
