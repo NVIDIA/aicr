@@ -513,7 +513,7 @@ func runValidation(
 }
 
 func validateCmdFlags() []cli.Flag {
-	return []cli.Flag{
+	flags := []cli.Flag{
 		&cli.StringFlag{
 			Name:    cmdNameRecipe,
 			Aliases: []string{"r"},
@@ -633,6 +633,23 @@ func validateCmdFlags() []cli.Flag {
 			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
 			Category: catAgentDeployment,
 		},
+	}
+	flags = append(flags, validateEvidenceFlags()...)
+	return append(flags,
+		configFlag(),
+		dataFlag(),
+		outputFlag(),
+		kubeconfigFlag(),
+	)
+}
+
+// validateEvidenceFlags returns the --emit-attestation flag family: what to
+// emit, where to push it, how much of it to ship, and the keyless-signing
+// inputs. Split out of validateCmdFlags to keep that function under the
+// funlen limit; the order here is the order the flags appear under the
+// Evidence heading in `aicr validate --help`.
+func validateEvidenceFlags() []cli.Flag {
+	return []cli.Flag{
 		&cli.StringFlag{
 			Name:     "evidence-dir",
 			Usage:    "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
@@ -665,6 +682,21 @@ func validateCmdFlags() []cli.Flag {
 	so node names, provider instance IDs, the node label/taint set, OS tuning, and raw container logs are
 	not published. --full restores the complete payloads. The cryptographic verification story
 	(predicate digests, manifest binding, signature) holds either way.`,
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
+			Name: flagAllowMutableValidatorTags,
+			// Deliberately no Sources: an env var set once for a disposable run
+			// would silently disable the gate for every later run in that shell
+			// or CI job — the same "applied from habit" failure AICR_VALIDATOR_IMAGE_TAG
+			// caused in #2873. Opting out must be argued per invocation.
+			Usage: `Emit the attestation even when a validator image resolves to a mutable tag.
+	Emission otherwise fails closed: the predicate identifies the validators that ran by tag alone, so a moving
+	tag (:edge, :latest) leaves the attestation naming a reference that can later resolve to different validator
+	code. Immutable tags are :vX.Y.Z, :sha-<commit>, :uat-<run-id>, and digest-pinned refs.
+	The usual cause is a stale AICR_VALIDATOR_IMAGE_TAG override — unset it before a conformance run rather than
+	reaching for this flag. Reserve the flag for disposable evidence (a local demo, a side-loaded smoke lane).
+	There is no environment-variable or config-file equivalent: the opt-out must be passed per invocation.`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
@@ -714,10 +746,6 @@ func validateCmdFlags() []cli.Flag {
 			Category: catEvidence,
 		},
 		assumeYesFlag(catEvidence),
-		configFlag(),
-		dataFlag(),
-		outputFlag(),
-		kubeconfigFlag(),
 	}
 }
 

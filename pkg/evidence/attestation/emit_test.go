@@ -16,15 +16,19 @@ package attestation
 
 import (
 	"context"
+	stderrors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 )
 
 // snapshotWithSensitiveData builds a snapshot whose measurements include the
@@ -322,5 +326,135 @@ func TestSignAndPush_NoPushReturnsZeroOutcome(t *testing.T) {
 	}
 	if out.Sign != nil || out.PushSummary != nil {
 		t.Errorf("expected zero outcome when Push absent; got %+v", out)
+	}
+}
+
+// emitCatalog builds a validator catalog whose images carry the given tags.
+func emitCatalog(tags ...string) *catalog.ValidatorCatalog {
+	cat := &catalog.ValidatorCatalog{}
+	for i, tag := range tags {
+		cat.Validators = append(cat.Validators, catalog.ValidatorEntry{
+			Name:  fmt.Sprintf("check-%d", i),
+			Phase: "conformance",
+			Image: "ghcr.io/nvidia/aicr-validators/performance:" + tag,
+		})
+	}
+	return cat
+}
+
+func TestMutableValidatorImages(t *testing.T) {
+	tests := []struct {
+		name   string
+		images []ValidatorImage
+		want   []string
+	}{
+		{"nil", nil, nil},
+		{"all immutable", []ValidatorImage{
+			{Image: "ghcr.io/nvidia/aicr-validators/performance:v1.0.0"},
+			{Image: "ghcr.io/nvidia/aicr-validators/conformance:sha-1f27c0dc6e4617db9b505eb10ee9d910a08968aa"},
+		}, nil},
+		{"one mutable", []ValidatorImage{
+			{Image: "ghcr.io/nvidia/aicr-validators/performance:v1.0.0"},
+			{Image: "ghcr.io/nvidia/aicr-validators/conformance:edge"},
+		}, []string{"ghcr.io/nvidia/aicr-validators/conformance:edge"}},
+		{"all mutable, order preserved", []ValidatorImage{
+			{Image: "ghcr.io/nvidia/aicr-validators/performance:latest"},
+			{Image: "ghcr.io/nvidia/aicr-validators/conformance:edge"},
+		}, []string{
+			"ghcr.io/nvidia/aicr-validators/performance:latest",
+			"ghcr.io/nvidia/aicr-validators/conformance:edge",
+		}},
+		{"empty ref is skipped", []ValidatorImage{{Image: ""}}, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MutableValidatorImages(tt.images)
+			if len(got) != len(tt.want) {
+				t.Fatalf("MutableValidatorImages() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("MutableValidatorImages()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestEmit_RejectsMutableValidatorTag(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Emit(context.Background(), EmitOptions{
+		OutDir:      dir,
+		Recipe:      emitRecipe(),
+		Snapshot:    snapshotWithSensitiveData(),
+		Catalog:     emitCatalog("v1.0.0", "edge"),
+		AICRVersion: "v0.0.0-test",
+	})
+	if err == nil {
+		t.Fatal("expected Emit to fail closed on a mutable validator tag")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+	}
+	// The offending ref must be named — the operator has to know which
+	// override to drop.
+	if !strings.Contains(err.Error(), "aicr-validators/performance:edge") {
+		t.Errorf("error must name the mutable ref, got: %v", err)
+	}
+
+	// Fail closed means fail EARLY: nothing may be written to disk, or a
+	// half-built bundle invites a partial publish.
+	if entries, rerr := os.ReadDir(dir); rerr == nil && len(entries) > 0 {
+		t.Errorf("Emit wrote %d entries before failing closed: %v", len(entries), entries)
+	}
+}
+
+func TestEmit_AllowMutableValidatorTagsOptsOut(t *testing.T) {
+	dir := t.TempDir()
+	res, err := Emit(context.Background(), EmitOptions{
+		OutDir:                    dir,
+		Recipe:                    emitRecipe(),
+		Snapshot:                  snapshotWithSensitiveData(),
+		Catalog:                   emitCatalog("edge"),
+		AllowMutableValidatorTags: true,
+		AICRVersion:               "v0.0.0-test",
+	})
+	if err != nil {
+		t.Fatalf("Emit with AllowMutableValidatorTags: %v", err)
+	}
+	// The override records the tag verbatim — that is the point of the
+	// escape hatch, and why the predicate still shows what actually ran.
+	imgs := res.Bundle.Predicate.ValidatorImages
+	if len(imgs) != 1 || imgs[0].Image != "ghcr.io/nvidia/aicr-validators/performance:edge" {
+		t.Errorf("predicate validatorImages = %+v, want the :edge ref recorded", imgs)
+	}
+}
+
+func TestEmit_ImmutableValidatorTagsPass(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Emit(context.Background(), EmitOptions{
+		OutDir:      dir,
+		Recipe:      emitRecipe(),
+		Snapshot:    snapshotWithSensitiveData(),
+		Catalog:     emitCatalog("v1.0.0", "sha-1f27c0dc6e4617db9b505eb10ee9d910a08968aa", "uat-19283746"),
+		AICRVersion: "v0.0.0-test",
+	}); err != nil {
+		t.Fatalf("Emit with immutable validator tags: %v", err)
+	}
+}
+
+// TestEmit_NilCatalogPasses guards the documented "pass nil when no catalog
+// was loaded" contract: no catalog means no validatorImages to vouch for, and
+// the gate must not turn that into a failure.
+func TestEmit_NilCatalogPasses(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Emit(context.Background(), EmitOptions{
+		OutDir:      dir,
+		Recipe:      emitRecipe(),
+		Snapshot:    snapshotWithSensitiveData(),
+		AICRVersion: "v0.0.0-test",
+	}); err != nil {
+		t.Fatalf("Emit with nil catalog: %v", err)
 	}
 }
