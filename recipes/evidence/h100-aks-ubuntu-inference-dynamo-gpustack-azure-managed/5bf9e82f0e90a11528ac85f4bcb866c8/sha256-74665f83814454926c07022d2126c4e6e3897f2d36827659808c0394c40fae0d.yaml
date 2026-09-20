@@ -1,0 +1,13 @@
+attestations:
+  - attestedAt: 2026-09-19T23:05:57Z
+    bundle:
+      digest: sha256:74665f83814454926c07022d2126c4e6e3897f2d36827659808c0394c40fae0d
+      oci: ghcr.io/yuanchen8911/aicr-evidence:h100-aks-ubuntu-inference-dynamo-gpustack-azure-managed-dcda36ffa0b9
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: https://github.com/yuanchen8911/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/aks-h100-training-inference
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 117333676
+profile: gpuStack=azure-managed
+recipe: h100-aks-ubuntu-inference-dynamo-gpustack-azure-managed
+schemaVersion: 1.0.0

@@ -1,0 +1,13 @@
+attestations:
+  - attestedAt: 2026-09-19T22:50:29Z
+    bundle:
+      digest: sha256:bd916837f67ee27f44bbc42342242e062b77e82511e79ca7fae4e82202e56cf1
+      oci: ghcr.io/yuanchen8911/aicr-evidence:h100-aks-ubuntu-training-kubeflow-gpustack-azure-managed-e6dced26e022
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: https://github.com/yuanchen8911/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/aks-h100-training-inference
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 117333684
+profile: gpuStack=azure-managed
+recipe: h100-aks-ubuntu-training-kubeflow-gpustack-azure-managed
+schemaVersion: 1.0.0

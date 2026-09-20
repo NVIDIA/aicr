@@ -69,6 +69,26 @@ const (
 	// pod binary is a separate package that does not import this one.
 	ncclFabricEnv = "AICR_NCCL_FABRIC"
 
+	// NCCLAllReduceBWCheckName / NCCLAllReduceBWNvlsCheckName are the catalog
+	// names of the default and NVLS NCCL all-reduce checks, exported alongside
+	// NCCLAllReduceBWNetCheckName so ncclRuntimeImageEnv can scope forwarding to
+	// all three NCCL variants. A rename of any entry would otherwise silently
+	// no-op image-override forwarding to that variant with no test failing —
+	// see TestEmbeddedCatalog_NCCLEntriesExist.
+	NCCLAllReduceBWCheckName     = "nccl-all-reduce-bw"
+	NCCLAllReduceBWNvlsCheckName = "nccl-all-reduce-bw-nvls"
+
+	// ncclRuntimeImageEnv overrides the NCCL launcher/worker workload image
+	// (CUDA/NCCL/MPI/SSH/transport runtime) baked into the per-platform
+	// TrainingRuntime templates. Forwarded to all three NCCL all-reduce check
+	// pods so an operator can qualify a different CUDA/NCCL combination
+	// (e.g. CUDA 13 on GKE TCPXO) without rebuilding the validator image. This
+	// is the orchestrator (forwarding) end; the validator-pod (reading) end
+	// defines the same literal in
+	// validators/performance/nccl_runtime_image.go — keep the two in sync (see
+	// NVIDIA/aicr#1751).
+	ncclRuntimeImageEnv = "AICR_NCCL_RUNTIME_IMAGE"
+
 	// inferencePerfNoCleanupEnv, when truthy, makes the inference-perf validator
 	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
 	// for post-mortem inspection. Forwarded only to the inference-perf pod.
@@ -180,6 +200,19 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: ncclFabricEnv, Value: v})
 	}
 
+	// Forward the NCCL workload-image override to all three NCCL all-reduce
+	// check pods (default, NET, NVLS). Each check runs inside its own Job, so
+	// it can't observe the CLI process environment unless forwarded here.
+	// Unset (default) leaves every check on its compiled-in per-platform
+	// image; scoped to the NCCL checks so unrelated validator pods don't carry
+	// it. Malformed references are rejected pod-side (fail closed), not here —
+	// the orchestrator forwards the raw value verbatim, matching ncclFabricEnv.
+	ncclRuntimeImageEnvVal, ncclRuntimeImageEnvOK := os.LookupEnv(ncclRuntimeImageEnv)
+	ncclRuntimeImageApplies := entry.Name == NCCLAllReduceBWCheckName || entry.Name == NCCLAllReduceBWNetCheckName || entry.Name == NCCLAllReduceBWNvlsCheckName
+	if ncclRuntimeImageEnvOK && ncclRuntimeImageEnvVal != "" && ncclRuntimeImageApplies {
+		env = append(env, corev1.EnvVar{Name: ncclRuntimeImageEnv, Value: ncclRuntimeImageEnvVal})
+	}
+
 	// Forward the inference-perf no-cleanup debug toggle into that validator pod.
 	// Cleanup runs inside the Job, so it can't see the CLI process environment
 	// unless the orchestrator carries the value across. Scoped to the
@@ -200,7 +233,7 @@ func buildEnv(
 	// forwarded value (k8s takes the last duplicate), breaking that trust
 	// boundary.
 	for _, e := range entry.Env {
-		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclFabricEnv {
+		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclFabricEnv || e.Name == ncclRuntimeImageEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})
