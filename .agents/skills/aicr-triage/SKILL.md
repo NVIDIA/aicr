@@ -6,16 +6,23 @@ description: |
   project 248). Reviews active non-Done issues, then promotes P2 issues
   to P1, demotes Ready items to Backlog, closes superseded issues, and
   classifies unclassified ones — applying only user-confirmed changes
-  via `gh` CLI. Triggers on backlog hygiene before sprint planning or
-  release prep, or when the user files a new issue and asks to classify
-  it on the board.
+  via `gh` CLI. Also backfills Priority on Done issues that opened and
+  closed between runs, and asserts that every issue on the board carries
+  both Status and Priority before reporting. Triggers on backlog hygiene
+  before sprint planning or release prep, or when the user files a new
+  issue and asks to classify it on the board.
 ---
 
 # AICR Issue Triage
 
 Review a GitHub Projects v2 board, produce structured recommendations across
-five actionable buckets plus a no-change list, get explicit user confirmation,
+six actionable buckets plus a no-change list, get explicit user confirmation,
 then apply the approved changes via `gh`.
+
+The run ends on a board-wide invariant: **every issue carries both Status and
+Priority**. Five of the six buckets work the active slice; the sixth exists
+because an issue that opens and closes between two runs is never in that slice,
+and its empty Priority would otherwise be unreachable forever.
 
 **Default board:** <https://github.com/orgs/NVIDIA/projects/248> (AICR). Pass
 `owner/number` as the skill arg to triage a different board.
@@ -67,13 +74,14 @@ IDs differ per project and change when an option is deleted and re-added —
 re-fetch every run, never hardcode. Stop if a required field or option is
 missing; do not proceed on partial metadata.
 
-### 2. Pull every item, slice to active issues
+### 2. Pull every item, slice to active issues and to unclassified stragglers
 
 ```bash
 # From Step 1, NOT the defaults: re-applying them would triage the wrong board.
 owner="<owner>"; num="<project-number>"
 ITEMS="${TMPDIR:-/tmp}/aicr-triage-items.json"
 ACTIVE="${TMPDIR:-/tmp}/aicr-triage-active.json"
+BACKFILL="${TMPDIR:-/tmp}/aicr-triage-backfill.json"
 
 # Guard the fetch: a failed read must not be reported as a truncated one.
 gh project item-list "$num" --owner "$owner" --format json --limit 400 > "$ITEMS" \
@@ -87,9 +95,28 @@ jq '[.items[]
      | select(.content.type == "Issue")
      | select(.status == "Done" | not)]' "$ITEMS" > "$ACTIVE" \
   || { echo "slice failed — stop and report"; exit 1; }
+
+# Done issues carrying a field hole. An issue opened and closed between two runs
+# is never in $ACTIVE at any moment a run fires, so without this slice its empty
+# Priority is unreachable forever — not skipped, never seen.
+jq '[.items[]
+     | select(.content.type == "Issue")
+     | select(.status == "Done")
+     | select(.priority == null)]' "$ITEMS" > "$BACKFILL" \
+  || { echo "backfill slice failed — stop and report"; exit 1; }
 ```
 
 `item-list` defaults to 30 results, so keep `--limit` above the board size.
+
+The two slices are disjoint by construction and never merge: `$ACTIVE` drives the
+verdict buckets, `$BACKFILL` drives Step 4's Backfill bucket and nothing else.
+Do **not** widen `$ACTIVE` to include Done — that would drag every completed
+issue through promote, demote, and close, where all three are meaningless, and
+would post triage comments on long-closed threads.
+
+`$BACKFILL` is normally a handful of rows. If it returns a large fraction of the
+Done column, that is a board-level anomaly (a Priority option deleted and
+re-added, a bulk import); report it and stop rather than backfilling at scale.
 
 Each entry carries `id` (the `PVTI_*` that `item-edit` needs), `status`,
 `priority` (**absent**, not null, when unset), `labels`, and
@@ -153,6 +180,11 @@ An active board item absent from `$OPEN` is closed: report it under Manual Revie
 as "closed but Status is not Done" — a human fixes it, and every later run skips
 it too, so an unreported one is never corrected.
 
+This check reads `$ACTIVE` only. A `$BACKFILL` item is Done and therefore closed
+by definition; running it through here would report every one as an anomaly.
+Backfill items need no extra fetch at all — title, labels, and body are already
+in the dump, and Step 4 derives their Priority from exactly that.
+
 Before any **Close**, or any verdict that **changes an already-set Status or
 Priority**, read the full comment thread — the blocker or supersession evidence
 usually lives there:
@@ -173,6 +205,10 @@ it no item's open/closed state is known.
 
 Each issue gets one verdict. Precedence, highest first: **Manual Review > Close >
 Incomplete > Demote > Promote > First-time > No change.**
+
+Those seven verdicts apply to `$ACTIVE`. `$BACKFILL` has exactly one verdict,
+**Backfill**, defined at the end of this section; the precedence list never
+reaches it because the two slices are disjoint.
 
 **A verdict writes every field whose correct value differs from the current one.**
 The bucket names below label the shape of that difference for reporting and
@@ -230,6 +266,30 @@ forever.
 
 **No change** — correctly placed. Listed in the report, no comment, no edit.
 
+**Backfill** — the only verdict for `$BACKFILL`: a Done issue with no Priority.
+
+- **Priority only. Never write Status.** The item is Done; that is settled, and
+  a triage run is not the place to relitigate whether something shipped
+- Derive the value from the issue's own content using the First-time Priority
+  rules above, judged as of when the work was done: P1 for a confirmed
+  regression, a security issue, or something that blocked a contributor or a
+  release; P2 otherwise. Default P2 when the content does not clearly say
+- Do **not** blanket-assign P2 to clear the hole. On an active issue P2 is a
+  scheduling default meaning "no reason to jump the queue." On a Done issue
+  Priority is no longer scheduling — it is the record of what the project
+  shipped, and the Done column's P1/P2 ratio is read that way. Blanket P2
+  silently biases it and erases the difference between "was genuinely routine"
+  and "nobody ever triaged this"
+- Body, title, and labels come from `$ITEMS`; no extra fetch is needed. Read the
+  comment thread only when the body alone leaves P1-versus-P2 genuinely open
+- Ambiguity here resolves to P2 and never to Manual Review. An unwritten
+  Priority is the defect being fixed; deferring it recreates the hole
+
+**Out of scope for Backfill:** `PullRequest` items, even when unprioritized.
+Every slice in this skill filters to `content.type == "Issue"`, and PR priority
+on this board is set by something else. Step 8 reports unprioritized PRs as
+informational so the gap stays visible without this skill writing to it.
+
 **Stalled (information only):** an `In progress` item whose `updatedAt` from
 Step 3 is more than 30 days old. Its own table, never a bucket: being stalled
 neither creates nor suppresses a verdict, and does not withdraw an item from
@@ -251,6 +311,11 @@ exact action cannot be stated, the item goes to Manual Review, not into a bucket
 This table is the only gate before writes to a shared board, so apply the
 escaping convention to every cell, reasoning included.
 
+Backfill gets its own table, placed last among the actionable ones and labelled
+as closing a field hole rather than changing a decision. Columns are the same,
+and the proposed action always reads `Priority → P<n>` with no Status component —
+if a row shows a Status change, the verdict was built wrong.
+
 Stalled and Manual Review items get their own tables, labelled as not
 actionable.
 
@@ -266,6 +331,11 @@ as `owner/repo#N — <proposed action>`.
 Where `AskUserQuestion` is unavailable, present each bucket as a numbered list
 and require a reply of accepted numbers, "all", or "none". Do not proceed
 without an explicit answer.
+
+Backfill is confirmed like any other bucket and is never auto-applied, but it may
+be offered as grouped options — several `owner/repo#N — Priority → P2` rows in one
+option — since the writes are uniform and low-risk. Keep any row you scored P1 as
+its own option: that is the judgment call worth accepting or rejecting on its own.
 
 **No field is edited and no issue is closed without this confirmation.** Board
 changes are visible org-wide and closures are hard to reverse; the value here is
@@ -324,9 +394,26 @@ Triaged: <verdict>. <one or two sentences of reasoning>
 BODY
 ```
 
-Body format: first line starts with `Triaged:` (field updates) or `Closing:`
-(closures), followed by one or two sentences of reasoning. For closures, say
-what changed, where the work lives now, and how to reopen.
+Body format: first line starts with `Triaged:` (field updates), `Closing:`
+(closures), or `Records backfill:` (Backfill), followed by one or two sentences
+of reasoning. For closures, say what changed, where the work lives now, and how
+to reopen.
+
+A Backfill comment lands on a **closed** thread, so it must not read as a reopen
+or a request for action. Lead with `Records backfill:`, name the value and why it
+was missing, and say plainly that nothing else changed:
+
+```bash
+n="<issue-number>"; repo="<owner/repo>"
+
+gh issue comment "$n" -R "$repo" --body-file - <<'BODY'
+Records backfill: Priority set to <P1|P2>. Status unchanged (Done).
+
+This issue opened and closed between triage runs, so it was never in an active
+slice and its Priority was left empty. Setting it from the issue's own content so
+the Done column reflects what shipped. No action needed — nothing is reopening.
+BODY
+```
 
 **Closures comment first, then close** — nothing may close without a visible
 reason, so a failed comment aborts before the close:
@@ -372,13 +459,42 @@ state=$(gh issue view "$n" -R "$repo" --json state --jq '.state') \
 ### 8. Verify and report
 
 Re-run the Step 2 fetch and confirm the outcome for every changed item. Field
-edits are confirmed in `$ACTIVE`. **Closures must be confirmed in `$ITEMS`** —
-`$ACTIVE` drops Done items, so a successful closure vanishes from it — and their
-Status must read Done; anything else goes to Manual Review. Print two tables:
+edits are confirmed in `$ACTIVE`. **Closures and Backfill writes must be confirmed
+in `$ITEMS`** — `$ACTIVE` drops Done items, so both vanish from it — and a
+closure's Status must read Done; anything else goes to Manual Review.
 
-Both tables render issue-derived text, so the escaping convention applies here as
-it does in Step 5.
+**Then assert the board-wide invariant.** Per-item verification only proves the
+writes this run intended; it cannot see a hole no bucket claimed. This check can,
+and it is what keeps a future rule gap from sitting unnoticed for weeks:
+
+```bash
+ITEMS="${TMPDIR:-/tmp}/aicr-triage-items.json"   # the Step 8 re-fetch
+
+echo "unclassified issues (must be empty):"
+jq -r '.items[]
+       | select(.content.type == "Issue")
+       | select(.status == null or .priority == null)
+       | "\(.content.repository)#\(.content.number)\t\(.status // "NO-STATUS")\t\(.priority // "NO-PRIORITY")"' "$ITEMS"
+
+echo "unprioritized pull requests (informational, not written by this skill):"
+jq -r '.items[]
+       | select(.content.type == "PullRequest")
+       | select(.priority == null)
+       | "\(.content.repository)#\(.content.number)"' "$ITEMS"
+```
+
+Report the invariant's result explicitly either way — "every issue on the board
+carries both Status and Priority" is the sentence that makes the run trustworthy,
+and silence reads the same whether the check passed or was skipped. Any issue it
+lists is a rule gap: name it under Manual Review, and say which slice should have
+caught it so the next edit to this skill has somewhere to start.
+
+Print three tables. All render issue-derived text, so the escaping convention
+applies here as it does in Step 5.
 
 1. **Applied** — issue | action | new Status | new Priority
 2. **Manual review required** — issue | reason (fetch failed, ambiguous match,
-   closed but Status is not Done, edit or comment outcome unknown)
+   closed but Status is not Done, edit or comment outcome unknown, invariant
+   violation)
+3. **Board completeness** — the invariant result, plus the informational count of
+   unprioritized PRs
