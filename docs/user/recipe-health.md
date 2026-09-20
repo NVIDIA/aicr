@@ -67,8 +67,8 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | pending |
 | gb200-eks-ubuntu-training-slurm | eks | gb200 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
-| gb300-eks-ubuntu-inference-dynamo | eks | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | pending |
+| gb300-eks-ubuntu-inference-dynamo | eks | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/gb300-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb300-ubuntu/inference-dynamo) |
+| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | [eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) |
 | gb300-eks-ubuntu-training-slurm | eks | gb300 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-eks-ubuntu-inference-dynamo | eks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/h100-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/h100-ubuntu/inference-dynamo) |
 | h100-eks-ubuntu-inference-nim | eks | h100 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:11 | pending |
@@ -85,7 +85,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | b200-gke-cos-training-kubeflow | gke | b200 | cos | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | gb200-gke-cos-inference-dynamo | gke | gb200 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | gb200-gke-cos-training-kubeflow | gke | gb200 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
-| gb200-gke-cos-training-slurm | gke | gb200 | cos | training | slurm | pass | R:0 D:4 P:0 C:12 | pending |
+| gb200-gke-cos-training-slurm | gke | gb200 | cos | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:5 P:1 C:10 | pending |
 | h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:5 P:0 C:10 | pending |

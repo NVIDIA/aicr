@@ -44,6 +44,8 @@ coordinates:
   # and the health generator is criteria-only today — their cells stay an
   # honest `pending` until profile-aware health links land (re-add the
   # suffixed paths together with that change).
+  - eks/gb300-ubuntu/inference-dynamo
+  - eks/gb300-ubuntu/training-kubeflow
   - eks/h100-ubuntu/inference-dynamo
   - eks/h100-ubuntu/training-kubeflow
   - k0s/h200-ubuntu/training
