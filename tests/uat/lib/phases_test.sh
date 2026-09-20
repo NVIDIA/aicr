@@ -64,8 +64,14 @@ case "$1" in
             # Its PID is recorded so the test can follow this exact process. A
             # command-line pattern cannot: it matches any process on the
             # machine, including one an earlier run left behind.
-            hang) touch "${AICR_STUB_STARTED:?}"
-                  sleep 2149 & echo $! > "${AICR_STUB_STARTED}.pid"; wait $! ;;
+            # Order matters: the PID is written first and the readiness marker
+            # published last. The test waits on the marker and then reads the
+            # PID, so anything it gates on must already be on disk when the
+            # marker appears. Touching first leaves a window -- however brief,
+            # and a preemption between the two lines is enough -- in which the
+            # test proceeds and reads a PID that is not there yet.
+            hang) sleep 2149 & echo $! > "${AICR_STUB_STARTED:?}.pid"
+                  touch "${AICR_STUB_STARTED}"; wait $! ;;
         esac ;;
     recipe) exit 7 ;;
     *) exit 0 ;;
