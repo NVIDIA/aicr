@@ -235,7 +235,11 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 			config.WithAttest(true),
 		)
 		attester := &closedWorldTestAttester{}
-		b := &DefaultBundler{Config: cfg, Attester: attester}
+		b := &DefaultBundler{
+			Config:                    cfg,
+			Attester:                  attester,
+			verifiedBinaryAttestation: []byte(`{"injected":true}`),
+		}
 		_, err := b.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
@@ -254,7 +258,11 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 			config.WithAttest(true),
 		)
 		attester := &closedWorldTestAttester{writeMetadata: true}
-		b := &DefaultBundler{Config: cfg, Attester: attester}
+		b := &DefaultBundler{
+			Config:                    cfg,
+			Attester:                  attester,
+			verifiedBinaryAttestation: []byte(`{"injected":true}`),
+		}
 		dir := t.TempDir()
 		output, err := b.runDeployer(
 			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, time.Now())
@@ -324,7 +332,8 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 				config.WithIncludeChecksums(true),
 				config.WithAttest(true),
 			),
-			Attester: attester,
+			Attester:                  attester,
+			verifiedBinaryAttestation: []byte(`{"injected":true}`),
 		}
 	}
 
@@ -985,10 +994,17 @@ func TestNew_AttestWithInjectedBinaryAttestation(t *testing.T) {
 // verifyAndCopyBinaryAttestation (closedWorldTestAttester returns nil, which
 // short-circuits attestBundle before the binary attestation is embedded).
 type fixtureBinaryAttester struct {
-	bundleJSON []byte
+	bundleJSON               []byte
+	requireBinaryAttestation bool
 }
 
-func (a *fixtureBinaryAttester) Attest(_ context.Context, _ attestation.AttestSubject) ([]byte, error) {
+func (a *fixtureBinaryAttester) Attest(_ context.Context, subject attestation.AttestSubject) ([]byte, error) {
+	if a.requireBinaryAttestation {
+		path := filepath.Join(subject.Metadata.OutputDir, filepath.FromSlash(attestation.BinaryAttestationFile))
+		if _, err := os.Stat(path); err != nil {
+			return nil, fmt.Errorf("binary attestation was not verified before signing: %w", err)
+		}
+	}
 	return a.bundleJSON, nil
 }
 
@@ -1012,7 +1028,10 @@ func TestAttestBundle_EmbedsInjectedBinaryAttestation(t *testing.T) {
 			config.WithIncludeChecksums(true),
 			config.WithAttest(true),
 		),
-		Attester:                  &fixtureBinaryAttester{bundleJSON: []byte(`{"bundle":true}`)},
+		Attester: &fixtureBinaryAttester{
+			bundleJSON:               []byte(`{"bundle":true}`),
+			requireBinaryAttestation: true,
+		},
 		verifiedBinaryAttestation: fixture,
 	}
 

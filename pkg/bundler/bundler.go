@@ -2725,6 +2725,31 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 		})
 	}
 
+	attestFiles := make([]string, 0, 2)
+	_, isNoOp := b.Attester.(*attestation.NoOpAttester)
+	if !isNoOp {
+		// Create the attestation directory before copying the verified binary
+		// attestation, which must happen before signing.
+		var attestDir string
+		attestDir, joinErr = deployer.SafeJoin(dir, attestation.AttestationDir)
+		if joinErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe attestation directory path", joinErr)
+		}
+		if mkdirErr := os.MkdirAll(attestDir, 0755); mkdirErr != nil { //nolint:gosec // attestDir validated by SafeJoin
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create attestation directory", mkdirErr)
+		}
+	}
+
+	// Verify and copy the binary attestation before invoking the attester. A
+	// stale sidecar must fail before any OIDC login or transparency-log entry
+	// can be created.
+	if !isNoOp {
+		err = b.verifyAndCopyBinaryAttestation(ctx, dir)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Sign
 	bundleJSON, err := b.Attester.Attest(ctx, subject)
 	if err != nil {
@@ -2734,17 +2759,6 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	// If attester returned nil (NoOp), nothing to write
 	if bundleJSON == nil {
 		return nil, nil
-	}
-
-	var attestFiles []string
-
-	// Create attestation subdirectory
-	attestDir, joinErr := deployer.SafeJoin(dir, attestation.AttestationDir)
-	if joinErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe attestation directory path", joinErr)
-	}
-	if mkdirErr := os.MkdirAll(attestDir, 0755); mkdirErr != nil { //nolint:gosec // attestDir validated by SafeJoin
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create attestation directory", mkdirErr)
 	}
 
 	// Write bundle attestation
@@ -2758,11 +2772,6 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	attestFiles = append(attestFiles, attestation.BundleAttestationFile)
 	slog.Info("bundle attestation written", "path", bundleAttestPath)
 
-	// Copy binary attestation into bundle — errors are fatal since the user
-	// opted into attestation (remove --attest to skip).
-	if err := b.verifyAndCopyBinaryAttestation(ctx, dir); err != nil {
-		return nil, err
-	}
 	attestFiles = append(attestFiles, attestation.BinaryAttestationFile)
 
 	return attestFiles, nil
