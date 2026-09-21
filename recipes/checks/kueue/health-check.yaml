@@ -17,7 +17,7 @@
 # Validates that Kueue is running and healthy in the kueue-system
 # namespace. Asserts resourceflavors / clusterqueues /
 # localqueues.kueue.x-k8s.io are Established=True (verified against
-# chart 0.19.3; re-verify on defaultVersion bump), and that the default
+# chart 0.19.5; re-verify on defaultVersion bump), and that the default
 # quota CRs shipped with the component (ResourceFlavor default-flavor,
 # ClusterQueue cluster-queue, LocalQueue default/default) were admitted
 # and reconciled to Active — a functional proof (CRDs installed,
@@ -138,7 +138,7 @@ spec:
       try:
         # The default quota CRs ship with the component via registry
         # manifestFiles (wave N+1), so they must exist wherever this
-        # check runs. v1beta2 is the storage version in chart 0.19.3.
+        # check runs. v1beta2 is the storage version in chart 0.19.5.
         #
         # COUPLING: these asserts are pinned to the DEFAULT CR names. An
         # overlay that overrides the component's manifestFiles (shipping
