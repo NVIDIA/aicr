@@ -108,7 +108,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-published-links bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
@@ -159,6 +159,10 @@ check-settings-checksums: ## Verifies .settings.yaml checksum pins match their p
 .PHONY: check-docs-mdx
 check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
+
+.PHONY: check-docs-published-links
+check-docs-published-links: ## Ensures published docs link only to published pages and existing repository files
+	@./tools/check-docs-published-links
 
 # Parser-level docs gate — runs the SAME MDX parser Fern does over every
 # published doc, so a construct that would abort `fern generate --docs` at

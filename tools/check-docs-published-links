@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Check that published documentation links target published or repository files."""
+
+from __future__ import annotations
+
+import posixpath
+import re
+import subprocess
+import sys
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+ROOT = Path(__file__).resolve().parent.parent
+PUBLISHED_FILES = ROOT / "tools" / "docs-published-files"
+LINK_RE = re.compile(r"\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
+GITHUB_REPO = "NVIDIA/aicr"
+
+
+def published_paths() -> set[str]:
+    result = subprocess.run([str(PUBLISHED_FILES)], check=True, capture_output=True, text=True)
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def markdown_links(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    # Avoid treating examples in fenced code blocks as documentation links.
+    text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    return [angle or bare for angle, bare in LINK_RE.findall(text)]
+
+
+def relative_target(source: str, target: str) -> str | None:
+    target = target.split("#", 1)[0].split("?", 1)[0]
+    if not target or target.startswith(("/", "\\")):
+        return None
+    source_dir = posixpath.dirname(source)
+    return posixpath.normpath(posixpath.join(source_dir, unquote(target)))
+
+
+def github_blob_target(target: str) -> str | None:
+    parsed = urlparse(target)
+    if parsed.scheme != "https" or parsed.netloc != "github.com":
+        return None
+    parts = parsed.path.strip("/").split("/")
+    if len(parts) < 5 or "/".join(parts[:2]) != GITHUB_REPO or parts[2:4] != ["blob", "main"]:
+        return None
+    return unquote("/".join(parts[4:]))
+
+
+def main() -> int:
+    published = published_paths()
+    errors: list[str] = []
+    for source in sorted(published):
+        source_path = ROOT / source
+        for target in markdown_links(source_path):
+            github_path = github_blob_target(target)
+            if github_path is not None:
+                if not (ROOT / github_path).exists():
+                    errors.append(f"{source}: GitHub link target does not exist: {target}")
+                continue
+
+            parsed = urlparse(target)
+            if parsed.scheme or parsed.netloc or target.startswith("#"):
+                continue
+            resolved = relative_target(source, target)
+            if resolved and resolved.endswith(".md") and resolved not in published:
+                errors.append(f"{source}: relative link targets unpublished page: {target}")
+
+    if errors:
+        print("Published documentation link check failed:", file=sys.stderr)
+        print("\n".join(errors), file=sys.stderr)
+        return 1
+    print(f"Published documentation links checked for {len(published)} pages.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

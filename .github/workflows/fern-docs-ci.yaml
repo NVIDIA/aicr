@@ -57,6 +57,9 @@ jobs:
         run: fern check
 
       - name: Check links
+        run: ./tools/check-docs-published-links
+
+      - name: Check external links
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: --offline --no-progress 'docs/**/*.md'
