@@ -58,6 +58,8 @@ type closedWorldTestAttester struct {
 	attestErr     error
 }
 
+func testVerifiedBinaryAttestation() []byte { return []byte(`{"pre-verified":true}`) }
+
 func (a *closedWorldTestAttester) Attest(_ context.Context, subject attestation.AttestSubject) ([]byte, error) {
 	a.called++
 	if a.attestErr != nil {
@@ -235,7 +237,11 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 			config.WithAttest(true),
 		)
 		attester := &closedWorldTestAttester{}
-		b := &DefaultBundler{Config: cfg, Attester: attester}
+		b := &DefaultBundler{
+			Config:                    cfg,
+			Attester:                  attester,
+			verifiedBinaryAttestation: testVerifiedBinaryAttestation(),
+		}
 		_, err := b.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
@@ -254,7 +260,11 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 			config.WithAttest(true),
 		)
 		attester := &closedWorldTestAttester{writeMetadata: true}
-		b := &DefaultBundler{Config: cfg, Attester: attester}
+		b := &DefaultBundler{
+			Config:                    cfg,
+			Attester:                  attester,
+			verifiedBinaryAttestation: testVerifiedBinaryAttestation(),
+		}
 		dir := t.TempDir()
 		output, err := b.runDeployer(
 			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, time.Now())
@@ -324,9 +334,32 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 				config.WithIncludeChecksums(true),
 				config.WithAttest(true),
 			),
-			Attester: attester,
+			Attester:                  attester,
+			verifiedBinaryAttestation: testVerifiedBinaryAttestation(),
 		}
 	}
+
+	t.Run("binary attestation fails before signing", func(t *testing.T) {
+		attester := &closedWorldTestAttester{}
+		b := &DefaultBundler{
+			Config: config.NewConfig(
+				config.WithIncludeChecksums(true),
+				config.WithAttest(true),
+			),
+			Attester: attester,
+		}
+		files, err := b.attestBundle(
+			context.Background(), dir, nil, closedWorldRecipeResult())
+		if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			t.Fatalf("attestBundle() error = %v, want ErrCodeNotFound", err)
+		}
+		if len(files) != 0 {
+			t.Errorf("attestBundle() files = %v, want none", files)
+		}
+		if attester.called != 0 {
+			t.Errorf("Attest() calls = %d, want 0 when binary attestation verification fails", attester.called)
+		}
+	})
 
 	t.Run("checksum digest cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
