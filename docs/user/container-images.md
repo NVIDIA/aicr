@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **49**
-- Unique images: **116**
+- Unique images: **117**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -57,8 +57,8 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.6 | 1 |
-| mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
-| mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
+| mariadb-operator | helm | mariadb-operator | 26.10.0 | 1 |
+| mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.0 | 0 |
 | network-operator | helm | nvidia/network-operator | 26.4.1 | 12 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
@@ -79,7 +79,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm-operator | helm | slurm-operator | 1.2.2 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.2 | 0 |
 | slinky-topograph | helm | topograph/topograph | 1.0.0 | 1 |
-| slurm-accounting-mariadb | helm | mariadb-cluster | 26.6.0 | 0 |
+| slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.0 | 1 |
 
 ## Version variants
 
@@ -249,7 +249,7 @@ _No images extracted._
 
 ### mariadb-operator
 
-- `ghcr.io/mariadb-operator/mariadb-operator:26.6.0`
+- `ghcr.io/mariadb-operator/mariadb-operator:26.10.0`
 
 ### mariadb-operator-crds
 
@@ -368,7 +368,7 @@ _No images extracted._
 
 ### slurm-accounting-mariadb
 
-_No images extracted._
+- `mariadb:11.8.8`
 
 ### kube-prometheus-stack@83.7.0 (variant)
 
