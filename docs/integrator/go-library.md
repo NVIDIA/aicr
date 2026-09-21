@@ -604,6 +604,36 @@ For a per-resolution Slurm accounting mode, use
 `aicr.WithAccountingMode("customer-managed")`. The original criteria and
 snapshot method signatures remain unchanged for source compatibility.
 
+### Keeping a prior artifact's namespaces
+
+A component's namespace is re-derived from the registry on every resolve, so
+a registry default that moved between two AICR releases relocates a component
+that is already running. Helm cannot move a release between namespaces, so the
+bundle installs a second copy beside it. Name the prior artifact to keep its
+namespaces instead:
+
+```go
+result, err := client.ResolveRecipe(ctx, aicr.RecipeRequest{
+	Service:     "eks",
+	Accelerator: "h100",
+	Intent:      "training",
+	InheritFrom: "./bundles-v0.17.0", // or a recipe file
+})
+```
+
+`RecipeRequest.InheritFrom` is honored by `ResolveRecipe`;
+`aicr.WithInheritFrom(ref)` is the equivalent for
+`ResolveRecipeFromCriteriaWithOptions` and
+`ResolveRecipeFromSnapshotWithOptions`. A bundle directory is read through the
+`recipe.yaml` at its root. A component the prior artifact does not name keeps
+the registry default.
+
+The reference is read when the resolve runs, and it fails closed rather than
+silently resolving as a first deploy: a path that does not exist, a directory
+holding no `recipe.yaml`, and a `cm://` URI (not supported yet) each return
+`ErrCodeInvalidRequest`. Nothing is read from a cluster, so no kubeconfig is
+involved.
+
 ### Criteria relaxation on the snapshot path
 
 A snapshot resolve is strict by default — every criteria dimension you state
@@ -1587,7 +1617,7 @@ rest of `EvidenceOptions` stays yours, and the reasons differ:
 |---|---|
 | `Commit` | Names the running binary, not the document. It selects the validator catalog the bundle's BOM is built against. Set it after deriving. |
 | `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file; resolve it at sign time. |
-| `NoSign`, `Full` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. Both weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads — and a checked-in file that can silently disable signing is a supply-chain downgrade no reviewer would see in a diff. |
+| `NoSign`, `Full`, `AllowMutableValidatorTags` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. All three weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads, `AllowMutableValidatorTags` lets the predicate name validator images that can later resolve to different code — and a checked-in file that can silently disable signing or provenance is a supply-chain downgrade no reviewer would see in a diff. |
 
 **Why `plainHTTP` and `insecureTLS` project anyway.** They weaken a run too, so
 the rule above is not "config may never weaken anything" — stated that broadly

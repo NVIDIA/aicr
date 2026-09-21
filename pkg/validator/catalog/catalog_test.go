@@ -1224,6 +1224,39 @@ func TestEmbeddedCatalog_NCCLAllReduceBWNetEntryExists(t *testing.T) {
 	t.Fatalf("no embedded catalog entry named %q (AICR_NCCL_FABRIC forwarding would silently no-op)", v1.NCCLAllReduceBWNetCheckName)
 }
 
+// TestEmbeddedCatalog_NCCLEntriesExist locks the embedded catalog entry names
+// for all three NCCL all-reduce checks (default, NET, NVLS) to the
+// v1.NCCLAllReduceBW*CheckName constants that scope AICR_NCCL_RUNTIME_IMAGE
+// forwarding (see buildEnv in pkg/validator/v1). Without this, renaming any of
+// the three catalog entries would silently disable image-override forwarding
+// to that variant — the in-Job validator would never see the env and stay on
+// the compiled-in default — with no other test failing. See NVIDIA/aicr#1751.
+func TestEmbeddedCatalog_NCCLEntriesExist(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	want := map[string]bool{
+		v1.NCCLAllReduceBWCheckName:     false,
+		v1.NCCLAllReduceBWNetCheckName:  false,
+		v1.NCCLAllReduceBWNvlsCheckName: false,
+	}
+	for _, v := range cat.Validators {
+		if _, ok := want[v.Name]; !ok {
+			continue
+		}
+		if v.Phase != "performance" {
+			t.Errorf("%q phase = %q, want performance", v.Name, v.Phase)
+		}
+		want[v.Name] = true
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("no embedded catalog entry named %q (AICR_NCCL_RUNTIME_IMAGE forwarding would silently no-op)", name)
+		}
+	}
+}
+
 func TestCatalogEmbedding(t *testing.T) {
 	// Simulate embedding in a CR spec
 	type ValidatorCatalogSpec struct {
@@ -1376,5 +1409,135 @@ func TestLoadDataProvider(t *testing.T) {
 				t.Error("LoadWithDataProvider() returned catalog with no validators")
 			}
 		})
+	}
+}
+
+func TestIsImmutableRef(t *testing.T) {
+	const repo = "ghcr.io/nvidia/aicr-validators/performance"
+
+	tests := []struct {
+		name  string
+		image string
+		want  bool
+	}{
+		// Immutable: the shapes CI publishes as content-stable refs.
+		{"release tag", repo + ":v1.0.0", true},
+		{"pre-release tag", repo + ":v1.0.0-rc1", true},
+		{"pre-release with dotted suffix", repo + ":v1.0.0-alpha.1", true},
+		{"full sha tag", repo + ":sha-1f27c0dc6e4617db9b505eb10ee9d910a08968aa", true},
+		{"uat run tag", repo + ":uat-19283746", true},
+		{"digest pinned", repo + "@sha256:" + strings.Repeat("a", 64), true},
+		{"digest pinned with tag", repo + ":v1.0.0@sha256:" + strings.Repeat("a", 64), true},
+
+		// Mutable: the moving aliases and everything unrecognized.
+		// A local registry publishes under no contract AICR enforces, so the
+		// release-shaped tag buys it nothing.
+		{"registry port then release tag", "localhost:5001/aicr-validators/performance:v1.0.0", false},
+		{"edge", repo + ":edge", false},
+		{"latest", repo + ":latest", false},
+		{"main", repo + ":main", false},
+		{"ad-hoc feature tag", repo + ":dynamo102", false},
+		{"goreleaser snapshot is never published", repo + ":v0.13.0-next", false},
+		// on-tag.yaml only triggers on v-prefixed tags and release-images.sh
+		// re-checks `^v`, so a bare semver tag was never published.
+		{"release tag without v prefix was never published", repo + ":1.0.0", false},
+		// on-push.yaml tags with the full github.sha; a prefix is both
+		// unpublished and ambiguous across history.
+		{"short sha tag was never published", repo + ":sha-1f27c0d", false},
+		{"sha tag too short", repo + ":sha-1f27c0", false},
+		{"sha tag not hex", repo + ":sha-" + strings.Repeat("z", 40), false},
+		{"sha tag too long", repo + ":sha-" + strings.Repeat("a", 41), false},
+		{"uat tag not numeric", repo + ":uat-edge", false},
+		{"leading-zero version is not a release tag", repo + ":v01.0.0", false},
+		// Tag syntax is not proof of immutability — only the publisher's
+		// workflows are. Nothing constrains a third party's :v1.0.0.
+		{"third-party registry with release tag", "example.com/validators/performance:v1.0.0", false},
+		{"third-party registry with sha tag", "example.com/validators/performance:sha-" + strings.Repeat("a", 40), false},
+		{"mirrored nvidia path off-registry", "mirror.example.com/nvidia/aicr-validators/performance:v1.0.0", false},
+		{"prefix must be a path boundary", "ghcr.io/nvidia/aicr-validators-evil/performance:v1.0.0", false},
+		// A digest is self-verifying, so it needs no publisher promise.
+		{"third-party digest pin", "example.com/validators/performance@sha256:" + strings.Repeat("a", 64), true},
+		{"sha512 digest pin", repo + "@sha512:" + strings.Repeat("a", 128), true},
+		{"malformed digest is not a pin", repo + "@bar", false},
+		{"digest with truncated hex is not a pin", repo + "@sha256:abc123", false},
+		// Encoded length is a property of the algorithm: sha256 is exactly 64
+		// hex. A shorter value pins nothing, however hex-shaped it looks.
+		{"32-hex sha256 is too short to pin", repo + "@sha256:" + strings.Repeat("a", 32), false},
+		{"sha256 with sha512 length is not a pin", repo + "@sha256:" + strings.Repeat("a", 128), false},
+		{"sha512 with sha256 length is not a pin", repo + "@sha512:" + strings.Repeat("a", 64), false},
+		{"uppercase hex is not a canonical digest", repo + "@sha256:" + strings.Repeat("A", 64), false},
+		// An algorithm no verifier here implements cannot evidence anything.
+		{"unknown algorithm is not a pin", repo + "@md5:" + strings.Repeat("a", 32), false},
+		{"empty digest after @ is not a pin", repo + "@", false},
+		{"digest with non-hex encoding is not a pin", repo + "@sha256:" + strings.Repeat("z", 64), false},
+		{"mutable tag plus malformed digest stays mutable", repo + ":edge@sha256:nope", false},
+		{"untagged ref defaults to latest", repo, false},
+		{"registry port with no tag", "localhost:5001/aicr-validators/performance", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsImmutableRef(tt.image); got != tt.want {
+				t.Errorf("IsImmutableRef(%q) = %v, want %v", tt.image, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsImmutableRefAcceptsResolveImageOutput is the coupling guard: every tag
+// ResolveImage produces on its own (no AICR_VALIDATOR_IMAGE_TAG override) must
+// be classified immutable, so the attestation gate never rejects a run that did
+// nothing wrong. A new resolution path added to ResolveImage without a matching
+// IsImmutableRef shape fails here rather than in a UAT lane.
+func TestIsImmutableRefAcceptsResolveImageOutput(t *testing.T) {
+	t.Setenv("AICR_VALIDATOR_IMAGE_TAG", "")
+	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+
+	const img = "ghcr.io/nvidia/aicr-validators/performance:latest"
+
+	tests := []struct {
+		name    string
+		version string
+		commit  string
+	}{
+		{"stable release", "v1.0.0", ""},
+		// goreleaser can strip the leading "v" from the version string;
+		// replaceLatestTag adds it back, so the resolved TAG is still
+		// v-prefixed. IsImmutableRef requires that prefix, so this case is
+		// what proves the two halves of that asymmetry agree.
+		{"release version without v prefix", "1.0.0", ""},
+		{"pre-release", "v1.0.0-rc1", "1f27c0dc6e4617db9b505eb10ee9d910a08968aa"},
+		{"main dev build", "dev", "1f27c0dc6e4617db9b505eb10ee9d910a08968aa"},
+		{"snapshot build falls through to sha", "v0.13.0-next", "1f27c0dc6e4617db9b505eb10ee9d910a08968aa"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved := ResolveImage(img, tt.version, tt.commit)
+			if !IsImmutableRef(resolved) {
+				t.Errorf("ResolveImage(%q, %q, %q) = %q, which IsImmutableRef rejects",
+					img, tt.version, tt.commit, resolved)
+			}
+		})
+	}
+}
+
+// TestIsImmutableRefRejectsUnpublishedShortSHAResolution documents a deliberate
+// asymmetry with ResolveImage: isValidCommit accepts a 7-40 char SHA, so a
+// binary stamped with a short commit resolves to :sha-<short> — a tag on-push
+// never published, since it tags with the full github.sha. Such a run cannot
+// produce evidence anyway (the validator Job would fail to pull), so the gate
+// rejecting it is correct rather than a coupling break.
+func TestIsImmutableRefRejectsUnpublishedShortSHAResolution(t *testing.T) {
+	t.Setenv("AICR_VALIDATOR_IMAGE_TAG", "")
+	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+
+	resolved := ResolveImage("ghcr.io/nvidia/aicr-validators/performance:latest", "dev", "1f27c0d")
+	if want := "ghcr.io/nvidia/aicr-validators/performance:sha-1f27c0d"; resolved != want {
+		t.Fatalf("ResolveImage short-commit = %q, want %q", resolved, want)
+	}
+	if IsImmutableRef(resolved) {
+		t.Errorf("IsImmutableRef(%q) = true; a short-SHA tag is never published and must not vouch for provenance", resolved)
 	}
 }

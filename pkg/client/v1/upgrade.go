@@ -141,7 +141,7 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 		return nil, err
 	}
 
-	results := upgrade.Match(set, componentVersions(from), componentVersions(to))
+	results := upgrade.MatchIdentities(set, componentIdentities(from), componentIdentities(to))
 	if req.Deployer == "" && upgrade.RequiresDeployer(results) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"a deployer is required: at least one component needs operator steps, and steps differ per deployer. "+
@@ -227,7 +227,31 @@ func artifactRecipePath(ref string) (string, error) {
 	return embedded, nil
 }
 
-// componentVersions projects a resolved recipe onto the component-to-version
+// inheritedRecipePath maps a RecipeRequest.InheritFrom reference to the recipe
+// document to read, reusing artifactRecipePath's file and bundle-directory
+// forms but not its cm:// pass-through.
+//
+// cm:// is rejected before delegating so the unsupported form fails closed
+// here rather than inside a loader that would try to reach a cluster for it;
+// upgrade-check's --from keeps accepting the scheme (#2830).
+//
+// A reference that resolves to nothing is rejected here too. artifactRecipePath
+// leaves that to the loader, which reports ErrCodeNotFound; for inheritance the
+// distinction matters, because a silently absent prior artifact would resolve
+// as a first deploy and relocate exactly the components this is meant to pin.
+func inheritedRecipePath(ref string) (string, error) {
+	if strings.HasPrefix(strings.TrimSpace(ref), serializer.ConfigMapURIScheme) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"inherit-from does not support cm:// locations yet; pass a recipe file or a bundle directory")
+	}
+	if _, err := os.Stat(ref); err != nil {
+		return "", errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"inherit-from %s is not readable as a recipe file or a bundle directory", ref), err)
+	}
+	return artifactRecipePath(ref)
+}
+
+// componentIdentities projects a resolved recipe onto the component-to-identity
 // table the matcher compares. Unversioned components are carried rather than
 // dropped: the matcher classifies them as unversioned, which is a reportable
 // blind spot, while dropping them would read as a component removal.
@@ -237,17 +261,23 @@ func artifactRecipePath(ref string) (string, error) {
 // the registry declares). Reading Version alone would compare "" to "" for
 // every Kustomize component, and the matcher skips equal pins, so a tag move
 // would vanish from the report rather than be carried as unversioned.
-func componentVersions(r *RecipeResult) map[string]string {
+//
+// Namespace rides along because a recipe is regenerated from scratch on every
+// AICR upgrade: a moved registry default relocates the install, and Helm cannot
+// move a release between namespaces, so applying the new recipe installs a
+// second copy beside the running one. A version-only projection reports that as
+// no change at all.
+func componentIdentities(r *RecipeResult) map[string]upgrade.Identity {
 	if r == nil {
 		return nil
 	}
-	table := make(map[string]string, len(r.Components))
+	table := make(map[string]upgrade.Identity, len(r.Components))
 	for _, c := range r.Components {
 		version := c.Version
 		if version == "" {
 			version = c.Tag
 		}
-		table[c.Name] = version
+		table[c.Name] = upgrade.Identity{Version: version, Namespace: c.Namespace}
 	}
 	return table
 }

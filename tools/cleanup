@@ -118,6 +118,11 @@ AICR_NAMESPACES=(
     gpu-operator
     nvidia-network-operator
     cert-manager
+    nodewright
+    # Kept alongside nodewright: the registry default moved, but a cluster
+    # deployed before that move still has its operator in skyhook, and Helm
+    # cannot relocate a release. Both are AICR's to clean until no such
+    # cluster remains. Mirrors the two API groups listed below.
     skyhook
     nvsentinel
     nvidia-dra-driver

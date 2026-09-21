@@ -106,6 +106,7 @@ flag    aicr mirror list  --criteria-strict  type=bool default=false required=fa
 flag    aicr mirror list  --data  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --format,-f  type=string default="yaml" required=false hidden=false env=
 flag    aicr mirror list  --gke-tcpxo-interfaces  type=string default= required=false hidden=false env=
+flag    aicr mirror list  --inherit-from  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --intent  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --kubeconfig,-k  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --nodes  type=int default=0 required=false hidden=false env=
@@ -125,6 +126,7 @@ flag    aicr query  --criteria-strict  type=bool default=false required=false hi
 flag    aicr query  --data  type=string default= required=false hidden=false env=
 flag    aicr query  --format,-t  type=string default="yaml" required=false hidden=false env=
 flag    aicr query  --gke-tcpxo-interfaces  type=string default= required=false hidden=false env=
+flag    aicr query  --inherit-from  type=string default= required=false hidden=false env=
 flag    aicr query  --intent  type=string default= required=false hidden=false env=
 flag    aicr query  --kubeconfig,-k  type=string default= required=false hidden=false env=
 flag    aicr query  --nodes  type=int default=0 required=false hidden=false env=
@@ -142,6 +144,7 @@ flag    aicr recipe  --criteria-strict  type=bool default=false required=false h
 flag    aicr recipe  --data  type=string default= required=false hidden=false env=
 flag    aicr recipe  --format,-t  type=string default="yaml" required=false hidden=false env=
 flag    aicr recipe  --gke-tcpxo-interfaces  type=string default= required=false hidden=false env=
+flag    aicr recipe  --inherit-from  type=string default= required=false hidden=false env=
 flag    aicr recipe  --intent  type=string default= required=false hidden=false env=
 flag    aicr recipe  --kubeconfig,-k  type=string default= required=false hidden=false env=
 flag    aicr recipe  --nodes  type=int default=0 required=false hidden=false env=
@@ -204,6 +207,7 @@ flag    aicr upgrade-check  --kubeconfig,-k  type=string default= required=false
 flag    aicr upgrade-check  --output,-o  type=string default= required=false hidden=false env=
 flag    aicr upgrade-check  --to  type=string default= required=false hidden=false env=
 flag    aicr validate  --aks-gpu-pools  type=string default= required=false hidden=false env=AICR_AKS_GPU_POOLS_PATH
+flag    aicr validate  --allow-mutable-validator-tags  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --bom  type=string default= required=false hidden=false env=
 flag    aicr validate  --cncf-submission  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --config  type=string default= required=false hidden=false env=

@@ -110,6 +110,18 @@ reservations:
     cluster-config-path: tests/uat/gcp/cluster-config.yaml
     test-config-dir: tests/uat/gcp/tests
     nightly-intents: [training, inference]
+    # #2705 shipped the torch-distributed-tcpxo runtime and, in the same
+    # commit, gave the training config a
+    # `spec.recipe.configuration.gke.tcpxoInterfaces` block. Release cells run
+    # main's test config against the released binary, so a pre-#2705 aicr
+    # rejects that config outright (unknown field in
+    # config.RecipeConfigurationSpec) and would fail the training phase on a
+    # missing runtime even if it parsed — a permanently-red compatibility
+    # cell, not a regression signal. v0.22.0 is the first release expected to
+    # carry #2705; until it ships, training runs on main only. Bump this if
+    # the actual first-fixed tag differs. (Same mechanism azure-h100 uses.)
+    nightly-intent-min-versions:
+      training: v0.22.0
     daytime-intent: inference
   - name: azure-h100
     slug: zh1

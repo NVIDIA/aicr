@@ -239,6 +239,10 @@ func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *aicr.Con
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--gke-tcpxo-interfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
 		}
+		if cmd.IsSet(flagInheritFrom) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--inherit-from pins namespaces during criteria resolution and cannot be combined with --recipe; the recipe file already records the namespaces it resolved to")
+		}
 		// The config-file mapping is equally a criteria-resolution input; the
 		// recipe file on disk already records its mapping. Mirror the profile
 		// guard's flag-or-config check.

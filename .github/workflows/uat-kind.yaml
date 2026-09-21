@@ -191,6 +191,19 @@ jobs:
             # override that rewrite (catalog resolution step 3) so it matches the
             # loaded images. Release cells leave this unset (released :<version>).
             echo "AICR_VALIDATOR_IMAGE_TAG=latest"
+            # That :latest pin is a mutable tag, which `validate --emit-attestation`
+            # refuses by default (#2873) because the predicate names validators by
+            # tag alone. Accept it here and ONLY here: these are ko.local images
+            # side-loaded into a throwaway kind cluster, so there is no registry the
+            # tag could be repointed in and no immutable tag to prefer. The cloud
+            # lanes resolve :uat-<run_id> (main) or :<version> (release) and must
+            # keep failing closed — do not copy this line into them.
+            #
+            # This is read by tests/uat/lib/phases.sh, which turns it into an
+            # explicit --allow-mutable-validator-tags argument. aicr itself honors
+            # no env var for the opt-out, so a stray export cannot disable the gate
+            # for an unrelated run.
+            echo "UAT_ALLOW_MUTABLE_VALIDATOR_TAGS=true"
           } >> "$GITHUB_ENV"
 
       # Main cell (aicr_version empty): build the host aicr binary from source,

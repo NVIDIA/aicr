@@ -99,8 +99,8 @@ func resumeJobWatch(ctx context.Context, client kubernetes.Interface, namespace,
 	select {
 	case <-time.After(wait.Jitter(jobWatchResumeBackoff, jobWatchResumeJitterFactor)):
 	case <-ctx.Done():
-		return nil, nil, errors.WrapWithContext(errors.ErrCodeTimeout,
-			"context canceled before Job watch resume", ctx.Err(), resumeContext(namespace, name))
+		return nil, nil, errors.WrapCtxErrWithContext(ctx.Err(), errors.ErrCodeTimeout,
+			"context ended before Job watch resume", resumeContext(namespace, name))
 	}
 
 	// The timer and ctx.Done() branches race when the backoff elapses at or near
@@ -108,8 +108,8 @@ func resumeJobWatch(ctx context.Context, client kubernetes.Interface, namespace,
 	// lose to an already-fired timer. Re-check so a caller that has given up
 	// deterministically wins before we List/Watch against its apiserver.
 	if err := ctx.Err(); err != nil {
-		return nil, nil, errors.WrapWithContext(errors.ErrCodeTimeout,
-			"context canceled before Job watch resume", err, resumeContext(namespace, name))
+		return nil, nil, errors.WrapCtxErrWithContext(err, errors.ErrCodeTimeout,
+			"context ended before Job watch resume", resumeContext(namespace, name))
 	}
 
 	// Resync via List: its collection ResourceVersion is current, and its result
@@ -180,7 +180,7 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 	for {
 		select {
 		case <-timeoutCtx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", timeoutCtx.Err())
+			return errors.WrapCtxErr(timeoutCtx.Err(), errors.ErrCodeTimeout, "waiting for job completion")
 		case event, ok := <-watcher.ResultChan():
 			// The watch stream ended when the channel closes or the apiserver
 			// emits a retryable 410 (it compacted past our ResourceVersion).
@@ -192,12 +192,12 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 			// the context deadline or a classified resync failure does.
 			if !ok || isRetryableWatchError(event) {
 				if ctxErr := timeoutCtx.Err(); ctxErr != nil {
-					return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", ctxErr)
+					return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "waiting for job completion")
 				}
 				terminal, newWatcher, resumeErr := resumeJobWatch(timeoutCtx, client, namespace, name)
 				if resumeErr != nil {
 					if ctxErr := timeoutCtx.Err(); ctxErr != nil {
-						return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", ctxErr)
+						return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "waiting for job completion")
 					}
 					return resumeErr
 				}
@@ -241,9 +241,9 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 // Returns ErrCodeInternal if the initial Get or Watch call fails, or if the
 // Job is deleted while being watched. Returns ErrCodeUnavailable when the
 // resync List or its replacement Watch fails transiently while resuming a
-// closed watch, and ErrCodeTimeout on context deadline exceeded. A watch
-// closure alone never ends the wait; only the context deadline or a classified
-// resync failure does.
+// closed watch, ErrCodeTimeout on context deadline exceeded, and
+// ErrCodeCanceled on operator abort. A watch closure alone never ends the
+// wait; only the context ending or a classified resync failure does.
 //
 // When the watch ends without the Job being terminal (routine on kube-apiserver
 // --min-request-timeout expiry, rolling restarts, and LB drops), this resyncs
@@ -282,7 +282,7 @@ func WaitForJobTerminal(ctx context.Context, client kubernetes.Interface, namesp
 	for {
 		select {
 		case <-timeoutCtx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", timeoutCtx.Err())
+			return nil, errors.WrapCtxErr(timeoutCtx.Err(), errors.ErrCodeTimeout, "waiting for job to reach a terminal state")
 		case event, ok := <-watcher.ResultChan():
 			// The watch stream ended when the channel closes or the apiserver
 			// emits a retryable 410 (it compacted past our ResourceVersion) —
@@ -295,12 +295,12 @@ func WaitForJobTerminal(ctx context.Context, client kubernetes.Interface, namesp
 				// If the parent context already expired, classify the
 				// failure as a timeout rather than a generic recheck error.
 				if ctxErr := timeoutCtx.Err(); ctxErr != nil {
-					return nil, errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", ctxErr)
+					return nil, errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "waiting for job to reach a terminal state")
 				}
 				terminal, newWatcher, resumeErr := resumeJobWatch(timeoutCtx, client, namespace, name)
 				if resumeErr != nil {
 					if ctxErr := timeoutCtx.Err(); ctxErr != nil {
-						return nil, errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", ctxErr)
+						return nil, errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "waiting for job to reach a terminal state")
 					}
 					return nil, resumeErr
 				}

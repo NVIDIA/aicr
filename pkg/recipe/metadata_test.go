@@ -2180,6 +2180,195 @@ func TestComponentRefApplyRegistryDefaults_ManifestFiles(t *testing.T) {
 	})
 }
 
+// TestApplyInheritedIdentity verifies that a prior recipe's resolved namespaces
+// survive re-resolution against a registry whose defaults have moved.
+func TestApplyInheritedIdentity(t *testing.T) {
+	tests := []struct {
+		name   string
+		refs   []ComponentRef
+		prior  []ComponentRef
+		wantNS map[string]string
+	}{
+		{
+			name:   "prior namespace wins over registry default",
+			refs:   []ComponentRef{{Name: "nodewright-operator", Namespace: "nodewright"}},
+			prior:  []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}},
+			wantNS: map[string]string{"nodewright-operator": "skyhook"},
+		},
+		{
+			name:   "empty prior namespace does not clobber the default",
+			refs:   []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			prior:  []ComponentRef{{Name: "gpu-operator", Namespace: ""}},
+			wantNS: map[string]string{"gpu-operator": "gpu-operator"},
+		},
+		{
+			name:   "component absent from prior keeps the default",
+			refs:   []ComponentRef{{Name: "new-thing", Namespace: "new-thing"}},
+			prior:  []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			wantNS: map[string]string{"new-thing": "new-thing"},
+		},
+		{
+			name:   "nil prior is a no-op",
+			refs:   []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			prior:  nil,
+			wantNS: map[string]string{"gpu-operator": "gpu-operator"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := slices.Clone(tt.refs)
+			ApplyInheritedIdentity(refs, tt.prior)
+			for _, ref := range refs {
+				if got := ref.Namespace; got != tt.wantNS[ref.Name] {
+					t.Errorf("%s namespace = %q, want %q", ref.Name, got, tt.wantNS[ref.Name])
+				}
+			}
+		})
+	}
+}
+
+// TestApplyInheritedIdentityRebindsHealthCheck pins the interaction between the
+// two halves of --inherit-from: a health check is static YAML naming wherever
+// the registry currently puts the component, so a preserved namespace that left
+// the assertions behind would fail validation against the very deployment
+// inheritance just kept in place.
+//
+// The kube-system assertion is the control. A check may legitimately assert
+// against a namespace the component does not live in, and those must survive.
+func TestApplyInheritedIdentityRebindsHealthCheck(t *testing.T) {
+	const check = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+spec:
+  steps:
+    - name: validate-deployment-exists
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: skyhook-operator-controller-manager
+                namespace: nodewright
+    - name: validate-unrelated-namespace
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: kube-proxy
+                namespace: kube-system
+`
+
+	refs := []ComponentRef{{
+		Name:               "nodewright-operator",
+		Namespace:          "nodewright",
+		HealthCheckAsserts: check,
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	if got := refs[0].Namespace; got != "skyhook" {
+		t.Fatalf("namespace = %q, want skyhook", got)
+	}
+	if strings.Contains(refs[0].HealthCheckAsserts, "namespace: nodewright") {
+		t.Errorf("health check still asserts the registry namespace:\n%s", refs[0].HealthCheckAsserts)
+	}
+	if !strings.Contains(refs[0].HealthCheckAsserts, "namespace: skyhook") {
+		t.Errorf("health check does not assert the inherited namespace:\n%s", refs[0].HealthCheckAsserts)
+	}
+	if !strings.Contains(refs[0].HealthCheckAsserts, "namespace: kube-system") {
+		t.Errorf("unrelated namespace assertion was rewritten:\n%s", refs[0].HealthCheckAsserts)
+	}
+}
+
+// TestApplyInheritedIdentityRebindsEveryDocument pins that rebinding preserves
+// a multi-document health check. Nothing restricts the field to one document,
+// and decoding only the first would silently drop the rest on re-serialization,
+// leaving a check that passes without verifying what it claims to. The second
+// document also holds the only matching namespace, so a first-document-only
+// implementation would additionally fail to rebind at all.
+func TestApplyInheritedIdentityRebindsEveryDocument(t *testing.T) {
+	const check = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: first-doc
+spec:
+  steps:
+    - name: unrelated
+      try:
+        - assert:
+            resource:
+              kind: DaemonSet
+              metadata:
+                namespace: kube-system
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: second-doc
+spec:
+  steps:
+    - name: operator
+      try:
+        - assert:
+            resource:
+              kind: Deployment
+              metadata:
+                namespace: nodewright
+`
+
+	refs := []ComponentRef{{
+		Name:               "nodewright-operator",
+		Namespace:          "nodewright",
+		HealthCheckAsserts: check,
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	got := refs[0].HealthCheckAsserts
+	if !strings.Contains(got, "first-doc") {
+		t.Errorf("the first document was dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "second-doc") {
+		t.Errorf("the second document was dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "namespace: skyhook") {
+		t.Errorf("the second document's namespace was not rebound:\n%s", got)
+	}
+	if !strings.Contains(got, "namespace: kube-system") {
+		t.Errorf("an unrelated namespace was rewritten:\n%s", got)
+	}
+}
+
+// TestApplyInheritedIdentityLeavesRefIntactOnRebindFailure pins the all-or-
+// nothing contract: a ref changes both its namespace and its health check, or
+// neither. Assigning the namespace first would leave the new value beside
+// assertions still naming the old one, and the "already inherited" guard would
+// then skip the ref on a retry, stranding the stale YAML permanently.
+func TestApplyInheritedIdentityLeavesRefIntactOnRebindFailure(t *testing.T) {
+	refs := []ComponentRef{{
+		Name:      "nodewright-operator",
+		Namespace: "nodewright",
+		// Not parseable as YAML, so rebinding cannot succeed.
+		HealthCheckAsserts: "spec:\n  steps:\n   - bad\n  indent: [oops\n",
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	err := ApplyInheritedIdentity(refs, prior)
+	if err == nil {
+		t.Fatal("ApplyInheritedIdentity() = nil error, want a parse failure")
+	}
+	if got := refs[0].Namespace; got != "nodewright" {
+		t.Errorf("namespace = %q, want it left at nodewright: a failed rebind must not "+
+			"half-apply the inheritance", got)
+	}
+}
+
 // TestComponentRefMergeWithPath verifies that the Path field is correctly merged
 // when merging ComponentRefs (overlay into base).
 func TestComponentRefMergeWithPath(t *testing.T) {

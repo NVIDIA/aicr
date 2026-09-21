@@ -1279,11 +1279,19 @@ phase_conformance() {
   # after the failing check gave up, while status.status is most likely still
   # in_progress — before propagating the failure. The teardown-time collector runs
   # minutes later, by when the CR may have re-converged and hidden the flip.
+  # The kind lane validates side-loaded ko.local images pinned to :latest, a
+  # mutable tag that `--emit-attestation` refuses to record as provenance
+  # (#2873). There is no immutable tag to prefer — the images never reach a
+  # registry — so that lane opts out explicitly. Every cloud lane resolves
+  # :uat-<run_id> or a release tag and must keep failing closed, which is why
+  # this is an opt-in per lane rather than a default.
+  local -a validate_args=(--config "${config}" --phase all --output report.json)
+  if [[ "${UAT_ALLOW_MUTABLE_VALIDATOR_TAGS:-}" == "true" ]]; then
+    validate_args+=(--allow-mutable-validator-tags)
+  fi
+
   local vrc=0
-  "${AICR_BIN}" validate \
-    --config "${config}" \
-    --phase all \
-    --output report.json || vrc=$?
+  "${AICR_BIN}" validate "${validate_args[@]}" || vrc=$?
   echo "::endgroup::"
   if (( vrc != 0 )); then
     capture_skyhook_snapshot conformance-validate

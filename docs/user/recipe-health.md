@@ -34,6 +34,8 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 The link is constructed **hermetically and deterministically** from the recipe's resolved criteria using the shared `pkg/recipe.CoordinateFor` mapping — the generator makes no network call, and the coordinate carries **no Kubernetes version**, so a link is stable across k8s-version rolls. The Evidence cell is a link and nothing more: it points at the live board and carries **no** pass/fail state or count. Which recipes are linked is driven by a committed presence manifest (`pkg/testgrid/presence.yaml`); a weekly, warning-only bot keeps it honest by reporting any link that no longer resolves against the live dashboard data (it never blocks merges or edits this doc).
 
 > **Community-source posture is author-asserted provenance, not independently-verified correctness.** A coordinate's tab placement and any community-sourced results on the dashboard are declared by the signing author; corroboration counts agreement at the same AICR version but does not itself certify runtime correctness. Read the linked board accordingly.
+>
+> **Today every committed pointer is `community` class; none is `first-party`.** The signer classes are pinned per class in [`recipes/evidence/allowlist.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/evidence/allowlist.yaml) — `first-party` is the project's own UAT workflows, `community` is individual external contributors, `partner` has nobody onboarded. Every pointer committed under `recipes/evidence/` is community class, published from a contributor fork per [evidence publishing](https://github.com/NVIDIA/aicr/blob/main/docs/contributor/evidence-publishing.md), and admitted by maintainer review. The Evidence column does not render the class, so a deep-link here does not distinguish one from the other — read the class from the allowlist. Surfacing it per row is deferred alongside ADR-009's in-cell freshness state ([#2877](https://github.com/NVIDIA/aicr/issues/2877)).
 
 The deep-link is the current Evidence rendering. It is distinct from — and coexists with — [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md)'s deferred, verify-gated *in-cell freshness* state (`unattested` vs aged, derived from a signed attestation's `AttestedAt`): the link points at the live board, and an optional freshness token can later annotate the same cell without replacing the link. See also the [coverage matrix](coverage-matrix.md) for the complementary breadth view.
 
@@ -64,11 +66,11 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
 | h100-bcm-ubuntu-training-kubeflow | bcm | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:6 | pending |
 | a100-eks-ubuntu-training-kubeflow | eks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
-| gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | pending |
+| gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/gb200-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb200-ubuntu/inference-dynamo) |
+| gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | [eks/gb200-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb200-ubuntu/training-kubeflow) |
 | gb200-eks-ubuntu-training-slurm | eks | gb200 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
-| gb300-eks-ubuntu-inference-dynamo | eks | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | pending |
+| gb300-eks-ubuntu-inference-dynamo | eks | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/gb300-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb300-ubuntu/inference-dynamo) |
+| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | [eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) |
 | gb300-eks-ubuntu-training-slurm | eks | gb300 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-eks-ubuntu-inference-dynamo | eks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/h100-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/h100-ubuntu/inference-dynamo) |
 | h100-eks-ubuntu-inference-nim | eks | h100 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:11 | pending |
@@ -85,7 +87,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | b200-gke-cos-training-kubeflow | gke | b200 | cos | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | gb200-gke-cos-inference-dynamo | gke | gb200 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | gb200-gke-cos-training-kubeflow | gke | gb200 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
-| gb200-gke-cos-training-slurm | gke | gb200 | cos | training | slurm | pass | R:0 D:4 P:0 C:12 | pending |
+| gb200-gke-cos-training-slurm | gke | gb200 | cos | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:5 P:1 C:10 | pending |
 | h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:5 P:0 C:10 | pending |
