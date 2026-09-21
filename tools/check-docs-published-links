@@ -12,7 +12,6 @@ from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 PUBLISHED_FILES = ROOT / "tools" / "docs-published-files"
-LINK_RE = re.compile(r"\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
 GITHUB_REPO = "NVIDIA/aicr"
 
 
@@ -23,9 +22,113 @@ def published_paths() -> set[str]:
 
 def markdown_links(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
-    # Avoid treating examples in fenced code blocks as documentation links.
-    text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
-    return [angle or bare for angle, bare in LINK_RE.findall(text)]
+    text = _without_fenced_code(text)
+    links = _inline_links(text)
+    references = {
+        label.casefold(): destination
+        for label, destination in _reference_definitions(text)
+    }
+    links.extend(
+        destination
+        for label in re.findall(r"(?<!\\)\[[^\]]+\]\[([^\]]*)\]", text)
+        if (destination := references.get(label.casefold() or label.casefold()))
+    )
+    return links
+
+
+def _without_fenced_code(text: str) -> str:
+    """Remove fenced blocks while respecting marker type and fence width."""
+    kept: list[str] = []
+    marker: str | None = None
+    width = 0
+    for line in text.splitlines(keepends=True):
+        opener = re.match(r"^ {0,3}([`~]{3,})[^\n]*", line)
+        if marker is None:
+            if opener and (opener.group(1)[0] == "~" or "`" not in line[opener.end(1) :]):
+                marker = opener.group(1)[0]
+                width = len(opener.group(1))
+                kept.append("\n" if line.endswith("\n") else "")
+            else:
+                kept.append(line)
+            continue
+
+        closing = re.match(rf"^ {{0,3}}{re.escape(marker)}{{{width},}}[ \t]*(?:\n|$)", line)
+        if closing:
+            marker = None
+            width = 0
+            kept.append("\n" if line.endswith("\n") else "")
+        else:
+            kept.append("\n" if line.endswith("\n") else "")
+    return "".join(kept)
+
+
+def _inline_links(text: str) -> list[str]:
+    links: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "[" or (index and text[index - 1] == "\\"):
+            index += 1
+            continue
+        label_end = text.find("]", index + 1)
+        if label_end < 0:
+            break
+        cursor = label_end + 1
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor >= len(text) or text[cursor] != "(":
+            index = label_end + 1
+            continue
+        destination = _parenthesized_destination(text, cursor + 1)
+        if destination is not None:
+            links.append(destination)
+        index = cursor + 1
+    return links
+
+
+def _parenthesized_destination(text: str, start: int) -> str | None:
+    cursor = start
+    while cursor < len(text) and text[cursor].isspace():
+        cursor += 1
+    if cursor < len(text) and text[cursor] == "<":
+        end = text.find(">", cursor + 1)
+        if end < 0:
+            return None
+        return text[cursor + 1 : end]
+
+    begin = cursor
+    depth = 0
+    escaped = False
+    while cursor < len(text):
+        char = text[cursor]
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            if depth == 0:
+                raw = text[begin:cursor].strip()
+                return raw.split(None, 1)[0] if raw else None
+            depth -= 1
+        cursor += 1
+    return None
+
+
+def _reference_definitions(text: str) -> list[tuple[str, str]]:
+    definitions: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        match = re.match(r"^ {0,3}\[([^\]]+)\]:[ \t]*(.*)$", line)
+        if not match:
+            continue
+        raw = match.group(2).strip()
+        if raw.startswith("<") and ">" in raw:
+            destination = raw[1 : raw.index(">")]
+        else:
+            destination = raw.split(None, 1)[0] if raw else ""
+        if destination:
+            definitions.append((match.group(1), destination))
+    return definitions
 
 
 def relative_target(source: str, target: str) -> str | None:
@@ -43,7 +146,13 @@ def github_blob_target(target: str) -> str | None:
     parts = parsed.path.strip("/").split("/")
     if len(parts) < 5 or "/".join(parts[:2]) != GITHUB_REPO or parts[2:4] != ["blob", "main"]:
         return None
-    return unquote("/".join(parts[4:]))
+    decoded = unquote("/".join(parts[4:]))
+    candidate = (ROOT / decoded).resolve()
+    try:
+        relative = candidate.relative_to(ROOT)
+    except ValueError:
+        return None
+    return relative.as_posix()
 
 
 def main() -> int:

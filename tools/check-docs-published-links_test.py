@@ -39,6 +39,38 @@ class PublishedDocsLinkTest(unittest.TestCase):
             page.write_text("````\n[not a link](missing.md)\n````\n[real](real.md)\n", encoding="utf-8")
             self.assertEqual(MODULE.markdown_links(page), ["real.md"])
 
+    def test_reference_links_and_parenthesized_destinations_are_extracted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text(
+                "[reference][guide]\n\n"
+                "[guide]: docs/guide_(stable).md\n"
+                "[inline](docs/guide_(stable).md)\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                MODULE.markdown_links(page),
+                ["docs/guide_(stable).md", "docs/guide_(stable).md"],
+            )
+
+    def test_fence_closes_only_with_same_marker_and_width(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text(
+                "````\n[hidden-short](hidden-short.md)\n``\n"
+                "~~~\n[hidden-other](hidden-other.md)\n~~~\n"
+                "````\n[real](real.md)\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(MODULE.markdown_links(page), ["real.md"])
+
+    def test_github_blob_target_rejects_encoded_escape(self) -> None:
+        self.assertIsNone(
+            MODULE.github_blob_target(
+                "https://github.com/NVIDIA/aicr/blob/main/%2e%2e/%2e%2e/etc/passwd"
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
