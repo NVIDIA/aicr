@@ -927,27 +927,27 @@ gb200-eks-ubuntu-training-slurm:
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   016-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm-operator-crds/install.sh: eb06eb1e88d36d6d33893c5d8c51c57e3ecc65b7c051ec27b3a0d0ff717813f2
-  016-slinky-slurm-operator-crds/upstream.env: 1c777d58b5c1b98b87458662de44a517d6ad83a9ce4db2fc48d138bfce3588f7
+  016-slinky-slurm-operator-crds/upstream.env: 4d0a2be7546b7bf8bc9469de1609fdaca2af94c51f77882e050878f5820e2b88
   016-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   017-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator/install.sh: 27de19667ac26f26f82ea7ce539b8c36aee7ace8cab7db782ed74063cf31083f
-  017-slinky-slurm-operator/upstream.env: 26b9cd7773cbf321f6fb36fc6011219ef44eacffd2595522466b74807499eb02
+  017-slinky-slurm-operator/upstream.env: f359e532717f31dece6765590458939931c5fe6cfeea774c9441ad360036ec54
   017-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  018-slinky-slurm-pre/Chart.yaml: fec67bce3bf4db7adc7a031a87ca73d7e6230715ef4a2f88ca38e7c8a6439a67
+  018-slinky-slurm-pre/Chart.yaml: f65c7669d78ddb55eeccb55768259568f88ceb23bc0853a325ebdefbab18a6a0
   018-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-pre/install.sh: 60f9b291cca233a7c5d1c531415dbb78df9d01d42f53022f72584283e7c70342
-  018-slinky-slurm-pre/templates/compute-domain.yaml: ff206f00811a99148e620fe86259ddb1156a68cbb3519b46bc3f0a73176afa83
+  018-slinky-slurm-pre/templates/compute-domain.yaml: 7bd167d352ba5e395977598d474233506f2783ea1bc6d8744fe4650558a35114
   018-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   018-slinky-slurm-pre/values.yaml: 36b3e905ded091f970dd6ad98389be8e4a6481afffb6682b66370558fa99a393
   019-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm/install.sh: 0af86182c21ec50e8e96a8fb7c813b35e20f70690b9962ccc168b48bdd6bf631
-  019-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
+  019-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   019-slinky-slurm/values.yaml: 36b3e905ded091f970dd6ad98389be8e4a6481afffb6682b66370558fa99a393
-  README.md: 5a702972381d049091d661c4d102940786e22aeb10d52d95f9a7910f9140212a
-  bundle-info.yaml: ae53d167918fae1df2b9abe04f1a2bb21a4597e95812def0a961b0ea6f9e3954
-  checksums.txt: e48f553c2c2e26f00296cec926876df2c291ea6698e5fd2bab8ef5c0b909a6e4
+  README.md: 14517248f5adf48b5ba0865879174958203aab0bc50ceb3ada7ce6f94bb5f1ac
+  bundle-info.yaml: 97de3a62d9c82c7d964c7fe029e8018eb4d04dfb4b65857158f412011bb684e6
+  checksums.txt: 3384c6810a13962cd68b7397e06e3986a0e90a5754fcf4873df7b673537955e1
   deploy.sh: 3aff2338397036c2cf993aefe177089a562d4af5679614f84a43fb0a66965c0a
-  recipe.yaml: 1407462f82ec027513f2cf40804764725cb79d0c0f1ffe1f3b29dea61f6d468c
+  recipe.yaml: f4d2f9023662f1c8651e2d209834d6e4036164b527b9b17426da29a36db5bc37
 gb200-gke-cos-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: be3aac106557d5763a64613f7b720755b4990da86140b4e01cabc6c4962a10f1
@@ -1199,27 +1199,27 @@ gb200-gke-cos-training-slurm:
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   016-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm-operator-crds/install.sh: eb06eb1e88d36d6d33893c5d8c51c57e3ecc65b7c051ec27b3a0d0ff717813f2
-  016-slinky-slurm-operator-crds/upstream.env: 1c777d58b5c1b98b87458662de44a517d6ad83a9ce4db2fc48d138bfce3588f7
+  016-slinky-slurm-operator-crds/upstream.env: 4d0a2be7546b7bf8bc9469de1609fdaca2af94c51f77882e050878f5820e2b88
   016-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   017-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator/install.sh: 27de19667ac26f26f82ea7ce539b8c36aee7ace8cab7db782ed74063cf31083f
-  017-slinky-slurm-operator/upstream.env: 26b9cd7773cbf321f6fb36fc6011219ef44eacffd2595522466b74807499eb02
+  017-slinky-slurm-operator/upstream.env: f359e532717f31dece6765590458939931c5fe6cfeea774c9441ad360036ec54
   017-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  018-slinky-slurm-pre/Chart.yaml: fec67bce3bf4db7adc7a031a87ca73d7e6230715ef4a2f88ca38e7c8a6439a67
+  018-slinky-slurm-pre/Chart.yaml: f65c7669d78ddb55eeccb55768259568f88ceb23bc0853a325ebdefbab18a6a0
   018-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-pre/install.sh: 60f9b291cca233a7c5d1c531415dbb78df9d01d42f53022f72584283e7c70342
-  018-slinky-slurm-pre/templates/compute-domain.yaml: ff206f00811a99148e620fe86259ddb1156a68cbb3519b46bc3f0a73176afa83
+  018-slinky-slurm-pre/templates/compute-domain.yaml: 7bd167d352ba5e395977598d474233506f2783ea1bc6d8744fe4650558a35114
   018-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   018-slinky-slurm-pre/values.yaml: 36b3e905ded091f970dd6ad98389be8e4a6481afffb6682b66370558fa99a393
   019-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm/install.sh: 0af86182c21ec50e8e96a8fb7c813b35e20f70690b9962ccc168b48bdd6bf631
-  019-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
+  019-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   019-slinky-slurm/values.yaml: 36b3e905ded091f970dd6ad98389be8e4a6481afffb6682b66370558fa99a393
-  README.md: bc35a57d0b6d92e21600c9d180f4640458213c219cf6cd9326b2101dfacabe51
-  bundle-info.yaml: ce6ea7e28221ac9974efe38b37e496cef8aea6dd51fdcef65401ed380edbf722
-  checksums.txt: a26f2fb8b6b6156d40e8326124bb0bff8bad936b2ac292541b64b23815a94dae
+  README.md: 13a365ee4d09970fc456455e9d87d1b3e758c95314eb7facd65bdd5b2b051452
+  bundle-info.yaml: 944561c3812a664da209586586cd80cf24251b563bc5e8f254b7a9062b4f9492
+  checksums.txt: 10861f0ff9ddfe199328f23fbf277feb1405faf7ed93d2fa377216b99dd9fd17
   deploy.sh: 8630dfe6091415c889b813004e2ce0fde38a0d5909819da92fa5c26564c29b97
-  recipe.yaml: 12bd6b89f1b609a85b556f3f8e6705c5b8f173c8408736f61bb7bda7ce752fce
+  recipe.yaml: 4a07d29fd84309201f097d7df13faaa11b02a105593b8f63bb3f40d3dc06965c
 gb200-oke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: be3aac106557d5763a64613f7b720755b4990da86140b4e01cabc6c4962a10f1
@@ -1663,27 +1663,27 @@ gb300-eks-ubuntu-training-slurm:
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   016-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm-operator-crds/install.sh: eb06eb1e88d36d6d33893c5d8c51c57e3ecc65b7c051ec27b3a0d0ff717813f2
-  016-slinky-slurm-operator-crds/upstream.env: 1c777d58b5c1b98b87458662de44a517d6ad83a9ce4db2fc48d138bfce3588f7
+  016-slinky-slurm-operator-crds/upstream.env: 4d0a2be7546b7bf8bc9469de1609fdaca2af94c51f77882e050878f5820e2b88
   016-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   017-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator/install.sh: 27de19667ac26f26f82ea7ce539b8c36aee7ace8cab7db782ed74063cf31083f
-  017-slinky-slurm-operator/upstream.env: 26b9cd7773cbf321f6fb36fc6011219ef44eacffd2595522466b74807499eb02
+  017-slinky-slurm-operator/upstream.env: f359e532717f31dece6765590458939931c5fe6cfeea774c9441ad360036ec54
   017-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  018-slinky-slurm-pre/Chart.yaml: fec67bce3bf4db7adc7a031a87ca73d7e6230715ef4a2f88ca38e7c8a6439a67
+  018-slinky-slurm-pre/Chart.yaml: f65c7669d78ddb55eeccb55768259568f88ceb23bc0853a325ebdefbab18a6a0
   018-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-pre/install.sh: 60f9b291cca233a7c5d1c531415dbb78df9d01d42f53022f72584283e7c70342
-  018-slinky-slurm-pre/templates/compute-domain.yaml: ff206f00811a99148e620fe86259ddb1156a68cbb3519b46bc3f0a73176afa83
+  018-slinky-slurm-pre/templates/compute-domain.yaml: 7bd167d352ba5e395977598d474233506f2783ea1bc6d8744fe4650558a35114
   018-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   018-slinky-slurm-pre/values.yaml: ef75bbe2e03bc4b1cf4c4f4456b31d470a7bcce3ca243af1891f9dada650c6f6
   019-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm/install.sh: 0af86182c21ec50e8e96a8fb7c813b35e20f70690b9962ccc168b48bdd6bf631
-  019-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
+  019-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   019-slinky-slurm/values.yaml: ef75bbe2e03bc4b1cf4c4f4456b31d470a7bcce3ca243af1891f9dada650c6f6
-  README.md: f9a2462961f380e17d33bedf48940af20221d741df3e9e99128f4248a4b11a9b
-  bundle-info.yaml: 72a381dc5b28dadc7338d30a8bcf7a7731bc9379c7bb1a3efa70cfa8ce6a698c
-  checksums.txt: 93955a268d6e4cb6e4f8644b3b7ff9a8c64ccf2db9e8b55907315d78972816a7
+  README.md: 9dabc27d48319f71d8de311d87247c6a7e6cc4cb478ec38b9d59639ec08d36f2
+  bundle-info.yaml: 66ddcf3f9aa1b221550ec37c8e2f2bd52876bd8da0adfa43b2f585a7b8fd30fe
+  checksums.txt: 3df157918e1200fcb139a7c235ada8055352cff9471f28684f047fec43c63aac
   deploy.sh: 3aff2338397036c2cf993aefe177089a562d4af5679614f84a43fb0a66965c0a
-  recipe.yaml: c8385e82edae5ad95a1f82f789b99df16c2f66675b81ecfb3d1b71fdc05b2ed1
+  recipe.yaml: 3601efd6e4bb3c04195ac4e724c436f7002179b8f49f7ebe1be767280aa4df6e
 gb300-generic-ubuntu-training:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: 3ebd7265d5c4a7c7517c713919e541bff9218b0e2e1d2fae7c10ede08b5fcf2d
@@ -1998,26 +1998,26 @@ h100-aks-ubuntu-training-slurm:
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   016-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm-operator-crds/install.sh: eb06eb1e88d36d6d33893c5d8c51c57e3ecc65b7c051ec27b3a0d0ff717813f2
-  016-slinky-slurm-operator-crds/upstream.env: 1c777d58b5c1b98b87458662de44a517d6ad83a9ce4db2fc48d138bfce3588f7
+  016-slinky-slurm-operator-crds/upstream.env: 4d0a2be7546b7bf8bc9469de1609fdaca2af94c51f77882e050878f5820e2b88
   016-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   017-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator/install.sh: 27de19667ac26f26f82ea7ce539b8c36aee7ace8cab7db782ed74063cf31083f
-  017-slinky-slurm-operator/upstream.env: 26b9cd7773cbf321f6fb36fc6011219ef44eacffd2595522466b74807499eb02
+  017-slinky-slurm-operator/upstream.env: f359e532717f31dece6765590458939931c5fe6cfeea774c9441ad360036ec54
   017-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  018-slinky-slurm-pre/Chart.yaml: fec67bce3bf4db7adc7a031a87ca73d7e6230715ef4a2f88ca38e7c8a6439a67
+  018-slinky-slurm-pre/Chart.yaml: f65c7669d78ddb55eeccb55768259568f88ceb23bc0853a325ebdefbab18a6a0
   018-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-pre/install.sh: 60f9b291cca233a7c5d1c531415dbb78df9d01d42f53022f72584283e7c70342
   018-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   018-slinky-slurm-pre/values.yaml: 5643ef72841c8424adbe75cfb40f99691ec60c5e6498bb3a115824a3264bce9d
   019-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm/install.sh: 0af86182c21ec50e8e96a8fb7c813b35e20f70690b9962ccc168b48bdd6bf631
-  019-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
+  019-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   019-slinky-slurm/values.yaml: 5643ef72841c8424adbe75cfb40f99691ec60c5e6498bb3a115824a3264bce9d
-  README.md: 68fc45d8cec6b041f2329617cb5664f72f509b009a4466b0f8af4ce7e5ee9968
-  bundle-info.yaml: 866f0e1c6e371daf1d82fb90604a6ae0dcfa09c0f2b8c1660d1f19bb77882649
-  checksums.txt: bf5df3aec51413155d5db8250708f195e7d3233e9d08bb4b5e1acdaf488e4442
+  README.md: 9363cc46ca57bc131430fdc981ca4b98ac4e159435c6d735f4040bd8941eae71
+  bundle-info.yaml: e6f68308da3c2c43a1bc9838552a7f16c0b868d79a86ee865623142fdd51220e
+  checksums.txt: 3f0d0dd4367888e9ae177ed68eb66b667b00af2fddeee36a87bf085d73573a0e
   deploy.sh: 73038b6e40f69ed29753482d33e0cb7da0d9e003307070824d6ec853ef71daab
-  recipe.yaml: 1af0942d9a2cc110faaadffdd404f22aacfb7f4bbe902c7f56fa3bd670a204e3
+  recipe.yaml: 5bf4a23b046cdd8c6713651668b132da8eced8f6b532ed793d6326fa65b9ac44
 h100-any:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: 3ebd7265d5c4a7c7517c713919e541bff9218b0e2e1d2fae7c10ede08b5fcf2d
@@ -2446,26 +2446,26 @@ h100-eks-ubuntu-training-slurm:
   014-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   015-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-slinky-slurm-operator-crds/install.sh: eb06eb1e88d36d6d33893c5d8c51c57e3ecc65b7c051ec27b3a0d0ff717813f2
-  015-slinky-slurm-operator-crds/upstream.env: 1c777d58b5c1b98b87458662de44a517d6ad83a9ce4db2fc48d138bfce3588f7
+  015-slinky-slurm-operator-crds/upstream.env: 4d0a2be7546b7bf8bc9469de1609fdaca2af94c51f77882e050878f5820e2b88
   015-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   016-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm-operator/install.sh: 27de19667ac26f26f82ea7ce539b8c36aee7ace8cab7db782ed74063cf31083f
-  016-slinky-slurm-operator/upstream.env: 26b9cd7773cbf321f6fb36fc6011219ef44eacffd2595522466b74807499eb02
+  016-slinky-slurm-operator/upstream.env: f359e532717f31dece6765590458939931c5fe6cfeea774c9441ad360036ec54
   016-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  017-slinky-slurm-pre/Chart.yaml: fec67bce3bf4db7adc7a031a87ca73d7e6230715ef4a2f88ca38e7c8a6439a67
+  017-slinky-slurm-pre/Chart.yaml: f65c7669d78ddb55eeccb55768259568f88ceb23bc0853a325ebdefbab18a6a0
   017-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-pre/install.sh: 60f9b291cca233a7c5d1c531415dbb78df9d01d42f53022f72584283e7c70342
   017-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   017-slinky-slurm-pre/values.yaml: 5643ef72841c8424adbe75cfb40f99691ec60c5e6498bb3a115824a3264bce9d
   018-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm/install.sh: 0af86182c21ec50e8e96a8fb7c813b35e20f70690b9962ccc168b48bdd6bf631
-  018-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
+  018-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   018-slinky-slurm/values.yaml: 5643ef72841c8424adbe75cfb40f99691ec60c5e6498bb3a115824a3264bce9d
-  README.md: 7c284ebde381a514b6c78931f3d48278e56153c7a56a8880c795859da5dda5a7
-  bundle-info.yaml: 1ae022b1b271ed06d221288d201639caa09c7fc0821ac695d48afe43f8fa7187
-  checksums.txt: 5b9d5e37a2371ff4ffbd6f815ceb4d189a007a3ae449abf437bde00e05f55f7a
+  README.md: 8ba5830a9e9b8cab58f6516013d67e5aa7461b2c083a25eb602968c68de80a1d
+  bundle-info.yaml: 13fc709cea26389b63a5342c1d84327a9281045f0137d1d6e38f09a206eaacaf
+  checksums.txt: 94082298036b60c30db73202b3c61d34c8f6325ef31b0c5eecec19c69f894eda
   deploy.sh: 3aff2338397036c2cf993aefe177089a562d4af5679614f84a43fb0a66965c0a
-  recipe.yaml: 9d1566acf0fe361cc66ca157c98dcd3cb730c8683486d82104d01251e38d1b75
+  recipe.yaml: 3d4351165bcc4ca50a6b480d35b0e64f1af49726aab5cdf84dbfe94daf52f36a
 h100-gke-cos-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: be3aac106557d5763a64613f7b720755b4990da86140b4e01cabc6c4962a10f1
@@ -2707,30 +2707,30 @@ h100-gke-cos-training-slurm:
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   016-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm-operator-crds/install.sh: eb06eb1e88d36d6d33893c5d8c51c57e3ecc65b7c051ec27b3a0d0ff717813f2
-  016-slinky-slurm-operator-crds/upstream.env: 1c777d58b5c1b98b87458662de44a517d6ad83a9ce4db2fc48d138bfce3588f7
+  016-slinky-slurm-operator-crds/upstream.env: 4d0a2be7546b7bf8bc9469de1609fdaca2af94c51f77882e050878f5820e2b88
   016-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   017-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator/install.sh: 27de19667ac26f26f82ea7ce539b8c36aee7ace8cab7db782ed74063cf31083f
-  017-slinky-slurm-operator/upstream.env: 26b9cd7773cbf321f6fb36fc6011219ef44eacffd2595522466b74807499eb02
+  017-slinky-slurm-operator/upstream.env: f359e532717f31dece6765590458939931c5fe6cfeea774c9441ad360036ec54
   017-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  018-slinky-slurm-pre/Chart.yaml: fec67bce3bf4db7adc7a031a87ca73d7e6230715ef4a2f88ca38e7c8a6439a67
+  018-slinky-slurm-pre/Chart.yaml: f65c7669d78ddb55eeccb55768259568f88ceb23bc0853a325ebdefbab18a6a0
   018-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-pre/install.sh: 60f9b291cca233a7c5d1c531415dbb78df9d01d42f53022f72584283e7c70342
   018-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   018-slinky-slurm-pre/values.yaml: d241dedebe0614319d35c94c97e9ed81b2967738139173658a297d0bf696a026
   019-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm/install.sh: 0af86182c21ec50e8e96a8fb7c813b35e20f70690b9962ccc168b48bdd6bf631
-  019-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
+  019-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   019-slinky-slurm/values.yaml: d241dedebe0614319d35c94c97e9ed81b2967738139173658a297d0bf696a026
   020-slinky-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-topograph/install.sh: 6f915a9e36f5225d55626eff24e83d9baa403cb4ba06bdd289cb39da2481626b
   020-slinky-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
   020-slinky-topograph/values.yaml: 83a1582f2ab8f283e77367a998d5f5d8ea686466d42c2dd5645fba1fba96bcc6
-  README.md: 1ae1622b3dd3cf448af227aec15acf8025cd857fea559f2466049a10144c693b
-  bundle-info.yaml: 3eb6f9de846cc716affa45bd110e2101419d3923e5452e27c10cad5c7dfd0dd6
-  checksums.txt: 19fa6eb34f6cc147f0d67a90fed490f59a8d8fc0d4330e53729b663b964f278c
+  README.md: 666cc872bf5220090e1cc682e497f8e38f0771c8ca8fbf72a328c514e90dbe2d
+  bundle-info.yaml: e14a9c662408526765d4e919ce77dcd53a9854b8d1c31f4257e31c5d9c41fb9c
+  checksums.txt: 5475fde5cb7be8d53869d3445c5372fbbd6a944093bbc43318e39540041cc74e
   deploy.sh: bb69b44cb1a35863c79534a48a99d307913e86a9130fd56422b0ffd015f56bcf
-  recipe.yaml: dbaccc75c3dc7d51cf542ac2aec6af4dc7e55dbd726aa8719692aeb7b9466050
+  recipe.yaml: 64494244d8381d691a1463a7f3ed1856354817c83932ac85ad4dbd6a468e2659
 h100-kind-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: be3aac106557d5763a64613f7b720755b4990da86140b4e01cabc6c4962a10f1
@@ -2929,30 +2929,30 @@ h100-kind-training-slurm:
   012-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   013-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-slinky-slurm-operator-crds/install.sh: eb06eb1e88d36d6d33893c5d8c51c57e3ecc65b7c051ec27b3a0d0ff717813f2
-  013-slinky-slurm-operator-crds/upstream.env: 1c777d58b5c1b98b87458662de44a517d6ad83a9ce4db2fc48d138bfce3588f7
+  013-slinky-slurm-operator-crds/upstream.env: 4d0a2be7546b7bf8bc9469de1609fdaca2af94c51f77882e050878f5820e2b88
   013-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   014-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-slinky-slurm-operator/install.sh: 27de19667ac26f26f82ea7ce539b8c36aee7ace8cab7db782ed74063cf31083f
-  014-slinky-slurm-operator/upstream.env: 26b9cd7773cbf321f6fb36fc6011219ef44eacffd2595522466b74807499eb02
+  014-slinky-slurm-operator/upstream.env: f359e532717f31dece6765590458939931c5fe6cfeea774c9441ad360036ec54
   014-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  015-slinky-slurm-pre/Chart.yaml: fec67bce3bf4db7adc7a031a87ca73d7e6230715ef4a2f88ca38e7c8a6439a67
+  015-slinky-slurm-pre/Chart.yaml: f65c7669d78ddb55eeccb55768259568f88ceb23bc0853a325ebdefbab18a6a0
   015-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-slinky-slurm-pre/install.sh: 60f9b291cca233a7c5d1c531415dbb78df9d01d42f53022f72584283e7c70342
   015-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   015-slinky-slurm-pre/values.yaml: cd2aebf004a13a262bd9e6a72e7d28879abd762909a02c339f0447a6fbae570a
   016-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm/install.sh: 0af86182c21ec50e8e96a8fb7c813b35e20f70690b9962ccc168b48bdd6bf631
-  016-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
+  016-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   016-slinky-slurm/values.yaml: cd2aebf004a13a262bd9e6a72e7d28879abd762909a02c339f0447a6fbae570a
   017-slinky-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-topograph/install.sh: 6f915a9e36f5225d55626eff24e83d9baa403cb4ba06bdd289cb39da2481626b
   017-slinky-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
   017-slinky-topograph/values.yaml: ead36c362fbd40fa1257039e02155764f59bd28d38f41ee478a6005aa9184bae
-  README.md: e4581f632b612627784caa6956adcbb31fbdb4b4f8b9ba0756ecef3def586572
-  bundle-info.yaml: 4795b58ec189156c86ffa63b034291a3997fcb657352476b1624fb6633f7e780
-  checksums.txt: fb6aac24b920a263d82fcbb076b6fe908fdcaf49c2487bdf56ecb6a747796643
+  README.md: dd002eda515227077a54692c7a3bb946554c884ed57a68b3a2141c753a664f1a
+  bundle-info.yaml: 4f3ee268df70a6a4d6488aededa5d21123625d0600e9c06db7ec1a2246883e20
+  checksums.txt: 86019d023b6b3ae8881ee10564966a3903eda70cd369a82b5fae33853ff4ea3c
   deploy.sh: 0cca5f7a02f209d2f85fa5a4dd546ab90ef373f39c39d4f6d03faf788ff87d1e
-  recipe.yaml: 951013e72ff6aea0c411a7f7cb6cd19b8226b647a43cee763cb7605f59e4a7a1
+  recipe.yaml: 914c880ab5b728575941ac5ea5ceccfb4eb35123520d74d5b2194daef2b6f69b
 h200-any:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: 3ebd7265d5c4a7c7517c713919e541bff9218b0e2e1d2fae7c10ede08b5fcf2d
