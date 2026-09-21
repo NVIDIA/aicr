@@ -203,10 +203,9 @@ func TestVerifyNodewrightReady_ListsClusterScoped(t *testing.T) {
 	}
 }
 
-// Issue #607 acceptance: Nodewright check must skip gracefully when the CRD is
-// not registered on the cluster, even when nodewright-customizations is declared
-// in the recipe's componentRefs.
-func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T) {
+// Issue #2836 acceptance: a recipe that renders Nodewright CRs must not skip
+// readiness merely because CRD establishment races the first discovery call.
+func TestCheckExpectedResources_DoesNotSkipNodewrightWhenCRDNotRegistered(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContextWithUnregistered(t,
@@ -216,9 +215,12 @@ func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T
 		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
-	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil when Nodewright CRD is not registered", err)
-		return
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("checkExpectedResources() error = nil, want timeout while Nodewright CRD is not registered")
+	}
+	if !strings.Contains(err.Error(), "neither nodewright.nvidia.com/v1alpha1 nor skyhook.nvidia.com/v1alpha1 registered yet") {
+		t.Fatalf("checkExpectedResources() error = %v, want the unregistered-CRD diagnostic", err)
 	}
 }
 
@@ -1610,6 +1612,42 @@ func TestResolveNodewrightGVR_VersionGate(t *testing.T) {
 	}
 }
 
+// Discovery of a group/version alone is not enough to prove that the
+// Nodewright resource is established; another CRD in the same group may have
+// made the group visible first.
+func TestResolveNodewrightGVRRequiresSpecificResource(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContextWithDiscovery(
+		t,
+		[]runtime.Object{activeNamespace("skyhook")},
+		nil,
+		[]schema.GroupVersion{nodewrightGVR.GroupVersion()},
+		nil,
+		nil,
+	)
+	fakeDisc, ok := ctx.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+	if !ok {
+		t.Fatalf("expected *fakediscovery.FakeDiscovery, got %T", ctx.Clientset.Discovery())
+	}
+	for _, resources := range fakeDisc.Resources {
+		if resources.GroupVersion == nodewrightGVR.GroupVersion().String() {
+			resources.APIResources = []metav1.APIResource{{Name: "deploymentpolicies"}}
+		}
+	}
+
+	gvr, registered, err := resolveNodewrightGVR(ctx)
+	if err != nil {
+		t.Fatalf("resolveNodewrightGVR() error = %v", err)
+	}
+	if registered {
+		t.Fatalf("resolveNodewrightGVR() registered = true, want false for a missing %q resource", nodewrightGVR.Resource)
+	}
+	if gvr != (schema.GroupVersionResource{}) {
+		t.Fatalf("resolveNodewrightGVR() gvr = %v, want zero value", gvr)
+	}
+}
+
 // TestVerifyNodewrightReady_PrefersNodeWrightOverLegacySkyhook pins the #2593
 // fix. nodewright-operator v0.18.0 mirrors each legacy Skyhook into a
 // NodeWright and writes status only there; the legacy status stays empty. With
@@ -1759,6 +1797,7 @@ func configureFakeDiscovery(
 	}
 
 	gvSet := make(map[schema.GroupVersion]bool)
+	resourcesByGV := make(map[schema.GroupVersion]map[string]bool)
 	for _, object := range dynamicObjects {
 		u, ok := object.(*unstructured.Unstructured)
 		if !ok {
@@ -1769,12 +1808,25 @@ func configureFakeDiscovery(
 			continue
 		}
 		gvSet[gv] = true
+		if resourcesByGV[gv] == nil {
+			resourcesByGV[gv] = make(map[string]bool)
+		}
+		resourcesByGV[gv][gvrForTestObject(u.GroupVersionKind()).Resource] = true
 	}
 	for _, gv := range extraRegistered {
 		if unregSet[gv] {
 			continue
 		}
 		gvSet[gv] = true
+		if resourcesByGV[gv] == nil {
+			resourcesByGV[gv] = make(map[string]bool)
+		}
+		switch gv {
+		case nodewrightGVR.GroupVersion():
+			resourcesByGV[gv][nodewrightGVR.Resource] = true
+		case legacySkyhookGVR.GroupVersion():
+			resourcesByGV[gv][legacySkyhookGVR.Resource] = true
+		}
 	}
 
 	fakeDisc, ok := clientset.Discovery().(*fakediscovery.FakeDiscovery)
@@ -1783,9 +1835,11 @@ func configureFakeDiscovery(
 		return
 	}
 	for gv := range gvSet {
-		fakeDisc.Resources = append(fakeDisc.Resources, &metav1.APIResourceList{
-			GroupVersion: gv.String(),
-		})
+		resourceList := &metav1.APIResourceList{GroupVersion: gv.String()}
+		for resource := range resourcesByGV[gv] {
+			resourceList.APIResources = append(resourceList.APIResources, metav1.APIResource{Name: resource})
+		}
+		fakeDisc.Resources = append(fakeDisc.Resources, resourceList)
 	}
 }
 

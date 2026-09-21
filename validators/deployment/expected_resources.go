@@ -727,21 +727,11 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 		return nil
 	}
 
-	gvr, registered, err := resolveNodewrightGVR(ctx)
-	if err != nil {
-		return err
-	}
-	if !registered {
-		fmt.Printf("  Nodewright: neither %s nor %s registered, skipping\n",
-			nodewrightGVR.GroupVersion(), legacySkyhookGVR.GroupVersion())
-		return nil
-	}
-	fmt.Printf("  Nodewright: polling %s\n", gvr.GroupResource())
-
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
 		return err
 	}
+	var gvr schema.GroupVersionResource
 
 	// Poll two signals until both hold continuously for the stability window, or
 	// the budget elapses:
@@ -763,6 +753,20 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 	return pollUntilStable(ctx,
 		fmt.Sprintf("%d expected Nodewright(s) + runtime-required taint clearance", len(expectedNames)),
 		func() error {
+			// Discovery is part of the poll, not a one-time preflight. A recipe
+			// with rendered Nodewright CRs must not pass merely because the CRD
+			// establishment race made the first discovery call look empty.
+			var registered bool
+			var err error
+			gvr, registered, err = resolveNodewrightGVR(ctx)
+			if err != nil {
+				return err
+			}
+			if !registered {
+				return errors.New(errors.ErrCodeNotFound,
+					fmt.Sprintf("Nodewright: neither %s nor %s registered yet",
+						nodewrightGVR.GroupVersion(), legacySkyhookGVR.GroupVersion()))
+			}
 			// The CR status Gets and the node-list taint scan are independent
 			// read-only calls, so fan them out (per repo CLAUDE.md "Sequential
 			// calls to N independent read-only K8s APIs → fan-out with
@@ -806,15 +810,15 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 		})
 }
 
-// resolveNodewrightGVR discovery-gates the Nodewright CR kinds before any Get
-// by name, preferring nodewrightGVR. The legacySkyhookGVR fallback is taken
+// resolveNodewrightGVR discovery-gates the Nodewright resources before any Get
+// by name, preferring nodewrightGVR. A served group/version is not sufficient:
+// the specific resource must appear in discovery. The legacySkyhookGVR fallback is taken
 // only when legacySkyhookAllowed permits it: a recipe that pins the operator at
 // nodewrightRenameVersion or later must serve the new group, so a legacy-only
 // cluster there is a broken install (or stale Skyhooks from a prior operator)
 // and fails closed rather than being read as ready. registered is false when
-// neither group is served (the caller skips per #607). Any discovery error
-// other than NotFound fails closed so a transient failure cannot mask
-// readiness.
+// neither specific resource is served. Any discovery error other than NotFound
+// fails closed so a transient failure cannot mask readiness.
 func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResource, registered bool, err error) {
 	served := func(candidate schema.GroupVersionResource) (bool, error) {
 		gv := candidate.GroupVersion().String()
@@ -823,10 +827,15 @@ func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResou
 		// so an unresponsive apiserver would outlive both cancellation and the
 		// readiness budget. This runs ahead of pollUntilStable, which is the
 		// window where nothing else would notice.
-		_, discErr := helper.GroupVersionResources(ctx.Ctx, ctx.Clientset, gv)
+		resources, discErr := helper.GroupVersionResources(ctx.Ctx, ctx.Clientset, gv)
 		switch {
 		case discErr == nil:
-			return true, nil
+			for _, resource := range resources.APIResources {
+				if resource.Name == candidate.Resource {
+					return true, nil
+				}
+			}
+			return false, nil
 		case apierrors.IsNotFound(discErr):
 			return false, nil
 		case stderrors.Is(discErr, context.Canceled), stderrors.Is(discErr, context.DeadlineExceeded):
