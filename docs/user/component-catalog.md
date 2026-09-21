@@ -1340,9 +1340,21 @@ Fresh installs are unaffected. To migrate an existing cluster, set the flag
    kubectl patch mariadb mariadb -n slurm --type merge \
      -p '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
    ```
-2. Upgrade `mariadb-operator-crds` to `26.10.0` **in place**. Never
-   `helm uninstall` the CRD chart: that deletes the CRDs and cascade-deletes
-   every `MariaDB`, `User`, `Database` and `Grant` with them.
+2. Upgrade `mariadb-operator-crds` to `26.10.0` **in place**. Confirm which
+   namespace the existing release is in first, because Helm scopes a release
+   by namespace: without `--namespace` the request lands in whatever namespace
+   the kubeconfig context points at, `--install` does not find the existing
+   release, and Helm installs a second one that then fights the first for
+   ownership of the cluster-scoped CRDs. `mariadb-system` is the registry
+   default and no overlay overrides it, but an inherited bundle may differ.
+   ```bash
+   helm list -A | grep mariadb-operator-crds
+   helm upgrade --install mariadb-operator-crds \
+     oci://ghcr.io/mariadb-operator/charts/mariadb-operator-crds \
+     --version 26.10.0 --namespace mariadb-system
+   ```
+   Never `helm uninstall` the CRD chart: that deletes the CRDs and
+   cascade-deletes every `MariaDB`, `User`, `Database` and `Grant` with them.
 3. Upgrade `mariadb-operator` to `26.10.0` (re-run `install.sh`, `helmfile
    apply`, or sync the release).
 4. For each HA MariaDB patched in step 1, wait for the roll to finish before

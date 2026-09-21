@@ -69,13 +69,23 @@ transitions:
               update.
           - id: upgrade-crds
             description: >-
-              helm upgrade --install mariadb-operator-crds
+              Confirm the namespace the existing release lives in with
+              `helm list -A | grep mariadb-operator-crds`, then upgrade in
+              place: `helm upgrade --install mariadb-operator-crds
               oci://ghcr.io/mariadb-operator/charts/mariadb-operator-crds
-              --version 26.10.0
+              --version 26.10.0 --namespace mariadb-system`, substituting the
+              namespace the previous command reported.
             reason: >-
               CRDs go first, and in place. helm uninstall on the CRD chart
               deletes the CRDs and cascade-deletes every MariaDB, User,
-              Database and Grant with them.
+              Database and Grant with them. --namespace is not optional here:
+              Helm scopes a release by namespace, so without it the request
+              lands in whatever namespace the kubeconfig context points at,
+              --install does not find the existing release, and Helm installs
+              a second one that then fights the first for ownership of
+              cluster-scoped CRDs. mariadb-system is the registry default and
+              no overlay overrides it, but an inherited bundle may differ,
+              which is what the helm list confirms.
           - id: upgrade-operator
             description: >-
               Re-run install.sh (helm) or helmfile apply (helmfile).
