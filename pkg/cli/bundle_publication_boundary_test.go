@@ -1168,7 +1168,20 @@ func TestImageRefsRejectsCaseAndUnsafeFinalTargets(t *testing.T) {
 	if err := os.Symlink(realParent, parentAlias); err != nil {
 		t.Fatalf("Symlink(parent) error = %v", err)
 	}
-	assertInvalidImageRefsTarget(t, bundle, filepath.Join(parentAlias, "refs.txt"))
+	target, err := prepareImageRefsTarget(context.Background(), bundle, filepath.Join(parentAlias, "refs.txt"))
+	if err != nil {
+		t.Fatalf("prepareImageRefsTarget() error = %v, want symlinked parent to resolve", err)
+	}
+	t.Cleanup(func() { _ = target.close() })
+	if target.parentPath != realParent {
+		t.Fatalf("parent path = %q, want resolved path %q", target.parentPath, realParent)
+	}
+	if err := target.writeAtomic(context.Background(), []byte("sha256:abc\n")); err != nil {
+		t.Fatalf("writeAtomic() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(realParent, "refs.txt")); err != nil {
+		t.Fatalf("resolved image-reference target missing: %v", err)
+	}
 
 	t.Run("Unix socket", func(t *testing.T) {
 		socketBase, socketBaseErr := filepath.EvalSymlinks(filepath.FromSlash("/tmp"))

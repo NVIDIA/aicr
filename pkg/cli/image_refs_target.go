@@ -219,6 +219,10 @@ func prepareImageRefsTargetWithDependencies(
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"image-reference target aliases the bundle output")
 	}
+	// Continue from the resolved parent so platform paths such as macOS's
+	// symlinked /tmp can be used without weakening the no-symlink invariant
+	// enforced for the retained directory and final target.
+	parentPath = resolvedParent
 
 	parentAncestor, parentRelative, parentOutputInfo, inspectErr :=
 		inspectPlannedDirectory(ctx, parentPath, deps.lstat)
