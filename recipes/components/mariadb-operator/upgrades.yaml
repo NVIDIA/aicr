@@ -1,0 +1,120 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: mariadb-operator
+transitions:
+  # from opens below the pin rather than at 26.6.0: upstream uses CalVer and
+  # the only 26.x releases are 26.3.0, 26.6.0 and 26.10.0, so an operator
+  # arriving from any of them crosses the same boundary. Naming 26.6.0 as the
+  # floor would leave every earlier pin matching nothing.
+  #
+  # verdict is manual, not safe, and carries no verifiedBy: no UAT lane or
+  # KWOK run has exercised this transition. The procedure below is transcribed
+  # from upstream's own upgrade guide, not vouched for by a run here.
+  - from: "<26.10.0"
+    to: "26.10.0"
+    verdict: manual
+    summary: >-
+      26.10.0 changes the replication configuration rendered by the MariaDB
+      init container and the replication liveness probe served by the agent,
+      so the data plane must move with the operator. autoUpdateDataPlane
+      defaults to false, so an operator upgraded without setting it first runs
+      26.10.0 against init and agent containers left at the prior version.
+      The release also changes the operator's default server image to
+      mariadb:12.3.3; AICR pins mariadb:11.8.8 in the slurm-accounting-mariadb
+      values, so a cluster bundled from this recipe is unaffected, but any
+      MariaDB CR that omits spec.image will come up on a new MariaDB major
+      version.
+    precondition: >-
+      Know which MariaDB resources the operator manages and whether any omits
+      spec.image. Check with
+      `kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,IMAGE:.spec.image`;
+      a blank IMAGE column means that cluster takes the operator default and
+      will move to mariadb:12.3.3 on its next reconcile.
+    affectedResources:
+      - group: k8s.mariadb.com
+        kinds:
+          - MariaDB
+    stepsByDeployer:
+      - deployers: [helm, helmfile]
+        steps:
+          - id: enable-dataplane-autoupdate
+            description: >-
+              kubectl patch mariadb mariadb -n slurm --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
+            reason: >-
+              Upstream requires this before the operator moves, so the operator
+              updates the init and agent containers instead of leaving them
+              behind at the prior version. Repeat for every MariaDB resource
+              the precondition listed.
+          - id: upgrade-crds
+            description: >-
+              helm upgrade --install mariadb-operator-crds
+              oci://ghcr.io/mariadb-operator/charts/mariadb-operator-crds
+              --version 26.10.0
+            reason: >-
+              CRDs go first, and in place. helm uninstall on the CRD chart
+              deletes the CRDs and cascade-deletes every MariaDB, User,
+              Database and Grant with them.
+          - id: upgrade-operator
+            description: >-
+              Re-run install.sh (helm) or helmfile apply (helmfile).
+            reason: >-
+              Moves the operator to 26.10.0 once the new CRD schema is
+              Established.
+          - id: revert-dataplane-autoupdate
+            description: >-
+              kubectl patch mariadb mariadb -n slurm --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":false}}}'
+            reason: >-
+              Upstream recommends returning it to false so a later operator
+              bump does not update the data plane unattended.
+      - steps:
+          - id: enable-dataplane-autoupdate
+            description: >-
+              kubectl patch mariadb mariadb -n slurm --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
+            reason: >-
+              Same upstream requirement, applied out of band before the sync so
+              it lands ahead of the operator. Repeat for every MariaDB resource
+              the precondition listed. A pruning Argo CD or Flux configuration
+              will revert this field on the next sync, so run the sync below
+              promptly after patching.
+          - id: sync-crds
+            description: >-
+              Sync or reconcile the mariadb-operator-crds release to 26.10.0
+              before the operator release.
+            reason: >-
+              Neither Flux nor Argo CD applies a changed crds/ directory on
+              upgrade, and the CRD chart must never be pruned or deleted to
+              achieve the version change: that cascade-deletes every MariaDB.
+          - id: sync-operator
+            description: >-
+              Sync or reconcile the mariadb-operator release.
+            reason: >-
+              Moves the operator to 26.10.0 once the new CRD schema is
+              Established.
+          - id: revert-dataplane-autoupdate
+            description: >-
+              kubectl patch mariadb mariadb -n slurm --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":false}}}'
+            reason: >-
+              Upstream recommends returning it to false. If the field is
+              managed in git, set it there instead so the next sync does not
+              reintroduce true.
+    references:
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.0.md
+      - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.0

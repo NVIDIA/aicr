@@ -13,6 +13,15 @@ fullnameOverride: mariadb
 namespaceOverride: slurm
 
 mariadb:
+  # Engine pinned explicitly. mariadb-operator 26.10.0 changed its default
+  # server image to mariadb:12.3.3; without a pin, a fresh slurm_acct_db
+  # cluster would silently come up on a new MariaDB major version while
+  # existing clusters kept 11.8.8, and slurmdbd's supported MariaDB matrix
+  # has not been checked against 12.3. Pinning also puts the server image
+  # into the rendered CR, where the BOM can see it: the operator's own
+  # default lives in its runtime config block and is invisible to a
+  # render-based BOM. Moving to 12.3 is its own change, with its own UAT.
+  image: mariadb:11.8.8
   rootPasswordSecretKeyRef:
     name: mariadb-root-password
     key: root

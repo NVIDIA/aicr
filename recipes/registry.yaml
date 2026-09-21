@@ -1147,7 +1147,7 @@ components:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator-crds
       # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator-crds
-      defaultVersion: "26.6.0"
+      defaultVersion: "26.10.0"
       defaultNamespace: mariadb-system
 
   - name: mariadb-operator
@@ -1156,11 +1156,13 @@ components:
       - mariadboperator
     healthCheck:
       assertFile: checks/mariadb-operator/health-check.yaml
+    upgrades:
+      file: components/mariadb-operator/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator
       # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator
-      defaultVersion: "26.6.0"
+      defaultVersion: "26.10.0"
       defaultNamespace: mariadb-system
     nodeScheduling:
       system:
@@ -1190,7 +1192,7 @@ components:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-cluster
       # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-cluster
-      defaultVersion: "26.6.0"
+      defaultVersion: "26.10.0"
       defaultNamespace: slurm
     storageClassPaths:
       - mariadb.storage.storageClassName

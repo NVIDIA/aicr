@@ -1312,6 +1312,46 @@ CRDs come from the OLM `Subscription`/CSV and an `Application`-level
 `ignoreDifferences` has nothing to arbitrate. That conflict is tracked
 separately. See [NVIDIA/aicr#2546](https://github.com/NVIDIA/aicr/issues/2546).
 
+### `mariadb-operator`: `26.6.0` (or earlier) to `26.10.0`
+
+`26.10.0` changes the replication configuration rendered by the MariaDB init
+container and the replication liveness probe served by the agent, so the data
+plane has to move with the operator. `updateStrategy.autoUpdateDataPlane`
+defaults to `false`, so an operator upgraded without setting it first runs
+`26.10.0` against init and agent containers left at the prior version.
+
+Fresh installs are unaffected. To migrate an existing cluster, set the flag
+**before** the operator moves, then upgrade CRDs first and the operator second:
+
+1. Enable data-plane auto-update on every MariaDB the operator manages (AICR's
+   accounting database is `mariadb` in namespace `slurm`):
+   ```bash
+   kubectl patch mariadb mariadb -n slurm --type merge \
+     -p '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
+   ```
+2. Upgrade `mariadb-operator-crds` to `26.10.0` **in place**. Never
+   `helm uninstall` the CRD chart: that deletes the CRDs and cascade-deletes
+   every `MariaDB`, `User`, `Database` and `Grant` with them.
+3. Upgrade `mariadb-operator` to `26.10.0` (re-run `install.sh`, `helmfile
+   apply`, or sync the release).
+4. Return the flag to `false` so a later operator bump does not update the data
+   plane unattended. If the field is managed in git, set it there.
+
+The same release changes the operator's default server image to
+`mariadb:12.3.3`. AICR pins `mariadb:11.8.8` in
+`recipes/components/slurm-accounting-mariadb/values.yaml`, so a cluster bundled
+from this recipe stays on `11.8.8`; the pin also puts the server image into the
+rendered `MariaDB` resource, where the BOM records it. Any `MariaDB` that omits
+`spec.image` takes the operator default and will move to a new MariaDB major
+version on its next reconcile. Check with:
+
+```bash
+kubectl get mariadb -A \
+  -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,IMAGE:.spec.image
+```
+
+A blank `IMAGE` column means that cluster takes the default.
+
 ### `agentgateway`: upgrading across breaking releases
 
 AICR pins the `agentgateway` and `agentgateway-crds` charts in the component
