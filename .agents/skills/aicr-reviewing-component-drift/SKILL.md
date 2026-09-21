@@ -66,17 +66,17 @@ In order of preference:
    supported — pass `--run <id>` explicitly (option 1) rather than relying on
    the default.
 3. A local `drift-report.json` path the user provides
-4. A pasted Slack digest — parse the component names only, then re-derive
-   current and latest from `recipes/registry.yaml` and the upstream registry
-   (`helm show chart` for HTTP repos, `crane ls` for `oci://`). This is the
-   fallback for an expired artifact, not the contract, and it is unfiltered:
-   it does not apply Renovate's `minimumReleaseAge` (3 days,
+4. A pasted Slack digest — it carries counts and a `report artifact` link, no
+   component names, so take the run ID out of that link and download the
+   artifact per option 1. If the artifact has expired, re-derive the drift
+   set from `recipes/registry.yaml` and the upstream registry (`helm show
+   chart` for HTTP repos, `crane ls` for `oci://`). That re-derivation is
+   unfiltered: it does not apply Renovate's `minimumReleaseAge` (3 days,
    `.github/renovate.json5`) or `internalChecksFilter: "strict"`, so it can
    surface a release younger than the cooldown or one Renovate's strict
-   filter would reject. Use it only to identify which components to look at
-   when the artifact has expired — never to justify a bump on its own; the
-   artifact remains the authoritative source for whether a version is
-   actually eligible.
+   filter would reject. Use it only to identify which components to look at —
+   never to justify a bump on its own; the artifact remains the authoritative
+   source for whether a version is actually eligible.
 
 Confirm `schemaVersion` is `1`. A higher number means this skill is stale —
 read `tools/drift-report/report.go` before trusting the field names.
