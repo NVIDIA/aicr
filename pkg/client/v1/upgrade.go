@@ -137,7 +137,9 @@ func WriteUpgradeReportTable(w io.Writer, report *UpgradeReport) error {
 //     Deployer that was not supplied.
 //   - Loader, resolver, cluster-read and record errors propagate with their
 //     own codes. The advisory at-risk scan is the one exception: its failure
-//     is reported in the section it could not fill.
+//     is reported in the section it could not fill, unless the caller's own
+//     context died, which is ErrCodeCanceled or ErrCodeTimeout like anywhere
+//     else.
 func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*UpgradeReport, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
@@ -252,7 +254,11 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 		// default, which would report access that existed as access nobody had.
 		atRisk = &upgrade.AtRiskReport{Reason: upgrade.NotScannedDeclined}
 	case fromCluster || scanRequested:
-		atRisk = c.upgradeCheckScan(ctx, req.Kubeconfig, upgrade.AffectedKinds(results))
+		scanned, scanErr := c.upgradeCheckScan(ctx, req.Kubeconfig, upgrade.AffectedKinds(results))
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		atRisk = scanned
 	}
 
 	return upgrade.NewReport(results, upgrade.ReportOptions{
@@ -351,27 +357,45 @@ func reportSourceFrom(info inventory.SourceInfo, kubeconfig string, matched int)
 	}
 }
 
-// upgradeCheckScan runs the advisory at-risk scan, and returns a report
-// whatever happens.
+// upgradeCheckScan runs the advisory at-risk scan, and returns a report for
+// every failure the caller did not cause.
 //
 // A scan failure, such as an RBAC gap on a CRD or an apiserver that went
 // away, fills the section's reason instead of aborting the run. The findings already stay
 // out of the exit code per ADR-021 Decision 3, and an advisory feature taking
 // down the comparison it annotates is that same trade made backwards.
+//
+// An abort is the exception, because it is not a finding. Decision 3 is about
+// objects the scan reports: AICR blocking an upgrade over resources it does
+// not own is a claim it has not earned. A caller who pressed Ctrl-C, or whose
+// deadline expired, asked for no answer at all, and handing them a report with
+// a nil error says the comparison stands.
+//
+// The caller's context is what separates the two, rather than the returned
+// error's code or the sentinel under it. pkg/inventory bounds the scan by
+// defaults.AtRiskScanTimeout, which is shorter than the CLI's whole-run
+// budget, and codes that expiry ErrCodeTimeout over a context.DeadlineExceeded
+// exactly as it codes the caller's own: matching on either would fail the run
+// for the slow cluster the scan's budget exists to cut short.
 func (c *Client) upgradeCheckScan(ctx context.Context, kubeconfig string,
-	kinds []upgrade.ResourceKind) *upgrade.AtRiskReport {
+	kinds []upgrade.ResourceKind) (*upgrade.AtRiskReport, error) {
 
 	result, err := c.deps.scanAtRisk(ctx, inventory.AtRiskOptions{
 		Kubeconfig: kubeconfig,
 		Kinds:      atRiskKinds(kinds),
 	})
 	if err != nil {
+		if aborted := ctx.Err(); aborted != nil {
+			return nil, errors.WrapCtxErrWithContext(aborted, errors.ErrCodeTimeout,
+				"the upgrade check was aborted while scanning for resources an upgrade could disturb",
+				map[string]any{"scanError": err.Error()})
+		}
 		slog.Warn("at-risk scan failed; the upgrade comparison is unaffected", "error", err)
 
-		return &upgrade.AtRiskReport{Reason: "the scan failed: " + err.Error()}
+		return &upgrade.AtRiskReport{Reason: "the scan failed: " + err.Error()}, nil
 	}
 
-	return atRiskReportFrom(result)
+	return atRiskReportFrom(result), nil
 }
 
 // atRiskKinds hands the crossed records' kinds to the scanner.

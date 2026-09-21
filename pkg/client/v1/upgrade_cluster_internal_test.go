@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -70,6 +71,10 @@ type fakeCluster struct {
 	readErr    error
 	scanResult inventory.AtRiskResult
 	scanErr    error
+
+	// onScan runs inside the scan, which is the only place a test can make
+	// the caller's context die while the scan is the operation in flight.
+	onScan func()
 }
 
 func (f *fakeCluster) client(t *testing.T) *Client {
@@ -84,6 +89,9 @@ func (f *fakeCluster) client(t *testing.T) *Client {
 	deps.scanAtRisk = func(_ context.Context, opts inventory.AtRiskOptions) (inventory.AtRiskResult, error) {
 		f.calls = append(f.calls, "scan")
 		f.scanOpts = append(f.scanOpts, opts)
+		if f.onScan != nil {
+			f.onScan()
+		}
 
 		return f.scanResult, f.scanErr
 	}
@@ -662,5 +670,166 @@ func TestAtRiskReportFromScannedIsNotInferred(t *testing.T) {
 	}
 	if !got.Scanned || got.Reason != "" {
 		t.Errorf("atRiskReportFrom(empty) = %#v, want Scanned with no reason", got)
+	}
+}
+
+// abortingContext reports the caller's context as dead on cue, which no real
+// context can be made to do at the moment the scan returns: cancellation would
+// have to race the recipe loads that run first, and a deadline short enough to
+// expire during the scan would expire during them instead.
+type abortingContext struct {
+	context.Context
+
+	mu   sync.Mutex
+	err  error
+	done chan struct{}
+}
+
+func newAbortingContext(parent context.Context) *abortingContext {
+	return &abortingContext{Context: parent, done: make(chan struct{})}
+}
+
+func (c *abortingContext) Done() <-chan struct{} { return c.done }
+
+func (c *abortingContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err != nil {
+		return c.err
+	}
+
+	return c.Context.Err()
+}
+
+// abort makes the context report err, as context.WithCancel and
+// context.WithTimeout report context.Canceled and context.DeadlineExceeded.
+func (c *abortingContext) abort(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err == nil {
+		c.err = err
+		close(c.done)
+	}
+}
+
+// TestUpgradeCheckScanAbortIsNotAFinding separates an abort from a finding.
+// ADR-021 Decision 3 keeps what the scan reports advisory; a caller who
+// stopped the run reported nothing, and answering them with a report and a
+// nil error says the comparison stands.
+//
+// The two rows that must not fail the run are the discriminating ones. A scan
+// that exhausted its own defaults.AtRiskScanTimeout carries exactly the code
+// and the sentinel an expired caller deadline carries, because pkg/inventory
+// codes both through the same abortError, so neither distinguishes them; the
+// caller's context does.
+func TestUpgradeCheckScanAbortIsNotAFinding(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// abort is what the caller's context reports by the time the scan
+		// returns; nil leaves it alive.
+		abort   error
+		scanErr error
+		// wantCode empty means the run has to survive, with the failure in
+		// the section it could not fill.
+		wantCode      errors.ErrorCode
+		wantTransient bool
+	}{
+		{
+			name:     "operator cancels during the scan",
+			abort:    context.Canceled,
+			scanErr:  context.Canceled,
+			wantCode: errors.ErrCodeCanceled,
+		},
+		{
+			name:          "the run's own deadline expires during the scan",
+			abort:         context.DeadlineExceeded,
+			scanErr:       context.DeadlineExceeded,
+			wantCode:      errors.ErrCodeTimeout,
+			wantTransient: true,
+		},
+		{
+			// The scan's budget is the shorter of the two, so this is the
+			// slow cluster it exists to cut short, and nobody aborted.
+			name: "the scan's own budget expires",
+			scanErr: errors.Wrap(errors.ErrCodeTimeout,
+				"timed out reading the cluster for resources an upgrade could disturb",
+				context.DeadlineExceeded),
+		},
+		{
+			name:    "RBAC denies the scan",
+			scanErr: errors.New(errors.ErrCodeUnauthorized, "customresourcedefinitions is forbidden"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			to := clusterRecipe(t, filepath.Join(dir, "to.yaml"),
+				map[string]string{"synthetic-beta": "0.19.0"})
+
+			ctx := newAbortingContext(t.Context())
+			f := &fakeCluster{
+				result:  inventory.Result{Versions: map[string]string{"synthetic-beta": "0.18.0"}},
+				scanErr: tt.scanErr,
+			}
+			if tt.abort != nil {
+				f.onScan = func() { ctx.abort(tt.abort) }
+			}
+			client := f.client(t)
+
+			report, err := client.UpgradeCheck(ctx, UpgradeCheckRequest{
+				From: FromCluster, To: to, Deployer: "helm",
+			})
+
+			// Whichever way the row goes, the scan has to be what produced
+			// it: an error raised before the scan ran would satisfy a bare
+			// non-nil assertion without the branch under test being reached.
+			if want := []string{"read", "scan"}; !reflect.DeepEqual(f.calls, want) {
+				t.Fatalf("calls = %v, want %v (err = %v)", f.calls, want, err)
+			}
+
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("UpgradeCheck failed on an advisory scan error: %v", err)
+				}
+				if report.AtRisk.Scanned {
+					t.Error("AtRisk.Scanned = true after a scan that failed")
+				}
+				if !strings.Contains(report.AtRisk.Reason, tt.scanErr.Error()) {
+					t.Errorf("AtRisk.Reason = %q, want the scan's own failure in it",
+						report.AtRisk.Reason)
+				}
+				if want := rowsFailing(report); report.Summary.Failing != want {
+					t.Errorf("Summary.Failing = %d, want %d (the failing rows); a scan that could "+
+						"not answer must not move the exit code", report.Summary.Failing, want)
+				}
+
+				return
+			}
+
+			if err == nil {
+				t.Fatal("UpgradeCheck error = nil; an aborted run must not report as a completed one")
+			}
+			if report != nil {
+				t.Errorf("report = %#v, want none beside the error", report)
+			}
+			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				t.Errorf("error = %v, want code %s", err, tt.wantCode)
+			}
+			// The code is not the property on its own: ErrCodeCanceled exists
+			// so IsTransient reports false, while the bare context.Canceled
+			// the scan returned carries the right sentinel and IsTransient
+			// reports true for it.
+			if got := errors.IsTransient(err); got != tt.wantTransient {
+				t.Errorf("IsTransient = %v, want %v; a canceled run must not re-enter a retry loop "+
+					"and an expired deadline must stay in the transient bucket", got, tt.wantTransient)
+			}
+			if !stderrors.Is(err, tt.abort) {
+				t.Errorf("error = %v, want %v kept in the cause chain", err, tt.abort)
+			}
+		})
 	}
 }
