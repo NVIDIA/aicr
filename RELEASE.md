@@ -60,6 +60,22 @@ a client that switches exhaustively on it, so it is announced but does not owe a
 window. Adding a value to a *request* enum is always additive; removing one is
 always breaking.
 
+### Criteria enums name recognized values, not covered ones
+
+The recipe criteria enums — `service`, `accelerator`, `os`, `intent`,
+`platform`, in `api/aicr/v1/server.yaml` and `pkg/recipe/criteria.go` — are a
+namespace of values AICR *recognizes*. They are not an assertion that a recipe
+covers every one of them. A recognized value with no recipe behind it resolves
+to `INVALID_REQUEST` naming the gap, which is the intended behavior: the
+request was well-formed and the answer is that coverage does not exist.
+
+At v1.0.0 the following carry no recipe and resolve that way: `os=rhel`,
+`os=amazonlinux`, `os=talos`, `service=metal3`, `platform=runai`. This is a
+recorded decision, not an oversight. **Do not remove them as cleanup.** Under
+the table above, removing a value from a request enum is always breaking on
+both the CLI and REST surfaces, so after v1.0.0 it requires the next major.
+Coverage arrives by adding a recipe, which is additive and needs no window.
+
 ### Notice owed before removal
 
 - **Before `v1.0.0`:** a minimum of **two minor releases** between the

@@ -670,7 +670,7 @@ func TestHandleTimeoutContainerNotTerminated(t *testing.T) {
 			// Production shape: WaitForJobTerminal wraps the context error under
 			// ErrCodeTimeout — isDeadlineCause must see through the wrap chain.
 			name:         "wrapped ErrCodeTimeout (production wait shape)",
-			cause:        errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", context.DeadlineExceeded),
+			cause:        errors.Wrap(errors.ErrCodeTimeout, "waiting for job to reach a terminal state", context.DeadlineExceeded),
 			wantContains: []string{"timeout: validator did not complete within"},
 		},
 		{

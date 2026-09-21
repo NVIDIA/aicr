@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -855,6 +856,12 @@ func TestSurveyComponentSourceOnlyChartFallback(t *testing.T) {
 	}
 }
 
+// draNodeLabelerImageRE matches a literal, digest-pinned alpine/kubectl
+// reference. The registry host stays explicit because short-name-enforcing
+// runtimes reject unqualified references, and the tag is constrained to a
+// version shape so a floating tag such as :latest cannot satisfy it.
+var draNodeLabelerImageRE = regexp.MustCompile(`^docker\.io/alpine/kubectl:[0-9]+(?:\.[0-9]+)*@sha256:[0-9a-f]{64}$`)
+
 // TestSurveyComponent_DRANodeLabelerImageInventoried pins the supply-chain
 // contract for dra-node-labeler: its one executable image is a literal,
 // digest-pinned reference in the embedded manifest, so the manifest walk (no
@@ -873,9 +880,10 @@ func TestSurveyComponent_DRANodeLabelerImageInventoried(t *testing.T) {
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
-	want := "docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95"
-	if len(got.Images) != 1 || got.Images[0] != want {
-		t.Fatalf("dra-node-labeler images = %v, want exactly [%s]; a templated image renders as a placeholder and drops out of the BOM", got.Images, want)
+	// Shape rather than an exact digest: Renovate rotates the digest as upstream
+	// rebuilds the tag.
+	if len(got.Images) != 1 || !draNodeLabelerImageRE.MatchString(got.Images[0]) {
+		t.Fatalf("dra-node-labeler images = %v, want exactly one matching %s; a templated image renders as a placeholder and drops out of the BOM", got.Images, draNodeLabelerImageRE)
 	}
 	if got.Type != kindManifest {
 		t.Errorf("type = %q, want %q", got.Type, kindManifest)

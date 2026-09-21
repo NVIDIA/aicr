@@ -1269,7 +1269,7 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 	for _, e := range folderEntries {
 		select {
 		case <-ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "context cancelled", ctx.Err())
+			return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "writing argocd-helm bundle folders")
 		default:
 		}
 		if !e.IsDir() || !isNNNFolder(e.Name()) {
