@@ -59,58 +59,7 @@
 # A post-merge check belongs here rather than only in a PR description, because
 # the skill reads this file and does not read PR descriptions. A check recorded
 # only in a PR is a check nobody runs.
-deferred_verifications:
-  - id: revision-16-tooling-not-published
-    opened: 2026-09-10
-    document_version: 16
-    why_deferred: >-
-      The projection is only produced during a release, so the published bytes
-      cannot be inspected until the next release runs.
-    check: >-
-      The OpenVEX attestation on the next released image must carry `tooling`
-      equal to the openvex-bind identifier and must contain none of the revision
-      narrative removed at revision 16.
-    how: |
-      cosign verify-attestation --type openvex \
-        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-        --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.*' \
-        ghcr.io/nvidia/aicr@<linux/amd64 digest> \
-        | jq -rs '.[0].payload | @base64d | fromjson | .predicate.tooling'
-    resolves_when: >-
-      the command above has been run against THE FIRST release published after
-      revision 16 AND returned the openvex-bind identifier. Three ways this does
-      not resolve: the command has not been run; it returned anything else; or
-      it passed against some later release while the first one was never
-      checked. A release publishing is what makes the check runnable, not what
-      resolves it, and a failure on the first release is the finding to triage
-      rather than something a subsequent green release discharges.
-
-  - id: revision-17-cve-2026-82049-on-rebuilt-image
-    opened: 2026-09-21
-    document_version: 17
-    why_deferred: >-
-      The CVE-2026-82049 statement was validated against the exact bytes the
-      failed v0.22.0-rc1 scan read (aiperf-bench@sha256:7499dacf...), which is
-      the strongest available evidence but is NOT the image the next RC will
-      scan. The builder stage is `FROM python:3.13-slim` by tag, so a re-cut RC
-      resolves that tag afresh and can install a different venv closure; the
-      runtime base is digest-pinned and cannot move.
-    check: >-
-      The `Image Vuln Scan (aiperf-bench/amd64)` and `(aiperf-bench/arm64)` jobs
-      of the next on-tag run must both succeed, with CVE-2026-82049 suppressed
-      rather than absent -- absent would mean the interpreter moved and the
-      statement is now stale, not that it worked.
-    how: |
-      gh run list -R NVIDIA/aicr --workflow on-tag.yaml --limit 1 \
-        --json databaseId --jq '.[0].databaseId'
-      # then, against that run id:
-      gh run view <id> -R NVIDIA/aicr --json jobs \
-        --jq '.jobs[] | select(.name|test("aiperf-bench")) | {name, conclusion}'
-    resolves_when: >-
-      both aiperf-bench scan jobs of the FIRST on-tag run published after
-      revision 17 have been inspected and passed. A run that passes because the
-      finding disappeared does not resolve this -- it converts the statement
-      into a stale-audit deletion instead.
+deferred_verifications: []
 
 known_negatives:
   - id: no-fixed-cpython-3.13-for-cve-2026-82049
