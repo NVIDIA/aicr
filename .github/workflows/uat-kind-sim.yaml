@@ -226,6 +226,19 @@ jobs:
             # otherwise rewrite :latest to :sha-<commit>, a tag never loaded
             # into the cluster, and the validator Jobs ImagePullBackOff.
             echo "AICR_VALIDATOR_IMAGE_TAG=latest"
+            # That :latest pin is a mutable tag, which `validate
+            # --emit-attestation` refuses by default (#2873) because the
+            # predicate names validators by tag alone. Accepted here for the
+            # same reason uat-kind.yaml accepts it: these are ko.local images
+            # side-loaded into a throwaway kind cluster, so there is no
+            # registry the tag could be repointed in and no immutable tag to
+            # prefer. The cloud lanes resolve :uat-<run_id> and must keep
+            # failing closed, so do not copy this line into them.
+            #
+            # Read by tests/uat/lib/phases.sh, which turns it into an explicit
+            # --allow-mutable-validator-tags argument; aicr itself honors no
+            # env var for the opt-out.
+            echo "UAT_ALLOW_MUTABLE_VALIDATOR_TAGS=true"
           } >> "$GITHUB_ENV"
 
       - name: Build aicr binary
