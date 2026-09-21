@@ -37,13 +37,18 @@ transitions:
       mariadb:12.3.3; AICR pins mariadb:11.8.8 in the slurm-accounting-mariadb
       values, so a cluster bundled from this recipe is unaffected, but any
       MariaDB CR that omits spec.image will come up on a new MariaDB major
-      version.
+      version. The init container and agent are the HA data plane, so they
+      exist only where Galera or replication is enabled; the data-plane steps
+      below are inert on a single-instance non-HA MariaDB, which is what the
+      accounting database AICR ships is by default.
     precondition: >-
       Know which MariaDB resources the operator manages and whether any omits
       spec.image. Check with
-      `kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,IMAGE:.spec.image`;
+      `kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,IMAGE:.spec.image,GALERA:.spec.galera.enabled,REPLICATION:.spec.replication.enabled`;
       a blank IMAGE column means that cluster takes the operator default and
-      will move to mariadb:12.3.3 on its next reconcile.
+      will move to mariadb:12.3.3 on its next reconcile. Rows where both
+      GALERA and REPLICATION are absent or false have no data plane, so only
+      the CRD and operator upgrades apply to them.
     affectedResources:
       - group: k8s.mariadb.com
         kinds:
@@ -58,8 +63,10 @@ transitions:
             reason: >-
               Upstream requires this before the operator moves, so the operator
               updates the init and agent containers instead of leaving them
-              behind at the prior version. Repeat for every MariaDB resource
-              the precondition listed.
+              behind at the prior version. Repeat for every HA MariaDB the
+              precondition listed. On a non-HA instance the field is accepted
+              and does nothing, because there is no agent or init container to
+              update.
           - id: upgrade-crds
             description: >-
               helm upgrade --install mariadb-operator-crds
@@ -75,6 +82,23 @@ transitions:
             reason: >-
               Moves the operator to 26.10.0 once the new CRD schema is
               Established.
+          - id: await-dataplane-update
+            description: >-
+              For each HA MariaDB patched in the first step, wait for the roll
+              to finish before continuing:
+              `kubectl wait mariadb <name> -n <namespace>
+              --for=condition=Updated=True --timeout=15m`, then the same with
+              `--for=condition=Ready=True`.
+            reason: >-
+              The operator applies the new init and agent images
+              asynchronously, so reverting the flag while a resource is still
+              updating strands it on the old data-plane version against a
+              26.10.0 operator, which is the skew this record exists to
+              prevent. Name each resource rather than passing --all: the
+              Updated condition is absent until an update is triggered, and
+              kubectl wait does not return early on an absent condition, so a
+              blanket wait burns the full timeout on every instance that had
+              no roll to do.
           - id: revert-dataplane-autoupdate
             description: >-
               kubectl patch mariadb mariadb -n slurm --type merge -p
@@ -89,9 +113,10 @@ transitions:
               '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
             reason: >-
               Same upstream requirement, applied out of band before the sync so
-              it lands ahead of the operator. Repeat for every MariaDB resource
-              the precondition listed. A pruning Argo CD or Flux configuration
-              will revert this field on the next sync, so run the sync below
+              it lands ahead of the operator. Repeat for every HA MariaDB the
+              precondition listed; on a non-HA instance the field is accepted
+              and does nothing. A pruning Argo CD or Flux configuration will
+              revert this field on the next sync, so run the sync below
               promptly after patching.
           - id: sync-crds
             description: >-
@@ -107,6 +132,23 @@ transitions:
             reason: >-
               Moves the operator to 26.10.0 once the new CRD schema is
               Established.
+          - id: await-dataplane-update
+            description: >-
+              For each HA MariaDB patched in the first step, wait for the roll
+              to finish before continuing:
+              `kubectl wait mariadb <name> -n <namespace>
+              --for=condition=Updated=True --timeout=15m`, then the same with
+              `--for=condition=Ready=True`.
+            reason: >-
+              The operator applies the new init and agent images
+              asynchronously, so reverting the flag while a resource is still
+              updating strands it on the old data-plane version against a
+              26.10.0 operator, which is the skew this record exists to
+              prevent. Name each resource rather than passing --all: the
+              Updated condition is absent until an update is triggered, and
+              kubectl wait does not return early on an absent condition, so a
+              blanket wait burns the full timeout on every instance that had
+              no roll to do.
           - id: revert-dataplane-autoupdate
             description: >-
               kubectl patch mariadb mariadb -n slurm --type merge -p
