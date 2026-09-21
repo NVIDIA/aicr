@@ -77,7 +77,7 @@ A component that appears on only one side is reported too. An added component is
 
 The check compares two axes, not one. Beside the version it compares the namespace each artifact resolves for a component.
 
-The reason is at the top of this page. You regenerate the recipe from scratch on every AICR upgrade, and a component's namespace comes from `recipes/registry.yaml` in the binary doing the regenerating. If a default namespace moved between the two AICR releases, the new recipe names the new namespace. Helm cannot move a release between namespaces, so applying the resulting bundle does not relocate anything: it installs a **second copy** of the component beside the one already running, and nothing reconciles the two. A version-only comparison reports that as no change at all, which is why the check used to pass it in silence.
+The reason is at the top of this page. You regenerate the recipe from scratch on every AICR upgrade, and a component's namespace comes from `recipes/registry.yaml` in the binary doing the regenerating. If a default namespace moved between the two AICR releases, the new recipe names the new namespace. Helm cannot move a release between namespaces, so applying the resulting bundle does not relocate anything. What it does instead depends on what the chart owns, and neither outcome is one you want: it either installs a **second copy** of the component beside the one already running with nothing reconciling the two, or it **fails outright** partway through the bundle. Both are covered below. A version-only comparison reports the move as no change at all, which is why the check used to pass it in silence.
 
 Two shapes of row come out of this:
 
@@ -85,6 +85,30 @@ Two shapes of row come out of this:
 - **The component moved on both axes in one hop.** The relocation is carried on the version row, and a `safe` verdict there is **withdrawn** to `unknown`. The record assessed a version boundary; nobody asked its author about a relocation, and reading a claim about one axis as evidence about the other is exactly the false confidence a wrong `safe` buys. Any other verdict is left as it was, because it already stops the run and already sends you to the row.
 
 `unknown` rather than `blocked` is deliberate. A `blocked` verdict is an author's judgement recorded against a version boundary, and the record vocabulary has no way to express one about where a release lives, so no author can record it here. The gap is in what the vocabulary covers, not in somebody's diligence.
+
+### What applying the moved bundle actually does
+
+Whether you get a second copy or a hard failure turns on whether the chart owns **cluster-scoped** resources, because those carry Helm ownership annotations naming the release's namespace.
+
+A chart whose resources are entirely namespaced has nothing to collide over. The install into the new namespace succeeds and you get the second copy described above.
+
+A chart that ships cluster-scoped resources, CRDs most commonly, cannot have them adopted by a release in a different namespace. Helm refuses before creating anything:
+
+```text
+Error: unable to continue with install: CustomResourceDefinition
+"deploymentpolicies.skyhook.nvidia.com" in namespace "" exists and cannot be
+imported into the current release: invalid ownership metadata; annotation
+validation error: key "meta.helm.sh/release-namespace" must equal "nodewright":
+current value is "skyhook"
+```
+
+This is the better of the two outcomes: the running component is untouched, there is no second operator and no competing reconcilers. But three things are worth knowing before you meet it at three in the morning:
+
+- **The bundle applies partially.** Components ordered before the relocated one are already upgraded when the failure hits, so the cluster is left in a mixed state. Re-running after you fix the cause is safe, since every component's install is `helm upgrade --install`.
+- **The error names nothing you can act on.** It talks about ownership annotations, not about namespaces moving, not about AICR, and not about this page. Seeing `must equal "<new-namespace>": current value is "<old-namespace>"` is the tell that you are in this situation.
+- **It depends on the deployer reaching Helm.** `helm`, `helmfile`, and Flux `HelmRelease` all perform this ownership validation. A deployer that renders manifests and applies them directly does not, so it is not protected by this check.
+
+Either way the fix is the same, and `upgrade-check` flags the move before you apply anything: pin the namespace with `--inherit-from`, below, or move the release deliberately and re-run the check.
 
 Structured output carries the move alongside the verdict, on both shapes of row:
 
@@ -107,6 +131,15 @@ aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer helm
 ```
 
 `--inherit-from` takes the recipe you deployed from, or the bundle directory you deployed, which is read through the `recipe.yaml` every deployer writes at the bundle root. The resolved recipe keeps that artifact's namespaces; everything else, chart pins included, comes from the new binary as usual. The relocation rows then disappear from the check, leaving the version axis to be assessed on its own.
+
+**Inheriting from a bundle older than v0.22.0 works only for `helm`.** Writing `recipe.yaml` for *every* deployer landed in v0.22.0; before that only the `helm` deployer wrote one. So a bundle built by v0.21.1 or earlier with `helmfile`, `argocd`, `argocd-helm` or `flux` has no `recipe.yaml` at its root, and pointing `--inherit-from` at it is rejected:
+
+```text
+[INVALID_REQUEST] <path> is a directory with no recipe.yaml in it, so it is
+neither a recipe nor a bundle
+```
+
+This is the one upgrade where it bites, because the artifact you are inheriting *from* is by definition built by the older release. Pass the recipe file you generated instead, which every version writes. From a v0.22.0 bundle onward, either works.
 
 A component the prior artifact does not name keeps the registry default, because as far as that artifact knows it is a first deploy. Two cases land there and are worth telling apart: a component the new AICR release adds, which genuinely is a first deploy, and a component you excluded at bundle time with `--set <component>:enabled=false`, which a bundle's `recipe.yaml` records post-filter and therefore does not carry. Inheriting from a filtered bundle gives the excluded components registry defaults. Inherit from the recipe rather than the bundle if you want them pinned.
 
