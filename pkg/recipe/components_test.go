@@ -398,7 +398,7 @@ func TestComponentRegistry_SlinkySlurmChartVersions(t *testing.T) {
 		t.Fatalf("failed to load component registry: %v", err)
 	}
 
-	const wantVersion = "1.2.0"
+	const wantVersion = "1.2.2"
 	for _, name := range []string{
 		"slinky-slurm-operator-crds",
 		"slinky-slurm-operator",
