@@ -89,6 +89,11 @@ func TestRecipeList_JSONHealth(t *testing.T) {
 
 	var sawLeafHealth bool
 	for _, e := range entries {
+		for _, key := range []string{"Service", "Accelerator", "Intent", "OS", "Platform", "Nodes"} {
+			if _, ok := e.Criteria[key]; ok {
+				t.Errorf("entry %q uses Go field name %q in criteria", e.Name, key)
+			}
+		}
 		if e.Name == "" {
 			t.Error("entry missing #1208 name field")
 		}
@@ -145,6 +150,11 @@ func TestRecipeList_YAMLHealth(t *testing.T) {
 	}
 	if !strings.Contains(out, "- criteria:") {
 		t.Errorf("yaml output missing top-level criteria on a list item\n%s", out)
+	}
+	for _, key := range []string{"Service:", "Accelerator:", "Intent:", "OS:", "Platform:", "Nodes:"} {
+		if strings.Contains(out, key) {
+			t.Errorf("yaml output uses Go field name %q\n%s", strings.TrimSuffix(key, ":"), out)
+		}
 	}
 	if !strings.Contains(out, "health:") {
 		t.Errorf("yaml output missing health block:\n%s", out)
@@ -208,8 +218,8 @@ func TestRecipeList_FilteredJSONHealth(t *testing.T) {
 	}
 	var sawLeaf bool
 	for _, e := range entries {
-		if svc, _ := e.Criteria["Service"].(string); svc != "eks" {
-			t.Errorf("filter leaked non-eks overlay %q (service=%v)", e.Name, e.Criteria["Service"])
+		if svc, _ := e.Criteria["service"].(string); svc != "eks" {
+			t.Errorf("filter leaked non-eks overlay %q (service=%v)", e.Name, e.Criteria["service"])
 		}
 		if e.IsLeaf {
 			sawLeaf = true

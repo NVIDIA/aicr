@@ -251,12 +251,12 @@ type AgentConfig struct {
 // where 0 plays that role. A non-empty string that the registry does not
 // recognize is rejected at resolve time with ErrCodeInvalidRequest.
 type Criteria struct {
-	Service     string
-	Accelerator string
-	Intent      string
-	OS          string
-	Platform    string
-	Nodes       int
+	Service     string `json:"service,omitempty" yaml:"service,omitempty"`
+	Accelerator string `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
+	Intent      string `json:"intent,omitempty" yaml:"intent,omitempty"`
+	OS          string `json:"os,omitempty" yaml:"os,omitempty"`
+	Platform    string `json:"platform,omitempty" yaml:"platform,omitempty"`
+	Nodes       int    `json:"nodes,omitempty" yaml:"nodes,omitempty"`
 }
 
 // AllowLists fences which criteria values the resolve path accepts on a
