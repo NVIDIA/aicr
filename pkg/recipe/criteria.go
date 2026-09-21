@@ -39,14 +39,15 @@ import (
 // (CriteriaServiceAny, CriteriaAcceleratorAny, etc.) is the same
 // string in its typed form; CriteriaAnyValue is the bare-string
 // constant for matching logic that operates on stringified values
-// (e.g., pkg/fingerprint.matchDim's three-way comparison).
+// (e.g., pkg/fingerprint.matchDim's comparison).
 const CriteriaAnyValue = "any"
 
 // CriteriaServiceType represents the Kubernetes service/platform type for criteria.
 //
 // CriteriaServiceGeneric is self-managed Kubernetes with no distinguishing
 // distro or provisioning system; unlike CriteriaServiceAny, it is a concrete
-// service, not the wildcard.
+// service, not the wildcard. It is opt-in-only (CriteriaRegistry.IsOptInOnly):
+// a snapshot reports the provisioner it sees, never generic.
 type CriteriaServiceType string
 
 // CriteriaServiceType constants for supported Kubernetes services.
