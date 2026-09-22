@@ -16,8 +16,13 @@ name: Renovate
 
 # Self-hosted Renovate runner. Configuration: .github/renovate.json5
 # Modeled on NVIDIA/gpu-operator/.github/workflows/renovate.yaml.
-# Uses GITHUB_TOKEN (no PAT/App): the repo's /ok reviewer-comment policy
-# re-fires CI on bot PRs, sidestepping GitHub's GITHUB_TOKEN-no-trigger limitation.
+# Uses GITHUB_TOKEN (no PAT/App). GitHub fires no workflow event for a push its
+# own token authored, and nothing in this repo substitutes for that: `/ok-to-test`
+# dispatches qualification.yaml, and a dispatched merge-gate.yaml run attaches its
+# checks to the commit but never to the PR's status-check rollup, so neither
+# produces the `gate` aggregate the branch ruleset requires (measured on PR #2780:
+# 27 check-runs on the commit, 0 in the rollup). A maintainer clicking "Update
+# branch" is what re-binds a bot PR's checks — see .github/RENOVATE.md.
 
 on:
   schedule:
