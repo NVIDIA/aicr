@@ -958,8 +958,17 @@ VERSION="1.3.0"   # replace with the version you are upgrading to
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 
-helm pull "${CHART}" --version "${VERSION}" --destination "${work}"
-tar -xzf "${work}"/*.tgz -C "${work}"
+# Every step below is checked explicitly rather than left to `set -e`. This
+# block gets pasted into a shell, often only in part, and a copy that loses
+# the `set -e` line would otherwise carry on past a failure in silence.
+if ! helm pull "${CHART}" --version "${VERSION}" --destination "${work}"; then
+  echo "ERROR: helm pull failed for ${CHART} ${VERSION}" >&2
+  exit 1
+fi
+if ! tar -xzf "${work}"/*.tgz -C "${work}"; then
+  echo "ERROR: could not extract the chart archive" >&2
+  exit 1
+fi
 
 # Collect first, so discovering nothing is an error rather than a loop that
 # runs zero times and exits 0.
@@ -969,7 +978,7 @@ while IFS= read -r crd; do
 done < <(find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \) | sort)
 
 if [ ${#crds[@]} -eq 0 ]; then
-  echo "no CRDs found under crds/ in ${CHART} ${VERSION}" >&2
+  echo "ERROR: no CRDs found under crds/ in ${CHART} ${VERSION}" >&2
   exit 1
 fi
 
@@ -977,7 +986,12 @@ fi
 # manager so a field or spec.versions entry the new chart removes is pruned.
 for crd in "${crds[@]}"; do
   grep -q '[^[:space:]]' "${crd}" || continue
-  kubectl apply --server-side --force-conflicts --field-manager=helm -f "${crd}"
+  if ! kubectl apply --server-side --force-conflicts --field-manager=helm -f "${crd}"; then
+    echo "ERROR: failed to apply ${crd}." >&2
+    echo "       Stopping: the remaining CRDs are unapplied, so do not upgrade" >&2
+    echo "       the controller until this is resolved." >&2
+    exit 1
+  fi
 done
 ```
 
