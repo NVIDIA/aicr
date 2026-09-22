@@ -64,6 +64,36 @@ class PublishedDocsLinkTest(unittest.TestCase):
             )
             self.assertEqual(MODULE.markdown_links(page), ["real.md"])
 
+    def test_shortcut_and_collapsed_reference_links_are_extracted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text(
+                "[Guide]\n[Guide][]\n[Guide][guide]\n\n"
+                "[Guide]: unpublished.md\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                MODULE.markdown_links(page),
+                ["unpublished.md", "unpublished.md", "unpublished.md"],
+            )
+
+    def test_mixed_fence_markers_do_not_hide_links(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text(
+                "`~`\n[real](real.md)\n\n[hidden](hidden.md)\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                MODULE.markdown_links(page), ["real.md", "hidden.md"]
+            )
+
+    def test_nested_inline_link_labels_are_extracted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text("[API [v2]](unpublished.md)\n", encoding="utf-8")
+            self.assertEqual(MODULE.markdown_links(page), ["unpublished.md"])
+
     def test_github_blob_target_rejects_encoded_escape(self) -> None:
         self.assertIsNone(
             MODULE.github_blob_target(

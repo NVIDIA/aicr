@@ -28,11 +28,22 @@ def markdown_links(path: Path) -> list[str]:
         label.casefold(): destination
         for label, destination in _reference_definitions(text)
     }
-    links.extend(
-        destination
-        for label in re.findall(r"(?<!\\)\[[^\]]+\]\[([^\]]*)\]", text)
-        if (destination := references.get(label.casefold() or label.casefold()))
-    )
+    links.extend(_reference_links(text, references))
+    return links
+
+
+def _reference_links(text: str, references: dict[str, str]) -> list[str]:
+    links: list[str] = []
+    for text_label, reference_label in re.findall(
+        r"(?<!\\)\[([^\]\n]+)\]\[([^\]\n]*)\]", text
+    ):
+        if destination := references.get((reference_label or text_label).casefold()):
+            links.append(destination)
+    for label in re.findall(
+        r"(?<!\\)(?<!\])\[([^\]\n]+)\](?![ \t]*(?:\(|\[|:))", text
+    ):
+        if destination := references.get(label.casefold()):
+            links.append(destination)
     return links
 
 
@@ -42,7 +53,7 @@ def _without_fenced_code(text: str) -> str:
     marker: str | None = None
     width = 0
     for line in text.splitlines(keepends=True):
-        opener = re.match(r"^ {0,3}([`~]{3,})[^\n]*", line)
+        opener = re.match(r"^ {0,3}(`{3,}|~{3,})[^\n]*", line)
         if marker is None:
             if opener and (opener.group(1)[0] == "~" or "`" not in line[opener.end(1) :]):
                 marker = opener.group(1)[0]
@@ -69,7 +80,7 @@ def _inline_links(text: str) -> list[str]:
         if text[index] != "[" or (index and text[index - 1] == "\\"):
             index += 1
             continue
-        label_end = text.find("]", index + 1)
+        label_end = _label_end(text, index)
         if label_end < 0:
             break
         cursor = label_end + 1
@@ -83,6 +94,23 @@ def _inline_links(text: str) -> list[str]:
             links.append(destination)
         index = cursor + 1
     return links
+
+
+def _label_end(text: str, start: int) -> int:
+    depth = 1
+    cursor = start + 1
+    while cursor < len(text):
+        if text[cursor] == "\\":
+            cursor += 2
+            continue
+        if text[cursor] == "[":
+            depth += 1
+        elif text[cursor] == "]":
+            depth -= 1
+            if depth == 0:
+                return cursor
+        cursor += 1
+    return -1
 
 
 def _parenthesized_destination(text: str, start: int) -> str | None:
