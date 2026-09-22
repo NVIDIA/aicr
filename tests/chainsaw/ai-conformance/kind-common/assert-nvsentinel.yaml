@@ -12,14 +12,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert NVSentinel controller and platform connector are healthy on kind.
-# Kind profile — reduced DaemonSet expectations compared to EKS.
-# Compared to the EKS cluster test:
-#   Removed: gpu-health-monitor-dcgm-4.x (may not schedule in kind)
-#   Removed: gpu-health-monitor-dcgm-3.x (may not schedule in kind)
-#   Removed: metadata-collector (may not schedule in kind)
-#   Removed: syslog-health-monitor-regular (may not schedule in kind)
-#   Removed: syslog-health-monitor-kata (may not schedule in kind)
+# Assert the NVSentinel workloads a kind lane can satisfy are healthy. Reduced
+# compared to the cluster profile, which asserts all seven.
+#
+# The five omitted workloads are DaemonSets gated on node labels this lane does
+# not produce. Absent GPUs are not the reason; each label has a specific writer
+# that is disabled or unused here:
+#
+#   gpu-health-monitor-dcgm-3.x      nvsentinel.dgxc.nvidia.com/dcgm.version
+#   gpu-health-monitor-dcgm-4.x      nvsentinel.dgxc.nvidia.com/dcgm.version
+#   metadata-collector               nvidia.com/gpu.present
+#                                    + nvsentinel.dgxc.nvidia.com/driver.installed
+#   syslog-health-monitor-regular    driver.installed, kata.enabled=false
+#   syslog-health-monitor-kata       driver.installed, kata.enabled=true
+#
+# dcgm.version is written by the NVSentinel labeler from the image tag of a
+# Ready pod labelled app=nvidia-dcgm. recipes/overlays/kind.yaml disables the
+# standalone DCGM host engine (gpu-operator dcgm.enabled: false), so no such
+# pod runs and the label is never written. The dcgm-exporter that replaces it
+# does not substitute: the labeler matches the tag `dcgm:<major>.`, and the
+# exporter image is `dcgm-exporter:<version>`.
+#
+# driver.installed is written from a driver pod. The same overlay sets
+# driver.enabled: false, because the host supplies the driver on nvkind.
+#
+# Both gpu-health-monitor variants and both syslog-health-monitor variants are
+# mutually exclusive pairs: the labeler stamps exactly one dcgm.version, and a
+# node is either kata-enabled or not. At most one member of each pair can
+# schedule, so asserting both would fail by construction.
+#
+# Supplying a DCGM host engine is therefore sufficient to schedule the GPU
+# health monitors here, with no GPU present.
 
 # NVSentinel controller — manages network policies and platform configuration
 apiVersion: apps/v1
