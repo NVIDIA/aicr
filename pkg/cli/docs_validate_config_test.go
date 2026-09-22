@@ -38,20 +38,30 @@ func docsAICRConfigBlocks(t *testing.T, path string) []string {
 	var blocks []string
 	var current []string
 	inFence := false
+	fenceIndent := 0
 	for _, line := range strings.Split(string(body), "\n") {
-		if strings.HasPrefix(line, "```") {
+		// Markdown permits up to three spaces before a fence (four makes it an
+		// indented code block instead). Anchoring at column zero dropped an
+		// indented AICRConfig from the corpus without failing anything.
+		unindented := strings.TrimLeft(line, " ")
+		indent := len(line) - len(unindented)
+		if indent <= 3 && strings.HasPrefix(unindented, "```") {
 			if inFence {
 				block := strings.Join(current, "\n")
 				if strings.Contains(block, "kind: AICRConfig") {
 					blocks = append(blocks, block)
 				}
 				current = nil
+			} else {
+				fenceIndent = indent
 			}
 			inFence = !inFence
 			continue
 		}
 		if inFence {
-			current = append(current, line)
+			// Body lines lose the opening fence's indentation, as a renderer
+			// strips it; left in place the extracted text is not valid YAML.
+			current = append(current, strings.TrimPrefix(line, strings.Repeat(" ", fenceIndent)))
 		}
 	}
 	return blocks
@@ -125,5 +135,58 @@ func TestDocsValidateConfigExamplesPassOurOwnGuards(t *testing.T) {
 		t.Fatalf("no documented AICRConfig reached the guard with any spec.validate setting "+
 			"(skipChecks, evidence.cncf.dir or features); every case above passed vacuously, "+
 			"so this gate proves nothing about %s", reference)
+	}
+}
+
+// TestDocsAICRConfigBlocksFindsIndentedFence pins the extractor against a
+// fence carrying leading spaces, which Markdown permits (up to three) and the
+// CLI reference already uses for blocks nested under a list item. Anchoring the
+// backtick scan at column zero dropped such a block from the corpus silently:
+// the remaining blocks still satisfied the non-vacuity floor in
+// TestDocsValidateConfigExamplesPassOurOwnGuards, so the gate stayed green
+// while a documented example went unvalidated.
+func TestDocsAICRConfigBlocksFindsIndentedFence(t *testing.T) {
+	const doc = "Steps:\n" +
+		"\n" +
+		"1. Write the config:\n" +
+		"\n" +
+		"   ```yaml\n" +
+		"   kind: AICRConfig\n" +
+		"   apiVersion: aicr.run/v1beta1\n" +
+		"   metadata:\n" +
+		"     name: indented\n" +
+		"   spec:\n" +
+		"     validate:\n" +
+		"       execution:\n" +
+		"         skipChecks:\n" +
+		"           - gpu-operator-health\n" +
+		"   ```\n" +
+		"\n" +
+		"Done.\n"
+
+	path := filepath.Join(t.TempDir(), "indented.md")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	blocks := docsAICRConfigBlocks(t, path)
+	if len(blocks) != 1 {
+		t.Fatalf("docsAICRConfigBlocks found %d blocks, want 1", len(blocks))
+	}
+
+	// Stripped of the opening fence's indentation, as a Markdown renderer
+	// does. A block found but left indented does not parse as YAML, so the
+	// gate would report a documented example as broken instead of checking it.
+	const want = "kind: AICRConfig\n" +
+		"apiVersion: aicr.run/v1beta1\n" +
+		"metadata:\n" +
+		"  name: indented\n" +
+		"spec:\n" +
+		"  validate:\n" +
+		"    execution:\n" +
+		"      skipChecks:\n" +
+		"        - gpu-operator-health"
+	if blocks[0] != want {
+		t.Errorf("block not dedented to the fence indentation:\ngot:\n%s\nwant:\n%s", blocks[0], want)
 	}
 }
