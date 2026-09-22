@@ -196,9 +196,23 @@ if [[ -n "${KUBE_CONTEXT:-}" ]]; then
 fi
 
 # Remediation commands printed below are meant to be copy-pasted, so they carry
-# the same context this script acts on rather than whatever the reader's
-# ambient kubeconfig happens to select.
-KUBECTL_HINT="kubectl${KUBE_CONTEXT:+ --context ${KUBE_CONTEXT}}"
+# the same connection this script acts on rather than whatever the reader's
+# ambient kubeconfig happens to select. Several of those commands delete
+# webhooks, APIServices, or CRDs, so a hint that silently resolves elsewhere
+# is worse than no hint.
+#
+# Both halves of the selection are carried, not just the context: a cluster
+# chosen through KUBECONFIG alone has an empty KUBE_CONTEXT, and a hint
+# naming neither would target the reader's ambient cluster. printf %q escapes
+# each value as one shell word, so a path or context containing whitespace or
+# shell syntax survives the copy-paste as a single argument.
+KUBECTL_HINT="kubectl"
+if [[ -n "${KUBECONFIG:-}" ]]; then
+  KUBECTL_HINT+=" --kubeconfig $(printf '%q' "${KUBECONFIG}")"
+fi
+if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  KUBECTL_HINT+=" --context $(printf '%q' "${KUBE_CONTEXT}")"
+fi
 # ==============================================================================
 # Output helpers (respects NO_COLOR and non-TTY)
 # ==============================================================================

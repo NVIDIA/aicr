@@ -20,6 +20,7 @@ import (
 	"flag"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -1605,3 +1606,106 @@ func listBundleFiles(t *testing.T, dir string) []string {
 
 // Ensure deployer package is referenced so unused-import rules are satisfied.
 var _ = deployer.SortComponentRefsByDeploymentOrder
+
+// TestDeployScript_RemediationHintCarriesConnection pins that the
+// copy-pasteable remediation commands deploy.sh prints target the cluster the
+// script just inspected, and survive shell-hostile values intact.
+//
+// Those commands finalize namespaces and delete webhooks, APIServices, and
+// CRDs. An operator pastes them into a different shell, so a hint that names
+// neither the kubeconfig nor the context resolves against whatever ambient
+// cluster that shell happens to select: a destructive command aimed at the
+// wrong cluster. A cluster chosen through KUBECONFIG alone has an empty
+// KUBE_CONTEXT, which is exactly the case a context-only hint loses.
+//
+// Asserting on the rendered text would prove nothing about quoting, so the
+// hint is evaluated by a real shell against a stub kubectl that records argv
+// one element per line.
+func TestDeployScript_RemediationHintCarriesConnection(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	outputDir := t.TempDir()
+	g := &Generator{
+		RecipeResult:    createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         "v1.0.0",
+	}
+	if _, genErr := g.Generate(context.Background(), outputDir); genErr != nil {
+		t.Fatalf("Generate failed: %v", genErr)
+	}
+	script, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+	if err != nil {
+		t.Fatalf("read deploy.sh: %v", err)
+	}
+
+	// Lift the hint construction out of deploy.sh rather than reimplementing
+	// it, so this fails if the shipped block stops carrying either value.
+	lines := strings.Split(string(script), "\n")
+	start := slices.IndexFunc(lines, func(l string) bool { return l == `KUBECTL_HINT="kubectl"` })
+	if start < 0 {
+		t.Fatalf("deploy.sh no longer starts the hint with KUBECTL_HINT=\"kubectl\"")
+	}
+	end := start
+	for end < len(lines) && !strings.HasPrefix(lines[end], "# ====") {
+		end++
+	}
+	hintBlock := strings.Join(lines[start:end], "\n")
+	if !strings.Contains(hintBlock, "KUBECONFIG") || !strings.Contains(hintBlock, "KUBE_CONTEXT") {
+		t.Fatalf("hint block references only one half of the connection:\n%s", hintBlock)
+	}
+
+	dir := t.TempDir()
+	argvFile := filepath.Join(dir, "argv")
+	binDir := filepath.Join(dir, "bin")
+	if mkErr := os.MkdirAll(binDir, 0o750); mkErr != nil {
+		t.Fatalf("mkdir: %v", mkErr)
+	}
+	// One argv element per line, so a value split by the shell is visible as
+	// extra lines rather than hidden inside a flattened "$*".
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvFile + "\n"
+	if wErr := os.WriteFile(filepath.Join(binDir, "kubectl"), []byte(stub), 0o700); wErr != nil {
+		t.Fatalf("write stub: %v", wErr)
+	}
+
+	// Both values carry a space and shell syntax; unquoted interpolation
+	// would split them and could execute the substitution.
+	const (
+		wantKubeconfig = "/tmp/my configs/$(touch pwned).yaml"
+		wantContext    = "kind aicr;echo pwned"
+	)
+	harness := filepath.Join(dir, "hint.sh")
+	body := "#!/usr/bin/env bash\nset -euo pipefail\n" + hintBlock +
+		"\neval \"${KUBECTL_HINT} delete ns doomed\"\n"
+	if wErr := os.WriteFile(harness, []byte(body), 0o700); wErr != nil {
+		t.Fatalf("write harness: %v", wErr)
+	}
+
+	cmd := exec.Command(bashPath, harness)
+	cmd.Env = append(os.Environ(),
+		"PATH="+binDir,
+		"KUBECONFIG="+wantKubeconfig,
+		"KUBE_CONTEXT="+wantContext,
+	)
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("hint failed to evaluate: %v\n%s", runErr, out)
+	}
+
+	raw, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("kubectl stub never ran (%v)", err)
+	}
+	got := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	want := []string{
+		"--kubeconfig", wantKubeconfig,
+		"--context", wantContext,
+		"delete", "ns", "doomed",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("remediation hint argv mismatch\ngot:  %q\nwant: %q", got, want)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "pwned")); statErr == nil {
+		t.Error("command substitution in a connection value executed")
+	}
+}
