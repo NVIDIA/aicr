@@ -86,6 +86,13 @@ spec:
       # Mokka (NVIDIA/k8s-test-infra) stages a mock libnvidia-ml.so from a
       # DaemonSet, so there is no host driver, no kernel module and no GPU.
       # Each operand is pointed at that staged root instead of the host root.
+      #
+      # The driver-root value tracks the pinned nvml-mock chart
+      # (testing.component_test.nvml_mock_chart_version in .settings.yaml),
+      # which publishes the tree at /var/lib/nvml-mock/driver. A later Mokka
+      # bind-mounts it onto /run/nvidia/driver instead, at which point these
+      # three NVIDIA_DRIVER_ROOT entries should be dropped rather than
+      # repointed. Revisit them with any bump of that pin.
       # Verified on Kind with ghcr.io/nvidia/mokka-kind-node: every operand
       # reaches 1/1 including nvidia-operator-validator, both nodes advertise
       # nvidia.com/gpu=8, GFD derives the H100 product labels from the mocked

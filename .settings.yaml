@@ -314,6 +314,17 @@ testing:
     # mediatype application/vnd.cncf.helm.config.v1+json" on every run. The
     # error was discarded and the script fell through to its manifest
     # fallback, so the Helm path had never once succeeded.
+    #
+    # COUPLED to the mokka-mock gpuStack values in recipes/overlays/kind.yaml.
+    # Through 0.3.0 (and 0.4.0-rc1/-rc2) the mock driver tree is published at
+    # /var/lib/nvml-mock/driver, which is why that profile value points the
+    # operands there. Mokka main has since changed to bind-mount the tree onto
+    # /run/nvidia/driver, the chart's own default, and dropped the
+    # NVIDIA_DRIVER_ROOT overrides from its own GPU Operator guide
+    # (k8s-test-infra e8e49aeb, unreleased at time of writing). Advancing this
+    # pin past that change means revisiting the profile: the three
+    # NVIDIA_DRIVER_ROOT entries become unnecessary and point at a staging
+    # path rather than the published one.
     nvml_mock_chart: 'ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock'
     nvml_mock_chart_version: '0.3.0'
     # Image pin for the manifest fallback only. The chart carries its own
