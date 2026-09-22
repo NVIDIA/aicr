@@ -135,7 +135,7 @@ spec:
           # manifests without rendering values, and the mirror flow rewrites literal
           # references. Same tag and digest as nodewright-operator's
           # webhook.removalImage so the catalog carries one kubectl image.
-          image: docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95
+          image: docker.io/alpine/kubectl:1.37.0@sha256:954b65dea0eb140219b440413ede17c2eca205866df350d3c1fbc84d28af14ae
           command:
             - /bin/sh
             - -c
