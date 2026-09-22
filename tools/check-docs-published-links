@@ -40,7 +40,8 @@ def _reference_links(text: str, references: dict[str, str]) -> list[str]:
             continue
         label_end = _label_end(text, index)
         if label_end < 0:
-            break
+            index += 1
+            continue
         text_label = text[index + 1 : label_end]
         cursor = label_end + 1
         if cursor < len(text) and text[cursor] == "[":
@@ -107,7 +108,8 @@ def _inline_links(text: str) -> list[str]:
             continue
         label_end = _label_end(text, index)
         if label_end < 0:
-            break
+            index += 1
+            continue
         cursor = label_end + 1
         if cursor >= len(text) or text[cursor] != "(":
             index = label_end + 1
@@ -197,9 +199,51 @@ def _reference_definitions(text: str) -> list[tuple[str, str]]:
             while end < len(text) and not text[end].isspace():
                 end += 1
             destination = text[cursor:end]
-        if destination:
+        if destination and _valid_reference_definition_tail(text, end):
             definitions.append((text[start + 1 : label_end], destination))
     return definitions
+
+
+def _valid_reference_definition_tail(text: str, start: int) -> bool:
+    """Return whether a definition tail is whitespace or a valid title."""
+    line_end = text.find("\n", start)
+    if line_end < 0:
+        line_end = len(text)
+    cursor = start
+    while cursor < line_end and text[cursor] in " \t\r":
+        cursor += 1
+    if cursor == line_end:
+        return True
+
+    if text[cursor] in "'\"":
+        quote = text[cursor]
+        cursor += 1
+        while cursor < line_end:
+            if text[cursor] == "\\":
+                cursor += 2
+                continue
+            if text[cursor] == quote:
+                cursor += 1
+                break
+            cursor += 1
+        else:
+            return False
+    elif text[cursor] == "(":
+        cursor += 1
+        while cursor < line_end:
+            if text[cursor] == "\\":
+                cursor += 2
+                continue
+            if text[cursor] == ")":
+                cursor += 1
+                break
+            cursor += 1
+        else:
+            return False
+    else:
+        return False
+
+    return not text[cursor:line_end].strip()
 
 
 def relative_target(source: str, target: str) -> str | None:

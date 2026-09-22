@@ -145,6 +145,31 @@ class PublishedDocsLinkTest(unittest.TestCase):
             )
         )
 
+    def test_unmatched_label_does_not_hide_later_links(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text("[unterminated\n[real](real.md)\n", encoding="utf-8")
+            self.assertEqual(MODULE.markdown_links(page), ["real.md"])
+
+    def test_invalid_reference_definition_trailing_text_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text(
+                "[guide]\n[guide]: unpublished.md trailing text\n"
+                "[real](real.md)\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(MODULE.markdown_links(page), ["real.md"])
+
+    def test_reference_definition_titles_remain_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text(
+                "[guide]\n[guide]: unpublished.md \"Guide\"\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(MODULE.markdown_links(page), ["unpublished.md"])
+
 
 if __name__ == "__main__":
     unittest.main()
