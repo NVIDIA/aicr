@@ -334,8 +334,8 @@ func TestGenerateSkipsUnparseableAttestedAt(t *testing.T) {
 
 func TestGenerateSkipsEmptySigner(t *testing.T) {
 	// A run with an empty signer issuer/identity is dropped rather than
-	// counted: canonicalSourceID collides every such run onto the same source
-	// key, so admitting one would silently merge it with any other.
+	// counted. canonicalSourceID collides every such run onto the same
+	// source key, so admitting one would silently merge it with any other.
 	dir := t.TempDir()
 	runDir := filepath.Join(dir, "results", "eks", "h100-ubuntu", "training", "s1", "run-1")
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
