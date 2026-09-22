@@ -854,15 +854,19 @@ const RecipeCriteriaKind = "RecipeCriteria"
 // constant; the track's target is header.GroupVersionV1.
 const RecipeCriteriaAPIVersion = header.StableGroupVersion
 
-func validateRecipeCriteriaHeader(kind, apiVersion string) error {
+// validateRecipeCriteriaHeader gates a RecipeCriteria document. source names
+// where the bytes came from — a path, a URL, or the request body — because the
+// same criteria can arrive from any of the three and the header is the one
+// error whose remedy depends on knowing which artifact to edit.
+func validateRecipeCriteriaHeader(source, kind, apiVersion string) error {
 	if kind != "" && kind != RecipeCriteriaKind {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid kind %q, expected %q", kind, RecipeCriteriaKind))
+			fmt.Sprintf("%s has invalid kind %q, expected %q", source, kind, RecipeCriteriaKind))
 	}
 	if !header.IsSupportedAPIVersion(apiVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid apiVersion %q%s for %s, expected %q; regenerate the criteria with a matching aicr version",
-				apiVersion, header.RetirementNoteWithAbsent(apiVersion), RecipeCriteriaKind, header.GroupVersionV1))
+			fmt.Sprintf("%s has invalid apiVersion %q%s for %s, expected %q; regenerate the criteria with a matching aicr version",
+				source, apiVersion, header.RetirementNoteWithAbsent(apiVersion), RecipeCriteriaKind, header.GroupVersionV1))
 	}
 	return nil
 }
@@ -997,7 +1001,7 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load criteria file", err)
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader(fmt.Sprintf("criteria file %q", path), raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
 	return validateAndConvertRawSpec(&raw.Spec, reg)
@@ -1036,7 +1040,7 @@ func LoadCriteriaFromFileWithContext(ctx context.Context, path string, reg *Crit
 		return nil, err
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader(fmt.Sprintf("criteria file %q", path), raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
 	return validateAndConvertRawSpec(&raw.Spec, reg)
@@ -1066,7 +1070,7 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string, reg *Crite
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "failed to deserialize criteria")
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader(fmt.Sprintf("criteria URL %q", url), raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
 
@@ -1149,7 +1153,7 @@ func ParseCriteriaFromBody(body io.Reader, contentType string, reg *CriteriaRegi
 		}
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader("criteria request body", raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
 

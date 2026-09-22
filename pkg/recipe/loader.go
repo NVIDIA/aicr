@@ -105,7 +105,7 @@ func LoadFromFileWithProviderProfile(
 	// The accepted set is selected by wire kind/schema track. Since ADR-022 N+2
 	// an empty value is rejected on every track, so this path and the catalog
 	// scanner agree by construction rather than by matching special cases.
-	if versionErr := validateRecipeInputAPIVersion(rec.Kind, inputAPIVersion); versionErr != nil {
+	if versionErr := validateRecipeInputAPIVersion(path, rec.Kind, inputAPIVersion); versionErr != nil {
 		return nil, versionErr
 	}
 	// Users often pass overlay files directly; auto-hydrate so they don't need
@@ -230,7 +230,7 @@ func LoadFromFileWithProviderProfile(
 // An empty value is rejected on every track. It was tolerated for RecipeResult
 // inputs, which genuinely predate the apiVersion field; ADR-022 §3 retired that
 // tolerance at Release N+2 (#2417).
-func validateRecipeInputAPIVersion(kind, apiVersion string) error {
+func validateRecipeInputAPIVersion(path, kind, apiVersion string) error {
 	if kind == RecipeMetadataKind {
 		if header.IsSupportedAuthoringAPIVersion(apiVersion) ||
 			header.IsSupportedProfileAPIVersion(apiVersion) {
@@ -238,9 +238,9 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 			return nil
 		}
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("recipe metadata file has apiVersion %q%s, which this aicr build does not support (expected %q or %q); "+
+			fmt.Sprintf("recipe metadata file %q has apiVersion %q%s, which this aicr build does not support (expected %q or %q); "+
 				"update the catalog header for this aicr release",
-				apiVersion, header.RetirementNote(apiVersion),
+				path, apiVersion, header.RetirementNote(apiVersion),
 				header.GroupVersionV1Beta1, header.GroupVersionV1Beta2))
 	}
 
@@ -248,9 +248,9 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 		return nil
 	}
 	return errors.New(errors.ErrCodeInvalidRequest,
-		fmt.Sprintf("recipe file has apiVersion %q%s, which this aicr build does not support (expected %q or %q); "+
+		fmt.Sprintf("recipe file %q has apiVersion %q%s, which this aicr build does not support (expected %q or %q); "+
 			"regenerate the recipe with a matching aicr version",
-			apiVersion, header.RetirementNoteWithAbsent(apiVersion),
+			path, apiVersion, header.RetirementNoteWithAbsent(apiVersion),
 			header.GroupVersionV1, header.GroupVersionV1Beta2))
 }
 

@@ -17,8 +17,10 @@ package recipe
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1642,4 +1644,86 @@ func TestCriteriaValidate(t *testing.T) {
 // writeTestFile is a helper to create test files.
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// Every criteria loader must name where the bytes came from. The same criteria
+// arrives from a path, a URL, or a request body, and the header error is the
+// one whose remedy depends on knowing which artifact to go edit. This regressed
+// once already: header.WarnDeprecatedAPIVersion used to name the file, and when
+// ADR-022 N+2 replaced the warning with a rejection the name went with it.
+func TestCriteriaHeaderErrorsNameTheirSource(t *testing.T) {
+	t.Parallel()
+
+	const badHeader = `kind: RecipeCriteria
+apiVersion: aicr.run/v1alpha2
+spec:
+  service: eks`
+
+	writeTemp := func(t *testing.T) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "criteria.yaml")
+		if err := os.WriteFile(path, []byte(badHeader), 0o600); err != nil {
+			t.Fatalf("write criteria fixture: %v", err)
+		}
+		return path
+	}
+
+	t.Run("file", func(t *testing.T) {
+		t.Parallel()
+		path := writeTemp(t)
+		_, err := LoadCriteriaFromFile(path, nil)
+		if err == nil {
+			t.Fatal("a retired apiVersion must be rejected")
+		}
+		if !strings.Contains(err.Error(), path) {
+			t.Errorf("error does not name the criteria file %q: %v", path, err)
+		}
+	})
+
+	t.Run("file with context", func(t *testing.T) {
+		t.Parallel()
+		path := writeTemp(t)
+		_, err := LoadCriteriaFromFileWithContext(context.Background(), path, nil)
+		if err == nil {
+			t.Fatal("a retired apiVersion must be rejected")
+		}
+		if !strings.Contains(err.Error(), path) {
+			t.Errorf("error does not name the criteria file %q: %v", path, err)
+		}
+	})
+
+	t.Run("url", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/yaml")
+			if _, err := w.Write([]byte(badHeader)); err != nil {
+				t.Errorf("write response: %v", err)
+			}
+		}))
+		defer server.Close()
+
+		criteriaURL := server.URL + "/criteria.yaml"
+		_, err := LoadCriteriaFromFileWithContext(context.Background(), criteriaURL, nil)
+		if err == nil {
+			t.Fatal("a retired apiVersion must be rejected")
+		}
+		if !strings.Contains(err.Error(), criteriaURL) {
+			t.Errorf("error does not name the criteria URL %q: %v", criteriaURL, err)
+		}
+	})
+
+	// A request body has no path to name, so it names itself instead -- the
+	// caller still learns the header came from the POST rather than a file.
+	t.Run("request body", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseCriteriaFromBody(
+			strings.NewReader(`{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks"}}`),
+			"application/json", nil)
+		if err == nil {
+			t.Fatal("a retired apiVersion must be rejected")
+		}
+		if !strings.Contains(err.Error(), "request body") {
+			t.Errorf("error does not identify the request body as the source: %v", err)
+		}
+	})
 }
