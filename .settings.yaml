@@ -280,6 +280,19 @@ testing:
   # renovate: datasource=docker depName=kindest/node depType=testing
   h100_kind_node_image: 'kindest/node:v1.37.0'
 
+  # Kind node image published by Mokka (NVIDIA/k8s-test-infra) with the nvidia
+  # containerd runtime handler registered and CDI enabled. A stock kindest/node
+  # carries only runc and test-handler, so every GPU Operator operand, which
+  # sets runtimeClassName: nvidia, fails with "no runtime for nvidia is
+  # configured". Used only by the GPU-free gpu-operator lane; the nvkind lanes
+  # on real silicon keep h100_kind_node_image above.
+  #
+  # Pinned by digest: Mokka publishes no version tag for this image, only a
+  # floating `latest`, so the digest is the only reproducible reference and a
+  # bare tag would silently change the lane's cluster under it. Upstream
+  # issue: the node image should carry release tags like the chart does.
+  # renovate: datasource=docker depName=ghcr.io/nvidia/mokka-kind-node depType=testing
+  mokka_kind_node_image: 'ghcr.io/nvidia/mokka-kind-node:latest@sha256:6e92b27038b253fb37e28aad34b0eb0acc41900a2e0ab21b44c0d523fc961a1c'
 
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
