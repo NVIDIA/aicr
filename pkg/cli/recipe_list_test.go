@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -88,7 +89,13 @@ func TestRecipeList_JSONHealth(t *testing.T) {
 	}
 
 	var sawLeafHealth bool
+	var sawCompleteCriteria bool
 	for _, e := range entries {
+		for key, value := range e.Criteria {
+			if value == nil || value == "" || value == float64(0) {
+				t.Errorf("entry %q contains an unset criteria value for %q", e.Name, key)
+			}
+		}
 		for _, key := range []string{"Service", "Accelerator", "Intent", "OS", "Platform", "Nodes"} {
 			if _, ok := e.Criteria[key]; ok {
 				t.Errorf("entry %q uses Go field name %q in criteria", e.Name, key)
@@ -99,6 +106,19 @@ func TestRecipeList_JSONHealth(t *testing.T) {
 		}
 		if e.Source == "" {
 			t.Error("entry missing #1208 source field")
+		}
+		if e.Name == "a100-aks-ubuntu-training-kubeflow" {
+			want := map[string]any{
+				"service":     "aks",
+				"accelerator": "a100",
+				"intent":      "training",
+				"os":          "ubuntu",
+				"platform":    "kubeflow",
+			}
+			if !reflect.DeepEqual(e.Criteria, want) {
+				t.Errorf("entry %q criteria mismatch: got %#v, want %#v", e.Name, e.Criteria, want)
+			}
+			sawCompleteCriteria = true
 		}
 		if !e.IsLeaf {
 			if e.Health != nil {
@@ -126,6 +146,9 @@ func TestRecipeList_JSONHealth(t *testing.T) {
 	}
 	if !sawLeafHealth {
 		t.Fatal("expected at least one leaf entry carrying health")
+	}
+	if !sawCompleteCriteria {
+		t.Fatal("expected the complete criteria fixture in JSON output")
 	}
 }
 
@@ -161,6 +184,48 @@ func TestRecipeList_YAMLHealth(t *testing.T) {
 	}
 	if !strings.Contains(out, "coverage:") || !strings.Contains(out, "dimensions:") {
 		t.Errorf("yaml health block missing coverage/dimensions:\n%s", out)
+	}
+
+	var entries []struct {
+		Name     string         `yaml:"name"`
+		Criteria map[string]any `yaml:"criteria"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &entries); err != nil {
+		t.Fatalf("unmarshal yaml output: %v\n%s", err, out)
+	}
+	var sawCompleteCriteria, sawPartialCriteria bool
+	for _, e := range entries {
+		for key, value := range e.Criteria {
+			if value == nil || value == "" || value == 0 {
+				t.Errorf("entry %q contains an unset criteria value for %q", e.Name, key)
+			}
+		}
+		if e.Name == "a100-aks-ubuntu-training-kubeflow" {
+			want := map[string]any{
+				"service":     "aks",
+				"accelerator": "a100",
+				"intent":      "training",
+				"os":          "ubuntu",
+				"platform":    "kubeflow",
+			}
+			if !reflect.DeepEqual(e.Criteria, want) {
+				t.Errorf("entry %q criteria mismatch: got %#v, want %#v", e.Name, e.Criteria, want)
+			}
+			sawCompleteCriteria = true
+		}
+		if e.Name == "a100-any" {
+			want := map[string]any{"service": "any", "accelerator": "a100"}
+			if !reflect.DeepEqual(e.Criteria, want) {
+				t.Errorf("entry %q should omit unset dimensions: got %#v, want %#v", e.Name, e.Criteria, want)
+			}
+			sawPartialCriteria = true
+		}
+	}
+	if !sawCompleteCriteria {
+		t.Fatal("expected the complete criteria fixture in YAML output")
+	}
+	if !sawPartialCriteria {
+		t.Fatal("expected the partial criteria fixture in YAML output")
 	}
 }
 
