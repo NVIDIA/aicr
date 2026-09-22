@@ -332,6 +332,33 @@ func TestGenerateSkipsUnparseableAttestedAt(t *testing.T) {
 	}
 }
 
+func TestGenerateSkipsEmptySigner(t *testing.T) {
+	// A run with an empty signer issuer/identity is dropped rather than
+	// counted. canonicalSourceID collides every such run onto the same
+	// source key, so admitting one would silently merge it with any other.
+	dir := t.TempDir()
+	runDir := filepath.Join(dir, "results", "eks", "h100-ubuntu", "training", "s1", "run-1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"schemaVersion":"aicr-corroboration-meta/v1",` +
+		`"coordinate":{"group":"eks","dashboard":"h100-ubuntu","tab":"training"},` +
+		`"recipe":"h100-eks-ubuntu-training",` +
+		`"signer":{"idHash":"s1","identity":"","issuer":"","class":"community","allowlisted":false},` +
+		`"runId":"run-1","attestedAt":"2026-06-20T03:14:07Z"}`
+	if err := os.WriteFile(filepath.Join(runDir, "meta.json"), []byte(meta), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Generate(context.Background(), Options{InputDir: dir, OutputDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.Runs != 0 || res.Recipes != 0 {
+		t.Errorf("summary = %+v, want 0 runs / 0 recipes (empty-signer run skipped)", res)
+	}
+}
+
 func TestGenerateConsensusKeyedByVerifiedIdentityNotIDHash(t *testing.T) {
 	// Anti-sybil: one verified (issuer, identity) submitted under two different
 	// IDHashes must count as ONE distinct allowlisted signer (SINGLE), never two

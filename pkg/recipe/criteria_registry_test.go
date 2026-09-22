@@ -137,6 +137,30 @@ func TestCriteriaRegistry_ResetReadsEnv(t *testing.T) {
 	}
 }
 
+func TestCriteriaRegistry_IsOptInOnly(t *testing.T) {
+	r := newCriteriaRegistry()
+	t.Log("Testing that generic is the only opt-in-only service value, in any spelling")
+	for _, v := range []string{"generic", "Generic", " generic "} {
+		if !r.IsOptInOnly(FieldService, v) {
+			t.Errorf("IsOptInOnly(service, %q) = false, want true", v)
+		}
+	}
+	for _, v := range []string{"metal3", "rke2", "eks", "any", ""} {
+		if r.IsOptInOnly(FieldService, v) {
+			t.Errorf("IsOptInOnly(service, %q) = true, want false", v)
+		}
+	}
+	t.Log("Testing that other fields have no opt-in-only values")
+	if r.IsOptInOnly(FieldAccelerator, "generic") || r.IsOptInOnly(FieldIntent, "generic") {
+		t.Error("IsOptInOnly reported an opt-in-only value outside the service field")
+	}
+	t.Log("Testing that a zero-value registry answers the same")
+	var zero CriteriaRegistry
+	if !zero.IsOptInOnly(FieldService, "generic") {
+		t.Error("zero-value registry must classify generic as opt-in-only")
+	}
+}
+
 func TestCriteriaRegistry_Values_NilForUnknownField(t *testing.T) {
 	r := newCriteriaRegistry()
 	if got := r.Values(FieldPlatform); got != nil {
