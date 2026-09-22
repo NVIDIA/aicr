@@ -63,14 +63,25 @@ stays readable only with a retained v0.21 or v0.22 binary. See
 for the release-by-release table.
 
 **Go importers.** The retirement also removed the exported `pkg/header`
-identifiers that named the alpha values: `APIVersionV1Alpha2`,
-`APIVersionV1Alpha3`, `GroupVersion`, `RecipeResultGroupVersion`,
-`WarnDeprecatedAPIVersion`, and `ResetAPIVersionRecorderForTest`. `pkg/header`
-sits outside the `pkg/client/v1` SDK surface the API compatibility gate covers,
-so this reaches you as a compile error rather than a recorded API break. Move to
-the per-track constant — `GroupVersionV1`, `GroupVersionV1Beta1`, or
-`GroupVersionV1Beta2` — and alias the one for your track rather than the string
-it happens to equal.
+identifiers that named the alpha values. `pkg/header` sits outside the
+`pkg/client/v1` SDK surface the API compatibility gate covers, so this reaches
+you as a compile error rather than a recorded API break.
+
+| Removed | Replace with |
+|---|---|
+| `APIVersionV1Alpha2` | the bare segment for your track — `APIVersionV1`, `APIVersionV1Beta1`, or `APIVersionV1Beta2` |
+| `APIVersionV1Alpha3` | `APIVersionV1Beta2`; it only ever named the profile-bearing track |
+| `GroupVersion` | the full group/version for your track — `GroupVersionV1`, `GroupVersionV1Beta1`, or `GroupVersionV1Beta2` |
+| `RecipeResultGroupVersion` | `GroupVersionV1Beta2`, for the same reason |
+| `WarnDeprecatedAPIVersion` | nothing — a retired value is rejected now, not warned about. `RetirementNote` supplies the `(… was retired in v1.0.0)` clause for the rejection message |
+| `ResetAPIVersionRecorderForTest` | nothing — the warning recorder it reset is gone |
+
+The two constant families are not interchangeable: an `APIVersion*` constant is
+a bare segment (`v1beta1`), while a `GroupVersion*` constant carries the group
+as well (`aicr.run/v1beta1`). Use the Kind table above to pick your track, and
+alias the constant rather than the string it happens to equal — the tracks hold
+distinct values now, so a collapsed alias shows up as a wrong value rather than
+a latent one.
 
 ### Empty `apiVersion` on artifacts
 
