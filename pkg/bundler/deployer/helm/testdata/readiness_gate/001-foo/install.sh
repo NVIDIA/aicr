@@ -30,14 +30,6 @@ if [[ "${HELM_MAJOR:-0}" -ge 4 ]]; then
   FORCE_CONFLICTS_FLAG="--force-conflicts"
 fi
 
-# Apply this chart's CRDs before upgrading. Helm installs a chart's crds/
-# directory on first install and never touches it again, so without this a
-# chart bump whose CRDs changed runs the new controller against the old
-# schema. Skipped under --dry-run, which must not touch the cluster.
-if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
-  bash ./apply-crds.sh
-fi
-
 # CHART carries the full OCI URI for OCI charts and just the chart name for
 # HTTP/HTTPS charts. REPO is non-empty only for HTTP/HTTPS charts; the
 # ${REPO:+--repo "${REPO}"} expansion adds --repo iff REPO is set.
@@ -57,8 +49,8 @@ if [[ -z "${DRY_RUN_FLAG:-}" && -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
   REPO=""
 fi
 
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'k8s-aibom' "${CHART_REF}" \
+helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'foo' "${CHART_REF}" \
   ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
-  --namespace 'k8s-aibom-system' --create-namespace \
+  --namespace 'foo' --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}
