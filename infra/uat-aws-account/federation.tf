@@ -116,7 +116,14 @@ data "aws_iam_policy_document" "github_actions_permissions" {
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aicr-*",
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/aicr-*",
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/aicr-*",
-      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/*",
+      # Scoped to EKS IRSA providers, NOT oidc-provider/*. The actuator creates
+      # the per-cluster IRSA provider for its own ephemeral clusters, and EKS
+      # issues those under oidc.eks.<region>.amazonaws.com/id/<hash>, so this
+      # pattern covers every provider the actuator legitimately manages. The
+      # wildcard it replaces also granted DeleteOpenIDConnectProvider on every
+      # provider in the account, including ones unrelated to this role — which
+      # matters where the account is shared with other workloads.
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/oidc.eks.*.amazonaws.com/*",
     ]
   }
 

@@ -816,7 +816,14 @@ func TestCommittedRegistryValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("committed reservations.yaml invalid: %v", err)
 	}
-	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure, "kind-h100": CloudKind}
+	want := map[string]string{
+		"aws-h100":      CloudAWS,
+		"aws-h100-ct-1": CloudAWS,
+		"aws-h100-ct-2": CloudAWS,
+		"gcp-h100":      CloudGCP,
+		"azure-h100":    CloudAzure,
+		"kind-h100":     CloudKind,
+	}
 	for name, cloud := range want {
 		res, err := reg.Lookup(name)
 		if err != nil {
@@ -834,9 +841,68 @@ func TestCommittedRegistryValid(t *testing.T) {
 	// closed rather than sliding in unnoticed.
 	gotNames := append([]string(nil), reg.Names()...)
 	slices.Sort(gotNames)
-	wantNames := []string{"aws-h100", "azure-h100", "gcp-h100", "kind-h100"}
+	wantNames := []string{"aws-h100", "aws-h100-ct-1", "aws-h100-ct-2", "azure-h100", "gcp-h100", "kind-h100"}
 	if !slices.Equal(gotNames, wantNames) {
 		t.Errorf("committed registry reservations = %v, want exactly %v", gotNames, wantNames)
+	}
+
+	// The CT slots are two leases over ONE physical reservation — the shape
+	// that lets a daytime cluster and a nightly cell run as two independent
+	// 2-node clusters instead of contending for one lease. Both must stay on
+	// the same reservation-id and cluster-config: that is what bounds AICR to
+	// 2 slots x desired 2 = 4 instances there, and a slot pointed at different
+	// capacity would silently raise the ceiling.
+	//
+	// The slots also carry the day/night SPLIT that makes the two concurrent:
+	// slot 1 holds the daytime cluster and runs no nightly cells, slot 2 runs
+	// the nightly batch and holds no daytime intent. Collapsing that split
+	// (both nightly, or both daytime) would silently restore the contention
+	// this shape exists to remove, so lock it.
+	ctSlots := []string{"aws-h100-ct-1", "aws-h100-ct-2"}
+	var ctReservationID, ctConfig string
+	for _, name := range ctSlots {
+		slot, slotErr := reg.Lookup(name)
+		if slotErr != nil {
+			t.Errorf("committed registry missing %q: %v", name, slotErr)
+			continue
+		}
+		if ctReservationID == "" {
+			ctReservationID, ctConfig = slot.ReservationID, slot.ClusterConfigPath
+			continue
+		}
+		if slot.ReservationID != ctReservationID {
+			t.Errorf("%s reservation-id = %q, want %q (slots share one reservation)",
+				name, slot.ReservationID, ctReservationID)
+		}
+		if slot.ClusterConfigPath != ctConfig {
+			t.Errorf("%s cluster-config-path = %q, want %q (slots share one config)",
+				name, slot.ClusterConfigPath, ctConfig)
+		}
+	}
+
+	// Slot 1: daytime only. OrDefault, not the raw field — it returns
+	// [training] when the key is absent, so an empty result proves the explicit
+	// opt-out is present rather than the key having been dropped.
+	if slot1, slotErr := reg.Lookup("aws-h100-ct-1"); slotErr == nil {
+		if got := slot1.NightlyIntentsOrDefault(); len(got) != 0 {
+			t.Errorf("aws-h100-ct-1 nightly-intents = %v, want empty (daytime slot)", got)
+		}
+		if slot1.DaytimeIntent != IntentTraining {
+			t.Errorf("aws-h100-ct-1 daytime-intent = %q, want %q", slot1.DaytimeIntent, IntentTraining)
+		}
+	}
+
+	// Slot 2: opted out of both for now. Nightly still runs on aws-h100, so
+	// landing these rows adds nothing to a schedule; enrolling slot 2 is a
+	// later deliberate edit here, once a green run exists on this capacity for
+	// each intent it would list.
+	if slot2, slotErr := reg.Lookup("aws-h100-ct-2"); slotErr == nil {
+		if got := slot2.NightlyIntentsOrDefault(); len(got) != 0 {
+			t.Errorf("aws-h100-ct-2 nightly-intents = %v, want empty (not yet enrolled)", got)
+		}
+		if slot2.DaytimeIntent != "" {
+			t.Errorf("aws-h100-ct-2 daytime-intent = %q, want empty (aws-h100-ct-1 holds it)", slot2.DaytimeIntent)
+		}
 	}
 
 	// The committed daytime-name discovery slugs (ADR-017). Locked here so a
@@ -844,10 +910,12 @@ func TestCommittedRegistryValid(t *testing.T) {
 	// cluster name (aicr-uat-day-<slug>-<slot>-<run_id>) and its guard/teardown
 	// scans key off these exact values.
 	wantSlug := map[string]string{
-		"aws-h100":   "ah1",
-		"gcp-h100":   "gh1",
-		"azure-h100": "zh1",
-		"kind-h100":  "kh1",
+		"aws-h100":      "ah1",
+		"aws-h100-ct-1": "ch1",
+		"aws-h100-ct-2": "ch2",
+		"gcp-h100":      "gh1",
+		"azure-h100":    "zh1",
+		"kind-h100":     "kh1",
 	}
 	for name, slug := range wantSlug {
 		res, lookupErr := reg.Lookup(name)
@@ -867,7 +935,7 @@ func TestCommittedRegistryValid(t *testing.T) {
 	for _, a := range assignments {
 		gotIntent[a.Reservation] = a.Intent
 	}
-	wantIntent := map[string]string{"aws-h100": IntentTraining, "gcp-h100": IntentInference}
+	wantIntent := map[string]string{"aws-h100-ct-1": IntentTraining, "gcp-h100": IntentInference}
 	for name, intent := range wantIntent {
 		if gotIntent[name] != intent {
 			t.Errorf("committed registry daytime-intent[%q] = %q, want %q", name, gotIntent[name], intent)
