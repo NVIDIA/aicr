@@ -1,0 +1,13 @@
+attestations:
+  - attestedAt: 2026-09-22T21:21:54Z
+    bundle:
+      digest: sha256:e754b827cb9b723d467741d63757125cff5cf7dd639e16e72ec07046608b44b2
+      oci: ghcr.io/mikecook/aicr-evidence:gb200-gke-cos-training-kubeflow-gpustack-bundle-installer-de2f67ff57a2
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: 1082845+mikecook@users.noreply.github.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 121355626
+profile: gpuStack=bundle-installer
+recipe: gb200-gke-cos-training-kubeflow-gpustack-bundle-installer
+schemaVersion: 1.0.0

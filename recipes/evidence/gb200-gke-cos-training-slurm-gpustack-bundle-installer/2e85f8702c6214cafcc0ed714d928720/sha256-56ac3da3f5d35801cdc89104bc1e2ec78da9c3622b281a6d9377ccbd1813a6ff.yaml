@@ -1,0 +1,13 @@
+attestations:
+  - attestedAt: 2026-09-22T22:07:45Z
+    bundle:
+      digest: sha256:56ac3da3f5d35801cdc89104bc1e2ec78da9c3622b281a6d9377ccbd1813a6ff
+      oci: ghcr.io/mikecook/aicr-evidence:gb200-gke-cos-training-slurm-gpustack-bundle-installer-ba6088f7350d
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: 1082845+mikecook@users.noreply.github.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 121400864
+profile: gpuStack=bundle-installer
+recipe: gb200-gke-cos-training-slurm-gpustack-bundle-installer
+schemaVersion: 1.0.0
