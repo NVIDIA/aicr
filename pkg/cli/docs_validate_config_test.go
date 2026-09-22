@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	appcfg "github.com/NVIDIA/aicr/pkg/config"
 )
 
 // docsAICRConfigBlocks returns every fenced YAML block in path whose body
@@ -78,6 +79,10 @@ func docsAICRConfigBlocks(t *testing.T, path string) []string {
 // guard reads flag-or-config, so the YAML-only form is refused exactly as the
 // two flags are.
 //
+// The second bug is a documented example on a deprecated apiVersion. Nothing
+// here checked the header, and the reference drifted onto aicr.run/v1alpha2
+// twice without failing anything, because the loader still accepts it.
+//
 // The gate is kept honest by the floor below: a config that carries no
 // spec.validate section passes trivially, so a restructure that stopped the
 // extractor from finding the validate block would leave every case vacuous.
@@ -104,6 +109,21 @@ func TestDocsValidateConfigExamplesPassOurOwnGuards(t *testing.T) {
 		if err != nil {
 			t.Errorf("AICRConfig block %d does not load: %v\n%s", i, err, block)
 			continue
+		}
+
+		// A documented block must carry the CURRENT authoring apiVersion, not
+		// merely a supported one. header.IsSupportedAuthoringAPIVersion still
+		// accepts aicr.run/v1alpha2, so a block on it loads clean while
+		// teaching readers a value whose every load emits a deprecation
+		// notice (header.WarnDeprecatedAPIVersion, removed in
+		// header.AlphaRemovedIn). The want is read from appcfg.APIVersion,
+		// which aliases header.AuthoringGroupVersion, rather than written as
+		// a literal: a literal would pin this release's answer and go stale
+		// at the next authoring-track bump, which is the drift it exists to
+		// catch.
+		if loaded := cfg.Unwrap(); loaded.APIVersion != appcfg.APIVersion {
+			t.Errorf("AICRConfig block %d (metadata.name %q) in %s documents apiVersion %q, want %q",
+				i, loaded.Metadata.Name, reference, loaded.APIVersion, appcfg.APIVersion)
 		}
 
 		opts, _, err := cfg.ValidateSettings()
