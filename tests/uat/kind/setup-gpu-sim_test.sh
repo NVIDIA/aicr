@@ -263,4 +263,62 @@ check "each instance annotation carries that node's own name" \
 check "labelling touches only the mapped workers" "4" \
     "$(printf '%s\n' "$label_argv" | grep -cF -- 'label node')"
 
+# --- the DCGM host engine -------------------------------------------------
+#
+# NVSentinel's GPU health monitors are DaemonSets gated on the node label
+# nvsentinel.dgxc.nvidia.com/dcgm.version. Its labeler writes that label only
+# when it finds a READY pod carrying app=nvidia-dcgm whose IMAGE STRING matches
+# `dcgm:<major>.` (labeler/pkg/labeler/labeler.go, verified at the v1.20.0 this
+# repo pins). Nothing in that path inspects a GPU, which is why a mocked NVML
+# driver under a real DCGM host engine is enough.
+#
+# Three separate contracts have to hold, and each failed at least once while
+# this was being built. All three fail SILENTLY: the lane comes up green with
+# the monitors sitting at desiredNumberScheduled 0.
+
+# 1. Reproducibility AND parseability, which pull in opposite directions here.
+#    The lane pins images by digest. A bare digest reference contains no
+#    `dcgm:4.` substring, so pinning the way the device plugin is pinned would
+#    stop the labeler stamping. The tag+digest form satisfies both: the digest
+#    still decides which bytes run, and the tag is inert for resolution but
+#    parseable by the labeler.
+ref="$(dcgm_image_ref)"
+check "the DCGM reference carries a digest" "digest" \
+    "$(grep -qE '@sha256:[0-9a-f]{64}$' <<<"$ref" && echo digest || echo "no-digest:${ref}")"
+check "the DCGM reference also carries a labeler-parseable tag" "parseable" \
+    "$(grep -qE 'dcgm:[0-9]+\.' <<<"$ref" && echo parseable || echo "unparseable:${ref}")"
+
+# 2. The pod label is the labeler's selector (--dcgm-app-label, default
+#    nvidia-dcgm). Rename it and the labeler sees no DCGM pod at all.
+check "the DaemonSet carries the app label the labeler selects on" "1" \
+    "$(dcgm_manifest | grep -cE '^        app: nvidia-dcgm$' | tr -d ' ')"
+
+# 3. nv-hostengine binds loopback by default. NVSentinel connects over the
+#    Service from another pod, so without an explicit bind the handshake fails
+#    with "connection to the host engine is not valid any longer", surfacing in
+#    the monitor as a Python AttributeError that names nothing relevant.
+check "the host engine binds all interfaces" "1" \
+    "$(dcgm_manifest | grep -cE '^            - ALL$' | tr -d ' ')"
+
+# 4. NVSentinel hardcodes the endpoint nvidia-dcgm.<ns>.svc:5555, so the
+#    Service name and port are a contract, not a preference.
+# Scoped to the Service document: the DaemonSet carries the same name by
+# convention, so an unscoped count is 2 and proves nothing about the Service.
+check "exactly one Service is emitted" "1" \
+    "$(dcgm_manifest | grep -cE '^kind: Service$' | tr -d ' ')"
+check "the Service is named nvidia-dcgm" "1" \
+    "$(dcgm_manifest | awk '/^kind: Service$/,0' | grep -cE '^  name: nvidia-dcgm$' | tr -d ' ')"
+check "the Service exposes 5555" "1" \
+    "$(dcgm_manifest | grep -cE '^      port: 5555$' | tr -d ' ')"
+
+# 5. The host engine image is ~2GB and is not side-loaded, so it cannot share
+#    the device plugin's 300s rollout budget. A wait that expires on a cold
+#    pull fails the lane for being slow rather than wrong, and the usual repair
+#    is to widen it until it no longer discriminates. Require a dedicated, and
+#    strictly larger, budget so a later tidy-up cannot collapse the two.
+check "the host engine has its own rollout budget" "own" \
+    "$([[ "${DCGM_ROLLOUT_TIMEOUT}" != "${ROLLOUT_TIMEOUT}" ]] && echo own || echo "shared:${DCGM_ROLLOUT_TIMEOUT}")"
+check "the host engine budget exceeds the shared one" "larger" \
+    "$([[ "${DCGM_ROLLOUT_TIMEOUT%s}" -gt "${ROLLOUT_TIMEOUT%s}" ]] && echo larger || echo "not-larger:${DCGM_ROLLOUT_TIMEOUT}")"
+
 exit "${fail}"

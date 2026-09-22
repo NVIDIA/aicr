@@ -336,9 +336,30 @@ jobs:
         timeout-minutes: 10
         run: ./tests/uat/kind/verify-topology.sh "${KIND_CLUSTER_NAME}"
 
+      # Gates the other half of what the simulated GPUs buy: NVSentinel's GPU
+      # health monitor running and reporting with no GPU hardware. It is a lane
+      # step rather than a recipe health check because the shared check has to
+      # stay tolerant of desiredNumberScheduled 0, which is correct on every
+      # lane that supplies no DCGM host engine. See the script's header.
+      #
+      # After topology, so a failure here is attributable to the DCGM hop alone
+      # and not confused with a Topograph problem; before conformance, so the
+      # monitors are proven up before a signed evidence bundle claims them.
+      - name: UAT - verify NVSentinel GPU health monitors
+        id: gpu_health
+        if: steps.topology.outcome == 'success'
+        timeout-minutes: 15
+        run: ./tests/uat/kind/verify-gpu-health-monitors.sh "${KIND_CLUSTER_NAME}"
+
       - name: UAT - validate (conformance phase) + emit signed evidence
         id: conformance
-        if: steps.topology.outcome == 'success'
+        # Both gates, named explicitly rather than relying on the chain. The
+        # gpu_health step already depends on topology, so requiring only the
+        # former would hold transitively, but the invariant this lane states is
+        # that conformance must not publish evidence for a wrong topology, and
+        # an invariant that survives only by transitivity is one a later edit
+        # can drop without noticing.
+        if: steps.topology.outcome == 'success' && steps.gpu_health.outcome == 'success'
         timeout-minutes: 45
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -437,6 +458,7 @@ jobs:
             echo "| Install | ${{ steps.install.outcome }} |"
             echo "| Footprint - after bundle install | ${{ steps.footprint_install.outcome }} |"
             echo "| Topology (#2358 acceptance gate) | ${{ steps.topology.outcome }} |"
+            echo "| NVSentinel GPU health monitors | ${{ steps.gpu_health.outcome }} |"
             echo "| Validate (phases: conformance) | ${{ steps.conformance.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
             echo ""

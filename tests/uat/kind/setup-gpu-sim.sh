@@ -129,6 +129,45 @@ DEVICE_PLUGIN_IMAGE="${DEVICE_PLUGIN_REPOSITORY}@${DEVICE_PLUGIN_DIGEST}"
 DEVICE_PLUGIN_NAME="nvidia-device-plugin-mock"
 DEVICE_PLUGIN_NAMESPACE="kube-system"
 
+# The DCGM host engine. NVSentinel's GPU health monitors are gated on the node
+# label nvsentinel.dgxc.nvidia.com/dcgm.version, which its labeler writes only
+# when it finds a Ready pod labelled app=nvidia-dcgm whose image string matches
+# `dcgm:<major>.` (labeler/pkg/labeler/labeler.go at the v1.20.0 this repo
+# pins). Nothing on that path inspects a GPU, so a real host engine reading the
+# mocked NVML driver is enough to bring the monitors up with no hardware.
+#
+# THE REFERENCE CARRIES BOTH A TAG AND A DIGEST, deliberately. Everything else
+# here is pinned by bare digest, but a bare digest contains no `dcgm:4.`
+# substring and the labeler would stop stamping, leaving the monitors at
+# desiredNumberScheduled 0 with nothing failing. The digest still decides which
+# bytes run; the tag is inert for resolution and exists for the labeler to
+# parse. setup-gpu-sim_test.sh requires both halves.
+#
+# The version tracks what gpu-operator renders for the pinned chart, so the
+# lane exercises the same host engine a real deployment gets. To re-resolve:
+#   docker buildx imagetools inspect nvcr.io/nvidia/cloud-native/dcgm:<version>
+# Printed sha256:e30317a5... for 4.6.0-1-ubuntu24.04 on 2026-09-22, a
+# multi-arch index (linux/amd64 and linux/arm64).
+DCGM_REPOSITORY="nvcr.io/nvidia/cloud-native/dcgm"
+DCGM_VERSION="4.6.0-1-ubuntu24.04"
+DCGM_DIGEST="sha256:e30317a5f1e1e1c236784776d0c25ce7e48d93e18ed2a8224bb5d805aa98acb8"
+# The Service name and port are NVSentinel's contract, not a preference: the
+# monitor dials nvidia-dcgm.<namespace>.svc:5555.
+DCGM_NAME="nvidia-dcgm"
+DCGM_NAMESPACE="gpu-operator"
+DCGM_PORT=5555
+# The host engine image is roughly 2GB unpacked, several times the other
+# images this lane pulls, and it is NOT side-loaded: the lane side-loads only
+# AICR's own ko.local images, so this comes from nvcr.io over the network on
+# every run. ROLLOUT_TIMEOUT (300s) is not enough for it.
+#
+# Measured on a cold node: a 905MB image took 338s, so 2GB does not fit in 300s
+# with any margin. A too-short wait here fails the lane for being slow rather
+# than wrong, and the usual repair is to widen the timeout until it stops
+# discriminating. 900s is chosen to absorb a cold pull and still fail in a
+# bounded time when the image genuinely cannot be fetched.
+DCGM_ROLLOUT_TIMEOUT="${DCGM_ROLLOUT_TIMEOUT:-900s}"
+
 # The label the DEVICE PLUGIN selects on. The mock itself does not: chart
 # 0.3.0 ships an empty nodeSelector and runs on every node. Keeping the label
 # off the control plane is what leaves it GPU-free.
@@ -296,6 +335,90 @@ spec:
 MANIFEST
 }
 
+# dcgm_image_ref
+#
+# The tag+digest reference. Both halves are load-bearing; see the pin block.
+dcgm_image_ref() {
+    printf '%s:%s@%s' "${DCGM_REPOSITORY}" "${DCGM_VERSION}" "${DCGM_DIGEST}"
+}
+
+# dcgm_manifest
+#
+# Prints the DCGM host engine DaemonSet and the Service NVSentinel dials.
+#
+# Not gpu-operator: its operands carry runtimeClassName nvidia, which a stock
+# kindest/node cannot satisfy (it ships only runc and test-handler), and that
+# is why this lane excludes gpu-operator entirely. The host engine itself needs
+# no such runtime. It reads the mocked driver through a plain hostPath and
+# NVIDIA_DRIVER_ROOT, which is what makes the GPU-free path work.
+#
+# `-b ALL` is not optional. nv-hostengine binds loopback by default, so the
+# monitor connecting over the Service from another pod fails the handshake with
+# "connection to the host engine is not valid any longer" and reports it as a
+# Python AttributeError that names neither the bind address nor the Service.
+dcgm_manifest() {
+    cat <<MANIFEST
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ${DCGM_NAME}
+  namespace: ${DCGM_NAMESPACE}
+spec:
+  selector:
+    matchLabels:
+      app: ${DCGM_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${DCGM_NAME}
+    spec:
+      # Workers only, matching the device plugin, so the control plane stays
+      # GPU-free and the negative control keeps its meaning.
+      nodeSelector:
+        ${MOKKA_NODE_TYPE_LABEL}: ${MOKKA_NODE_TYPE}
+      tolerations:
+        - operator: Exists
+      hostNetwork: true
+      containers:
+        - name: nvidia-dcgm-ctr
+          image: $(dcgm_image_ref)
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command:
+            - /usr/bin/nv-hostengine
+          args:
+            - -n
+            - -b
+            - ALL
+          env:
+            - name: NVIDIA_DRIVER_ROOT
+              value: ${NVML_MOCK_DRIVER_ROOT}
+            - name: LD_LIBRARY_PATH
+              value: ${NVML_MOCK_DRIVER_ROOT}/usr/lib64
+          volumeMounts:
+            - name: mock-root
+              mountPath: ${NVML_MOCK_HOST_ROOT}
+      volumes:
+        - name: mock-root
+          hostPath:
+            path: ${NVML_MOCK_HOST_ROOT}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${DCGM_NAME}
+  namespace: ${DCGM_NAMESPACE}
+spec:
+  selector:
+    app: ${DCGM_NAME}
+  ports:
+    - name: dcgm
+      port: ${DCGM_PORT}
+      targetPort: ${DCGM_PORT}
+MANIFEST
+}
+
 # --- cluster actions --------------------------------------------------------
 
 # label_workers <context> <cluster>
@@ -354,6 +477,22 @@ install_device_plugin() {
         kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" apply -f -
 }
 
+# install_dcgm <context>
+#
+# Applies the host engine and its Service. The namespace is created first
+# because nothing else in this lane owns gpu-operator: the lane excludes the
+# gpu-operator component precisely because its operands need a runtime a stock
+# kind node does not have.
+install_dcgm() {
+    local context="$1"
+    echo "installing the DCGM host engine ${DCGM_VERSION} at $(dcgm_image_ref)"
+    kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
+        create namespace "${DCGM_NAMESPACE}" --dry-run=client -o yaml |
+        kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" apply -f - || return 1
+    dcgm_manifest |
+        kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" apply -f -
+}
+
 # verify_capacity <context> <cluster>
 #
 # Fails unless every mapped worker advertises exactly GPUS_PER_WORKER devices.
@@ -407,10 +546,19 @@ main() {
     label_workers "${context}" "${cluster}" || return 1
     install_nvml_mock "${context}" || return 1
     install_device_plugin "${context}" || return 1
+    install_dcgm "${context}" || return 1
 
     kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
         rollout status "daemonset/${DEVICE_PLUGIN_NAME}" \
         -n "${DEVICE_PLUGIN_NAMESPACE}" --timeout="${ROLLOUT_TIMEOUT}" || return 1
+
+    # The host engine pulls a ~900MB image, so it gets its own rollout wait
+    # rather than riding the device plugin's. Without this the lane races on to
+    # assert NVSentinel's monitors while the labeler still has no DCGM pod to
+    # read, and the monitors are legitimately absent rather than broken.
+    kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
+        rollout status "daemonset/${DCGM_NAME}" \
+        -n "${DCGM_NAMESPACE}" --timeout="${DCGM_ROLLOUT_TIMEOUT}" || return 1
 
     wait_for_capacity "${context}" "${cluster}" || return 1
     verify_capacity "${context}" "${cluster}"
