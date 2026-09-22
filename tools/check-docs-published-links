@@ -25,7 +25,7 @@ def markdown_links(path: Path) -> list[str]:
     text = _without_fenced_code(text)
     links = _inline_links(text)
     references = {
-        label.casefold(): destination
+        _normalize_reference_label(label): destination
         for label, destination in _reference_definitions(text)
     }
     links.extend(_reference_links(text, references))
@@ -37,14 +37,20 @@ def _reference_links(text: str, references: dict[str, str]) -> list[str]:
     for text_label, reference_label in re.findall(
         r"(?<!\\)\[([^\]\n]+)\]\[([^\]\n]*)\]", text
     ):
-        if destination := references.get((reference_label or text_label).casefold()):
+        if destination := references.get(
+            _normalize_reference_label(reference_label or text_label)
+        ):
             links.append(destination)
     for label in re.findall(
         r"(?<!\\)(?<!\])\[([^\]\n]+)\](?![ \t]*(?:\(|\[|:))", text
     ):
-        if destination := references.get(label.casefold()):
+        if destination := references.get(_normalize_reference_label(label)):
             links.append(destination)
     return links
+
+
+def _normalize_reference_label(label: str) -> str:
+    return " ".join(label.casefold().split())
 
 
 def _without_fenced_code(text: str) -> str:

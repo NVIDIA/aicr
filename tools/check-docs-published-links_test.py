@@ -77,6 +77,16 @@ class PublishedDocsLinkTest(unittest.TestCase):
                 ["unpublished.md", "unpublished.md", "unpublished.md"],
             )
 
+    def test_reference_labels_normalize_internal_whitespace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text(
+                "[release   notes]\n\n"
+                "[release notes]: unpublished.md\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(MODULE.markdown_links(page), ["unpublished.md"])
+
     def test_mixed_fence_markers_do_not_hide_links(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             page = Path(directory) / "page.md"
