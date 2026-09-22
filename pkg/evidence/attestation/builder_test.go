@@ -28,6 +28,7 @@ import (
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/header"
+	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
@@ -51,6 +52,50 @@ func TestBuild_RejectsMissingRequiredFields(t *testing.T) {
 				t.Errorf("expected error for missing required field")
 			}
 		})
+	}
+}
+
+func TestBuild_OptInOnlyServiceIsNotInferable(t *testing.T) {
+	t.Log("Building evidence for the generic GB300 recipe against a metal3 snapshot")
+	rec := &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: header.GroupVersion,
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceGeneric,
+			Accelerator: recipe.CriteriaAcceleratorGB300,
+			OS:          recipe.CriteriaOSUbuntu,
+			Intent:      recipe.CriteriaIntentTraining,
+		},
+	}
+	snap := &snapshotter.Snapshot{Measurements: []*measurement.Measurement{
+		measurement.NewMeasurement(measurement.TypeK8s).WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("node").Set("provider", measurement.Str("metal3")),
+		).Build(),
+	}}
+	bundle, err := Build(context.Background(), BuildOptions{
+		OutputDir:    t.TempDir(),
+		Recipe:       rec,
+		RecipeYAML:   []byte("apiVersion: " + header.GroupVersion + "\nkind: RecipeResult\n"),
+		Snapshot:     snap,
+		SnapshotYAML: []byte("measurements: []\n"),
+		BOM:          BOMInputs{Body: []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[]}`), CycloneDXVersion: "1.6"},
+		AICRVersion:  "v0.22.0",
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	t.Log("Testing that the predicate qualifies the recipe and records the observed provider")
+	cm := bundle.Predicate.CriteriaMatch
+	if !cm.Matched {
+		t.Errorf("CriteriaMatch.Matched = false, want true; perDimension = %+v", cm.PerDimension)
+	}
+	service, ok := cm.Find(fingerprint.DimensionService)
+	if !ok {
+		t.Fatalf("service dimension missing from %+v", cm.PerDimension)
+	}
+	if service.Match != fingerprint.DimensionNotInferable || service.RecipeRequires != "generic" || service.FingerprintProvides != "metal3" {
+		t.Errorf("service diff = %+v, want not-inferable generic/metal3", service)
 	}
 }
 
