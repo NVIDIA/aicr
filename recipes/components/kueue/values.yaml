@@ -24,7 +24,7 @@ controllerManager:
   tolerations:
     - operator: Exists
 
-# Pinned copy of the chart 0.19.3 default controllerManagerConfigYaml with
+# Pinned copy of the chart 0.19.5 default controllerManagerConfigYaml with
 # ONE deliberate change: integrations.frameworks is trimmed to the
 # frameworks AICR manages (batch/job, JobSet, TrainJob). The chart default
 # also enables mpijob/ray (rayjob, rayservice, raycluster)/appwrapper/pod/
