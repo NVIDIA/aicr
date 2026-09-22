@@ -217,6 +217,15 @@ A release includes everything merged to `main` since the last tag. There is no c
 - No known regressions since the last release
 - Breaking changes use `feat!:` or `fix!:` commit prefix (drives changelog and signals consumers)
 
+**After a minor release publishes, verify:**
+
+- The supported minor and the end-of-life threshold are bumped in **both**
+  [Supported Versions](#supported-versions) here and the matching table in
+  `SECURITY.md`. `TestSupportedVersionsMatchSecurityPolicy` fails when the two
+  files disagree, so they cannot drift apart — but nothing catches them going
+  stale *together*, and that is the only way this has ever been wrong. Patch
+  releases do not move either value.
+
 ## Quality Gates
 
 Every release must pass these automated gates before artifacts are published:
