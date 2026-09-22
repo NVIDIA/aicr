@@ -101,7 +101,10 @@ jobs:
           node_image=$(yq -r '.testing.mokka_kind_node_image' .settings.yaml)
           chart=$(yq -r '.testing.component_test.nvml_mock_chart' .settings.yaml)
           chart_version=$(yq -r '.testing.component_test.nvml_mock_chart_version' .settings.yaml)
-          for v in node_image chart chart_version; do
+          # The chart's image.tag defaults to a floating `latest`, so the image
+          # is pinned separately or the lane's cluster changes under it.
+          image_version=$(yq -r '.testing.component_test.nvml_mock_version' .settings.yaml)
+          for v in node_image chart chart_version image_version; do
             if [ -z "${!v}" ] || [ "${!v}" = "null" ]; then
               echo "::error::.settings.yaml is missing $v" && exit 1
             fi
@@ -110,6 +113,7 @@ jobs:
             echo "node_image=$node_image"
             echo "chart=$chart"
             echo "chart_version=$chart_version"
+            echo "image_version=$image_version"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build aicr
@@ -152,6 +156,7 @@ jobs:
             --namespace mokka --create-namespace \
             --set gpu.profile="$GPU_PROFILE" \
             --set gpu.count="$GPU_COUNT" \
+            --set image.tag="${{ steps.mokka.outputs.image_version }}" \
             --wait --timeout 300s
           kubectl rollout status daemonset/nvml-mock -n mokka --timeout=300s
 
@@ -200,8 +205,16 @@ jobs:
           while [ "$SECONDS" -lt "$deadline" ]; do
             ready=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o json \
               | jq --arg n "$GPU_COUNT" '[.items[] | select((.status.allocatable["nvidia.com/gpu"] // "0") == $n)] | length')
-            settling=$(kubectl get pods -n gpu-operator --no-headers 2>/dev/null \
-              | grep -vcE 'Running|Completed' || true)
+            # Readiness, not phase. A pod sitting Running with 0/1 containers
+            # ready passes a phase check while its probe is still failing, so
+            # the assertions below would run against a half-converged stack.
+            # dcgm-exporter alone has initialDelaySeconds: 45.
+            settling=$(kubectl get pods -n gpu-operator -o json 2>/dev/null | jq '
+              [ .items[]
+                | select(.status.phase != "Succeeded")
+                | select( ((.status.containerStatuses // []) | length) == 0
+                          or ((.status.containerStatuses // []) | map(.ready) | index(false) != null) )
+              ] | length')
             echo "  workers_at_capacity=$ready/$workers pods_settling=$settling"
             if [ "$ready" = "$workers" ] && [ "$settling" -eq 0 ]; then
               echo "converged"; exit 0
