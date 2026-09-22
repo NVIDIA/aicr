@@ -17,12 +17,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/evidence/project"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/testgrid"
@@ -192,7 +195,7 @@ func TestEvidenceCell(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := evidenceCell(tt.crit, tt.presence)
+			got := evidenceCell(tt.crit, tt.presence, nil)
 			if got != tt.want {
 				t.Errorf("evidenceCell() = %q, want %q", got, tt.want)
 			}
@@ -203,6 +206,338 @@ func TestEvidenceCell(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func writeTestPointer(t *testing.T, root, recipeSlug, sourceSlug, filename, issuer, identity string, attestedAt time.Time) string {
+	t.Helper()
+	dir := filepath.Join(root, recipeSlug, sourceSlug)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	content := fmt.Sprintf(`schemaVersion: 1.0.0
+recipe: %s
+attestations:
+  - attestedAt: %s
+    bundle:
+      digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      oci: ghcr.io/nvidia/aicr-evidence:test
+      predicateType: https://aicr.run/recipe-evidence/v1
+    signer:
+      identity: %s
+      issuer: %s
+`, recipeSlug, attestedAt.UTC().Format(time.RFC3339), identity, issuer)
+	p := filepath.Join(dir, filename)
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("writeFile %s: %v", filename, err)
+	}
+	return p
+}
+
+func writeTestPointerWithProfile(t *testing.T, root, recipeSlug, profile, sourceSlug, filename, issuer, identity string, attestedAt time.Time) string {
+	t.Helper()
+	dir := filepath.Join(root, recipeSlug, sourceSlug)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	content := fmt.Sprintf(`schemaVersion: 1.0.0
+recipe: %s
+profile: %s
+attestations:
+  - attestedAt: %s
+    bundle:
+      digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      oci: ghcr.io/nvidia/aicr-evidence:test
+      predicateType: https://aicr.run/recipe-evidence/v1
+    signer:
+      identity: %s
+      issuer: %s
+`, recipeSlug, profile, attestedAt.UTC().Format(time.RFC3339), identity, issuer)
+	p := filepath.Join(dir, filename)
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("writeFile %s: %v", filename, err)
+	}
+	return p
+}
+
+func TestEvidenceCellTrustClass(t *testing.T) {
+	presence, err := testgrid.LoadPresence()
+	if err != nil {
+		t.Fatalf("LoadPresence() error = %v", err)
+	}
+
+	crit := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorGB300,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+		Platform:    recipe.CriteriaPlatformKubeflow,
+	}
+
+	ghaIssuer := "https://token.actions.githubusercontent.com"
+	firstPartyIdentity := "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main"
+
+	commIssuer := "https://github.com/login/oauth"
+	commIdentity := "contributor@example.com"
+	commSlug, err := attestation.SourceSlug(commIssuer, commIdentity)
+	if err != nil {
+		t.Fatalf("SourceSlug(community): %v", err)
+	}
+
+	partnerIssuer := "https://oidc.partner.example"
+	partnerIdentity := "partner-runner@partner.example"
+	partnerSlug, err := attestation.SourceSlug(partnerIssuer, partnerIdentity)
+	if err != nil {
+		t.Fatalf("SourceSlug(partner): %v", err)
+	}
+
+	tempDir := t.TempDir()
+	allowlistYAML := fmt.Sprintf(`schemaVersion: 1.0.0
+firstParty:
+  - label: aicr-uat-aws
+    issuer: %s
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
+community:
+  - label: community-contrib
+    issuer: %s
+    source: %s
+partner:
+  - label: partner-org
+    issuer: %s
+    source: %s
+`, ghaIssuer, commIssuer, commSlug, partnerIssuer, partnerSlug)
+
+	alPath := filepath.Join(tempDir, "allowlist.yaml")
+	if err := os.WriteFile(alPath, []byte(allowlistYAML), 0o600); err != nil {
+		t.Fatalf("WriteFile allowlist: %v", err)
+	}
+	al, err := project.LoadAllowlist(alPath)
+	if err != nil {
+		t.Fatalf("LoadAllowlist: %v", err)
+	}
+
+	assertCellTokens := func(t *testing.T, got string) {
+		t.Helper()
+		for _, banned := range []string{"pass", "fail", "warn", "P:", "C:"} {
+			if strings.Contains(got, banned) {
+				t.Errorf("evidence cell %q leaked a status/count token %q", got, banned)
+			}
+		}
+	}
+
+	t.Run("first-party trust class", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "src-fp", "ptr.yaml",
+			ghaIssuer, firstPartyIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · first-party"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+	})
+
+	t.Run("community trust class", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", commSlug, "ptr.yaml",
+			commIssuer, commIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · community"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+	})
+
+	t.Run("partner trust class", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", partnerSlug, "ptr.yaml",
+			partnerIssuer, partnerIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · partner"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+	})
+
+	t.Run("unmatched signer falls back to link without trust class", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "unknown-slug", "ptr.yaml",
+			"https://unknown-issuer.example", "user@unknown.example", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow)"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+	})
+
+	t.Run("missing pointer directory falls back to link without trust class", func(t *testing.T) {
+		dir := t.TempDir()
+		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow)"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+	})
+
+	t.Run("malformed pointer is ignored and falls back to link", func(t *testing.T) {
+		dir := t.TempDir()
+		pDir := filepath.Join(dir, "gb300-eks-ubuntu-training-kubeflow", "bad-src")
+		_ = os.MkdirAll(pDir, 0o755)
+		_ = os.WriteFile(filepath.Join(pDir, "bad.yaml"), []byte("invalid: [yaml: content"), 0o600)
+		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow)"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+	})
+
+	t.Run("multiple pointers selects latest by attestedAt without artificial precedence", func(t *testing.T) {
+		dir := t.TempDir()
+		// Older first-party pointer
+		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "src-fp", "old-fp.yaml",
+			ghaIssuer, firstPartyIdentity, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+		// Newer community pointer
+		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", commSlug, "new-comm.yaml",
+			commIssuer, commIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+
+		// Community should be selected because it is newer, demonstrating no "first-party > community" ranking.
+		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · community"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+	})
+
+	t.Run("deterministic tie-breaker for identical attestedAt", func(t *testing.T) {
+		dir := t.TempDir()
+		sameTime := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+		// Pointer in "a-src" (lexicographically first directory)
+		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "a-src", "ptr.yaml",
+			commIssuer, commIdentity, sameTime)
+		// Pointer in "z-src"
+		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "z-src", "ptr.yaml",
+			partnerIssuer, partnerIdentity, sameTime)
+
+		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · community"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+	})
+
+	t.Run("profile-bearing recipe result resolves profile-specific pointer", func(t *testing.T) {
+		dir := t.TempDir()
+		profileCrit := &recipe.Criteria{
+			Service:     recipe.CriteriaServiceEKS,
+			Accelerator: recipe.CriteriaAcceleratorGB300,
+			OS:          recipe.CriteriaOSUbuntu,
+			Intent:      recipe.CriteriaIntentTraining,
+			Platform:    recipe.CriteriaPlatformKubeflow,
+		}
+		res := &recipe.RecipeResult{
+			Criteria: profileCrit,
+			Metadata: recipe.RecipeResultMetadata{
+				SelectedProfile: &recipe.SelectedProfile{
+					Name:  "gpuStack",
+					Value: "azure-managed",
+				},
+			},
+		}
+		// Suffixed slug: gb300-eks-ubuntu-training-kubeflow-gpustack-azure-managed
+		profileSlug := "gb300-eks-ubuntu-training-kubeflow-gpustack-azure-managed"
+		writeTestPointerWithProfile(t, dir, profileSlug, "gpuStack=azure-managed", commSlug, "ptr.yaml",
+			commIssuer, commIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+
+		got := evidenceCellWithContext(profileCrit, presence, al, res, dir)
+		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · community"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+	})
+
+	t.Run("real repository evidence and allowlist", func(t *testing.T) {
+		realAl, err := project.LoadAllowlist(filepath.Join("..", "..", "recipes", "evidence", "allowlist.yaml"))
+		if err != nil {
+			t.Fatalf("Load real allowlist: %v", err)
+		}
+		// Coordinate with committed community evidence: k0s/h200-ubuntu/training
+		k0sCrit := &recipe.Criteria{
+			Service:     recipe.CriteriaServiceK0s,
+			Accelerator: recipe.CriteriaAcceleratorH200,
+			OS:          recipe.CriteriaOSUbuntu,
+			Intent:      recipe.CriteriaIntentTraining,
+		}
+		evidenceRoot := filepath.Join("..", "..", "recipes", "evidence")
+		got := evidenceCellWithContext(k0sCrit, presence, realAl, nil, evidenceRoot)
+		want := "[k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) · community"
+		if got != want {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
+		}
+		assertCellTokens(t, got)
+
+		// Coordinate present in presence.yaml but with NO pointer committed: eks/gb200-ubuntu/inference-dynamo
+		gb200Crit := &recipe.Criteria{
+			Service:     recipe.CriteriaServiceEKS,
+			Accelerator: recipe.CriteriaAcceleratorGB200,
+			OS:          recipe.CriteriaOSUbuntu,
+			Intent:      recipe.CriteriaIntentInference,
+			Platform:    recipe.CriteriaPlatformDynamo,
+		}
+		gotGB200 := evidenceCellWithContext(gb200Crit, presence, realAl, nil, evidenceRoot)
+		wantGB200 := "[eks/gb200-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb200-ubuntu/inference-dynamo)"
+		if gotGB200 != wantGB200 {
+			t.Errorf("evidenceCellWithContext() = %q, want %q", gotGB200, wantGB200)
+		}
+		assertCellTokens(t, gotGB200)
+	})
+}
+
+func TestRenderMatrixWithAllowlist(t *testing.T) {
+	presence, err := testgrid.LoadPresence()
+	if err != nil {
+		t.Fatalf("LoadPresence() error = %v", err)
+	}
+	al, err := project.LoadAllowlist(filepath.Join("..", "..", "recipes", "evidence", "allowlist.yaml"))
+	if err != nil {
+		t.Fatalf("Load real allowlist: %v", err)
+	}
+	report := &health.Report{
+		SchemaVersion: health.SchemaVersion,
+		Combos: []health.ComboHealth{
+			{
+				Criteria: &recipe.Criteria{
+					Service:     recipe.CriteriaServiceK0s,
+					Accelerator: recipe.CriteriaAcceleratorH200,
+					OS:          recipe.CriteriaOSUbuntu,
+					Intent:      recipe.CriteriaIntentTraining,
+				},
+				LeafOverlay: "h200-k0s-ubuntu-training",
+				Structure:   health.StructureHealth{Status: health.StatusPass},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := renderMatrix(&buf, report, markdownOptions{
+		Deterministic: true,
+		NoTitle:       true,
+		Presence:      presence,
+		Allowlist:     al,
+		EvidenceDir:   filepath.Join("..", "..", "recipes", "evidence"),
+	}); err != nil {
+		t.Fatalf("renderMatrix() error = %v", err)
+	}
+	out := buf.String()
+	want := "[k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) · community"
+	if !strings.Contains(out, want) {
+		t.Errorf("renderMatrix with allowlist missing %q:\n%s", want, out)
 	}
 }
 

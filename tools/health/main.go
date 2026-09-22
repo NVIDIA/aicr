@@ -42,6 +42,8 @@ import (
 	"path/filepath"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/project"
+	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/testgrid"
@@ -74,6 +76,18 @@ func main() {
 }
 
 func run(ctx context.Context, outDir, summaryOut, aicrVersion string, deterministic, noTitle bool) error {
+	allowlistPath := filepath.Join(verifier.EvidenceDirName, verifier.AllowlistFileName)
+	if _, err := os.Stat(allowlistPath); os.IsNotExist(err) {
+		fallback := filepath.Join("..", "..", verifier.EvidenceDirName, verifier.AllowlistFileName)
+		if _, err := os.Stat(fallback); err == nil {
+			allowlistPath = fallback
+		}
+	}
+	allowlist, err := project.LoadAllowlist(allowlistPath)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "load evidence allowlist", err)
+	}
+
 	// Presence is read from the committed manifest embedded in pkg/testgrid, so
 	// the Evidence deep-links are constructed offline and the run stays
 	// hermetic — no dashboard fetch.
@@ -108,6 +122,7 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 			Deterministic: deterministic,
 			NoTitle:       noTitle,
 			Presence:      presence,
+			Allowlist:     allowlist,
 		})
 	}); err != nil {
 		return err
