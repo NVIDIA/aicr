@@ -280,6 +280,7 @@ testing:
   # renovate: datasource=docker depName=kindest/node depType=testing
   h100_kind_node_image: 'kindest/node:v1.37.0'
 
+
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
   gpu_operator_chart_version: 'v26.7.0'
@@ -292,8 +293,20 @@ testing:
   # Component test harness configuration
   # Used by tools/component-test/ scripts to validate individual components
   component_test:
-    nvml_mock_version: '0.1.0'
+    # Mokka (NVIDIA/k8s-test-infra) publishes the chart and the image at
+    # DIFFERENT paths. They are pinned separately because conflating them is
+    # what broke the Helm path: setup-gpu-mock.sh built its chart reference as
+    # "oci://$nvml_mock_image", which resolves to an image repository, not a
+    # chart, so `helm install` failed with "could not load config with
+    # mediatype application/vnd.cncf.helm.config.v1+json" on every run. The
+    # error was discarded and the script fell through to its manifest
+    # fallback, so the Helm path had never once succeeded.
+    nvml_mock_chart: 'ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock'
+    nvml_mock_chart_version: '0.3.0'
+    # Image pin for the manifest fallback only. The chart carries its own
+    # image reference and must not be forced to this tag.
     nvml_mock_image: 'ghcr.io/nvidia/nvml-mock'
+    nvml_mock_version: '0.1.0'
     default_gpu_profile: 'a100'
     default_gpu_count: 8
     cluster_name: 'aicr-component-test'
