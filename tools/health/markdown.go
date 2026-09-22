@@ -112,7 +112,7 @@ func (s *stickyWriter) Write(p []byte) (int, error) {
 // renderMatrix writes the recipe-health matrix as Markdown. The report's
 // Combos are already sorted deterministically by health.Compute, so rendering
 // preserves that order and adds no ordering of its own.
-func renderMatrix(w io.Writer, report *health.Report, opts markdownOptions) error {
+func renderMatrix(ctx context.Context, w io.Writer, report *health.Report, opts markdownOptions) error {
 	sw := &stickyWriter{w: w}
 
 	if !opts.NoTitle {
@@ -127,7 +127,7 @@ func renderMatrix(w io.Writer, report *health.Report, opts markdownOptions) erro
 	}
 
 	writeSummary(sw, report)
-	writeMatrix(sw, report, opts.Presence, opts.Allowlist, opts.EvidenceDir)
+	writeMatrix(ctx, sw, report, opts.Presence, opts.Allowlist, opts.EvidenceDir)
 
 	if sw.err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to write recipe-health markdown", sw.err)
@@ -159,12 +159,14 @@ func writeSummary(sw *stickyWriter, report *health.Report) {
 
 // writeMatrix emits the per-recipe matrix table.
 func writeMatrix(
+	ctx context.Context,
 	sw *stickyWriter,
 	report *health.Report,
 	presence *testgrid.Presence,
 	allowlist *project.Allowlist,
 	evidenceDir string,
 ) {
+
 	fmt.Fprintf(sw, "## Recipes\n\n")
 	fmt.Fprintln(sw, "| Recipe | Service | Accelerator | OS | Intent | Platform | Status | Coverage | Evidence |")
 	fmt.Fprintln(sw, "|--------|---------|-------------|----|--------|----------|--------|----------|----------|")
@@ -179,7 +181,7 @@ func writeMatrix(
 			dimCell(string(crit.Platform)),
 			c.Structure.Status,
 			coverageCell(c.Structure.Coverage),
-			evidenceCellWithContext(crit, presence, allowlist, c.Result, evidenceDir),
+			evidenceCellWithContext(ctx, crit, presence, allowlist, c.Result, evidenceDir),
 		)
 	}
 	fmt.Fprintln(sw)
@@ -193,7 +195,7 @@ func writeMatrix(
 // the deep-link (e.g. "[coord](url) · first-party"). Link construction is pure
 // and offline (pkg/testgrid.LinkFor over pkg/recipe.CoordinateFor), so the generator
 // stays hermetic and byte-deterministic. The cell never carries a status or a
-// pass/fail/count token — it points at the live board and nothing more, per
+// pass/fail/count token — it carries no pass/fail verdict or count, per
 // #1283 (RQ2 owns keeping the link honest; #1224 owns any later freshness
 // token). A recipe with a wildcard/absent required dimension (e.g. a100-any)
 // has no concrete coordinate and stays pending.
@@ -202,18 +204,21 @@ func evidenceCell(
 	presence *testgrid.Presence,
 	allowlist *project.Allowlist,
 ) string {
-	return evidenceCellWithContext(crit, presence, allowlist, nil, "")
+
+	return evidenceCellWithContext(context.Background(), crit, presence, allowlist, nil, "")
 }
 
 // evidenceCellWithContext is evidenceCell with an explicit RecipeResult and evidence
 // directory override, primarily used by writeMatrix and unit tests.
 func evidenceCellWithContext(
+	ctx context.Context,
 	crit *recipe.Criteria,
 	presence *testgrid.Presence,
 	allowlist *project.Allowlist,
 	result *recipe.RecipeResult,
 	evidenceDir string,
 ) string {
+
 	if presence == nil {
 		return evidencePending
 	}
@@ -223,7 +228,7 @@ func evidenceCellWithContext(
 	}
 	path := co.Path()
 	link := fmt.Sprintf("[%s](%s)", path, testgrid.LinkFor(co))
-	if class, ok := resolveTrustClass(crit, result, allowlist, evidenceDir); ok {
+	if class, ok := resolveTrustClass(ctx, crit, result, allowlist, evidenceDir); ok {
 		return fmt.Sprintf("%s · %s", link, class)
 	}
 	return link
@@ -233,11 +238,13 @@ func evidenceCellWithContext(
 // recipe and returns its trust class, or ("", false) if none exists.
 // evidenceDir defaults to verifier.EvidenceDirName ("recipes/evidence") when empty.
 func resolveTrustClass(
+	ctx context.Context,
 	crit *recipe.Criteria,
 	result *recipe.RecipeResult,
 	allowlist *project.Allowlist,
 	evidenceDir string,
 ) (project.Class, bool) {
+
 	if allowlist == nil || crit == nil {
 		return "", false
 	}
@@ -267,8 +274,8 @@ func resolveTrustClass(
 	)
 
 	for _, p := range pointers {
-		ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
-		ptr, err := verifier.LoadAndValidatePointerContext(ctx, p)
+		readCtx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
+		ptr, err := verifier.LoadAndValidatePointerContext(readCtx, p)
 		cancel()
 		if err != nil || ptr == nil || len(ptr.Attestations) == 0 {
 			continue

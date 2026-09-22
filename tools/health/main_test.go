@@ -78,7 +78,7 @@ func sampleReport() *health.Report {
 
 func TestRenderMatrixContent(t *testing.T) {
 	var buf bytes.Buffer
-	if err := renderMatrix(&buf, sampleReport(), markdownOptions{Deterministic: true, NoTitle: true}); err != nil {
+	if err := renderMatrix(t.Context(), &buf, sampleReport(), markdownOptions{Deterministic: true, NoTitle: true}); err != nil {
 		t.Fatalf("renderMatrix() error = %v", err)
 	}
 	out := buf.String()
@@ -103,7 +103,7 @@ func TestRenderMatrixContent(t *testing.T) {
 func TestRenderMatrixTitleAndStamp(t *testing.T) {
 	// NoTitle=false emits the H1; Deterministic=false emits the generated stamp.
 	var buf bytes.Buffer
-	if err := renderMatrix(&buf, sampleReport(), markdownOptions{
+	if err := renderMatrix(t.Context(), &buf, sampleReport(), markdownOptions{
 		AICRVersion:   "v1.2.3",
 		Deterministic: false,
 		NoTitle:       false,
@@ -122,7 +122,7 @@ func TestRenderMatrixTitleAndStamp(t *testing.T) {
 
 func TestRenderMatrixDeterministicOmitsStamp(t *testing.T) {
 	var buf bytes.Buffer
-	if err := renderMatrix(&buf, sampleReport(), markdownOptions{
+	if err := renderMatrix(t.Context(), &buf, sampleReport(), markdownOptions{
 		AICRVersion:   "v1.2.3",
 		Deterministic: true,
 		NoTitle:       true,
@@ -141,10 +141,10 @@ func TestRenderMatrixByteStable(t *testing.T) {
 	// meaningful.
 	opts := markdownOptions{AICRVersion: "main", Deterministic: true, NoTitle: true}
 	var a, b bytes.Buffer
-	if err := renderMatrix(&a, sampleReport(), opts); err != nil {
+	if err := renderMatrix(t.Context(), &a, sampleReport(), opts); err != nil {
 		t.Fatalf("renderMatrix() first run error = %v", err)
 	}
-	if err := renderMatrix(&b, sampleReport(), opts); err != nil {
+	if err := renderMatrix(t.Context(), &b, sampleReport(), opts); err != nil {
 		t.Fatalf("renderMatrix() second run error = %v", err)
 	}
 	if !bytes.Equal(a.Bytes(), b.Bytes()) {
@@ -210,8 +210,9 @@ func TestEvidenceCell(t *testing.T) {
 	}
 }
 
-func writeTestPointer(t *testing.T, root, recipeSlug, sourceSlug, filename, issuer, identity string, attestedAt time.Time) string {
+func writeTestPointer(t *testing.T, root, sourceSlug, filename, issuer, identity string, attestedAt time.Time) string {
 	t.Helper()
+	const recipeSlug = "gb300-eks-ubuntu-training-kubeflow"
 	dir := filepath.Join(root, recipeSlug, sourceSlug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
@@ -309,8 +310,8 @@ partner:
 `, ghaIssuer, commIssuer, commSlug, partnerIssuer, partnerSlug)
 
 	alPath := filepath.Join(tempDir, "allowlist.yaml")
-	if err := os.WriteFile(alPath, []byte(allowlistYAML), 0o600); err != nil {
-		t.Fatalf("WriteFile allowlist: %v", err)
+	if writeErr := os.WriteFile(alPath, []byte(allowlistYAML), 0o600); writeErr != nil {
+		t.Fatalf("WriteFile allowlist: %v", writeErr)
 	}
 	al, err := project.LoadAllowlist(alPath)
 	if err != nil {
@@ -328,9 +329,9 @@ partner:
 
 	t.Run("first-party trust class", func(t *testing.T) {
 		dir := t.TempDir()
-		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "src-fp", "ptr.yaml",
+		writeTestPointer(t, dir, "src-fp", "ptr.yaml",
 			ghaIssuer, firstPartyIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
-		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		got := evidenceCellWithContext(t.Context(), crit, presence, al, nil, dir)
 		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · first-party"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -340,9 +341,9 @@ partner:
 
 	t.Run("community trust class", func(t *testing.T) {
 		dir := t.TempDir()
-		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", commSlug, "ptr.yaml",
+		writeTestPointer(t, dir, commSlug, "ptr.yaml",
 			commIssuer, commIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
-		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		got := evidenceCellWithContext(t.Context(), crit, presence, al, nil, dir)
 		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · community"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -352,9 +353,9 @@ partner:
 
 	t.Run("partner trust class", func(t *testing.T) {
 		dir := t.TempDir()
-		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", partnerSlug, "ptr.yaml",
+		writeTestPointer(t, dir, partnerSlug, "ptr.yaml",
 			partnerIssuer, partnerIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
-		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		got := evidenceCellWithContext(t.Context(), crit, presence, al, nil, dir)
 		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · partner"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -364,9 +365,9 @@ partner:
 
 	t.Run("unmatched signer falls back to link without trust class", func(t *testing.T) {
 		dir := t.TempDir()
-		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "unknown-slug", "ptr.yaml",
+		writeTestPointer(t, dir, "unknown-slug", "ptr.yaml",
 			"https://unknown-issuer.example", "user@unknown.example", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
-		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		got := evidenceCellWithContext(t.Context(), crit, presence, al, nil, dir)
 		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow)"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -376,7 +377,7 @@ partner:
 
 	t.Run("missing pointer directory falls back to link without trust class", func(t *testing.T) {
 		dir := t.TempDir()
-		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		got := evidenceCellWithContext(t.Context(), crit, presence, al, nil, dir)
 		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow)"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -389,7 +390,7 @@ partner:
 		pDir := filepath.Join(dir, "gb300-eks-ubuntu-training-kubeflow", "bad-src")
 		_ = os.MkdirAll(pDir, 0o755)
 		_ = os.WriteFile(filepath.Join(pDir, "bad.yaml"), []byte("invalid: [yaml: content"), 0o600)
-		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		got := evidenceCellWithContext(t.Context(), crit, presence, al, nil, dir)
 		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow)"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -400,14 +401,14 @@ partner:
 	t.Run("multiple pointers selects latest by attestedAt without artificial precedence", func(t *testing.T) {
 		dir := t.TempDir()
 		// Older first-party pointer
-		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "src-fp", "old-fp.yaml",
+		writeTestPointer(t, dir, "src-fp", "old-fp.yaml",
 			ghaIssuer, firstPartyIdentity, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 		// Newer community pointer
-		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", commSlug, "new-comm.yaml",
+		writeTestPointer(t, dir, commSlug, "new-comm.yaml",
 			commIssuer, commIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
 
 		// Community should be selected because it is newer, demonstrating no "first-party > community" ranking.
-		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		got := evidenceCellWithContext(t.Context(), crit, presence, al, nil, dir)
 		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · community"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -419,13 +420,13 @@ partner:
 		dir := t.TempDir()
 		sameTime := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 		// Pointer in "a-src" (lexicographically first directory)
-		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "a-src", "ptr.yaml",
+		writeTestPointer(t, dir, "a-src", "ptr.yaml",
 			commIssuer, commIdentity, sameTime)
 		// Pointer in "z-src"
-		writeTestPointer(t, dir, "gb300-eks-ubuntu-training-kubeflow", "z-src", "ptr.yaml",
+		writeTestPointer(t, dir, "z-src", "ptr.yaml",
 			partnerIssuer, partnerIdentity, sameTime)
 
-		got := evidenceCellWithContext(crit, presence, al, nil, dir)
+		got := evidenceCellWithContext(t.Context(), crit, presence, al, nil, dir)
 		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · community"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -456,7 +457,7 @@ partner:
 		writeTestPointerWithProfile(t, dir, profileSlug, "gpuStack=azure-managed", commSlug, "ptr.yaml",
 			commIssuer, commIdentity, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
 
-		got := evidenceCellWithContext(profileCrit, presence, al, res, dir)
+		got := evidenceCellWithContext(t.Context(), profileCrit, presence, al, res, dir)
 		want := "[eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) · community"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -477,7 +478,7 @@ partner:
 			OS:          recipe.CriteriaOSUbuntu,
 			Intent:      recipe.CriteriaIntentTraining,
 		}
-		got := evidenceCellWithContext(k0sCrit, presence, realAl, nil, evidenceRoot)
+		got := evidenceCellWithContext(t.Context(), k0sCrit, presence, realAl, nil, evidenceRoot)
 		want := "[k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) · community"
 		if got != want {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", got, want)
@@ -492,7 +493,7 @@ partner:
 			Intent:      recipe.CriteriaIntentInference,
 			Platform:    recipe.CriteriaPlatformDynamo,
 		}
-		gotGB200 := evidenceCellWithContext(gb200Crit, presence, realAl, nil, evidenceRoot)
+		gotGB200 := evidenceCellWithContext(t.Context(), gb200Crit, presence, realAl, nil, evidenceRoot)
 		wantGB200 := "[eks/gb200-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb200-ubuntu/inference-dynamo)"
 		if gotGB200 != wantGB200 {
 			t.Errorf("evidenceCellWithContext() = %q, want %q", gotGB200, wantGB200)
@@ -538,7 +539,7 @@ func TestRenderMatrixWithAllowlist(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := renderMatrix(&buf, report, markdownOptions{
+	if err := renderMatrix(t.Context(), &buf, report, markdownOptions{
 		Deterministic: true,
 		NoTitle:       true,
 		Presence:      presence,
@@ -583,7 +584,7 @@ func TestRenderMatrixLinksPresentCoordinate(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := renderMatrix(&buf, report, markdownOptions{Deterministic: true, NoTitle: true, Presence: presence}); err != nil {
+	if err := renderMatrix(t.Context(), &buf, report, markdownOptions{Deterministic: true, NoTitle: true, Presence: presence}); err != nil {
 		t.Fatalf("renderMatrix() error = %v", err)
 	}
 	out := buf.String()

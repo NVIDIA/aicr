@@ -124,7 +124,7 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 
 	mdPath := filepath.Join(outDir, matrixFile)
 	if err := docgen.WriteRendered(mdPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, func(w io.Writer) error {
-		return renderMatrix(w, report, markdownOptions{
+		return renderMatrix(ctx, w, report, markdownOptions{
 			AICRVersion:   aicrVersion,
 			Deterministic: deterministic,
 			NoTitle:       noTitle,
