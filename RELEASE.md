@@ -225,6 +225,13 @@ A release includes everything merged to `main` since the last tag. There is no c
   files disagree, so they cannot drift apart — but nothing catches them going
   stale *together*, and that is the only way this has ever been wrong. Patch
   releases do not move either value.
+- Any deprecation whose removal **shipped in this release** is moved from
+  `## Active` to `## Removed` in
+  [`docs/user/deprecations.md`](docs/user/deprecations.md), per that page's own
+  rule. Nothing gates this, and the timing is easy to get wrong in both
+  directions: the entry belongs under `## Active` right up to the tag, because
+  until then no released binary behaves the new way, and it becomes misleading
+  the moment the tag lands.
 
 ## Quality Gates
 
