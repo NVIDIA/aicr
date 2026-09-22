@@ -826,7 +826,7 @@ components:
       defaultRepository: oci://ghcr.io/kai-scheduler/kai-scheduler
       defaultChart: kai-scheduler
       # renovate: datasource=docker depName=ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler
-      defaultVersion: v0.16.9
+      defaultVersion: v0.17.2
       defaultNamespace: kai-scheduler
     nodeScheduling:
       system:
