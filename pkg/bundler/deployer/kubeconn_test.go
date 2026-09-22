@@ -124,6 +124,13 @@ func TestKubeConnection_ResolvesContext(t *testing.T) {
 			wantWarn:    true,
 		},
 		{
+			name:        "an agreeing KUBECONFIG is not a conflict",
+			env:         []string{"KUBECONFIG=/a/kc.yaml", "KUBECONFIG_FLAG=--kubeconfig /a/kc.yaml"},
+			wantHelm:    []string{"--kubeconfig", "/a/kc.yaml", "list"},
+			wantKubectl: []string{"--kubeconfig", "/a/kc.yaml", "get", "crd"},
+			wantWarn:    true,
+		},
+		{
 			name:        "agreeing KUBE_CONTEXT and KUBECONFIG_FLAG are not a conflict",
 			env:         []string{"KUBE_CONTEXT=kind-aicr", "KUBECONFIG_FLAG=--kube-context kind-aicr"},
 			wantHelm:    []string{"--kube-context", "kind-aicr", "list"},
@@ -217,6 +224,13 @@ func TestKubeConnection_FailsClosed(t *testing.T) {
 			name:    "an empty joined kubeconfig is refused",
 			env:     []string{"KUBECONFIG_FLAG=--kubeconfig="},
 			wantMsg: "whose value is empty",
+		},
+		{
+			// Two kubeconfigs select two clusters exactly as two contexts do,
+			// so the disagreement is refused rather than silently overwritten.
+			name:    "disagreeing kubeconfigs are refused",
+			env:     []string{"KUBECONFIG=/a/kc.yaml", "KUBECONFIG_FLAG=--kubeconfig /b/kc.yaml"},
+			wantMsg: "Refusing to guess which cluster",
 		},
 		{
 			// helm's --kube-token carries a bearer token in the joined form,

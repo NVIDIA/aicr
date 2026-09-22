@@ -1643,9 +1643,9 @@ func TestDeployScript_RemediationHintCarriesConnection(t *testing.T) {
 	// Lift the hint construction out of deploy.sh rather than reimplementing
 	// it, so this fails if the shipped block stops carrying either value.
 	lines := strings.Split(string(script), "\n")
-	start := slices.IndexFunc(lines, func(l string) bool { return l == `KUBECTL_HINT="kubectl"` })
+	start := slices.IndexFunc(lines, func(l string) bool { return l == `KUBECONFIG_PREFIX=""` })
 	if start < 0 {
-		t.Fatalf("deploy.sh no longer starts the hint with KUBECTL_HINT=\"kubectl\"")
+		t.Fatalf("deploy.sh no longer starts the hint with KUBECONFIG_PREFIX=\"\"")
 	}
 	end := start
 	for end < len(lines) && !strings.HasPrefix(lines[end], "# ====") {
@@ -1664,7 +1664,9 @@ func TestDeployScript_RemediationHintCarriesConnection(t *testing.T) {
 	}
 	// One argv element per line, so a value split by the shell is visible as
 	// extra lines rather than hidden inside a flattened "$*".
-	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvFile + "\n"
+	kubeconfigFile := filepath.Join(dir, "kubeconfig-seen")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvFile +
+		"\nprintf '%s' \"${KUBECONFIG:-}\" > " + kubeconfigFile + "\n"
 	if wErr := os.WriteFile(filepath.Join(binDir, "kubectl"), []byte(stub), 0o700); wErr != nil {
 		t.Fatalf("write stub: %v", wErr)
 	}
@@ -1704,15 +1706,100 @@ func TestDeployScript_RemediationHintCarriesConnection(t *testing.T) {
 		t.Fatalf("kubectl stub never ran (%v)", err)
 	}
 	got := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	// The kubeconfig rides as an assignment, not a flag: KUBECONFIG is a
+	// :-separated merge list and --kubeconfig takes a single file.
 	want := []string{
-		"--kubeconfig", wantKubeconfig,
 		"--context", wantContext,
 		"delete", "ns", "doomed",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("remediation hint argv mismatch\ngot:  %q\nwant: %q", got, want)
 	}
+	seen, err := os.ReadFile(kubeconfigFile)
+	if err != nil {
+		t.Fatalf("stub recorded no KUBECONFIG: %v", err)
+	}
+	if string(seen) != wantKubeconfig {
+		t.Errorf("kubectl resolved KUBECONFIG %q, want %q", seen, wantKubeconfig)
+	}
 	if _, statErr := os.Stat(filepath.Join(dir, "pwned")); statErr == nil {
 		t.Error("command substitution in a connection value executed")
+	}
+}
+
+// KUBECONFIG is documented as a :-separated merge list, but --kubeconfig takes
+// a single file: handed a list it resolves an empty config and still exits 0,
+// so a remediation command carrying it as a flag would silently act on no
+// cluster at all rather than the one deploy.sh just inspected.
+func TestDeployScript_RemediationHintPreservesMergedKubeconfig(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+
+	outputDir := t.TempDir()
+	g := &Generator{
+		RecipeResult:    createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         "v1.0.0",
+	}
+	if _, genErr := g.Generate(context.Background(), outputDir); genErr != nil {
+		t.Fatalf("Generate failed: %v", genErr)
+	}
+	script, readErr := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+	if readErr != nil {
+		t.Fatalf("read deploy.sh: %v", readErr)
+	}
+	lines := strings.Split(string(script), "\n")
+	start := slices.IndexFunc(lines, func(l string) bool { return l == `KUBECONFIG_PREFIX=""` })
+	if start < 0 {
+		t.Fatalf("hint block not found")
+	}
+	end := start
+	for end < len(lines) && !strings.HasPrefix(lines[end], "# ====") {
+		end++
+	}
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if mkErr := os.MkdirAll(binDir, 0o750); mkErr != nil {
+		t.Fatalf("mkdir: %v", mkErr)
+	}
+	// argv, not the inherited environment: the harness exports KUBECONFIG
+	// either way, so only the absence of a --kubeconfig flag distinguishes
+	// the assignment form from the flag form this replaced.
+	seenFile := filepath.Join(dir, "seen")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + seenFile +
+		"\nprintf '%s' \"${KUBECONFIG:-}\" > " + seenFile + ".env\n"
+	if wErr := os.WriteFile(filepath.Join(binDir, "kubectl"), []byte(stub), 0o700); wErr != nil {
+		t.Fatalf("write stub: %v", wErr)
+	}
+
+	const merged = "/home/u/.kube/config:/home/u/.kube/extra.yaml"
+	harness := filepath.Join(dir, "hint.sh")
+	body := "#!/usr/bin/env bash\nset -euo pipefail\n" + strings.Join(lines[start:end], "\n") +
+		"\neval \"${KUBECTL_HINT} get ns\"\n"
+	if wErr := os.WriteFile(harness, []byte(body), 0o700); wErr != nil {
+		t.Fatalf("write harness: %v", wErr)
+	}
+	cmd := exec.Command(bashPath, harness)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+binDir, "KUBECONFIG="+merged, "KUBE_CONTEXT=")
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("hint failed to evaluate: %v\n%s", runErr, out)
+	}
+
+	rawArgv, statErr := os.ReadFile(seenFile)
+	if statErr != nil {
+		t.Fatalf("kubectl stub never ran: %v", statErr)
+	}
+	argv := strings.Split(strings.TrimRight(string(rawArgv), "\n"), "\n")
+	if slices.Contains(argv, "--kubeconfig") {
+		t.Errorf("hint passed the merge list as --kubeconfig, which resolves an "+
+			"empty config and exits 0; argv: %q", argv)
+	}
+	env, envErr := os.ReadFile(seenFile + ".env")
+	if envErr != nil || string(env) != merged {
+		t.Errorf("kubectl resolved KUBECONFIG %q (err %v), want %q", env, envErr, merged)
 	}
 }

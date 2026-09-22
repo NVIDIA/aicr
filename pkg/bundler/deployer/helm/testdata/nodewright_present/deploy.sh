@@ -83,6 +83,31 @@ HELM_CONN=()
 # shellcheck disable=SC2034
 KUBECTL_CONN=()
 
+# Records the kubeconfig the deprecated flag names. A value disagreeing with an
+# existing KUBECONFIG selects a different cluster exactly as two contexts would,
+# so it is refused on the same grounds rather than silently overwritten.
+#
+# Exported as well as passed: bash cannot export an array, and the deprecated
+# variable is unset once translated, so a child script re-running this prologue
+# would otherwise see no kubeconfig and fall back to the ambient one.
+# $1 is the path; the remaining arguments are the argv form to forward, so the
+# caller's spelling (--kubeconfig PATH or --kubeconfig=PATH) reaches the
+# binaries unchanged.
+_aicr_check_kubeconfig() {
+  _aicr_kc="$1"
+  shift
+  if [[ -n "${KUBECONFIG:-}" && "${KUBECONFIG}" != "${_aicr_kc}" ]]; then
+    echo "ERROR: KUBECONFIG names '${KUBECONFIG}' but KUBECONFIG_FLAG names" >&2
+    echo "       '${_aicr_kc}'. Refusing to guess which cluster to act on; set" >&2
+    echo "       only KUBECONFIG." >&2
+    exit 1
+  fi
+  KUBECONFIG="${_aicr_kc}"
+  export KUBECONFIG
+  HELM_CONN+=("$@")
+  KUBECTL_CONN+=("$@")
+}
+
 if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
   echo "WARNING: KUBECONFIG_FLAG is deprecated; export KUBE_CONTEXT (and KUBECONFIG) instead." >&2
 
@@ -93,9 +118,9 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
   # and several append tokens that are then rejected as unsupported options.
   # Restored only if this shell had it enabled, so an embedding script that
   # deliberately runs with `set -f` keeps it.
-  # shellcheck disable=SC2206
   _aicr_reglob=0
   [[ -o noglob ]] || { _aicr_reglob=1; set -f; }
+  # shellcheck disable=SC2206
   _aicr_argv=(${KUBECONFIG_FLAG})
   (( _aicr_reglob == 0 )) || set +f
   _aicr_i=0
@@ -128,14 +153,7 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
         if [[ "${_aicr_tok}" == "--kube-context" ]]; then
           _aicr_ctx="${_aicr_val}"
         else
-          # Exported as well as passed: bash cannot export an array, and the
-          # deprecated variable is unset once translated, so a child script
-          # re-running this prologue would otherwise see no kubeconfig at all
-          # and fall back to the ambient one.
-          KUBECONFIG="${_aicr_val}"
-          export KUBECONFIG
-          HELM_CONN+=(--kubeconfig "${_aicr_val}")
-          KUBECTL_CONN+=(--kubeconfig "${_aicr_val}")
+          _aicr_check_kubeconfig "${_aicr_val}" --kubeconfig "${_aicr_val}"
         fi
         _aicr_i=$(( _aicr_i + 2 ))
         ;;
@@ -148,10 +166,7 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
         if [[ "${_aicr_tok}" == --kube-context=* ]]; then
           _aicr_ctx="${_aicr_val}"
         else
-          KUBECONFIG="${_aicr_val}"
-          export KUBECONFIG
-          HELM_CONN+=("${_aicr_tok}")
-          KUBECTL_CONN+=("${_aicr_tok}")
+          _aicr_check_kubeconfig "${_aicr_val}" "${_aicr_tok}"
         fi
         _aicr_i=$(( _aicr_i + 1 ))
         ;;
@@ -206,12 +221,25 @@ fi
 # naming neither would target the reader's ambient cluster. printf %q escapes
 # each value as one shell word, so a path or context containing whitespace or
 # shell syntax survives the copy-paste as a single argument.
-KUBECTL_HINT="kubectl"
+#
+# The kubeconfig rides as the variable rather than as --kubeconfig, because
+# KUBECONFIG is a :-separated merge list while the flag takes a single file:
+# handed a list, kubectl resolves an empty config and still exits 0, so the
+# remedy would find nothing and report no error. Assigning the variable is
+# correct for both the single-file and the merged case.
+KUBECONFIG_PREFIX=""
 if [[ -n "${KUBECONFIG:-}" ]]; then
-  KUBECTL_HINT+=" --kubeconfig $(printf '%q' "${KUBECONFIG}")"
+  KUBECONFIG_PREFIX="KUBECONFIG=$(printf '%q' "${KUBECONFIG}") "
 fi
+KUBECTL_HINT="${KUBECONFIG_PREFIX}kubectl"
+HELM_HINT="${KUBECONFIG_PREFIX}helm"
+# install.sh resolves its own connection from the environment, so its hint
+# carries assignments rather than flags.
+INSTALL_HINT_ENV="${KUBECONFIG_PREFIX}"
 if [[ -n "${KUBE_CONTEXT:-}" ]]; then
   KUBECTL_HINT+=" --context $(printf '%q' "${KUBE_CONTEXT}")"
+  HELM_HINT+=" --kube-context $(printf '%q' "${KUBE_CONTEXT}")"
+  INSTALL_HINT_ENV+="KUBE_CONTEXT=$(printf '%q' "${KUBE_CONTEXT}") "
 fi
 # ==============================================================================
 # Output helpers (respects NO_COLOR and non-TTY)
@@ -231,7 +259,10 @@ function _step_header() {
   local manual_dir
   printf -v manual_dir '%q' "$5"
   printf '\n%s┌─ [%s/%s] %s  →  %s%s\n' "${_B}" "$1" "$2" "$3" "$4" "${_X}"
-  printf '%s│  Manual (approx, set KUBE_CONTEXT/DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && bash install.sh%s\n' "${_D}" "${manual_dir}" "${_X}"
+  # The resolved selection is baked in rather than named as something to set:
+  # this line installs, and pasted into a fresh shell without it the release
+  # lands on whatever cluster that shell happens to select.
+  printf '%s│  Manual (approx, set DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && %sbash install.sh%s\n' "${_D}" "${manual_dir}" "${INSTALL_HINT_ENV}" "${_X}"
 }
 
 function _step_ok() {
@@ -525,7 +556,7 @@ remove_stale_nodewright_taints "skyhook" "${nodewright_dir}/values.yaml"
 if [[ "${preflight_failed}" == "true" ]]; then
   echo ""
   _fail "Pre-flight checks failed. Fix the issues above before deploying."
-  echo "  To clean up partial state, run 'helm uninstall <release> -n <namespace>' for each affected component, then retry."
+  echo "  To clean up partial state, run '${HELM_HINT} uninstall <release> -n <namespace>' for each affected component, then retry."
   exit 1
 fi
 

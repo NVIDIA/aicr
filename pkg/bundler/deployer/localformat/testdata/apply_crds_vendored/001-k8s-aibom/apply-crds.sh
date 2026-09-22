@@ -72,6 +72,31 @@ HELM_CONN=()
 # shellcheck disable=SC2034
 KUBECTL_CONN=()
 
+# Records the kubeconfig the deprecated flag names. A value disagreeing with an
+# existing KUBECONFIG selects a different cluster exactly as two contexts would,
+# so it is refused on the same grounds rather than silently overwritten.
+#
+# Exported as well as passed: bash cannot export an array, and the deprecated
+# variable is unset once translated, so a child script re-running this prologue
+# would otherwise see no kubeconfig and fall back to the ambient one.
+# $1 is the path; the remaining arguments are the argv form to forward, so the
+# caller's spelling (--kubeconfig PATH or --kubeconfig=PATH) reaches the
+# binaries unchanged.
+_aicr_check_kubeconfig() {
+  _aicr_kc="$1"
+  shift
+  if [[ -n "${KUBECONFIG:-}" && "${KUBECONFIG}" != "${_aicr_kc}" ]]; then
+    echo "ERROR: KUBECONFIG names '${KUBECONFIG}' but KUBECONFIG_FLAG names" >&2
+    echo "       '${_aicr_kc}'. Refusing to guess which cluster to act on; set" >&2
+    echo "       only KUBECONFIG." >&2
+    exit 1
+  fi
+  KUBECONFIG="${_aicr_kc}"
+  export KUBECONFIG
+  HELM_CONN+=("$@")
+  KUBECTL_CONN+=("$@")
+}
+
 if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
   echo "WARNING: KUBECONFIG_FLAG is deprecated; export KUBE_CONTEXT (and KUBECONFIG) instead." >&2
 
@@ -82,9 +107,9 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
   # and several append tokens that are then rejected as unsupported options.
   # Restored only if this shell had it enabled, so an embedding script that
   # deliberately runs with `set -f` keeps it.
-  # shellcheck disable=SC2206
   _aicr_reglob=0
   [[ -o noglob ]] || { _aicr_reglob=1; set -f; }
+  # shellcheck disable=SC2206
   _aicr_argv=(${KUBECONFIG_FLAG})
   (( _aicr_reglob == 0 )) || set +f
   _aicr_i=0
@@ -117,14 +142,7 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
         if [[ "${_aicr_tok}" == "--kube-context" ]]; then
           _aicr_ctx="${_aicr_val}"
         else
-          # Exported as well as passed: bash cannot export an array, and the
-          # deprecated variable is unset once translated, so a child script
-          # re-running this prologue would otherwise see no kubeconfig at all
-          # and fall back to the ambient one.
-          KUBECONFIG="${_aicr_val}"
-          export KUBECONFIG
-          HELM_CONN+=(--kubeconfig "${_aicr_val}")
-          KUBECTL_CONN+=(--kubeconfig "${_aicr_val}")
+          _aicr_check_kubeconfig "${_aicr_val}" --kubeconfig "${_aicr_val}"
         fi
         _aicr_i=$(( _aicr_i + 2 ))
         ;;
@@ -137,10 +155,7 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
         if [[ "${_aicr_tok}" == --kube-context=* ]]; then
           _aicr_ctx="${_aicr_val}"
         else
-          KUBECONFIG="${_aicr_val}"
-          export KUBECONFIG
-          HELM_CONN+=("${_aicr_tok}")
-          KUBECTL_CONN+=("${_aicr_tok}")
+          _aicr_check_kubeconfig "${_aicr_val}" "${_aicr_tok}"
         fi
         _aicr_i=$(( _aicr_i + 1 ))
         ;;
