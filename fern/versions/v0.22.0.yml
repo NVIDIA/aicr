@@ -1,0 +1,163 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Fern's navigation manifest, and therefore the authoritative list of pages
+# Fern publishes (see tools/docs-published-files). A page missing here is not
+# published and not gated by the MDX checkers.
+#
+# Deliberately excluded:
+#   - docs/design/ and docs/conformance/ (mirrored in .lychee.toml)
+#   - docs/user/index.md and docs/integrator/index.md, whose link tables are
+#     superseded by the sections below (docs/contributor/index.md IS published,
+#     as Architecture Overview — it carries more than a link table)
+#   - docs/user/container-images.md and docs/user/component-version-matrix.md,
+#     which are generated with HTML-comment region markers that MDX cannot parse
+navigation:
+  - section: Overview
+    contents:
+      - page: Introduction
+        path: v0.22.0-content/README.md
+
+  - section: User Guide
+    contents:
+      - page: Installation
+        path: v0.22.0-content/user/installation.md
+      - page: End-to-End Tutorial
+        path: v0.22.0-content/user/tutorial.md
+      - page: CLI Reference
+        path: v0.22.0-content/user/cli-reference.md
+      - page: Generating Bundles
+        path: v0.22.0-content/user/bundling.md
+      - page: Upgrading a Deployed Stack
+        path: v0.22.0-content/user/upgrading.md
+      - page: Fabric-Attached Training
+        path: v0.22.0-content/user/fabric-attached-training.md
+      - page: CLI Configuration File
+        path: v0.22.0-content/user/cli-config.md
+      - page: Artifact Verification
+        path: v0.22.0-content/user/artifact-verification.md
+      - page: API Reference
+        path: v0.22.0-content/user/api-reference.md
+      - page: Deprecations
+        path: v0.22.0-content/user/deprecations.md
+      - page: Agent Deployment
+        path: v0.22.0-content/user/agent-deployment.md
+      - page: Air-Gapped Mirroring
+        path: v0.22.0-content/user/air-gap-mirror.md
+      - page: Component Catalog
+        path: v0.22.0-content/user/component-catalog.md
+      - page: Recipe Health
+        path: v0.22.0-content/user/recipe-health.md
+      - page: TestGrid
+        path: v0.22.0-content/user/testgrid.md
+      - page: Evidence Dashboard
+        path: v0.22.0-content/user/evidence-dashboard.md
+      - page: Validation
+        path: v0.22.0-content/user/validation.md
+      - page: Coverage Matrix
+        path: v0.22.0-content/user/coverage-matrix.md
+      - page: Slurm Accounting
+        path: v0.22.0-content/user/slinky-slurm-accounting.md
+      - page: Slurm Enroot Configuration
+        path: v0.22.0-content/user/slinky-slurm-enroot.md
+      - page: Slurm Shared Storage
+        path: v0.22.0-content/user/slinky-slurm-storage.md
+
+  - section: Integrator Guide
+    contents:
+      - page: Automation
+        path: v0.22.0-content/integrator/automation.md
+      - page: Data Flow
+        path: v0.22.0-content/integrator/data-flow.md
+      - page: Kubernetes Deployment
+        path: v0.22.0-content/integrator/kubernetes-deployment.md
+      - page: AKS GPU Setup
+        path: v0.22.0-content/integrator/aks-gpu-setup.md
+      - page: GKE GPU Setup
+        path: v0.22.0-content/integrator/gke-gpu-setup.md
+      - page: OKE GPU Setup
+        path: v0.22.0-content/integrator/oke-gpu-setup.md
+      - page: RKE2 VR200 Setup
+        path: v0.22.0-content/integrator/rke2-vr200-setup.md
+      - page: k0s H200 Setup
+        path: v0.22.0-content/integrator/k0s-h200-setup.md
+      - page: EKS Dynamo Networking
+        path: v0.22.0-content/integrator/eks-dynamo-networking.md
+      - page: GKE TCPXO Networking
+        path: v0.22.0-content/integrator/gke-tcpxo-networking.md
+      - page: GKE GB200 Networking
+        path: v0.22.0-content/integrator/gke-gb200-networking.md
+      - page: OpenShift Deployment
+        path: v0.22.0-content/integrator/openshift.md
+      - page: Talos Integration
+        path: v0.22.0-content/integrator/talos-integration.md
+      - page: Recipe Development
+        path: v0.22.0-content/integrator/recipe-development.md
+      - page: Data Extension
+        path: v0.22.0-content/integrator/data-extension.md
+      - page: Validator Extension
+        path: v0.22.0-content/integrator/validator-extension.md
+      - page: Supply Chain Verification
+        path: v0.22.0-content/integrator/supply-chain-verification.md
+      - page: Go Library Integration
+        path: v0.22.0-content/integrator/go-library.md
+      - page: Public API Surface
+        path: v0.22.0-content/integrator/public-api.md
+      - page: Measurement Schema
+        path: v0.22.0-content/integrator/measurement-api.md
+      - section: Components
+        contents:
+          - page: Nodewright
+            path: v0.22.0-content/integrator/components/nodewright.md
+
+  - section: Contributor Guide
+    contents:
+      - page: Architecture Overview
+        path: v0.22.0-content/contributor/index.md
+      - page: Architecture Boundary Gate
+        path: v0.22.0-content/contributor/architecture-gate.md
+      - page: Recipes, Overlays, and Mixins
+        path: v0.22.0-content/contributor/recipe.md
+      - page: Components
+        path: v0.22.0-content/contributor/component.md
+      - page: Upgrade Transition Records
+        path: v0.22.0-content/contributor/upgrade-records.md
+      - page: Collectors
+        path: v0.22.0-content/contributor/collector.md
+      - page: Validators
+        path: v0.22.0-content/contributor/validator.md
+      - page: Evidence Ingest
+        path: v0.22.0-content/contributor/evidence-ingest.md
+      - page: Inference-Perf Fluctuation (investigation)
+        path: v0.22.0-content/contributor/inference-perf-fluctuation.md
+      - page: CLI
+        path: v0.22.0-content/contributor/cli.md
+      - page: API Server
+        path: v0.22.0-content/contributor/api-server.md
+      - page: Testing
+        path: v0.22.0-content/contributor/tests.md
+      - page: Registry Egress
+        path: v0.22.0-content/contributor/registry-egress.md
+      - page: Claude Skills
+        path: v0.22.0-content/contributor/skills.md
+      - page: Maintaining AICR
+        path: v0.22.0-content/contributor/maintaining.md
+      - page: Rekor v2 Signing
+        path: v0.22.0-content/contributor/rekor-v2-signing.md
+      - page: Publishing Recipe Evidence
+        path: v0.22.0-content/contributor/evidence-publishing.md
+      - page: Publishing the Evidence Dashboard
+        path: v0.22.0-content/contributor/evidence-dashboard-publish.md
+      - page: UAT Day/Night Cycle
+        path: v0.22.0-content/contributor/uat.md
