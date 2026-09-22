@@ -53,7 +53,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
-| kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
+| kai-scheduler | helm | kai-scheduler | v0.17.2 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.3 | 1 |
@@ -213,18 +213,18 @@ _No images extracted._
 
 ### kai-scheduler
 
-- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.17.2`
 
 ### kube-prometheus-stack
 
