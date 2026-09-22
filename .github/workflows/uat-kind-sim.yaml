@@ -110,7 +110,14 @@ jobs:
   uat-kind-sim:
     name: kind slurm (simulated GPUs)
     # Never on a fork: the evidence push needs ghcr.io/nvidia write access.
-    if: github.repository == 'nvidia/aicr'
+    # And only main's copy: the job holds id-token: write and signs an
+    # evidence bundle with this workflow's own OIDC identity, so a
+    # workflow_dispatch against any other ref would sign code that is not on
+    # main under an identity that claims the lane. The header's "main tip"
+    # scope is a promise only this expression keeps.
+    if: >-
+      github.repository == 'nvidia/aicr' &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Covers the sum of the sequential step budgets (tools 10 + bootstrap 25 +
     # binary 20 + images 25 + prep 20 + install 90 + topology 10 +

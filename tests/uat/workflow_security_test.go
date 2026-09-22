@@ -149,6 +149,7 @@ type workflowJob struct {
 	Steps          []workflowStep    `yaml:"steps"`
 	RunsOn         string            `yaml:"runs-on"`
 	TimeoutMinutes int               `yaml:"timeout-minutes"`
+	If             string            `yaml:"if"`
 }
 
 type workflowDefaults struct {
@@ -744,6 +745,37 @@ func TestUATRunBlocksNeverSpliceAttackerChosenRefs(t *testing.T) {
 					"summary step that reports the branch or reverted to splicing it inline", file)
 			}
 		})
+	}
+}
+
+// TestUATKindSimJobPinsMainRef holds the sim lane to the scope its own header
+// claims ("manual dispatch, main tip"). workflow_dispatch offers a ref picker,
+// so without a ref term the job runs whatever branch the dispatcher selects —
+// while holding id-token: write and signing an evidence bundle with the lane's
+// OIDC identity. That signature says "uat-kind-sim on NVIDIA/aicr" whatever ref
+// produced it, so the repository term alone does not bound what gets signed.
+//
+// The comparison is against the whole normalized condition rather than a
+// substring, because a substring search cannot tell a conjunct from a
+// disjunct: "github.repository == 'nvidia/aicr' || github.ref ==
+// 'refs/heads/main'" contains the ref term and guards nothing.
+func TestUATKindSimJobPinsMainRef(t *testing.T) {
+	const (
+		file    = "uat-kind-sim.yaml"
+		jobName = "uat-kind-sim"
+		want    = "github.repository == 'nvidia/aicr' && github.ref == 'refs/heads/main'"
+	)
+
+	workflow := decodeWorkflow(t, file)
+	job, ok := workflow.Jobs[jobName]
+	if !ok {
+		t.Fatalf("%s has no job %q (jobs: %v); the guard cannot be reading the lane",
+			file, jobName, slices.Sorted(maps.Keys(workflow.Jobs)))
+	}
+	if got := strings.Join(strings.Fields(job.If), " "); got != want {
+		t.Errorf("job %q condition is %q, want %q; the lane signs evidence with its own OIDC "+
+			"identity, so it must refuse a workflow_dispatch on any ref but main",
+			jobName, got, want)
 	}
 }
 
