@@ -498,7 +498,7 @@ Generate recipes using direct system parameters:
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
-| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE) |
+| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE, `gpuStack=bundle-installer` on GKE, `gpuStack=mokka-mock` on Kind); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE, `gpuStack=nvkind-host` on Kind) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
@@ -3420,7 +3420,7 @@ aicr evidence digest -r <recipe-or-overlay> [flags]
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--recipe` | `-r` | string | | Path/URI to a recipe or overlay file (file, HTTP/HTTPS, or `cm://namespace/name`). Required. |
-| `--profile` | | string | | Profile selection in exact `name=value` form for overlay inputs on a profiled family (e.g. `gpuStack=operator-managed` on AKS); omit for the declaration default. Rejected when the input is a hydrated `RecipeResult` — its selection is already baked into `metadata.selectedProfile`. |
+| `--profile` | | string | | Profile selection in exact `name=value` form for overlay inputs on a profiled family (e.g. `gpuStack=operator-managed` on AKS, `gpuStack=mokka-mock` on Kind); omit for the declaration default. Rejected when the input is a hydrated `RecipeResult` — its selection is already baked into `metadata.selectedProfile`. |
 | `--kubeconfig` | | string | | Kubeconfig path; consulted only when the input is a `cm://` URI. |
 
 **Exit codes:**

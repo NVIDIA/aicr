@@ -575,11 +575,12 @@ The recipes now carry that value wherever it is needed ([#2181](https://github.c
 | OKE `gpuStack=oci-managed` (default) | none — driver is in the node image; OKE's `NvidiaGpuPlugin` add-on advertises | `true` | the `gpuStack` profile |
 | OKE `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
 | EKS | the operator's driver pod | unset (chart default `false`) | — |
-| Kind (nvkind) | none — driver is host-installed | `true` | the overlay (Kind has no profile) |
+| Kind `gpuStack=nvkind-host` (default) | none — driver is host-installed | `true` | the overlay (Kind's profile does not own this path) |
+| Kind `gpuStack=mokka-mock` | none — the mock stages a driver userspace, and there is no driver pod | `true` | the overlay (Kind's profile does not own this path) |
 
 The explicit `false` on the operator-managed variants is deliberate rather than redundant: it keeps the path profile-owned, so it cannot be flipped into an unsafe hybrid later. Do **not** assume a preinstalled driver where the GPU Operator installs one — skipping detection there would keep the label applied across an unloaded or unhealthy driver.
 
-**NVSentinel is mandatory on the profiled families.** Because the AKS, GKE-COS, and OKE `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional on platforms with no `gpuStack` profile, such as EKS.
+**NVSentinel is mandatory on the profiled families.** Because the AKS, GKE-COS, and OKE `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional wherever no `gpuStack` profile names it: EKS, which declares no profile, and Kind, whose profile declares only the GPU driver-root paths.
 
 AKS, GKE-COS, and OKE get the install-time profile lock; Kind sets the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
 
