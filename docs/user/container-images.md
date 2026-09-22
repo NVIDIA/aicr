@@ -71,7 +71,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nvcre | helm | cluster-readiness-engine | v0.2.0 | 1 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
-| nvsentinel | helm | nvsentinel | v1.20.0 | 6 |
+| nvsentinel | helm | nvsentinel | v1.22.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
@@ -323,12 +323,12 @@ _No images extracted._
 
 ### nvsentinel
 
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.20.0-dcgm-3.x`
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.20.0-dcgm-4.x`
-- `ghcr.io/nvidia/nvsentinel/labeler:v1.20.0`
-- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.20.0`
-- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.20.0`
-- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.20.0`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.22.0-dcgm-3.x`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.22.0-dcgm-4.x`
+- `ghcr.io/nvidia/nvsentinel/labeler:v1.22.0`
+- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.22.0`
+- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.22.0`
+- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.22.0`
 
 ### prometheus-adapter
 
@@ -399,8 +399,8 @@ The trade-off is intentional. Pinning an image gives reproducibility; deferring 
 **Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Four known cases, none counted in the `nvsentinel` row's image count above. Three set a `global.*` toggle:
 
 - The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/bitnamilegacy/os-shell:12-debian-12-r30`) to the `platform-connectors` DaemonSet and `labeler` Deployment. It is a third-party image AICR does not otherwise mirror.
-- The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.20.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
-- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.20.0`. Its `chown` init container reuses `docker.io/bitnamilegacy/os-shell:12-debian-12-r30` — the same third-party image the observability mixin above already pulls in, not a second one. Unlike the other two, this mixin is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not.
+- The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.22.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
+- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.22.0`. Its `chown` init container reuses `docker.io/bitnamilegacy/os-shell:12-debian-12-r30` — the same third-party image the observability mixin above already pulls in, not a second one. Unlike the other two, this mixin is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not.
 
 A recipe composing any of these mixins **with `nvsentinel` still enabled** adds that mixin's images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship none of them.
 

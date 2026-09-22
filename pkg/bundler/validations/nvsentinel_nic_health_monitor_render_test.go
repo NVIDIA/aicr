@@ -29,7 +29,7 @@ import (
 // against its base values only, so it cannot see a mixin-gated subchart --
 // these assertions are what keep that note honest.
 const (
-	nicHealthMonitorImage     = "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.20.0"
+	nicHealthMonitorImage     = "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.22.0"
 	nicHealthMonitorInitImage = "docker.io/bitnamilegacy/os-shell:12-debian-12-r30"
 )
 

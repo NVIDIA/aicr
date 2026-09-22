@@ -471,7 +471,7 @@ components:
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: nvsentinel
       # renovate: datasource=docker depName=ghcr.io/nvidia/nvsentinel
-      defaultVersion: v1.20.0
+      defaultVersion: v1.22.0
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:

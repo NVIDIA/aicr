@@ -69,7 +69,7 @@ func preflightLeaf(mixins []string, deps []string) RecipeMetadataSpec {
 		ComponentRefs: []ComponentRef{
 			{Name: "kai-scheduler", Chart: "kai-scheduler", Version: "v0.16.9", Source: "oci://ghcr.io/kai-scheduler", Type: ComponentTypeHelm},
 			{
-				Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.20.0",
+				Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.22.0",
 				Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm,
 				Namespace: "nvsentinel", DependencyRefs: deps,
 			},
@@ -286,7 +286,7 @@ func TestMixinNVSentinelPreflight_RejectsNonAllowlistedPath(t *testing.T) {
 	spec := RecipeMetadataSpec{
 		Mixins: []string{"test-preflight"},
 		ComponentRefs: []ComponentRef{
-			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.20.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
+			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.22.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
 		},
 	}
 	if _, err := store.mergeMixins(ctx, &spec); err == nil {
