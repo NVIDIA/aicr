@@ -24,28 +24,47 @@ def markdown_links(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     text = _without_fenced_code(text)
     links = _inline_links(text)
-    references = {
-        _normalize_reference_label(label): destination
-        for label, destination in _reference_definitions(text)
-    }
+    references: dict[str, str] = {}
+    for label, destination in _reference_definitions(text):
+        references.setdefault(_normalize_reference_label(label), destination)
     links.extend(_reference_links(text, references))
     return links
 
 
 def _reference_links(text: str, references: dict[str, str]) -> list[str]:
     links: list[str] = []
-    for text_label, reference_label in re.findall(
-        r"(?<!\\)\[([^\]\n]+)\]\[([^\]\n]*)\]", text
-    ):
-        if destination := references.get(
-            _normalize_reference_label(reference_label or text_label)
-        ):
+    index = 0
+    while index < len(text):
+        if text[index] != "[" or (index and text[index - 1] == "\\"):
+            index += 1
+            continue
+        label_end = _label_end(text, index)
+        if label_end < 0:
+            break
+        text_label = text[index + 1 : label_end]
+        cursor = label_end + 1
+        if cursor < len(text) and text[cursor] == "[":
+            reference_end = _label_end(text, cursor)
+            if reference_end < 0:
+                break
+            reference_label = text[cursor + 1 : reference_end] or text_label
+            if destination := references.get(_normalize_reference_label(reference_label)):
+                links.append(destination)
+            index = reference_end + 1
+            continue
+
+        if cursor < len(text) and text[cursor] in "(:":
+            index = cursor + 1
+            continue
+        probe = cursor
+        while probe < len(text) and text[probe] in " \t":
+            probe += 1
+        if probe < len(text) and text[probe] in "([:":
+            index = cursor + 1
+            continue
+        if destination := references.get(_normalize_reference_label(text_label)):
             links.append(destination)
-    for label in re.findall(
-        r"(?<!\\)(?<!\])\[([^\]\n]+)\](?![ \t]*(?:\(|\[|:))", text
-    ):
-        if destination := references.get(_normalize_reference_label(label)):
-            links.append(destination)
+        index = label_end + 1
     return links
 
 
@@ -90,8 +109,6 @@ def _inline_links(text: str) -> list[str]:
         if label_end < 0:
             break
         cursor = label_end + 1
-        while cursor < len(text) and text[cursor].isspace():
-            cursor += 1
         if cursor >= len(text) or text[cursor] != "(":
             index = label_end + 1
             continue
@@ -151,17 +168,37 @@ def _parenthesized_destination(text: str, start: int) -> str | None:
 
 def _reference_definitions(text: str) -> list[tuple[str, str]]:
     definitions: list[tuple[str, str]] = []
-    for line in text.splitlines():
-        match = re.match(r"^ {0,3}\[([^\]]+)\]:[ \t]*(.*)$", line)
-        if not match:
+    for match in re.finditer(r"(?m)^ {0,3}\[", text):
+        start = match.end() - 1
+        label_end = _label_end(text, start)
+        if label_end < 0 or label_end + 1 >= len(text) or text[label_end + 1] != ":":
             continue
-        raw = match.group(2).strip()
-        if raw.startswith("<") and ">" in raw:
-            destination = raw[1 : raw.index(">")]
+        cursor = label_end + 2
+        while cursor < len(text) and text[cursor] in " \t":
+            cursor += 1
+        if cursor < len(text) and text[cursor] in "\r\n":
+            if text[cursor] == "\r":
+                cursor += 1
+                if cursor < len(text) and text[cursor] == "\n":
+                    cursor += 1
+            else:
+                cursor += 1
+            while cursor < len(text) and text[cursor] in " \t":
+                cursor += 1
+        if cursor >= len(text) or text[cursor] in "\r\n'\"":
+            continue
+        if text[cursor] == "<":
+            end = text.find(">", cursor + 1)
+            if end < 0 or "\n" in text[cursor + 1 : end]:
+                continue
+            destination = text[cursor + 1 : end]
         else:
-            destination = raw.split(None, 1)[0] if raw else ""
+            end = cursor
+            while end < len(text) and not text[end].isspace():
+                end += 1
+            destination = text[cursor:end]
         if destination:
-            definitions.append((match.group(1), destination))
+            definitions.append((text[start + 1 : label_end], destination))
     return definitions
 
 

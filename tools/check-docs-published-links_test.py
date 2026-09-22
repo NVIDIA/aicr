@@ -87,6 +87,40 @@ class PublishedDocsLinkTest(unittest.TestCase):
             )
             self.assertEqual(MODULE.markdown_links(page), ["unpublished.md"])
 
+    def test_first_reference_definition_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text(
+                "[guide]\n\n"
+                "[guide]: unpublished-first.md\n"
+                "[guide]: published-second.md\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(MODULE.markdown_links(page), ["unpublished-first.md"])
+
+    def test_reference_labels_can_be_nested_and_multiline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text(
+                "[API [v2]][nested [guide]]\n\n"
+                "[nested [guide]]:\n"
+                "unpublished.md\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(MODULE.markdown_links(page), ["unpublished.md"])
+
+    def test_space_before_inline_destination_is_not_a_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text("[guide] (unpublished.md)\n", encoding="utf-8")
+            self.assertEqual(MODULE.markdown_links(page), [])
+
+    def test_reference_definition_with_title_only_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            page = Path(directory) / "page.md"
+            page.write_text("[guide]\n\n[guide]: \"title only\"\n", encoding="utf-8")
+            self.assertEqual(MODULE.markdown_links(page), [])
+
     def test_mixed_fence_markers_do_not_hide_links(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             page = Path(directory) / "page.md"
