@@ -51,17 +51,22 @@ func TestSlackPayloadDrift(t *testing.T) {
 	text := payloadText(t, r)
 	for _, want := range []string{
 		"34 pins, 2 charts behind, 1 charts unresolved",
-		"nvsentinel",
-		"v1.20.0 -> v1.23.0",
-		"prometheus-adapter, prometheus-adapter-ocp",
-		"unresolved",
-		"dynamo-platform",
 		"https://example/run/1",
 		"Review with /aicr-reviewing-component-drift (Codex: $aicr-reviewing-component-drift)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("message missing %q:\n%s", want, text)
 		}
+	}
+
+	// Per-chart rows belong to drift-report.json, not the channel post.
+	for _, unwanted := range []string{"nvsentinel", "prometheus-adapter", "dynamo-platform", "v1.20.0", "->", "•"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("message must not carry per-chart detail %q:\n%s", unwanted, text)
+		}
+	}
+	if lines := strings.Count(text, "\n") + 1; lines != 3 {
+		t.Errorf("digest should be header + link + call to action, got %d lines:\n%s", lines, text)
 	}
 
 	raw, err := SlackPayload(r)
