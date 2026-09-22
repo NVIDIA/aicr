@@ -1344,7 +1344,7 @@ config here:
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: partial-lane-validate
 spec:
