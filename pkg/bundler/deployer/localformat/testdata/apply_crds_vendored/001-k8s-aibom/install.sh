@@ -53,6 +53,19 @@ KUBECTL_CONN=()
 # Exported as well as passed: bash cannot export an array, and the deprecated
 # variable is unset once translated, so a child script re-running this prologue
 # would otherwise see no kubeconfig and fall back to the ambient one.
+# Records the context the deprecated flag names. Repeats are allowed only while
+# they agree: each occurrence used to overwrite the last, so the final value
+# won silently and every later helm and kubectl call -- including the CRD
+# writes and the taint removal -- acted on it.
+_aicr_check_context() {
+  if [[ -n "${_aicr_ctx}" && "${_aicr_ctx}" != "$1" ]]; then
+    echo "ERROR: KUBECONFIG_FLAG names context '${_aicr_ctx}' and then '$1'." >&2
+    echo "       Refusing to guess which cluster to act on; name it once." >&2
+    exit 1
+  fi
+  _aicr_ctx="$1"
+}
+
 # $1 is the path; the remaining arguments are the argv form to forward, so the
 # caller's spelling (--kubeconfig PATH or --kubeconfig=PATH) reaches the
 # binaries unchanged.
@@ -114,7 +127,7 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
           exit 1
         fi
         if [[ "${_aicr_tok}" == "--kube-context" ]]; then
-          _aicr_ctx="${_aicr_val}"
+          _aicr_check_context "${_aicr_val}"
         else
           _aicr_check_kubeconfig "${_aicr_val}" --kubeconfig "${_aicr_val}"
         fi
@@ -127,7 +140,7 @@ if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
           exit 1
         fi
         if [[ "${_aicr_tok}" == --kube-context=* ]]; then
-          _aicr_ctx="${_aicr_val}"
+          _aicr_check_context "${_aicr_val}"
         else
           _aicr_check_kubeconfig "${_aicr_val}" "${_aicr_tok}"
         fi

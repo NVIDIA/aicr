@@ -124,6 +124,13 @@ func TestKubeConnection_ResolvesContext(t *testing.T) {
 			wantWarn:    true,
 		},
 		{
+			name:        "a repeated but agreeing context is not a conflict",
+			env:         []string{"KUBECONFIG_FLAG=--kube-context kind-aicr --kube-context=kind-aicr"},
+			wantHelm:    []string{"--kube-context", "kind-aicr", "list"},
+			wantKubectl: []string{"--context", "kind-aicr", "get", "crd"},
+			wantWarn:    true,
+		},
+		{
 			name:        "an agreeing KUBECONFIG is not a conflict",
 			env:         []string{"KUBECONFIG=/a/kc.yaml", "KUBECONFIG_FLAG=--kubeconfig /a/kc.yaml"},
 			wantHelm:    []string{"--kubeconfig", "/a/kc.yaml", "list"},
@@ -224,6 +231,33 @@ func TestKubeConnection_FailsClosed(t *testing.T) {
 			name:    "an empty joined kubeconfig is refused",
 			env:     []string{"KUBECONFIG_FLAG=--kubeconfig="},
 			wantMsg: "whose value is empty",
+		},
+		{
+			// Each occurrence used to overwrite the last, so the final value
+			// won and every helm/kubectl path -- including the CRD writes and
+			// the taint removal -- acted on a cluster the operator named only
+			// by accident.
+			name:    "repeated disagreeing contexts are refused",
+			env:     []string{"KUBECONFIG_FLAG=--kube-context prod-a --kube-context prod-b"},
+			wantMsg: "Refusing to guess which cluster",
+		},
+		{
+			name:    "repeated disagreeing joined contexts are refused",
+			env:     []string{"KUBECONFIG_FLAG=--kube-context=prod-a --kube-context=prod-b"},
+			wantMsg: "Refusing to guess which cluster",
+		},
+		{
+			name:    "repeated disagreeing contexts are refused across spellings",
+			env:     []string{"KUBECONFIG_FLAG=--kube-context prod-a --kube-context=prod-b"},
+			wantMsg: "Refusing to guess which cluster",
+		},
+		{
+			// The kubeconfig equivalent of the repeated-context case. This one
+			// already failed closed, because the first occurrence exports
+			// KUBECONFIG and the second compares against it.
+			name:    "repeated disagreeing kubeconfigs are refused",
+			env:     []string{"KUBECONFIG_FLAG=--kubeconfig /a/kc.yaml --kubeconfig /b/kc.yaml"},
+			wantMsg: "Refusing to guess which cluster",
 		},
 		{
 			// Two kubeconfigs select two clusters exactly as two contexts do,
