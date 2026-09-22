@@ -252,8 +252,10 @@
     // Disable the github-actions manager — dependabot owns workflow/action
     // bumps because GitHub's auto-issued GITHUB_TOKEN cannot push changes to
     // `.github/workflows/*` regardless of `permissions:` set in the workflow.
-    // Renovate would need a GitHub App or PAT with `workflows` scope to push,
-    // which we explicitly don't run.
+    // Pushing those needs a credential that grants it explicitly — the
+    // `workflow` scope on a classic PAT, or `Workflows: write` on a GitHub
+    // App — and this repo runs neither. That requirement belongs to this
+    // manager alone; do not cite it as a cost the other managers pay.
     {
       matchManagers: ["github-actions"],
       enabled: false,
