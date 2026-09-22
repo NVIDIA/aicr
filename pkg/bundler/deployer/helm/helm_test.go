@@ -1671,8 +1671,11 @@ func TestDeployScript_RemediationHintCarriesConnection(t *testing.T) {
 
 	// Both values carry a space and shell syntax; unquoted interpolation
 	// would split them and could execute the substitution.
+	// The canary is a bare redirection rather than `touch`, because PATH holds
+	// only the stub: an external binary would fail to resolve and the check
+	// would pass whether or not the substitution ran.
 	const (
-		wantKubeconfig = "/tmp/my configs/$(touch pwned).yaml"
+		wantKubeconfig = "/tmp/my configs/$(>pwned).yaml"
 		wantContext    = "kind aicr;echo pwned"
 	)
 	harness := filepath.Join(dir, "hint.sh")
@@ -1683,6 +1686,10 @@ func TestDeployScript_RemediationHintCarriesConnection(t *testing.T) {
 	}
 
 	cmd := exec.Command(bashPath, harness)
+	// Without this the harness inherits the test process working directory,
+	// so an executed substitution writes its canary into the package source
+	// tree and the assertion below inspects an empty directory.
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"PATH="+binDir,
 		"KUBECONFIG="+wantKubeconfig,
