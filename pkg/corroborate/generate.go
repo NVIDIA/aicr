@@ -296,6 +296,15 @@ func loadRun(metaPath string, allowlist *Allowlist) (*signerRun, error) {
 			"path", metaPath, "got", meta.SchemaVersion, "want", RunMetaSchemaVersion)
 	}
 
+	// canonicalSourceID trusts that issuer and identity are non-empty; without
+	// this gate, every run with an empty signer would collide on the same
+	// source key instead of being kept apart on the dashboard.
+	if meta.Signer.Issuer == "" || meta.Signer.Identity == "" {
+		slog.Warn("skipping run: signer issuer/identity is empty",
+			"path", metaPath)
+		return nil, errSkipRun
+	}
+
 	class := Class(meta.Signer.Class)
 	allowlisted := meta.Signer.Allowlisted
 	if allowlist != nil {
