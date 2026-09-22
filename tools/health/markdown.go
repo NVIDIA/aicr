@@ -172,6 +172,10 @@ func writeMatrix(
 	fmt.Fprintln(sw, "|--------|---------|-------------|----|--------|----------|--------|----------|----------|")
 	for _, c := range report.Combos {
 		crit := c.Criteria
+		evidence := evidencePending
+		if c.Result != nil {
+			evidence = evidenceCellWithContext(ctx, crit, presence, allowlist, c.Result, evidenceDir)
+		}
 		fmt.Fprintf(sw, "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			c.LeafOverlay,
 			dimCell(string(crit.Service)),
@@ -181,7 +185,7 @@ func writeMatrix(
 			dimCell(string(crit.Platform)),
 			c.Structure.Status,
 			coverageCell(c.Structure.Coverage),
-			evidenceCellWithContext(ctx, crit, presence, allowlist, c.Result, evidenceDir),
+			evidence,
 		)
 	}
 	fmt.Fprintln(sw)
