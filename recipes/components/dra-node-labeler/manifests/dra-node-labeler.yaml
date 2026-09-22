@@ -133,8 +133,11 @@ spec:
         - name: labeler
           # Literal, not templated from values: tools/bom inventories embedded
           # manifests without rendering values, and the mirror flow rewrites literal
-          # references. Same tag and digest as nodewright-operator's
-          # webhook.removalImage so the catalog carries one kubectl image.
+          # references. Pinned independently of nodewright-operator's
+          # webhook.removalImage, which comes from the upstream chart's defaults
+          # and is not pinned in this repo's values.yaml, so nothing holds the two
+          # together — the catalog carries a kubectl image for each, listed
+          # separately in docs/user/container-images.md.
           image: docker.io/alpine/kubectl:1.37.0@sha256:954b65dea0eb140219b440413ede17c2eca205866df350d3c1fbc84d28af14ae
           command:
             - /bin/sh
