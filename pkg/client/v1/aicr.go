@@ -2184,10 +2184,13 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 // ServiceAccount, a Role and a Job existed, while the --skip-check help text
 // promised rejection "before the cluster is touched".
 //
-// It reads WithValidationSkipChecks and WithValidationPhases from opts and
-// ignores the rest; pass the same options ValidateState will get. recipe must
-// come from a prior call on this Client, as for ValidateState. No Kubernetes
-// call is made, so it is safe on a caller with no cluster access.
+// Pass the same options ValidateState will get. WithValidationSkipChecks
+// supplies the list under test and WithValidationPhases the phase set it is
+// judged against; WithValidationCommit also matters, because the catalog load
+// resolves validator images against that commit. The remaining validation
+// options reach the validator but nothing on this path consults them. recipe
+// must come from a prior call on this Client, as for ValidateState. No
+// Kubernetes call is made, so it is safe on a caller with no cluster access.
 //
 // It does not replace the guard inside ValidateState, which stays for callers
 // that reach ValidateState directly. Running both is idempotent.
@@ -2200,7 +2203,8 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 //   - ErrCodeInvalidRequest when the Client or recipe is nil, when recipe
 //     lacks internal state, when the Client has been Closed, or when an entry
 //     names no validator in the catalog (or would empty a requested phase).
-//   - ErrCodeInternal when the catalog cannot be loaded.
+//   - The catalog loader's own structured code when the catalog cannot be
+//     loaded; ErrCodeInternal only when that failure carries no code.
 func (c *Client) PreflightSkipChecks(
 	ctx context.Context,
 	recipe *RecipeResult,
