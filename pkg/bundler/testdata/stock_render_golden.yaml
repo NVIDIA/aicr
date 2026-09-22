@@ -1112,6 +1112,7 @@ gb200-gke-cos-training-kubeflow:
   014-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kubeflow-trainer-post/install.sh: 52644789814af91e233603e6b59ac5e9f24af031cd93ab7c3a2d8596175a14bb
   014-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
+  014-kubeflow-trainer-post/templates/torch-distributed-rdma-cluster-training-runtime.yaml: d69465fcef3314b46938b3809864d99c3a901fbb9818cbe20dca453b3b15decb
   014-kubeflow-trainer-post/values.yaml: 1718ceee86a061f6b39028307f1e19c5389d71c25b00a9abba716888d680ab00
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 02dbe460dacbefdf7747764e36da13df927322b37b4f8c26904eba26df041a44
@@ -1127,10 +1128,10 @@ gb200-gke-cos-training-kubeflow:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 08535a5ceccdeb9dd52c0633c540e830d09e4e235a9308fb01b4c9590a0b46b9
-  bundle-info.yaml: 0de847d4474eff823a0e05c556910689011ddbbee0c2a45db52b1b8a6e270599
-  checksums.txt: 93868330de568526d29203fd17406ffe5b4e131eaa0d7dc7949fc707e856134a
+  bundle-info.yaml: 0bfee2390fe1656d5fe06e8a3a2fda0b1098d4ec125264082d7b6c07defc8216
+  checksums.txt: 6030049092028ebc0bb0b2d527f0cbee07c86a860513eb0fbd0617ca70979cc2
   deploy.sh: 5992e27664c96f8280215a1d4661e4b25ecfcd8d30abb75c7dd6a308dda3fc93
-  recipe.yaml: 8aa7916d4e6430e47a9214f8a92547f3ed1af24f356edea2be079c023f360571
+  recipe.yaml: 90f9493b54168491a3e4f4ed4f8e0bf46dca97fa9f67abdaab2c0d81e54e097a
 gb200-gke-cos-training-slurm:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: 3ebd7265d5c4a7c7517c713919e541bff9218b0e2e1d2fae7c10ede08b5fcf2d
