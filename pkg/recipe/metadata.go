@@ -842,9 +842,11 @@ func (r *RecipeResult) ValidateCoherence() error {
 	if r == nil {
 		return nil
 	}
-	if r.APIVersion != "" && !header.IsSupportedRecipeResultAPIVersion(r.APIVersion) {
+	if !header.IsSupportedRecipeResultAPIVersion(r.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("RecipeResult apiVersion %q is not supported", r.APIVersion))
+			fmt.Sprintf("RecipeResult apiVersion %q is not supported%s; expected %q or %q",
+				r.APIVersion, header.RetirementNoteWithAbsent(r.APIVersion),
+				header.GroupVersionV1, header.GroupVersionV1Beta2))
 	}
 	if err := r.validateAccountingConfiguration(); err != nil {
 		return err

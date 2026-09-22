@@ -404,13 +404,12 @@ Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query
 
 The `v1` in the route and the `apiVersion` in a recipe document are
 independent version axes. The route segment versions the HTTP contract;
-`aicr.run/v1` and `aicr.run/v1beta2` are the recipe schemas emitted from v0.22.
-`/v1/bundle` also still accepts the superseded `aicr.run/v1alpha2` and
-`aicr.run/v1alpha3`, retired in v1.0.0:
-`aicr.run/v1` for a default recipe and `aicr.run/v1beta2` for a
-profile/configuration recipe, plus versionless legacy artifacts. Selecting a
-profile or resolving a Slurm accounting mode determines which schema track
-applies.
+`aicr.run/v1` and `aicr.run/v1beta2` are the recipe schemas, emitted from v0.22
+and the only ones read from v1.0.0: `aicr.run/v1` for a default recipe and
+`aicr.run/v1beta2` for a profile/configuration recipe. The superseded
+`aicr.run/v1alpha2` and `aicr.run/v1alpha3`, and versionless legacy artifacts,
+were retired in v1.0.0 (ADR-022 N+2). Selecting a profile or resolving a Slurm
+accounting mode determines which schema track applies.
 
 There is a single route family. `/v1/recipe`, `/v1/query`, and `/v1/bundle`
 serve every composition — profiled and unprofiled alike — with one contract.
@@ -423,7 +422,7 @@ optional `profile=name=value`, `slurmAccountingMode`, and
 applies the resolved declaration's required default. Slurm accounting accepts
 `disabled`, `customer-managed`, or `aicr-provided`; omission defaults a Slurm
 recipe to `disabled`. The setting is recorded at
-`configuration.slurm.accounting.mode` in an `aicr.run/v1beta2` RecipeResult (the superseded `aicr.run/v1alpha3` is still read).
+`configuration.slurm.accounting.mode` in an `aicr.run/v1beta2` RecipeResult.
 `gkeTcpxoInterfaces` carries the ordered `eth1=<network>,...,eth8=<network>`
 GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime; it is
 required when the resolved recipe ships that runtime (h100 GKE kubeflow
@@ -481,10 +480,9 @@ selector: metadata.selectedProfile
 **POST `/v1/bundle`.** Uses the query parameters and ZIP response documented
 under [POST /v1/bundle](#post-v1bundle) below. It carries no
 profile-selection field because its body is
-an already-selected `RecipeResult`. It accepts legacy
-`aicr.run/v1alpha2` and `aicr.run/v1` default recipes, including older
-artifacts that omit `apiVersion`, and strictly decodes profiled or
-accounting-configured `aicr.run/v1alpha3` and `aicr.run/v1beta2` recipes. The
+an already-selected `RecipeResult`. It accepts `aicr.run/v1` default recipes
+and strictly decodes profiled or accounting-configured `aicr.run/v1beta2`
+recipes. The
 request requires `Content-Type: application/json` or `Content-Type:
 application/x-yaml`; missing, aliased, or unsupported media types are
 rejected.
@@ -503,15 +501,14 @@ curl -fsS -X POST "http://localhost:8080/v1/bundle" \
 
 Profile-bearing responses record `metadata.selectedProfile`; accounting-aware
 responses record `configuration.slurm.accounting`. Both use recipe apiVersion
-`aicr.run/v1beta2` (the superseded `aicr.run/v1alpha3` is still read). Their owned paths are immutable across AICR's supported
+`aicr.run/v1beta2`. Their owned paths are immutable across AICR's supported
 override surfaces: divergent static values, intersecting dynamic paths,
 owned-component removal, and argocd-helm install-time values fail closed before
 output.
 
 A recipe resolved without an explicit profile or `slurmAccountingMode` uses
-the default-track response shape. That track is `aicr.run/v1` from v0.22, and
-the schema also still admits the superseded `aicr.run/v1alpha2` so a client
-generated from this spec reads artifacts captured earlier. Profile and
+the default-track response shape. That track is `aicr.run/v1`, and from
+v1.0.0 it is the only value the schema admits. Profile and
 Slurm-accounting selection are available on every endpoint; no composition
 needs special routing.
 
@@ -561,8 +558,8 @@ Generate deployment bundles from a recipe.
 
 The request body is the recipe (`RecipeResult`) directly. No wrapper object is
 needed. This release emits `apiVersion: aicr.run/v1` or
-`aicr.run/v1beta2` and `kind: RecipeResult`; its bundle readers additionally
-accept the superseded `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, respectively. The profile track identifies
+`aicr.run/v1beta2` and `kind: RecipeResult`, and its bundle readers accept only
+those. The profile track identifies
 recipes carrying `metadata.selectedProfile`, typed
 `configuration.slurm.accounting`, or both; profile-bearing artifacts must use
 `/v1/bundle`. New clients should preserve the version emitted by recipe
@@ -590,21 +587,18 @@ CLI file loader for the same values — `aicr bundle -r` accepts a
 `RecipeResult` artifact it too accepts only `RecipeResult` or an absent kind.
 `apiVersion` is validated separately, as described next.
 
-The shared artifact gate rejects any `apiVersion` outside
-`aicr.run/v1alpha2`, `aicr.run/v1`, `aicr.run/v1alpha3`, and
+The shared artifact gate rejects any `apiVersion` outside `aicr.run/v1` and
 `aicr.run/v1beta2` with a 400, on this endpoint as well as on the CLI file-load
-path. An absent or empty `apiVersion` is still admitted as the legacy shape on
-`RecipeResult` inputs through v0.22, and v1.0.0 stops admitting it along with the
-alpha values. The tolerance is scoped to `RecipeResult`, which predates the
-field: a `RecipeMetadata` overlay is a catalog document however it arrives, so
-`aicr bundle -r` and `aicr validate -r` reject a headerless one exactly as a
-`--data` catalog scan does. The reader and emitter clocks are separate: v0.21
-and v0.22 both read the alpha values, the target values, and the empty header,
-while generated recipes carried alpha headers through v0.21 and carry the target
-values from v0.22 onward. On the CLI file-load path, reading an alpha or
-headerless artifact logs a deprecation warning naming the file; these endpoints
-take the artifact as a request body, so there is no file to name and no
-equivalent signal. See
+path. An absent or empty `apiVersion` is rejected with them: that tolerance was
+scoped to `RecipeResult`, which predates the field, and v1.0.0 retired it
+(ADR-022 N+2). A `RecipeMetadata` overlay is a catalog document however it
+arrives, so `aicr bundle -r` and `aicr validate -r` have always rejected a
+headerless one exactly as a `--data` catalog scan does. v0.21 and v0.22 read the
+alpha values, the target values and the empty header; generated recipes carried
+alpha headers through v0.21 and the target values from v0.22 onward, so no
+artifact produced by a supported binary carries a retired value. v0.22 warned
+when it read one — on the CLI path, naming the file — and v1.0.0 rejects
+instead. See
 [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 for the release-by-release table.
 

@@ -70,7 +70,7 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "RecipeResult loads directly",
-			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1\ncriteria:\n  service: eks\n",
 			wantErr:     false,
 			checkResult: func(t *testing.T, rec *RecipeResult) {
 				t.Helper()
@@ -85,7 +85,7 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "RecipeMetadata with criteria auto-hydrates",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     false,
 			checkResult: func(t *testing.T, rec *RecipeResult) {
 				t.Helper()
@@ -104,7 +104,7 @@ func TestLoadFromFile(t *testing.T) {
 		{
 			name: "profile RecipeMetadata outside active catalog fails closed",
 			yamlContent: `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   name: direct-profile
 spec:
@@ -128,25 +128,25 @@ spec:
 		},
 		{
 			name:        "RecipeMetadata without criteria errors",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  "has no criteria",
 		},
 		{
 			name:        "RecipeMixin kind rejected",
-			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  `kind "RecipeMixin"`,
 		},
 		{
 			name:        "unknown kind rejected",
-			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  `kind "SomethingElse"`,
 		},
 		{
 			name:        "empty kind allowed",
-			yamlContent: "apiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n",
+			yamlContent: "apiVersion: aicr.run/v1\ncriteria:\n  service: eks\n",
 			wantErr:     false,
 			checkResult: func(t *testing.T, rec *RecipeResult) {
 				t.Helper()
@@ -166,12 +166,14 @@ spec:
 			errContain:  `recipe metadata file has apiVersion ""`,
 		},
 		{
-			// The empty tolerance is narrowed to RecipeResult, not removed.
-			// ADR-022 §3 retires this one at Release N+2 (#2417); until then a
-			// pre-apiVersion recipe must still load.
-			name:        "headerless RecipeResult still accepted",
+			// The empty tolerance survived, narrowed to RecipeResult, until
+			// ADR-022 §3 Release N+2 (#2417) retired it. Inverted rather than
+			// deleted: a reintroduced tolerance would otherwise widen the gate
+			// silently, and this is the track it would come back on.
+			name:        "headerless RecipeResult rejected",
 			yamlContent: "kind: RecipeResult\ncriteria:\n  service: eks\n",
-			wantErr:     false,
+			wantErr:     true,
+			errContain:  "an absent apiVersion was accepted before",
 		},
 		{
 			name:        "unsupported apiVersion rejected",
@@ -188,7 +190,7 @@ spec:
 		{
 			name: "profile RecipeResult loads strictly",
 			yamlContent: `kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: mode
@@ -220,7 +222,7 @@ componentRefs: []
 		{
 			name: "profile RecipeResult rejects unknown field",
 			yamlContent: `kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: mode
@@ -247,7 +249,7 @@ profie: typo
 		},
 		{
 			name: "profile RecipeResult requires kind",
-			yamlContent: `apiVersion: aicr.run/v1alpha3
+			yamlContent: `apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: mode
@@ -273,14 +275,14 @@ componentRefs: []
 		},
 		{
 			name:        "profile version requires selection",
-			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1alpha3\ncomponentRefs: []\n",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1beta2\ncomponentRefs: []\n",
 			wantErr:     true,
 			errContain:  "requires metadata.selectedProfile",
 		},
 		{
 			name: "legacy version rejects selection",
 			yamlContent: `kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   selectedProfile:
     name: mode
@@ -295,17 +297,6 @@ metadata:
 			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     true,
 			errContain:  `apiVersion "aicr.nvidia.com/v1alpha1"`,
-		},
-		{
-			name:        "empty apiVersion allowed for backward compat",
-			yamlContent: "kind: RecipeResult\ncriteria:\n  service: eks\n",
-			wantErr:     false,
-			checkResult: func(t *testing.T, rec *RecipeResult) {
-				t.Helper()
-				if rec.APIVersion != "" {
-					t.Errorf("apiVersion = %q, want empty", rec.APIVersion)
-				}
-			},
 		},
 	}
 
@@ -392,7 +383,7 @@ spec:
 func TestLoadFromFile_ProfileDecodeErrorIsInvalidRequest(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "recipe.yaml")
 	content := `kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: mode
@@ -415,7 +406,7 @@ profie: typo
 
 func TestLoadFromFile_ProfileSourceReadOnce(t *testing.T) {
 	const content = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: mode
@@ -462,8 +453,8 @@ func TestRecipeMetadataHeaderGatesAgree(t *testing.T) {
 		apiVersion string
 	}{
 		{"empty", ""},
-		{"alpha authoring", header.GroupVersion},
-		{"alpha profile", header.RecipeResultGroupVersion},
+		{"retired authoring", header.RetiredGroupVersionV1Alpha2},
+		{"retired profile", header.RetiredGroupVersionV1Alpha3},
 		{"target authoring", header.GroupVersionV1Beta1},
 		{"target profile", header.GroupVersionV1Beta2},
 		{"stable target belongs to another track", header.GroupVersionV1},

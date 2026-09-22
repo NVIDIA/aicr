@@ -96,14 +96,18 @@ plausible and wrong. The accepted values per kind, and the releases in which
 they change, are defined by
 [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 
-Each catalog kind has a current value and a target value:
+Each catalog kind migrated from a retired value to a target value:
 
-| Kind | Current | Target |
+| Kind | Retired | Target |
 |---|---|---|
 | `ComponentRegistry` | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
 | `RecipeMetadata`, `RecipeMixin` (ordinary) | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
 | `RecipeMetadata` (profile-bearing) | `aicr.run/v1alpha3` | `aicr.run/v1beta2` |
 | `AICRConfig` (not a catalog file; see [CLI config](../user/cli-config.md)) | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
+
+The Retired column is history as of v1.0.0: those values are rejected, not
+accepted-with-a-warning. A catalog still carrying one fails to load with an
+error naming the value and the release that withdrew it.
 
 Which binary accepts which catalog:
 
@@ -303,13 +307,12 @@ mechanics:
 - **A same-path replacement replaces the declaration too.** An external
   `overlays/aks.yaml` completely replaces the embedded file — including its
   `spec.profile` block. Keep the declaration in the replacement — dropping it
-  while keeping profile apiVersion `aicr.run/v1alpha3` or
-  `aicr.run/v1beta2` fails catalog validation
+  while keeping profile apiVersion `aicr.run/v1beta2` fails catalog validation
   (the version⟺declaration cross-check). That guardrail protects an
   integrator *editing* a profile-track file: de-profiling one requires BOTH
   removing the declaration AND downgrading the overlay to the legacy
-  apiVersion. It does NOT protect the upgrade path — a pre-existing legacy
-  (`aicr.run/v1alpha2` or `aicr.run/v1beta1`) external `overlays/aks.yaml`, authored before the
+  apiVersion. It does NOT protect the upgrade path — a pre-existing
+  `aicr.run/v1beta1` external `overlays/aks.yaml`, authored before the
   family's conversion, already satisfies both conditions. Upgrading AICR
   with such a catalog in `--data` silently preserves the unprofiled family:
   resolution succeeds with no error, no `selectedProfile` on the recipe, and

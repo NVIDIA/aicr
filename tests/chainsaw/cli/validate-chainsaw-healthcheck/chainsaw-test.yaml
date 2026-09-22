@@ -68,6 +68,8 @@ spec:
 
               # Create a minimal snapshot
               cat > "${WORK}/snapshot.yaml" <<'SNAP'
+              apiVersion: aicr.run/v1
+              kind: Snapshot
               measurements:
                 - type: K8s
                   subtypes:

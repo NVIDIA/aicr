@@ -59,6 +59,8 @@ func TestRunDryRun(t *testing.T) {
 
 	// Write recipe.yaml
 	recipe := `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   service: eks
   accelerator: h100
@@ -128,6 +130,8 @@ func TestRunDryRunFailedTests(t *testing.T) {
 	dir := t.TempDir()
 
 	recipe := `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   service: gke
   accelerator: h100
@@ -186,6 +190,8 @@ func TestRunDryRunMissingCTRF(t *testing.T) {
 	dir := t.TempDir()
 
 	recipe := `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   service: eks
   accelerator: h100
@@ -237,6 +243,8 @@ func TestRunDryRunSummaryBundleAutoResolve(t *testing.T) {
 	}
 
 	recipe := `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   service: gke
   accelerator: h100

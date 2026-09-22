@@ -29,7 +29,6 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
 )
 
 // configMapURIScheme matches the prefix used by the snapshot/recipe loaders
@@ -78,14 +77,14 @@ func Load(ctx context.Context, source string) (*AICRConfig, error) {
 			fmt.Sprintf("failed to parse config from %q", source), err)
 	}
 
+	// Validate is a method on the struct and cannot name the file; Load holds
+	// source. Wrapping here is what keeps "which config?" answerable, and it is
+	// where the retired WarnDeprecatedAPIVersion used to supply it. Same code,
+	// so the wrap adds context without reclassifying the failure.
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid config %q", source), err)
 	}
-	// After Validate, so a rejected header errors rather than warns. Load holds
-	// source, which Validate does not -- a method on the struct cannot name the
-	// file, and a warning that cannot name the file is not the one RELEASE.md
-	// promises.
-	header.WarnDeprecatedAPIVersion(source, cfg.APIVersion, header.GroupVersionV1Beta1)
 	return cfg, nil
 }
 

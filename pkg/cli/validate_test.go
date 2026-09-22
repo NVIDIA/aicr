@@ -53,7 +53,7 @@ func TestResolveCNCFAllocationPolicy(t *testing.T) {
 			name: "recipe context resolves the hydrated policy",
 			// Auto-hydrates from the embedded catalog; stock recipes default
 			// to device-plugin allocation since the #1327/#1671 flip.
-			recipeYAML: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n",
+			recipeYAML: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n",
 			wantPolicy: v1.GPUAllocationPolicyDevicePluginExtendedResource,
 		},
 		{
@@ -311,39 +311,39 @@ func TestValidateCmd_RecipeKindHandling(t *testing.T) {
 	}{
 		{
 			name:        "RecipeMetadata without criteria returns clear error",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  "has no criteria",
 		},
 		{
 			name:        "RecipeMetadata with criteria auto-hydrates",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "has no criteria",
 		},
 		{
 			name:        "RecipeMixin kind is rejected",
-			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  `kind "RecipeMixin"`,
 		},
 		{
 			name:        "unknown kind is rejected",
-			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  `kind "SomethingElse"`,
 		},
 		{
 			name:        "RecipeResult kind passes kind check",
-			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
 		},
 		{
 			name:        "empty kind passes kind check",
-			yamlContent: "apiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "apiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
@@ -408,12 +408,12 @@ func TestValidateCmd_KubeconfigSelectsValidationCluster(t *testing.T) {
 	t.Setenv("KUBECONFIG", filepath.Join(tmp, "env-default.kubeconfig"))
 
 	recipePath := filepath.Join(tmp, "recipe.yaml")
-	recipeYAML := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n  - name: gpu-operator\n    type: Helm\n    source: https://helm.ngc.nvidia.com/nvidia\n    version: v25.10.0\n    overrides:\n      devicePlugin:\n        enabled: true\n"
+	recipeYAML := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n  - name: gpu-operator\n    type: Helm\n    source: https://helm.ngc.nvidia.com/nvidia\n    version: v25.10.0\n    overrides:\n      devicePlugin:\n        enabled: true\n"
 	if err := os.WriteFile(recipePath, []byte(recipeYAML), 0o600); err != nil {
 		t.Fatalf("failed to write test recipe file: %v", err)
 	}
 	snapshotPath := filepath.Join(tmp, "snapshot.yaml")
-	if err := os.WriteFile(snapshotPath, []byte("kind: Snapshot\nmetadata:\n  version: test\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
+	if err := os.WriteFile(snapshotPath, []byte("kind: Snapshot\napiVersion: aicr.run/v1\nmetadata:\n  version: test\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
 		t.Fatalf("failed to write test snapshot file: %v", err)
 	}
 

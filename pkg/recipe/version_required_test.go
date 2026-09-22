@@ -66,14 +66,14 @@ func TestResolveRejectsEmptyHelmVersion_ExternalRegistry(t *testing.T) {
 
 	provider := newInMemoryProvider("external-unpinned", map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
   componentRefs: []
 `),
 		"overlays/unpinned-leaf.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: unpinned-leaf
 spec:
@@ -82,7 +82,7 @@ spec:
   componentRefs:
     - name: unpinned-helm
 `),
-		"registry.yaml": []byte(`apiVersion: aicr.run/v1alpha2
+		"registry.yaml": []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: unpinned-helm
@@ -120,7 +120,7 @@ components:
 		"overlays/base.yaml": provider.files["overlays/base.yaml"],
 		"registry.yaml":      provider.files["registry.yaml"],
 		"overlays/pinned-leaf.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: pinned-leaf
 spec:
@@ -158,7 +158,7 @@ spec:
 	provider3 := newInMemoryProvider("external-whitespace", map[string][]byte{
 		"overlays/base.yaml":          provider.files["overlays/base.yaml"],
 		"overlays/unpinned-leaf.yaml": provider.files["overlays/unpinned-leaf.yaml"],
-		"registry.yaml": []byte(`apiVersion: aicr.run/v1alpha2
+		"registry.yaml": []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: unpinned-helm
@@ -194,7 +194,7 @@ func TestLoadRejectsEmptyHelmVersion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "recipe.yaml")
 	content := `kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 criteria:
   service: eks
 componentRefs:
@@ -451,7 +451,7 @@ func TestPrepareAndValidateRejectsEmptyHelmVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &RecipeResult{ComponentRefs: tt.refs}
+			r := &RecipeResult{APIVersion: RecipeResultAPIVersion, ComponentRefs: tt.refs}
 			err := r.PrepareAndValidate()
 			if !tt.wantErr {
 				if err != nil {

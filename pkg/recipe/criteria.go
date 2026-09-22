@@ -859,10 +859,10 @@ func validateRecipeCriteriaHeader(kind, apiVersion string) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid kind %q, expected %q", kind, RecipeCriteriaKind))
 	}
-	if apiVersion != "" && !header.IsSupportedAPIVersion(apiVersion) {
+	if !header.IsSupportedAPIVersion(apiVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid apiVersion %q for %s, expected %q or %q; regenerate the criteria with a matching aicr version",
-				apiVersion, RecipeCriteriaKind, header.GroupVersion, header.GroupVersionV1))
+			fmt.Sprintf("invalid apiVersion %q%s for %s, expected %q; regenerate the criteria with a matching aicr version",
+				apiVersion, header.RetirementNoteWithAbsent(apiVersion), RecipeCriteriaKind, header.GroupVersionV1))
 	}
 	return nil
 }
@@ -1000,8 +1000,6 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
-	header.WarnDeprecatedAPIVersion(path, raw.APIVersion, header.GroupVersionV1)
-
 	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 
@@ -1041,8 +1039,6 @@ func LoadCriteriaFromFileWithContext(ctx context.Context, path string, reg *Crit
 	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
-	header.WarnDeprecatedAPIVersion(path, raw.APIVersion, header.GroupVersionV1)
-
 	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 

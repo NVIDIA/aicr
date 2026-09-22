@@ -151,13 +151,15 @@ Two candidates existed and neither turns out to be a real exercise:
   yet, that owes no notice window — it is a pre-adoption restructure. Spending
   two releases deprecating an endpoint nobody calls would buy a worse end state
   (two frozen path families instead of one) for the sake of a dry run.
-- **The ADR-022 alpha migration runs warn-then-remove across v0.22 and v1.0.0**
-  and is the first end-to-end use of the loader-warning arm:
+- **The ADR-022 alpha migration ran warn-then-remove across v0.22 and v1.0.0**
+  and was the first end-to-end use of the loader-warning arm:
   [#2416](https://github.com/NVIDIA/aicr/issues/2416) wired `deprecation.Warn`
   into the snapshot, recipe, catalog and criteria loaders in v0.22, so reading
-  an alpha or headerless artifact now names the file and the release that stops
-  reading it. Alpha owes no window under the table above, so this demonstrates
-  the mechanism working rather than the policy being honored.
+  an alpha or headerless artifact named the file and the release that would stop
+  reading it. [#2417](https://github.com/NVIDIA/aicr/issues/2417) completed the
+  remove arm in v1.0.0: those loaders now reject, and the warning helper is gone
+  because no case survived it. Alpha owes no window under the table above, so
+  this demonstrated the mechanism working rather than the policy being honored.
 
 What that leaves untested is the *obligation*, not the machinery. The
 per-surface mechanisms have unit coverage in `pkg/deprecation` and `pkg/server`.

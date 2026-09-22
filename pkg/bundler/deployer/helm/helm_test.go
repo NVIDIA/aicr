@@ -80,7 +80,7 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
 	recipeFile := "recipe.yaml"
-	if err := os.WriteFile(filepath.Join(outputDir, recipeFile), []byte("apiVersion: aicr.run/v1alpha2\nkind: Recipe\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(outputDir, recipeFile), []byte("apiVersion: aicr.run/v1\nkind: Recipe\n"), 0600); err != nil {
 		t.Fatalf("write %s: %v", recipeFile, err)
 	}
 
@@ -157,7 +157,7 @@ func TestGenerateReportsLayout(t *testing.T) {
 	// call).
 	recipeResult := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -1201,7 +1201,7 @@ func TestBundleGolden_ManifestOnly(t *testing.T) {
 	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 			ComponentRefs: []recipe.ComponentRef{
 				{Name: "skyhook-customizations", Namespace: "skyhook"},
@@ -1279,7 +1279,7 @@ func TestBundleGolden_KaiSchedulerPresent(t *testing.T) {
 	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 			ComponentRefs: []recipe.ComponentRef{
 				{
@@ -1482,7 +1482,7 @@ func readFile(t *testing.T, path string) string {
 func singleComponentRecipe(name, namespace, chart, version, source string) *recipe.RecipeResult {
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: name, Namespace: namespace, Chart: chart, Version: version, Source: source},
@@ -1494,7 +1494,7 @@ func singleComponentRecipe(name, namespace, chart, version, source string) *reci
 func createTestRecipeResult() *recipe.RecipeResult {
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 		Criteria: &recipe.Criteria{
 			Service:     "eks",

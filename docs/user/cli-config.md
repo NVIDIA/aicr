@@ -32,7 +32,7 @@ The schema's source of truth is
 
 ```yaml
 kind: AICRConfig               # required, exactly this value
-apiVersion: aicr.run/v1beta1   # required; v1alpha2 still accepted, see below
+apiVersion: aicr.run/v1beta1   # required; the only accepted value
 metadata:
   name: gke-h100-training      # optional, identifying only
 spec:
@@ -53,11 +53,11 @@ is checked when the file loads, whichever command loaded it — so a malformed
 wrong. Keep that in mind for a single document spanning several sections: an
 error can name a section the running command never reads.
 
-`AICRConfig` is an authored file, so its `apiVersion` is yours to set. From
-v0.22 the documented value is `aicr.run/v1beta1`; the loader still accepts the
-superseded `aicr.run/v1alpha2` and warns, naming your config file, while empty
-and unknown values are rejected. v1.0.0 stops accepting `aicr.run/v1alpha2`
-entirely, so edit your config before upgrading to it. The full release-by-release table
+`AICRConfig` is an authored file, so its `apiVersion` is yours to set. The
+value is `aicr.run/v1beta1`, and as of v1.0.0 it is the only one accepted: the
+superseded `aicr.run/v1alpha2` was read-with-a-warning in v0.22 and is rejected
+now, as are empty and unknown values. A config still carrying it must be edited
+by hand — AICR has no conversion layer. The full release-by-release table
 is in
 [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility);
 the policy behind it is

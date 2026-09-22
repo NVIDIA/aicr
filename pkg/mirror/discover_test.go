@@ -63,6 +63,7 @@ func TestPrepareMirrorCandidate_Canceled(t *testing.T) {
 	cancel()
 
 	_, err := prepareMirrorCandidate(ctx, &recipe.RecipeResult{
+		APIVersion:    recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}},
 	}, nil)
 	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
@@ -99,6 +100,7 @@ func TestDiscover(t *testing.T) {
 		{
 			name: "empty recipe",
 			rec: &recipe.RecipeResult{
+				APIVersion:    recipe.RecipeResultAPIVersion,
 				ComponentRefs: []recipe.ComponentRef{},
 			},
 			helmRenderer: &helmtest.MockRenderer{},
@@ -109,6 +111,7 @@ func TestDiscover(t *testing.T) {
 		{
 			name: "helm component with images",
 			rec: &recipe.RecipeResult{
+				APIVersion: recipe.RecipeResultAPIVersion,
 				ComponentRefs: []recipe.ComponentRef{
 					{
 						Name:    "gpu-operator",
@@ -148,6 +151,7 @@ spec:
 			// rather than silently omitting the chart and its images.
 			name: "source-only helm ref falls back to component name",
 			rec: &recipe.RecipeResult{
+				APIVersion: recipe.RecipeResultAPIVersion,
 				ComponentRefs: []recipe.ComponentRef{
 					{
 						Name:    "gpu-operator",
@@ -180,6 +184,7 @@ spec:
 		{
 			name: "helm render failure produces warning",
 			rec: &recipe.RecipeResult{
+				APIVersion: recipe.RecipeResultAPIVersion,
 				ComponentRefs: []recipe.ComponentRef{
 					{
 						Name:    "broken-chart",
@@ -203,6 +208,7 @@ spec:
 		{
 			name: "multiple components with deduplication",
 			rec: &recipe.RecipeResult{
+				APIVersion: recipe.RecipeResultAPIVersion,
 				ComponentRefs: []recipe.ComponentRef{
 					{
 						Name:    "comp-a",
@@ -247,6 +253,7 @@ spec:
 		{
 			name: "disabled component skipped",
 			rec: &recipe.RecipeResult{
+				APIVersion: recipe.RecipeResultAPIVersion,
 				ComponentRefs: []recipe.ComponentRef{
 					{
 						Name:      "disabled-comp",
@@ -266,6 +273,7 @@ spec:
 		{
 			name: "context cancellation returns error",
 			rec: &recipe.RecipeResult{
+				APIVersion: recipe.RecipeResultAPIVersion,
 				ComponentRefs: []recipe.ComponentRef{
 					{
 						Name:    "slow-comp",
@@ -439,6 +447,7 @@ func TestDiscover_RejectsNonMapOverrideAncestor(t *testing.T) {
 		Rendered: map[string][]byte{"gpu-operator": {}},
 	}
 	result := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{{
 			Name:    "gpu-operator",
 			Type:    recipe.ComponentTypeHelm,
@@ -492,6 +501,7 @@ func TestDiscover_SetEnabledOverride(t *testing.T) {
 					mustParseOverride(t, tt.override),
 				}),
 			).Discover(t.Context(), &recipe.RecipeResult{
+				APIVersion: recipe.RecipeResultAPIVersion,
 				ComponentRefs: []recipe.ComponentRef{{
 					Name:    "gpu-operator",
 					Type:    recipe.ComponentTypeHelm,
@@ -805,6 +815,7 @@ spec:
 
 func TestDiscoverOperatorManagedImagesWithAutoscalingOverride(t *testing.T) {
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:    "kai-scheduler",
@@ -855,6 +866,7 @@ func TestDiscoverOperatorManagedImagesWithAutoscalingOverride(t *testing.T) {
 
 func TestDiscoverRejectsNullOperatorImageNameOverride(t *testing.T) {
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:    "kai-scheduler",
@@ -958,6 +970,7 @@ spec:
 	}}
 
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:          "network-operator",
@@ -1001,6 +1014,7 @@ spec:
 	}}
 
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:          "kai-scheduler",
@@ -1030,6 +1044,7 @@ func TestDiscover_PropagatesManifestReadCancellation(t *testing.T) {
 	defer cancel()
 
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:          "test",
@@ -1074,6 +1089,7 @@ spec:
 		},
 	}
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:          "test",
@@ -1103,6 +1119,7 @@ func TestDiscover_OverrideAliasRegistryFailureIsFatal(t *testing.T) {
 		"registry.yaml": []byte("components: ["),
 	}}
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{{
 			Name:    "network-operator",
 			Type:    recipe.ComponentTypeHelm,
@@ -1132,6 +1149,7 @@ func TestDiscover_RegistryFailureWithoutOverridesIsNotFatal(t *testing.T) {
 		"registry.yaml": []byte("components: ["),
 	}}
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{{
 			Name:    "network-operator",
 			Type:    recipe.ComponentTypeHelm,
@@ -1161,6 +1179,7 @@ func TestDiscover_NilDataProviderFallsBackToEmbedded(t *testing.T) {
 	const embeddedManifest = "components/network-operator/manifests/nfd-network-rule.yaml"
 
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:          "network-operator",
@@ -1194,6 +1213,7 @@ func TestDiscover_SourceOnlyFallbackShape(t *testing.T) {
 		Rendered: map[string][]byte{"gpu-operator": []byte("kind: ConfigMap\n")},
 	}
 	rec := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:    "gpu-operator",
