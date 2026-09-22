@@ -352,6 +352,7 @@ func TestStability_Validate(t *testing.T) {
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationImageRegistryOverride)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationImageTagOverride)
 	requireSignature[func(bool) aicr.ValidateOption](aicr.WithValidationFailFast)
+	requireSignature[func(...string) aicr.ValidateOption](aicr.WithValidationSkipChecks)
 
 	_ = []aicr.ValidateOption{
 		aicr.WithValidationKubeconfig("/path/to/kubeconfig"),
@@ -368,6 +369,7 @@ func TestStability_Validate(t *testing.T) {
 		aicr.WithValidationImageRegistryOverride("reg"),
 		aicr.WithValidationImageTagOverride("tag"),
 		aicr.WithValidationFailFast(true),
+		aicr.WithValidationSkipChecks("gpu-operator-health"),
 	}
 }
 
