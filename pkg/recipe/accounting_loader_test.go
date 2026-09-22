@@ -37,7 +37,7 @@ func TestConfiguredRecipeResultVersionAndStrictDecode(t *testing.T) {
 			name: "v1alpha3 requires configuration",
 			wantErr: "requires metadata.selectedProfile or " +
 				"configuration.slurm.accounting",
-			body: `apiVersion: aicr.run/v1alpha3
+			body: `apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 criteria:
   platform: slurm
@@ -49,7 +49,7 @@ deploymentOrder: []
 			name: "v1alpha2 rejects accounting configuration",
 			wantErr: "configuration.slurm.accounting requires " +
 				"apiVersion",
-			body: `apiVersion: aicr.run/v1alpha2
+			body: `apiVersion: aicr.run/v1
 kind: RecipeResult
 criteria:
   platform: slurm
@@ -64,7 +64,7 @@ deploymentOrder: []
 		{
 			name:    "v1alpha3 rejects unknown fields",
 			wantErr: "unknownField",
-			body: `apiVersion: aicr.run/v1alpha3
+			body: `apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 criteria:
   platform: slurm

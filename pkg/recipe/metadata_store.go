@@ -413,10 +413,9 @@ func validateRecipeMixinCatalogHeader(kind, apiVersion, path string) error {
 	}
 	if !header.IsSupportedAuthoringAPIVersion(apiVersion) {
 		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("mixin file %s has apiVersion %q, expected %q or %q for %s; update the catalog header for this aicr release",
-				path, apiVersion, header.GroupVersion, header.GroupVersionV1Beta1, RecipeMixinKind))
+			fmt.Sprintf("mixin file %s has apiVersion %q%s, expected %q for %s; update the catalog header for this aicr release",
+				path, apiVersion, header.RetirementNote(apiVersion), header.GroupVersionV1Beta1, RecipeMixinKind))
 	}
-	header.WarnDeprecatedAPIVersion(path, apiVersion, header.GroupVersionV1Beta1)
 	return nil
 }
 
@@ -440,17 +439,10 @@ func classifyRecipeMetadataCatalogHeader(
 	profileVersion := header.IsSupportedProfileAPIVersion(metadata.APIVersion)
 	if !profileVersion && !header.IsSupportedAuthoringAPIVersion(metadata.APIVersion) {
 		return false, false, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("RecipeMetadata file %s has apiVersion %q, expected %q, %q, %q, or %q; update the catalog header for this aicr release",
-				path, metadata.APIVersion, header.GroupVersion, header.GroupVersionV1Beta1,
-				header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
+			fmt.Sprintf("RecipeMetadata file %s has apiVersion %q%s, expected %q or %q; update the catalog header for this aicr release",
+				path, metadata.APIVersion, header.RetirementNote(metadata.APIVersion),
+				header.GroupVersionV1Beta1, header.GroupVersionV1Beta2))
 	}
-	// Naming the wrong target would be worse than naming none: the reader would
-	// follow it into a second failure.
-	target := header.GroupVersionV1Beta1
-	if profileVersion {
-		target = header.GroupVersionV1Beta2
-	}
-	header.WarnDeprecatedAPIVersion(path, metadata.APIVersion, target)
 	return true, profileVersion, nil
 }
 

@@ -37,7 +37,7 @@ import (
 // component-to-version table, and no install namespace on either side.
 func syntheticRecipe(t *testing.T, path string, components map[string]string) string {
 	t.Helper()
-	doc := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n"
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n"
 	for _, name := range sortedKeys(components) {
 		doc += fmt.Sprintf("  - name: %s\n    type: Helm\n    source: https://charts.invalid/synthetic\n    version: %s\n",
 			name, components[name])
@@ -339,7 +339,7 @@ func TestUpgradeCheckRejectsUnrecognizedDeployer(t *testing.T) {
 // a Kustomize tag rather than a Helm chart version.
 func syntheticKustomizeRecipe(t *testing.T, path string, components map[string]string) string {
 	t.Helper()
-	doc := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n"
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n"
 	for _, name := range sortedKeys(components) {
 		doc += fmt.Sprintf(
 			"  - name: %s\n    type: Kustomize\n    source: https://github.invalid/synthetic\n"+
@@ -421,7 +421,7 @@ type syntheticComponent struct {
 // an install namespace alongside their version.
 func syntheticNamespacedRecipe(t *testing.T, path string, components map[string]syntheticComponent) string {
 	t.Helper()
-	doc := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n"
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n"
 	for _, name := range sortedKeys(components) {
 		c := components[name]
 		doc += fmt.Sprintf(

@@ -15,109 +15,134 @@
 package header_test
 
 import (
-	"bytes"
-	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/header"
 )
 
-// captureWarnings redirects the default logger for one test and returns what it
-// wrote. Not parallel-safe: slog.SetDefault is process-wide.
-func captureWarnings(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	// Fresh recorder per test: dedup is the behavior under test, and the
-	// process-wide one makes `go test -count=2` observe every subject already
-	// seen and emit nothing.
-	header.ResetAPIVersionRecorderForTest()
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	return &buf
-}
+// This file replaces the WarnDeprecatedAPIVersion suite. Through ADR-022 §3
+// Release N+1 a loader accepted the deprecated shape and warned; at N+2
+// (v1.0.0, #2417) it rejects instead, so the promise RELEASE.md makes moved
+// from the warning to the rejection. What has to survive that move is the part
+// that made the warning actionable: the message says which release stopped
+// reading the artifact, so its author knows this is a withdrawal to act on
+// rather than a corrupt file or a bug.
+//
+// RetirementNote carries that half. The other half -- naming the file -- now
+// belongs to each caller's error, and the per-package wiring tests assert it.
 
-// TestWarnDeprecatedAPIVersion covers the ADR-022 §3 promise in RELEASE.md that
-// a loader "accepts the deprecated shape and warns, naming the file and the
-// release that stops reading it". Naming the file is the part most easily lost,
-// because it is what makes the warning actionable in a catalog of 120 overlays.
-func TestWarnDeprecatedAPIVersion(t *testing.T) {
-	tests := []struct {
-		name       string
-		apiVersion string
-		target     string
-		wantWarn   bool
-	}{
-		{"stable alpha warns", header.GroupVersion, header.GroupVersionV1, true},
-		{"profile alpha warns", header.RecipeResultGroupVersion, header.GroupVersionV1Beta2, true},
-		{"absent header warns", "", header.GroupVersionV1, true},
-		{"stable target is silent", header.GroupVersionV1, header.GroupVersionV1, false},
-		{"authoring target is silent", header.GroupVersionV1Beta1, header.GroupVersionV1Beta1, false},
-		{"profile target is silent", header.GroupVersionV1Beta2, header.GroupVersionV1Beta2, false},
-		{"unknown value is silent", "example.com/v1", header.GroupVersionV1, false},
-	}
+func TestRetirementNoteNamesTheValueAndTheRelease(t *testing.T) {
+	t.Parallel()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			buf := captureWarnings(t)
-			// Subject embeds the path and is the dedup key, so a path unique to
-			// this subtest keeps the process-wide recorder from suppressing it
-			// because an earlier subtest warned about the same apiVersion.
-			path := "testdata/" + strings.ReplaceAll(tt.name, " ", "-") + ".yaml"
-
-			header.WarnDeprecatedAPIVersion(path, tt.apiVersion, tt.target)
-
-			got := buf.String()
-			if !tt.wantWarn {
-				if got != "" {
-					t.Fatalf("WarnDeprecatedAPIVersion(%q) warned when it should not: %s", tt.apiVersion, got)
-				}
-				return
-			}
-			if got == "" {
-				t.Fatalf("WarnDeprecatedAPIVersion(%q) emitted no warning", tt.apiVersion)
-			}
-			if !strings.Contains(got, path) {
-				t.Errorf("warning does not name the file %q: %s", path, got)
+	for _, retired := range []string{
+		header.RetiredGroupVersionV1Alpha2,
+		header.RetiredGroupVersionV1Alpha3,
+	} {
+		t.Run(retired, func(t *testing.T) {
+			t.Parallel()
+			got := header.RetirementNote(retired)
+			if !strings.Contains(got, retired) {
+				t.Errorf("note %q does not name the observed value %q", got, retired)
 			}
 			if !strings.Contains(got, header.AlphaRemovedIn) {
-				t.Errorf("warning does not name the removal release %q: %s", header.AlphaRemovedIn, got)
-			}
-			if !strings.Contains(got, tt.target) {
-				t.Errorf("warning does not name the replacement %q: %s", tt.target, got)
+				t.Errorf("note %q does not name the removal release %q", got, header.AlphaRemovedIn)
 			}
 		})
 	}
 }
 
-// TestWarnDeprecatedAPIVersionDedupsPerFile pins the granularity decision. A
-// catalog scan re-reading one file must not restate the same warning, while a
-// second offending file must still be named — otherwise a user fixes the one
-// file they were told about and the next run names another.
-func TestWarnDeprecatedAPIVersionDedupsPerFile(t *testing.T) {
-	buf := captureWarnings(t)
+// An absent apiVersion was tolerated on five readers before N+2, so their
+// authors have the same "this used to work" question and are owed the same
+// answer -- but only theirs. Whether a headerless artifact ever loaded is a
+// property of the reader, not of the empty string, so the clause is opt-in.
+func TestRetirementNoteWithAbsentCoversTheAbsentHeader(t *testing.T) {
+	t.Parallel()
 
-	header.WarnDeprecatedAPIVersion("dedup/first.yaml", header.GroupVersion, header.GroupVersionV1)
-	header.WarnDeprecatedAPIVersion("dedup/first.yaml", header.GroupVersion, header.GroupVersionV1)
-	header.WarnDeprecatedAPIVersion("dedup/second.yaml", header.GroupVersion, header.GroupVersionV1)
+	got := header.RetirementNoteWithAbsent("")
+	if got == "" {
+		t.Fatal("an absent apiVersion produced no note; its author gets no signal that the tolerance was withdrawn")
+	}
+	if !strings.Contains(got, header.AlphaRemovedIn) {
+		t.Errorf("note %q does not name the removal release %q", got, header.AlphaRemovedIn)
+	}
+}
 
-	// Count records, not substrings: each record names the path twice, once in
-	// the rendered message and once in the subject attribute.
-	got := buf.String()
-	records := func(path string) int {
-		n := 0
-		for line := range strings.SplitSeq(strings.TrimSpace(got), "\n") {
-			if strings.Contains(line, path) {
-				n++
+// The readers that never accepted a headerless artifact must not claim one was
+// accepted. An AICRConfig always required a header, and a RecipeMetadata overlay
+// stopped accepting an absent one in v0.21 with the catalog scanner (#2421);
+// telling either author the value "was accepted before v1.0.0" sends them
+// hunting a regression that never happened.
+func TestRetirementNoteMakesNoClaimAboutTheAbsentHeader(t *testing.T) {
+	t.Parallel()
+
+	if got := header.RetirementNote(""); got != "" {
+		t.Errorf("RetirementNote(%q) = %q, want empty: the bare helper must not assert a tolerance "+
+			"its caller may never have had", "", got)
+	}
+}
+
+// The opt-in variant differs from the bare helper only on the empty value; a
+// retired alpha reads identically through either, so a caller that picks the
+// wrong one still names the value and the release.
+func TestRetirementNoteWithAbsentDelegatesForEveryOtherValue(t *testing.T) {
+	t.Parallel()
+
+	for _, v := range []string{
+		header.RetiredGroupVersionV1Alpha2,
+		header.RetiredGroupVersionV1Alpha3,
+		header.GroupVersionV1,
+		header.GroupVersionV1Beta1,
+		header.GroupVersionV1Beta2,
+		"garbage",
+	} {
+		t.Run(v, func(t *testing.T) {
+			t.Parallel()
+			if got, want := header.RetirementNoteWithAbsent(v), header.RetirementNote(v); got != want {
+				t.Errorf("RetirementNoteWithAbsent(%q) = %q, want %q", v, got, want)
 			}
-		}
-		return n
+		})
 	}
-	if n := records("dedup/first.yaml"); n != 1 {
-		t.Errorf("first file warned %d times, want 1: %s", n, got)
+}
+
+// A value that was never accepted is a typo or a future version, not a
+// withdrawal. Claiming otherwise would send its author looking for a migration
+// that does not exist.
+func TestRetirementNoteIsSilentForEverythingElse(t *testing.T) {
+	t.Parallel()
+
+	for _, v := range []string{
+		header.GroupVersionV1,
+		header.GroupVersionV1Beta1,
+		header.GroupVersionV1Beta2,
+		"aicr.run/v1alpha4",
+		"example.com/v1",
+		"garbage",
+	} {
+		t.Run(v, func(t *testing.T) {
+			t.Parallel()
+			if got := header.RetirementNote(v); got != "" {
+				t.Errorf("RetirementNote(%q) = %q, want empty", v, got)
+			}
+		})
 	}
-	if n := records("dedup/second.yaml"); n != 1 {
-		t.Errorf("second file warned %d times, want 1: %s", n, got)
+}
+
+// The note is appended mid-sentence by every caller, so it has to read as a
+// clause rather than start one. Callers that forget the leading space produce
+// `apiVersion "x"(x was retired...)`, which no reviewer would notice in a diff.
+func TestRetirementNoteIsAppendable(t *testing.T) {
+	t.Parallel()
+
+	for name, got := range map[string]string{
+		"retired alpha": header.RetirementNote(header.RetiredGroupVersionV1Alpha2),
+		"absent header": header.RetirementNoteWithAbsent(""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if !strings.HasPrefix(got, " (") || !strings.HasSuffix(got, ")") {
+				t.Errorf("note %q is not a parenthetical clause; callers append it to an existing sentence", got)
+			}
+		})
 	}
 }

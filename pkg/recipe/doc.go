@@ -205,7 +205,7 @@
 //
 //	type RecipeCriteria struct {
 //	    Kind       string    // Must be "RecipeCriteria"
-//	    APIVersion string    // emits "aicr.run/v1"; "aicr.run/v1alpha2" still accepted
+//	    APIVersion string    // "aicr.run/v1"
 //	    Metadata   struct {
 //	        Name string       // Optional descriptive name
 //	    }

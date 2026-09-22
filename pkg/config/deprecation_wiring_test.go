@@ -15,9 +15,7 @@
 package config_test
 
 import (
-	"bytes"
 	"context"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,94 +25,94 @@ import (
 	"github.com/NVIDIA/aicr/pkg/header"
 )
 
-// TestLoadWarnsOnAlphaAPIVersion binds the AICRConfig loader to the deprecation
-// channel. Without a test at this level the call site is deletable green: the
-// unit tests in pkg/header prove WarnDeprecatedAPIVersion works, not that
-// anything calls it. This one was written because the loader shipped documented
-// as warning while doing nothing of the sort.
-func TestLoadWarnsOnAlphaAPIVersion(t *testing.T) {
-	// t.TempDir is unique per run, so the dedup subject (which embeds the path)
-	// differs on every invocation and `go test -count=2` still observes a warning.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "legacy-config.yaml")
-	body := "kind: AICRConfig\napiVersion: " + header.GroupVersion + "\n" +
+// These were the Release N+1 wiring tests, asserting that an alpha AICRConfig
+// still LOADED and merely warned. ADR-022 §3 N+2 (#2417) inverted that
+// contract, and they are inverted with it rather than deleted: the reason they
+// exist is unchanged. The gate is one line in Validate, so without a test at
+// this level it is deletable green -- the pkg/header unit tests prove the
+// predicate, not that the loader consults it. This file was written in the
+// first place because the loader shipped documented as warning while doing
+// nothing of the sort.
+
+func writeConfig(t *testing.T, name, apiVersion string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	body := "kind: AICRConfig\napiVersion: " + apiVersion + "\n" +
 		"metadata:\n  name: legacy\nspec:\n  snapshot: {}\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return path
+}
 
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+func TestLoadRejectsRetiredAPIVersion(t *testing.T) {
+	t.Parallel()
 
-	// Release N+1 still reads alpha; only the warning is new.
-	if _, err := config.Load(context.Background(), path); err != nil {
-		t.Fatalf("alpha AICRConfig must still load until %s: %v", header.AlphaRemovedIn, err)
+	path := writeConfig(t, "legacy-config.yaml", header.RetiredGroupVersionV1Alpha2)
+
+	_, err := config.Load(context.Background(), path)
+	if err == nil {
+		t.Fatalf("an AICRConfig stamped %q must be rejected since %s",
+			header.RetiredGroupVersionV1Alpha2, header.AlphaRemovedIn)
 	}
 
-	got := buf.String()
+	got := err.Error()
+	// Naming the file is what the retired warning carried and what Load wraps in
+	// now; Validate alone cannot, so this is the assertion that keeps the wrap.
 	if !strings.Contains(got, "legacy-config.yaml") {
-		t.Errorf("warning does not name the config file: %q", got)
+		t.Errorf("error does not name the config file: %q", got)
 	}
-	if !strings.Contains(got, header.AlphaRemovedIn) {
-		t.Errorf("warning does not name the removal release %q: %q", header.AlphaRemovedIn, got)
+	// The observed value, not just the expected one: without this a loader that
+	// reported the wrong version -- or an empty one -- still satisfies the rest.
+	if !strings.Contains(got, header.RetiredGroupVersionV1Alpha2) {
+		t.Errorf("error does not name the observed apiVersion %q: %q",
+			header.RetiredGroupVersionV1Alpha2, got)
 	}
 	if !strings.Contains(got, header.GroupVersionV1Beta1) {
-		t.Errorf("warning does not name the authoring target %q: %q", header.GroupVersionV1Beta1, got)
+		t.Errorf("error does not name the authoring target %q: %q", header.GroupVersionV1Beta1, got)
 	}
-	// The observed value, not just the target: without this a loader that passed
-	// through the wrong version — or an empty one — still satisfies every other
-	// assertion here.
-	if !strings.Contains(got, header.GroupVersion) {
-		t.Errorf("warning does not name the observed apiVersion %q: %q", header.GroupVersion, got)
+	if !strings.Contains(got, header.AlphaRemovedIn) {
+		t.Errorf("error does not name the removal release %q: %q", header.AlphaRemovedIn, got)
 	}
 }
 
-// TestLoadIsSilentOnTargetAPIVersion is the other half: a migrated config must
-// not nag. A warning that fires on the value the user was just told to adopt
-// teaches them to filter the channel out.
-func TestLoadIsSilentOnTargetAPIVersion(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "current-config.yaml")
-	body := "kind: AICRConfig\napiVersion: " + header.GroupVersionV1Beta1 + "\n" +
-		"metadata:\n  name: current\nspec:\n  snapshot: {}\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
+// AICRConfig never tolerated an empty apiVersion, so this one did not invert --
+// it asserts the same rejection it always did. Kept alongside the case above so
+// the two failure modes stay distinguishable: only one of them owes the reader
+// a retirement note.
+func TestLoadRejectsHeaderlessConfig(t *testing.T) {
+	t.Parallel()
 
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	path := writeConfig(t, "headerless-config.yaml", `""`)
+
+	_, err := config.Load(context.Background(), path)
+	if err == nil {
+		t.Fatal("an AICRConfig with no apiVersion must be rejected")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "headerless-config.yaml") {
+		t.Errorf("error does not name the config file: %q", got)
+	}
+	if !strings.Contains(got, header.GroupVersionV1Beta1) {
+		t.Errorf("error does not name the authoring target %q: %q", header.GroupVersionV1Beta1, got)
+	}
+	// The half this test was missing: it named the note owed to the alpha case
+	// but never checked that the headerless case withholds it, so the loader
+	// spent a release telling AICRConfig authors their file "was accepted
+	// before v1.0.0" -- a regression to hunt that never happened.
+	if note := header.RetirementNoteWithAbsent(""); strings.Contains(got, note) {
+		t.Errorf("error claims an absent apiVersion once loaded (%q), but AICRConfig always required one: %q", note, got)
+	}
+}
+
+// The other half, and the reason the two above cannot be satisfied by a loader
+// that rejects everything.
+func TestLoadAcceptsTargetAPIVersion(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfig(t, "current-config.yaml", header.GroupVersionV1Beta1)
 
 	if _, err := config.Load(context.Background(), path); err != nil {
 		t.Fatalf("target AICRConfig must load: %v", err)
-	}
-	if got := buf.String(); got != "" {
-		t.Errorf("target apiVersion must not warn, got: %q", got)
-	}
-}
-
-// TestLoadRejectsHeaderlessConfig pins the fail-closed half. AICRConfig has
-// always required an exact, non-empty apiVersion (ADR-022 §2 discussion), so
-// unlike the snapshot, recipe and criteria loaders it has no empty-value
-// tolerance to retire and the warning's absent-header branch is unreachable
-// here by design.
-//
-// Written because review proposed admitting the empty value "during the
-// compatibility window". There is no such window for this kind: #2421 closed
-// the headerless seam for authoring documents in v0.21 precisely so the direct
-// and catalog paths could not disagree, and re-opening it would be a
-// regression that #2417 then has to close again.
-func TestLoadRejectsHeaderlessConfig(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "headerless-config.yaml")
-	body := "kind: AICRConfig\nmetadata:\n  name: headerless\nspec:\n  snapshot: {}\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := config.Load(context.Background(), path); err == nil {
-		t.Fatal("headerless AICRConfig must be rejected; it has no empty-value tolerance")
 	}
 }
