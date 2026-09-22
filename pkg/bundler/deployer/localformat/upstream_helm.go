@@ -45,18 +45,23 @@ func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// shellFuncs is registered on every template that renders a shell script, so
+// recipe-supplied values reach the generated shell as single-quoted literals.
+// Component names are validated only as path components
+// (IsSafePathComponent rejects separators, not shell metacharacters), and
+// namespaces are not validated here at all, so neither is safe to interpolate
+// bare into a command.
+var shellFuncs = template.FuncMap{"shq": shellSingleQuote}
+
 var upstreamHelmTmpl = template.Must(
-	template.ParseFS(upstreamHelmTemplates, "templates/install-upstream-helm.sh.tmpl"),
+	template.New("install-upstream-helm.sh.tmpl").
+		Funcs(shellFuncs).
+		ParseFS(upstreamHelmTemplates, "templates/install-upstream-helm.sh.tmpl"),
 )
 
-// applyCRDsTmpl registers shq so recipe-supplied names reach the generated
-// shell as single-quoted literals. Component names are validated only as path
-// components (IsSafePathComponent rejects separators, not shell
-// metacharacters), and namespaces are not validated here at all, so neither is
-// safe to interpolate bare into a command.
 var applyCRDsTmpl = template.Must(
 	template.New("apply-crds.sh.tmpl").
-		Funcs(template.FuncMap{"shq": shellSingleQuote}).
+		Funcs(shellFuncs).
 		ParseFS(applyCRDsTemplates, "templates/apply-crds.sh.tmpl"),
 )
 

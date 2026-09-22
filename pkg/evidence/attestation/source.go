@@ -31,30 +31,25 @@ import (
 // did not. It is still short enough for a workable directory name.
 const SourceSlugLength = 32
 
-// SourceSlug derives the stable per-source directory slug from a
-// signer's OIDC issuer + identity. It is the first SourceSlugLength hex
-// characters of sha256(issuer + "\n" + identity).
-//
-// The slug is the <source> path segment in the per-source pointer layout
-// recipes/evidence/<recipe>/<source>/<bundle-digest>.yaml (issue #1347,
-// Option A). Deriving it deterministically — rather than from a free-form
-// label — is what makes the path non-squattable: the CI path-ownership
-// check (verifier.CheckEvidenceTree) recomputes the slug from the pointer's
-// own claimed signer and rejects any file that does not live under the
-// directory its signer hashes to. That check is structural, not
-// cryptographic — it proves the path matches the claimed signer, while the
-// signature that binds that identity to the bundle is verified at ingest
-// (issue #1535). The newline separator is a domain separator so
-// ("a\nb", "") and ("a", "b") cannot collide.
-//
-// The same derivation keys the GP2 ingest tree so a committed community
-// pointer and a first-party direct-ingest land under identical source
-// identifiers without a side registry.
+// SourceSlug returns the first SourceSlugLength hex characters of
+// sha256(issuer + "\n" + identity). The "\n" separator keeps ("a\nb", "")
+// and ("a", "b") from colliding.
 func SourceSlug(issuer, identity string) (string, error) {
+	sum, err := HashIdentityPair(issuer, identity)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum[:])[:SourceSlugLength], nil
+}
+
+// HashIdentityPair returns sha256(issuer + "\n" + identity). It returns an
+// error if issuer or identity is empty. Changing the formula breaks every
+// value derived from it, since each is persisted and re-verified across
+// runs.
+func HashIdentityPair(issuer, identity string) ([sha256.Size]byte, error) {
 	if issuer == "" || identity == "" {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
+		return [sha256.Size]byte{}, errors.New(errors.ErrCodeInvalidRequest,
 			"source slug requires non-empty issuer and identity")
 	}
-	sum := sha256.Sum256([]byte(issuer + "\n" + identity))
-	return hex.EncodeToString(sum[:])[:SourceSlugLength], nil
+	return sha256.Sum256([]byte(issuer + "\n" + identity)), nil
 }
