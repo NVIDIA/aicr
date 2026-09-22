@@ -130,10 +130,10 @@ var catalog = map[Type]typeSpec{
 			"aks-gpu-pools": {scalar: closedKeys("gpu-pool-count", "gpu-pools", "gpu-driver")},
 			// oke-addons is the OKE control-plane add-on projection supplied via
 			// `aicr snapshot --oke-addons` / `aicr validate --oke-addons` —
-			// pkg/collector/k8s/okeaddons.go. nvidia-gpu-plugin normalizes the
-			// NvidiaGpuPlugin add-on state (installed/absent; any other
-			// lifecycle state projects a fail-closed marker).
-			"oke-addons": {scalar: closedKeys("addon-count", "nvidia-gpu-plugin")},
+			// pkg/collector/k8s/okeaddons.go. The two projected add-on states
+			// normalize ACTIVE/absent and fail closed on every other lifecycle
+			// state.
+			"oke-addons": {scalar: closedKeys("addon-count", "nvidia-gpu-plugin", "nvidia-network-operator")},
 			// oke-legacy-plugin is in-cluster conflict evidence for OKE's legacy
 			// addon-manager-shipped device plugin (invisible to list-addons) —
 			// pkg/collector/k8s/okelegacyplugin.go. nvidia-gpu-device-plugin is

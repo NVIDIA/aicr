@@ -36,6 +36,15 @@ spec:
 
   # L40S + OKE specific constraints; kept aligned with l40s-oke-training.
   constraints:
+    # This leaf redeploys the OKE fabric inherited from l40s-oke-training;
+    # restate its ownership tripwire because snapshot qualification evaluates
+    # the selected maximal leaf's own constraints.
+    - name: K8s.oke-addons.nvidia-network-operator
+      value: absent
+      remediation: >-
+        Oracle's NvidiaNetworkOperator add-on is enabled on this OKE cluster,
+        but this recipe deploys AICR's network-operator. Remove the add-on and
+        recapture the OKE add-on projection before qualifying the recipe.
     - name: K8s.server.version
       value: ">= 1.32"
 

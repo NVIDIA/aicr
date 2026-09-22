@@ -206,3 +206,87 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 		})
 	}
 }
+
+// TestOKETrainingFabricLeavesRequireNetworkOperatorAbsent guards the
+// ownership boundary between Oracle's optional NvidiaNetworkOperator add-on
+// and AICR's network-operator component. The constraint is repeated on every
+// concrete training leaf because snapshot qualification evaluates only
+// maximal matching overlays; relying on inheritance would let a more specific
+// Ubuntu or Kubeflow leaf bypass the tripwire.
+func TestOKETrainingFabricLeavesRequireNetworkOperatorAbsent(t *testing.T) {
+	t.Parallel()
+
+	const constraintName = "K8s.oke-addons.nvidia-network-operator"
+	tests := []struct {
+		name     string
+		leafName string
+		criteria *Criteria
+	}{
+		{
+			name:     "gb200 OKE training",
+			leafName: "gb200-oke-training",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorGB200, OS: CriteriaOSOracleLinux, Intent: CriteriaIntentTraining},
+		},
+		{
+			name:     "gb200 OKE Ubuntu training",
+			leafName: "gb200-oke-ubuntu-training",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorGB200, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining},
+		},
+		{
+			name:     "gb200 OKE Ubuntu Kubeflow training",
+			leafName: "gb200-oke-ubuntu-training-kubeflow",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorGB200, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining, Platform: CriteriaPlatformKubeflow},
+		},
+		{
+			name:     "l40s OKE training",
+			leafName: "l40s-oke-training",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, OS: CriteriaOSOracleLinux, Intent: CriteriaIntentTraining},
+		},
+		{
+			name:     "l40s OKE Kubeflow training",
+			leafName: "l40s-oke-training-kubeflow",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, OS: CriteriaOSOracleLinux, Intent: CriteriaIntentTraining, Platform: CriteriaPlatformKubeflow},
+		},
+	}
+
+	store, err := loadMetadataStore(t.Context())
+	if err != nil {
+		t.Fatalf("loadMetadataStore: %v", err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			leaf, ok := store.GetRecipeByName(tt.leafName)
+			if !ok {
+				t.Fatalf("overlay %q not found in store", tt.leafName)
+			}
+			foundOnLeaf := false
+			for _, constraint := range leaf.Spec.Constraints {
+				if constraint.Name == constraintName {
+					foundOnLeaf = true
+					if constraint.Value != "absent" {
+						t.Errorf("leaf constraint %s = %q, want absent", constraintName, constraint.Value)
+					}
+				}
+			}
+			if !foundOnLeaf {
+				t.Fatalf("leaf has no %s generation constraint", constraintName)
+			}
+
+			result, err := store.BuildRecipeResult(t.Context(), tt.criteria)
+			if err != nil {
+				t.Fatalf("BuildRecipeResult: %v", err)
+			}
+			foundInResult := false
+			for _, constraint := range result.Constraints {
+				if constraint.Name == constraintName && constraint.Value == "absent" {
+					foundInResult = true
+					break
+				}
+			}
+			if !foundInResult {
+				t.Errorf("resolved recipe missing %s=absent constraint: %v", constraintName, result.Constraints)
+			}
+		})
+	}
+}

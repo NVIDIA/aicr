@@ -31,6 +31,16 @@ spec:
   # L40S is Ada Lovelace (not Hopper/Blackwell) — no IMEX/NVLink ComputeDomain
   # requirement, so the recipe keeps the OKE training baseline K8s floor.
   constraints:
+    # Oracle's NvidiaNetworkOperator add-on must not coexist with AICR's
+    # network-operator component: both controllers reconcile NicClusterPolicy.
+    # Keep this on the leaf so snapshot-time qualification evaluates it even
+    # when the Kubeflow descendant is selected.
+    - name: K8s.oke-addons.nvidia-network-operator
+      value: absent
+      remediation: >-
+        Oracle's NvidiaNetworkOperator add-on is enabled on this OKE cluster,
+        but this recipe deploys AICR's network-operator. Remove the add-on and
+        recapture the OKE add-on projection before qualifying the recipe.
     - name: K8s.server.version
       value: ">= 1.32"
 

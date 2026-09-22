@@ -30,23 +30,21 @@ import (
 // per-provider projection contract this follows).
 const SubtypeOKEAddons = "oke-addons"
 
-// okeNvidiaGPUPluginAddonName is the OKE cluster add-on that auto-installs
-// NVIDIA's device plugin. Its control-plane state is the canonical
-// gpuStack qualification signal for the OKE family: present and ACTIVE
-// means Oracle's plugin owns nvidia.com/gpu (oci-managed); absent means
-// the pools are operator-managed. Per-node label disablement
-// (oci.oraclecloud.com/disable-gpu-device-plugin) is out of contract —
-// it leaves the add-on installed, which this projection reports as
-// installed.
-const okeNvidiaGPUPluginAddonName = "NvidiaGpuPlugin"
+// OKE add-on names used by recipe qualification. NvidiaGpuPlugin is the
+// canonical gpuStack signal; NvidiaNetworkOperator guards ownership of the
+// NicClusterPolicy reconciler used by OKE fabric recipes.
+const (
+	okeNvidiaGPUPluginAddonName       = "NvidiaGpuPlugin"
+	okeNvidiaNetworkOperatorAddonName = "NvidiaNetworkOperator"
+)
 
-// Normalized nvidia-gpu-plugin readings. Only the two plain values match
+// Normalized OKE add-on readings. Only the two plain values match
 // declared profile constraints; every other observed state projects a
 // marker that matches no constraint, so resolution fails closed with the
 // observed state as the actual (the AKS Managed/Mixed precedent).
 const (
-	okeGPUPluginInstalled = "installed"
-	okeGPUPluginAbsent    = "absent"
+	okeAddonInstalled = "installed"
+	okeAddonAbsent    = "absent"
 )
 
 // okeAddon is the narrow shape read from each `data[]` entry. Unknown
@@ -64,8 +62,8 @@ type okeAddonsDump struct {
 }
 
 // ProjectOKEAddons reads an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`
-// dump and projects the NvidiaGpuPlugin add-on's control-plane state into
-// the oke-addons subtype:
+// dump and projects the relevant add-on control-plane states into the
+// oke-addons subtype:
 //
 //   - NvidiaGpuPlugin present with lifecycle-state ACTIVE →
 //     nvidia-gpu-plugin: installed.
@@ -78,6 +76,10 @@ type okeAddonsDump struct {
 //     constraint accepts, so resolution fails closed naming the observed
 //     state.
 //
+// The same normalization is applied to NvidiaNetworkOperator, whose absent
+// value is required by OKE fabric recipes before AICR deploys its own
+// network-operator component.
+//
 // The file is operator-supplied via an explicit flag, so every failure here
 // is an error, never a degraded-but-successful measurement: a typoed path
 // or truncated dump must not masquerade as "reading unavailable" and steer
@@ -88,29 +90,32 @@ func ProjectOKEAddons(ctx context.Context, path string) (measurement.Subtype, er
 		return measurement.Subtype{}, err
 	}
 
-	plugin := okeGPUPluginAbsent
+	plugin := normalizeOKEAddonState(addons, okeNvidiaGPUPluginAddonName)
+	networkOperator := normalizeOKEAddonState(addons, okeNvidiaNetworkOperatorAddonName)
+
+	data := map[string]measurement.Reading{
+		"addon-count":             measurement.Int(len(addons)),
+		"nvidia-gpu-plugin":       measurement.Str(plugin),
+		"nvidia-network-operator": measurement.Str(networkOperator),
+	}
+	return measurement.Subtype{Name: SubtypeOKEAddons, Data: data}, nil
+}
+
+func normalizeOKEAddonState(addons []okeAddon, name string) string {
+	state := okeAddonAbsent
 	for _, addon := range addons {
-		if !strings.EqualFold(addon.Name, okeNvidiaGPUPluginAddonName) {
+		if !strings.EqualFold(addon.Name, name) {
 			continue
 		}
 		if strings.EqualFold(addon.LifecycleState, "ACTIVE") {
-			plugin = okeGPUPluginInstalled
-		} else {
-			// Preserve the observed state fail-closed: neither profile
-			// value's constraint accepts it, and the resolution error
-			// names it so the operator can see what the control plane
-			// reported (an add-on mid-delete must not qualify either
-			// ownership mode).
-			plugin = "addon-" + strings.ToLower(addon.LifecycleState)
+			return okeAddonInstalled
 		}
-		break
+		// Preserve the observed state fail-closed: no declared constraint
+		// accepts it, and the resolution error names the state reported by
+		// the control plane.
+		return "addon-" + strings.ToLower(addon.LifecycleState)
 	}
-
-	data := map[string]measurement.Reading{
-		"addon-count":       measurement.Int(len(addons)),
-		"nvidia-gpu-plugin": measurement.Str(plugin),
-	}
-	return measurement.Subtype{Name: SubtypeOKEAddons, Data: data}, nil
+	return state
 }
 
 // readOKEAddons loads and decodes the add-ons dump through the shared

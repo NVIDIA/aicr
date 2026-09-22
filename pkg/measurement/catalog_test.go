@@ -37,6 +37,7 @@ func TestValidatePath(t *testing.T) {
 		{name: "closed scalar key", path: "K8s.server.version"},
 		{name: "closed scalar key on node", path: "K8s.node.kubelet-version"},
 		{name: "closed scalar key on aks pools", path: "K8s.aks-gpu-pools.gpu-driver"},
+		{name: "closed scalar key on OKE add-ons", path: "K8s.oke-addons.nvidia-network-operator"},
 		{name: "closed scalar key on gpu hardware", path: "GPU.hardware.driver-loaded"},
 		{name: "open scalar key on os release", path: "OS.release.VERSION_ID"},
 		{name: "open scalar key with dots", path: "OS.sysctl./proc/sys/kernel/osrelease"},

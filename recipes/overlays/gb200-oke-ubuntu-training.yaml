@@ -34,6 +34,15 @@ spec:
 
   # Constraints for GB200 on OKE with Ubuntu for training workloads
   constraints:
+    # This leaf redeploys the OKE fabric inherited from gb200-oke-training;
+    # restate its ownership tripwire because snapshot qualification evaluates
+    # the selected maximal leaf's own constraints.
+    - name: K8s.oke-addons.nvidia-network-operator
+      value: absent
+      remediation: >-
+        Oracle's NvidiaNetworkOperator add-on is enabled on this OKE cluster,
+        but this recipe deploys AICR's network-operator. Remove the add-on and
+        recapture the OKE add-on projection before qualifying the recipe.
     # GB200 NVLS performance validation needs the GA resource.k8s.io/v1 DRA
     # API (Kubernetes 1.34+); keep this leaf aligned with gb200-oke-training.
     - name: K8s.server.version
