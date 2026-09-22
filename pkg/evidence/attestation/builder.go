@@ -237,7 +237,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		snapMeasurements = opts.Snapshot.Measurements
 	}
 	fp := fingerprint.FromMeasurements(snapMeasurements)
-	cm := fp.Match(criteriaOf(opts.Recipe))
+	cm := fp.MatchWith(criteriaOf(opts.Recipe), recipe.NewCriteriaRegistry())
 	pred := BuildPredicate(PredicateInputs{
 		Profile:                 profilePredicateOf(opts.Recipe),
 		AttestedAt:              attestedAt,
