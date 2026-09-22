@@ -83,7 +83,7 @@ func Load(ctx context.Context, source string) (*AICRConfig, error) {
 	// so the wrap adds context without reclassifying the failure.
 	if err := cfg.Validate(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid config %q", source), err)
+			fmt.Sprintf("failed to validate config %q", source), err)
 	}
 	return cfg, nil
 }

@@ -62,6 +62,16 @@ stays readable only with a retained v0.21 or v0.22 binary. See
 [catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 for the release-by-release table.
 
+**Go importers.** The retirement also removed the exported `pkg/header`
+identifiers that named the alpha values: `APIVersionV1Alpha2`,
+`APIVersionV1Alpha3`, `GroupVersion`, `RecipeResultGroupVersion`,
+`WarnDeprecatedAPIVersion`, and `ResetAPIVersionRecorderForTest`. `pkg/header`
+sits outside the `pkg/client/v1` SDK surface the API compatibility gate covers,
+so this reaches you as a compile error rather than a recorded API break. Move to
+the per-track constant — `GroupVersionV1`, `GroupVersionV1Beta1`, or
+`GroupVersionV1Beta2` — and alias the one for your track rather than the string
+it happens to equal.
+
 ### Empty `apiVersion` on artifacts
 
 **Surface:** bundle and artifact schemas ·
