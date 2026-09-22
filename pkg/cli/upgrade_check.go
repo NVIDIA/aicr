@@ -39,18 +39,31 @@ func upgradeCheckCmd() *cli.Command {
 		Usage:    "Report whether moving between two recipes or bundles is safe to apply",
 		Description: `Compare two artifacts component by component and report a verdict for
 each version that changed, from the transition records this aicr release
-ships. No cluster state is read: the comparison is between two artifacts, and
-nothing is inspected, deployed or modified. A cm:// path is an artifact
-location like a file path, so reading or writing one does contact that
-cluster's API to fetch or store the ConfigMap.
+ships. That comparison is the default and it reads no cluster state: the two
+artifacts are all it looks at, and nothing is inspected, deployed or modified.
+A cm:// path is an artifact location like a file path, so reading or writing
+one does contact that cluster's API to fetch or store the ConfigMap.
 
 Either side may be a recipe file or a bundle directory; a bundle is read
 through the recipe.yaml at its root. Omitting --to re-resolves the --from artifact's own
 criteria against this binary's registry, which answers "am I behind, and does
 catching up hurt?" rather than "is this move safe?".
 
+Two flags do read a cluster. --from cluster takes the source side from what
+Helm and Argo CD each recorded they last applied. That answers which version
+is installed and answers nothing else: a resource somebody edited by hand
+leaves the record untouched, and reading the record will not say so. It is not
+a view of live state.
+
+--scan-cluster is an advisory pass for objects an upgrade could disturb that
+carry no deployer ownership marker. It warns and never changes the exit code.
+--from cluster implies it; pass --scan-cluster=false there to skip it.
+
 Operator steps are deployer-scoped, so --deployer is required whenever any
-component needs steps.
+component carries steps. A cluster read is stricter: it requires --deployer
+whatever the records turn out to hold, because a release name encodes the
+deployer that wrote it and attribution cannot run without one. It requires
+--to as well, a cluster carrying no criteria to re-resolve.
 
 Exits non-zero on any verdict other than safe, unknown included: a
 transition nobody assessed is not a transition anyone approved. Records are
@@ -68,6 +81,9 @@ Examples:
   # Am I behind, and does catching up hurt?
   aicr upgrade-check --from ./bundles-v0.16.0 --deployer helm
 
+  # What is actually installed, rather than what an artifact claims
+  aicr upgrade-check --from cluster --to new-recipe.yaml --deployer helm
+
   # JSON for a pipeline, reporting only
   aicr upgrade-check --from old.yaml --to new.yaml --format json --fail-on-error=false`,
 		Flags:  upgradeCheckCmdFlags(),
@@ -79,22 +95,33 @@ Examples:
 func upgradeCheckCmdFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
-			Name:     "from",
-			Aliases:  []string{"f"},
-			Usage:    "source artifact: recipe file, bundle directory, or ConfigMap URI",
+			Name:    "from",
+			Aliases: []string{"f"},
+			Usage: fmt.Sprintf("source: recipe file, bundle directory, ConfigMap URI, or the literal "+
+				"%s to read the installed inventory instead of an artifact", aicr.FromCluster),
 			Category: catInput,
 		},
 		&cli.StringFlag{
-			Name:     "to",
-			Usage:    "target artifact (default: re-resolve --from's criteria against this binary's registry)",
+			Name: "to",
+			Usage: fmt.Sprintf("target artifact (default: re-resolve --from's criteria against this "+
+				"binary's registry; required with --from %s)", aicr.FromCluster),
 			Category: catInput,
 		},
 		withCompletions(&cli.StringFlag{
-			Name:     "deployer",
-			Aliases:  []string{"d"},
-			Usage:    fmt.Sprintf("deployer the reported steps are scoped to (%s)", strings.Join(config.GetDeployerTypes(), ", ")),
+			Name:    "deployer",
+			Aliases: []string{"d"},
+			Usage: fmt.Sprintf("deployer the reported steps are scoped to (%s); required whenever a "+
+				"component carries steps, and always with --from %s",
+				strings.Join(config.GetDeployerTypes(), ", "), aicr.FromCluster),
 			Category: catInput,
 		}, config.GetDeployerTypes),
+		&cli.BoolFlag{
+			Name: "scan-cluster",
+			Usage: fmt.Sprintf("Also report objects an upgrade could disturb that carry no deployer "+
+				"ownership marker. Implied by --from %s; pass --scan-cluster=false there to skip the scan",
+				aicr.FromCluster),
+			Category: catInput,
+		},
 		&cli.BoolFlag{
 			Name:  "fail-on-error",
 			Value: true,
@@ -113,7 +140,8 @@ func upgradeCheckCmdFlags() []cli.Flag {
 
 // runUpgradeCheckCmd executes the upgrade-check command.
 func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
-	if err := validateSingleValueFlags(cmd, "from", "to", "deployer", "output", "format", "kubeconfig"); err != nil {
+	if err := validateSingleValueFlags(cmd,
+		"from", "to", "deployer", "scan-cluster", "output", "format", "kubeconfig"); err != nil {
 		return err
 	}
 
@@ -125,22 +153,20 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	from := cmd.String("from")
-	if from == "" {
+	req := upgradeCheckRequestFrom(cmd)
+	if req.From == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "--from is required")
 	}
-	deployer := cmd.String("deployer")
-	if deployer != "" {
+	if req.Deployer != "" {
 		// Reject a typo here rather than letting it silently select no step
 		// group, which would render a manual verdict with no steps under it.
-		if _, parseErr := config.ParseDeployerType(deployer); parseErr != nil {
+		if _, parseErr := config.ParseDeployerType(req.Deployer); parseErr != nil {
 			return parseErr
 		}
 	}
 
-	to := cmd.String("to")
-	kubeconfig := cmd.String("kubeconfig")
-	slog.Debug("upgrade check", slog.String("from", from), slog.String("to", to), slog.String("deployer", deployer))
+	slog.Debug("upgrade check", slog.String("from", req.From), slog.String("to", req.To),
+		slog.String("deployer", req.Deployer), slog.Any("scanCluster", req.ScanAtRisk))
 
 	client, err := embeddedClient(ctx)
 	if err != nil {
@@ -148,12 +174,7 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	report, err := client.UpgradeCheck(ctx, aicr.UpgradeCheckRequest{
-		From:       from,
-		To:         to,
-		Deployer:   deployer,
-		Kubeconfig: kubeconfig,
-	})
+	report, err := client.UpgradeCheck(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -162,7 +183,7 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 		slog.Int("components", report.Summary.Components),
 		slog.Int("failing", report.Summary.Failing))
 
-	if err := writeUpgradeReport(ctx, cmd, outFormat, kubeconfig, report); err != nil {
+	if err := writeUpgradeReport(ctx, cmd, outFormat, req.Kubeconfig, report); err != nil {
 		return err
 	}
 
@@ -173,6 +194,27 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 			"upgrade check failed: %d component change(s) need attention", report.Summary.Failing))
 	}
 	return nil
+}
+
+// upgradeCheckRequestFrom projects the parsed flags onto the facade request.
+//
+// --scan-cluster reaches the request only when the operator actually typed it.
+// The flag defaults to false, so a false urfave invented is indistinguishable
+// from one somebody meant, and sending it unconditionally would cancel the
+// scan --from cluster implies on every run that never mentioned it.
+func upgradeCheckRequestFrom(cmd *cli.Command) aicr.UpgradeCheckRequest {
+	req := aicr.UpgradeCheckRequest{
+		From:       cmd.String("from"),
+		To:         cmd.String("to"),
+		Deployer:   cmd.String("deployer"),
+		Kubeconfig: cmd.String("kubeconfig"),
+	}
+	if cmd.IsSet("scan-cluster") {
+		scan := cmd.Bool("scan-cluster")
+		req.ScanAtRisk = &scan
+	}
+
+	return req
 }
 
 // writeUpgradeReport serializes the report, using the package's own table

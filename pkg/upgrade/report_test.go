@@ -480,3 +480,93 @@ func TestReportBlockedRendersStepsOnlyWhenOneRecordDescribesTheJump(t *testing.T
 		})
 	}
 }
+
+// TestReportSourceSerializationTags pins every name the source block puts on
+// the wire, for both encoders. A struct tag is invisible to every other test
+// in this package — the table renders none of them and Go code reads the field
+// names — so a typo'd or missing tag ships silently and renames a key a
+// pipeline matches on.
+func TestReportSourceSerializationTags(t *testing.T) {
+	tests := []struct {
+		name  string
+		typ   reflect.Type
+		field string
+		json  string
+		yaml  string
+	}{
+		{"report carries source", reflect.TypeOf(Report{}), "Source", "source,omitempty", "source,omitempty"},
+		{"kubeconfig", reflect.TypeOf(ReportSource{}), "Kubeconfig", "kubeconfig,omitempty", "kubeconfig,omitempty"},
+		{"context", reflect.TypeOf(ReportSource{}), "Context", "context,omitempty", "context,omitempty"},
+		{"matched", reflect.TypeOf(ReportSource{}), "Matched", "matched", "matched"},
+		{"helm block", reflect.TypeOf(ReportSource{}), "Helm", "helm", "helm"},
+		{"argo block", reflect.TypeOf(ReportSource{}), "Argo", "argo", "argo"},
+		{"helm records", reflect.TypeOf(ReportSourceHelm{}), "Records", "records", "records"},
+		{"helm unattributed", reflect.TypeOf(ReportSourceHelm{}), "Unattributed", "unattributed", "unattributed"},
+		{"helm unreadable", reflect.TypeOf(ReportSourceHelm{}), "Unreadable", "unreadable", "unreadable"},
+		{"helm uninstalled", reflect.TypeOf(ReportSourceHelm{}), "Uninstalled", "uninstalled", "uninstalled"},
+		{
+			"helm stamped but unmatched", reflect.TypeOf(ReportSourceHelm{}), "StampedUnmatched",
+			"stampedUnmatched", "stampedUnmatched",
+		},
+		{"argo applications", reflect.TypeOf(ReportSourceArgo{}), "Applications", "applications", "applications"},
+		{"argo unattributed", reflect.TypeOf(ReportSourceArgo{}), "Unattributed", "unattributed", "unattributed"},
+		{"argo unreadable", reflect.TypeOf(ReportSourceArgo{}), "Unreadable", "unreadable", "unreadable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, ok := tt.typ.FieldByName(tt.field)
+			if !ok {
+				t.Fatalf("%s has no field %s", tt.typ, tt.field)
+			}
+			if got := f.Tag.Get("json"); got != tt.json {
+				t.Errorf("%s.%s json tag = %q, want %q", tt.typ, tt.field, got, tt.json)
+			}
+			if got := f.Tag.Get("yaml"); got != tt.yaml {
+				t.Errorf("%s.%s yaml tag = %q, want %q", tt.typ, tt.field, got, tt.yaml)
+			}
+		})
+	}
+}
+
+// TestReportSourceHasNoArgoStampedCount pins the absence itself. Adding the
+// field to mirror the Helm side would produce an always-zero count that reads
+// as a mapping verified against a stamp nothing looked for.
+func TestReportSourceHasNoArgoStampedCount(t *testing.T) {
+	if _, ok := reflect.TypeOf(ReportSourceArgo{}).FieldByName("StampedUnmatched"); ok {
+		t.Error("ReportSourceArgo grew a StampedUnmatched field; an Application carries no AICR stamp to check")
+	}
+}
+
+// TestNewReportSource covers the source block's build path: absent for an
+// artifact comparison, and copied rather than aliased for a cluster read, so
+// the report keeps the ownership contract every other field in it holds.
+func TestNewReportSource(t *testing.T) {
+	if got := NewReport(nil, ReportOptions{From: "a.yaml", To: "b.yaml"}); got.Source != nil {
+		t.Errorf("an artifact comparison carries a source block: %+v", got.Source)
+	}
+
+	src := &ReportSource{
+		Kubeconfig: "/home/op/.kube/config",
+		Context:    "prod-east",
+		Matched:    2,
+		Helm:       ReportSourceHelm{Records: 37, Unattributed: 2, Unreadable: 1, Uninstalled: 3, StampedUnmatched: 4},
+		Argo:       ReportSourceArgo{Applications: 5, Unattributed: 6, Unreadable: 7},
+	}
+	want := *src
+	rep := NewReport(nil, ReportOptions{From: "cluster", Source: src})
+	if rep.Source == nil {
+		t.Fatal("NewReport dropped the source block a cluster read supplied")
+	}
+	if rep.Source == src {
+		t.Error("NewReport aliased the caller's ReportSource instead of copying it")
+	}
+	if *rep.Source != want {
+		t.Errorf("source = %+v, want %+v", *rep.Source, want)
+	}
+
+	src.Context = "mutated"
+	src.Helm.Records = 0
+	if *rep.Source != want {
+		t.Errorf("the report's source changed with the caller's: %+v, want %+v", *rep.Source, want)
+	}
+}

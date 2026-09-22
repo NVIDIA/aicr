@@ -1329,6 +1329,31 @@ func TestMatchIdentitiesIdentityAxis(t *testing.T) {
 			to:       Identity{Version: "1.0.0"},
 			wantRows: 0,
 		},
+		{
+			// The version axis ignores a leading "v", so this hop held its
+			// version however the two sides spelled it. The row has to be the
+			// relocation it is: a version row here would print the two
+			// spellings in FROM and TO and read as a bump nobody made.
+			name:         "a respelled version that relocates is still only a relocation",
+			set:          safeHop,
+			from:         Identity{Version: "v1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.0.0", Namespace: "nvidia"},
+			wantRows:     1,
+			change:       ChangeIdentity,
+			wantFrom:     "v1.0.0",
+			wantTo:       "1.0.0",
+			verdict:      VerdictUnknown,
+			reason:       ReasonIdentityChanged,
+			moved:        nsMove,
+			explainNames: []string{"v1.0.0", "gpu-operator", "nvidia"},
+		},
+		{
+			name:     "a respelled version that stays put emits no row",
+			set:      safeHop,
+			from:     Identity{Version: "v1.0.0", Namespace: "gpu-operator"},
+			to:       Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			wantRows: 0,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1400,5 +1425,69 @@ func TestMatchIsMatchIdentitiesWithoutTheIdentityAxis(t *testing.T) {
 		if r.IdentityChanges != nil {
 			t.Errorf("%s carries identity changes, but a version table states no identity to move", r.Component)
 		}
+	}
+}
+
+// TestMatchLeadingVPrefixIsNotAChange pins the one normalization the
+// same-version check applies, and its two limits.
+//
+// The prefix is not cosmetic in practice: the Argo CD deployer writes
+// targetRevision through deployer.NormalizeVersion for an HTTPS chart repo, so
+// a recipe pinning "v26.7.0" produces a cluster that reads back "26.7.0". A
+// string comparison there reports every such component as changed and then
+// resolves it to unknown, failing a run against a cluster already at the
+// target.
+func TestMatchLeadingVPrefixIsNotAChange(t *testing.T) {
+	tests := []struct {
+		name     string
+		from     string
+		to       string
+		wantRows int
+	}{
+		{
+			name:     "a v prefix on the target alone is not a change",
+			from:     "26.7.0",
+			to:       "v26.7.0",
+			wantRows: 0,
+		},
+		{
+			name:     "a v prefix on the source alone is not a change",
+			from:     "v26.7.0",
+			to:       "26.7.0",
+			wantRows: 0,
+		},
+		{
+			name:     "a real version change still reports",
+			from:     "26.7.0",
+			to:       "v26.8.0",
+			wantRows: 1,
+		},
+		{
+			// semver orders build metadata as equal, so semver.Equal would
+			// silence this pair. Silence reads as safe, and a pin that moved
+			// is not a pin that did not.
+			name:     "a build-metadata-only difference still reports",
+			from:     "1.2.3+build.1",
+			to:       "1.2.3+build.2",
+			wantRows: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Match(oneComponent(blockA), map[string]string{"c": tt.from}, map[string]string{"c": tt.to})
+			if len(got) != tt.wantRows {
+				t.Fatalf("Match() returned %d rows, want %d: %+v", len(got), tt.wantRows, got)
+			}
+			if tt.wantRows == 0 {
+				return
+			}
+			// The versions are reported as each side wrote them, so an
+			// operator reads the real strings rather than a normalized form
+			// neither artifact contains.
+			if got[0].From != tt.from || got[0].To != tt.to {
+				t.Errorf("From/To = %q/%q, want %q/%q as written", got[0].From, got[0].To, tt.from, tt.to)
+			}
+		})
 	}
 }

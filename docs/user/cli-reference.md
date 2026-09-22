@@ -1511,23 +1511,26 @@ aicr diff --baseline ./golden.yaml --target cm://default/aicr-snapshot
 
 ### aicr upgrade-check
 
-Compare two recipes or bundles component by component and report, for each component whose version or namespace changed, whether moving between them is safe to apply. Verdicts come from the [transition records](../contributor/upgrade-records.md) the running `aicr` release ships. No cluster state is inspected, which makes this the CI and GitOps path: the comparison reads two artifacts and nothing else. A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.
+Compare two recipes or bundles component by component and report, for each component whose version or namespace changed, whether moving between them is safe to apply. Verdicts come from the [transition records](../contributor/upgrade-records.md) the running `aicr` release ships.
+
+An artifact comparison inspects no cluster state, which makes it the CI and GitOps path: it reads two artifacts and nothing else. A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself. Two opt-in flags do read a cluster: `--from cluster` takes the source side from what the deployers recorded they installed, and `--scan-cluster` adds an advisory pass over live objects the upgrade might disturb.
 
 **Synopsis:**
 ```shell
-aicr upgrade-check --from <recipe|bundle> [--to <recipe|bundle>] [--deployer <name>] [flags]
+aicr upgrade-check --from <recipe|bundle|cluster> [--to <recipe|bundle>] [--deployer <name>] [flags]
 ```
 
 **Flags:**
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--from` | `-f` | string | | Source artifact: recipe file, bundle directory, or ConfigMap URI. **Required.** |
-| `--to` | | string | re-resolve | Target artifact. When omitted, `--from`'s own criteria are re-resolved against this binary's registry. |
-| `--deployer` | `-d` | string | | Deployer the reported steps are scoped to: `argocd`, `argocd-helm`, `flux`, `helm`, `helmfile`. **Required whenever any component needs steps.** |
+| `--from` | `-f` | string | | Source: recipe file, bundle directory, ConfigMap URI, or the literal `cluster` to read the installed inventory instead of an artifact. **Required.** |
+| `--to` | | string | re-resolve | Target artifact. When omitted, `--from`'s own criteria are re-resolved against this binary's registry. **Required with `--from cluster`**, which carries no criteria to re-resolve. |
+| `--deployer` | `-d` | string | | Deployer the reported steps are scoped to: `argocd`, `argocd-helm`, `flux`, `helm`, `helmfile`. **Always required with `--from cluster`**; otherwise required whenever any component needs steps. |
+| `--scan-cluster` | | bool | off (on with `--from cluster`) | Also report live objects the upgrade could disturb that carry no deployer ownership marker. Implied by `--from cluster`; pass `--scan-cluster=false` there to skip the scan. Advisory: findings never change the exit code. |
 | `--fail-on-error` | | bool | **true** | Exit non-zero when any component needs attention. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. |
 | `--format` | `-t` | string | **table** | Output format: `json`, `yaml`, or `table`. |
-| `--kubeconfig` | `-k` | string | | Kubeconfig used for `cm://` artifact reads and a `cm://` `--output`. Overrides `KUBECONFIG` and `~/.kube/config`. No cluster is contacted unless an argument is a ConfigMap URI. |
+| `--kubeconfig` | `-k` | string | | Kubeconfig used for `cm://` artifact reads, a `cm://` `--output`, `--from cluster`, and `--scan-cluster`. Overrides `KUBECONFIG` and `~/.kube/config`. No cluster is contacted unless one of those is in play. |
 
 Note the two defaults that differ from sibling commands. `--format` defaults to `table` rather than `yaml`, because the report's payload is a list of operator steps that folded YAML scalars make unreadable. `--fail-on-error` defaults to **true**, the opposite of `aicr diff --fail-on-drift`: you chose to run this check, so its exit code is what makes running it worth something in a pipeline.
 
@@ -1536,6 +1539,33 @@ Note the two defaults that differ from sibling commands. `--format` defaults to 
 `--from X --to Y` asks *"is this specific move safe?"* and presumes you already know your target.
 
 Omitting `--to` asks *"am I behind, and does catching up hurt?"*, which is usually the real question: what an operator holds is an old artifact, not a chosen destination. The `--from` artifact's embedded criteria are re-resolved against the running binary's pins to synthesize the target.
+
+**`--from cluster` takes the source side from what is installed.** Instead of a source artifact, the check reads the record each deployer leaves behind: Helm's release records, out of the Kubernetes objects Helm stores them in, and Argo CD's `Application` objects, which are the only evidence for a cluster deployed with `argocd` or `argocd-helm` because those write no Helm release at all. The `--to` side is still an artifact; there is nothing in a cluster to upgrade *to*.
+
+That answers *which version is installed*, authoritatively, including where a cluster has drifted from the recipe in git. It answers nothing else. Both sources are declarations rather than observations: Helm records what it last applied and an `Application` records what it is configured to deploy, so a resource somebody edited by hand leaves both untouched and reading them will not say so. It is not a view of live cluster state.
+
+Two flags stop being optional:
+
+- `--to`, because a cluster carries no criteria to re-resolve, so the single-argument "am I behind?" form has nothing to work from.
+- `--deployer`, whether or not any component turns out to carry steps, and checked before any cluster I/O. A release name encodes the deployer that wrote it (`flux` composes `<targetNamespace>-<name>`, Argo CD prepends a prefix the user sets), so without one no installed release maps to a component and the read could only report an empty cluster.
+
+`cluster` is a sentinel value rather than a path. A directory of that name is reached as `./cluster`.
+
+The report gains a `READ FROM CLUSTER` block above the rows, naming the kubeconfig and context that were read and accounting for each reader separately. The two sets of counts are never summed: the Helm side counts storage records, so one release with ten retained revisions contributes ten, while the Argo side counts `Application` objects, of which a component has one. `--format json` and `--format yaml` carry the same thing as `source`.
+
+A read that recognizes nothing is reported, never failed. Every row then reads "added", and the block says so in as many words, because from the rows alone a cluster with none of these components installed looks identical to the two likelier causes: the wrong cluster, or components installed by a deployer other than the one you named.
+
+**A cluster read reports no namespace move.** The identity comparison below is artifact-to-artifact only. The read recovers a version and no namespace, and that is not an omission it could fill: attribution composes the release name *from* the registry's namespace, so a namespace is an input to the read rather than a fact recovered from it, and only `helm` and `helmfile` match on the component's bare name at all. A namespace stated here would come from two deployers of five and be silently absent under the other three, which is a worse report than none.
+
+**`--scan-cluster` warns about objects the upgrade could destroy.** It is an axis of its own rather than a property of `--from`: the scan needs a cluster wherever the `from` table came from, so comparing two bundles while scanning a live cluster is a legitimate and useful combination. `--from cluster` implies it, and an explicit `--scan-cluster=false` wins over that implication.
+
+For the group and kind pairs the *crossed* transition records name, the scan lists each kind cluster-wide and reports every object carrying neither Helm ownership (the `app.kubernetes.io/managed-by=Helm` label together with a `meta.helm.sh/release-name` annotation, because the label alone is written by anything) nor Argo CD's `argocd.argoproj.io/tracking-id` annotation. Only crossed records contribute, because an upgrade nobody is making cannot put anything at risk.
+
+That test is positive, so an object carrying no marker AICR recognizes is reported by default. The direction is deliberate: the failure being guarded against is an operator's own custom resources being cascade-deleted when a component removes a CRD, and AICR cannot restore what it does not own. Over-warning about an object some fourth tool owns costs a line of output; under-warning costs the object.
+
+Findings **never change the exit code**. A kind the cluster does not serve is reported as not installed rather than raised, since the CRD a record names may simply not be there, and a scan that fails outright (an RBAC gap, an apiserver that went away) fills its own section with the reason and leaves the comparison alone.
+
+**An empty `AT RISK` section is not an all-clear.** It renders on every run, including one that contacted no cluster, and states which case it is: no cluster access was requested, the scan was explicitly turned off, no crossed record names a resource kind so nothing was examined, or the scan read objects and found every one of them owned. `--format json` and `--format yaml` carry `atRisk` unconditionally for the same reason.
 
 **Verdicts:**
 
@@ -1594,7 +1624,7 @@ Every row states its reason in the detail block under the table, and `--format j
 
 **Why `--deployer` is required rather than defaulted:**
 
-Steps are deployer-scoped. Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. It is only required when some component actually carries steps. A bundle now records the deployer that built it in [`bundle-info.yaml`](bundling.md#bundle-info), so `upgrade-check` can stop asking once it reads that record ([#2528](https://github.com/NVIDIA/aicr/issues/2528)).
+Steps are deployer-scoped. Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. On an artifact comparison it is only required when some component actually carries steps; `--from cluster` requires it unconditionally, for the separate reason that the release names it maps encode it. A bundle now records the deployer that built it in [`bundle-info.yaml`](bundling.md#bundle-info), so `upgrade-check` can stop asking once it reads that record ([#2528](https://github.com/NVIDIA/aicr/issues/2528)).
 
 **Example:**
 
@@ -1633,6 +1663,17 @@ aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer argocd
 # Am I behind, and does catching up hurt?
 aicr upgrade-check --from ./bundles-v0.16.0 --deployer helm
 
+# What is actually installed on this cluster, and does moving it hurt?
+aicr upgrade-check --from cluster --to ./bundles-v0.17.0 --deployer argocd
+
+# Compare two bundles, and scan the live cluster while doing it
+aicr upgrade-check --from ./bundles-v0.16.0 --to ./bundles-v0.17.0 \
+  --deployer helm --scan-cluster
+
+# Read the cluster without the advisory scan it would otherwise imply
+aicr upgrade-check --from cluster --to ./bundles-v0.17.0 \
+  --deployer flux --scan-cluster=false
+
 # JSON for a pipeline, reporting without gating
 aicr upgrade-check --from old.yaml --to new.yaml \
   --format json --output report.json --fail-on-error=false
@@ -1643,7 +1684,7 @@ aicr upgrade-check --from old.yaml --to new.yaml \
 | Code | Description |
 |------|-------------|
 | `0` | No component needs attention, or `--fail-on-error=false` |
-| `2` | Invalid input (missing `--from`, unknown deployer, a bundle with no `recipe.yaml`, a missing `--deployer` where steps are needed) **or** a component needs attention (mapped from `ErrCodeConflict`) |
+| `2` | Invalid input (missing `--from`, unknown deployer, a bundle with no `recipe.yaml`, a missing `--deployer` where steps are needed, `--from cluster` without `--deployer` or without `--to`) **or** a component needs attention (mapped from `ErrCodeConflict`) |
 
 > **Note on CI gating:** as with `aicr diff`, a bad invocation and a failing check both exit `2`. To tell them apart without parsing stderr, write the report with `--format json --output report.json` and branch on the file's presence plus its `summary.failing` count.
 
@@ -1652,7 +1693,8 @@ aicr upgrade-check --from old.yaml --to new.yaml \
 - **A bundle is read through the `recipe.yaml` at its root.** Every deployer writes one as of [#2759](https://github.com/NVIDIA/aicr/pull/2759); a directory without it is neither a recipe nor a bundle and is rejected rather than misread.
 - **Coverage starts near zero.** Every transition without an authored record reports `unknown`. See the [authoring guide](../contributor/upgrade-records.md).
 - **A namespace move is seen only when both artifacts state one.** An absent namespace is read as a field the artifact did not carry, not as the default, so a component that gains or loses an explicit namespace between the two artifacts produces no relocation row. Reading it the other way would report a move nobody performed for every component the moment one side stopped carrying the field.
-- **No cluster comparison yet.** `--from cluster`, which reads installed Helm release inventory, is tracked in [#2531](https://github.com/NVIDIA/aicr/issues/2531).
+- **A cluster read answers the version question and nothing else.** What it reads are the deployers' own declarations of what they last applied, so it is authoritative about installed versions and silent about everything a hand edit changed. It also reports no relocation, because it recovers no namespace to compare.
+- **The at-risk scan sees ownership markers, not use.** An object is reported for carrying no marker the scan recognizes, which says nothing about whether anything depends on it. Confirming that is yours to do.
 
 ---
 

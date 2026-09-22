@@ -102,6 +102,8 @@ jobs:
           # let the CI light lie about coverage (#1997).
           command -v yq >/dev/null || { echo "::error::yq is required for kwok/scripts/lib tests"; exit 1; }
           bash kwok/scripts/lib/sync-budget_test.sh
+          bash kwok/scripts/lib/deployer-map_test.sh
+          bash kwok/scripts/lib/upgrade-readback_test.sh
           bash kwok/scripts/lib/profile-select_test.sh
           bash kwok/scripts/lib/preload-image_test.sh
           bash kwok/scripts/lib/image-cache_test.sh
@@ -134,6 +136,9 @@ jobs:
           # pairs. Tier 2 stays helm-only by deliberate policy (see ADR-003
           # "Tier 2 deployer coverage"). Keep .github/actions/kwok-test/action.yml's
           # deployer input doc-string in sync with this list (prose only, not enforced).
+          # kwok/scripts/lib/deployer-map.sh must map every entry to an aicr
+          # --deployer value; that one IS enforced, by deployer-map_test.sh,
+          # which reads this array.
           deployers='["helm","argocd-oci","argocd-helm-oci","argocd-git","flux-oci","flux-git"]'
 
           # --- workflow_dispatch: test exactly the requested recipe ---

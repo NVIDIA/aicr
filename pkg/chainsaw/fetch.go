@@ -24,16 +24,14 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
 )
 
 // groupDiscoverer is the subset of discovery.DiscoveryInterface the fetcher
@@ -136,60 +134,38 @@ func NewClusterFetcherWithClient(client dynamic.Interface, restConfig *rest.Conf
 // Exported for callers that construct the two halves separately (the
 // deployment validator keeps its own client so ctx.DynamicClient stays an
 // injection seam) — going through it keeps both halves bounded alike.
+//
+// Client construction itself lives in pkg/k8s/client: a caller that only wants
+// a dynamic client must not have to depend on this in-process test executor.
 func NewDynamicClientForConfig(restConfig *rest.Config) (dynamic.Interface, error) {
-	if restConfig == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "no kubernetes client configuration available")
-	}
-
-	dynClient, err := dynamic.NewForConfig(boundedConfig(restConfig))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create dynamic client", err)
-	}
-	return dynClient, nil
+	return k8sclient.NewDynamicClientForConfig(restConfig)
 }
 
 // NewRESTMapperForConfig builds the discovery-backed RESTMapper the fetcher
-// uses to resolve a GroupVersionKind to a resource and its scope. Discovery is
-// deferred: no API call happens until the first mapping lookup.
+// uses to resolve a GroupVersionKind to a resource and its scope.
 //
 // Prefer NewClusterFetcherWithClient when the mapper is destined for a fetcher:
 // it also wires the partial-discovery probe, which a mapper alone cannot carry.
+//
+// Construction itself lives in pkg/k8s/client, for the reason
+// NewDynamicClientForConfig gives.
 func NewRESTMapperForConfig(restConfig *rest.Config) (meta.RESTMapper, error) {
-	mapper, _, err := newRESTMapperAndDiscovery(restConfig)
-	return mapper, err
+	return k8sclient.NewRESTMapperForConfig(restConfig)
 }
 
-// newRESTMapperAndDiscovery builds the deferred RESTMapper together with the
-// cached discovery client backing it. Returning both is what lets the fetcher
-// ask the very cache the mapper resolved through whether a no-match came from
-// a group discovery could not enumerate; two independently-constructed caches
-// would drift across a Reset().
+// newRESTMapperAndDiscovery is NewRESTMapperForConfig also returning the cached
+// discovery client the mapper resolves through, which is what lets the fetcher
+// ask that very cache whether a no-match came from a group discovery could not
+// enumerate.
 func newRESTMapperAndDiscovery(restConfig *rest.Config) (meta.RESTMapper, discovery.CachedDiscoveryInterface, error) {
-	if restConfig == nil {
-		return nil, nil, errors.New(errors.ErrCodeInvalidRequest, "no kubernetes client configuration available")
-	}
-
-	discoveryClient, err := kubernetes.NewForConfig(boundedConfig(restConfig))
-	if err != nil {
-		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create discovery client", err)
-	}
-
-	cached := memory.NewMemCacheClient(discoveryClient.Discovery())
-	return restmapper.NewDeferredDiscoveryRESTMapper(cached), cached, nil
+	return k8sclient.NewRESTMapperAndDiscovery(restConfig)
 }
 
-// boundedConfig returns a copy of restConfig with an explicit request timeout
-// when the caller left one unset. The RESTMapper reaches the apiserver through
-// the context-free DiscoveryInterface, so nothing else bounds those calls —
-// client-go's own 32s discovery default is the only backstop, and it does not
-// apply to the dynamic client at all. Copying keeps the caller's config
-// untouched.
+// boundedConfig applies the shared per-request bound to restConfig. The
+// RESTMapper reaches the apiserver through the context-free DiscoveryInterface,
+// so nothing else bounds those calls.
 func boundedConfig(restConfig *rest.Config) *rest.Config {
-	cfg := rest.CopyConfig(restConfig)
-	if cfg.Timeout == 0 {
-		cfg.Timeout = defaults.K8sClientRequestTimeout
-	}
-	return cfg
+	return k8sclient.BoundedConfig(restConfig)
 }
 
 // resettableMapper is the subset of restmapper.DeferredDiscoveryRESTMapper the
