@@ -23,7 +23,7 @@ require (
 	github.com/sigstore/sigstore v1.10.10
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/sigstore/sigstore/pkg/signature/kms/aws v1.10.10
-	github.com/sigstore/sigstore/pkg/signature/kms/azure v1.10.10
+	github.com/sigstore/sigstore/pkg/signature/kms/azure v1.11.0
 	github.com/sigstore/sigstore/pkg/signature/kms/gcp v1.10.10
 	github.com/sigstore/sigstore/pkg/signature/kms/hashivault v1.10.10
 	github.com/stretchr/testify v1.12.1
