@@ -18,8 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -244,13 +242,7 @@ func resolveTrustClass(
 		return "", false
 	}
 	if evidenceDir == "" {
-		if _, err := os.Stat(verifier.EvidenceDirName); err == nil {
-			evidenceDir = verifier.EvidenceDirName
-		} else if _, err := os.Stat(filepath.Join("..", "..", verifier.EvidenceDirName)); err == nil {
-			evidenceDir = filepath.Join("..", "..", verifier.EvidenceDirName)
-		} else {
-			evidenceDir = verifier.EvidenceDirName
-		}
+		evidenceDir = verifier.EvidenceDirName
 	}
 	var res *recipe.RecipeResult
 	if result != nil {

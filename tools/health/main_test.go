@@ -26,6 +26,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/evidence/project"
+	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/testgrid"
@@ -248,11 +249,11 @@ attestations:
     bundle:
       digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       oci: ghcr.io/nvidia/aicr-evidence:test
-      predicateType: https://aicr.run/recipe-evidence/v1
+      predicateType: %s
     signer:
       identity: %s
       issuer: %s
-`, recipeSlug, profile, attestedAt.UTC().Format(time.RFC3339), identity, issuer)
+`, recipeSlug, profile, attestedAt.UTC().Format(time.RFC3339), attestation.PredicateTypeV2, identity, issuer)
 	p := filepath.Join(dir, filename)
 	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
 		t.Fatalf("writeFile %s: %v", filename, err)
@@ -464,7 +465,8 @@ partner:
 	})
 
 	t.Run("real repository evidence and allowlist", func(t *testing.T) {
-		realAl, err := project.LoadAllowlist(filepath.Join("..", "..", "recipes", "evidence", "allowlist.yaml"))
+		evidenceRoot := resolveEvidenceDir()
+		realAl, err := project.LoadAllowlist(filepath.Join(evidenceRoot, verifier.AllowlistFileName))
 		if err != nil {
 			t.Fatalf("Load real allowlist: %v", err)
 		}
@@ -475,7 +477,6 @@ partner:
 			OS:          recipe.CriteriaOSUbuntu,
 			Intent:      recipe.CriteriaIntentTraining,
 		}
-		evidenceRoot := filepath.Join("..", "..", "recipes", "evidence")
 		got := evidenceCellWithContext(k0sCrit, presence, realAl, nil, evidenceRoot)
 		want := "[k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) · community"
 		if got != want {
@@ -500,12 +501,24 @@ partner:
 	})
 }
 
+func TestResolveEvidenceDir(t *testing.T) {
+	dir := resolveEvidenceDir()
+	if dir == "" {
+		t.Fatal("resolveEvidenceDir() returned empty path")
+	}
+	alPath := filepath.Join(dir, verifier.AllowlistFileName)
+	if _, err := os.Stat(alPath); err != nil {
+		t.Fatalf("resolveEvidenceDir() = %q does not contain %s: %v", dir, verifier.AllowlistFileName, err)
+	}
+}
+
 func TestRenderMatrixWithAllowlist(t *testing.T) {
 	presence, err := testgrid.LoadPresence()
 	if err != nil {
 		t.Fatalf("LoadPresence() error = %v", err)
 	}
-	al, err := project.LoadAllowlist(filepath.Join("..", "..", "recipes", "evidence", "allowlist.yaml"))
+	evidenceDir := resolveEvidenceDir()
+	al, err := project.LoadAllowlist(filepath.Join(evidenceDir, verifier.AllowlistFileName))
 	if err != nil {
 		t.Fatalf("Load real allowlist: %v", err)
 	}
@@ -530,7 +543,7 @@ func TestRenderMatrixWithAllowlist(t *testing.T) {
 		NoTitle:       true,
 		Presence:      presence,
 		Allowlist:     al,
-		EvidenceDir:   filepath.Join("..", "..", "recipes", "evidence"),
+		EvidenceDir:   evidenceDir,
 	}); err != nil {
 		t.Fatalf("renderMatrix() error = %v", err)
 	}

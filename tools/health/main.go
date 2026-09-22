@@ -75,15 +75,22 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, outDir, summaryOut, aicrVersion string, deterministic, noTitle bool) error {
-	allowlistPath := filepath.Join(verifier.EvidenceDirName, verifier.AllowlistFileName)
-	if _, err := os.Stat(allowlistPath); os.IsNotExist(err) {
-		fallback := filepath.Join("..", "..", verifier.EvidenceDirName, verifier.AllowlistFileName)
-		if _, err := os.Stat(fallback); err == nil {
-			allowlistPath = fallback
+// resolveEvidenceDir locates the committed evidence directory, falling back to
+// the repo root when run from tools/health.
+func resolveEvidenceDir() string {
+	evidenceDir := verifier.EvidenceDirName
+	if _, err := os.Stat(filepath.Join(evidenceDir, verifier.AllowlistFileName)); os.IsNotExist(err) {
+		fallback := filepath.Join("..", "..", verifier.EvidenceDirName)
+		if _, err := os.Stat(filepath.Join(fallback, verifier.AllowlistFileName)); err == nil {
+			evidenceDir = fallback
 		}
 	}
-	allowlist, err := project.LoadAllowlist(allowlistPath)
+	return evidenceDir
+}
+
+func run(ctx context.Context, outDir, summaryOut, aicrVersion string, deterministic, noTitle bool) error {
+	evidenceDir := resolveEvidenceDir()
+	allowlist, err := project.LoadAllowlist(filepath.Join(evidenceDir, verifier.AllowlistFileName))
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "load evidence allowlist", err)
 	}
@@ -123,6 +130,7 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 			NoTitle:       noTitle,
 			Presence:      presence,
 			Allowlist:     allowlist,
+			EvidenceDir:   evidenceDir,
 		})
 	}); err != nil {
 		return err
