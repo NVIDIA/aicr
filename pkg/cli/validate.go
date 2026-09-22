@@ -623,8 +623,10 @@ func validateCmdFlags() []cli.Flag {
 	For a caller that cannot satisfy a check the recipe declares, e.g. a lane
 	deploying a subset of the recipe. Each named check is REPORTED as skipped,
 	not dropped, so the report still accounts for it.
-	Rejected before the cluster is touched when a name matches no check, or when
-	the list would leave a requested phase with nothing to run.
+	Rejected before any validation resource is created when a name matches no
+	check, or when the list would leave a requested phase with nothing to run.
+	A cm:// recipe is read from the cluster first, so that form contacts the
+	API server before the list is judged.
 	Example: --skip-check gpu-operator-health --skip-check dra-support`,
 			Category: catValidationControl,
 		},

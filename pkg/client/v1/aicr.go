@@ -2182,7 +2182,7 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 // --no-cluster deploys a snapshot-capture agent before it has a Snapshot to
 // hand ValidateState, so without this the guard fired only after a
 // ServiceAccount, a Role and a Job existed, while the --skip-check help text
-// promised rejection "before the cluster is touched".
+// promised rejection "before any validation resource is created".
 //
 // Pass the same options ValidateState will get. WithValidationSkipChecks
 // supplies the list under test and WithValidationPhases the phase set it is

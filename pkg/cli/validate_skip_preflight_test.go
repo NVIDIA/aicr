@@ -104,12 +104,13 @@ users:
 }
 
 // TestValidateCmd_UnknownSkipCheckRejectedBeforeClusterIsTouched pins the
-// promise the --skip-check help text makes: "Rejected before the cluster is
-// touched when a name matches no check". The catalog-backed guard lives in
-// pkg/validator and runs inside ValidatePhases, which is AFTER the Action's
-// agent-deploy branch contacts the cluster to capture a snapshot. So a typo'd
-// skip name used to pay for cluster contact (and, against a real cluster, a
-// ServiceAccount, Role and Job) before the error surfaced.
+// promise the --skip-check help text makes: "Rejected before any validation
+// resource is created when a name matches no check". The catalog-backed
+// guard lives in pkg/validator and runs inside ValidatePhases, which is AFTER
+// the Action's agent-deploy branch contacts the cluster to capture a
+// snapshot. So a typo'd skip name used to pay for cluster contact (and,
+// against a real cluster, a ServiceAccount, Role and Job) before the error
+// surfaced.
 //
 // The bug this catches: moving the CLI-side preflight back below the
 // snapshot/agent branch, or dropping it. Either way the unknown-name run
@@ -124,6 +125,11 @@ users:
 // permission pre-check, so the control never reaches the ServiceAccount, Role
 // and Job creation calls themselves. The assertion made here is the stronger
 // and simpler one, that no request reached the apiserver at all.
+//
+// It also does not cover a cm:// recipe: LoadRecipe reads that from the
+// cluster before the preflight, so that form contacts the API server
+// first. The recipe here is a file, which is the form the promise holds
+// for.
 func TestValidateCmd_UnknownSkipCheckRejectedBeforeClusterIsTouched(t *testing.T) {
 	tests := []struct {
 		name          string

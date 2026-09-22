@@ -159,8 +159,8 @@ func (v *Validator) preflightSkipChecks(
 // validate` deploys a snapshot-capture agent before it ever constructs the
 // validator, so the guard inside ValidatePhases fires only after a
 // ServiceAccount, a Role and a Job exist. The --skip-check help text promises
-// the opposite ("Rejected before the cluster is touched"), and this is what
-// lets the CLI keep that promise.
+// the opposite ("Rejected before any validation resource is created"), and
+// this is what lets the CLI keep that promise.
 //
 // It does not replace the ValidatePhases and ValidatePhase calls: an SDK or
 // server caller reaches those directly and must stay guarded there. Calling

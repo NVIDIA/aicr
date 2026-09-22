@@ -788,11 +788,12 @@ Three properties make it a scoping tool rather than a way to hide a failure:
   and why it was withheld travel with the attestation; `--full` keeps the prose
   message too.
 - **The run fails closed on a list that would not do what it says.** A name
-  matching no check in the catalog is rejected before the cluster is touched,
-  and so is a list that would leave a requested phase with nothing to run (that
-  phase would otherwise report `passed` while running nothing, because the
-  skipped entries keep its test count above zero). Stop requesting the phase
-  instead.
+  matching no check in the catalog is rejected before any validation resource
+  is created, and so is a list that would leave a requested phase with nothing
+  to run (that phase would otherwise report `passed` while running nothing,
+  because the skipped entries keep its test count above zero). Stop requesting
+  the phase instead. The recipe is loaded first, so a `cm://` recipe is read
+  from the cluster before the list is judged.
 - **A check added later is not silenced.** A skip list names what to withhold,
   so a new check in a recipe runs and can fail, which forces a decision rather
   than hiding one.

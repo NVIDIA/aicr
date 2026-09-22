@@ -1069,7 +1069,7 @@ aicr validate [flags]
 | `--snapshot` | `-s` | string | | Path/URI to snapshot file containing measurements (omit to capture live) |
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
-| `--skip-check` | | string[] | | Check to withhold from every phase that runs, one level below `--phase` (repeatable). For a caller that cannot satisfy a check the recipe declares, e.g. a lane deploying a subset of the recipe. Each named check is **reported as skipped**, not dropped, so the CTRF report and the recipe-evidence bundle still account for it. Rejected before the cluster is touched when a name matches no check, when the list would leave a requested phase with nothing to run, or when it is combined with `--evidence-dir` (the CNCF renderer omits skipped checks, so a submission would silently lose the requirement). Mirrors `spec.validate.execution.skipChecks`. |
+| `--skip-check` | | string[] | | Check to withhold from every phase that runs, one level below `--phase` (repeatable). For a caller that cannot satisfy a check the recipe declares, e.g. a lane deploying a subset of the recipe. Each named check is **reported as skipped**, not dropped, so the CTRF report and the recipe-evidence bundle still account for it. Rejected before any validation resource is created when a name matches no check, when the list would leave a requested phase with nothing to run, or when it is combined with `--evidence-dir` (the CNCF renderer omits skipped checks, so a submission would silently lose the requirement). A `cm://` recipe is read from the cluster first, so that form contacts the API server before the list is judged. Mirrors `spec.validate.execution.skipChecks`. |
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any phase check reports `failed` or `other` (crash/OOM/timeout). Scopes to phase checks only — the readiness pre-flight always fails closed with exit 2 regardless of this flag (see the readiness note under [Validation Phases](#validation-phases)). |
 | `--fail-fast` | | bool | false | Stop after the first phase that fails. By default all phases run and produce results. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`), or stdout |
@@ -1333,8 +1333,9 @@ spec:
 A lane that deploys only part of a recipe can withhold the checks it cannot
 satisfy. Each named check is still reported, as skipped, so the run accounts for
 it; a name matching no check in the recipe's catalog, or a list that would leave
-a requested phase with nothing to run, is rejected before the cluster is
-touched.
+a requested phase with nothing to run, is rejected before any validation
+resource is created. The recipe is loaded first, so a `cm://` recipe is read
+from the cluster before the list is judged.
 
 `skipChecks` cannot be combined with `evidence.cncf.dir`. The CNCF evidence
 renderer drops skipped checks entirely, so a withheld requirement would produce
