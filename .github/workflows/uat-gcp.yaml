@@ -685,10 +685,10 @@ jobs:
       # so the intent-only condition below selects the same phase `all` would;
       # the one platform with no CUJ (slurm, where a TrainJob would bypass
       # slurmd) has no cell here. Training runs the Kubeflow TrainJob;
-      # inference would run the served DynamoGraphDeployment (phase_serve,
-      # DC3). For training, the TrainJob fires; for inference the serve step is
-      # currently disabled (see below), so verify/evidence cover the deployed
-      # stack either way.
+      # inference runs the served DynamoGraphDeployment (phase_serve, DC3).
+      # Both steps are live in this pipeline; it is the AWS and Azure copies
+      # that keep phase_serve commented out (see the step below). Either way,
+      # verify/evidence cover the deployed stack.
       - name: UAT - train (TrainJob)
         id: train
         if: steps.conformance.outcome == 'success' && inputs.intent == 'training'
