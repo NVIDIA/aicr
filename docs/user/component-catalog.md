@@ -950,24 +950,38 @@ Run the command below by hand only when you are upgrading outside a generated
 bundle, or when `apply-crds.sh` failed and you are reproducing it:
 
 ```bash
+set -euo pipefail
+
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
 VERSION="1.3.0"   # replace with the version you are upgrading to
 
 work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
+
 helm pull "${CHART}" --version "${VERSION}" --destination "${work}"
 tar -xzf "${work}"/*.tgz -C "${work}"
 
+# Collect first, so discovering nothing is an error rather than a loop that
+# runs zero times and exits 0.
+crds=()
+while IFS= read -r crd; do
+  crds+=("${crd}")
+done < <(find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \) | sort)
+
+if [ ${#crds[@]} -eq 0 ]; then
+  echo "no CRDs found under crds/ in ${CHART} ${VERSION}" >&2
+  exit 1
+fi
+
 # One kubectl call per CRD file, server-side applied under Helm's own field
 # manager so a field or spec.versions entry the new chart removes is pruned.
-find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \) \
-  | sort \
-  | while read -r crd; do
-      grep -q '[^[:space:]]' "${crd}" || continue
-      kubectl apply --server-side --force-conflicts --field-manager=helm -f "${crd}"
-    done
+for crd in "${crds[@]}"; do
+  grep -q '[^[:space:]]' "${crd}" || continue
+  kubectl apply --server-side --force-conflicts --field-manager=helm -f "${crd}"
+done
 ```
 
-Three details are load-bearing, and the obvious shorter forms fail on them:
+Four details are load-bearing, and the obvious shorter forms fail on them:
 
 - **Server-side apply under `--field-manager=helm`, not `kubectl replace` or a
   bare `kubectl apply --server-side`.** A chart's raw CRD manifest carries no
@@ -992,6 +1006,14 @@ Three details are load-bearing, and the obvious shorter forms fail on them:
   coordinates, not content. Reading CRDs through them and letting the upgrade
   resolve them again is two fetches, and a mutable tag does not promise the same
   bytes.
+- **Fail closed.** `set -euo pipefail` plus collecting the file list before the
+  loop is what makes a failure stop the upgrade instead of reading as success.
+  A `find ... | while read` pipeline reports only the last iteration's status,
+  so an earlier failed apply is masked by a later one that succeeds, and a
+  chart whose `crds/` is empty or moved runs the loop zero times and exits 0.
+  Either way you would proceed to upgrade the controller against a stale or
+  partial schema — the exact failure this command exists to prevent, and it
+  matters most on `helmfile`, where nothing else covers it.
 
 The generated `apply-crds.sh` does exactly this, with each call bounded; it is
 the reference if you need the details.
