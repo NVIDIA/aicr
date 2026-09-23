@@ -2778,7 +2778,7 @@ func TestGenerate_InnerParentCollisionUsesEffectiveAppName(t *testing.T) {
 		// argocd generator's own default parent name is exactly
 		// "nvidia-stack".
 		dataDir := t.TempDir()
-		registryYAML := `apiVersion: aicr.run/v1alpha2
+		registryYAML := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: nvidia-stack

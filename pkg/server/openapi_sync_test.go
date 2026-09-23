@@ -192,9 +192,16 @@ func TestOpenAPIBundleContract(t *testing.T) {
 	legacyAPIVersion := openAPIObjectAt(t, legacyOverlay, "properties", "apiVersion")
 	legacyAPIVersions := openAPISequence(t, legacyAPIVersion["enum"],
 		"LegacyBundleRecipeRequest apiVersion enum")
-	for _, value := range []string{"", "aicr.run/v1alpha2", header.GroupVersionV1} {
-		if !openAPIHasString(legacyAPIVersions, value) {
-			t.Errorf("LegacyBundleRecipeRequest apiVersion enum missing %q", value)
+	// ADR-022 N+2 (#2417) narrowed this branch to the stable target. The
+	// retired members are asserted absent, not merely unlisted: the enum is the
+	// contract clients validate against, so a re-added "" or alpha value would
+	// re-advertise a tolerance the handler no longer has.
+	if !openAPIHasString(legacyAPIVersions, header.GroupVersionV1) {
+		t.Errorf("LegacyBundleRecipeRequest apiVersion enum missing %q", header.GroupVersionV1)
+	}
+	for _, value := range []string{"", header.RetiredGroupVersionV1Alpha2, header.RetiredGroupVersionV1Alpha3} {
+		if openAPIHasString(legacyAPIVersions, value) {
+			t.Errorf("LegacyBundleRecipeRequest apiVersion enum still advertises retired %q", value)
 		}
 	}
 	legacyKind := openAPIObjectAt(t, legacyOverlay, "properties", "kind")

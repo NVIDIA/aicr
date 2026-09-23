@@ -63,7 +63,7 @@ func TestK8sAIBOM_MirrorDiscoversQualifiedImage(t *testing.T) {
 	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	rec := &recipe.RecipeResult{
 		Kind:       recipe.RecipeResultKind,
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		ComponentRefs: []recipe.ComponentRef{{
 			Name:       "k8s-aibom",
 			Namespace:  component.Helm.DefaultNamespace,

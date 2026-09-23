@@ -236,9 +236,8 @@ names the ones at the end of a chain.
 
 `RecipeMetadata.Spec.Profile` declares one overlay-scoped enum for qualified
 configuration ownership modes. A declaration requires recipe apiVersion
-`aicr.run/v1beta2`, or the superseded `aicr.run/v1alpha3`; either profile
-track without a declaration, or a declaration on a default-track version, is
-rejected. Profile-version metadata and recipe artifacts are strictly decoded
+`aicr.run/v1beta2`; the profile track without a declaration, or a declaration
+on a default-track version, is rejected. Profile-version metadata and recipe artifacts are strictly decoded
 so an unknown field cannot silently disappear.
 
 The core `ProfileValue` contract is closed to `advertiser`, `constraints`,

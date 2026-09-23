@@ -64,7 +64,7 @@ func readChartMetadata(t *testing.T, path string) chartMetadata {
 func stampRecipe() *recipe.RecipeResult {
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "custom-manifests", Namespace: "default", Type: recipe.ComponentTypeHelm},
 			{

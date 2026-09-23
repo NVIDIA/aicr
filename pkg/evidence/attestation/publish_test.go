@@ -36,7 +36,7 @@ func emitUnsignedBundle(t *testing.T) string {
 	dir := t.TempDir()
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
 			Accelerator: recipe.CriteriaAcceleratorH100,
@@ -389,7 +389,7 @@ func TestLoadOnDiskBundle_ProfilePredicateIncoherenceFailsBeforeSideEffects(t *t
 		t.Fatal(err)
 	}
 	const recipeYAML = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: gpuStack
@@ -431,7 +431,7 @@ func TestLoadOnDiskBundle_ProfiledEmitRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha3",
+		APIVersion: "aicr.run/v1beta2",
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceGKE,
 			Accelerator: recipe.CriteriaAcceleratorH100,
@@ -503,7 +503,7 @@ func TestLoadOnDiskBundle_StaleDescriptorIdentityFailsBeforeSideEffects(t *testi
 		t.Fatal(err)
 	}
 	const recipeYAML = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: gpuStack

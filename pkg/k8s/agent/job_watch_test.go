@@ -70,7 +70,11 @@ func TestFindOrWatchPodName_WatchAddedEvent(t *testing.T) {
 	}
 }
 
-// TestFindOrWatchPodName_ContextCanceled exercises the timeout branch.
+// TestFindOrWatchPodName_ContextCanceled exercises the watch-loop ctx.Done()
+// branch under an explicit operator abort, which must report ErrCodeCanceled
+// rather than ErrCodeTimeout — the sibling
+// TestFindOrWatchPodName_DeadlineExceeded pins the other side of that split so
+// a regression collapsing both back onto one code fails one of the two.
 func TestFindOrWatchPodName_ContextCanceled(t *testing.T) {
 	t.Parallel()
 
@@ -89,6 +93,37 @@ func TestFindOrWatchPodName_ContextCanceled(t *testing.T) {
 	_, err := d.findOrWatchPodName(ctx)
 	if err == nil {
 		t.Fatal("expected error for canceled context")
+	}
+	var sErr *aicrerrors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *StructuredError, got %T", err)
+	}
+	if sErr.Code != aicrerrors.ErrCodeCanceled {
+		t.Errorf("expected ErrCodeCanceled, got %v", sErr.Code)
+	}
+}
+
+// TestFindOrWatchPodName_DeadlineExceeded is the deadline counterpart to
+// TestFindOrWatchPodName_ContextCanceled: a context that ends via its own
+// timeout (no explicit cancel) must report ErrCodeTimeout.
+func TestFindOrWatchPodName_DeadlineExceeded(t *testing.T) {
+	t.Parallel()
+
+	clientset := fake.NewClientset()
+	w := watch.NewFake()
+	clientset.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(w, nil))
+
+	d := NewDeployer(clientset, Config{
+		Namespace: "test-ns",
+		JobName:   "test-job",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := d.findOrWatchPodName(ctx)
+	if err == nil {
+		t.Fatal("expected error for expired deadline")
 	}
 	var sErr *aicrerrors.StructuredError
 	if !stderrors.As(err, &sErr) {

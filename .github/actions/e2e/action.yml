@@ -32,7 +32,8 @@ inputs:
       Whether this run checked out trusted content. Forwarded to
       install-e2e-tools, which gates its tool-binary cache save on it. The Go
       cache below is restore-only and needs no gate. Restore is unconditional
-      either way.
+      either way. Like the gate it forwards to, this is defense in depth rather
+      than a boundary on the ok-to-test path (#2681, accepted).
     required: false
     default: 'true'
 

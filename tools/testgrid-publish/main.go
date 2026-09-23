@@ -43,8 +43,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	stderrors "errors"
 	"flag"
 	"fmt"
@@ -141,8 +139,7 @@ func localBundleDigest(dir string, dryRun bool) (string, error) {
 		return "", errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"local bundle publication requires a readable manifest.json for the build-ID digest")
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return attestation.HashBytesSHA256(data), nil
 }
 
 func run(ctx context.Context, cfg runConfig) error {

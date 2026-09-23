@@ -138,7 +138,7 @@ func TestComputeRecipeDigestWithProfile_MatchesBuilderHydration(t *testing.T) {
 func TestComputeRecipeDigestWithProfile_RejectsFullResultInput(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "recipe.yaml")
-	body := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: aks\n"
+	body := "kind: RecipeResult\napiVersion: aicr.run/v1\ncriteria:\n  service: aks\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write recipe: %v", err)
 	}

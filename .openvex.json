@@ -3,8 +3,8 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-09-10T00:00:00Z",
-  "version": 16,
+  "timestamp": "2026-09-21T00:00:00Z",
+  "version": 17,
   "tooling": "manual curation (.agents/skills/aicr-managing-openvex)",
   "statements": [
     {
@@ -259,6 +259,29 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The defect is in HttpParser.feed_data's error path at aiohttp/_http_parser.pyx:588-590 of 3.13.5: `after = cparser.llhttp_get_error_pos(self._cparser)` yields a raw `const char*` into the fed buffer, and the following `after.split(b\"\\r\\n\", 1)` forces an implicit char*-to-bytes conversion whose strlen() scans past the end of that buffer looking for a NUL. aio-libs/aiohttp PR #13222 (commit 49f65d5, released in 3.14.3) fixes it by slicing the snippet out of the bounded `data` object instead. This code is genuinely live in the image -- the compiled parser ships at /opt/venv/lib/python3.13/site-packages/aiohttp/_http_parser.cpython-313-x86_64-linux-gnu.so and the image config sets no AIOHTTP_NO_EXTENSIONS (verified with `crane config`), so the C parser, not the unaffected Python one, parses every benchmark response. What makes the image not_affected is that the parser only enters this branch when a peer emits a malformed HTTP message, and no peer aiperf-bench talks to is attacker-influenced. The installed aiperf 0.11.0 constructs exactly four aiohttp.ClientSession objects. (1) transports/aiohttp_client.py:139 is the benchmark request transport, shared by common/readiness_probe.py; its only target is the --url value, which buildAIPerfJob (validators/performance/inference_perf_constraint.go:2964) fills from resolveInferenceEndpoint -- a cluster-internal Service URL of the form http://<svc>.<ns>.svc:<port> discovered through the Kubernetes API by resolveFrontendEndpoint/resolveGatewayEndpoint in the same file, pointing at the Dynamo frontend or inference gateway that this same validator deployed. No recipe, snapshot, CLI flag, or environment variable can redirect it; the file's only os.Getenv bindings cover timeouts, model, router mode, cache sizing, and image resolution. (2) and (3) common/mixins/base_metrics_collector_mixin.py:294 and :413 are the GPU-telemetry and server-metrics scrapers; GpuTelemetryConfig defaults the DCGM collector to a local exporter (http://localhost:9400/metrics) and ServerMetricsDiscoveryConfig defaults to mode=auto, which enumerates eligible in-cluster inference-server pods via the Kubernetes API -- both address only workloads inside the cluster under test. (4) dataset/dataset_manager.py:269 downloads media URLs carried in the dataset and is the one session that could reach an arbitrary internet host; it is unreachable under AICR's fixed argv, which passes synthetic-prompt flags (--prompt-input-tokens-mean, --num-dataset-entries, --random-seed) with no --input-file and no public-dataset selector, so the dataset holds only generated text and the media-URL map stays empty. The same gating keeps dataset/loader/base_public_dataset.py, which fetches remote dataset archives over AioHttpClient, out of the run. Residual risk if a cluster-internal inference server were somehow made to emit malformed chunked framing is bounded: the flaw is an out-of-bounds read with no write primitive, and the process that would crash is a single-shot benchmark Job pod -- BackoffLimit 0, RestartPolicy Never, TTLSecondsAfterFinished 3600 in buildAIPerfJob -- running as non-root nvs (uid 1000) on a distroless base with no shell and no package manager. The outcome is a failed inference-perf validation, not a crossed security boundary."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-82049",
+        "description": "CPython: the tarfile module's `data` and `tar` extraction filters (PEP 706) mishandle a crafted archive containing a hard link to a symbolic link, so extraction can alter the permissions or mtime of a file outside the destination directory, or expose that file's contents inside the extracted tree (CWE-59, High, CVSS 4.0 AV:L/AC:L/PR:N/UI:P). It arrives with the runtime base image's interpreter, not with any pip package: grype catalogs it as `pkg:generic/python@3.13.15` at /usr/local/bin/python{,3,3.13} and /usr/local/lib/libpython3.13.so, which is the CPython in nvcr.io/nvidia/distroless/python:3.13-v4.1.4. No bump reaches a fix. 3.13.15 is the newest 3.13 release (2026-08-05), the advisory published 2026-09-14, and the only fixed version grype records is `3.14.0b1` (fix.state=fixed, first-observed 2026-09-18) -- a 3.14 beta, which is why --only-fixed does not withhold it. nvcr.io/nvidia/distroless/python does publish a 3.14-v4.1.4 tag, but the installed aiperf 0.11.0 declares `Requires-Python: <3.14,>=3.10` (upstream main is still `>=3.11,<3.14`), so building the venv on 3.14 would fail pip resolution rather than produce a fixed image. The 3.14 move is tracked in #1910."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flaw is reachable only by calling TarFile.extract()/extractall() on an archive an adversary supplied, which is what the CVSS 4.0 vector's AV:L/UI:P records. The aiperf-bench workload extracts no archive of any kind, and nothing hands the pod one. aiperf itself contains no tar code: `grep -rnE '^\\s*(import|from)\\s+tarfile'` across all 682 .py files of the installed aiperf 0.11.0 wheel returns zero hits, and the only archive API anywhere in the package is `zipfile.ZipFile(zip_buffer, \"w\")` -- write mode, against an in-memory buffer -- at aiperf/plot/dashboard/callbacks.py:1530 and :1955, under the `aiperf plot` subcommand. Exactly one tar-extracting call site ships in the dependency closure, datasets/utils/extract.py:130-131 (`tarfile.open(input_path)` followed by `.extractall(...)`), reached from `datasets.load_dataset`; aiperf imports `datasets` only in aiperf/dataset/loader/ (base_hf_dataset.py, hf_asr.py) and aiperf/accuracy/benchmarks/, the latter belonging to an `accuracy` extra that is not installed because validators/performance/requirements.txt pins a bare `aiperf==0.11.0`. Neither group executes here. buildAIPerfJob sets an exec-form Command of [\"/opt/venv/bin/python\", \"/opt/aicr/aiperf_entrypoint.py\"] (validators/performance/inference_perf_constraint.go:3092), and aiperf_entrypoint.py imports only os, signal, subprocess and sys before execvp-ing `aiperf profile` with the fixed argv built at inference_perf_constraint.go:3023 -- synthetic-prompt flags (--prompt-input-tokens-mean, --prompt-output-tokens-mean, --num-dataset-entries, --random-seed) with no --input-file and no public-dataset selector -- so the dataset is generated in process and no loader, HuggingFace download, or extraction step runs. pandas is off this path too: it is imported only under aiperf/plot/, and its apparent `extractall` hits are pandas/core/strings/accessor.py docstrings for the unrelated Series.str.extractall regex helper, not tar extraction. The pod's only inputs are that argv and the --url cluster-internal Service endpoint; no archive is mounted or fetched. The runtime base is NVIDIA distroless with no shell and no package manager, and the Job supplies exec-form argv rather than a shell string, so there is no path to `python -m tarfile` or to executing an arbitrary script; the benchmark pod is single-shot (BackoffLimit 0, RestartPolicy Never) and runs as non-root nvs (uid 1000)."
     }
   ]
 }

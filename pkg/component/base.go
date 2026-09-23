@@ -197,7 +197,7 @@ func (b *BaseBundler) Finalize(start time.Time) {
 func (b *BaseBundler) CheckContext(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
-		return errors.Wrap(errors.ErrCodeTimeout, "context canceled during bundling", ctx.Err())
+		return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "bundling component")
 	default:
 		return nil
 	}

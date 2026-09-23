@@ -493,7 +493,7 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot` |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot`; recipe evidence records the service dimension as `not-inferable` with the observed provider, which does not disqualify the evidence |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
@@ -1094,6 +1094,7 @@ aicr validate [flags]
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. The `sha256:` digest is the canonical address, so the tag is only a human-readable label — tag choice never affects verification. Omit the tag and aicr derives a unique per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g. `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so distinct attestations never collide on a shared tag. Pass an explicit tag to override. |
 | `--no-sign` | | bool | false | Push the evidence bundle **unsigned** (requires `--emit-attestation` and `--push`) and write a `pointer.yaml` with an empty `signer` block. No-op unless both `--emit-attestation` and `--push` are set. Commit the flat unsigned pointer; the fork CI signing leg signs it and relocates it to its nested per-source path (or sign locally with `aicr evidence sign --relocate` on a Sigstore-reachable host). The blocking *Evidence Pointer Contract* gate requires the final committed pointer to be **signed and nested** — see [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci). |
+| `--allow-mutable-validator-tags` | | bool | false | Emit the attestation even when a validator image resolves to a mutable tag. Emission otherwise fails closed with `INVALID_REQUEST`: the predicate identifies the validators that ran by tag alone (`validatorImages[].digest` is empty by design), so a moving tag such as `:edge` or `:latest` leaves the bundle naming a reference that can later resolve to different validator code. A reference qualifies as immutable only if it is digest-pinned (`name@sha256:...`, any registry), or carries a CI-frozen tag — `:vX.Y.Z` and pre-releases, `:sha-<full-commit>`, `:uat-<run-id>` — **under `ghcr.io/nvidia/aicr-validators/`**, the only namespace whose tag conventions AICR's workflows enforce. Tag syntax alone is not proof: a third-party or mirrored registry may repoint its own `:v1.0.0` freely, so images from one must be digest-pinned. The usual cause is a stale `AICR_VALIDATOR_IMAGE_TAG` override — unset it rather than reaching for this flag. Has no env var or config equivalent by design: the opt-out must be passed per invocation so it cannot persist into a later run. See [Validator image provenance](../contributor/evidence-publishing.md#validator-image-provenance). |
 | `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
@@ -1123,22 +1124,20 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** As of v0.22, the ADR-022 emitter switch, AICR emits
-> `aicr.run/v1` for snapshots and default recipes, `aicr.run/v1beta1` for config
-> and ordinary catalog inputs, and `aicr.run/v1beta2` for profile-bearing
-> recipes. Readers additionally still accept the superseded
-> `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, so artifacts produced by v0.21 or
-> earlier keep loading. Unsupported artifact headers
-> fail fast; raw external catalog headers are checked before merge or
-> hydration. Recapture, regenerate, or update the authored header with a
-> version supported by the running AICR release. See
+> **apiVersion gate:** AICR emits `aicr.run/v1` for snapshots and default
+> recipes, `aicr.run/v1beta1` for config and ordinary catalog inputs, and
+> `aicr.run/v1beta2` for profile-bearing recipes, and as of v1.0.0 those are the
+> only values it reads. The superseded `aicr.run/v1alpha2` and
+> `aicr.run/v1alpha3` were retired in v1.0.0 (ADR-022 N+2), along with the empty
+> header the snapshot, recipe and criteria readers had tolerated. v0.22 was the
+> last release that read them, and it warned; v1.0.0 rejects instead, naming the
+> observed value, the expected value and the release that withdrew it.
+> Unsupported artifact headers fail fast; raw external catalog headers are
+> checked before merge or hydration. Recapture, regenerate, or update the
+> authored header with a version supported by the running AICR release. See
 > [ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md)
 > and
-> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md). v1.0.0 stops
-> accepting the alpha values, along with the empty header that the snapshot,
-> recipe, and criteria readers still tolerate. Reading either now logs a
-> deprecation warning naming the file. `AICRConfig` and external catalog headers already reject an
-> empty value, so they have no tolerance to retire.
+> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 > [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 > has the release-by-release table.
 

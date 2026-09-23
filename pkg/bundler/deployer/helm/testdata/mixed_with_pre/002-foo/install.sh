@@ -39,14 +39,18 @@ fi
 # mutable tag does not promise returns the same bytes.
 CHART_REF="${CHART}"
 CHART_VERSION_ARGS=(--version "${VERSION}")
-if [[ -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
+# Under --dry-run, apply-crds.sh above never ran, so no pull happened this
+# invocation: any archive present is leftover from an earlier real deploy and
+# is stale by definition, not merely unverified. A dry-run install must preview
+# what the next real run will actually fetch, not bytes that run never touched.
+if [[ -z "${DRY_RUN_FLAG:-}" && -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
   CHART_REF="${SCRIPT_DIR}/.aicr-chart.tgz"
   CHART_VERSION_ARGS=()
   REPO=""
 fi
 
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} foo "${CHART_REF}" \
+helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'foo' "${CHART_REF}" \
   ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
-  --namespace privileged-foo --create-namespace \
+  --namespace 'privileged-foo' --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}

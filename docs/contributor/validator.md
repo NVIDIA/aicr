@@ -643,6 +643,14 @@ AICR_VALIDATOR_IMAGE_TAG=edge aicr validate -r recipe.yaml -s snapshot.yaml --ph
 AICR_VALIDATOR_IMAGE_TAG=sha-<published-main-commit> aicr validate -r recipe.yaml -s snapshot.yaml ...
 ```
 
+**Not when emitting evidence.** `aicr validate --emit-attestation` refuses a
+mutable validator tag and fails closed, because the attestation records
+validator images by tag alone — so the `:edge` form above is rejected there
+while the `:sha-<commit>` form is accepted. See
+[Validator image provenance](evidence-publishing.md#validator-image-provenance).
+Drop the override for an evidence run, or pass
+`--allow-mutable-validator-tags` if the evidence is disposable.
+
 A bare `go build` stamps `commit: unknown`, so step 1 can't resolve a
 `:sha-<commit>` tag and the override is required. `make build` stamps the
 commit — but CI publishes `:sha-<commit>` images **only for `main`** (the

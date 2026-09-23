@@ -58,8 +58,18 @@
 #   PUSH_REF=ttl.sh/aicr-evidence-<uuid>:72h  OCI ref (default: fresh anonymous ttl.sh, 72h TTL)
 #
 #   # demo behavior
-#   AICR_VALIDATOR_IMAGE_TAG=edge   validator image tag for dev aicr builds
-#   SKIP_VALIDATE=1                 reuse the bundle at $WORKDIR/out; skip recipe + snapshot + validate
+#   AICR_VALIDATOR_IMAGE_TAG=edge   validator image tag for dev aicr builds. :edge moves, and
+#                                   validate refuses to attest a mutable validator tag. When
+#                                   this is set AND PUSH_REF is a ttl.sh ref (the default),
+#                                   the demo adds --allow-mutable-validator-tags, since the
+#                                   artifact expires on its own. Against any other PUSH_REF the
+#                                   guard stands and validate fails closed — real evidence
+#                                   leaves the override unset instead (see #2873 and
+#                                   docs/contributor/evidence-publishing.md).
+#   SKIP_VALIDATE=1                 reuse the bundle at $WORKDIR/out; skip recipe + snapshot + validate.
+#                                   Requires a ttl.sh PUSH_REF: the staged bundle's validator
+#                                   provenance is never re-checked on this path, so it must not
+#                                   be republished somewhere it is retained.
 #   DEMO_NO_PAUSE=1                 unattended: skip all the "Press Enter" prompts
 #   NO_COLOR=1                      disable ANSI color
 
@@ -82,6 +92,7 @@ PLATFORM="${PLATFORM:-}"
 # GPU pools created with --gpu-driver none. Empty = the declaration default
 # is applied on profiled families (unprofiled recipes are unaffected).
 AICR_PROFILE="${AICR_PROFILE:-}"
+
 
 # Snapshot node targeting. On a mixed CPU+GPU cluster the snapshot Job must land
 # on a GPU node, or PCI/NFD enumeration finds nothing and the accelerator
@@ -109,6 +120,21 @@ new_uuid() {
   fi
 }
 PUSH_REF="${PUSH_REF:-ttl.sh/aicr-evidence-$(new_uuid):72h}"
+
+# A dev build usually needs AICR_VALIDATOR_IMAGE_TAG=edge to find published
+# validator images, but :edge moves, so `validate --emit-attestation` refuses to
+# record it as provenance (#2873). The demo may waive that — but ONLY when the
+# bundle is going somewhere it expires on its own. ttl.sh drops the artifact
+# after its TTL, so nothing unverifiable outlives the demo. Against any other
+# PUSH_REF the evidence is retained, and waiving the guard there would publish
+# exactly the artifact this check exists to prevent — so the guard stands and
+# the run fails closed with an actionable message.
+DEMO_ALLOWED_MUTABLE_TAG=""
+if [ -n "${AICR_VALIDATOR_IMAGE_TAG:-}" ]; then
+  case "$PUSH_REF" in
+    ttl.sh/*) DEMO_ALLOWED_MUTABLE_TAG=1 ;;
+  esac
+fi
 
 # --- presentation helpers -----------------------------------------------------
 
@@ -202,6 +228,20 @@ if [ "$SKIP_VALIDATE" = "1" ]; then
     printf '%sERROR: SKIP_VALIDATE=1 but no bundle at %s — run once without it first.%s\n' "$RED" "$OUT/summary-bundle" "$RESET" >&2
     exit 1
   fi
+  # A staged bundle carries no record of whether it was emitted with
+  # --allow-mutable-validator-tags, and this path never re-runs the gate that
+  # would decide. Republishing it to a durable registry could therefore retain
+  # exactly the unverifiable evidence the guard exists to stop, so the demo
+  # declines rather than guessing. ttl.sh stays open: the artifact expires.
+  case "$PUSH_REF" in
+    ttl.sh/*) ;;
+    *)
+      printf '%sERROR: SKIP_VALIDATE=1 republishes a bundle whose validator provenance was not re-checked,%s\n' "$RED" "$RESET" >&2
+      printf '%s       and PUSH_REF (%s) is a durable registry.%s\n' "$RED" "$PUSH_REF" "$RESET" >&2
+      printf '%s       Re-run without SKIP_VALIDATE=1 to emit a freshly gated bundle, or point PUSH_REF at ttl.sh.%s\n' "$RED" "$RESET" >&2
+      exit 1
+      ;;
+  esac
   pause
 else
 
@@ -239,13 +279,27 @@ run "$AICR" snapshot "${snapshot_args[@]}"
 banner "LEG 1 (ON VPN): validate + emit attestation, WITHOUT --push"
 note "Runs the validators against the cluster and writes an UNSIGNED bundle to disk."
 note "No Fulcio/Rekor contact happens here — this leg only needs the cluster."
+if [ -n "$DEMO_ALLOWED_MUTABLE_TAG" ]; then
+  note "NOTE: AICR_VALIDATOR_IMAGE_TAG=${AICR_VALIDATOR_IMAGE_TAG} is a moving tag, so this demo adds"
+  note "      --allow-mutable-validator-tags. Allowed only because PUSH_REF is a ttl.sh ref that"
+  note "      expires on its own. Evidence you intend to keep must instead leave the override"
+  note "      unset, so the bundle names the immutable :vX.Y.Z / :sha-<commit> tag aicr resolves."
+elif [ -n "${AICR_VALIDATOR_IMAGE_TAG:-}" ]; then
+  note "NOTE: AICR_VALIDATOR_IMAGE_TAG=${AICR_VALIDATOR_IMAGE_TAG} is a moving tag and PUSH_REF is a"
+  note "      durable registry, so the demo does NOT waive the provenance guard — validate will"
+  note "      fail closed. Unset AICR_VALIDATOR_IMAGE_TAG to record an immutable tag, or point"
+  note "      PUSH_REF back at ttl.sh if you only want a throwaway demo artifact."
+fi
 rm -rf "$OUT"
 pause "Confirm you are ON VPN (cluster reachable), then press Enter to validate"
-run "$AICR" validate \
-  --recipe "$RECIPE" \
-  --snapshot "$SNAPSHOT" \
-  --emit-attestation "$OUT" \
+validate_args=(
+  --recipe "$RECIPE"
+  --snapshot "$SNAPSHOT"
+  --emit-attestation "$OUT"
   --fail-on-error=false
+)
+[ -n "$DEMO_ALLOWED_MUTABLE_TAG" ] && validate_args+=(--allow-mutable-validator-tags)
+run "$AICR" validate "${validate_args[@]}"
 fi   # end SKIP_VALIDATE guard
 
 banner "Inspect the unsigned bundle on disk"

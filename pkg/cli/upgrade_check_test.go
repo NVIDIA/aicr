@@ -32,7 +32,7 @@ import (
 
 func syntheticRecipeFile(t *testing.T, path string, components map[string]string) string {
 	t.Helper()
-	doc := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n"
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n"
 	for name, version := range components {
 		doc += fmt.Sprintf("  - name: %s\n    type: Helm\n    source: https://charts.invalid/synthetic\n    version: %s\n",
 			name, version)
