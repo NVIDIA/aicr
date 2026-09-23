@@ -391,6 +391,7 @@ read_log_re='^[[:space:]]*log_(info|warning|error|success|debug)[[:space:]]+"[^"
 # beside this path is `$(command -v <tool>)`, which is read-only; that one is
 # stripped, and any other $() or backtick disqualifies the line.
 safe_subst_re='\$\(command -v [[:alnum:]_-]+\)'
+bin_dest_re=$'/usr/local/bin/[^[:space:]"\'`;&|()<>]+'
 
 mapfile -t bin_refs < <(
     grep -nE '/usr/local/bin' "${SETUP_TOOLS}" | grep -vE '^[0-9]+:[[:space:]]*#' || true
@@ -407,7 +408,14 @@ for entry in "${bin_refs[@]}"; do
     # exception, each compared whole. A substring test let `/usr/local/bin/yq`
     # vouch for `/usr/local/bin/yq-helper`, and let a trailing comment that
     # mentions an excepted path vouch for whatever the line actually installs.
-    mapfile -t named_paths < <(grep -oE '/usr/local/bin/[[:alnum:]._-]+' <<< "${code}" || true)
+    #
+    # "Whole" means up to the next shell delimiter, not the next character
+    # outside a filename class: that stopped at `$` and `+`, so
+    # "/usr/local/bin/yq${SUFFIX}" and /usr/local/bin/yq+helper both read as yq.
+    # This guard stops at the destination as written. A directory assembled in
+    # a variable, or a path walked through `..` or a symlink, is past what a
+    # text match can see; code review covers those.
+    mapfile -t named_paths < <(grep -oE "${bin_dest_re}" <<< "${code}" || true)
     excepted=false
     if (( ${#named_paths[@]} > 0 )); then
         excepted=true
