@@ -134,6 +134,12 @@ var catalog = map[Type]typeSpec{
 			// NvidiaGpuPlugin add-on state (installed/absent; any other
 			// lifecycle state projects a fail-closed marker).
 			"oke-addons": {scalar: closedKeys("addon-count", "nvidia-gpu-plugin")},
+			// gke-gpu-pools is the GKE GPU node-pool driver-installation
+			// projection supplied via `aicr snapshot --gke-gpu-pools` /
+			// `aicr validate --gke-gpu-pools` (pkg/collector/k8s/gkegpupools.go).
+			// gpu-driver-installation is absent, a runtime NotFound rather
+			// than an unaddressable path, on a cluster with no GPU pools.
+			"gke-gpu-pools": {scalar: closedKeys("gpu-pool-count", "gpu-pools", "gpu-driver-installation")},
 			// oke-legacy-plugin is in-cluster conflict evidence for OKE's legacy
 			// addon-manager-shipped device plugin (invisible to list-addons) —
 			// pkg/collector/k8s/okelegacyplugin.go. nvidia-gpu-device-plugin is

@@ -119,6 +119,11 @@ type snapshotCmdOptions struct {
 	// dump into the oke-addons subtype at the snapshot orchestration
 	// layer — same contract as aksGPUPoolsPath.
 	okeAddonsPath string
+
+	// gkeGPUPoolsPath, when non-empty, projects a GKE GPU node-pool dump
+	// into the gke-gpu-pools subtype at the snapshot orchestration
+	// layer.
+	gkeGPUPoolsPath string
 	// discoverNetwork enables the network collector's live-discovery
 	// path. The collector calls l8k.Discover against the resolved
 	// kubeconfig; discovery is NOT read-only.
@@ -164,6 +169,7 @@ func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 		ClusterConfigPath:  o.clusterConfigPath,
 		AKSGPUPoolsPath:    o.aksGPUPoolsPath,
 		OKEAddonsPath:      o.okeAddonsPath,
+		GKEGPUPoolsPath:    o.gkeGPUPoolsPath,
 		DiscoverNetwork:    o.discoverNetwork,
 		Requests:           o.requests,
 		Limits:             o.limits,
@@ -190,7 +196,7 @@ func (o *snapshotCmdOptions) toSnapshotDelivery() snapshotter.SnapshotDelivery {
 // over config values. Returns a fully-typed snapshotCmdOptions that callers
 // can pass to the snapshotter without further parsing.
 func parseSnapshotCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*snapshotCmdOptions, error) {
-	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", flagAddRolesToSA, "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools", "oke-addons"); err != nil {
+	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", flagAddRolesToSA, "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools", "oke-addons", "gke-gpu-pools"); err != nil {
 		return nil, err
 	}
 
@@ -333,6 +339,7 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*snapshotCmdOp
 		clusterConfigPath: cmd.String("cluster-config"),
 		aksGPUPoolsPath:   cmd.String("aks-gpu-pools"),
 		okeAddonsPath:     cmd.String("oke-addons"),
+		gkeGPUPoolsPath:   cmd.String("gke-gpu-pools"),
 		discoverNetwork:   cmd.Bool("discover-network"),
 		requests:          resourceRequests,
 		limits:            resourceLimits,
@@ -617,6 +624,12 @@ func snapshotCmdFlags() []cli.Flag {
 			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
 			Category: catAgentDeployment,
 		},
+		&cli.StringFlag{
+			Name:     "gke-gpu-pools",
+			Usage:    "Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem. Projects each GPU pool's gpuDriverInstallationConfig.gpuDriverVersion into the K8s gke-gpu-pools subtype (Disabled/Installed; mixed or unrecognized driver-version values project a value no profile constraint accepts). Qualifies the GKE bundle-installer gpuStack value's pool-creation requirement beyond its opt-out node label. The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
+			Sources:  cli.EnvVars("AICR_GKE_GPU_POOLS_PATH"),
+			Category: catAgentDeployment,
+		},
 		&cli.BoolFlag{
 			Name:     "discover-network",
 			Usage:    "Enable live l8k discovery to populate the NetworkTopology Measurement. NOT read-only — discovery writes nvidia.kubernetes-launch-kit.* node labels and may patch NicClusterPolicy via server-side-apply.",
@@ -773,6 +786,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 					RequireGPU:      opts.requireGPU,
 					AKSGPUPoolsPath: opts.aksGPUPoolsPath,
 					OKEAddonsPath:   opts.okeAddonsPath,
+					GKEGPUPoolsPath: opts.gkeGPUPoolsPath,
 				}
 				return ns.Measure(ctx)
 			}

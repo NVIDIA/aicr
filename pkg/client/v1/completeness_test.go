@@ -34,7 +34,7 @@ import (
 // field can pass this guard purely by colliding with an existing
 // caller-owned facade field that has no config counterpart: AgentConfig
 // already declares Kubeconfig, Debug, Output, TemplatePath, RunID, NameBase,
-// ClusterConfigPath, AKSGPUPoolsPath and DiscoverNetwork for reasons
+// ClusterConfigPath, AKSGPUPoolsPath, GKEGPUPoolsPath and DiscoverNetwork for reasons
 // unrelated to spec.snapshot. A future spec.snapshot.agent.debug added to
 // SnapshotResolved would satisfy this check the instant it is named "Debug",
 // with the guard staying green even if SnapshotAgentConfig() never reads it

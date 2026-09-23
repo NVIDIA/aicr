@@ -162,6 +162,13 @@ type AgentConfig struct {
 	// snapshot as the oke-addons subtype.
 	OKEAddonsPath string
 
+	// GKEGPUPoolsPath, when set, points at an operator-supplied
+	// `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump on the CALLER's filesystem, projected
+	// controller-side before deploying and merged into the returned
+	// snapshot as the gke-gpu-pools subtype.
+	GKEGPUPoolsPath string
+
 	// DiscoverNetwork enables the in-pod network collector's live l8k
 	// discovery path. Discovery is NOT read-only — it writes node labels
 	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
@@ -274,6 +281,13 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	}
 	if config.OKEAddonsPath != "" {
 		subtype, err := k8scollector.ProjectOKEAddons(ctx, config.OKEAddonsPath)
+		if err != nil {
+			return nil, err
+		}
+		projections = append(projections, subtype)
+	}
+	if config.GKEGPUPoolsPath != "" {
+		subtype, err := k8scollector.ProjectGKEGPUPools(ctx, config.GKEGPUPoolsPath)
 		if err != nil {
 			return nil, err
 		}
@@ -429,7 +443,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 }
 
 // mergeProviderProjection attaches a controller-side provider projection
-// (aks-gpu-pools, oke-addons) to the
+// (aks-gpu-pools, oke-addons, gke-gpu-pools) to the
 // snapshot the agent Job returned. The merge is performed on generic maps,
 // NOT through the controller's typed Snapshot struct: the agent image is
 // user-pinnable, so a newer agent may emit fields this binary's struct does

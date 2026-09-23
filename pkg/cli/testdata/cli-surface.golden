@@ -178,6 +178,7 @@ flag    aicr snapshot  --cluster-config  type=string default= required=false hid
 flag    aicr snapshot  --config  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --discover-network  type=bool default=false required=false hidden=false env=AICR_DISCOVER_NETWORK
 flag    aicr snapshot  --format,-t  type=string default="yaml" required=false hidden=false env=
+flag    aicr snapshot  --gke-gpu-pools  type=string default= required=false hidden=false env=AICR_GKE_GPU_POOLS_PATH
 flag    aicr snapshot  --image  type=string default="ghcr.io/nvidia/aicr:latest" required=false hidden=false env=AICR_IMAGE
 flag    aicr snapshot  --image-pull-secret  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --job-name  type=string default="aicr" required=false hidden=false env=
@@ -218,6 +219,7 @@ flag    aicr validate  --fail-fast  type=bool default=false required=false hidde
 flag    aicr validate  --fail-on-error  type=bool default=true required=false hidden=false env=
 flag    aicr validate  --feature,-f  type=string default= required=false hidden=false env=
 flag    aicr validate  --full  type=bool default=false required=false hidden=false env=
+flag    aicr validate  --gke-gpu-pools  type=string default= required=false hidden=false env=AICR_GKE_GPU_POOLS_PATH
 flag    aicr validate  --identity-token  type=string default= required=false hidden=false env=COSIGN_IDENTITY_TOKEN
 flag    aicr validate  --image  type=string default="ghcr.io/nvidia/aicr:latest" required=false hidden=false env=AICR_VALIDATOR_IMAGE
 flag    aicr validate  --image-pull-secret  type=string default= required=false hidden=false env=

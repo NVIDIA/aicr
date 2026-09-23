@@ -684,6 +684,16 @@ requires `installed`, `operator-managed` requires `absent`, and any other
 add-on lifecycle state — or a snapshot captured without the dump — fails
 closed against either selection.
 
+**GKE's `bundle-installer` value additionally** projects each GPU pool's
+`gpuDriverInstallationConfig.gpuDriverVersion` into a snapshot reading
+(`K8s.gke-gpu-pools.gpu-driver-installation`, from the `--gke-gpu-pools`
+dump), corroborating the `NodeTopology.gpu-nodes.label` form above. The
+label alone proves only that GKE's device plugin has been evicted, not that
+the pool was actually created with the managed driver install disabled.
+`bundle-installer` requires `Disabled`. Mixed, unrecognized, or unavailable
+readings fail closed. `gke-default` declares no constraint on this
+reading. It remains the zero-setup default.
+
 No equivalent reading exists for other services yet. Declare a
 driver-ownership profile only once the signal for that service exists, and
 give both values symmetric constraints over it. Do not substitute a signal

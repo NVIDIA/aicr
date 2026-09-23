@@ -9,10 +9,10 @@ default) and recorded in `metadata.selectedProfile`; each value carries a
 constraint that the snapshot and the `aicr validate` readiness pre-flight
 verify against the cluster's GPU-node labels.
 
-| Value | `nvidia.com/gpu` advertiser | Driver provisioning | Node-label requirement | Pool creation | Recipe effect |
+| Value | `nvidia.com/gpu` advertiser | Driver provisioning | Node-label requirement | Pool-creation requirement | Recipe effect |
 |------|------|------|------|------|------|
-| `gke-default` (default) | GKE's managed device plugin (recorded as `advertiser: external`) | GKE's managed driver install | **No** GPU node carries `gke-no-default-nvidia-gpu-device-plugin` | Normal pools with `gpu-driver-version=default` or `latest` — zero extra setup | `devicePlugin.enabled=false` (profile-owned) |
-| `bundle-installer` | GPU Operator's device plugin (sole advertiser) | the bundle's `gcp-driver-installer` DaemonSet (recipe-pinned version) | **Every** GPU node carries `gke-no-default-nvidia-gpu-device-plugin=true` | Pools created with the label and `gpu-driver-version=disabled` | `devicePlugin.enabled=true` (profile-owned) |
+| `gke-default` (default) | GKE's managed device plugin (recorded as `advertiser: external`) | GKE's managed driver install | **No** GPU node carries `gke-no-default-nvidia-gpu-device-plugin` | Normal pools with `gpu-driver-version=default` or `latest` — zero extra setup, no `--gke-gpu-pools` required | `devicePlugin.enabled=false` (profile-owned) |
+| `bundle-installer` | GPU Operator's device plugin (sole advertiser) | the bundle's `gcp-driver-installer` DaemonSet (recipe-pinned version) | **Every** GPU node carries `gke-no-default-nvidia-gpu-device-plugin=true` | Pools created with the label and `gpu-driver-version=disabled`, verified via `K8s.gke-gpu-pools.gpu-driver-installation` (`--gke-gpu-pools`) | `devicePlugin.enabled=true` (profile-owned) |
 
 Both values keep `driver.enabled=false` in the GPU Operator values — the GPU
 Operator cannot install a driver on COS node images, so driver provisioning is
@@ -26,28 +26,52 @@ plugin's device IDs can reach the other plugin's `Allocate`. See
 [Component Catalog › GKE Device-Plugin Ownership](../user/component-catalog.md#gke-device-plugin-ownership)
 for the ownership model and the override-locking rules.
 
-**Recording the ownership mode in snapshots.** Unlike AKS — whose ownership
-signal is the Azure control-plane AgentPool `gpuProfile.driver` property and
-therefore needs a provider pool projection
-(`aicr snapshot --aks-gpu-pools <az dump>`) — the GKE signal is an ordinary
-Kubernetes node label, so **no extra snapshot flag is needed**: a plain
-`aicr snapshot` captures everything the constraint reads. Each value's
-constraint is the `NodeTopology.gpu-nodes.label` node-set form
+**Recording the ownership mode in snapshots.** `gke-default` reads an
+ordinary Kubernetes node label, so **no extra snapshot flag is needed for
+the default**: a plain `aicr snapshot` captures everything its constraint
+reads. Each value's device-plugin-ownership constraint is the
+`NodeTopology.gpu-nodes.label` node-set form
 ([#1755](https://github.com/NVIDIA/aicr/issues/1755)): the evaluator
 synthesizes the GPU-node universe from the snapshot's `NodeTopology.label`
 readings (nodes carrying `cloud.google.com/gke-accelerator`) and quantifies a
-label predicate over it, in both directions — the positive form
+label predicate over it, in both directions: the positive form
 `gke-no-default-nvidia-gpu-device-plugin=true` (every GPU node carries the
 label) qualifies `bundle-installer`, and the negated form
 `!gke-no-default-nvidia-gpu-device-plugin` (no GPU node carries the key)
 qualifies `gke-default`.
 
+`bundle-installer` carries a second, corroborating constraint. The label
+alone proves only that GKE's own device plugin has been evicted, not that
+the labeled pool was actually **created** with `gpu-driver-version=disabled`.
+A pool GKE still finalizes the managed driver install on can carry the
+label (evicting the device plugin) while GKE's driver-installer DaemonSet
+stays active underneath, racing the bundle's own `gcp-driver-installer`.
+Closing that gap needs a provider pool projection, the same pattern AKS
+uses for its own driver-ownership signal
+(`aicr snapshot --aks-gpu-pools <az dump>`): run
+`gcloud container node-pools list --cluster <cluster> --format=json` and
+pass the dump via `aicr snapshot --gke-gpu-pools <dump>` (or
+`aicr validate --gke-gpu-pools <dump>`). The projection reads each GPU
+pool's `gpuDriverInstallationConfig.gpuDriverVersion` into the
+`K8s.gke-gpu-pools.gpu-driver-installation` reading. Only `Disabled`
+satisfies `bundle-installer`, whether the pool set that explicitly or left
+the field absent or unspecified on a GKE version whose documented default
+for that case is no install. `Installed`, mixed, and unrecognized values
+all fail closed. `gke-default` declares no
+constraint on this reading. It stays the zero-setup default and never
+requires `--gke-gpu-pools`.
+
 **End-to-end flow.** Three steps; the snapshot carries the label readings
 from step 1 on (recipe takes the snapshot, bundle takes the recipe):
 
 ```shell
-# 1. Snapshot — no provider dump or extra flag needed on GKE.
+# 1. Snapshot: no provider dump or extra flag needed for gke-default. For
+#    bundle-installer, also project the pool dump (step 2 needs the
+#    reading to verify the pool-creation constraint):
 aicr snapshot -o snapshot.yaml
+#   ... or, for labeled pools (bundle-carried driver installer):
+#   gcloud container node-pools list --cluster <cluster> --format=json > pools.json
+#   aicr snapshot --gke-gpu-pools pools.json -o snapshot.yaml
 
 # 2. Generate the recipe with the profile value your pools call for,
 #    then bundle. Selection is explicit; the reading VERIFIES it.
@@ -71,7 +95,7 @@ combination is deterministic:
 | GPU-node labels read | Default (`gke-default`) | `--profile gpuStack=bundle-installer` |
 |---|---|---|
 | all GPU nodes label-absent | ✅ resolves | ❌ fails closed: constraint expects the label on every GPU node |
-| all GPU nodes `gke-no-default-nvidia-gpu-device-plugin=true` | ❌ fails closed: constraint expects no labeled GPU node | ✅ resolves |
+| all GPU nodes `gke-no-default-nvidia-gpu-device-plugin=true` | ❌ fails closed: constraint expects no labeled GPU node | ✅ resolves (still subject to the pool-creation check below) |
 | mixed (some labeled, some not) | ❌ fails closed naming the observed state | ❌ fails closed |
 | no identifiable GPU nodes (nothing carries `cloud.google.com/gke-accelerator`) | ❌ fails closed: empty GPU-node set | ❌ same |
 | truncated reading (`--max-nodes-per-entry` actually cut a participating label reading) | ❌ fails closed — a truncated node list cannot prove set membership; recapture without the cap (a cap larger than the node count truncates nothing and validates normally) | ❌ same |
@@ -80,17 +104,30 @@ A wrong selection can never silently produce a mismatched recipe — the error
 names the observed label state, and fixing it means changing the selection or
 the pools, never overriding the values by hand.
 
+`bundle-installer` additionally requires a `--gke-gpu-pools` projection
+corroborating the label, since the label alone cannot prove the pool was
+actually created with the managed install disabled:
+
+| `K8s.gke-gpu-pools.gpu-driver-installation` reading | `--profile gpuStack=bundle-installer` (label already satisfied) |
+|---|---|
+| `Disabled` (every GPU pool created with `gpu-driver-version=disabled`, or left absent/unspecified on a GKE version whose documented default for that case is no install) | ✅ resolves |
+| `Installed` (some pool created with `default`/`latest`, or left absent/unspecified on a GKE version whose documented default for that case is to install) | ❌ fails closed: a labeled pool GKE still finalizes the driver on races the bundle's installer |
+| `NotConfigured` or `NotInstalled` (some pool left absent or unspecified, and its `version` couldn't be parsed to resolve which default applies) | ❌ fails closed. An unresolvable version is never treated as proof of `disabled` |
+| mixed across or within pools | ❌ fails closed naming the observed state |
+| reading unavailable (no `--gke-gpu-pools` supplied) | ❌ fails closed: the label alone is insufficient evidence for this value |
+
 **Selection and verification are independent axes.** `--profile` (or its
 absence) decides the selection; `--snapshot` (or its absence) decides whether
 the selection is verified now or later. The selection is NEVER derived from
 the snapshot, and the check is NEVER skipped when a snapshot is present:
 
-| Invocation | Selected value | Node-label check |
-|---|---|---|
-| no `--profile`, no `--snapshot` | declaration default (`gke-default`) | none possible (no cluster data) — the constraint is still recorded in the recipe and enforced at `aicr validate` readiness |
-| `--profile gpuStack=bundle-installer`, no `--snapshot` | `bundle-installer` | same — deferred to validate |
-| no `--profile`, `--snapshot` | default (`gke-default`) | checked at generation: no GPU node may carry the opt-out label, else generation fails closed naming the observed state |
-| `--profile gpuStack=bundle-installer`, `--snapshot` | `bundle-installer` | checked at generation: every GPU node must carry `gke-no-default-nvidia-gpu-device-plugin=true`, else fails closed |
+| Invocation | Selected value | Node-label check | Pool-creation check (`bundle-installer` only) |
+|---|---|---|---|
+| no `--profile`, no `--snapshot` | declaration default (`gke-default`) | none possible (no cluster data). The constraint is still recorded in the recipe and enforced at `aicr validate` readiness | n/a |
+| `--profile gpuStack=bundle-installer`, no `--snapshot` | `bundle-installer` | same, deferred to validate | same, deferred to validate |
+| no `--profile`, `--snapshot` | default (`gke-default`) | checked at generation: no GPU node may carry the opt-out label, else generation fails closed naming the observed state | n/a |
+| `--profile gpuStack=bundle-installer`, `--snapshot` (captured without `aicr snapshot --gke-gpu-pools`) | `bundle-installer` | checked at generation. Every GPU node must carry `gke-no-default-nvidia-gpu-device-plugin=true`, else fails closed | fails closed. The reading is unavailable without `--gke-gpu-pools` |
+| `--profile gpuStack=bundle-installer`, `--snapshot` (captured with `aicr snapshot --gke-gpu-pools <dump>`) | `bundle-installer` | checked at generation | checked at generation. Every GPU pool must read `Disabled`, else fails closed |
 
 If you need an unverified recipe deliberately, generate criteria-only (drop
 `--snapshot`): the artifact is honest about being unqualified, and the
@@ -223,6 +260,12 @@ GPU Operator, with the driver version pinned in the recipe
 the request against the COS build's curated per-GPU-type list and rejects
 unqualified versions. Version bumps take effect on replaced or rebooted
 nodes only (the installer skips nodes with a loaded nvidia module).
+
+Generating this value **from a snapshot** (`aicr recipe --snapshot ...`)
+additionally requires that snapshot to carry a `--gke-gpu-pools` projection.
+See [Recording the ownership mode in snapshots](#gpu-device-plugin-ownership)
+above. A criteria-only generation (no `--snapshot`, as in the example above)
+defers both the label and pool-creation checks to `aicr validate` readiness.
 
 On A4X/GB200 (`a4x-highgpu-4g`, arm64) nodes, the component's default
 `partitionGpuImage` (the `partition-gpus` init container) is an amd64-only
@@ -450,6 +493,11 @@ for a driver that never arrives).
 same kube-system DaemonSet the opt-out label disables. Labeling the pool
 disabled the whole DaemonSet — device plugin *and* driver finalization — so
 the pairing "label + managed driver install" is never functional.
+
+Generating or validating `bundle-installer` with a `--gke-gpu-pools`
+projection catches this pairing before deploy: a pool reporting `Installed`
+on `K8s.gke-gpu-pools.gpu-driver-installation` fails closed instead of
+producing a recipe that reaches this symptom live.
 
 **Fix — pick one exit:**
 
