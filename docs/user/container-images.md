@@ -56,7 +56,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
-| kueue | helm | kueue | 0.19.3 | 1 |
+| kueue | helm | kueue | 0.19.5 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
 | network-operator | helm | nvidia/network-operator | 26.4.1 | 12 |
@@ -76,9 +76,9 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | rdma-netns-exclusive | manifest | — | — | 1 |
-| slinky-slurm | helm | slurm | 1.2.0 | 5 |
-| slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
-| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
+| slinky-slurm | helm | slurm | 1.2.2 | 5 |
+| slinky-slurm-operator | helm | slurm-operator | 1.2.2 | 2 |
+| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.2 | 0 |
 | slinky-topograph | helm | topograph/topograph | 1.0.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.6.0 | 0 |
 
@@ -246,7 +246,7 @@ _No images extracted._
 
 ### kueue
 
-- `registry.k8s.io/kueue/kueue:v0.19.3`
+- `registry.k8s.io/kueue/kueue:v0.19.5`
 
 ### mariadb-operator
 
@@ -356,8 +356,8 @@ _No images extracted._
 
 ### slinky-slurm-operator
 
-- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.0`
-- `ghcr.io/slinkyproject/slurm-operator:1.2.0`
+- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.2`
+- `ghcr.io/slinkyproject/slurm-operator:1.2.2`
 
 ### slinky-slurm-operator-crds
 
