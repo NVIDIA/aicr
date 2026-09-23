@@ -253,3 +253,191 @@ if ! reason=$(check_module_tool_pins); then
     exit 1
 fi
 echo "Module-built tool pins: exact retained, stale/unreadable/unresolved replaced, both resolve from go.mod"
+
+# --- checksum verification core (#2666) ------------------------------------
+# verify_digest is the single comparison every binary install passes through
+# before it reaches /usr/local/bin, so it has to fail closed: an empty or
+# unrecognized expectation is a missing check, not a passed one. verify_sha256
+# used to return 0 for "" and "SKIP", so a caller whose checksum lookup came
+# back empty went on to install an unverified binary.
+#
+# The digests are fixed rather than computed here, so the test does not lean on
+# the same shasum/sha256sum the code under test uses. Each call runs in its own
+# subshell because a failed verification exits rather than returns.
+DIGEST_PAYLOAD_SHA256="36e355979e671af2ffddc498d4b7e5d431b2b25bf27618beaf7a8d2d52e3d4d2"
+DIGEST_PAYLOAD_SHA512="64cc424eb1d30d5546e61c31cd7deb22b733809a42715c59230e415255b5a107ce431eb310548ebe09103a74f8fdb0cc167c07c1c37a27889ab9c202eeb4585f"
+
+check_digest_verification() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        scratch=$(mktemp -d)
+        trap 'rm -rf "${scratch}"' EXIT
+        payload="${scratch}/payload"
+        printf 'aicr' > "${payload}"
+
+        # expect <pass|fail> <label> <command...>
+        expect() {
+            local want="$1" label="$2"; shift 2
+            local rc=0
+            ( "$@" ) >/dev/null 2>&1 || rc=$?
+            if [[ "${want}" == "pass" && "${rc}" -ne 0 ]]; then
+                echo "${label}: expected to pass, exited ${rc}"; exit 1
+            fi
+            if [[ "${want}" == "fail" && "${rc}" -eq 0 ]]; then
+                echo "${label}: expected to fail, but passed"; exit 1
+            fi
+        }
+
+        expect pass "matching sha256"  verify_digest "${payload}" sha256 "${DIGEST_PAYLOAD_SHA256}"
+        expect pass "matching sha512"  verify_digest "${payload}" sha512 "${DIGEST_PAYLOAD_SHA512}"
+        expect fail "mismatched sha256" verify_digest "${payload}" sha256 "${DIGEST_PAYLOAD_SHA256/3/4}"
+        expect fail "sha512 digest checked as sha256" verify_digest "${payload}" sha256 "${DIGEST_PAYLOAD_SHA512}"
+        expect fail "empty expectation" verify_digest "${payload}" sha256 ""
+        expect fail "unknown algorithm" verify_digest "${payload}" md5 "${DIGEST_PAYLOAD_SHA256}"
+
+        # The fail-open this replaces, asserted on the old entry point too.
+        expect pass "verify_sha256 on a match" verify_sha256 "${payload}" "${DIGEST_PAYLOAD_SHA256}"
+        expect fail "verify_sha256 with an empty expectation" verify_sha256 "${payload}" ""
+        expect fail "verify_sha256 with SKIP" verify_sha256 "${payload}" "SKIP"
+    )
+}
+
+if ! reason=$(check_digest_verification); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Digest verification: sha256 and sha512 match, and a mismatch, empty expectation, unknown algorithm or SKIP all fail closed"
+
+# A sidecar source names the digest algorithm and, optionally, the file suffix
+# the digest is published under. The suffix is not derivable from the algorithm:
+# dl.k8s.io serves kubectl's SHA-256 at `.sha256` and 404s on `.sha256sum`.
+check_sidecar_specs() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        expect_spec() {
+            local source="$1" want="$2" got
+            got=$(release_sidecar_spec "${source}") || { echo "${source} was rejected"; exit 1; }
+            [[ "${got}" == "${want}" ]] || { echo "${source} resolved to '${got}', want '${want}'"; exit 1; }
+        }
+        expect_spec sidecar:sha256         "sha256 .sha256sum"
+        expect_spec sidecar:sha512         "sha512 .sha512"
+        expect_spec sidecar:sha256:.sha256 "sha256 .sha256"
+
+        if ( release_sidecar_spec sidecar:md5 ) >/dev/null 2>&1; then
+            echo "an unsupported algorithm was accepted"; exit 1
+        fi
+    )
+}
+
+if ! reason=$(check_sidecar_specs); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Sidecar sources: default suffix per algorithm, explicit suffix honored, unsupported algorithm rejected"
+
+# --- every binary install is checksum-verified (#2666) ----------------------
+# install_release_binary will not run without a checksum source, so routing
+# every install through it is what makes verification impossible to skip. This
+# guard fails if an install into /usr/local/bin appears anywhere else -- the
+# shape a tool takes when it is added the quick way, which is how eight installs
+# ended up with no integrity check at all.
+#
+# Exceptions are named rather than pattern-matched, each with its reason:
+#   grype    -- installs through anchore's install.sh, which is itself
+#               checksum-pinned (GRYPE_INSTALL_SHA256) and verifies what it fetches.
+#   yq       -- UNVERIFIED. The bootstrap tool: it is what reads .settings.yaml,
+#               so it installs before any pin can be read and tracks `latest`.
+#               Verifying it needs a bootstrap pin; #2939.
+#   yamllint -- a pip package at a pinned version in a venv, symlinked in. pip
+#               resolves it rather than a release checksum, so it is outside
+#               what install_release_binary covers.
+BIN_INSTALL_EXCEPTIONS=(
+    "/usr/local/bin/grype"
+    "/usr/local/bin/yq"
+    "/usr/local/bin/yamllint"
+)
+
+helper_start=$(grep -nE '^install_release_binary\(\) *\{' "${SETUP_TOOLS}" | cut -d: -f1 || true)
+if [[ -z "${helper_start}" ]]; then
+    echo "FAIL: install_release_binary() is not defined in setup-tools." >&2
+    exit 1
+fi
+helper_end=$(awk -v s="${helper_start}" 'NR > s && /^\}/ { print NR; exit }' "${SETUP_TOOLS}")
+
+# An allowlist, not a list of forbidden verbs. The first version of this check
+# enumerated the ways to write a file (mv, cp, curl, ...) and missed `sudo ln`,
+# which put yamllint into /usr/local/bin unseen: a verb list fails open for
+# every verb nobody anticipated. Instead, every line outside the helper that
+# touches /usr/local/bin must be a named exception or a plain read -- a [[ ]]
+# test or a log_* message, and never under sudo. Anything else fails.
+read_test_re='^[[:space:]]*((el)?if[[:space:]]+)?\[\['
+read_log_re='log_(info|warning|error|success|debug)'
+
+mapfile -t bin_refs < <(
+    grep -nE '/usr/local/bin' "${SETUP_TOOLS}" | grep -vE '^[0-9]+:[[:space:]]*#' || true
+)
+
+bypasses=()
+for entry in "${bin_refs[@]}"; do
+    line_no="${entry%%:*}"
+    code="${entry#*:}"
+    if (( line_no > helper_start && line_no < helper_end )); then
+        continue
+    fi
+    excepted=false
+    for exception in "${BIN_INSTALL_EXCEPTIONS[@]}"; do
+        [[ "${code}" == *"${exception}"* ]] && excepted=true
+    done
+    "${excepted}" && continue
+    if [[ "${code}" != *sudo* ]] && [[ "${code}" =~ ${read_test_re} || "${code}" =~ ${read_log_re} ]]; then
+        continue
+    fi
+    bypasses+=("${entry}")
+done
+
+if [[ "${#bypasses[@]}" -ne 0 ]]; then
+    echo "FAIL: ${#bypasses[@]} line(s) write to /usr/local/bin outside install_release_binary." >&2
+    echo "      Each one can land a binary with no checksum comparison. Route it through" >&2
+    echo "      install_release_binary, which will not run without a checksum source, or" >&2
+    echo "      add it to BIN_INSTALL_EXCEPTIONS with the reason it cannot be." >&2
+    printf '        %s\n' "${bypasses[@]}" >&2
+    exit 1
+fi
+
+# Assert the installs BY BINARY, for the reason the module-tool check above
+# does: the bypass check alone passes vacuously if an install is deleted.
+REQUIRED_RELEASE_BINARIES=(
+    addlicense chainsaw cosign crane ctlptl flux git-cliff goreleaser hauler
+    helm helmfile kind ko kubectl mkcert oasdiff oras syft tilt zarf
+)
+
+# Join backslash-continued lines first. The binary argument usually sits on a
+# continuation line, so matching the first line of each call alone misses it --
+# and passes only for the calls where the name happens to appear up front.
+mapfile -t helper_calls < <(
+    awk '{ if (sub(/\\$/, "")) { buf = buf $0; next } print buf $0; buf = "" }' "${SETUP_TOOLS}" \
+        | grep -E '(^|[[:space:]])install_release_binary[[:space:]]' \
+        | grep -vE '^[[:space:]]*#' || true
+)
+
+missing_binaries=0
+for binary in "${REQUIRED_RELEASE_BINARIES[@]}"; do
+    # Match the binary as the bare argument that precedes the quoted
+    # description, not as any occurrence of the name. The description always
+    # contains the tool's name ("ko ${KO_VERSION} for Linux"), so a looser match
+    # lets it vouch for a call whose binary argument is gone. Anchoring on the
+    # trailing `"` also keeps "helm" from vouching for "helmfile".
+    if ! printf '%s\n' "${helper_calls[@]}" | grep -qE "[[:space:]]${binary}[[:space:]]+\""; then
+        echo "FAIL: no install_release_binary call installs ${binary}." >&2
+        missing_binaries=1
+    fi
+done
+[[ "${missing_binaries}" -eq 0 ]] || exit 1
+
+echo "Every write to /usr/local/bin is accounted for: ${#REQUIRED_RELEASE_BINARIES[@]} checksum-verified through install_release_binary, ${#BIN_INSTALL_EXCEPTIONS[@]} named exceptions"

@@ -88,36 +88,175 @@ verify_download_url() {
     return 0
 }
 
-verify_sha256() {
+# verify_digest compares a downloaded file against its expected digest and exits
+# on anything short of a match. Every binary install goes through it, so an empty
+# or unrecognized expectation is a failed check rather than a skipped one: it
+# means the caller's checksum lookup came back empty, and installing anyway is
+# the outcome this function exists to prevent.
+verify_digest() {
     local file_path="$1"
-    local expected_sha="$2"
+    local algo="$2"
+    local expected="$3"
 
-    if [[ -z "$expected_sha" || "$expected_sha" == "SKIP" ]]; then
-        return 0
+    if [[ -z "$expected" ]]; then
+        log_error "No expected ${algo} digest for $file_path; refusing to install an unverified binary."
+        exit 1
     fi
 
-    # Fail closed when no digest tool is available. This used to warn and
-    # return 0, which meant the caller went on to extract the archive and
-    # `sudo mv` the binary into /usr/local/bin with nothing verified -- the one
-    # outcome a checksum helper must never produce. Accept either tool: shasum
-    # is the perl one macOS ships, sha256sum is coreutils on Linux.
-    local actual_sha
+    local bits
+    case "$algo" in
+        sha256) bits=256 ;;
+        sha512) bits=512 ;;
+        *)
+            log_error "Unsupported digest algorithm '$algo' for $file_path."
+            exit 1
+            ;;
+    esac
+
+    # Accept either tool: shasum is the perl one macOS ships, <algo>sum is
+    # coreutils on Linux.
+    local actual
     if command_exists shasum; then
-        actual_sha=$(shasum -a 256 "$file_path" | awk '{print $1}')
-    elif command_exists sha256sum; then
-        actual_sha=$(sha256sum "$file_path" | awk '{print $1}')
+        actual=$(shasum -a "$bits" "$file_path" | awk '{print $1}')
+    elif command_exists "${algo}sum"; then
+        actual=$("${algo}sum" "$file_path" | awk '{print $1}')
     else
-        log_error "Neither shasum nor sha256sum is available; cannot verify $file_path."
+        log_error "Neither shasum nor ${algo}sum is available; cannot verify $file_path."
         log_error "Refusing to install an unverified binary. Install coreutils (or perl's shasum) and retry."
         exit 1
     fi
 
-    if [[ "$actual_sha" != "$expected_sha" ]]; then
+    if [[ "$actual" != "$expected" ]]; then
         log_error "Checksum mismatch for $file_path"
-        log_error "Expected: $expected_sha"
-        log_error "Actual:   $actual_sha"
+        log_error "Expected ${algo}: $expected"
+        log_error "Actual ${algo}:   $actual"
         exit 1
     fi
+}
+
+# verify_sha256 used to return 0 for an empty or "SKIP" expectation, which let a
+# failed checksum lookup install an unverified binary. It now fails closed on
+# both, like every other outcome short of a match.
+verify_sha256() {
+    verify_digest "$1" sha256 "$2"
+}
+
+# Exit status the install subshell uses for an unreachable asset -- the one
+# failure install_release_binary reports rather than aborts on.
+RELEASE_ASSET_UNREACHABLE=3
+
+# release_sidecar_spec <sidecar:algo[:suffix]> prints "<algo> <suffix>". The
+# suffix defaults per algorithm but cannot always be derived from it: dl.k8s.io
+# publishes kubectl's SHA-256 as `.sha256`, not `.sha256sum`.
+release_sidecar_spec() {
+    local spec="${1#sidecar:}"
+    local algo="${spec%%:*}" suffix=""
+    if [[ "$spec" == *:* ]]; then
+        suffix="${spec#*:}"
+    fi
+    case "$algo" in
+        sha256) suffix="${suffix:-.sha256sum}" ;;
+        sha512) suffix="${suffix:-.sha512}" ;;
+        *)
+            log_error "Unsupported sidecar digest algorithm '$algo'"
+            return 1
+            ;;
+    esac
+    echo "$algo $suffix"
+}
+
+# install_release_binary <asset-url> <checksum-source> <binary> <description> [archive-member]
+#
+# Downloads a release asset, verifies it, and installs <binary> into
+# /usr/local/bin. It cannot run without a checksum source, which is what makes
+# verification impossible to skip: every binary install goes through here, and
+# tools/setup-tools_test.sh fails if one does not.
+#
+# <checksum-source> names where the expected digest comes from, never the digest:
+#   manifest:<url>              a combined checksums file, looked up by the asset's name
+#   sidecar:<algo>[:<suffix>]   <asset-url><suffix>; see release_sidecar_spec
+#   pinned:<digest>             a sha256 committed in this repo
+#
+# [archive-member] is the binary's path inside a .tar.gz, when it is not
+# <binary> at the archive root. It may be a glob. Any other asset is installed
+# as the binary itself.
+#
+# An unreachable asset returns 1 so the caller can report it, as every install
+# block did before this helper. Anything else -- a failed download, a missing or
+# mismatched digest, a member not in the archive -- exits, because installing
+# an unverified binary is worse than not installing it.
+#
+# The work runs in a subshell so its EXIT trap can clean the temp dir without
+# replacing a trap of the caller's. It checks every step explicitly rather than
+# relying on `set -e`, which bash suspends for a function called under `if`
+# or `||` -- the way every caller calls this one.
+install_release_binary() {
+    local rc=0
+    (
+        url="$1" source="$2" binary="$3" description="$4" member="${5:-$3}"
+
+        verify_download_url "$url" "$description" || exit "$RELEASE_ASSET_UNREACHABLE"
+
+        tmp=$(mktemp -d) || exit 1
+        trap 'rm -rf "$tmp"' EXIT
+
+        asset="${url##*/}"
+        if ! curl -fsSL -o "${tmp}/${asset}" "$url"; then
+            log_error "Failed to download $description from $url"
+            exit 1
+        fi
+
+        algo=sha256
+        case "$source" in
+            manifest:*)
+                if ! curl -fsSL -o "${tmp}/checksums" "${source#manifest:}"; then
+                    log_error "Failed to download the checksums file for $description"
+                    exit 1
+                fi
+                # Exact field match, so `<asset>.sig` or a longer name that
+                # merely starts with this one cannot supply the digest.
+                expected=$(awk -v a="$asset" '$2 == a || $2 == "*" a { print $1; exit }' "${tmp}/checksums")
+                ;;
+            sidecar:*)
+                spec=$(release_sidecar_spec "$source") || exit 1
+                algo="${spec%% *}"
+                expected=$(curl -fsSL "${url}${spec#* }" | awk '{print $1}') || expected=""
+                ;;
+            pinned:*)
+                expected="${source#pinned:}"
+                ;;
+            *)
+                log_error "Unknown checksum source '$source' for $description"
+                exit 1
+                ;;
+        esac
+        # Exits on an empty or mismatched digest; see verify_digest.
+        verify_digest "${tmp}/${asset}" "$algo" "$expected"
+
+        src="${tmp}/${asset}"
+        case "$asset" in
+            *.tar.gz|*.tgz)
+                mkdir -p "${tmp}/extracted" || exit 1
+                if ! tar -xzf "${tmp}/${asset}" -C "${tmp}/extracted"; then
+                    log_error "Failed to extract $asset"
+                    exit 1
+                fi
+                src=$(compgen -G "${tmp}/extracted/${member}" | head -1)
+                if [[ -z "$src" ]]; then
+                    log_error "$member not found in $asset"
+                    exit 1
+                fi
+                ;;
+        esac
+
+        sudo install -m 0755 "$src" "/usr/local/bin/${binary}" || exit 1
+    ) || rc=$?
+
+    case "$rc" in
+        0) return 0 ;;
+        "$RELEASE_ASSET_UNREACHABLE") return 1 ;;
+        *) exit "$rc" ;;
+    esac
 }
 
 command_exists() {
@@ -186,17 +325,11 @@ install_helm() {
                     brew install helm
                 fi
             elif [[ "${OS}" == "linux" ]]; then
-                HELM_TMP=$(mktemp -d)
-                HELM_TAR="helm-${HELM_VERSION}-linux-${GO_ARCH}.tar.gz"
-                HELM_URL="https://get.helm.sh/${HELM_TAR}"
-                if verify_download_url "$HELM_URL" "helm ${HELM_VERSION} for Linux ${GO_ARCH}"; then
-                    curl -fsSL "$HELM_URL" | tar -xzC "$HELM_TMP"
-                    sudo mv "$HELM_TMP/linux-${GO_ARCH}/helm" /usr/local/bin/helm
-                    sudo chmod +x /usr/local/bin/helm
-                    rm -rf "$HELM_TMP"
-                else
+                if ! install_release_binary \
+                    "https://get.helm.sh/helm-${HELM_VERSION}-linux-${GO_ARCH}.tar.gz" \
+                    sidecar:sha256 helm "helm ${HELM_VERSION} for Linux ${GO_ARCH}" \
+                    "linux-${GO_ARCH}/helm"; then
                     log_error "Failed to install helm. Please install manually."
-                    rm -rf "$HELM_TMP"
                 fi
             fi
             installed_helm_version=$(helm version --template '{{.Version}}' 2>/dev/null || echo "unknown")
@@ -527,14 +660,8 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             HELMFILE_SHA256=$(yq ".testing_tools.helmfile_checksums.${HELMFILE_OS}_${HELMFILE_ARCH}" .settings.yaml)
             if [[ -z "${HELMFILE_SHA256}" || "${HELMFILE_SHA256}" == "null" ]]; then
                 log_error "No helmfile checksum pinned for ${HELMFILE_OS}_${HELMFILE_ARCH} in .settings.yaml; refresh with tools/update-helmfile-checksums ${HELMFILE_VERSION}"
-            elif verify_download_url "$HELMFILE_URL" "helmfile ${HELMFILE_VERSION} for ${HELMFILE_OS} ${HELMFILE_ARCH}"; then
-                HELMFILE_TMP=$(mktemp -d)
-                curl -fsSL -o "${HELMFILE_TMP}/${HELMFILE_TAR}" "${HELMFILE_URL}"
-                verify_sha256 "${HELMFILE_TMP}/${HELMFILE_TAR}" "${HELMFILE_SHA256}"
-                tar -xzf "${HELMFILE_TMP}/${HELMFILE_TAR}" -C "${HELMFILE_TMP}"
-                sudo mv "${HELMFILE_TMP}/helmfile" /usr/local/bin/helmfile
-                sudo chmod +x /usr/local/bin/helmfile
-                rm -rf "${HELMFILE_TMP}"
+            elif install_release_binary "$HELMFILE_URL" "pinned:${HELMFILE_SHA256}" \
+                helmfile "helmfile ${HELMFILE_VERSION} for ${HELMFILE_OS} ${HELMFILE_ARCH}"; then
                 log_success "helmfile installed"
             else
                 log_error "Failed to install helmfile. Please install manually."
@@ -553,24 +680,9 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             FLUX_CLI_ARCH="${GO_ARCH}"
             FLUX_TAR="flux_${FLUX_VER}_${FLUX_CLI_OS}_${FLUX_CLI_ARCH}.tar.gz"
             FLUX_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/${FLUX_TAR}"
-            if verify_download_url "$FLUX_URL" "flux ${FLUX_VERSION} for ${FLUX_CLI_OS} ${FLUX_CLI_ARCH}"; then
-                FLUX_TMP=$(mktemp -d)
-                curl -fsSL -o "${FLUX_TMP}/${FLUX_TAR}" "$FLUX_URL"
-                # Verify checksum from the release checksums file
-                FLUX_CHECKSUMS_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/flux_${FLUX_VER}_checksums.txt"
-                curl -fsSL -o "${FLUX_TMP}/checksums.txt" "$FLUX_CHECKSUMS_URL"
-                FLUX_EXPECTED=$(grep "  ${FLUX_TAR}$" "${FLUX_TMP}/checksums.txt" | awk '{print $1}')
-                if [[ -n "${FLUX_EXPECTED}" ]]; then
-                    verify_sha256 "${FLUX_TMP}/${FLUX_TAR}" "${FLUX_EXPECTED}"
-                else
-                    log_error "Could not extract checksum for ${FLUX_TAR} from checksums file; aborting install"
-                    rm -rf "$FLUX_TMP"
-                    exit 1
-                fi
-                tar -xzC "$FLUX_TMP" -f "${FLUX_TMP}/${FLUX_TAR}"
-                sudo mv "$FLUX_TMP/flux" /usr/local/bin/flux
-                sudo chmod +x /usr/local/bin/flux
-                rm -rf "$FLUX_TMP"
+            if install_release_binary "$FLUX_URL" \
+                "manifest:https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/flux_${FLUX_VER}_checksums.txt" \
+                flux "flux ${FLUX_VERSION} for ${FLUX_CLI_OS} ${FLUX_CLI_ARCH}"; then
                 log_success "flux installed"
             else
                 log_error "Failed to install flux. Please install manually."
@@ -594,14 +706,12 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             CHAINSAW_TAR="chainsaw_${CHAINSAW_OS}_${CHAINSAW_ARCH}.tar.gz"
             CHAINSAW_URL="https://github.com/kyverno/chainsaw/releases/download/v${CHAINSAW_VER}/${CHAINSAW_TAR}"
             CHAINSAW_SHA256=$(yq ".testing_tools.chainsaw_checksums.${CHAINSAW_OS}_${CHAINSAW_ARCH}" .settings.yaml)
-            CHAINSAW_TMP="$(mktemp -d)"
-            curl -fsSL -o "${CHAINSAW_TMP}/${CHAINSAW_TAR}" "${CHAINSAW_URL}"
-            verify_sha256 "${CHAINSAW_TMP}/${CHAINSAW_TAR}" "${CHAINSAW_SHA256}"
-            tar -xzf "${CHAINSAW_TMP}/${CHAINSAW_TAR}" -C "${CHAINSAW_TMP}"
-            sudo mv "${CHAINSAW_TMP}/chainsaw" /usr/local/bin/chainsaw
-            sudo chmod +x /usr/local/bin/chainsaw
-            rm -rf "${CHAINSAW_TMP}"
-            log_success "Chainsaw installed"
+            if install_release_binary "$CHAINSAW_URL" "pinned:${CHAINSAW_SHA256}" \
+                chainsaw "chainsaw ${CHAINSAW_VERSION} for ${CHAINSAW_OS} ${CHAINSAW_ARCH}"; then
+                log_success "Chainsaw installed"
+            else
+                log_error "Failed to install chainsaw. Please install manually."
+            fi
         fi
     fi
 
@@ -613,6 +723,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install mkcert
+                log_success "mkcert installed (run 'mkcert -install' to trust its CA)"
             else
                 MKCERT_ARCH="$(uname -m)"
                 case "${MKCERT_ARCH}" in
@@ -621,14 +732,13 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 esac
                 MKCERT_URL="https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_VERSION}/mkcert-${MKCERT_VERSION}-linux-${MKCERT_ARCH}"
                 MKCERT_SHA256=$(yq ".testing_tools.mkcert_checksums.linux_${MKCERT_ARCH}" .settings.yaml)
-                MKCERT_TMP="$(mktemp -d)"
-                curl -fsSL -o "${MKCERT_TMP}/mkcert" "${MKCERT_URL}"
-                verify_sha256 "${MKCERT_TMP}/mkcert" "${MKCERT_SHA256}"
-                sudo mv "${MKCERT_TMP}/mkcert" /usr/local/bin/mkcert
-                sudo chmod +x /usr/local/bin/mkcert
-                rm -rf "${MKCERT_TMP}"
+                if install_release_binary "$MKCERT_URL" "pinned:${MKCERT_SHA256}" \
+                    mkcert "mkcert ${MKCERT_VERSION} for linux ${MKCERT_ARCH}"; then
+                    log_success "mkcert installed (run 'mkcert -install' to trust its CA)"
+                else
+                    log_error "Failed to install mkcert. Please install manually."
+                fi
             fi
-            log_success "mkcert installed (run 'mkcert -install' to trust its CA)"
         fi
     fi
 
@@ -666,12 +776,10 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install kubectl
             elif [[ "${OS}" == "linux" ]]; then
-                KUBECTL_URL="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${GO_ARCH}/kubectl"
-
-                if verify_download_url "$KUBECTL_URL" "kubectl ${KUBECTL_VERSION} for Linux ${GO_ARCH}"; then
-                    sudo curl -fsSL "$KUBECTL_URL" -o /usr/local/bin/kubectl
-                    sudo chmod +x /usr/local/bin/kubectl
-                else
+                # dl.k8s.io publishes the digest as `<binary>.sha256`, not `.sha256sum`.
+                if ! install_release_binary \
+                    "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${GO_ARCH}/kubectl" \
+                    sidecar:sha256:.sha256 kubectl "kubectl ${KUBECTL_VERSION} for Linux ${GO_ARCH}"; then
                     log_error "Failed to install kubectl. Please install manually."
                     exit 1
                 fi
@@ -730,7 +838,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 GRYPE_SCRIPT_URL="https://raw.githubusercontent.com/anchore/grype/main/install.sh"
                 GRYPE_TMP=$(mktemp -d)
                 curl -fsSL "$GRYPE_SCRIPT_URL" -o "$GRYPE_TMP/install.sh"
-                verify_sha256 "$GRYPE_TMP/install.sh" "${GRYPE_INSTALL_SHA256:-SKIP}"
+                verify_sha256 "$GRYPE_TMP/install.sh" "${GRYPE_INSTALL_SHA256}"
                 # The anchore install.sh queries github.com for release metadata,
                 # which intermittently 502s. Retry with quadratic backoff so a brief
                 # CDN blip does not fail the whole CI step.
@@ -763,17 +871,18 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install cosign
+                log_success "cosign installed"
             elif [[ "${OS}" == "linux" ]]; then
                 COSIGN_VER="${COSIGN_VERSION#v}"
-                COSIGN_URL="https://github.com/sigstore/cosign/releases/download/v${COSIGN_VER}/cosign-linux-${GO_ARCH}"
-                if verify_download_url "$COSIGN_URL" "cosign ${COSIGN_VERSION} for Linux ${GO_ARCH}"; then
-                    sudo curl -fsSL "$COSIGN_URL" -o /usr/local/bin/cosign
-                    sudo chmod +x /usr/local/bin/cosign
+                COSIGN_RELEASE="https://github.com/sigstore/cosign/releases/download/v${COSIGN_VER}"
+                if install_release_binary "${COSIGN_RELEASE}/cosign-linux-${GO_ARCH}" \
+                    "manifest:${COSIGN_RELEASE}/cosign_checksums.txt" \
+                    cosign "cosign ${COSIGN_VERSION} for Linux ${GO_ARCH}"; then
+                    log_success "cosign installed"
                 else
                     log_error "Failed to install cosign. Please install manually."
                 fi
             fi
-            log_success "cosign installed"
         fi
     fi
 
@@ -785,21 +894,18 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install syft
+                log_success "syft installed"
             elif [[ "${OS}" == "linux" ]]; then
                 SYFT_VER="${SYFT_VERSION#v}"
-                SYFT_TMP=$(mktemp -d)
-                SYFT_URL="https://github.com/anchore/syft/releases/download/v${SYFT_VER}/syft_${SYFT_VER}_linux_${GO_ARCH}.tar.gz"
-                if verify_download_url "$SYFT_URL" "syft ${SYFT_VERSION} for Linux ${GO_ARCH}"; then
-                    curl -fsSL "$SYFT_URL" | tar -xzC "$SYFT_TMP"
-                    sudo mv "$SYFT_TMP/syft" /usr/local/bin/syft
-                    sudo chmod +x /usr/local/bin/syft
-                    rm -rf "$SYFT_TMP"
+                SYFT_RELEASE="https://github.com/anchore/syft/releases/download/v${SYFT_VER}"
+                if install_release_binary "${SYFT_RELEASE}/syft_${SYFT_VER}_linux_${GO_ARCH}.tar.gz" \
+                    "manifest:${SYFT_RELEASE}/syft_${SYFT_VER}_checksums.txt" \
+                    syft "syft ${SYFT_VERSION} for Linux ${GO_ARCH}"; then
+                    log_success "syft installed"
                 else
                     log_error "Failed to install syft. Please install manually."
-                    rm -rf "$SYFT_TMP"
                 fi
             fi
-            log_success "syft installed"
         fi
     fi
 
@@ -813,21 +919,18 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install oras
+                log_success "oras installed"
             elif [[ "${OS}" == "linux" ]]; then
                 ORAS_VER="${ORAS_VERSION#v}"
-                ORAS_TMP=$(mktemp -d)
-                ORAS_URL="https://github.com/oras-project/oras/releases/download/v${ORAS_VER}/oras_${ORAS_VER}_linux_${GO_ARCH}.tar.gz"
-                if verify_download_url "$ORAS_URL" "oras ${ORAS_VERSION} for Linux ${GO_ARCH}"; then
-                    curl -fsSL "$ORAS_URL" | tar -xzC "$ORAS_TMP"
-                    sudo mv "$ORAS_TMP/oras" /usr/local/bin/oras
-                    sudo chmod +x /usr/local/bin/oras
-                    rm -rf "$ORAS_TMP"
+                ORAS_RELEASE="https://github.com/oras-project/oras/releases/download/v${ORAS_VER}"
+                if install_release_binary "${ORAS_RELEASE}/oras_${ORAS_VER}_linux_${GO_ARCH}.tar.gz" \
+                    "manifest:${ORAS_RELEASE}/oras_${ORAS_VER}_checksums.txt" \
+                    oras "oras ${ORAS_VERSION} for Linux ${GO_ARCH}"; then
+                    log_success "oras installed"
                 else
                     log_error "Failed to install oras. Please install manually."
-                    rm -rf "$ORAS_TMP"
                 fi
             fi
-            log_success "oras installed"
         fi
     fi
 
@@ -839,24 +942,21 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install tilt
+                log_success "Tilt installed"
             elif [[ "${OS}" == "linux" ]]; then
-                # Install to a temp directory first to avoid "file exists" errors
-                TILT_TMP=$(mktemp -d)
-                TILT_URL="https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux.x86_64.tar.gz"
+                TILT_RELEASE="https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}"
+                TILT_ARCH="x86_64"
                 if [[ "${GO_ARCH}" == "arm64" ]]; then
-                    TILT_URL="https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux.arm64.tar.gz"
+                    TILT_ARCH="arm64"
                 fi
-                if verify_download_url "$TILT_URL" "tilt ${TILT_VERSION} for Linux ${GO_ARCH}"; then
-                    curl -fsSL "$TILT_URL" | tar -xzC "$TILT_TMP"
-                    sudo mv "$TILT_TMP/tilt" /usr/local/bin/tilt
-                    sudo chmod +x /usr/local/bin/tilt
-                    rm -rf "$TILT_TMP"
+                if install_release_binary "${TILT_RELEASE}/tilt.${TILT_VERSION}.linux.${TILT_ARCH}.tar.gz" \
+                    "manifest:${TILT_RELEASE}/checksums.txt" \
+                    tilt "tilt ${TILT_VERSION} for Linux ${GO_ARCH}"; then
+                    log_success "Tilt installed"
                 else
                     log_error "Failed to install Tilt. Please install manually."
-                    rm -rf "$TILT_TMP"
                 fi
             fi
-            log_success "Tilt installed"
         fi
     fi
 
@@ -868,16 +968,15 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install kind
+                log_success "Kind installed"
             elif [[ "${OS}" == "linux" ]]; then
-                KIND_URL="https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-${GO_ARCH}"
-                if verify_download_url "$KIND_URL" "kind ${KIND_VERSION} for Linux ${GO_ARCH}"; then
-                    sudo curl -Lo /usr/local/bin/kind "$KIND_URL"
-                    sudo chmod +x /usr/local/bin/kind
+                if install_release_binary "https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-${GO_ARCH}" \
+                    sidecar:sha256 kind "kind ${KIND_VERSION} for Linux ${GO_ARCH}"; then
+                    log_success "Kind installed"
                 else
                     log_error "Failed to install kind. Please install manually."
                 fi
             fi
-            log_success "Kind installed"
         fi
     fi
 
@@ -904,22 +1003,9 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 fi
                 CTLPTL_TAR="ctlptl.${CTLPTL_VERSION}.linux.${CTLPTL_ASSET_ARCH}.tar.gz"
                 CTLPTL_BASE="https://github.com/tilt-dev/ctlptl/releases/download/v${CTLPTL_VERSION}"
-                if verify_download_url "${CTLPTL_BASE}/${CTLPTL_TAR}" "ctlptl ${CTLPTL_VERSION} for Linux ${GO_ARCH}"; then
-                    CTLPTL_TMP=$(mktemp -d)
-                    curl -fsSL -o "${CTLPTL_TMP}/${CTLPTL_TAR}" "${CTLPTL_BASE}/${CTLPTL_TAR}"
-                    curl -fsSL -o "${CTLPTL_TMP}/checksums.txt" "${CTLPTL_BASE}/checksums.txt"
-                    CTLPTL_EXPECTED=$(grep "  ${CTLPTL_TAR}$" "${CTLPTL_TMP}/checksums.txt" | awk '{print $1}')
-                    if [[ -n "${CTLPTL_EXPECTED}" ]]; then
-                        verify_sha256 "${CTLPTL_TMP}/${CTLPTL_TAR}" "${CTLPTL_EXPECTED}"
-                    else
-                        log_error "Could not extract checksum for ${CTLPTL_TAR} from checksums file; aborting install"
-                        rm -rf "$CTLPTL_TMP"
-                        exit 1
-                    fi
-                    tar -xzC "$CTLPTL_TMP" -f "${CTLPTL_TMP}/${CTLPTL_TAR}"
-                    sudo mv "$CTLPTL_TMP/ctlptl" /usr/local/bin/ctlptl
-                    sudo chmod +x /usr/local/bin/ctlptl
-                    rm -rf "$CTLPTL_TMP"
+                if install_release_binary "${CTLPTL_BASE}/${CTLPTL_TAR}" \
+                    "manifest:${CTLPTL_BASE}/checksums.txt" \
+                    ctlptl "ctlptl ${CTLPTL_VERSION} for Linux ${GO_ARCH}"; then
                     log_success "ctlptl installed"
                 else
                     log_error "Failed to install ctlptl. Please install manually."
@@ -935,22 +1021,16 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         log_info "Installing hauler ${HAULER_VERSION} (required for mirror E2E)..."
         if prompt_continue; then
             HAULER_VER="${HAULER_VERSION#v}"
-            HAULER_TMP=$(mktemp -d)
-            HAULER_TAR="hauler_${HAULER_VER}_linux_${GO_ARCH}.tar.gz"
-            HAULER_URL="https://github.com/hauler-dev/hauler/releases/download/v${HAULER_VER}/${HAULER_TAR}"
+            HAULER_RELEASE="https://github.com/hauler-dev/hauler/releases/download/v${HAULER_VER}"
+            HAULER_OS="linux"
             if [[ "${OS}" == "darwin" ]]; then
-                HAULER_TAR="hauler_${HAULER_VER}_darwin_${GO_ARCH}.tar.gz"
-                HAULER_URL="https://github.com/hauler-dev/hauler/releases/download/v${HAULER_VER}/${HAULER_TAR}"
+                HAULER_OS="darwin"
             fi
-            if verify_download_url "$HAULER_URL" "hauler ${HAULER_VERSION} for ${OS} ${GO_ARCH}"; then
-                curl -fsSL -o "${HAULER_TMP}/${HAULER_TAR}" "${HAULER_URL}"
-                tar -xzf "${HAULER_TMP}/${HAULER_TAR}" -C "${HAULER_TMP}"
-                sudo mv "${HAULER_TMP}/hauler" /usr/local/bin/hauler
-                sudo chmod +x /usr/local/bin/hauler
-                rm -rf "${HAULER_TMP}"
+            if install_release_binary "${HAULER_RELEASE}/hauler_${HAULER_VER}_${HAULER_OS}_${GO_ARCH}.tar.gz" \
+                "manifest:${HAULER_RELEASE}/hauler_${HAULER_VER}_checksums.txt" \
+                hauler "hauler ${HAULER_VERSION} for ${OS} ${GO_ARCH}"; then
                 log_success "hauler installed"
             else
-                rm -rf "${HAULER_TMP}"
                 log_error "Failed to install hauler (required for mirror E2E). Download URL not accessible."
                 exit 1
             fi
@@ -964,28 +1044,15 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         log_info "Installing zarf ${ZARF_VERSION} (required for mirror E2E)..."
         if prompt_continue; then
             ZARF_VER="${ZARF_VERSION#v}"
-            ZARF_TMP=$(mktemp -d)
             ZARF_OS="$(uname -s)"
-            ZARF_BIN="zarf_v${ZARF_VER}_${ZARF_OS}_${GO_ARCH}"
             ZARF_BASE="https://github.com/zarf-dev/zarf/releases/download/v${ZARF_VER}"
-            if verify_download_url "${ZARF_BASE}/${ZARF_BIN}" "zarf ${ZARF_VERSION} for ${OS} ${GO_ARCH}"; then
-                curl -fsSL -o "${ZARF_TMP}/zarf" "${ZARF_BASE}/${ZARF_BIN}"
-                # Verify checksum (anchor grep to exact filename to avoid SBOM matches)
-                curl -fsSL -o "${ZARF_TMP}/checksums.txt" "${ZARF_BASE}/checksums.txt"
-                ZARF_EXPECTED=$(grep "  ${ZARF_BIN}$" "${ZARF_TMP}/checksums.txt" | awk '{print $1}')
-                if [[ -n "${ZARF_EXPECTED}" ]]; then
-                    verify_sha256 "${ZARF_TMP}/zarf" "${ZARF_EXPECTED}"
-                else
-                    log_error "Could not extract checksum for ${ZARF_BIN} from checksums file; aborting install"
-                    rm -rf "${ZARF_TMP}"
-                    exit 1
-                fi
-                sudo mv "${ZARF_TMP}/zarf" /usr/local/bin/zarf
-                sudo chmod +x /usr/local/bin/zarf
-                rm -rf "${ZARF_TMP}"
+            # A bare binary rather than an archive. The checksums file also
+            # lists SBOMs named after it, which the exact-name lookup skips.
+            if install_release_binary "${ZARF_BASE}/zarf_v${ZARF_VER}_${ZARF_OS}_${GO_ARCH}" \
+                "manifest:${ZARF_BASE}/checksums.txt" \
+                zarf "zarf ${ZARF_VERSION} for ${OS} ${GO_ARCH}"; then
                 log_success "zarf installed"
             else
-                rm -rf "${ZARF_TMP}"
                 log_error "Failed to install zarf (required for mirror E2E). Download URL not accessible."
                 exit 1
             fi
@@ -1000,26 +1067,24 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install ko
+                log_success "ko installed"
             elif [[ "${OS}" == "linux" ]]; then
                 # Install from binary release (go install has module path issues)
                 # Strip 'v' prefix for URL construction (version in .settings.yaml includes 'v')
                 KO_VERSION_NUM="${KO_VERSION#v}"
-                KO_TMP=$(mktemp -d)
-                KO_URL="https://github.com/ko-build/ko/releases/download/v${KO_VERSION_NUM}/ko_${KO_VERSION_NUM}_Linux_x86_64.tar.gz"
+                KO_RELEASE="https://github.com/ko-build/ko/releases/download/v${KO_VERSION_NUM}"
+                KO_ARCH="x86_64"
                 if [[ "${GO_ARCH}" == "arm64" ]]; then
-                    KO_URL="https://github.com/ko-build/ko/releases/download/v${KO_VERSION_NUM}/ko_${KO_VERSION_NUM}_Linux_arm64.tar.gz"
+                    KO_ARCH="arm64"
                 fi
-                if verify_download_url "$KO_URL" "ko ${KO_VERSION} for Linux ${GO_ARCH}"; then
-                    curl -fsSL "$KO_URL" | tar -xzC "$KO_TMP"
-                    sudo mv "$KO_TMP/ko" /usr/local/bin/ko
-                    sudo chmod +x /usr/local/bin/ko
-                    rm -rf "$KO_TMP"
+                if install_release_binary "${KO_RELEASE}/ko_${KO_VERSION_NUM}_Linux_${KO_ARCH}.tar.gz" \
+                    "manifest:${KO_RELEASE}/checksums.txt" \
+                    ko "ko ${KO_VERSION} for Linux ${GO_ARCH}"; then
+                    log_success "ko installed"
                 else
                     log_error "Failed to install ko. Please install manually."
-                    rm -rf "$KO_TMP"
                 fi
             fi
-            log_success "ko installed"
         fi
     fi
 
@@ -1031,24 +1096,22 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install crane
+                log_success "crane installed"
             elif [[ "${OS}" == "linux" ]]; then
                 CRANE_VER="${CRANE_VERSION#v}"
-                CRANE_TMP=$(mktemp -d)
-                CRANE_URL="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VER}/go-containerregistry_Linux_x86_64.tar.gz"
+                CRANE_RELEASE="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VER}"
+                CRANE_ARCH="x86_64"
                 if [[ "${GO_ARCH}" == "arm64" ]]; then
-                    CRANE_URL="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VER}/go-containerregistry_Linux_arm64.tar.gz"
+                    CRANE_ARCH="arm64"
                 fi
-                if verify_download_url "$CRANE_URL" "crane ${CRANE_VERSION} for Linux ${GO_ARCH}"; then
-                    curl -fsSL "$CRANE_URL" | tar -xzC "$CRANE_TMP"
-                    sudo mv "$CRANE_TMP/crane" /usr/local/bin/crane
-                    sudo chmod +x /usr/local/bin/crane
-                    rm -rf "$CRANE_TMP"
+                if install_release_binary "${CRANE_RELEASE}/go-containerregistry_Linux_${CRANE_ARCH}.tar.gz" \
+                    "manifest:${CRANE_RELEASE}/checksums.txt" \
+                    crane "crane ${CRANE_VERSION} for Linux ${GO_ARCH}"; then
+                    log_success "crane installed"
                 else
                     log_error "Failed to install crane. Please install manually."
-                    rm -rf "$CRANE_TMP"
                 fi
             fi
-            log_success "crane installed"
         fi
     fi
 
@@ -1070,22 +1133,9 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 fi
                 GORELEASER_TAR="goreleaser_Linux_${GORELEASER_ASSET_ARCH}.tar.gz"
                 GORELEASER_BASE="https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}"
-                if verify_download_url "${GORELEASER_BASE}/${GORELEASER_TAR}" "goreleaser ${GORELEASER_VERSION} for Linux ${GO_ARCH}"; then
-                    GORELEASER_TMP=$(mktemp -d)
-                    curl -fsSL -o "${GORELEASER_TMP}/${GORELEASER_TAR}" "${GORELEASER_BASE}/${GORELEASER_TAR}"
-                    curl -fsSL -o "${GORELEASER_TMP}/checksums.txt" "${GORELEASER_BASE}/checksums.txt"
-                    GORELEASER_EXPECTED=$(grep "  ${GORELEASER_TAR}$" "${GORELEASER_TMP}/checksums.txt" | awk '{print $1}')
-                    if [[ -n "${GORELEASER_EXPECTED}" ]]; then
-                        verify_sha256 "${GORELEASER_TMP}/${GORELEASER_TAR}" "${GORELEASER_EXPECTED}"
-                    else
-                        log_error "Could not extract checksum for ${GORELEASER_TAR} from checksums file; aborting install"
-                        rm -rf "$GORELEASER_TMP"
-                        exit 1
-                    fi
-                    tar -xzC "$GORELEASER_TMP" -f "${GORELEASER_TMP}/${GORELEASER_TAR}"
-                    sudo mv "$GORELEASER_TMP/goreleaser" /usr/local/bin/goreleaser
-                    sudo chmod +x /usr/local/bin/goreleaser
-                    rm -rf "$GORELEASER_TMP"
+                if install_release_binary "${GORELEASER_BASE}/${GORELEASER_TAR}" \
+                    "manifest:${GORELEASER_BASE}/checksums.txt" \
+                    goreleaser "goreleaser ${GORELEASER_VERSION} for Linux ${GO_ARCH}"; then
                     log_success "goreleaser installed"
                 else
                     log_error "Failed to install goreleaser. Please install manually."
@@ -1102,23 +1152,23 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install git-cliff
+                log_success "git-cliff installed"
             elif [[ "${OS}" == "linux" ]]; then
-                GIT_CLIFF_TMP=$(mktemp -d)
-                GIT_CLIFF_URL="https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                GIT_CLIFF_ARCH="x86_64"
                 if [[ "${GO_ARCH}" == "arm64" ]]; then
-                    GIT_CLIFF_URL="https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+                    GIT_CLIFF_ARCH="aarch64"
                 fi
-                if verify_download_url "$GIT_CLIFF_URL" "git-cliff ${GIT_CLIFF_VERSION} for Linux ${GO_ARCH}"; then
-                    curl -fsSL "$GIT_CLIFF_URL" | tar -xzC "$GIT_CLIFF_TMP"
-                    sudo mv "$GIT_CLIFF_TMP/git-cliff-${GIT_CLIFF_VERSION}"*/git-cliff /usr/local/bin/git-cliff
-                    sudo chmod +x /usr/local/bin/git-cliff
-                    rm -rf "$GIT_CLIFF_TMP"
+                # git-cliff publishes a per-asset SHA-512 rather than a combined
+                # checksums file, and nests the binary in a versioned directory.
+                if install_release_binary \
+                    "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-${GIT_CLIFF_ARCH}-unknown-linux-gnu.tar.gz" \
+                    sidecar:sha512 git-cliff "git-cliff ${GIT_CLIFF_VERSION} for Linux ${GO_ARCH}" \
+                    "git-cliff-${GIT_CLIFF_VERSION}*/git-cliff"; then
+                    log_success "git-cliff installed"
                 else
                     log_error "Failed to install git-cliff. Please install manually."
-                    rm -rf "$GIT_CLIFF_TMP"
                 fi
             fi
-            log_success "git-cliff installed"
         fi
     fi
 
@@ -1143,7 +1193,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
             GOLANGCI_SCRIPT_URL="https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_LINT_VERSION}/install.sh"
             GOLANGCI_TMP=$(mktemp)
             curl -fsSL "$GOLANGCI_SCRIPT_URL" -o "$GOLANGCI_TMP"
-            verify_sha256 "$GOLANGCI_TMP" "${GOLANGCI_LINT_INSTALL_SHA256:-SKIP}"
+            verify_sha256 "$GOLANGCI_TMP" "${GOLANGCI_LINT_INSTALL_SHA256}"
             sh "$GOLANGCI_TMP" -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
             rm -f "$GOLANGCI_TMP"
             log_success "golangci-lint installed"
@@ -1195,22 +1245,9 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
             OASDIFF_VERSION_NUM="${OASDIFF_VERSION#v}"
             OASDIFF_TAR="oasdiff_${OASDIFF_VERSION_NUM}_linux_${GO_ARCH}.tar.gz"
             OASDIFF_BASE="https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION_NUM}"
-            if verify_download_url "${OASDIFF_BASE}/${OASDIFF_TAR}" "oasdiff ${OASDIFF_VERSION} for Linux ${GO_ARCH}"; then
-                OASDIFF_TMP=$(mktemp -d)
-                curl -fsSL -o "${OASDIFF_TMP}/${OASDIFF_TAR}" "${OASDIFF_BASE}/${OASDIFF_TAR}"
-                curl -fsSL -o "${OASDIFF_TMP}/checksums.txt" "${OASDIFF_BASE}/checksums.txt"
-                OASDIFF_EXPECTED=$(grep "  ${OASDIFF_TAR}$" "${OASDIFF_TMP}/checksums.txt" | awk '{print $1}')
-                if [[ -n "${OASDIFF_EXPECTED}" ]]; then
-                    verify_sha256 "${OASDIFF_TMP}/${OASDIFF_TAR}" "${OASDIFF_EXPECTED}"
-                else
-                    log_error "Could not extract checksum for ${OASDIFF_TAR} from checksums file; aborting install"
-                    rm -rf "$OASDIFF_TMP"
-                    exit 1
-                fi
-                tar -xzC "$OASDIFF_TMP" -f "${OASDIFF_TMP}/${OASDIFF_TAR}"
-                sudo mv "$OASDIFF_TMP/oasdiff" /usr/local/bin/oasdiff
-                sudo chmod +x /usr/local/bin/oasdiff
-                rm -rf "$OASDIFF_TMP"
+            if install_release_binary "${OASDIFF_BASE}/${OASDIFF_TAR}" \
+                "manifest:${OASDIFF_BASE}/checksums.txt" \
+                oasdiff "oasdiff ${OASDIFF_VERSION} for Linux ${GO_ARCH}"; then
                 log_success "oasdiff ${OASDIFF_VERSION} installed"
             else
                 log_error "Failed to install oasdiff. Please install manually."
@@ -1256,30 +1293,17 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
             esac
             ADDLICENSE_TAR="addlicense_${ADDLICENSE_VERSION}_${ADDLICENSE_OS}_${ARCH}.tar.gz"
             ADDLICENSE_BASE="https://github.com/google/addlicense/releases/download/${ADDLICENSE_VERSION}"
-            if verify_download_url "${ADDLICENSE_BASE}/${ADDLICENSE_TAR}" "addlicense ${ADDLICENSE_VERSION} for ${ADDLICENSE_OS} ${ARCH}"; then
-                ADDLICENSE_TMP=$(mktemp -d)
-                curl -fsSL -o "${ADDLICENSE_TMP}/${ADDLICENSE_TAR}" "${ADDLICENSE_BASE}/${ADDLICENSE_TAR}"
-                # Prefer the committed pin on the one platform it covers; fall
-                # back to the release manifest elsewhere. .settings.yaml carries
-                # linux/amd64 only because that is what the CI action needs.
-                if [[ "${OS}" == "linux" && "${GO_ARCH}" == "amd64" &&
-                      "${ADDLICENSE_SHA256_LINUX_AMD64}" =~ ^[0-9a-f]{64}$ ]]; then
-                    ADDLICENSE_EXPECTED="${ADDLICENSE_SHA256_LINUX_AMD64}"
-                else
-                    curl -fsSL -o "${ADDLICENSE_TMP}/checksums.txt" "${ADDLICENSE_BASE}/checksums.txt"
-                    ADDLICENSE_EXPECTED=$(grep "  ${ADDLICENSE_TAR}$" "${ADDLICENSE_TMP}/checksums.txt" | awk '{print $1}')
-                fi
-                if [[ -n "${ADDLICENSE_EXPECTED}" ]]; then
-                    verify_sha256 "${ADDLICENSE_TMP}/${ADDLICENSE_TAR}" "${ADDLICENSE_EXPECTED}"
-                else
-                    log_error "Could not extract checksum for ${ADDLICENSE_TAR} from checksums file; aborting install"
-                    rm -rf "$ADDLICENSE_TMP"
-                    exit 1
-                fi
-                tar -xzC "$ADDLICENSE_TMP" -f "${ADDLICENSE_TMP}/${ADDLICENSE_TAR}"
-                sudo mv "$ADDLICENSE_TMP/addlicense" /usr/local/bin/addlicense
-                sudo chmod +x /usr/local/bin/addlicense
-                rm -rf "$ADDLICENSE_TMP"
+            # Prefer the committed pin on the one platform it covers; fall back to
+            # the release manifest elsewhere. .settings.yaml carries linux/amd64
+            # only because that is what the CI action needs.
+            if [[ "${OS}" == "linux" && "${GO_ARCH}" == "amd64" &&
+                  "${ADDLICENSE_SHA256_LINUX_AMD64}" =~ ^[0-9a-f]{64}$ ]]; then
+                ADDLICENSE_CHECKSUM="pinned:${ADDLICENSE_SHA256_LINUX_AMD64}"
+            else
+                ADDLICENSE_CHECKSUM="manifest:${ADDLICENSE_BASE}/checksums.txt"
+            fi
+            if install_release_binary "${ADDLICENSE_BASE}/${ADDLICENSE_TAR}" "${ADDLICENSE_CHECKSUM}" \
+                addlicense "addlicense ${ADDLICENSE_VERSION} for ${ADDLICENSE_OS} ${ARCH}"; then
                 log_success "addlicense ${ADDLICENSE_VERSION} installed"
             else
                 log_error "Failed to install addlicense. Please install manually."
