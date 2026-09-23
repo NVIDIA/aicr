@@ -62,6 +62,16 @@ criteria(service=, accelerator=, intent=, os=, platform=slurm):
             - service=eks, accelerator=h100, intent=training, os=ubuntu
             - service=gke, accelerator=gb200, intent=training, os=cos
             - service=gke, accelerator=h100, intent=training, os=cos
+criteria(service=, accelerator=, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - service=eks, accelerator=gb200, intent=inference
+            - service=eks, accelerator=gb300, intent=inference
+            - service=eks, accelerator=h100, intent=inference
+            - service=eks, accelerator=rtx-pro-6000, intent=inference
 criteria(service=, accelerator=, intent=, os=cos, platform=):
     outcome: error
     uncovered:
@@ -322,6 +332,25 @@ criteria(service=, accelerator=, intent=inference, os=, platform=nim):
             - service=ocp
             - service=eks, accelerator=h100, os=ubuntu
             - service=eks, accelerator=rtx-pro-6000, os=ubuntu
+criteria(service=, accelerator=, intent=inference, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=kind
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=eks, accelerator=gb200
+            - service=eks, accelerator=gb300
+            - service=eks, accelerator=h100
+            - service=eks, accelerator=rtx-pro-6000
 criteria(service=, accelerator=, intent=inference, os=cos, platform=):
     outcome: error
     uncovered:
@@ -1164,6 +1193,13 @@ criteria(service=, accelerator=gb200, intent=, os=, platform=slurm):
         platform:
             - service=eks, intent=training, os=ubuntu
             - service=gke, intent=training, os=cos
+criteria(service=, accelerator=gb200, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - service=eks, intent=inference
 criteria(service=, accelerator=gb200, intent=, os=cos, platform=):
     outcome: error
     uncovered:
@@ -1296,6 +1332,22 @@ criteria(service=, accelerator=gb200, intent=inference, os=, platform=dynamo):
             - service=eks, os=ubuntu
             - service=gke, os=cos
             - service=oke, os=ubuntu
+criteria(service=, accelerator=gb200, intent=inference, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=kind
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=eks
 criteria(service=, accelerator=gb200, intent=inference, os=cos, platform=):
     outcome: error
     uncovered:
@@ -1610,6 +1662,13 @@ criteria(service=, accelerator=gb300, intent=, os=, platform=slurm):
     validCompletions:
         platform:
             - service=eks, intent=training, os=ubuntu
+criteria(service=, accelerator=gb300, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - service=eks, intent=inference
 criteria(service=, accelerator=gb300, intent=, os=ubuntu, platform=):
     outcome: error
     uncovered:
@@ -1688,6 +1747,22 @@ criteria(service=, accelerator=gb300, intent=inference, os=, platform=dynamo):
             - service=oke, os=ol
         platform:
             - service=eks, os=ubuntu
+criteria(service=, accelerator=gb300, intent=inference, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=kind
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=eks
 criteria(service=, accelerator=gb300, intent=inference, os=ubuntu, platform=):
     outcome: error
     uncovered:
@@ -1883,6 +1958,13 @@ criteria(service=, accelerator=h100, intent=, os=, platform=slurm):
             - service=aks, intent=training, os=ubuntu
             - service=eks, intent=training, os=ubuntu
             - service=gke, intent=training, os=cos
+criteria(service=, accelerator=h100, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - service=eks, intent=inference
 criteria(service=, accelerator=h100, intent=, os=cos, platform=):
     outcome: error
     uncovered:
@@ -2043,6 +2125,22 @@ criteria(service=, accelerator=h100, intent=inference, os=, platform=nim):
         platform:
             - service=ocp
             - service=eks, os=ubuntu
+criteria(service=, accelerator=h100, intent=inference, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=kind
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=eks
 criteria(service=, accelerator=h100, intent=inference, os=cos, platform=):
     outcome: error
     uncovered:
@@ -2571,6 +2669,13 @@ criteria(service=, accelerator=rtx-pro-6000, intent=, os=, platform=nim):
         platform:
             - service=ocp, intent=inference
             - service=eks, intent=inference, os=ubuntu
+criteria(service=, accelerator=rtx-pro-6000, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - service=eks, intent=inference
 criteria(service=, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=):
     outcome: error
     uncovered:
@@ -2674,6 +2779,22 @@ criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=, platform=nim
         platform:
             - service=ocp
             - service=eks, os=ubuntu
+criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=kind
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=eks
 criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=):
     outcome: error
     uncovered:
@@ -3401,6 +3522,16 @@ criteria(service=eks, accelerator=, intent=, os=, platform=slurm):
             - accelerator=gb200, intent=training, os=ubuntu
             - accelerator=gb300, intent=training, os=ubuntu
             - accelerator=h100, intent=training, os=ubuntu
+criteria(service=eks, accelerator=, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - accelerator=gb200, intent=inference
+            - accelerator=gb300, intent=inference
+            - accelerator=h100, intent=inference
+            - accelerator=rtx-pro-6000, intent=inference
 criteria(service=eks, accelerator=, intent=, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=, intent=, os=ubuntu, platform=dynamo):
@@ -3462,6 +3593,16 @@ criteria(service=eks, accelerator=, intent=inference, os=, platform=nim):
         platform:
             - accelerator=h100, os=ubuntu
             - accelerator=rtx-pro-6000, os=ubuntu
+criteria(service=eks, accelerator=, intent=inference, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - accelerator=gb200
+            - accelerator=gb300
+            - accelerator=h100
+            - accelerator=rtx-pro-6000
 criteria(service=eks, accelerator=, intent=inference, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
@@ -3582,6 +3723,13 @@ criteria(service=eks, accelerator=gb200, intent=, os=, platform=slurm):
     validCompletions:
         platform:
             - intent=training, os=ubuntu
+criteria(service=eks, accelerator=gb200, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - intent=inference
 criteria(service=eks, accelerator=gb200, intent=, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=gb200, intent=, os=ubuntu, platform=dynamo):
@@ -3614,6 +3762,8 @@ criteria(service=eks, accelerator=gb200, intent=inference, os=, platform=dynamo)
     validCompletions:
         platform:
             - os=ubuntu
+criteria(service=eks, accelerator=gb200, intent=inference, os=amazonlinux, platform=):
+    outcome: success
 criteria(service=eks, accelerator=gb200, intent=inference, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=gb200, intent=inference, os=ubuntu, platform=dynamo):
@@ -3663,6 +3813,13 @@ criteria(service=eks, accelerator=gb300, intent=, os=, platform=slurm):
     validCompletions:
         platform:
             - intent=training, os=ubuntu
+criteria(service=eks, accelerator=gb300, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - intent=inference
 criteria(service=eks, accelerator=gb300, intent=, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=gb300, intent=, os=ubuntu, platform=dynamo):
@@ -3695,6 +3852,8 @@ criteria(service=eks, accelerator=gb300, intent=inference, os=, platform=dynamo)
     validCompletions:
         platform:
             - os=ubuntu
+criteria(service=eks, accelerator=gb300, intent=inference, os=amazonlinux, platform=):
+    outcome: success
 criteria(service=eks, accelerator=gb300, intent=inference, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=gb300, intent=inference, os=ubuntu, platform=dynamo):
@@ -3751,6 +3910,13 @@ criteria(service=eks, accelerator=h100, intent=, os=, platform=slurm):
     validCompletions:
         platform:
             - intent=training, os=ubuntu
+criteria(service=eks, accelerator=h100, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - intent=inference
 criteria(service=eks, accelerator=h100, intent=, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=h100, intent=, os=ubuntu, platform=dynamo):
@@ -3797,6 +3963,8 @@ criteria(service=eks, accelerator=h100, intent=inference, os=, platform=nim):
     validCompletions:
         platform:
             - os=ubuntu
+criteria(service=eks, accelerator=h100, intent=inference, os=amazonlinux, platform=):
+    outcome: success
 criteria(service=eks, accelerator=h100, intent=inference, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=h100, intent=inference, os=ubuntu, platform=dynamo):
@@ -3863,6 +4031,13 @@ criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=, platform=nim):
     validCompletions:
         platform:
             - intent=inference, os=ubuntu
+criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=amazonlinux, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - intent=inference
 criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=dynamo):
@@ -3902,6 +4077,8 @@ criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=, platform=
     validCompletions:
         platform:
             - os=ubuntu
+criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=amazonlinux, platform=):
+    outcome: success
 criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=dynamo):
