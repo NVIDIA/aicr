@@ -34,6 +34,8 @@ spec:
     - os-amazonlinux
 
   constraints:
+    # AWS does not support P6e-GB200 UltraServer instances on EKS versions
+    # before 1.33; this floor is higher than the base chain's 1.32.4.
     - name: K8s.server.version
       value: ">= 1.33"
 
