@@ -77,27 +77,106 @@ func TestProjectGKEGPUPools(t *testing.T) {
 			wantPools:  "gpu1=Installed",
 		},
 		{
-			// Absent gpuDriverInstallationConfig follows the provider's
-			// documented default: GKE installs the driver.
-			name: "absent gpuDriverInstallationConfig defaults to installed",
+			// GKE's default behavior for an absent config depends on the
+			// cluster's control-plane version, so this must not assert
+			// Installed.
+			name: "absent gpuDriverInstallationConfig projects NotConfigured",
 			content: `[
 			  {"name":"gpu1","config":{"accelerators":[{"acceleratorType":"nvidia-h100-80gb"}]}}
 			]`,
-			wantDriver: "Installed",
+			wantDriver: "NotConfigured",
 			wantCount:  1,
-			wantPools:  "gpu1=Installed",
+			wantPools:  "gpu1=NotConfigured",
 		},
 		{
-			// Explicit unspecified is the same absent case.
-			name: "unspecified driver version defaults to installed",
+			// Explicit unspecified is likewise version-dependent, so it
+			// gets its own non-committal state, distinct from an absent
+			// config.
+			name: "unspecified driver version projects NotInstalled",
 			content: `[
 			  {"name":"gpu1","config":{"accelerators":[
+			    {"acceleratorType":"nvidia-h100-80gb","gpuDriverInstallationConfig":{"gpuDriverVersion":"GPU_DRIVER_VERSION_UNSPECIFIED"}}
+			  ]}}
+			]`,
+			wantDriver: "NotInstalled",
+			wantCount:  1,
+			wantPools:  "gpu1=NotInstalled",
+		},
+		{
+			name: "empty driver version projects NotInstalled",
+			content: `[
+			  {"name":"gpu1","config":{"accelerators":[
+			    {"acceleratorType":"nvidia-h100-80gb","gpuDriverInstallationConfig":{"gpuDriverVersion":""}}
+			  ]}}
+			]`,
+			wantDriver: "NotInstalled",
+			wantCount:  1,
+			wantPools:  "gpu1=NotInstalled",
+		},
+		{
+			// Below GKE's earliest documented default-install threshold,
+			// an absent config resolves to Disabled, not a fallback state.
+			name: "absent config on a pre-threshold version resolves to Disabled",
+			content: `[
+			  {"name":"gpu1","version":"1.28.5-gke.100000","config":{"accelerators":[
+			    {"acceleratorType":"nvidia-h100-80gb"}
+			  ]}}
+			]`,
+			wantDriver: "Disabled",
+			wantCount:  1,
+			wantPools:  "gpu1=Disabled",
+		},
+		{
+			// Between the two thresholds, a regular (non-auto-provisioned)
+			// pool already gets the default-install behavior.
+			name: "unspecified on a mid-range regular pool resolves to Installed",
+			content: `[
+			  {"name":"gpu1","version":"1.31.0-gke.500000","config":{"accelerators":[
 			    {"acceleratorType":"nvidia-h100-80gb","gpuDriverInstallationConfig":{"gpuDriverVersion":"GPU_DRIVER_VERSION_UNSPECIFIED"}}
 			  ]}}
 			]`,
 			wantDriver: "Installed",
 			wantCount:  1,
 			wantPools:  "gpu1=Installed",
+		},
+		{
+			// At version 1.31.0-gke.500000, GKE has not yet extended
+			// the default-install behavior to auto-provisioned pools.
+			name: "unspecified on a mid-range auto-provisioned pool resolves to Disabled",
+			content: `[
+			  {"name":"gpu1","version":"1.31.0-gke.500000","autoscaling":{"autoprovisioned":true},"config":{"accelerators":[
+			    {"acceleratorType":"nvidia-h100-80gb","gpuDriverInstallationConfig":{"gpuDriverVersion":"GPU_DRIVER_VERSION_UNSPECIFIED"}}
+			  ]}}
+			]`,
+			wantDriver: "Disabled",
+			wantCount:  1,
+			wantPools:  "gpu1=Disabled",
+		},
+		{
+			// At and after the later threshold, auto-provisioned pools
+			// also get the default-install behavior.
+			name: "unspecified on a post-NAP-threshold auto-provisioned pool resolves to Installed",
+			content: `[
+			  {"name":"gpu1","version":"1.33.0-gke.999999","autoscaling":{"autoprovisioned":true},"config":{"accelerators":[
+			    {"acceleratorType":"nvidia-h100-80gb","gpuDriverInstallationConfig":{"gpuDriverVersion":"GPU_DRIVER_VERSION_UNSPECIFIED"}}
+			  ]}}
+			]`,
+			wantDriver: "Installed",
+			wantCount:  1,
+			wantPools:  "gpu1=Installed",
+		},
+		{
+			// An unparseable version can't be resolved against the
+			// thresholds, so this must not guess.
+			name: "unparseable version falls back to NotConfigured",
+			content: `[
+			  {"name":"gpu1","version":"not-a-version","config":{"accelerators":[
+			    {"acceleratorType":"nvidia-h100-80gb"}
+			  ]}}
+			]`,
+			wantDriver: "NotConfigured",
+			wantCount:  1,
+			wantPools:  "gpu1=NotConfigured",
 		},
 		{
 			// Disagreeing pools must not produce a clean value. This
@@ -269,5 +348,34 @@ func TestGKEReadingShapeMatchesProfileContract(t *testing.T) {
 	}
 	if got, _ := subtype.Data["gpu-driver-installation"].Any().(string); got != "Disabled" {
 		t.Fatalf("gpu-driver-installation = %v, want Disabled", subtype.Data["gpu-driver-installation"].Any())
+	}
+}
+
+func TestGKEOmittedDriverMode(t *testing.T) {
+	tests := []struct {
+		name            string
+		version         string
+		autoprovisioned bool
+		want            string
+	}{
+		{"below the earliest threshold", "1.28.5-gke.100000", false, gkeDriverInstallDisabled},
+		{"below the earliest threshold even when auto-provisioned", "1.28.5-gke.100000", true, gkeDriverInstallDisabled},
+		{"exactly the earliest threshold, regular pool", "1.30.1-gke.1156000", false, gkeDriverInstalled},
+		{"exactly the earliest threshold, auto-provisioned pool", "1.30.1-gke.1156000", true, gkeDriverInstallDisabled},
+		{"between the thresholds, regular pool", "1.31.0-gke.500000", false, gkeDriverInstalled},
+		{"between the thresholds, auto-provisioned pool", "1.31.0-gke.500000", true, gkeDriverInstallDisabled},
+		{"exactly the NAP threshold, auto-provisioned pool", "1.32.2-gke.1297000", true, gkeDriverInstalled},
+		{"past the NAP threshold, auto-provisioned pool", "1.33.0-gke.999999", true, gkeDriverInstalled},
+		{"unparseable version falls back", "not-a-version", false, "fallback"},
+		{"missing version falls back", "", true, "fallback"},
+		{"version without a gke build suffix falls back", "1.32.4", false, "fallback"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := gkeOmittedDriverMode(tt.version, tt.autoprovisioned, "fallback")
+			if got != tt.want {
+				t.Fatalf("gkeOmittedDriverMode(%q, %v) = %q, want %q", tt.version, tt.autoprovisioned, got, tt.want)
+			}
+		})
 	}
 }

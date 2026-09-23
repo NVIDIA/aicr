@@ -21,6 +21,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
+
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -32,14 +34,25 @@ import (
 const SubtypeGKEGPUPools = "gke-gpu-pools"
 
 const (
-	// gkeDriverInstallDisabled means every GPU pool's accelerators carry
-	// gpuDriverInstallationConfig.gpuDriverVersion=INSTALLATION_DISABLED.
+	// gkeDriverInstallDisabled means GKE never installs a driver, whether
+	// from an explicit INSTALLATION_DISABLED or an omitted, empty, or
+	// unspecified value that gkeOmittedDriverMode resolves to no-install.
 	gkeDriverInstallDisabled = "Disabled"
 
-	// gkeDriverInstalled means GKE installs the driver, matching an
-	// accelerator's gpuDriverVersion of DEFAULT, LATEST, or an absent
-	// field (the provider's documented default when unspecified).
+	// gkeDriverInstalled means GKE installs the driver, whether from an
+	// explicit DEFAULT or LATEST or an omitted, empty, or unspecified
+	// value that gkeOmittedDriverMode resolves to install-by-default.
 	gkeDriverInstalled = "Installed"
+
+	// gkeDriverNotConfigured is gkeOmittedDriverMode's fallback for a
+	// missing gpuDriverInstallationConfig when the pool's version can't
+	// be resolved to Installed or Disabled.
+	gkeDriverNotConfigured = "NotConfigured"
+
+	// gkeDriverNotInstalled is gkeOmittedDriverMode's fallback for an
+	// empty or unspecified gpuDriverVersion when the pool's version can't
+	// be resolved to Installed or Disabled.
+	gkeDriverNotInstalled = "NotInstalled"
 
 	// gkeDriverMixed marks GPU pools, or accelerators within one pool,
 	// that disagree. Disagreement matches no declared constraint, so
@@ -48,17 +61,52 @@ const (
 )
 
 // gkeGPUDriverVersionInstalled is the set of
-// gpuDriverInstallationConfig.gpuDriverVersion values meaning GKE installs
-// the driver, comprising the API's documented default (unspecified/empty)
-// and its two explicit installed modes.
+// gpuDriverInstallationConfig.gpuDriverVersion values GKE documents as
+// explicit installed modes.
 var gkeGPUDriverVersionInstalled = map[string]struct{}{
-	"":                               {},
-	"GPU_DRIVER_VERSION_UNSPECIFIED": {},
-	"DEFAULT":                        {},
-	"LATEST":                         {},
+	"DEFAULT": {},
+	"LATEST":  {},
 }
 
-const gkeGPUDriverVersionDisabled = "INSTALLATION_DISABLED"
+const (
+	gkeGPUDriverVersionDisabled    = "INSTALLATION_DISABLED"
+	gkeGPUDriverVersionUnspecified = "GPU_DRIVER_VERSION_UNSPECIFIED"
+)
+
+var (
+	// gkeOmittedDriverDefaultThreshold is the GKE version at and after
+	// which an omitted, empty, or unspecified gpuDriverVersion defaults
+	// to installing the driver. Below it, GKE installs no driver
+	// regardless of auto-provisioning.
+	gkeOmittedDriverDefaultThreshold = semver.MustParse("1.30.1-gke.1156000")
+
+	// gkeOmittedDriverDefaultThresholdNAP is the later version at and
+	// after which that default extends to node-auto-provisioned pools.
+	// Between the two thresholds, an auto-provisioned pool still gets no
+	// driver even at a version where a regular pool would.
+	gkeOmittedDriverDefaultThresholdNAP = semver.MustParse("1.32.2-gke.1297000")
+)
+
+// gkeOmittedDriverMode resolves GKE's documented default for an omitted,
+// empty, or unspecified gpuDriverVersion, using poolVersion and
+// autoprovisioned. It returns fallback if poolVersion can't be parsed, so
+// the result is never a guess.
+func gkeOmittedDriverMode(poolVersion string, autoprovisioned bool, fallback string) string {
+	v, err := semver.StrictNewVersion(poolVersion)
+	if err != nil || !strings.HasPrefix(v.Prerelease(), "gke.") {
+		// A real GKE node-pool version always carries a "gke.<build>"
+		// prerelease. Anything else can't be trusted against thresholds
+		// expressed in that same form.
+		return fallback
+	}
+	if v.LessThan(gkeOmittedDriverDefaultThreshold) {
+		return gkeDriverInstallDisabled
+	}
+	if autoprovisioned && v.LessThan(gkeOmittedDriverDefaultThresholdNAP) {
+		return gkeDriverInstallDisabled
+	}
+	return gkeDriverInstalled
+}
 
 // gkeAccelerator is the narrow shape read from each
 // config.accelerators[] entry. Unknown fields are ignored by design,
@@ -76,28 +124,36 @@ type gkeGPUDriverInstallationConfig struct {
 // gkeNodePool is the narrow slice of the
 // `gcloud container node-pools list -o json` JSON this projection reads.
 type gkeNodePool struct {
-	Name   string         `json:"name"`
-	Config *gkeNodeConfig `json:"config"`
+	Name        string                  `json:"name"`
+	Version     string                  `json:"version"`
+	Config      *gkeNodeConfig          `json:"config"`
+	Autoscaling *gkeNodePoolAutoscaling `json:"autoscaling"`
 }
 
 type gkeNodeConfig struct {
 	Accelerators []gkeAccelerator `json:"accelerators"`
 }
 
-// ProjectGKEGPUPools reads a `gcloud container node-pools list --cluster
-// <cluster> --format=json` dump and projects every GPU pool's
-// gpuDriverInstallationConfig.gpuDriverVersion into the gke-gpu-pools
-// subtype. For each pool with a non-empty config.accelerators list:
+type gkeNodePoolAutoscaling struct {
+	Autoprovisioned bool `json:"autoprovisioned"`
+}
+
+// ProjectGKEGPUPools projects each GPU pool's driver-installation mode
+// from the `gcloud container node-pools list --cluster <cluster>
+// --format=json` dump at path into the gke-gpu-pools subtype. For each
+// pool with a non-empty config.accelerators list, gpuDriverVersion maps
+// to gpu-driver-installation as:
 //
-//   - INSTALLATION_DISABLED on every accelerator sets gpu-driver-
-//     installation to Disabled.
-//   - DEFAULT, LATEST, or an absent/empty gpuDriverVersion on every
-//     accelerator (the provider's documented default) sets it to
-//     Installed.
-//   - Disagreement, within one pool or across pools, sets it to Mixed.
-//   - An unrecognized gpuDriverVersion string is preserved verbatim.
+//   - INSTALLATION_DISABLED on every accelerator sets it to Disabled.
+//   - DEFAULT or LATEST on every accelerator sets it to Installed.
+//   - Absent, empty, or GPU_DRIVER_VERSION_UNSPECIFIED resolves against
+//     the pool's version and auto-provisioning flag (see
+//     gkeOmittedDriverMode), falling back to NotConfigured or
+//     NotInstalled when the version can't be resolved.
+//   - Disagreement, within a pool or across pools, sets it to Mixed.
+//   - Anything else is preserved verbatim.
 //
-// The key is omitted when there are no GPU pools. Every read or decode
+// The key is omitted when there are no GPU pools. A read or decode
 // failure returns an error rather than a degraded reading, so a typoed
 // path or truncated dump can't resolve as available-but-empty.
 func ProjectGKEGPUPools(ctx context.Context, path string) (measurement.Subtype, error) {
@@ -119,9 +175,10 @@ func ProjectGKEGPUPools(ctx context.Context, path string) (measurement.Subtype, 
 			continue
 		}
 		gpuPools++
+		autoprovisioned := pool.Autoscaling != nil && pool.Autoscaling.Autoprovisioned
 		poolModes := make(map[string]struct{})
 		for _, acc := range pool.Config.Accelerators {
-			poolModes[gkeAcceleratorInstallMode(acc)] = struct{}{}
+			poolModes[gkeAcceleratorInstallMode(acc, pool.Version, autoprovisioned)] = struct{}{}
 		}
 		mode := aggregateGKEGPUDriver(poolModes)
 		modes[mode] = struct{}{}
@@ -137,15 +194,19 @@ func ProjectGKEGPUPools(ctx context.Context, path string) (measurement.Subtype, 
 	return measurement.Subtype{Name: SubtypeGKEGPUPools, Data: data}, nil
 }
 
-// gkeAcceleratorInstallMode normalizes one accelerator entry's
-// gpuDriverInstallationConfig.gpuDriverVersion into a projection state.
-func gkeAcceleratorInstallMode(acc gkeAccelerator) string {
-	version := ""
-	if acc.GPUDriverInstallationConfig != nil {
-		version = acc.GPUDriverInstallationConfig.GPUDriverVersion
+// gkeAcceleratorInstallMode normalizes acc's gpuDriverVersion into a
+// projection state, resolving an omitted value against poolVersion and
+// autoprovisioned.
+func gkeAcceleratorInstallMode(acc gkeAccelerator, poolVersion string, autoprovisioned bool) string {
+	if acc.GPUDriverInstallationConfig == nil {
+		return gkeOmittedDriverMode(poolVersion, autoprovisioned, gkeDriverNotConfigured)
 	}
+	version := acc.GPUDriverInstallationConfig.GPUDriverVersion
 	if version == gkeGPUDriverVersionDisabled {
 		return gkeDriverInstallDisabled
+	}
+	if version == "" || version == gkeGPUDriverVersionUnspecified {
+		return gkeOmittedDriverMode(poolVersion, autoprovisioned, gkeDriverNotInstalled)
 	}
 	if _, ok := gkeGPUDriverVersionInstalled[version]; ok {
 		return gkeDriverInstalled

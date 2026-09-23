@@ -170,12 +170,17 @@ spec:
             value: Disabled
             remediation: >-
               The bundle-installer profile requires every GPU node pool to
-              have been created with gpu-driver-version=disabled, so GKE's
-              managed driver install never races the bundle's own
-              gcp-driver-installer component. An existing pool's
-              driver-installation mode cannot be changed in place, so
-              recreate any pool reporting otherwise (gcloud container
-              node-pools create ...
+              never have GKE's own managed driver install running, so it
+              never races the bundle's own gcp-driver-installer component.
+              This reading is satisfied by an explicit
+              gpu-driver-version=disabled at creation, or by leaving the
+              field unset on a GKE version whose documented default for
+              that case is no install. A pool reporting Installed,
+              NotConfigured, or NotInstalled has neither. An existing
+              pool's driver-installation mode cannot be changed in place,
+              so recreate any pool reporting otherwise with the explicit
+              flag, which is the one fix that works regardless of GKE
+              version (gcloud container node-pools create ...
               --accelerator type=<type>,count=<n>,gpu-driver-version=disabled).
               Then recapture the snapshot with
               --gke-gpu-pools pointed at a fresh `gcloud container

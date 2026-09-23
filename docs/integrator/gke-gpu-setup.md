@@ -53,9 +53,11 @@ uses for its own driver-ownership signal
 pass the dump via `aicr snapshot --gke-gpu-pools <dump>` (or
 `aicr validate --gke-gpu-pools <dump>`). The projection reads each GPU
 pool's `gpuDriverInstallationConfig.gpuDriverVersion` into the
-`K8s.gke-gpu-pools.gpu-driver-installation` reading (`Installed` or
-`Disabled`, with mixed or unrecognized values failing closed), and
-`bundle-installer` requires `Disabled`. `gke-default` declares no
+`K8s.gke-gpu-pools.gpu-driver-installation` reading. Only `Disabled`
+satisfies `bundle-installer`, whether the pool set that explicitly or left
+the field absent or unspecified on a GKE version whose documented default
+for that case is no install. `Installed`, mixed, and unrecognized values
+all fail closed. `gke-default` declares no
 constraint on this reading. It stays the zero-setup default and never
 requires `--gke-gpu-pools`.
 
@@ -108,8 +110,9 @@ actually created with the managed install disabled:
 
 | `K8s.gke-gpu-pools.gpu-driver-installation` reading | `--profile gpuStack=bundle-installer` (label already satisfied) |
 |---|---|
-| `Disabled` (every GPU pool created with `gpu-driver-version=disabled`) | ✅ resolves |
-| `Installed` (some pool created with `default`/`latest`/unspecified) | ❌ fails closed: a labeled pool GKE still finalizes the driver on races the bundle's installer |
+| `Disabled` (every GPU pool created with `gpu-driver-version=disabled`, or left absent/unspecified on a GKE version whose documented default for that case is no install) | ✅ resolves |
+| `Installed` (some pool created with `default`/`latest`, or left absent/unspecified on a GKE version whose documented default for that case is to install) | ❌ fails closed: a labeled pool GKE still finalizes the driver on races the bundle's installer |
+| `NotConfigured` or `NotInstalled` (some pool left absent or unspecified, and its `version` couldn't be parsed to resolve which default applies) | ❌ fails closed. An unresolvable version is never treated as proof of `disabled` |
 | mixed across or within pools | ❌ fails closed naming the observed state |
 | reading unavailable (no `--gke-gpu-pools` supplied) | ❌ fails closed: the label alone is insufficient evidence for this value |
 
