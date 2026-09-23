@@ -523,18 +523,20 @@ func TestRenderMatrixWithAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load real allowlist: %v", err)
 	}
+	crit := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceK0s,
+		Accelerator: recipe.CriteriaAcceleratorH200,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+	}
 	report := &health.Report{
 		SchemaVersion: health.SchemaVersion,
 		Combos: []health.ComboHealth{
 			{
-				Criteria: &recipe.Criteria{
-					Service:     recipe.CriteriaServiceK0s,
-					Accelerator: recipe.CriteriaAcceleratorH200,
-					OS:          recipe.CriteriaOSUbuntu,
-					Intent:      recipe.CriteriaIntentTraining,
-				},
+				Criteria:    crit,
 				LeafOverlay: "h200-k0s-ubuntu-training",
 				Structure:   health.StructureHealth{Status: health.StatusPass},
+				Result:      &recipe.RecipeResult{Criteria: crit},
 			},
 		},
 	}
@@ -562,19 +564,21 @@ func TestRenderMatrixLinksPresentCoordinate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPresence() error = %v", err)
 	}
+	crit := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+		Platform:    recipe.CriteriaPlatformKubeflow,
+	}
 	report := &health.Report{
 		SchemaVersion: health.SchemaVersion,
 		Combos: []health.ComboHealth{
 			{
-				Criteria: &recipe.Criteria{
-					Service:     recipe.CriteriaServiceEKS,
-					Accelerator: recipe.CriteriaAcceleratorH100,
-					OS:          recipe.CriteriaOSUbuntu,
-					Intent:      recipe.CriteriaIntentTraining,
-					Platform:    recipe.CriteriaPlatformKubeflow,
-				},
+				Criteria:    crit,
 				LeafOverlay: "h100-eks-ubuntu-training-kubeflow",
 				Structure:   health.StructureHealth{Status: health.StatusPass},
+				Result:      &recipe.RecipeResult{Criteria: crit},
 			},
 			{
 				Criteria:    &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100},
