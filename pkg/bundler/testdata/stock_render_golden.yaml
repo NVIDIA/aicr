@@ -636,6 +636,25 @@ bcm-inference:
   checksums.txt: e3f0a4c42ed01d42d82be1484dadcb2024f9f5ef76fbbb5e6bc37567ffae4722
   deploy.sh: 1a3c04da625dcde80fa6dbabfea3bbfc26bfaaf7d6032ccb00802a42a13f5966
   recipe.yaml: f8f800d5018c6659b41dbaab01b8ded3338dbfab170ddead39d2efb3e74f69ab
+fixture/dra-node-labeler:
+  001-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  001-gpu-operator/install.sh: 4c1e45b3dff8475238810d321061ff103bc9c9b0fdd7c0fee9fe4b3c95ce1194
+  001-gpu-operator/upstream.env: f1d0e36646384fd7d670dd4d0a277432de5a9fce08a9de00feb244c779a0bd36
+  001-gpu-operator/values.yaml: b3762819bc9471ec1197bbcf74b74f82e310d2c2b69a2a719166e564dd23ee9c
+  002-dra-node-labeler/Chart.yaml: 58bb63cbcd76f8077189545c72d0bbad4503ea392e67cd533d5f91435635dc50
+  002-dra-node-labeler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  002-dra-node-labeler/install.sh: faa161fba25ae13cd372a9e3eaaf9163c72afe32d135fbc581ba702200e56b5f
+  002-dra-node-labeler/templates/dra-node-labeler.yaml: 26d0e9e94ddc6e12092c4077ba03925c60c0c60f3f0bc8dce8c97d063768f4bb
+  002-dra-node-labeler/values.yaml: b031d0171f8e9b9ebf4a83a60e961eb48a29e1cd2d6c255d134e5139f4508e27
+  003-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  003-nvidia-dra-driver-gpu/install.sh: e7accf24f179068417436e990065a0ad01dfcbed14fbe15acd9f611ef9b25059
+  003-nvidia-dra-driver-gpu/upstream.env: a1b02d918bd705724498edcaf80ee73d9b54f1cae0724d3b96fc047f42284529
+  003-nvidia-dra-driver-gpu/values.yaml: 747dba683933078119f4c39c7ab31d17e3839babcc79d4107939a5893cb9d7b2
+  README.md: bc23c59c8fcb5cb617a5befa2e33bd5be6abbf7c75de3990a5740b366a73fbe4
+  bundle-info.yaml: 2b2cb4e7a0e2bf88352ceb68224f8b2975b9857e8cf35da65ecec40e0fe22227
+  checksums.txt: 4f88cc59f806ef3be8bf3c6a533500bd2312791b3851d0c1237018ad4c40d3ad
+  deploy.sh: 41fac6cbc42258698c2569c315de643b4e9dbb9e3ab47e877001dbb368fe792c
+  recipe.yaml: ddda019b1c866bf844b8f6be6870fb2bce83cc4608c11645da05e2211db18b40
 gb200-any:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: 9612818934972acb37cd8b53cb3568aa21d2b308c9c3baedbc575152327147ca

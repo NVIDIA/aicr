@@ -37,7 +37,8 @@ import (
 )
 
 const (
-	stockRenderGoldenPath = "testdata/stock_render_golden.yaml"
+	stockRenderGoldenPath       = "testdata/stock_render_golden.yaml"
+	draNodeLabelerGoldenFixture = "fixture/dra-node-labeler"
 
 	// stockRenderVersion pins both the recipe builder version and the bundler
 	// version so the digests are a pure function of the catalog and the render
@@ -122,6 +123,16 @@ func TestStockRenderParityGolden(t *testing.T) {
 		}
 		got[name] = files
 	}
+	fixture := testDRANodeLabelerRecipeResult()
+	if prepErr := fixture.PrepareAndValidateWithContext(ctx); prepErr != nil {
+		t.Fatalf("prepare DRA node labeler fixture: %v", prepErr)
+	}
+	fixtureFiles, renderErr := renderRecipeFileDigests(ctx, t, fixture,
+		[]config.Option{config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel())})
+	if renderErr != nil {
+		t.Fatalf("render DRA node labeler fixture: %v", renderErr)
+	}
+	got[draNodeLabelerGoldenFixture] = fixtureFiles
 
 	if os.Getenv("AICR_UPDATE_GOLDEN") == "1" {
 		if t.Failed() {
@@ -253,9 +264,14 @@ func isRenderErrorLeaf(files map[string]string) bool {
 // injection paths rather than only the components that need no input. Their
 // exact values are irrelevant; that they never vary is what matters.
 func renderLeafFileDigests(ctx context.Context, t *testing.T, rr *recipe.RecipeResult) (map[string]string, error) {
+	return renderRecipeFileDigests(ctx, t, rr, nil)
+}
+
+func renderRecipeFileDigests(ctx context.Context, t *testing.T, rr *recipe.RecipeResult, extra []config.Option) (map[string]string, error) {
 	t.Helper()
 
-	cfg := config.NewConfig(
+	options := make([]config.Option, 0, 10+len(extra))
+	options = append(options,
 		config.WithDeployer(config.DeployerHelm),
 		config.WithVersion(stockRenderVersion),
 		// Suppresses wall-clock timestamps and derives attestation
@@ -274,6 +290,8 @@ func renderLeafFileDigests(ctx context.Context, t *testing.T, rr *recipe.RecipeR
 		config.WithSharedStorageClass("aicr-parity-rwx"),
 		config.WithEstimatedNodeCount(3),
 	)
+	options = append(options, extra...)
+	cfg := config.NewConfig(options...)
 
 	b, err := New(WithConfig(cfg))
 	if err != nil {
