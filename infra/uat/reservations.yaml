@@ -101,6 +101,51 @@ reservations:
     test-config-dir: tests/uat/aws/tests
     nightly-intents: [training, inference]
     daytime-intent: training
+  # GB300 SLOTS (Grace-Blackwell, arm64).
+  #
+  # Two rows over ONE physical reservation, the same shape the H100 lane uses.
+  # A row is a lease, not a pool: the concurrency group is uat-<name>, so one
+  # row admits one run at a time. Two rows admit two concurrent runs, which is
+  # what lets a daytime cluster and a nightly cell coexist instead of excluding
+  # each other. With the GPU node group fixed at desired: 2 and no autoscaling,
+  # the ceiling is 2 slots x 2 nodes = 4 of the 18 instances.
+  #
+  # Slot 1 is the future DAYTIME slot and slot 2 the future NIGHTLY slot, but
+  # neither carries an intent yet:
+  #   - nightly, because this is the first Blackwell-generation lane AICR has
+  #     ever run on real hardware and nothing about it is proven. Landing the
+  #     rows opted out adds the lane without adding a nightly cell.
+  #   - daytime, because only ONE reservation per cloud may carry a
+  #     daytime-intent and aws-h100 holds it for AWS. Assigning one here means
+  #     deciding which reservation hosts the AWS daytime cluster, which is a
+  #     separate decision from bringing GB300 up.
+  #
+  # The reservation is RAM-shared into 897722687756 — the account named by
+  # .deployment.tenancy in cluster-config-path below, which is the single
+  # source of truth for where a run provisions. That account already carries
+  # every prerequisite from the earlier GB200 bring-up: the GitHub OIDC
+  # provider, github-actions-role-aicr, and its Terraform state bucket.
+  #
+  # gpu-count is 4 because a p6e-gb300r.36xlarge carries 4 B300, so the
+  # 18-instance reservation is exactly one NVL72 rack (18 x 4 = 72 GPUs).
+  - name: aws-gb300-1
+    slug: ag3
+    cloud: aws
+    reservation-id: cr-0a5fe73705830011a
+    accelerator: gb300
+    gpu-count: 4
+    cluster-config-path: tests/uat/aws/cluster-config-gb300.yaml
+    test-config-dir: tests/uat/aws/tests
+    nightly-intents: []
+  - name: aws-gb300-2
+    slug: ag4
+    cloud: aws
+    reservation-id: cr-0a5fe73705830011a
+    accelerator: gb300
+    gpu-count: 4
+    cluster-config-path: tests/uat/aws/cluster-config-gb300.yaml
+    test-config-dir: tests/uat/aws/tests
+    nightly-intents: []
   - name: gcp-h100
     slug: gh1
     cloud: gcp

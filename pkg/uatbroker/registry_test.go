@@ -816,7 +816,14 @@ func TestCommittedRegistryValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("committed reservations.yaml invalid: %v", err)
 	}
-	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure, "kind-h100": CloudKind}
+	want := map[string]string{
+		"aws-h100":    CloudAWS,
+		"aws-gb300-1": CloudAWS,
+		"aws-gb300-2": CloudAWS,
+		"gcp-h100":    CloudGCP,
+		"azure-h100":  CloudAzure,
+		"kind-h100":   CloudKind,
+	}
 	for name, cloud := range want {
 		res, err := reg.Lookup(name)
 		if err != nil {
@@ -834,7 +841,7 @@ func TestCommittedRegistryValid(t *testing.T) {
 	// closed rather than sliding in unnoticed.
 	gotNames := append([]string(nil), reg.Names()...)
 	slices.Sort(gotNames)
-	wantNames := []string{"aws-h100", "azure-h100", "gcp-h100", "kind-h100"}
+	wantNames := []string{"aws-gb300-1", "aws-gb300-2", "aws-h100", "azure-h100", "gcp-h100", "kind-h100"}
 	if !slices.Equal(gotNames, wantNames) {
 		t.Errorf("committed registry reservations = %v, want exactly %v", gotNames, wantNames)
 	}
@@ -844,10 +851,46 @@ func TestCommittedRegistryValid(t *testing.T) {
 	// cluster name (aicr-uat-day-<slug>-<slot>-<run_id>) and its guard/teardown
 	// scans key off these exact values.
 	wantSlug := map[string]string{
-		"aws-h100":   "ah1",
-		"gcp-h100":   "gh1",
-		"azure-h100": "zh1",
-		"kind-h100":  "kh1",
+		"aws-h100":    "ah1",
+		"aws-gb300-1": "ag3",
+		"aws-gb300-2": "ag4",
+		"gcp-h100":    "gh1",
+		"azure-h100":  "zh1",
+		"kind-h100":   "kh1",
+	}
+
+	// The GB300 slots are two leases over ONE physical reservation, the shape
+	// that lets a daytime cluster and a nightly cell run concurrently. Both
+	// must stay on the same reservation-id and cluster-config: that is what
+	// bounds AICR to 2 slots x desired 2 = 4 instances there.
+	//
+	// Both are also in bring-up — manually dispatchable, excluded from the
+	// nightly batch — which keeps an unproven Blackwell lane off the nightly
+	// critical path. OrDefault, not the raw field: it returns [training] when
+	// the key is absent, so an empty result proves the explicit opt-out is
+	// present rather than the key having been dropped.
+	var gbReservation, gbConfig string
+	for _, name := range []string{"aws-gb300-1", "aws-gb300-2"} {
+		slot, slotErr := reg.Lookup(name)
+		if slotErr != nil {
+			t.Errorf("committed registry missing %q: %v", name, slotErr)
+			continue
+		}
+		if got := slot.NightlyIntentsOrDefault(); len(got) != 0 {
+			t.Errorf("%s nightly-intents = %v, want empty (bring-up opt-out)", name, got)
+		}
+		if gbReservation == "" {
+			gbReservation, gbConfig = slot.ReservationID, slot.ClusterConfigPath
+			continue
+		}
+		if slot.ReservationID != gbReservation {
+			t.Errorf("%s reservation-id = %q, want %q (slots share one reservation)",
+				name, slot.ReservationID, gbReservation)
+		}
+		if slot.ClusterConfigPath != gbConfig {
+			t.Errorf("%s cluster-config-path = %q, want %q (slots share one config)",
+				name, slot.ClusterConfigPath, gbConfig)
+		}
 	}
 	for name, slug := range wantSlug {
 		res, lookupErr := reg.Lookup(name)

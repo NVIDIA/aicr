@@ -1,0 +1,164 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# EKS GB300 UAT cluster (reservation aws-gb300, infra/uat/reservations.yaml).
+#
+# Closest sibling is cluster-config-gb300's Grace-Blackwell predecessor,
+# cluster-config-gb200.yaml — same arm64 architecture and the same explicit
+# accelerator override — but simpler in two ways that are worth stating,
+# because both were load-bearing complications there and are absent here:
+#
+#   1. NO LOCAL ZONE. The GB200 Capacity Block sat in us-east-1-dfw-2a, which
+#      forced a split subnet layout (control plane in region AZs, workers in
+#      the Local Zone, egress via a region NAT). This reservation is in
+#      us-east-2a, an ordinary AZ, so every subnet lives in a region AZ.
+#   2. NOT A CAPACITY BLOCK. describe-capacity-reservations reports
+#      CapacityReservationType null (an ordinary ODCR with an end date of
+#      2030-03-09), so there is no marketType: capacity-block here. Setting it
+#      would not match the reservation.
+#
+# The account is the same as GB200's and already carries every prerequisite
+# from that bring-up: the GitHub OIDC provider, github-actions-role-aicr, and
+# the cluster-state-897722687756 Terraform state bucket. No infra work needed.
+
+apiVersion: github.com/mchmarny/cluster/v1alpha1
+kind: Cluster
+
+deployment:
+  id: aicr-uat-gb300            # workflow overrides with a run-scoped id
+  provider: eks
+  # The pipeline derives AWS_ACCOUNT_ID from this field alone (uat-aws.yaml),
+  # so it is the single source of truth for which account a run provisions
+  # into. The reservation below is RAM-shared into this account from
+  # 204968151732, which is why the owner and the tenancy differ.
+  tenancy: "897722687756"
+  location: us-east-2
+  state: tenancy                # remote TF state in this account's S3
+  destroy: false
+  tags:
+    env: dev
+
+cluster:
+  eks:
+    version: "1.35"
+    # This account's CS-Admin SSO role. The name is not portable between
+    # accounts — the suffix is per-account — so it differs from every other
+    # cluster-config here. The CI OIDC role is deliberately NOT listed: it is
+    # the cluster creator and receives cluster-admin via
+    # bootstrap_cluster_creator_admin_permissions, so an explicit entry
+    # collides with the bootstrap one and 409s.
+    adminRoles:
+      - AWSReservedSSO_CS-Admin_6ba80e786f58f0c1
+    controlPlane:
+      allowedCidrs:
+        - 216.228.127.128/30
+        - 52.41.222.58/32
+        - 54.68.11.139/32
+        - 128.77.49.32/30
+    addOns:
+      coreDns: ""
+      kubeProxy: ""
+      vpcCni: ""
+
+network:
+  eks:
+    # No securityGroups.additionalRules — same posture as the sibling configs.
+    # Dynamo talks frontend<->worker directly (OS-assigned TCP ports, plus ZMQ
+    # KV events on fixed TCP 5557) and UAT places both roles on the gpu-worker
+    # node group, whose security group already allows all traffic from itself.
+    # Re-enabling NATS, or splitting Frontend and Worker across separate
+    # security groups, would need explicit rules — see
+    # docs/integrator/eks-dynamo-networking.md.
+    cidrs:
+      host: 10.0.0.0/16
+      pod: 100.65.0.0/16
+    subnets:
+      # All region AZs — no Local Zone here, unlike the GB200 lane. Workers are
+      # pinned to us-east-2a because the capacity reservation is AZ-scoped to
+      # us-east-2a; a worker subnet in any other AZ cannot draw from it under
+      # capacity-reservations-only.
+      public:
+        - cidr: 10.0.1.0/27
+          zone: us-east-2a
+        - cidr: 10.0.2.0/27
+          zone: us-east-2b
+      system:
+        - cidr: 10.0.4.0/22
+          zone: us-east-2a
+        - cidr: 10.0.8.0/22
+          zone: us-east-2b
+      worker:
+        - cidr: 10.0.128.0/17
+          zone: us-east-2a
+          disableEndpoints: true
+      pod:
+        - cidr: 100.65.0.0/16
+          zone: us-east-2a
+          disableEndpoints: true
+
+compute:
+  eks:
+    nodeGroups:
+      system:
+        instanceType: m7i.xlarge
+        capacity:
+          desired: 3
+        labels:
+          nodeGroup: system-worker
+          dedicated: system-workload
+      workers:
+        - name: gpu-worker
+          instanceType: p6e-gb300r.36xlarge
+          architecture: arm64               # GB300 = Grace/arm64 (arm64 Ubuntu EKS AMI)
+          # Pin the worker AMI. Absent imageId the actuator resolves
+          # data.aws_ami.ubuntu_eks (most_recent Canonical ubuntu-eks/k8s_1.35
+          # for this arch), which drifted to ubuntu-resolute-26.04 on 2026-08-05
+          # and broke the GPU stack on the GB200 lane. Ubuntu 26.04 cannot run
+          # the pinned driver at all (580.173.02 publishes no ubuntu26.04 tag),
+          # so this pins the last 24.04 (noble) arm64 build,
+          # ubuntu-noble-24.04-arm64-server-20260714, k8s 1.35, us-east-2 — the
+          # same build as the other lanes, resolved for THIS region (AMI IDs are
+          # region-specific). Re-resolve when eks.version bumps.
+          imageId: ami-0d0c7846ffa203702
+          gpuType: gb300
+          # REQUIRED, same trap as GB200: auto-derivation breaks on the
+          # "p6e-gb300r.*" name — the actuator keys its accelerator map on "p6e"
+          # but split(".")[0] yields "p6e-gb300r", so it falls through to the
+          # generic-GPU EFA branch and emits an invalid launch template
+          # (device_index=1 on a 1-device network card) → CreateAutoScalingGroup
+          # ValidationError. The explicit value selects the correct branch.
+          accelerator: gb300
+          capacity:
+            # Two GPU nodes: activates the multi-node NCCL East-West fabric
+            # check (nccl-all-reduce-bw-net, which skips on a single GPU node)
+            # and lets the TrainJob (numNodes: 2) span both nodes.
+            desired: 2
+            reservation:
+              preference: capacity-reservations-only
+              # Verified against EC2: p6e-gb300r.36xlarge in us-east-2a,
+              # matching the worker/pod subnet pin above. 18 instances
+              # provisioned, so the post-lease capacity assertion
+              # (TotalInstanceCount >= desired) passes at desired: 2.
+              #
+              # No marketType: this is an ordinary ODCR, not a Capacity Block
+              # (CapacityReservationType is null). It does carry an end date of
+              # 2030-03-09 — far out, but it is not open-ended.
+              target: cr-0a5fe73705830011a
+          labels:
+            nodeGroup: gpu-worker
+            dedicated: user-workload
+          taints:
+            - key: skyhook.nvidia.com
+              value: runtime-required
+              effect: NoSchedule
