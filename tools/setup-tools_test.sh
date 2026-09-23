@@ -376,8 +376,14 @@ helper_end=$(awk -v s="${helper_start}" 'NR > s && /^\}/ { print NR; exit }' "${
 # every verb nobody anticipated. Instead, every line outside the helper that
 # touches /usr/local/bin must be a named exception or a plain read -- a [[ ]]
 # test or a log_* message, and never under sudo. Anything else fails.
-read_test_re='^[[:space:]]*((el)?if[[:space:]]+)?\[\['
-read_log_re='log_(info|warning|error|success|debug)'
+#
+# Both read patterns match the whole line, so a read is a line that is only a
+# test or only a log call. Anchoring the start alone let
+# `[[ -f x ]] && cp x /usr/local/bin/x` pass as a test, and an unanchored log
+# match let `install ... /usr/local/bin/x || log_error "..."` pass as a message.
+# [^;&|] keeps a command separator from hiding inside the test.
+read_test_re='^[[:space:]]*((el)?if[[:space:]]+)?\[\[[^;&|]*\]\]([[:space:]]*;[[:space:]]*then)?[[:space:]]*$'
+read_log_re='^[[:space:]]*log_(info|warning|error|success|debug)[[:space:]]+"[^"]*"[[:space:]]*$'
 
 mapfile -t bin_refs < <(
     grep -nE '/usr/local/bin' "${SETUP_TOOLS}" | grep -vE '^[0-9]+:[[:space:]]*#' || true
