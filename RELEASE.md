@@ -15,19 +15,22 @@ Releases follow a **bi-weekly cadence**. A new release is cut every two weeks.
 
 ## Supported Versions
 
-AICR is pre-1.0 and ships from a single active release line. Only the latest
-released minor receives security fixes. Earlier minors are end-of-life: fixes
-are not backported to them, and the upgrade path is forward to the latest
-release.
+AICR supports the latest released minor and the one before it. Both receive
+security fixes, so you have a full release of overlap to upgrade in rather than
+having to move the day a new minor ships. Anything older is end-of-life: fixes
+do not reach it, and the upgrade path is forward to a supported release.
 
 | Version | Status |
 |---------|--------|
-| `0.21.x` (latest released minor) | Supported: receives security fixes |
-| `< 0.21` | End-of-life: upgrade to the latest release |
+| `0.22.x` (latest released minor) | Supported: receives security fixes |
+| `0.21.x` (previous minor) | Supported: receives security fixes |
+| `< 0.21` | End-of-life: upgrade to a supported release |
 
-A fix ships in a new patch or minor release cut from `main` under the cadence
-above, never as a backport to an end-of-life version. When AICR reaches 1.0
-this policy is revised and a longer support window published here.
+A fix lands on `main` first and ships in a new patch or minor release cut from
+`main` under the cadence above. Reaching the previous minor additionally
+requires the manual path in [Hotfix Procedure](#hotfix-procedure), because
+there is no long-lived release branch to merge into. A fix is never backported
+to an end-of-life version.
 
 This section says which versions a fix lands in. It does not say how to report
 one: security issues go to NVIDIA PSIRT rather than through GitHub, and
@@ -206,13 +209,29 @@ target values, is in
 
 ## What Goes Into a Release
 
-A release includes everything merged to `main` since the last tag. There is no cherry-picking or feature branching for releases — if it's on `main`, it ships.
+A release includes everything merged to `main` since the last tag. There is no cherry-picking or feature branching for the release itself — if it's on `main`, it ships. The one exception is a security fix reaching the previous supported minor, which has no branch to merge into and uses the manual path in [Hotfix Procedure](#hotfix-procedure).
 
 **Before cutting a release, verify:**
 
 - All CI checks pass on `main` (`make qualify`)
 - No known regressions since the last release
 - Breaking changes use `feat!:` or `fix!:` commit prefix (drives changelog and signals consumers)
+
+**After a minor release publishes, verify:**
+
+- The supported minor and the end-of-life threshold are bumped in **both**
+  [Supported Versions](#supported-versions) here and the matching table in
+  `SECURITY.md`. `TestSupportedVersionsMatchSecurityPolicy` fails when the two
+  files disagree, so they cannot drift apart — but nothing catches them going
+  stale *together*, and that is the only way this has ever been wrong. Patch
+  releases do not move either value.
+- Any deprecation whose removal **shipped in this release** is moved from
+  `## Active` to `## Removed` in
+  [`docs/user/deprecations.md`](docs/user/deprecations.md), per that page's own
+  rule. Nothing gates this, and the timing is easy to get wrong in both
+  directions: the entry belongs under `## Active` right up to the tag, because
+  until then no released binary behaves the new way, and it becomes misleading
+  the moment the tag lands.
 
 ## Quality Gates
 
@@ -348,7 +367,19 @@ For critical fixes between regular releases:
 
 1. Fix on `main` first (PR, review, merge as normal)
 2. Cut a patch release: `make bump-patch`
-3. For patching older release lines (rare): cherry-pick from `main` onto a hotfix branch, tag manually
+3. To reach the previous supported minor (see [Supported Versions](#supported-versions)): cherry-pick from `main` onto a hotfix branch cut from that minor's latest tag, and tag manually. Step 2 only ever patches the latest minor, so this is the only way to reach an older one — there is no long-lived release branch to cut from
+
+**Bring the release tooling forward with the fix.** A tag push runs the
+workflows as they exist *on the pushed ref*, so a branch cut from an older tag
+builds, scans, and attests with that tag's `.github/` tree rather than with
+`main`'s. Between v0.21.1 and v0.22.0, for example,
+[#2729](https://github.com/NVIDIA/aicr/pull/2729) moved SLSA provenance from the
+index digest alone onto each platform manifest as well; a hotfix cut from
+v0.21.1 without it publishes weaker provenance than
+[SECURITY.md](SECURITY.md#supply-chain-security) promises for a tagged release.
+Cherry-pick any `.github/workflows/**` and `.github/actions/**` change affecting
+build, scan, or attestation onto the hotfix branch before tagging, and verify
+the published attestations match what a current release carries.
 
 ## Release Pipeline
 
