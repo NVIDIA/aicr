@@ -121,7 +121,7 @@ func TestResolveRecipeGKETCPXOInterfacesRequired(t *testing.T) {
 func TestConfig_GKETCPXOInterfaces(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1alpha2
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -173,7 +173,7 @@ spec:
 func TestConfig_GKETCPXOInterfacesEmptyListRejected(t *testing.T) {
 	t.Parallel()
 
-	_, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1alpha2
+	_, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test

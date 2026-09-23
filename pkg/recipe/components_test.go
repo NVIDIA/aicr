@@ -1281,7 +1281,7 @@ func TestHelmConfig_DefaultNamespace(t *testing.T) {
 
 func TestHelmConfig_DefaultNamespaceParsing(t *testing.T) {
 	yamlData := `
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: test-component
@@ -1319,7 +1319,7 @@ func TestKustomizeConfig_Parsing(t *testing.T) {
 	)
 
 	yamlData := `
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: my-kustomize-app
@@ -1380,7 +1380,7 @@ func buildProviderWithRegistry(t *testing.T, tag string) DataProvider {
 		compName = "evict-only"
 	}
 
-	registryYAML := []byte("apiVersion: aicr.run/v1alpha2\n" +
+	registryYAML := []byte("apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: " + compName + "\n" +
@@ -1539,7 +1539,7 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 	}{
 		{
 			name: "component named deployer rejected",
-			registryYAML: "apiVersion: aicr.run/v1alpha2\n" +
+			registryYAML: "apiVersion: aicr.run/v1beta1\n" +
 				"kind: ComponentRegistry\n" +
 				"components:\n" +
 				"  - name: deployer\n" +
@@ -1548,7 +1548,7 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 		},
 		{
 			name: "component aliasing deployer via valueOverrideKeys rejected",
-			registryYAML: "apiVersion: aicr.run/v1alpha2\n" +
+			registryYAML: "apiVersion: aicr.run/v1beta1\n" +
 				"kind: ComponentRegistry\n" +
 				"components:\n" +
 				"  - name: my-operator\n" +
@@ -1585,7 +1585,7 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 // load time instead (same fail-closed contract as the reserved
 // deployer-key guard above).
 func TestLoadRegistry_RejectsKustomizeManifestFiles(t *testing.T) {
-	registryYAML := "apiVersion: aicr.run/v1alpha2\n" +
+	registryYAML := "apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: my-kustomize-app\n" +

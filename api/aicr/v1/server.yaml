@@ -636,8 +636,7 @@ paths:
         Renders a deployment bundle and returns it as a ZIP archive. The body is
         an already-selected RecipeResult, so this route has no profile-selection
         field; select the profile when resolving the recipe. Default recipes
-        stamped aicr.run/v1alpha2, aicr.run/v1, or omitting apiVersion are
-        accepted; profile recipes stamped aicr.run/v1alpha3 or aicr.run/v1beta2
+        must be stamped aicr.run/v1; profile recipes stamped aicr.run/v1beta2
         are decoded strictly. Content-Type must be application/json or
         application/x-yaml. The query parameters below control deployer, value
         overrides, node scheduling, workload gating and attestation.
@@ -1387,7 +1386,7 @@ components:
               type: object
               description: >
                 Selected profile identity and declaration-wide lock surface.
-                Present only when apiVersion is aicr.run/v1beta2 (or the superseded aicr.run/v1alpha3).
+                Present only when apiVersion is aicr.run/v1beta2.
               required: [name, value, ownedPaths]
               additionalProperties: false
               properties:
@@ -1625,9 +1624,9 @@ components:
         response with metadata and component references. Recipes without typed
         configuration emitted by this release use aicr.run/v1; profile-bearing
         recipes and recipes carrying configuration.slurm.accounting use
-        aicr.run/v1beta2. The schema also still admits the superseded
-        aicr.run/v1alpha2 and aicr.run/v1alpha3, so responses captured before
-        the ADR-022 emitter switch keep validating; v1.0.0 removes them.
+        aicr.run/v1beta2. The superseded aicr.run/v1alpha2 and
+        aicr.run/v1alpha3 were removed in v1.0.0 (ADR-022 N+2), so a response
+        captured before the emitter switch no longer validates.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
@@ -1635,7 +1634,7 @@ components:
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha2, aicr.run/v1alpha3, aicr.run/v1, aicr.run/v1beta2]
+              enum: [aicr.run/v1, aicr.run/v1beta2]
               example: aicr.run/v1
             kind:
               type: string
@@ -1710,15 +1709,15 @@ components:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
           description: >
-            Closed profile-bearing RecipeResult shape. aicr.run/v1beta2 is
-            emitted; the superseded aicr.run/v1alpha3 is still accepted until
+            Closed profile-bearing RecipeResult shape. aicr.run/v1beta2 is the
+            only accepted value; the superseded aicr.run/v1alpha3 was removed in
             v1.0.0. Unknown fields are rejected at its typed object boundaries.
           required: [metadata, componentRefs]
           additionalProperties: false
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha3, aicr.run/v1beta2]
+              enum: [aicr.run/v1beta2]
             kind:
               type: string
               enum: [RecipeResult]
@@ -1856,14 +1855,14 @@ components:
           description: >
             Closed typed-configuration RecipeResult shape without a selected
             profile (Slurm accounting, runtime inventory, or GKE TCPXO
-            interfaces). aicr.run/v1beta2 is emitted; the superseded
-            aicr.run/v1alpha3 is still accepted until v1.0.0.
+            interfaces). aicr.run/v1beta2 is the only accepted value; the
+            superseded aicr.run/v1alpha3 was removed in v1.0.0.
           required: [metadata, configuration, componentRefs]
           additionalProperties: false
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha3, aicr.run/v1beta2]
+              enum: [aicr.run/v1beta2]
             kind:
               type: string
               enum: [RecipeResult]
@@ -1999,16 +1998,15 @@ components:
 
     LegacyBundleRecipeRequest:
       description: >
-        Additive legacy RecipeResult accepted by POST /v1/bundle: any
-        combination of apiVersion absent, empty, aicr.run/v1alpha2, or
-        aicr.run/v1 with kind absent, empty, or RecipeResult. One branch
-        covers the whole legacy square because DecodeRecipeResult accepts
-        every cell of it — kind is enforced only when non-empty, and only the
-        profile track requires it.
+        Additive default RecipeResult accepted by POST /v1/bundle:
+        apiVersion aicr.run/v1 with kind absent, empty, or RecipeResult. Kind
+        is enforced only when non-empty, and only the profile track requires
+        it. The apiVersion tolerances this branch used to carry — absent,
+        empty, and aicr.run/v1alpha2 — were removed in v1.0.0 (ADR-022 N+2).
         The legacy kind Recipe, published through v0.18.0, is no longer
         accepted on any path.
-        metadata.selectedProfile remains reserved for v1alpha3/v1beta2.
-        configuration is likewise reserved for v1alpha3/v1beta2; default request
+        metadata.selectedProfile remains reserved for v1beta2.
+        configuration is likewise reserved for v1beta2; default request
         headers cannot carry typed Slurm accounting configuration.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
@@ -2019,9 +2017,8 @@ components:
             apiVersion:
               type: string
               description: >
-                aicr.run/v1alpha2, aicr.run/v1, absent, or empty after a legacy struct
-                round trip
-              enum: ["", aicr.run/v1alpha2, aicr.run/v1]
+                aicr.run/v1
+              enum: [aicr.run/v1]
             kind:
               type: string
               description: >
@@ -2035,12 +2032,12 @@ components:
     BundleRecipeRequest:
       description: >
         Version-partitioned RecipeResult accepted by POST /v1/bundle.
-        Default input with apiVersion aicr.run/v1alpha2, aicr.run/v1, or no
-        apiVersion remains additive; v1alpha3/v1beta2 input is closed and requires either
+        Default input with apiVersion aicr.run/v1 remains additive; v1beta2
+        input is closed and requires either
         metadata.selectedProfile or a typed configuration section
         (configuration.slurm, configuration.runtimeInventory, or configuration.gke). The
         branches are disjoint on apiVersion:
-        the default branch admits only absent/empty/v1alpha2/v1 and prohibits
+        the default branch admits only v1 and prohibits
         selectedProfile, while both configured branches require the profile track.
       oneOf:
         - $ref: "#/components/schemas/LegacyBundleRecipeRequest"

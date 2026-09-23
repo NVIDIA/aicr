@@ -17,8 +17,10 @@ package recipe
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -911,7 +913,7 @@ func TestLoadCriteriaFromFile(t *testing.T) {
 			name:     "valid YAML file with full structure",
 			filename: "criteria.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   name: eks-h100-training
 spec:
@@ -934,7 +936,7 @@ spec:
 		{
 			name:     "valid JSON file with full structure",
 			filename: "criteria.json",
-			content:  `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","metadata":{"name":"gke-a100"},"spec":{"service":"gke","accelerator":"a100","intent":"inference"}}`,
+			content:  `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1","metadata":{"name":"gke-a100"},"spec":{"service":"gke","accelerator":"a100","intent":"inference"}}`,
 			want: &Criteria{
 				Service:     CriteriaServiceGKE,
 				Accelerator: CriteriaAcceleratorA100,
@@ -964,7 +966,7 @@ spec:
 			name:     "partial fields - only spec.service",
 			filename: "partial.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   name: aks-only
 spec:
@@ -989,7 +991,7 @@ spec:
 			name:     "empty spec defaults to any",
 			filename: "empty_spec.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   name: empty
 spec: {}`,
@@ -1004,9 +1006,10 @@ spec: {}`,
 			wantErr: false,
 		},
 		{
-			name:     "missing kind and apiVersion still works",
+			name:     "missing kind still works",
 			filename: "minimal.yaml",
-			content: `spec:
+			content: `apiVersion: aicr.run/v1
+spec:
   service: eks`,
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
@@ -1022,7 +1025,7 @@ spec: {}`,
 			name:     "invalid kind",
 			filename: "invalid_kind.yaml",
 			content: `kind: wrongKind
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 spec:
   service: eks`,
 			wantErr: true,
@@ -1058,7 +1061,7 @@ spec:
 			name:     "invalid service type",
 			filename: "invalid_service.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 spec:
   service: invalid`,
 			wantErr: true,
@@ -1067,7 +1070,7 @@ spec:
 			name:     "invalid accelerator type",
 			filename: "invalid_accelerator.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 spec:
   accelerator: v100`,
 			wantErr: true,
@@ -1076,7 +1079,7 @@ spec:
 			name:     "invalid intent type",
 			filename: "invalid_intent.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 spec:
   intent: serving`,
 			wantErr: true,
@@ -1085,7 +1088,7 @@ spec:
 			name:     "invalid OS type",
 			filename: "invalid_os.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 spec:
   os: windows`,
 			wantErr: true,
@@ -1094,7 +1097,7 @@ spec:
 			name:     "negative nodes count",
 			filename: "negative_nodes.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 spec:
   nodes: -5`,
 			wantErr: true,
@@ -1103,7 +1106,7 @@ spec:
 			name:     "valid YAML file with platform",
 			filename: "criteria_with_platform.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   name: eks-h100-training-kubeflow
 spec:
@@ -1128,7 +1131,7 @@ spec:
 			name:     "invalid platform type",
 			filename: "invalid_platform.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 spec:
   platform: invalid-platform`,
 			wantErr: true,
@@ -1302,7 +1305,7 @@ func TestParseCriteriaFromBody(t *testing.T) {
 	}{
 		{
 			name:        "JSON body with full structure",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","metadata":{"name":"test"},"spec":{"service":"eks","accelerator":"h100","intent":"training"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1","metadata":{"name":"test"},"spec":{"service":"eks","accelerator":"h100","intent":"training"}}`,
 			contentType: "application/json",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
@@ -1329,7 +1332,7 @@ func TestParseCriteriaFromBody(t *testing.T) {
 		{
 			name: "YAML body with application/x-yaml",
 			body: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   name: test
 spec:
@@ -1350,7 +1353,7 @@ spec:
 		{
 			name: "YAML body with text/yaml",
 			body: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 spec:
   service: aks
   nodes: 8`,
@@ -1367,7 +1370,7 @@ spec:
 		},
 		{
 			name:        "empty content type defaults to JSON",
-			body:        `{"spec":{"service":"oke"}}`,
+			body:        `{"apiVersion":"aicr.run/v1","spec":{"service":"oke"}}`,
 			contentType: "",
 			want: &Criteria{
 				Service:     CriteriaServiceOKE,
@@ -1381,7 +1384,7 @@ spec:
 		},
 		{
 			name:        "content type with charset",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1","spec":{"service":"eks"}}`,
 			contentType: "application/json; charset=utf-8",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
@@ -1432,7 +1435,7 @@ spec:
 		},
 		{
 			name:        "unknown content type tries JSON",
-			body:        `{"spec":{"service":"eks"}}`,
+			body:        `{"apiVersion":"aicr.run/v1","spec":{"service":"eks"}}`,
 			contentType: "text/plain",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
@@ -1453,7 +1456,7 @@ spec:
 		},
 		{
 			name:        "JSON body with platform kubeflow",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
 			contentType: "application/json",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
@@ -1468,7 +1471,7 @@ spec:
 		{
 			name: "YAML body with platform",
 			body: `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 spec:
   service: eks
   accelerator: h100
@@ -1641,4 +1644,86 @@ func TestCriteriaValidate(t *testing.T) {
 // writeTestFile is a helper to create test files.
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// Every criteria loader must name where the bytes came from. The same criteria
+// arrives from a path, a URL, or a request body, and the header error is the
+// one whose remedy depends on knowing which artifact to go edit. This regressed
+// once already: header.WarnDeprecatedAPIVersion used to name the file, and when
+// ADR-022 N+2 replaced the warning with a rejection the name went with it.
+func TestCriteriaHeaderErrorsNameTheirSource(t *testing.T) {
+	t.Parallel()
+
+	const badHeader = `kind: RecipeCriteria
+apiVersion: aicr.run/v1alpha2
+spec:
+  service: eks`
+
+	writeTemp := func(t *testing.T) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "criteria.yaml")
+		if err := os.WriteFile(path, []byte(badHeader), 0o600); err != nil {
+			t.Fatalf("write criteria fixture: %v", err)
+		}
+		return path
+	}
+
+	t.Run("file", func(t *testing.T) {
+		t.Parallel()
+		path := writeTemp(t)
+		_, err := LoadCriteriaFromFile(path, nil)
+		if err == nil {
+			t.Fatal("a retired apiVersion must be rejected")
+		}
+		if !strings.Contains(err.Error(), path) {
+			t.Errorf("error does not name the criteria file %q: %v", path, err)
+		}
+	})
+
+	t.Run("file with context", func(t *testing.T) {
+		t.Parallel()
+		path := writeTemp(t)
+		_, err := LoadCriteriaFromFileWithContext(context.Background(), path, nil)
+		if err == nil {
+			t.Fatal("a retired apiVersion must be rejected")
+		}
+		if !strings.Contains(err.Error(), path) {
+			t.Errorf("error does not name the criteria file %q: %v", path, err)
+		}
+	})
+
+	t.Run("url", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/yaml")
+			if _, err := w.Write([]byte(badHeader)); err != nil {
+				t.Errorf("write response: %v", err)
+			}
+		}))
+		defer server.Close()
+
+		criteriaURL := server.URL + "/criteria.yaml"
+		_, err := LoadCriteriaFromFileWithContext(context.Background(), criteriaURL, nil)
+		if err == nil {
+			t.Fatal("a retired apiVersion must be rejected")
+		}
+		if !strings.Contains(err.Error(), criteriaURL) {
+			t.Errorf("error does not name the criteria URL %q: %v", criteriaURL, err)
+		}
+	})
+
+	// A request body has no path to name, so it names itself instead -- the
+	// caller still learns the header came from the POST rather than a file.
+	t.Run("request body", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseCriteriaFromBody(
+			strings.NewReader(`{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks"}}`),
+			"application/json", nil)
+		if err == nil {
+			t.Fatal("a retired apiVersion must be rejected")
+		}
+		if !strings.Contains(err.Error(), "request body") {
+			t.Errorf("error does not identify the request body as the source: %v", err)
+		}
+	})
 }

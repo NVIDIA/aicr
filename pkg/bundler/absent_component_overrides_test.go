@@ -314,7 +314,7 @@ func TestMake_SubsetBundleKeepsNVSentinelGateEvidence(t *testing.T) {
 
 	newRecipe := func() *recipe.RecipeResult {
 		return &recipe.RecipeResult{
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Kind:       "RecipeResult",
 			Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceOKE, Accelerator: "a100", Intent: "training"},
 			ComponentRefs: []recipe.ComponentRef{

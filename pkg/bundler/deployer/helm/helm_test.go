@@ -29,8 +29,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -78,7 +80,7 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
 	recipeFile := "recipe.yaml"
-	if err := os.WriteFile(filepath.Join(outputDir, recipeFile), []byte("apiVersion: aicr.run/v1alpha2\nkind: Recipe\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(outputDir, recipeFile), []byte("apiVersion: aicr.run/v1\nkind: Recipe\n"), 0600); err != nil {
 		t.Fatalf("write %s: %v", recipeFile, err)
 	}
 
@@ -155,7 +157,7 @@ func TestGenerateReportsLayout(t *testing.T) {
 	// call).
 	recipeResult := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -1199,7 +1201,7 @@ func TestBundleGolden_ManifestOnly(t *testing.T) {
 	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 			ComponentRefs: []recipe.ComponentRef{
 				{Name: "skyhook-customizations", Namespace: "skyhook"},
@@ -1277,7 +1279,7 @@ func TestBundleGolden_KaiSchedulerPresent(t *testing.T) {
 	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 			ComponentRefs: []recipe.ComponentRef{
 				{
@@ -1403,6 +1405,65 @@ func TestBundleGolden_OwnsCRDsChartOverride(t *testing.T) {
 	assertBundleGolden(t, outDir, "testdata/owns_crds_chart_override")
 }
 
+// TestBundleGolden_ReadinessGate pins the readiness folder a helm bundle
+// ships, which until now had no golden at all.
+//
+// The absence was the bug's cover. gatemanifest.Render annotates the gate Job
+// as a post-install,post-upgrade hook with
+// hook-delete-policy: before-hook-creation, and both annotations are
+// load-bearing under plain Helm:
+//
+//   - the hook is what makes deploy.sh block. It passes --wait without
+//     --wait-for-jobs, which is correct only because --wait blocks on hook
+//     completion. A bare Job under --wait alone returns as soon as the object
+//     exists, so the "gate" would let dependents start against a cluster it
+//     has not finished checking.
+//
+//   - before-hook-creation is what makes it re-run. A Job's spec.template is
+//     immutable, so an identical manifest is a no-op patch; without the
+//     delete-and-recreate the gate asserts once, at install, and every
+//     subsequent upgrade ships unverified.
+//
+// A golden here fails loudly if either annotation is stripped again.
+func TestBundleGolden_ReadinessGate(t *testing.T) {
+	gate, err := gatemanifest.Render("foo", "nvcr.io/nvidia/aicr:v1.0.0",
+		[]byte("apiVersion: chainsaw.kyverno.io/v1alpha1\nkind: Test\n"),
+		config.DeployerHelm)
+	if err != nil {
+		t.Fatalf("render gate manifest: %v", err)
+	}
+
+	outDir := t.TempDir()
+	g := &Generator{
+		RecipeResult: singleComponentRecipe(
+			"foo", "foo", "foo", "v1.0.0", "https://example.com/charts"),
+		ComponentValues: map[string]map[string]any{"foo": {}},
+		ComponentReadiness: map[string]map[string][]byte{
+			"foo": {"readiness.yaml": gate},
+		},
+		Version: "v1.0.0",
+	}
+	if _, genErr := g.Generate(context.Background(), outDir); genErr != nil {
+		t.Fatalf("Generate: %v", genErr)
+	}
+	assertBundleGolden(t, outDir, "testdata/readiness_gate")
+
+	// Stated as an assertion as well as a golden: a golden diff shows that
+	// bytes moved, not which promise broke.
+	job, readErr := os.ReadFile(filepath.Join(outDir, "002-foo-readiness", "templates", "readiness.yaml"))
+	if readErr != nil {
+		t.Fatalf("read gate manifest from bundle: %v", readErr)
+	}
+	for _, want := range []string{
+		"helm.sh/hook: post-install,post-upgrade",
+		"helm.sh/hook-delete-policy: before-hook-creation",
+	} {
+		if !strings.Contains(string(job), want) {
+			t.Errorf("the shipped gate lost %q:\n%s", want, job)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -1421,7 +1482,7 @@ func readFile(t *testing.T, path string) string {
 func singleComponentRecipe(name, namespace, chart, version, source string) *recipe.RecipeResult {
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: name, Namespace: namespace, Chart: chart, Version: version, Source: source},
@@ -1433,7 +1494,7 @@ func singleComponentRecipe(name, namespace, chart, version, source string) *reci
 func createTestRecipeResult() *recipe.RecipeResult {
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
