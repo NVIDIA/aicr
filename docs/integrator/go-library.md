@@ -628,6 +628,14 @@ result, err := client.ResolveRecipe(ctx, aicr.RecipeRequest{
 `recipe.yaml` at its root. A component the prior artifact does not name keeps
 the registry default.
 
+A **bundle directory** carries one thing a recipe file cannot: the merged
+values each release installed with, which is where `fullnameOverride` and
+`nameOverride` live. Given one, the resolve also pins those object names,
+writing a `ComponentRef.Overrides` entry only where the inherited name differs
+from what this binary resolves. Given a recipe file, namespaces are still
+pinned and a warning records that object names were not, because a recipe
+stores `valuesFile` as a path resolved against whichever binary reads it.
+
 The reference is read when the resolve runs, and it fails closed rather than
 silently resolving as a first deploy: a path that does not exist, a directory
 holding no `recipe.yaml`, and a `cm://` URI (not supported yet) each return

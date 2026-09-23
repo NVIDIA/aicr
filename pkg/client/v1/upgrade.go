@@ -16,6 +16,7 @@ package aicr
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -141,7 +143,13 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 		return nil, err
 	}
 
-	results := upgrade.MatchIdentities(set, componentIdentities(from), componentIdentities(to))
+	fromNames, toNames, skipped, nameErr := c.objectNames(ctx, req, to)
+	if nameErr != nil {
+		return nil, nameErr
+	}
+
+	results := upgrade.MatchIdentities(set,
+		componentIdentities(from, fromNames), componentIdentities(to, toNames))
 	if req.Deployer == "" && upgrade.RequiresDeployer(results) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"a deployer is required: at least one component needs operator steps, and steps differ per deployer. "+
@@ -163,10 +171,160 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 	}
 
 	return upgrade.NewReport(results, upgrade.ReportOptions{
-		From:     req.From,
-		To:       req.To,
-		Deployer: deployer,
+		From:                req.From,
+		To:                  req.To,
+		Deployer:            deployer,
+		ObjectNamesCompared: skipped == "",
+		ObjectNamesSkipped:  skipped,
 	}), nil
+}
+
+// objectNames resolves the object-name tables for both sides, or reports why
+// it could not.
+//
+// The source side governs. A resolved recipe records valuesFile as a PATH, so
+// reading a recipe file's merged values would read whichever data THIS binary
+// ships rather than what the artifact deployed — for two recipe files that
+// compares today's values against themselves, and the drop this axis exists to
+// catch would be invisible. Only a bundle wrote the merged values down.
+//
+// When either side cannot supply them, both are discarded. A table on one side
+// and nothing on the other would read as every component having just acquired
+// the names it has always had.
+//
+// A target that is not a bundle is the one case that needs no bundle: a recipe
+// file, or no --to at all, asks what would deploy NOW, and the current
+// provider answers exactly that. A target that IS a bundle is read as one,
+// and an unreadable bundle skips rather than falling back — resolving that
+// artifact's values against this binary would answer a question nobody asked.
+func (c *Client) objectNames(
+	ctx context.Context, req UpgradeCheckRequest, to *RecipeResult,
+) (fromNames, toNames map[string]map[string]string, skipped string, err error) {
+
+	fromNames, reason, err := bundleObjectNames(ctx, req.From)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if reason != "" {
+		return nil, nil, reason, nil
+	}
+
+	if _, targetIsBundle := bundleDirectory(req.To); targetIsBundle {
+		toNames, reason, err = bundleObjectNames(ctx, req.To)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if reason != "" {
+			return nil, nil, reason, nil
+		}
+		return fromNames, toNames, "", nil
+	}
+
+	toNames, err = resolvedObjectNames(ctx, to)
+	if err != nil {
+		// Withdraw the axis rather than the whole run. The target's values
+		// come from THIS binary's data, and a recipe from another release can
+		// name a values file this one does not ship — a component's values
+		// file being renamed between releases is enough. Every other
+		// unreadable-artifact path here degrades to a reason and still reports
+		// the version axis; failing the command outright would make a check
+		// that used to work stop working over an axis it never had.
+		return nil, nil, fmt.Sprintf(
+			"the target's values could not be resolved against this binary's data (%v), so the "+
+				"object names it would deploy with are unknown", err), nil
+	}
+	return fromNames, toNames, "", nil
+}
+
+// bundleObjectNames reads the object names a bundle recorded, returning the
+// reason it could not when ref is not a bundle that wrote them down.
+func bundleObjectNames(ctx context.Context, ref string) (map[string]map[string]string, string, error) {
+	dir, isBundle := bundleDirectory(ref)
+	if !isBundle {
+		return nil, "a recipe file records its values by reference, not by value, so it does not " +
+			"state the object names it deployed with. Compare against the bundle directory instead", nil
+	}
+
+	values, err := bundleinfo.ReadReleaseValues(ctx, dir)
+	if err != nil {
+		// A bundle predating build-record stamping has no bundle-info.yaml to
+		// locate its values through. That is a real state to report, not a
+		// failure: the rest of the check is still worth running.
+		if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			return nil, "the bundle at " + ref + " has no " + bundleinfo.FileName +
+				", so the values it installed cannot be located. It was built before build-record " +
+				"stamping; rebuild it with a current AICR to include this axis", nil
+		}
+		return nil, "", err
+	}
+	return projectObjectNames(values), "", nil
+}
+
+// resolvedObjectNames projects a resolved recipe's merged values, read through
+// the provider the result is bound to.
+func resolvedObjectNames(ctx context.Context, r *RecipeResult) (map[string]map[string]string, error) {
+	// Empty rather than nil: a facade result carrying no internal recipe
+	// states no object names, which is a table with no entries, not a failure
+	// to build one.
+	return internalObjectNames(ctx, r.Resolved())
+}
+
+// internalObjectNames resolves every ref's merged values and projects the
+// object names out of them. Disabled refs are included: the caller keys into
+// the result by name, and building two different tables for the two callers
+// would be a way for them to disagree.
+func internalObjectNames(
+	ctx context.Context, internal *recipe.RecipeResult,
+) (map[string]map[string]string, error) {
+
+	if internal == nil {
+		return map[string]map[string]string{}, nil
+	}
+	names := make(map[string]map[string]string, len(internal.ComponentRefs))
+	for i := range internal.ComponentRefs {
+		component := internal.ComponentRefs[i].Name
+		merged, err := internal.GetValuesForComponentWithContext(ctx, component)
+		if err != nil {
+			// The adapter already returns structured errors with the right code.
+			return nil, err
+		}
+		names[component] = recipe.ObjectNameValues(merged)
+	}
+	return names, nil
+}
+
+// projectObjectNames narrows merged values to the keys that name objects.
+//
+// A component that pins none keeps an entry holding an empty map, which is a
+// different statement from having no entry at all: the first says the artifact
+// deployed this component and it pinned nothing, the second that the artifact
+// says nothing about it. Inheritance turns on exactly that difference — the
+// first is a name the current values must not introduce, the second a first
+// deploy.
+func projectObjectNames(values map[string]map[string]any) map[string]map[string]string {
+	names := make(map[string]map[string]string, len(values))
+	for component, merged := range values {
+		names[component] = recipe.ObjectNameValues(merged)
+	}
+	return names
+}
+
+// bundleDirectory reports whether ref names a bundle directory, which is the
+// only artifact form carrying merged values. It mirrors artifactRecipePath's
+// recognition rule: a directory holding the recipe the bundler embedded.
+func bundleDirectory(ref string) (string, bool) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" || strings.HasPrefix(trimmed, serializer.ConfigMapURIScheme) {
+		return "", false
+	}
+	info, err := os.Stat(ref)
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	if _, err := os.Stat(filepath.Join(ref, bundler.RecipeFileName)); err != nil {
+		return "", false
+	}
+	return ref, true
 }
 
 // upgradeCheckTarget resolves the `to` side, synthesizing it from the source's
@@ -267,7 +425,15 @@ func inheritedRecipePath(ref string) (string, error) {
 // move a release between namespaces, so applying the new recipe installs a
 // second copy beside the running one. A version-only projection reports that as
 // no change at all.
-func componentIdentities(r *RecipeResult) map[string]upgrade.Identity {
+// Object names ride along for the same reason, one step further out: they live
+// in the merged values rather than on the ref, and they name the objects the
+// chart owns. Dropping a component's fullnameOverride renames every one of
+// them, which Helm applies as delete-and-recreate. objectNames supplies the
+// table, or nil where the artifacts could not state it.
+func componentIdentities(
+	r *RecipeResult, objectNames map[string]map[string]string,
+) map[string]upgrade.Identity {
+
 	if r == nil {
 		return nil
 	}
@@ -277,7 +443,11 @@ func componentIdentities(r *RecipeResult) map[string]upgrade.Identity {
 		if version == "" {
 			version = c.Tag
 		}
-		table[c.Name] = upgrade.Identity{Version: version, Namespace: c.Namespace}
+		table[c.Name] = upgrade.Identity{
+			Version:     version,
+			Namespace:   c.Namespace,
+			ObjectNames: objectNames[c.Name],
+		}
 	}
 	return table
 }

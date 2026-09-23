@@ -1,0 +1,12 @@
+UPGRADE CHECK
+  from      ./bundles-v0.19.0
+  to        ./recipe.yaml
+
+COMPONENT       FROM                              TO                                      VERDICT  NOTES
+---------       ----                              --                                      -------  -----
+chi-operator    fullnameOverride=legacy-operator  fullnameOverride=(unset)                unknown  0.19.0 unchanged, no record covers a rename
+omega-operator  grafana.fullnameOverride=grafana  grafana.fullnameOverride=omega-grafana  unknown  2.0.0 unchanged, no record covers a rename
+psi-operator    fullnameOverride=(unset)          fullnameOverride=psi                    unknown  1.0.0 unchanged, no record covers a rename
+theta-operator  1.4.0                             1.4.2                                   unknown  2 patches, nameOverride theta -> theta-new
+
+4 component changes, 4 need attention

@@ -76,6 +76,14 @@ func WriteTable(w io.Writer, r *Report) error {
 	}
 	ew.println("")
 
+	// Above the rows rather than below them, and before the no-changes early
+	// return, because "NO COMPONENT CHANGES" is exactly where a reader would
+	// otherwise conclude that object names held.
+	if r.ObjectNamesSkipped != "" {
+		writeParagraph(ew, "  ", "Object names were not compared: "+r.ObjectNamesSkipped)
+		ew.println("")
+	}
+
 	if len(r.Components) == 0 {
 		ew.println("NO COMPONENT CHANGES")
 		return wrapTableErr(ew.err)
@@ -136,8 +144,8 @@ func rowCells(c ReportComponent) (from, to string) {
 	fromFields := make([]string, len(c.IdentityChanges))
 	toFields := make([]string, len(c.IdentityChanges))
 	for i, ch := range c.IdentityChanges {
-		fromFields[i] = ch.Field + "=" + ch.From
-		toFields[i] = ch.Field + "=" + ch.To
+		fromFields[i] = ch.Field + "=" + identityValue(ch.From)
+		toFields[i] = ch.Field + "=" + identityValue(ch.To)
 	}
 	return cell(strings.Join(fromFields, ", ")), cell(strings.Join(toFields, ", "))
 }
