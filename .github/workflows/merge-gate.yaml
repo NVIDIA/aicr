@@ -164,8 +164,15 @@ jobs:
               # so gate the freshness test on the doc + registry directly. The
               # generator sources are included so a generator change also
               # re-runs the check independently of the full suite.
+              #
+              # tools/bom/main.go also reads each component's manifests
+              # directory and values.yaml directly (filepath.Join(repoRoot,
+              # "recipes", "components", <name>, ...)), so both must be
+              # watched too.
               - 'docs/user/container-images.md'
               - 'recipes/registry.yaml'
+              - 'recipes/components/*/manifests/**'
+              - 'recipes/components/*/values.yaml'
               - 'tools/bom/**'
               - 'pkg/bom/**'
             tuning:
