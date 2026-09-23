@@ -23,9 +23,10 @@ inputs:
   privileged_ci:
     description: >-
       Whether this run checked out trusted content. Only trusted runs save the
-      tool cache; restore is unconditional. ok-to-test executes an untrusted PR
-      head inside the default branch's cache scope, and this cache stores
-      executables rather than content-addressed objects.
+      tool cache; restore is unconditional. Defense in depth, not a boundary:
+      on the ok-to-test path this file comes from the fork, so a crafted PR can
+      restore the save (#2681, accepted). That matters most here, because this
+      cache stores executables rather than content-addressed objects.
     required: false
     default: 'true'
 
