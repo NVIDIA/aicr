@@ -580,6 +580,43 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"gang-scheduling",
 				"pod-autoscaling",
 				"cluster-autoscaling",
+				"robust-controller",
+				"secure-accelerator-access",
+			},
+			wantDRAConstraint: false,
+		},
+		{
+			name: "a100-oke-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceOKE
+				c.Accelerator = CriteriaAcceleratorA100
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"kubeflow-trainer",
+			},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+				"robust-controller",
+				"secure-accelerator-access",
 			},
 			wantDRAConstraint: false,
 		},
@@ -669,7 +706,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			},
 			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
 			requiredManifestComponents: []string{"kubeflow-trainer"},
-			requiredChecks:             []string{"platform-health", "robust-controller"},
+			requiredChecks:             []string{"platform-health", "robust-controller", "secure-accelerator-access"},
 		},
 		{
 			name: "l40s-oke-training-kubeflow",
@@ -684,7 +721,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			},
 			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
 			requiredManifestComponents: []string{"kubeflow-trainer"},
-			requiredChecks:             []string{"platform-health", "robust-controller"},
+			requiredChecks:             []string{"platform-health", "robust-controller", "secure-accelerator-access"},
 		},
 		{
 			name: "vr200-rke2-ubuntu-training-kubeflow",
