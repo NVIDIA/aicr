@@ -1,0 +1,165 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-validate-skip-checks
+spec:
+  description: |
+    Validates --skip-check and its config twin spec.validate.execution.skipChecks:
+    the knob that narrows a run to the checks a caller can satisfy, one level
+    below --phase.
+
+    What this covers that the package tests cannot: that the flag and the config
+    field actually REACH the validator's preflight. The unit tests exercise the
+    preflight and the option translation; only running the binary proves the
+    value travels the whole way, from a command line or a checked-in config,
+    through the facade, to the guard that acts on it.
+
+    Both guards are asserted by their exact message, and both directions of each:
+    a run that must be rejected, and the neighbouring run that must not be.
+
+    No cluster needed.
+  timeouts:
+    exec: 60s
+  steps:
+    - name: setup
+      description: Generate a recipe and a mock snapshot, plus a config that carries the same skip list.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-validate-skip-checks"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --intent training \
+                -o "${WORK}/recipe.yaml"
+              cat > "${WORK}/snapshot.yaml" << 'SNAP'
+              measurements:
+                - type: K8s
+                  subtypes:
+                    - subtype: server
+                      data:
+                        version: v1.33.0
+                - type: OS
+                  subtypes:
+                    - subtype: release
+                      data:
+                        ID: ubuntu
+                        VERSION_ID: "24.04"
+              SNAP
+              # The performance phase declares exactly one check in this recipe,
+              # which is what makes it the cheapest way to ask for a phase with
+              # nothing left to run.
+              cat > "${WORK}/empties-a-phase.yaml" << CONFIG
+              kind: AICRConfig
+              apiVersion: aicr.run/v1alpha2
+              metadata:
+                name: cli-validate-skip-checks
+              spec:
+                validate:
+                  input:
+                    recipe: ${WORK}/recipe.yaml
+                    snapshot: ${WORK}/snapshot.yaml
+                  execution:
+                    phases:
+                      - performance
+                    skipChecks:
+                      - nccl-all-reduce-bw
+              CONFIG
+
+    - name: skipping-declared-checks-runs
+      description: A skip list naming real checks leaves the run to complete normally.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-validate-skip-checks"
+              ${AICR_BIN} validate -r "${WORK}/recipe.yaml" -s "${WORK}/snapshot.yaml" \
+                --no-cluster --phase conformance \
+                --skip-check gpu-operator-health --skip-check dra-support \
+                -o "${WORK}/skipped.json"
+            check:
+              ($error == null): true
+
+    - name: unknown-check-name-is-rejected
+      description: A name matching no validator in the catalog fails the run before any cluster work.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-validate-skip-checks"
+              # The EXACT message, and the offending name: asserting only that
+              # the command failed would pass on an unrelated error, and the
+              # grep is what makes the assertion discriminate.
+              out=$(${AICR_BIN} validate -r "${WORK}/recipe.yaml" -s "${WORK}/snapshot.yaml" \
+                --no-cluster --phase conformance --skip-check gpu-operator-helth 2>&1) || true
+              echo "${out}" | \
+                grep -q 'skipChecks entry "gpu-operator-helth" matches no validator in the catalog'
+            check:
+              ($error == null): true
+
+    - name: emptying-a-requested-phase-is-rejected
+      description: |
+        A skip list that removes every declared check from a phase the run requests is
+        rejected. That phase would otherwise report passed while running nothing, because
+        the skipped entries keep its test count above zero.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-validate-skip-checks"
+              out=$(${AICR_BIN} validate -r "${WORK}/recipe.yaml" -s "${WORK}/snapshot.yaml" \
+                --no-cluster --phase performance --skip-check nccl-all-reduce-bw 2>&1) || true
+              echo "${out}" | \
+                grep -q 'skipChecks removes every declared check from phase performance'
+            check:
+              ($error == null): true
+
+    - name: the-same-skip-against-another-phase-is-accepted
+      description: |
+        The neighbour of the case above, so the guard is shown to discriminate rather than
+        to reject any run carrying a skip list. Same skip name, a phase that does not
+        declare it, and the run completes.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-validate-skip-checks"
+              ${AICR_BIN} validate -r "${WORK}/recipe.yaml" -s "${WORK}/snapshot.yaml" \
+                --no-cluster --phase conformance --skip-check nccl-all-reduce-bw \
+                -o "${WORK}/other-phase.json"
+            check:
+              ($error == null): true
+
+    - name: the-config-field-reaches-the-same-guard
+      description: |
+        spec.validate.execution.skipChecks with no --skip-check on the command line. This is
+        how a lane declares its skips, so the config path has to be shown to arrive at the
+        same place the flag does.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-validate-skip-checks"
+              out=$(${AICR_BIN} validate --config "${WORK}/empties-a-phase.yaml" --no-cluster 2>&1) || true
+              echo "${out}" | \
+                grep -q 'skipChecks removes every declared check from phase performance'
+            check:
+              ($error == null): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-validate-skip-checks

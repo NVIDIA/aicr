@@ -15,6 +15,8 @@
 package validator
 
 import (
+	"slices"
+
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -141,5 +143,15 @@ func WithDataProvider(dp recipe.DataProvider) Option {
 func WithFailFast(failFast bool) Option {
 	return func(v *Validator) {
 		v.FailFast = failFast
+	}
+}
+
+// WithSkipChecks names checks to withhold from every requested phase. Each is
+// reported as skipped rather than dropped, and the run is rejected up front if
+// a name matches no validator in the catalog or if the list would empty a
+// requested phase. Default: none. See skip_checks.go.
+func WithSkipChecks(names ...string) Option {
+	return func(v *Validator) {
+		v.SkipChecks = slices.Clone(names)
 	}
 }
