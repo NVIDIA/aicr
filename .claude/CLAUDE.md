@@ -712,10 +712,10 @@ aicr snapshot --output snapshot.yaml
 #   oci ce cluster list-addons --cluster-id <ocid> --all --output json > addons.json
 #   aicr snapshot --oke-addons addons.json --output snapshot.yaml
 # GKE bundle-installer only: include the pool projection or snapshot-qualified
-# recipe generation / validate readiness fails closed (gpuStack profile).
-# The default gke-default value needs no pool dump:
+# recipe generation / validate readiness fails closed (gpuStack profile):
 #   gcloud container node-pools list --cluster <cluster> --format=json > pools.json
 #   aicr snapshot --gke-gpu-pools pools.json --output snapshot.yaml
+# The default gke-default value needs no pool dump.
 
 # Generate recipe from snapshot
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
