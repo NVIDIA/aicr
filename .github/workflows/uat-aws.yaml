@@ -264,6 +264,20 @@ jobs:
             echo "::error::${CLUSTER_CONFIG} has no .deployment.tenancy"; exit 1
           fi
           echo "AWS_ACCOUNT_ID=${TENANCY}" >> "${GITHUB_ENV}"
+          # Same treatment for the REGION, and for the same reason. The job-level
+          # AWS_REGION default is us-east-1, which silently mismatches any
+          # cluster-config provisioning elsewhere: every aws call in this job is
+          # region-scoped, so the first symptom is a capacity assertion failing
+          # with InvalidCapacityReservationId.NotFound against a reservation that
+          # plainly exists — in another region. Deriving it from
+          # .deployment.location keeps the account and the region resolved from
+          # one source, so a lane cannot authenticate into the right tenancy and
+          # then look for its resources in the wrong place.
+          LOCATION=$(yq eval '.deployment.location' "${CLUSTER_CONFIG}")
+          if [[ -z "${LOCATION}" || "${LOCATION}" == "null" ]]; then
+            echo "::error::${CLUSTER_CONFIG} has no .deployment.location"; exit 1
+          fi
+          echo "AWS_REGION=${LOCATION}" >> "${GITHUB_ENV}"
           # Validate deployer after the account export (which teardown depends on).
           # workflow_dispatch constrains this to a choice, but workflow_call passes
           # free strings, so a typo from a caller must surface as a clear error here
