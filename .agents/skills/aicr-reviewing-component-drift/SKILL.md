@@ -105,6 +105,11 @@ Ordered by how often each is what actually bites.
    - `slinky-slurm-operator-crds`, `slinky-slurm-operator`, `slinky-slurm`
    - `mariadb-operator-crds`, `mariadb-operator`, `slurm-accounting-mariadb`
    - `agentgateway-crds`, `agentgateway`
+   - `prometheus-operator-crds`, `kube-prometheus-stack`, keyed on
+     `appVersion`, not chart version (the two chart sequences are unrelated).
+     A lagging CRDs pin also breaks `nvsentinel` and
+     `k8s-ephemeral-storage-metrics`, which create resources defined by those CRDs.
+     `TestPrometheusOperatorAppVersionLockstep` enforces this.
    - `prometheus-adapter` / `prometheus-adapter-ocp`,
      `nvidia-dra-driver-gpu` / `nvidia-dra-driver-gpu-ocp`, and
      `k8s-nim-operator` / `k8s-nim-operator-ocp` — these three `-ocp` twins
