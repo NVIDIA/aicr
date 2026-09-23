@@ -93,7 +93,11 @@ remapped_candidate() {
         old="${entry%%|*}/"
         new="${entry##*|}/"
         if [[ "${url}" == *"${old}"* ]]; then
-            printf '%s\n' "${url/"${old}"/"${new}"}"
+            # Keep the quotes around the expansion syntax, not inside the
+            # replacement pattern. Quoting the variables inside the
+            # parameter-expansion operator makes literal double quotes part of
+            # the generated URL.
+            printf '%s\n' "${url/$old/$new}"
             return
         fi
     done
