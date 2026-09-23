@@ -40,6 +40,15 @@ path these action files are themselves checked out from the fork, so the gate is
 not a boundary against a crafted PR. Job-level skipping in `qualification.yaml`
 (`cli-e2e`, `security-scan`) is the control that holds there.
 
+That residual exposure is accepted rather than closed ([#2681](https://github.com/NVIDIA/aicr/issues/2681)):
+the fixes that would make it an invariant either stop running lint/test/e2e on
+fork PRs, or move untrusted code onto a base-repo branch where fork-authored
+workflow files reach the private GPU runners. Since the maintainer's vouch is
+the real control, `/ok-to-test` refuses its bare form on a PR that touches
+`.github/**`, or has too many changed files for that to be checked, and
+requires `/ok-to-test confirm-ci`, so the CI diff cannot be waved through
+without being shown.
+
 Callers that set `apidiff_version` must check out full history with
 `fetch-depth: 0` so `make api-diff` can resolve a reachable stable release tag.
 
