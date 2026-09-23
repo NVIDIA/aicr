@@ -113,9 +113,9 @@ Which binary accepts which catalog:
 
 | AICR release | Accepts | Writes and documents |
 |---|---|---|
-| v0.20 and earlier | anything — catalog headers were ungated | current |
-| v0.21 | current and target | current |
-| v0.22 | current and target | target |
+| v0.20 and earlier | anything — catalog headers were ungated | retired |
+| v0.21 | retired and target | retired |
+| v0.22 | retired and target | target |
 | v1.0.0 and later | target only | target |
 
 **v0.20 and earlier cannot tell you whether your catalog is compatible.** Those
@@ -128,9 +128,9 @@ did in v0.21 (issue
 [#1812](https://github.com/NVIDIA/aicr/issues/1812)). Treat v0.20 as unable to
 validate your catalog rather than as a compatibility floor you can rely on.
 
-Switch to the **target** value before v1.0.0, which stops accepting the current
-one. Catalogs are authored inputs, so this is a manual edit in your tree. AICR
-does not rewrite them, and there is no conversion layer.
+v1.0.0 and later accept the **target** value only. Catalogs are authored inputs,
+so moving one off a retired value is a manual edit in your tree. AICR does not
+rewrite them, and there is no conversion layer.
 
 Empty, unknown, or wrong-kind AICR catalog headers fail with `INVALID_REQUEST`
 naming the value observed, the values expected for that kind, and the
