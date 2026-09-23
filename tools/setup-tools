@@ -145,6 +145,37 @@ verify_sha256() {
 # failure install_release_binary reports rather than aborts on.
 RELEASE_ASSET_UNREACHABLE=3
 
+# manifest_digest <checksums-file> <asset> prints the SHA-256 digest a combined
+# checksums file records for <asset>, or nothing. It reads two shapes: GNU
+# (`<digest>  <file>`, or `<digest> *<file>` in binary mode) and BSD
+# (`SHA256 (<file>) = <digest>`, which yq publishes). The name is matched
+# exactly, so `<asset>.sig` or a longer name that merely starts with it cannot
+# supply the digest.
+manifest_digest() {
+    awk -v a="$2" '
+        $2 == a || $2 == "*" a                         { print $1; exit }
+        $1 == "SHA256" && $2 == "(" a ")" && $3 == "=" { print $4; exit }
+    ' "$1"
+}
+
+# settings_yq_version <settings-file> prints the version pinned at
+# .testing_tools.yq, or nothing. It reads the file without yq, because yq is
+# what it is about to install, so it handles only that one key.
+# tools/setup-tools_test.sh holds it to agreeing with yq on the real file.
+settings_yq_version() {
+    awk '
+        /^testing_tools:/  { in_section = 1; next }
+        /^[^[:space:]#]/   { in_section = 0 }
+        in_section && /^  yq:/ {
+            sub(/^  yq:[[:space:]]*/, "")
+            sub(/[[:space:]]*(#.*)?$/, "")
+            gsub(/["\047]/, "")
+            print
+            exit
+        }
+    ' "$1"
+}
+
 # release_sidecar_spec <sidecar:algo[:suffix]> prints "<algo> <suffix>". The
 # suffix defaults per algorithm but cannot always be derived from it: dl.k8s.io
 # publishes kubectl's SHA-256 as `.sha256`, not `.sha256sum`.
@@ -213,9 +244,7 @@ install_release_binary() {
                     log_error "Failed to download the checksums file for $description"
                     exit 1
                 fi
-                # Exact field match, so `<asset>.sig` or a longer name that
-                # merely starts with this one cannot supply the digest.
-                expected=$(awk -v a="$asset" '$2 == a || $2 == "*" a { print $1; exit }' "${tmp}/checksums")
+                expected=$(manifest_digest "${tmp}/checksums" "$asset")
                 ;;
             sidecar:*)
                 spec=$(release_sidecar_spec "$source") || exit 1
@@ -488,13 +517,20 @@ if ! command_exists yq || [[ "${UPGRADE}" == "true" ]]; then
             exit 1
         fi
     elif [[ "${OS}" == "linux" ]]; then
-        YQ_URL="https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${GO_ARCH}"
-
-        if verify_download_url "$YQ_URL" "yq for Linux ${GO_ARCH}"; then
-            log_debug "Downloading yq from: $YQ_URL"
-            sudo curl -fsSL "$YQ_URL" -o /usr/local/bin/yq
-            sudo chmod +x /usr/local/bin/yq
-        else
+        # install-e2e-tools checks the installed yq against this pin before it
+        # saves the tool cache.
+        YQ_VERSION=$(settings_yq_version "${VERSIONS_FILE}")
+        if [[ -z "${YQ_VERSION}" ]]; then
+            log_error "No yq version pinned under testing_tools in .settings.yaml"
+            exit 1
+        fi
+        YQ_RELEASE="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}"
+        # yq's `checksums` puts the file name first, then one digest per
+        # algorithm in an order kept in a separate file; `checksums-bsd` labels
+        # each digest with its algorithm.
+        if ! install_release_binary "${YQ_RELEASE}/yq_linux_${GO_ARCH}" \
+            "manifest:${YQ_RELEASE}/checksums-bsd" \
+            yq "yq ${YQ_VERSION} for Linux ${GO_ARCH}"; then
             log_error "Failed to install yq. Please install manually."
             exit 1
         fi

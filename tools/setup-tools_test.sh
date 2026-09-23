@@ -341,6 +341,114 @@ if ! reason=$(check_sidecar_specs); then
 fi
 echo "Sidecar sources: default suffix per algorithm, explicit suffix honored, unsupported algorithm rejected"
 
+# A combined checksums file comes in two shapes: GNU (`<digest>  <file>`, or
+# `<digest> *<file>` in binary mode) and BSD (`SHA256 (<file>) = <digest>`,
+# which yq publishes). The lookup matches the asset name exactly, because real
+# manifests list near-misses beside it: cosign's has
+# `cosign-linux-amd64_<ver>_linux_amd64.sbom.json` next to the binary.
+check_manifest_lookup() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        scratch=$(mktemp -d)
+        trap 'rm -rf "${scratch}"' EXIT
+        manifest="${scratch}/checksums"
+        cat > "${manifest}" << 'EOF'
+aaaa000000000000000000000000000000000000000000000000000000000001  tool-linux-amd64.sig
+aaaa000000000000000000000000000000000000000000000000000000000002  tool-linux-amd64_1.0_linux_amd64.sbom.json
+aaaa000000000000000000000000000000000000000000000000000000000003  tool-linux-amd64
+bbbb000000000000000000000000000000000000000000000000000000000004 *tool-binary-mode
+MD5 (yq_linux_amd64) = 53db061387e8d051f450d49d0cfd367c
+SHA256 (yq_linux_amd64.sig) = cccc000000000000000000000000000000000000000000000000000000000005
+SHA256 (yq_linux_amd64) = cccc000000000000000000000000000000000000000000000000000000000006
+SHA512 (yq_linux_amd64) = dddd
+EOF
+        expect_digest() {
+            local asset="$1" want="$2" got
+            got=$(manifest_digest "${manifest}" "${asset}")
+            [[ "${got}" == "${want}" ]] || { echo "${asset} resolved to '${got}', want '${want}'"; exit 1; }
+        }
+        expect_digest tool-linux-amd64 aaaa000000000000000000000000000000000000000000000000000000000003
+        expect_digest tool-binary-mode bbbb000000000000000000000000000000000000000000000000000000000004
+        expect_digest yq_linux_amd64   cccc000000000000000000000000000000000000000000000000000000000006
+        expect_digest tool-linux-arm64 ""
+    )
+}
+
+if ! reason=$(check_manifest_lookup); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Manifest lookup: GNU and BSD formats, SHA256 picked from BSD, near-miss names and absent assets not matched"
+
+# yq reads .settings.yaml, so its own pin has to be read without it:
+# settings_yq_version is what lets a machine with no yq install the pinned one.
+# It must agree with yq on the real file -- that is the property that matters,
+# and it catches the file being reshaped under it -- and must take the key from
+# testing_tools, the section CI's pin check reads, not a `yq:` anywhere else.
+check_yq_pin_reader() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        scratch=$(mktemp -d)
+        trap 'rm -rf "${scratch}"' EXIT
+
+        real=$(settings_yq_version "${REPO_ROOT}/.settings.yaml")
+        [[ "${real}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+            { echo "the real .settings.yaml yielded '${real}', not a vX.Y.Z version"; exit 1; }
+        if command -v yq >/dev/null 2>&1; then
+            via_yq=$(yq '.testing_tools.yq' "${REPO_ROOT}/.settings.yaml")
+            [[ "${real}" == "${via_yq}" ]] ||
+                { echo "read '${real}' without yq, but yq reads '${via_yq}'"; exit 1; }
+        fi
+
+        cat > "${scratch}/other-section-first.yaml" << 'EOF'
+build_tools:
+  yq: 'v9.9.9'
+testing_tools:
+  kind: '0.1.0'
+  # renovate: datasource=github-releases depName=mikefarah/yq
+  yq: 'v4.1.2'
+security_tools:
+  yq: 'v8.8.8'
+EOF
+        got=$(settings_yq_version "${scratch}/other-section-first.yaml")
+        [[ "${got}" == "v4.1.2" ]] ||
+            { echo "took '${got}' instead of the testing_tools key v4.1.2"; exit 1; }
+
+        printf 'testing_tools:\n  yq: "v4.1.3"\n' > "${scratch}/double.yaml"
+        [[ "$(settings_yq_version "${scratch}/double.yaml")" == "v4.1.3" ]] ||
+            { echo "a double-quoted pin was not read"; exit 1; }
+        printf 'testing_tools:\n  yq: v4.1.4  # trailing\n' > "${scratch}/bare.yaml"
+        [[ "$(settings_yq_version "${scratch}/bare.yaml")" == "v4.1.4" ]] ||
+            { echo "an unquoted pin with a trailing comment was not read"; exit 1; }
+
+        printf 'testing_tools:\n  kind: "0.1.0"\nsecurity_tools:\n  yq: v8.8.8\n' > "${scratch}/absent.yaml"
+        [[ -z "$(settings_yq_version "${scratch}/absent.yaml")" ]] ||
+            { echo "testing_tools has no yq pin, but a later section's was read"; exit 1; }
+    )
+}
+
+if ! reason=$(check_yq_pin_reader); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "yq pin reader: agrees with yq on .settings.yaml, reads only testing_tools, handles quoting, empty when absent"
+
+# A `releases/latest` URL installs whatever upstream shipped last, not the pin,
+# and its checksums move with it -- verified, but not the version CI expects.
+# yq installed that way until #2939.
+if latest=$(grep -nE '^[^#]*/releases/latest' "${SETUP_TOOLS}"); then
+    echo "FAIL: setup-tools downloads from a moving releases/latest URL instead of a pinned version:" >&2
+    echo "${latest}" >&2
+    exit 1
+fi
+echo "No install downloads from a moving releases/latest URL"
+
 # --- every binary install is checksum-verified (#2666) ----------------------
 # install_release_binary will not run without a checksum source, so routing
 # every install through it is what makes verification impossible to skip. This
@@ -351,15 +459,11 @@ echo "Sidecar sources: default suffix per algorithm, explicit suffix honored, un
 # Exceptions are named rather than pattern-matched, each with its reason:
 #   grype    -- installs through anchore's install.sh, which is itself
 #               checksum-pinned (GRYPE_INSTALL_SHA256) and verifies what it fetches.
-#   yq       -- UNVERIFIED. The bootstrap tool: it is what reads .settings.yaml,
-#               so it installs before any pin can be read and tracks `latest`.
-#               Verifying it needs a bootstrap pin; #2939.
 #   yamllint -- a pip package at a pinned version in a venv, symlinked in. pip
 #               resolves it rather than a release checksum, so it is outside
 #               what install_release_binary covers.
 BIN_INSTALL_EXCEPTIONS=(
     "/usr/local/bin/grype"
-    "/usr/local/bin/yq"
     "/usr/local/bin/yamllint"
 )
 
@@ -452,7 +556,7 @@ fi
 # does: the bypass check alone passes vacuously if an install is deleted.
 REQUIRED_RELEASE_BINARIES=(
     addlicense chainsaw cosign crane ctlptl flux git-cliff goreleaser hauler
-    helm helmfile kind ko kubectl mkcert oasdiff oras syft tilt zarf
+    helm helmfile kind ko kubectl mkcert oasdiff oras syft tilt yq zarf
 )
 
 # Join backslash-continued lines first. The binary argument usually sits on a

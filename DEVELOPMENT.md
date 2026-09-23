@@ -37,7 +37,7 @@ make qualify        # Full check: test-coverage + lint + tuning-check + coverage
 | **make** | Build automation | Pre-installed on macOS; `apt install make` on Ubuntu/Debian |
 | **git** | Version control | Pre-installed on most systems |
 | **Docker** | Container builds | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
-| **yq** | YAML processing | Required for `make tools-setup/check`. See [github.com/mikefarah/yq](https://github.com/mikefarah/yq) |
+| **yq** | YAML processing | Installed by `make tools-setup`: the pinned version on Linux, via Homebrew on macOS. `make tools-check` needs it |
 
 ### Development Tools (installed by `make tools-setup`)
 
@@ -70,11 +70,9 @@ On Ubuntu 24.04+ and other systems using PEP 668, system-wide pip installs are b
 sudo apt-get install -y make git curl pipx
 pipx ensurepath
 pipx install yamllint
-
-# Install yq
-sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-sudo chmod +x /usr/local/bin/yq
 ```
+
+`make tools-setup` installs yq itself, at the version pinned in `.settings.yaml`, checksum-verified. It keeps a yq that is already on `PATH`, so run `make tools-update` to replace a hand-installed one.
 
 ## Development Setup
 
