@@ -1,0 +1,118 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The consuming overlay owns the nvidiaDriver values and the switch from the
+# legacy ClusterPolicy driver fields. This post-manifest only materializes that
+# policy as a NVIDIADriver CR after the GPU Operator chart installs its CRD.
+{{- $vals := index .Values "gpu-operator" }}
+{{- $driver := $vals.driver }}
+{{- $nvidiaDriver := $vals.nvidiaDriver }}
+{{- if and (ne (toString $driver.enabled) "false") $driver.nvidiaDriverCRD.enabled (eq (toString $driver.nvidiaDriverCRD.deployDefaultCR) "false") }}
+---
+apiVersion: nvidia.com/v1alpha1
+kind: NVIDIADriver
+metadata:
+  name: default
+  annotations:
+    # This CR is already ordered after the GPU Operator release by each
+    # deployer; it must not become a Helm hook with separate lifecycle rules.
+    aicr/skip-hook-validation: "true"
+spec:
+  default: true
+  repository: {{ $nvidiaDriver.repository }}
+  image: {{ $nvidiaDriver.image }}
+  version: {{ $nvidiaDriver.version | quote }}
+  {{- if $nvidiaDriver.imagePullPolicy }}
+  imagePullPolicy: {{ $nvidiaDriver.imagePullPolicy }}
+  {{- end }}
+  {{- if $nvidiaDriver.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml $nvidiaDriver.imagePullSecrets | nindent 4 }}
+  {{- end }}
+  driverType: {{ default "gpu" $nvidiaDriver.driverType }}
+  kernelModuleType: {{ default "auto" $nvidiaDriver.kernelModuleType }}
+  usePrecompiled: {{ default false $nvidiaDriver.usePrecompiled }}
+  {{- if $driver.useOpenKernelModules }}
+  useOpenKernelModules: true
+  {{- end }}
+  manager:
+    {{- toYaml $nvidiaDriver.manager | nindent 4 }}
+  {{- if $driver.startupProbe }}
+  startupProbe:
+    {{- toYaml $driver.startupProbe | nindent 4 }}
+  {{- end }}
+  upgradePolicy:
+    autoUpgrade: {{ $nvidiaDriver.upgradePolicy.autoUpgrade }}
+    maxParallelUpgrades: {{ $nvidiaDriver.upgradePolicy.maxParallelUpgrades }}
+    maxUnavailable: {{ $nvidiaDriver.upgradePolicy.maxUnavailable }}
+    waitForCompletion:
+      {{- toYaml $nvidiaDriver.upgradePolicy.waitForCompletion | nindent 6 }}
+    podDeletion:
+      {{- toYaml $nvidiaDriver.upgradePolicy.gpuPodDeletion | nindent 6 }}
+    drain:
+      enable: {{ $nvidiaDriver.upgradePolicy.drain.enable }}
+      force: {{ $nvidiaDriver.upgradePolicy.drain.force }}
+      podSelector: {{ $nvidiaDriver.upgradePolicy.drain.podSelector | quote }}
+      timeoutSeconds: {{ $nvidiaDriver.upgradePolicy.drain.timeoutSeconds }}
+      deleteEmptyDir: {{ $nvidiaDriver.upgradePolicy.drain.deleteEmptyDir }}
+  {{- if $driver.rdma }}
+  rdma:
+    {{- toYaml $driver.rdma | nindent 4 }}
+  {{- end }}
+  {{- if and $driver.repoConfig $driver.repoConfig.configMapName }}
+  repoConfig:
+    name: {{ $driver.repoConfig.configMapName }}
+  {{- end }}
+  {{- if and $driver.certConfig $driver.certConfig.name }}
+  certConfig:
+    name: {{ $driver.certConfig.name }}
+  {{- end }}
+  {{- if and $driver.kernelModuleConfig $driver.kernelModuleConfig.name }}
+  kernelModuleConfig:
+    name: {{ $driver.kernelModuleConfig.name }}
+  {{- end }}
+  {{- if and $driver.licensingConfig $driver.licensingConfig.secretName }}
+  licensingConfig:
+    secretName: {{ $driver.licensingConfig.secretName }}
+    nlsEnabled: {{ ne (toString $driver.licensingConfig.nlsEnabled) "false" }}
+  {{- else if and $driver.licensingConfig $driver.licensingConfig.configMapName }}
+  licensingConfig:
+    name: {{ $driver.licensingConfig.configMapName }}
+    nlsEnabled: {{ ne (toString $driver.licensingConfig.nlsEnabled) "false" }}
+  {{- end }}
+  {{- if $driver.resources }}
+  resources:
+    {{- toYaml $driver.resources | nindent 4 }}
+  {{- end }}
+  {{- if $driver.env }}
+  env:
+    {{- toYaml $driver.env | nindent 4 }}
+  {{- end }}
+  {{- if $driver.args }}
+  args:
+    {{- toYaml $driver.args | nindent 4 }}
+  {{- end }}
+  {{- if $vals.gds }}
+  gds:
+    {{- toYaml $vals.gds | nindent 4 }}
+  {{- end }}
+  {{- if $vals.gdrcopy }}
+  gdrcopy:
+    {{- toYaml $vals.gdrcopy | nindent 4 }}
+  {{- end }}
+  {{- if $vals.daemonsets.tolerations }}
+  tolerations:
+    {{- toYaml $vals.daemonsets.tolerations | nindent 4 }}
+  {{- end }}
+{{- end }}

@@ -148,6 +148,30 @@ The policy is **only-false**: the auto-detect never forces `driver.enabled=true`
 
 The signal is a single-node sample: the snapshotter Job runs on one `nvidia.com/gpu.present=true` node, so its `driver-loaded` reading is representative only when every GPU pool is in the same driver state. Mixed-pool clusters (some nodes with a preinstalled driver, some without) are out of scope for the auto-detect and tracked in [#464](https://github.com/NVIDIA/aicr/issues/464); AICR emits a `topology reports non-uniform GPU labels…` warning when the snapshot's node-topology labels indicate divergent GPU nodes so the fail-direction (some non-preinstalled pools may come up driverless) is at least observable.
 
+#### Opt-in NVIDIADriver CR ownership
+
+The `gpu-operator-nvidia-driver-cr` mixin adds a post-manifest that renders a
+separately managed `NVIDIADriver/default` resource. The mixin itself hard-codes
+no driver version or rollout policy: the consuming overlay must enable
+`driver.nvidiaDriverCRD.enabled`, explicitly set `deployDefaultCR: false`, clear
+the legacy ClusterPolicy driver identity and `upgradePolicy`, and provide a
+complete `nvidiaDriver` value tree. Omitting `deployDefaultCR` does not opt in.
+The manifest renders only when the GPU Operator still manages the driver and
+all three guards are satisfied.
+
+The post-manifest resolves in one Helm pass for every deployer. Driver identity,
+pull secrets, and rollout policy come from `nvidiaDriver`; the existing `gds`
+and `gdrcopy` trees are projected into the CR so enabling CR ownership does not
+silently drop those driver sidecars. The resource is the cluster-wide default,
+so it intentionally omits `nodeSelector`: the upstream CRD forbids a default
+`NVIDIADriver` from selecting nodes. Deployments that need pool-specific driver
+resources must attach separate non-default manifests instead of this mixin.
+
+This is an advanced ownership mode, not a stock recipe default. Do not enable
+it alongside the chart-generated default CR or leave the legacy
+`ClusterPolicy.spec.driver` identity populated; either combination creates two
+sources of truth for the same driver rollout.
+
 To see exactly which components appear in a given recipe, generate one:
 
 ```bash

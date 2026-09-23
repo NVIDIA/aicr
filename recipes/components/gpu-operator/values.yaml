@@ -143,8 +143,28 @@ dcgmExporter:
       DCGM_FI_PROF_PIPE_FP32_ACTIVE, gauge, Ratio of cycles the fp32 pipes are active (in %).
       DCGM_FI_PROF_PIPE_FP16_ACTIVE, gauge, Ratio of cycles the fp16 pipes are active (in %).
 
+# Pin the chart defaults explicitly because the opt-in NVIDIADriver post-chart
+# receives recipe values, not the upstream chart's merged default values. The
+# NVIDIADriver manifest projects these complete trees into the CR.
+gds:
+  enabled: false
+  repository: nvcr.io/nvidia/cloud-native
+  image: nvidia-fs
+  version: "2.29.4"
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+  env: []
+  args: []
+
 gdrcopy:
   enabled: true
+  repository: nvcr.io/nvidia/cloud-native
+  image: gdrdrv
+  version: "v2.6"
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+  env: []
+  args: []
 
 gfd:
   enabled: true
