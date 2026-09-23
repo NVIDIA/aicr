@@ -933,7 +933,7 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**CRDs are applied for you; the manual command is a fallback.** The chart
+**CRDs are applied for you on every deployer except `helmfile`.** The chart
 ships its CRDs under `crds/`. Helm installs that directory on first install and
 never touches it again on upgrade, so a chart bump whose CRDs changed would
 leave the previous schema in place and the API server would silently prune the
@@ -946,8 +946,16 @@ apply the CRDs through their own controllers. `helmfile` has no automated
 equivalent: the manual command below is always required for its `ownsCRDs`
 components.
 
-Run the command below by hand only when you are upgrading outside a generated
-bundle, or when `apply-crds.sh` failed and you are reproducing it:
+When you run the command below depends on your deployer, because only some of
+them do it for you:
+
+- **`helmfile`: always, including from a generated bundle.** Nothing runs it
+  for you on this deployer, so it is a required step before every `ownsCRDs`
+  upgrade, not a fallback.
+- **`helm`: only** when you are upgrading outside a generated bundle, or when
+  the bundle's `apply-crds.sh` failed and you are reproducing it by hand.
+- **`flux`, `argocd`, `argocd-helm`: not needed.** Their controllers apply the
+  CRDs themselves.
 
 ```bash
 set -euo pipefail
