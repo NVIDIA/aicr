@@ -152,6 +152,7 @@ aicr snapshot \
 - `--cluster-config`: Path to a pre-existing k8s-launch-kit cluster-config.yaml to ingest network topology (local agent mode only).
 - `--oke-addons`: Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump, projected into the `K8s.oke-addons.nvidia-gpu-plugin` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
 - `--aks-gpu-pools`: Path to an `az aks nodepool list -o json` dump, projected into the `K8s.aks-gpu-pools.gpu-driver` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
+- `--gke-gpu-pools`: Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump, projected into the `K8s.gke-gpu-pools.gpu-driver-installation` reading (required only to resolve the GKE `bundle-installer` gpuStack value from a snapshot). Controller-side: works in agent Job mode too. The file never enters the pod. The CLI merges the projection into the returned snapshot.
 - `--discover-network`: Enable live l8k discovery to populate the NetworkTopology measurement. **Not read-only** — writes `nvidia.kubernetes-launch-kit.*` node labels and may patch `NicClusterPolicy`.
 
 ### 4. Check Agent Logs (Debugging)

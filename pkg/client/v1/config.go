@@ -908,8 +908,8 @@ func (c *Config) CNCFEvidenceOptions() (CNCFEvidenceOptions, error) {
 //
 // Callers deliver with snapshotter.DeliverSnapshot, passing Snapshot.Raw.
 //
-// Kubeconfig, Debug, ClusterConfigPath, AKSGPUPoolsPath, DiscoverNetwork,
-// RunID and NameBase are left at their zero values. None has a spec.snapshot
+// Kubeconfig, Debug, ClusterConfigPath, AKSGPUPoolsPath, GKEGPUPoolsPath,
+// DiscoverNetwork, RunID and NameBase are left at their zero values. None has a spec.snapshot
 // counterpart — they are per-invocation or caller-owned. NameBase in
 // particular carries the "aicr" default prefix that lets an unset job name
 // stay empty while deployed objects keep their released names, which is a

@@ -273,6 +273,89 @@ func TestMergeOKEAddons(t *testing.T) {
 	}
 }
 
+// TestMeasureAttachesGKEGPUPools confirms the local-mode GKE projection
+// lands on the K8s measurement of the serialized snapshot without
+// touching any collector.
+func TestMeasureAttachesGKEGPUPools(t *testing.T) {
+	ser := &mockSerializer{}
+	ns := &NodeSnapshotter{
+		Version:    "1.0.0",
+		Factory:    &mockFactory{},
+		Serializer: ser,
+		GKEGPUPoolsPath: writePoolsFile(t,
+			`[{"name":"gpu1","config":{"accelerators":[
+			    {"acceleratorType":"nvidia-h100-80gb","gpuDriverInstallationConfig":{"gpuDriverVersion":"INSTALLATION_DISABLED"}}
+			  ]}}]`),
+	}
+
+	if err := ns.Measure(t.Context()); err != nil {
+		t.Fatalf("Measure() error = %v", err)
+	}
+	snap, ok := ser.data.(*Snapshot)
+	if !ok {
+		t.Fatalf("serialized %T, want *Snapshot", ser.data)
+	}
+	subtype := findK8sSubtype(snap, k8scollector.SubtypeGKEGPUPools)
+	if subtype == nil {
+		t.Fatal("snapshot is missing the gke-gpu-pools subtype")
+	}
+	if got, _ := subtype.Data["gpu-driver-installation"].Any().(string); got != "Disabled" {
+		t.Fatalf("gpu-driver-installation = %v, want Disabled", subtype.Data["gpu-driver-installation"].Any())
+	}
+}
+
+// TestMeasureFailsLoudOnBadGKEPoolsFile confirms a bad GKE pools file
+// fails before any collector runs.
+func TestMeasureFailsLoudOnBadGKEPoolsFile(t *testing.T) {
+	factory := &mockFactory{}
+	ns := &NodeSnapshotter{
+		Version:         "1.0.0",
+		Factory:         factory,
+		Serializer:      &mockSerializer{},
+		GKEGPUPoolsPath: filepath.Join(t.TempDir(), "absent.json"),
+	}
+
+	if err := ns.Measure(t.Context()); err == nil {
+		t.Fatal("Measure() error = nil, want failure on a missing pools file")
+	}
+	if factory.k8sCalled {
+		t.Error("collectors ran despite the pools pre-projection failing")
+	}
+}
+
+// TestMergeGKEGPUPools confirms the agent Job-mode GKE projection merges
+// cleanly onto an existing K8s measurement, since mergeProviderProjection
+// is subtype-agnostic.
+func TestMergeGKEGPUPools(t *testing.T) {
+	snap := NewSnapshot()
+	snap.Measurements = append(snap.Measurements,
+		measurement.NewMeasurement(measurement.TypeK8s).Build())
+	raw, err := yaml.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	merged, err := mergeProviderProjection(raw, measurement.Subtype{
+		Name: k8scollector.SubtypeGKEGPUPools,
+		Data: map[string]measurement.Reading{"gpu-driver-installation": measurement.Str("Disabled")},
+	})
+	if err != nil {
+		t.Fatalf("mergeProviderProjection() error = %v", err)
+	}
+
+	var got Snapshot
+	if err := yaml.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("unmarshal merged: %v", err)
+	}
+	subtype := findK8sSubtype(&got, k8scollector.SubtypeGKEGPUPools)
+	if subtype == nil {
+		t.Fatal("merged snapshot is missing the gke-gpu-pools subtype")
+	}
+	if got, _ := subtype.Data["gpu-driver-installation"].Any().(string); got != "Disabled" {
+		t.Fatalf("gpu-driver-installation = %v, want Disabled", subtype.Data["gpu-driver-installation"].Any())
+	}
+}
+
 // TestMergeAKSGPUPoolsPreservesUnknownFields pins the version-skew contract:
 // fields a newer agent image emits that this binary's Snapshot struct does
 // not declare must survive the merge byte path.

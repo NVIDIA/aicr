@@ -57,6 +57,11 @@ Each stage transforms input data into a different format:
   `aicr snapshot --oke-addons <file>` (the `NvidiaGpuPlugin` add-on's
   control-plane state). Same up-front validation and attach/merge flow
   as `aks-gpu-pools`
+- **gke-gpu-pools**: Orchestration-layer projection, not a collector.
+  Produced from the explicit operator-supplied pool dump passed to
+  `aicr snapshot --gke-gpu-pools <file>` (per-pool
+  `gpuDriverInstallationConfig.gpuDriverVersion` install modes). Same
+  up-front validation and attach/merge flow as `aks-gpu-pools`
 
 **GPU Hardware:**
 - Source: NFD/PCI enumeration via sysfs (driver-free; no `nvidia-smi`)
@@ -86,7 +91,8 @@ Each stage transforms input data into a different format:
 │   │   └─ subtypes: [server, image, policy, node,        │
 │   │                 slinky-slurm, mariadb-operator,      │
 │   │                 aks-gpu-pools (with --aks-gpu-pools),│
-│   │                 oke-addons (with --oke-addons)]      │
+│   │                 oke-addons (with --oke-addons),      │
+│   │                 gke-gpu-pools (with --gke-gpu-pools)]│
 │   │       ├─ data: map[string]Reading                   │
 │   │       └─ slinky-slurm.items: []ItemEntry            │
 │   │             (allowlisted resource context + data)   │
@@ -181,9 +187,9 @@ type Reading interface {
   cancel-on-error collector is supported, but today per-collector errors
   are swallowed.)
 - Provider projections follow the opposite failure policy: the
-  `aks-gpu-pools` and `oke-addons` projections are explicit operator
-  input, so a malformed pool or add-on file ABORTS the snapshot before
-  any collector runs
+  `aks-gpu-pools`, `oke-addons`, and `gke-gpu-pools` projections are
+  explicit operator input, so a malformed pool or add-on file ABORTS
+  the snapshot before any collector runs
   (`pkg/snapshotter/snapshot.go`) — it must never ride the
   degrade-to-warning path and masquerade as a snapshot whose reading is
   merely unavailable.

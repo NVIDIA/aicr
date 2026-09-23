@@ -63,7 +63,23 @@ spec:
   # the two values are distinguished at generation time by the opt-out
   # pool label alone (positive vs negated), which resolved ADR-015
   # Deferred Decision 5 by construction — the ambiguous external-installer
-  # sibling mode was withdrawn rather than marked.
+  # sibling mode was withdrawn rather than marked. gke-default's label-only
+  # contract is deliberately left as the sole requirement. It is the
+  # zero-setup default, and requiring an operator-supplied pool dump just
+  # to resolve the default value would defeat that.
+  #
+  # bundle-installer alone carries a second, corroborating constraint.
+  # The label proves only device-plugin ownership, not that a pool was
+  # actually CREATED with gpu-driver-version=disabled, so a labeled pool
+  # GKE still manages the driver on would otherwise resolve and bundle as
+  # bundle-installer while GKE's driver DaemonSet stays active. The
+  # K8s.gke-gpu-pools.gpu-driver-installation reading closes that gap.
+  # It is supplied via `aicr snapshot --gke-gpu-pools` / `aicr validate
+  # --gke-gpu-pools` (pkg/collector/k8s/gkegpupools.go), and unavailable,
+  # unknown, or mixed pool values fail closed, same as the label
+  # constraint. Opting into bundle-installer already means supplying the
+  # node-label setup, so supplying its corroborating pool dump too is not
+  # a new burden on the zero-setup path.
   #
   # nvsentinel.labeler.assumeDriverInstalled is owned per value because driver
   # evidence differs between them (#2181). The NVSentinel labeler infers driver
@@ -106,7 +122,13 @@ spec:
       nvidia-driver-installer DaemonSet is not a named mode: it is the same
       pool shape with an unmanaged installer — delete it and select
       bundle-installer (the bundle's DaemonSet shares its name and Helm
-      will not adopt the pre-existing object).
+      will not adopt the pre-existing object). bundle-installer
+      additionally verifies the pool's actual gpuDriverInstallationConfig
+      against the K8s.gke-gpu-pools.gpu-driver-installation snapshot
+      reading (supplied via --gke-gpu-pools), so a pool carrying the
+      opt-out label without also having been created with
+      gpu-driver-version=disabled fails closed instead of resolving as
+      bundle-installer.
     default: gke-default
     values:
       # Bundle-owned driver install (issue #1716): opt-out pools
@@ -144,6 +166,21 @@ spec:
               See docs/integrator/gke-gpu-setup.md. To use a
               default-provisioned GKE cluster instead, regenerate with the
               default (--profile gpuStack=gke-default).
+          - name: K8s.gke-gpu-pools.gpu-driver-installation
+            value: Disabled
+            remediation: >-
+              The bundle-installer profile requires every GPU node pool to
+              have been created with gpu-driver-version=disabled, so GKE's
+              managed driver install never races the bundle's own
+              gcp-driver-installer component. An existing pool's
+              driver-installation mode cannot be changed in place, so
+              recreate any pool reporting otherwise (gcloud container
+              node-pools create ...
+              --accelerator type=<type>,count=<n>,gpu-driver-version=disabled).
+              Then recapture the snapshot with
+              --gke-gpu-pools pointed at a fresh `gcloud container
+              node-pools list --cluster <cluster> --format=json` dump.
+              See docs/integrator/gke-gpu-setup.md.
 
       # GKE-installed driver AND GKE's managed device plugin — a
       # default-provisioned GKE cluster (no node label required). The

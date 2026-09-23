@@ -120,6 +120,59 @@ func TestGKEGpuStackProfileResolution(t *testing.T) {
 	}
 }
 
+// TestGKEBundleInstallerCarriesPoolCreationConstraint confirms only
+// bundle-installer carries the K8s.gke-gpu-pools.gpu-driver-installation
+// constraint. gke-default must resolve without a --gke-gpu-pools
+// projection, so it must not carry it.
+func TestGKEBundleInstallerCarriesPoolCreationConstraint(t *testing.T) {
+	t.Parallel()
+
+	const constraintName = "K8s.gke-gpu-pools.gpu-driver-installation"
+
+	tests := []struct {
+		name           string
+		selection      string
+		wantPresent    bool
+		wantConstraint string
+	}{
+		{
+			name:        "gke-default carries no pool-creation constraint",
+			selection:   "",
+			wantPresent: false,
+		},
+		{
+			name:           "bundle-installer requires pools created with the driver disabled",
+			selection:      "gpuStack=bundle-installer",
+			wantPresent:    true,
+			wantConstraint: "Disabled",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := NewBuilder().BuildFromCriteriaWithProfile(
+				t.Context(), gkeCriteria(), tt.selection)
+			if err != nil {
+				t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
+			}
+			var found bool
+			var value string
+			for _, c := range result.Constraints {
+				if c.Name == constraintName {
+					found = true
+					value = c.Value
+				}
+			}
+			if found != tt.wantPresent {
+				t.Fatalf("%s present = %v, want %v", constraintName, found, tt.wantPresent)
+			}
+			if tt.wantPresent && value != tt.wantConstraint {
+				t.Errorf("%s value = %q, want %q", constraintName, value, tt.wantConstraint)
+			}
+		})
+	}
+}
+
 // TestGKEGpuStackHappyPathThroughHydrationGate is the ADR-required
 // external-advertiser happy path: invalid-tuple tests alone would pass an
 // implementation that rejects every advertiser "external"; this proves the
