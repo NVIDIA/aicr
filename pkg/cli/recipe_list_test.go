@@ -208,8 +208,8 @@ func TestRecipeList_FilteredJSONHealth(t *testing.T) {
 	}
 	var sawLeaf bool
 	for _, e := range entries {
-		if svc, _ := e.Criteria["Service"].(string); svc != "eks" {
-			t.Errorf("filter leaked non-eks overlay %q (service=%v)", e.Name, e.Criteria["Service"])
+		if svc, _ := e.Criteria["service"].(string); svc != "eks" {
+			t.Errorf("filter leaked non-eks overlay %q (service=%v)", e.Name, e.Criteria["service"])
 		}
 		if e.IsLeaf {
 			sawLeaf = true
