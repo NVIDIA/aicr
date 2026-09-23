@@ -162,12 +162,12 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:26.04@sha256:9559ceb7c21e528e233e8dff26a0fb2682f4094cce06176eeb075d87a22b31de`
+- `ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
 
-- `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
+- `docker.io/library/busybox:1.38.0@sha256:cac8f90bbee42dc962a6b38bb1a235948d070385bb9d996bba15a6db8d364008`
 - `nvcr.io/nvidia/cloud-native/dcgm:4.6.0-1-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6`
 - `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.3`
@@ -258,7 +258,7 @@ _No images extracted._
 
 ### network-operator
 
-- `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
+- `docker.io/library/busybox:1.38.0@sha256:cac8f90bbee42dc962a6b38bb1a235948d070385bb9d996bba15a6db8d364008`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni:v4.2.1`
 - `ghcr.io/k8snetworkplumbingwg/plugins:v1.6.2-update.1`
 - `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin:v3.9.0`
