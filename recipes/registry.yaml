@@ -1095,8 +1095,8 @@ components:
     # See https://github.com/NVIDIA/aicr/issues/914.
     hasSelfRefCRDs: true
     helm:
-      # Chart and controller image are public on GHCR. Image pull is
-      # anonymous; Helm OCI chart pulls may require GHCR credentials.
+      # Chart and controller image are public on GHCR; both pull anonymously,
+      # so no pull secret is required for either.
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: cluster-readiness-engine
       # renovate: datasource=docker depName=ghcr.io/nvidia/cluster-readiness-engine
