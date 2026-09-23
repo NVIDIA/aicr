@@ -271,6 +271,37 @@ func (s *MetadataStore) verifyCriteriaCoverage(criteria *Criteria, appliedOverla
 		return nil
 	}
 
+	clauses, entries := s.uncoveredDimensionDetails(criteria, uncovered, excluded)
+
+	ctx := map[string]any{"uncovered": entries}
+	if len(excluded) > 0 {
+		ctx["excludedOverlays"] = excluded
+	}
+	if len(warnings) > 0 {
+		ctx["constraintWarnings"] = warnings
+	}
+	return aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
+		strings.Join(clauses, "; "), ctx)
+}
+
+// uncoveredDimensionDetails builds the attribution a caller reads off a
+// resolve failure: the human-facing completion clauses, and the structured
+// "uncovered" entries keyed by dimension.
+//
+// Extracted so it is not the private property of verifyCriteriaCoverage. More
+// than one guard can be true of a single resolve: when snapshot constraint
+// filtering removes the only overlay covering a stated dimension AND that
+// overlay declared the profile, both the coverage post-condition and
+// ensureProfileDeclarationSurvived fire. Only the first to return reaches the
+// caller, so both must carry this attribution or the surviving error reports
+// the failure with an empty dimension list and pkg/client/v1 cannot tell a
+// constraint-excluded dimension from an absent one.
+func (s *MetadataStore) uncoveredDimensionDetails(
+	criteria *Criteria,
+	uncovered []string,
+	excluded []ExcludedOverlay,
+) ([]string, []map[string]any) {
+
 	clauses := make([]string, 0, len(uncovered))
 	entries := make([]map[string]any, 0, len(uncovered))
 	for _, dimName := range uncovered {
@@ -292,16 +323,7 @@ func (s *MetadataStore) verifyCriteriaCoverage(criteria *Criteria, appliedOverla
 			"constraintExcluded": constraintExcluded,
 		})
 	}
-
-	ctx := map[string]any{"uncovered": entries}
-	if len(excluded) > 0 {
-		ctx["excludedOverlays"] = excluded
-	}
-	if len(warnings) > 0 {
-		ctx["constraintWarnings"] = warnings
-	}
-	return aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
-		strings.Join(clauses, "; "), ctx)
+	return clauses, entries
 }
 
 // excludedOverlayProvides reports whether any constraint-excluded overlay

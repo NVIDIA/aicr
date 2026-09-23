@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1beta1
+apiVersion: aicr.run/v1beta2
 metadata:
   name: kind
 
@@ -28,6 +28,114 @@ spec:
   constraints:
     - name: K8s.server.version
       value: ">= 1.32"
+
+  # gpuStack: where the GPU driver userspace the operands read comes from.
+  #
+  # Unlike the AKS, GKE-COS and OKE declarations, neither value here carries a
+  # distinguishing constraint. ADR-015 asks for one, and those three families
+  # can supply it because a cloud control plane labels GPU nodes before
+  # anything is deployed (AKS reads the pool's gpu-driver setting, GKE an
+  # accelerator label, OKE an addon state). Kind has no control plane to do
+  # that: on a fresh cluster no node carries any GPU-identifying label until
+  # NFD and the operands themselves run, which is after the point a profile
+  # constraint is evaluated. Measured, not assumed: with nvml-mock installed
+  # and NFD absent, a Kind node carries no nvidia.com/* or
+  # feature.node.kubernetes.io/* GPU label at all.
+  #
+  # The value is therefore chosen explicitly with --profile gpuStack=<value>,
+  # and snapshot-driven generation never infers it. That path is unaffected:
+  # BuildRecipeResultWithProfile passes a nil evaluator, so the default value
+  # is selected and its constraints, of which there are none, are never
+  # evaluated. Recorded here rather than worked around so the asymmetry with
+  # the other three families is visible to the next reader.
+  profile:
+    name: gpuStack
+    description: Where the GPU driver userspace the operands read comes from.
+    default: nvkind-host
+    values:
+      # nvkind on a GPU host: the NVIDIA driver and container runtime are
+      # installed on the host, and every operand reads them from the host
+      # root. These are the values this overlay has always produced; they are
+      # stated explicitly rather than left unset so that both profile values
+      # assign the same leaf paths, which ADR-015 union totality requires.
+      nvkind-host:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              devicePlugin:
+                env: []
+              gfd:
+                env: []
+              dcgmExporter:
+                env: []
+              validator:
+                driver:
+                  env:
+                    # Real GPUs, real kernel module: the validator can create
+                    # the /dev/char symlinks that gpu-operator#430 needs.
+                    - name: DISABLE_DEV_CHAR_SYMLINK_CREATION
+                      value: "false"
+                cuda:
+                  env:
+                    # Real silicon executes CUDA, so the validator workload runs.
+                    - name: WITH_WORKLOAD
+                      value: "true"
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: "/"
+      # Mokka (NVIDIA/k8s-test-infra) stages a mock libnvidia-ml.so from a
+      # DaemonSet, so there is no host driver, no kernel module and no GPU.
+      # Each operand is pointed at that staged root instead of the host root.
+      #
+      # The driver-root value tracks the pinned nvml-mock chart
+      # (testing.component_test.nvml_mock_chart_version in .settings.yaml),
+      # which publishes the tree at /var/lib/nvml-mock/driver. A later Mokka
+      # bind-mounts it onto /run/nvidia/driver instead, at which point these
+      # three NVIDIA_DRIVER_ROOT entries should be dropped rather than
+      # repointed. Revisit them with any bump of that pin.
+      # Verified on Kind with ghcr.io/nvidia/mokka-kind-node: every operand
+      # reaches 1/1 including nvidia-operator-validator, both nodes advertise
+      # nvidia.com/gpu=8, GFD derives the H100 product labels from the mocked
+      # NVML, and a pod requesting 9 GPUs stays Pending on
+      # "Insufficient nvidia.com/gpu".
+      mokka-mock:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              devicePlugin:
+                env:
+                  - name: NVIDIA_DRIVER_ROOT
+                    value: /var/lib/nvml-mock/driver
+              gfd:
+                env:
+                  - name: NVIDIA_DRIVER_ROOT
+                    value: /var/lib/nvml-mock/driver
+              dcgmExporter:
+                env:
+                  - name: NVIDIA_DRIVER_ROOT
+                    value: /var/lib/nvml-mock/driver
+              validator:
+                driver:
+                  env:
+                    # No kernel module exists to load, so symlink creation
+                    # aborts driver-validation with "failed to load module
+                    # nvidia: chroot: can't execute '/sbin/modprobe'".
+                    # gpu-operator names this exact opt-out in that error.
+                    - name: DISABLE_DEV_CHAR_SYMLINK_CREATION
+                      value: "true"
+                cuda:
+                  env:
+                    # Mokka simulates the NVML contract, not CUDA execution.
+                    # Left on, the validator's vectorAdd fails with "CUDA
+                    # driver version is insufficient for CUDA runtime version"
+                    # and holds operator-validator at Init:2/4. This is the
+                    # boundary of what a mocked lane can claim: scheduling and
+                    # discovery are exercised, kernel execution is not.
+                    - name: WITH_WORKLOAD
+                      value: "false"
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /var/lib/nvml-mock/driver
 
   # Kind-specific component overrides
   componentRefs:
@@ -72,9 +180,6 @@ spec:
             create: false
             name: ""
             data: ""
-        # Use chart-default device plugin env in kind (no CDI overrides)
-        devicePlugin:
-          env: []
         # Keep GPU Operator operand DaemonSets off kind control-plane nodes.
         # The chart default `daemonsets.tolerations: [{operator: Exists}]`
         # tolerates the control-plane `NoSchedule` taint; combined with NFD
@@ -174,8 +279,10 @@ spec:
     # metadata-collector plus both syslog-health-monitor DaemonSets sit at
     # zero desired pods — silently, with no error and no event (#2175).
     #
-    # Kind has no gpuStack profile, so this value is overlay-level and is NOT
-    # profile-owned — same asymmetry as OKE (#2181). The NVSentinel
+    # Kind's gpuStack profile does not own this path: both of its values
+    # assume a driver is already present (host-installed under nvkind, staged
+    # by the mock under Mokka), so the value does not vary between them and
+    # stays overlay-level. The NVSentinel
     # driver-label bundle gate still rejects bundle-time and declared-dynamic
     # changes that would recreate #2175, but a manual post-generation edit to
     # the rendered Helm values is outside that guarantee.
@@ -207,12 +314,11 @@ spec:
                 cpu: 500m
                 memory: 1Gi
 
-    # nvidia-dra-driver-gpu: override driver root for kind GPU passthrough
+    # nvidia-dra-driver-gpu: driver root is profile-owned (gpuStack), because
+    # it is "/" for a host-installed driver and the staged mock root under
+    # Mokka. See spec.profile above.
     - name: nvidia-dra-driver-gpu
       type: Helm
-      overrides:
-        # Use "/" for host-installed drivers (kind GPU passthrough)
-        nvidiaDriverRoot: "/"
 
     # network-operator: NVIDIA Network Operator for high-performance networking
     - name: network-operator

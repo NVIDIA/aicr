@@ -280,6 +280,20 @@ testing:
   # renovate: datasource=docker depName=kindest/node depType=testing
   h100_kind_node_image: 'kindest/node:v1.37.0'
 
+  # Kind node image published by Mokka (NVIDIA/k8s-test-infra) with the nvidia
+  # containerd runtime handler registered and CDI enabled. A stock kindest/node
+  # carries only runc and test-handler, so every GPU Operator operand, which
+  # sets runtimeClassName: nvidia, fails with "no runtime for nvidia is
+  # configured". Used only by the GPU-free gpu-operator lane; the nvkind lanes
+  # on real silicon keep h100_kind_node_image above.
+  #
+  # Pinned by digest: Mokka publishes no version tag for this image, only a
+  # floating `latest`, so the digest is the only reproducible reference and a
+  # bare tag would silently change the lane's cluster under it. Upstream
+  # issue: the node image should carry release tags like the chart does.
+  # renovate: datasource=docker depName=ghcr.io/nvidia/mokka-kind-node depType=testing
+  mokka_kind_node_image: 'ghcr.io/nvidia/mokka-kind-node:latest@sha256:6e92b27038b253fb37e28aad34b0eb0acc41900a2e0ab21b44c0d523fc961a1c'
+
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
   gpu_operator_chart_version: 'v26.7.0'
@@ -292,8 +306,42 @@ testing:
   # Component test harness configuration
   # Used by tools/component-test/ scripts to validate individual components
   component_test:
-    nvml_mock_version: '0.1.0'
+    # Mokka (NVIDIA/k8s-test-infra) publishes the chart and the image at
+    # DIFFERENT paths. They are pinned separately because conflating them is
+    # what broke the Helm path: setup-gpu-mock.sh built its chart reference as
+    # "oci://$nvml_mock_image", which resolves to an image repository, not a
+    # chart, so `helm install` failed with "could not load config with
+    # mediatype application/vnd.cncf.helm.config.v1+json" on every run. The
+    # error was discarded and the script fell through to its manifest
+    # fallback, so the Helm path had never once succeeded.
+    #
+    # COUPLED to the mokka-mock gpuStack values in recipes/overlays/kind.yaml.
+    # Measured on 0.4.0-rc2: the mock driver tree is readable at BOTH
+    # /var/lib/nvml-mock/driver and /run/nvidia/driver, so the profile's
+    # explicit driver root still resolves. Mokka main has since moved to
+    # bind-mounting onto /run/nvidia/driver only and dropped the
+    # NVIDIA_DRIVER_ROOT overrides from its own GPU Operator guide
+    # (k8s-test-infra e8e49aeb). Advancing this pin past that change means
+    # revisiting the profile: the three NVIDIA_DRIVER_ROOT entries become
+    # unnecessary and should be removed rather than repointed.
+    nvml_mock_chart: 'ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock'
+    nvml_mock_chart_version: '0.4.0-rc2'
     nvml_mock_image: 'ghcr.io/nvidia/nvml-mock'
+    # The chart's image.tag defaults to the FLOATING `latest`, so pinning the
+    # chart alone does not pin what runs. Measured 2026-09-22: `latest` was
+    # rebuilt mid-session (sha256:00c8e31a -> sha256:9bfbbb69) and the new
+    # build needs a privileged container with Bidirectional mount propagation
+    # that chart 0.3.0 does not grant, so the node agent failed its bind mount
+    # with "operation not permitted" and never became Ready. Both ends are
+    # pinned here for that reason.
+    #
+    # Tested combinations, to READY:
+    #   chart 0.3.0     + image 0.3.0      CrashLoopBackOff (image ships no node-agent)
+    #   chart 0.3.0     + image 0.4.0-rc1  works
+    #   chart 0.4.0-rc2 + image 0.4.0-rc2  works  <- used here, matched pair
+    # There is currently no stable-release pair that works, which is why a
+    # release candidate is pinned for this test-only dependency.
+    nvml_mock_version: '0.4.0-rc2'
     default_gpu_profile: 'a100'
     default_gpu_count: 8
     cluster_name: 'aicr-component-test'

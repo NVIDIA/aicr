@@ -1,0 +1,324 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Validates the gpu-operator slice of the Kind recipe with no GPU present.
+#
+# Every other lane that runs gpu-operator holds a physical GPU: the two
+# gpu-h100-* callers and uat-kind lease the single self-hosted
+# linux-amd64-gpu-h100-latest-1 runner, and gpu-smoke-test leases the L40G.
+# This lane runs on a GitHub-hosted CPU runner. GPU capacity comes from Mokka
+# (github.com/NVIDIA/k8s-test-infra), whose node image registers the nvidia
+# containerd runtime handler and whose nvml-mock DaemonSet stages a mock
+# libnvidia-ml.so the real device plugin, GFD, DCGM exporter and
+# operator-validator read.
+#
+# What it proves: the recipe's gpu-operator values deploy, every operand
+# reaches Ready, and the advertised nvidia.com/gpu capacity is real to the
+# scheduler.
+#
+# What it does NOT prove, and no mocked lane can: CUDA execution, NCCL,
+# GPUDirect/RDMA data paths, driver and firmware lifecycle, MIG, or anything
+# timing- or throughput-sensitive. The cuda validator workload is disabled by
+# the mokka-mock profile value for exactly this reason. Those keep needing the
+# hardware lanes, which this lane does not replace.
+name: GPU Operator on Mokka (GPU-free)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'recipes/overlays/kind.yaml'
+      - 'recipes/components/gpu-operator/**'
+      - 'recipes/registry.yaml'
+      - 'pkg/recipe/**'
+      - 'pkg/bundler/**'
+      - 'cmd/aicr/**'
+      - '.settings.yaml'
+      - '.github/workflows/gpu-operator-mokka-test.yaml'
+      - '!**.md'
+      - '!**.mdx'
+  workflow_dispatch: {}
+  schedule:
+    # Daily, so drift in the upstream chart or the Mokka image surfaces here
+    # rather than on the leased hardware lanes.
+    - cron: '30 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gpu-operator-mokka:
+    name: gpu-operator on mocked GPUs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLUSTER_NAME: aicr-mokka
+      GPU_PROFILE: h100
+      GPU_COUNT: '8'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Load pinned versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up build tools
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kind: 'true'
+          kind_version: ${{ steps.versions.outputs.kind }}
+          install_helm: 'true'
+          install_kubectl: 'true'
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Resolve Mokka pins from .settings.yaml
+        id: mokka
+        run: |
+          set -euo pipefail
+          # Node image: ghcr.io/nvidia/mokka-kind-node, pinned by digest.
+          node_image=$(yq -r '.testing.mokka_kind_node_image' .settings.yaml)
+          chart=$(yq -r '.testing.component_test.nvml_mock_chart' .settings.yaml)
+          chart_version=$(yq -r '.testing.component_test.nvml_mock_chart_version' .settings.yaml)
+          # The chart's image.tag defaults to a floating `latest`, so the image
+          # is pinned separately or the lane's cluster changes under it.
+          image_version=$(yq -r '.testing.component_test.nvml_mock_version' .settings.yaml)
+          for v in node_image chart chart_version image_version; do
+            if [ -z "${!v}" ] || [ "${!v}" = "null" ]; then
+              echo "::error::.settings.yaml is missing $v" && exit 1
+            fi
+          done
+          {
+            echo "node_image=$node_image"
+            echo "chart=$chart"
+            echo "chart_version=$chart_version"
+            echo "image_version=$image_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build aicr
+        run: go build -o ./bin/aicr ./cmd/aicr
+
+      - name: Create Kind cluster on the Mokka node image
+        run: |
+          set -euo pipefail
+          cat > /tmp/kind-mokka.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+            - role: worker
+          EOF
+          kind create cluster --name "$CLUSTER_NAME" \
+            --image "${{ steps.mokka.outputs.node_image }}" \
+            --config /tmp/kind-mokka.yaml --wait 180s
+
+      - name: Assert the node image provides the nvidia runtime handler
+        run: |
+          set -euo pipefail
+          # The reason a stock kindest/node cannot host gpu-operator: its
+          # containerd knows only runc and test-handler, so every operand
+          # (all set runtimeClassName: nvidia) fails to create a sandbox.
+          missing=0
+          for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
+            if ! docker exec "$node" grep -q 'containerd.runtimes.nvidia' /etc/containerd/config.toml; then
+              echo "::error::node $node has no nvidia containerd runtime handler"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - name: Install Mokka nvml-mock
+        run: |
+          set -euo pipefail
+          helm install nvml-mock "oci://${{ steps.mokka.outputs.chart }}" \
+            --version "${{ steps.mokka.outputs.chart_version }}" \
+            --namespace mokka --create-namespace \
+            --set gpu.profile="$GPU_PROFILE" \
+            --set gpu.count="$GPU_COUNT" \
+            --set image.tag="${{ steps.mokka.outputs.image_version }}" \
+            --wait --timeout 300s
+          kubectl rollout status daemonset/nvml-mock -n mokka --timeout=300s
+
+      - name: Generate and bundle the Kind recipe with gpuStack=mokka-mock
+        run: |
+          set -euo pipefail
+          ./bin/aicr recipe --service kind --accelerator "$GPU_PROFILE" --intent training \
+            --profile gpuStack=mokka-mock --output /tmp/recipe.yaml
+          ./bin/aicr bundle --recipe /tmp/recipe.yaml --output /tmp/bundle
+          # Fail loudly if the profile did not take: the whole lane is
+          # meaningless if the rendered values still point at the host root.
+          grep -q '/var/lib/nvml-mock/driver' /tmp/bundle/*gpu-operator/values.yaml
+
+      - name: Deploy NFD and gpu-operator from the bundle
+        run: |
+          set -euo pipefail
+          # NFD first: gpu-operator gates its operands on the labels NFD
+          # derives from the feature file nvml-mock stages. Without it the
+          # ClusterPolicy reports ready with zero operands and zero GPUs.
+          nfd_dir=$(find /tmp/bundle -maxdepth 1 -type d -name '*-nfd' | head -1)
+          gpu_dir=$(find /tmp/bundle -maxdepth 1 -type d -name '*-gpu-operator' | head -1)
+          [ -n "$nfd_dir" ] && [ -n "$gpu_dir" ]
+          ( cd "$nfd_dir" && bash install.sh )
+          ( cd "$gpu_dir" && bash install.sh )
+
+      - name: Wait for the GPU stack to converge
+        run: |
+          set -euo pipefail
+          # Not `kubectl wait --all`: that matches only the pods that exist when
+          # it is invoked, and at this point the operator has created none of
+          # its operands yet, so it returns satisfied against the controller
+          # alone and the assertions below race the stack.
+          #
+          # The recipe keeps operands off the control plane
+          # (daemonsets.tolerations: [] in recipes/overlays/kind.yaml), so the
+          # GPU nodes are exactly the workers. Converged means: every worker
+          # advertises the mocked capacity, and nothing in the namespace is
+          # still settling.
+          workers=$(kubectl get nodes \
+            -l '!node-role.kubernetes.io/control-plane' \
+            -o jsonpath='{.items[*].metadata.name}' | wc -w | tr -d ' ')
+          [ "$workers" -gt 0 ] || { echo "::error::no worker nodes"; exit 1; }
+          echo "expecting $workers worker(s) at nvidia.com/gpu=$GPU_COUNT"
+
+          deadline=$((SECONDS + 600))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            ready=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o json \
+              | jq --arg n "$GPU_COUNT" '[.items[] | select((.status.allocatable["nvidia.com/gpu"] // "0") == $n)] | length')
+            # Readiness, not phase. A pod sitting Running with 0/1 containers
+            # ready passes a phase check while its probe is still failing, so
+            # the assertions below would run against a half-converged stack.
+            # dcgm-exporter alone has initialDelaySeconds: 45.
+            settling=$(kubectl get pods -n gpu-operator -o json 2>/dev/null | jq '
+              [ .items[]
+                | select(.status.phase != "Succeeded")
+                | select( ((.status.containerStatuses // []) | length) == 0
+                          or ((.status.containerStatuses // []) | map(.ready) | index(false) != null) )
+              ] | length')
+            echo "  workers_at_capacity=$ready/$workers pods_settling=$settling"
+            if [ "$ready" = "$workers" ] && [ "$settling" -eq 0 ]; then
+              echo "converged"; exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::GPU stack did not converge within 600s"
+          kubectl get pods -n gpu-operator -o wide
+          exit 1
+
+      - name: Assert the mocked GPUs are allocatable
+        run: |
+          set -euo pipefail
+          kubectl get pods -n gpu-operator -o wide
+          # Assert per GPU node, and assert that GPU nodes exist at all: a
+          # cluster where the device plugin never landed has zero of them and
+          # would vacuously satisfy a loop over an empty set.
+          gpu_nodes=$(kubectl get nodes -o json \
+            | jq -r '.items[] | select(.status.allocatable["nvidia.com/gpu"] != null) | .metadata.name')
+          [ -n "$gpu_nodes" ] || { echo "::error::no node advertises nvidia.com/gpu"; exit 1; }
+          fail=0
+          for node in $gpu_nodes; do
+            got=$(kubectl get node "$node" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')
+            echo "$node: nvidia.com/gpu=$got (expected $GPU_COUNT)"
+            [ "$got" = "$GPU_COUNT" ] || { echo "::error::$node advertises $got"; fail=1; }
+          done
+          [ "$fail" -eq 0 ]
+
+      - name: Assert GFD derived the accelerator identity from mocked NVML
+        run: |
+          set -euo pipefail
+          # Read from a node that actually runs GFD. The control plane carries
+          # no operands here, so indexing items[0] blindly reads an empty label
+          # and turns this into a check that can only fail by accident.
+          node=$(kubectl get nodes -o json \
+            | jq -r '[.items[] | select(.status.allocatable["nvidia.com/gpu"] != null)][0].metadata.name')
+          product=$(kubectl get node "$node" -o jsonpath='{.metadata.labels.nvidia\.com/gpu\.product}')
+          count=$(kubectl get node "$node" -o jsonpath='{.metadata.labels.nvidia\.com/gpu\.count}')
+          echo "$node: gpu.product=${product:-<empty>} gpu.count=${count:-<empty>}"
+          case "$product" in
+            *H100*) echo "GFD read the mocked H100 identity through NVML" ;;
+            *) echo "::error::expected an H100 product label, got '${product:-<empty>}'" && exit 1 ;;
+          esac
+          [ "$count" = "$GPU_COUNT" ] || { echo "::error::gpu.count=${count:-<empty>}, expected $GPU_COUNT"; exit 1; }
+
+      - name: Negative control - capacity must be enforced, not cosmetic
+        run: |
+          set -euo pipefail
+          # Labels and allocatable numbers can both be present while the
+          # scheduler ignores them. Request one more GPU than any node has and
+          # require the scheduler to refuse it for the right reason.
+          over=$((GPU_COUNT + 1))
+          kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: gpu-over-capacity
+          spec:
+            restartPolicy: Never
+            tolerations: [{operator: Exists}]
+            containers:
+              - name: c
+                image: busybox:1.36
+                command: ["sh","-c","echo should-not-run"]
+                resources:
+                  limits:
+                    nvidia.com/gpu: $over
+          EOF
+          for _ in $(seq 1 12); do
+            phase=$(kubectl get pod gpu-over-capacity -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            [ "$phase" = "Pending" ] && break
+            sleep 5
+          done
+          phase=$(kubectl get pod gpu-over-capacity -o jsonpath='{.status.phase}')
+          [ "$phase" = "Pending" ] || { echo "::error::pod requesting $over GPUs reached $phase"; exit 1; }
+          # The reason matters: Pending for an unrelated cause would pass a
+          # phase-only check while proving nothing about GPU capacity.
+          kubectl get events --field-selector involvedObject.name=gpu-over-capacity \
+            -o jsonpath='{range .items[*]}{.message}{"\n"}{end}' > /tmp/events.txt
+          cat /tmp/events.txt
+          grep -q 'Insufficient nvidia.com/gpu' /tmp/events.txt \
+            || { echo "::error::Pending, but not for insufficient GPU capacity"; exit 1; }
+          kubectl delete pod gpu-over-capacity --ignore-not-found
+
+      - name: Collect debug artifacts
+        if: failure()
+        run: |
+          mkdir -p /tmp/debug
+          kubectl get pods -A -o wide > /tmp/debug/pods.txt 2>&1 || true
+          kubectl get nodes -o yaml > /tmp/debug/nodes.yaml 2>&1 || true
+          kubectl describe clusterpolicy > /tmp/debug/clusterpolicy.txt 2>&1 || true
+          kubectl logs -n gpu-operator --all-containers --tail=200 -l app=nvidia-operator-validator \
+            > /tmp/debug/operator-validator.log 2>&1 || true
+          kubectl logs -n mokka --all-containers --tail=200 -l app.kubernetes.io/name=nvml-mock \
+            > /tmp/debug/nvml-mock.log 2>&1 || true
+
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: gpu-operator-mokka-debug
+          path: /tmp/debug
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        run: kind delete cluster --name "$CLUSTER_NAME" || true
