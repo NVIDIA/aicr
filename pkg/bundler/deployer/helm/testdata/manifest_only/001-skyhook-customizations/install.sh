@@ -26,7 +26,7 @@ if [[ "${HELM_MAJOR:-0}" -ge 4 ]]; then
   FORCE_CONFLICTS_FLAG="--force-conflicts"
 fi
 
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} skyhook-customizations ./ \
-  --namespace skyhook --create-namespace \
+helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'skyhook-customizations' ./ \
+  --namespace 'skyhook' --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}

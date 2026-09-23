@@ -86,6 +86,9 @@ community:
   - issuer: https://github.com/login/oauth
     source: 728b071aed7124418b1fa9c7f0521e24
     label: atif1996
+  - issuer: https://github.com/login/oauth
+    source: 2e85f8702c6214cafcc0ed714d928720
+    label: mikecook
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []

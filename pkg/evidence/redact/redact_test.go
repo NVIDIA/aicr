@@ -34,7 +34,7 @@ import (
 func fullSnapshot() *snapshotter.Snapshot {
 	s := snapshotter.NewSnapshot()
 	s.Kind = header.KindSnapshot
-	s.APIVersion = header.GroupVersion
+	s.APIVersion = header.GroupVersionV1
 	s.Metadata = map[string]string{
 		"timestamp":   "2026-06-22T00:00:00Z",
 		"version":     "0.11.1",

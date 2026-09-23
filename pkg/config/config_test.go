@@ -375,7 +375,7 @@ func TestValidate_DefersCriteriaMembership(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.AICRConfig{
-		APIVersion: header.GroupVersion,
+		APIVersion: header.GroupVersionV1Beta1,
 		Kind:       "AICRConfig",
 		Metadata:   config.Metadata{Name: "t"},
 		Spec: config.Spec{
