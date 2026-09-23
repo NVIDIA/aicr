@@ -55,12 +55,14 @@ var shellFuncs = template.FuncMap{"shq": shellSingleQuote}
 
 var upstreamHelmTmpl = template.Must(
 	template.New("install-upstream-helm.sh.tmpl").
+		Funcs(deployer.TemplateFuncs).
 		Funcs(shellFuncs).
 		ParseFS(upstreamHelmTemplates, "templates/install-upstream-helm.sh.tmpl"),
 )
 
 var applyCRDsTmpl = template.Must(
 	template.New("apply-crds.sh.tmpl").
+		Funcs(deployer.TemplateFuncs).
 		Funcs(shellFuncs).
 		ParseFS(applyCRDsTemplates, "templates/apply-crds.sh.tmpl"),
 )
