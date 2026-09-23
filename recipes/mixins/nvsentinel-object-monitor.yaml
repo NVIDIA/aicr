@@ -34,17 +34,17 @@
 # in these namespaces would, once unhealthy for 30m, raise a fatal event blaming
 # the operator. Each policy therefore also requires a label that only that
 # operator's own operands carry. They are not the same label, and neither was
-# guessable -- both were read off live deployments at the versions this repo
-# pins:
+# guessable -- both were independently verified at the versions this repo
+# pins (live for GPU Operator, source for Network Operator):
 #
 #   gpu-operator v26.7.0      app.kubernetes.io/managed-by = gpu-operator
 #                             Confirmed on a live EKS H100 cluster: all 9 operand
 #                             DaemonSets including driver, toolkit and dcgm, and
 #                             the running Pods inherit it. The bundled NFD
 #                             subchart does not carry it and is out of scope.
-#   network-operator 26.4.1   ds-owner = NicClusterPolicy
-#                             Kind-only, and the label is per-operand rather than
-#                             universal: mofed + rdma-shared-dp carry it,
+#   network-operator 26.7.0   ds-owner = NicClusterPolicy
+#                             Source-verified, and the label is per-operand
+#                             rather than universal: mofed + rdma-shared-dp carry it,
 #                             nv-ipam-node does not. So coverage depends on which
 #                             NicClusterPolicy a recipe ships -- the oke-l40s one
 #                             enables none of the verified operands. Under-match,
