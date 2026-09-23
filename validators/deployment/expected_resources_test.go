@@ -203,10 +203,10 @@ func TestVerifyNodewrightReady_ListsClusterScoped(t *testing.T) {
 	}
 }
 
-// Issue #607 acceptance: Nodewright check must skip gracefully when the CRD is
-// not registered on the cluster, even when nodewright-customizations is declared
-// in the recipe's componentRefs.
-func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T) {
+// Issue #2836 regression: a recipe that declares Nodewright CRs must not pass
+// while their CRD is absent from discovery. The readiness poll must retain the
+// undiscoverable state until its budget expires instead of skipping it.
+func TestCheckExpectedResources_FailsClosedWhenCRDNotRegistered(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContextWithUnregistered(t,
@@ -216,9 +216,12 @@ func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T
 		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
-	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil when Nodewright CRD is not registered", err)
-		return
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("checkExpectedResources() error = nil, want a timeout while Nodewright CRD is not registered")
+	}
+	if !strings.Contains(err.Error(), "neither") {
+		t.Fatalf("checkExpectedResources() error = %v, want the undiscoverable CRD cause", err)
 	}
 }
 
@@ -1610,6 +1613,46 @@ func TestResolveNodewrightGVR_VersionGate(t *testing.T) {
 	}
 }
 
+func TestResolveNodewrightGVR_RequiresSpecificResource(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContextWithDiscovery(t, nil, nil,
+		[]schema.GroupVersion{nodewrightGVR.GroupVersion()}, nil, nil)
+	fakeDisc, ok := ctx.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+	if !ok {
+		t.Fatalf("expected *fakediscovery.FakeDiscovery, got %T", ctx.Clientset.Discovery())
+	}
+	fakeDisc.Resources[0].APIResources = []metav1.APIResource{{Name: "deploymentpolicies", Kind: "DeploymentPolicy"}}
+
+	_, registered, err := resolveNodewrightGVR(ctx)
+	if err != nil {
+		t.Fatalf("resolveNodewrightGVR() error = %v", err)
+	}
+	if registered {
+		t.Fatal("registered = true, want false when only another resource in the group is discoverable")
+	}
+}
+
+func TestVerifyNodewrightReady_DoesNotSkipExpectedResourcesBeforeCRDDiscovery(t *testing.T) {
+	t.Parallel()
+
+	ref := recipe.ComponentRef{
+		Name:          nodewrightCustomizationsComponent,
+		Namespace:     "skyhook",
+		ManifestFiles: []string{testNodewrightManifest},
+	}
+	ctx := newDeploymentTestContext(t,
+		[]runtime.Object{activeNamespace("skyhook")}, nil, []recipe.ComponentRef{ref})
+
+	err := verifyNodewrightReady(ctx, ref, nil)
+	if err == nil {
+		t.Fatal("verifyNodewrightReady() error = nil, want a timeout while expected CRDs remain undiscoverable")
+	}
+	if !strings.Contains(err.Error(), "neither") {
+		t.Fatalf("verifyNodewrightReady() error = %v, want the undiscoverable CRD cause", err)
+	}
+}
+
 // TestVerifyNodewrightReady_PrefersNodeWrightOverLegacySkyhook pins the #2593
 // fix. nodewright-operator v0.18.0 mirrors each legacy Skyhook into a
 // NodeWright and writes status only there; the legacy status stays empty. With
@@ -1783,10 +1826,41 @@ func configureFakeDiscovery(
 		return
 	}
 	for gv := range gvSet {
+		resources := apiResourcesForGroupVersion(dynamicObjects, gv)
+		// Some tests provide discovery registration separately from the
+		// dynamic objects they use to drive readiness. Keep those registrations
+		// faithful to the two Nodewright API groups as well.
+		if len(resources) == 0 {
+			switch gv {
+			case nodewrightGVR.GroupVersion():
+				resources = []metav1.APIResource{{Name: nodewrightGVR.Resource, Kind: "NodeWright"}}
+			case legacySkyhookGVR.GroupVersion():
+				resources = []metav1.APIResource{{Name: legacySkyhookGVR.Resource, Kind: "Skyhook"}}
+			}
+		}
 		fakeDisc.Resources = append(fakeDisc.Resources, &metav1.APIResourceList{
 			GroupVersion: gv.String(),
+			APIResources: resources,
 		})
 	}
+}
+
+func apiResourcesForGroupVersion(objects []runtime.Object, gv schema.GroupVersion) []metav1.APIResource {
+	resources := make([]metav1.APIResource, 0)
+	seen := make(map[string]struct{})
+	for _, object := range objects {
+		u, ok := object.(*unstructured.Unstructured)
+		if !ok || u.GroupVersionKind().GroupVersion() != gv {
+			continue
+		}
+		resource := gvrForTestObject(u.GroupVersionKind()).Resource
+		if _, exists := seen[resource]; exists {
+			continue
+		}
+		seen[resource] = struct{}{}
+		resources = append(resources, metav1.APIResource{Name: resource, Kind: u.GetKind()})
+	}
+	return resources
 }
 
 type fakeDynamicClient struct {
