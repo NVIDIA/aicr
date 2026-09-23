@@ -119,6 +119,23 @@ See the upstream [Topology Updater docs](https://kubernetes-sigs.github.io/node-
 
 ### GPU Operator Driver Auto-Detect
 
+#### Opt-in NVIDIADriver CR ownership
+
+The `gpu-operator-nvidia-driver-cr` mixin adds a post-manifest that renders a
+separately managed `NVIDIADriver/default` resource. It deliberately carries no
+driver version or rollout policy: the consuming overlay must enable
+`driver.nvidiaDriverCRD.enabled`, set `deployDefaultCR: false`, clear the legacy
+ClusterPolicy driver identity and `upgradePolicy`, and provide a complete
+`nvidiaDriver` value tree. The manifest renders only when the GPU Operator still
+manages the driver and those CRD-mode switches are set. Its version and rollout
+throttle accept bundle-level `nvidiaDriver.*` dynamic values, falling back to
+the resolved recipe values when no install-time override is supplied.
+
+This is an advanced ownership mode, not a stock recipe default. Do not enable
+it alongside the chart-generated default CR or leave the legacy
+`ClusterPolicy.spec.driver` identity populated; either combination creates two
+sources of truth for the same driver rollout.
+
 When a recipe is resolved from a snapshot (`aicr recipe --snapshot snap.yaml`, or the `ResolveRecipeFromSnapshot` SDK entry point), AICR reads the sampled GPU node's `driver-loaded` measurement and, when the NVIDIA kernel module is already loaded, injects `components.gpu-operator.overrides.driver.enabled=false` into the resolved recipe. **On recipes whose ADR-015 profile owns `driver.enabled` (the AKS family), the injector is subordinated**: the profile fragment owns the path, the injector skips it without mutating (logging the skip), and the fragment's value is authoritative. Subordination follows path ownership, not mere profile presence — the GKE family is also profiled (`gpuStack` owns `devicePlugin.enabled`, not `driver.enabled`), so the injection/teardown discussion in this section applies to GKE-COS exactly as to unprofiled compositions (OKE, legacy AKS artifacts). The override lands at the top of the merge chain (`base values.yaml → ValuesFile → Overrides`), so the rendered Helm values a deployer installs carry `driver.enabled: false` regardless of what the resolved overlay's values file would default to. This prevents the GPU Operator from installing a second driver on top of one the platform has already provisioned. Explicit `--set` flags at bundle generation (`aicr bundle --set gpuoperator:driver.enabled=true`) retain higher precedence and can supersede the injection **unless the path is profile-owned** — on recipes carrying `metadata.selectedProfile` (the AKS family's `gpuStack`), a `--set` diverging from the selected value on an owned path fails closed at bundle time. `--set` is a bundle-time flag, not an `aicr recipe` flag.
 
 Injection is gated on the resolved overlay already declaring `driver.enabled=false` in its merged base+valuesFile. That marker check inspects `driver.enabled` alone; the shipped preinstalled-driver overlays additionally carry coordinated ownership settings (AKS and OKE set `toolkit.enabled=false`; GKE-COS keeps the toolkit enabled with the COS-specific `toolkit.installDir` under the host-managed driver root) plus `hostPaths.driverInstallDir`, and the bundle-time `CheckDriverOwnershipCoherence` validation enforces full ownership coherence for any recipe. That scopes auto-detect to overlays like AKS, GKE-COS, and OKE where every dependent setting is already aligned. Bare EKS overlays lack the marker; the auto-detect **skips them and logs a warning** (`gpu-operator driver auto-detect: pre-installed driver observed …`) telling the operator to use a preinstalled-profile overlay rather than land a half-configured Operator (driver off, toolkit and gdrcopy still enabled with no operator-managed driver root). The case is still tracked as separate work:
