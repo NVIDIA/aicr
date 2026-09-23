@@ -100,7 +100,72 @@ reservations:
     cluster-config-path: tests/uat/aws/cluster-config.yaml
     test-config-dir: tests/uat/aws/tests
     nightly-intents: [training, inference]
+    # No daytime-intent: it moved to aws-h100-ct-1, whose reservation has room
+    # for a daytime hold and a nightly cell at the same time (this one is 2
+    # instances total, so it could only ever do one or the other). This row
+    # keeps running nightly as a second AWS lane until it is retired.
+  # CT-account H100 SLOTS.
+  #
+  # Two rows over ONE physical reservation (same reservation-id, same
+  # cluster-config). A row is a lease, not a pool: the concurrency group is
+  # uat-<name>, so one row admits exactly one run at a time. Two rows therefore
+  # admit two concurrent runs, and since the GPU node group is a fixed
+  # `desired: 2` with no autoscaling, the account-wide ceiling AICR can reach on
+  # this reservation is 2 rows x 2 nodes = 4 instances. A third dispatch queues
+  # behind a slot rather than adding a fifth and sixth node, so the cap holds
+  # without depending on anyone remembering it.
+  #
+  # Add a slot to raise the ceiling by 2; remove one to lower it. Do not raise
+  # `desired` instead — that changes what a single run qualifies (the 2-node
+  # floor is the NCCL fabric check plus the numNodes: 2 TrainJob) rather than
+  # how many runs fit.
+  #
+  # Concurrent runs sharing one cluster-config is safe: the workflow overrides
+  # `deployment.id` with a run-scoped name (aicr-uat-<run_id>), so cluster names
+  # and Terraform state keys (deployments/<region>/aicr-uat-<run_id>/) never
+  # collide. The two clusters' VPCs carry identical CIDRs, which is fine because
+  # they never peer.
+  - name: aws-h100-ct-1
+    slug: ch1
+    cloud: aws
+    reservation-id: cr-0fbe17cfb8701249e
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: tests/uat/aws/cluster-config-ct.yaml
+    test-config-dir: tests/uat/aws/tests
+    # Bring-up mode: manually dispatchable through uat-run.yaml, skipped by the
+    # nightly batch. This is what makes these rows safe to land on main — they
+    # add lanes without adding nightly cells. Flip to [training, inference] once
+    # a manual dispatch is green on this capacity, the way azure-h100 and
+    # kind-h100 were onboarded; that enrollment is also the prerequisite for
+    # retiring the dev-account aws-h100 row above, since removing it before
+    # then would leave AWS with no nightly coverage.
+    # Slot 1 is the DAYTIME slot: it hosts the held human-access cluster and is
+    # kept out of the nightly batch, so the batch never queues behind a daytime
+    # hold. Moved here from aws-h100 below, because only one reservation per
+    # cloud may carry a daytime-intent.
+    nightly-intents: []
     daytime-intent: training
+  - name: aws-h100-ct-2
+    slug: ch2
+    cloud: aws
+    reservation-id: cr-0fbe17cfb8701249e
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: tests/uat/aws/cluster-config-ct.yaml
+    test-config-dir: tests/uat/aws/tests
+    # Slot 2 is the future NIGHTLY slot, but stays opted out for now: nightly
+    # continues to run on aws-h100 above, so merging this changes nothing that
+    # runs on a schedule. Until it is enrolled, slot 2's 2 instances are free
+    # for manual dispatch, which is what makes all 4 CT instances available for
+    # daytime and ad-hoc use.
+    #
+    # Enrolling it is the deliberate edit that makes a daytime cluster and the
+    # nightly batch concurrent — the shape is already in place (separate
+    # leases, separate (slug, slot)-scoped guard prefixes, 2 nodes each), so it
+    # is a one-line change once a green run exists on this capacity for each
+    # intent it would list. Only training has one today.
+    nightly-intents: []
   - name: gcp-h100
     slug: gh1
     cloud: gcp
