@@ -439,6 +439,82 @@ if ! reason=$(check_yq_pin_reader); then
 fi
 echo "yq pin reader: agrees with yq on .settings.yaml, reads only testing_tools, handles quoting, empty when absent"
 
+# install_pinned_yq writes the pinned yq to /usr/local/bin, but the yq that runs
+# afterwards is whichever comes first on PATH. An earlier one shadowing the pin
+# must fail the install, not leave the unpinned yq in use behind a success line.
+run_install_pinned_yq() {
+    local settings="$1" active_version="$2" install_rc="${3:-0}"
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        scratch=$(mktemp -d)
+        trap 'rm -rf "${scratch}"' EXIT
+        printf '%b' "${settings}" > "${scratch}/settings.yaml"
+        VERSIONS_FILE="${scratch}/settings.yaml"
+        GO_ARCH="amd64"
+        mkdir "${scratch}/bin"
+        printf '#!/usr/bin/env bash\necho "yq (https://github.com/mikefarah/yq/) version %s"\n' \
+            "${active_version}" > "${scratch}/bin/yq"
+        chmod +x "${scratch}/bin/yq"
+        PATH="${scratch}/bin:${PATH}"
+        install_release_binary() { echo "INSTALL $*"; return "${install_rc}"; }
+
+        rc=0
+        install_pinned_yq || rc=$?
+        exit "${rc}"
+    ) 2>&1
+}
+
+pinned_settings='testing_tools:\n  yq: "v4.1.2"\n'
+yq_release="https://github.com/mikefarah/yq/releases/download/v4.1.2"
+if ! output=$(run_install_pinned_yq "${pinned_settings}" "v4.1.2"); then
+    echo "FAIL: install_pinned_yq failed although the pinned yq is the one on PATH" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+if ! grep -qxF "INSTALL ${yq_release}/yq_linux_amd64 manifest:${yq_release}/checksums-bsd yq yq v4.1.2 for Linux amd64" <<< "${output}"; then
+    echo "FAIL: install_pinned_yq did not install the pinned asset against checksums-bsd" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+if output=$(run_install_pinned_yq "${pinned_settings}" "v4.0.9"); then
+    echo "FAIL: a yq v4.0.9 ahead of the pinned v4.1.2 on PATH did not fail install_pinned_yq" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+if ! grep -q 'v4.0.9' <<< "${output}"; then
+    echo "FAIL: the shadowing error does not name the yq that runs (v4.0.9)" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+if output=$(run_install_pinned_yq "${pinned_settings}" "v4.1.2" 1); then
+    echo "FAIL: install_pinned_yq succeeded although the download failed" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+if ! grep -q 'Failed to install yq' <<< "${output}"; then
+    echo "FAIL: a failed yq download was not reported" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+if output=$(run_install_pinned_yq 'testing_tools:\n  kind: "0.1.0"\n' "v4.1.2"); then
+    echo "FAIL: install_pinned_yq succeeded with no yq pin" >&2
+    exit 1
+fi
+if grep -q '^INSTALL' <<< "${output}"; then
+    echo "FAIL: install_pinned_yq installed something with no yq pin" >&2
+    exit 1
+fi
+echo "Pinned yq: installs the pinned asset against checksums-bsd; fails when the download fails, when shadowed on PATH, or when unpinned"
+
+# Calling install_pinned_yq directly proves nothing if setup-tools stops calling it.
+if ! grep -qE '^[^#]*(^|[[:space:]])install_pinned_yq([[:space:]]|$)' "${SETUP_TOOLS}"; then
+    echo "FAIL: setup-tools no longer calls install_pinned_yq" >&2
+    exit 1
+fi
+
 # A `releases/latest` URL installs whatever upstream shipped last, not the pin,
 # and its checksums move with it -- verified, but not the version CI expects.
 # yq installed that way until #2939.

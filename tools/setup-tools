@@ -288,6 +288,36 @@ install_release_binary() {
     esac
 }
 
+# install_pinned_yq installs the Linux yq pinned in .settings.yaml, then fails
+# unless that version is the yq that runs: an earlier yq on PATH shadows the one
+# written to /usr/local/bin. The version check matches install-e2e-tools', which
+# gates the CI tool cache on it.
+install_pinned_yq() {
+    local version release active got
+    version=$(settings_yq_version "${VERSIONS_FILE}")
+    if [[ -z "${version}" ]]; then
+        log_error "No yq version pinned under testing_tools in .settings.yaml"
+        return 1
+    fi
+    release="https://github.com/mikefarah/yq/releases/download/${version}"
+    # yq's `checksums` puts the file name first, then one digest per algorithm
+    # in an order kept in a separate file; `checksums-bsd` labels each digest
+    # with its algorithm.
+    if ! install_release_binary "${release}/yq_linux_${GO_ARCH}" \
+        "manifest:${release}/checksums-bsd" \
+        yq "yq ${version} for Linux ${GO_ARCH}"; then
+        log_error "Failed to install yq. Please install manually."
+        return 1
+    fi
+    active=$(command -v yq || true)
+    got=$(yq --version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+    if [[ "${got}" != "${version}" ]]; then
+        log_error "Installed yq ${version} to /usr/local/bin, but ${active:-no yq} (${got:-unknown version}) runs first on PATH."
+        log_error "Remove it, or put /usr/local/bin ahead of it on PATH, then re-run."
+        return 1
+    fi
+}
+
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
@@ -517,23 +547,7 @@ if ! command_exists yq || [[ "${UPGRADE}" == "true" ]]; then
             exit 1
         fi
     elif [[ "${OS}" == "linux" ]]; then
-        # install-e2e-tools checks the installed yq against this pin before it
-        # saves the tool cache.
-        YQ_VERSION=$(settings_yq_version "${VERSIONS_FILE}")
-        if [[ -z "${YQ_VERSION}" ]]; then
-            log_error "No yq version pinned under testing_tools in .settings.yaml"
-            exit 1
-        fi
-        YQ_RELEASE="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}"
-        # yq's `checksums` puts the file name first, then one digest per
-        # algorithm in an order kept in a separate file; `checksums-bsd` labels
-        # each digest with its algorithm.
-        if ! install_release_binary "${YQ_RELEASE}/yq_linux_${GO_ARCH}" \
-            "manifest:${YQ_RELEASE}/checksums-bsd" \
-            yq "yq ${YQ_VERSION} for Linux ${GO_ARCH}"; then
-            log_error "Failed to install yq. Please install manually."
-            exit 1
-        fi
+        install_pinned_yq || exit 1
     fi
 
     log_success "yq installed"
