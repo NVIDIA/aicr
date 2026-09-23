@@ -384,6 +384,13 @@ helper_end=$(awk -v s="${helper_start}" 'NR > s && /^\}/ { print NR; exit }' "${
 # [^;&|] keeps a command separator from hiding inside the test.
 read_test_re='^[[:space:]]*((el)?if[[:space:]]+)?\[\[[^;&|]*\]\]([[:space:]]*;[[:space:]]*then)?[[:space:]]*$'
 read_log_re='^[[:space:]]*log_(info|warning|error|success|debug)[[:space:]]+"[^"]*"[[:space:]]*$'
+#
+# A command substitution runs before the command it sits in, so a test or log
+# line containing one can write while looking like a read:
+# `log_info "$(cp x /usr/local/bin/x)"`. The only substitution setup-tools uses
+# beside this path is `$(command -v <tool>)`, which is read-only; that one is
+# stripped, and any other $() or backtick disqualifies the line.
+safe_subst_re='\$\(command -v [[:alnum:]_-]+\)'
 
 mapfile -t bin_refs < <(
     grep -nE '/usr/local/bin' "${SETUP_TOOLS}" | grep -vE '^[0-9]+:[[:space:]]*#' || true
@@ -401,7 +408,12 @@ for entry in "${bin_refs[@]}"; do
         [[ "${code}" == *"${exception}"* ]] && excepted=true
     done
     "${excepted}" && continue
-    if [[ "${code}" != *sudo* ]] && [[ "${code}" =~ ${read_test_re} || "${code}" =~ ${read_log_re} ]]; then
+    unsubstituted="${code}"
+    while [[ "${unsubstituted}" =~ ${safe_subst_re} ]]; do
+        unsubstituted="${unsubstituted/"${BASH_REMATCH[0]}"/}"
+    done
+    if [[ "${code}" != *sudo* && "${unsubstituted}" != *'$('* && "${unsubstituted}" != *'`'* ]] \
+        && [[ "${code}" =~ ${read_test_re} || "${code}" =~ ${read_log_re} ]]; then
         continue
     fi
     bypasses+=("${entry}")
