@@ -126,8 +126,8 @@ the snapshot, and the check is NEVER skipped when a snapshot is present:
 | no `--profile`, no `--snapshot` | declaration default (`gke-default`) | none possible (no cluster data). The constraint is still recorded in the recipe and enforced at `aicr validate` readiness | n/a |
 | `--profile gpuStack=bundle-installer`, no `--snapshot` | `bundle-installer` | same, deferred to validate | same, deferred to validate |
 | no `--profile`, `--snapshot` | default (`gke-default`) | checked at generation: no GPU node may carry the opt-out label, else generation fails closed naming the observed state | n/a |
-| `--profile gpuStack=bundle-installer`, `--snapshot` (no `--gke-gpu-pools`) | `bundle-installer` | checked at generation: every GPU node must carry `gke-no-default-nvidia-gpu-device-plugin=true`, else fails closed | fails closed: the reading is unavailable without `--gke-gpu-pools` |
-| `--profile gpuStack=bundle-installer`, `--snapshot --gke-gpu-pools <dump>` | `bundle-installer` | checked at generation | checked at generation: every GPU pool must read `Disabled`, else fails closed |
+| `--profile gpuStack=bundle-installer`, `--snapshot` (captured without `aicr snapshot --gke-gpu-pools`) | `bundle-installer` | checked at generation. Every GPU node must carry `gke-no-default-nvidia-gpu-device-plugin=true`, else fails closed | fails closed. The reading is unavailable without `--gke-gpu-pools` |
+| `--profile gpuStack=bundle-installer`, `--snapshot` (captured with `aicr snapshot --gke-gpu-pools <dump>`) | `bundle-installer` | checked at generation | checked at generation. Every GPU pool must read `Disabled`, else fails closed |
 
 If you need an unverified recipe deliberately, generate criteria-only (drop
 `--snapshot`): the artifact is honest about being unqualified, and the
