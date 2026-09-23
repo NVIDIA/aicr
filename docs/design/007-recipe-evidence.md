@@ -591,12 +591,13 @@ fingerprint:
   nodeCount: { value: 12 }
 criteriaMatch:
   matched: true
-  perDimension:
-    service: { recipeRequires: eks, fingerprintProvides: eks, match: true }
-    accelerator: { recipeRequires: h100, fingerprintProvides: h100, match: true }
-    os: { recipeRequires: ubuntu, fingerprintProvides: ubuntu, match: true }
-    intent: { recipeRequires: training, fingerprintProvides: training, match: true }
-    platform: { recipeRequires: kubeflow, fingerprintProvides: kubeflow, match: true }
+  perDimension:   # ordered; match is one of matched | mismatched | unknown | not-inferable
+    - { dimension: service, recipeRequires: eks, fingerprintProvides: eks, match: matched }
+    - { dimension: accelerator, recipeRequires: h100, fingerprintProvides: h100, match: matched }
+    - { dimension: os, recipeRequires: ubuntu, fingerprintProvides: ubuntu, match: matched }
+    - { dimension: intent, recipeRequires: training, match: unknown }
+    - { dimension: platform, recipeRequires: kubeflow, match: unknown }
+    - { dimension: nodes, recipeRequires: "12", fingerprintProvides: "12", match: matched }
 phases:
   deployment: { passed: 12, failed: 0, skipped: 0, ctrfDigest: sha256:... }
   performance: { passed: 3, failed: 0, skipped: 0, ctrfDigest: sha256:... }
@@ -718,6 +719,27 @@ the `redaction` field entirely and is byte-identical to pre-feature output.
 This extends the same reasoning ADR-007 already applied to logs (split into an
 opt-in artifact because they are large and frequently sensitive) to the
 snapshot and CTRF payloads that still ship in the summary bundle.
+
+### Opt-in-only criteria values
+
+Some criteria values are selectable only by an explicit flag because no
+snapshot measurement can produce them. Today that is the `generic` service
+(`aicr recipe --service generic`): a self-managed cluster fingerprints as the
+provisioner it reports through `k8s.node.provider` (`metal3`, `rke2`, `k0s`),
+or as `any` when it reports nothing, never as `generic`. The registry exposes
+this classification as `CriteriaRegistry.IsOptInOnly`.
+
+For such a dimension `Fingerprint.Match` records `match: not-inferable` with
+the observed value kept in `fingerprintProvides`, instead of `mismatched`. A
+`not-inferable` dimension does not flip `matched` to `false`, on the same
+footing as `unknown`: the fingerprint cannot contradict a value it can never
+yield. The verifier surfaces the row and a distinct verdict so a reviewer sees
+which concrete provider validated the provider-independent recipe.
+
+Provider-specific leaves layered over a generic base (`metal3`, `rke2`) carry
+inferable service values and match normally; their evidence qualifies the
+leaf, while evidence collected against the generic leaf itself qualifies the
+base with the provider recorded.
 
 ### Pointer schema (1.0) (proposed)
 
@@ -865,7 +887,10 @@ auto-detected input form — OCI ref or unpacked directory):
    from #752; confirm `predicate.criteriaMatch.matched: true` (the
    predicate is the source of truth; the pointer does not carry this
    field); render per-dimension diff in Markdown so reviewers see
-   exactly which dimensions matched.
+   exactly which dimensions matched. `unknown` and `not-inferable`
+   dimensions (see "Opt-in-only criteria values") do not fail this step;
+   a `not-inferable` row must carry `fingerprintProvides` so the report
+   names the provider that validated the recipe.
 8. **Inline constraint replay.** Run the snapshot through the recipe's
    inline constraints (the `aicr validate --no-cluster` deterministic
    path) and confirm the recorded pass/fail matches what the bundle

@@ -164,28 +164,29 @@ func TestADR022TargetIsReadable(t *testing.T) {
 	}
 }
 
-// TestADR022EmittersAreOnTarget pins the migration stage. AICR is in ADR-022 §3
-// Release N+1 (v0.22, issue #2416): every emitter writes its §2 target, and the
-// readers still accept the alpha values until N+2 (v1.0.0, issue #2417).
+// TestADR022EmittersAreOnTarget pins the migration stage. AICR is at ADR-022 §3
+// Release N+2 (v1.0.0, issue #2417): every emitter writes its §2 target and no
+// reader accepts an alpha value.
 //
-// This is the inverted form of the Release N test, which asserted the opposite
-// and failed at the switch by design. Keep it: an emitter silently reverting to
-// an alpha value — most likely by aliasing header.GroupVersion directly instead
-// of its track constant — is exactly what this catches.
+// This has been inverted once already — the Release N form asserted the
+// opposite and failed at the N+1 switch by design. Keep it: an emitter silently
+// reverting to a retired value, most likely by aliasing a retired constant
+// instead of its track constant, is exactly what this catches. The retired
+// constants still exist for RetirementNote, so that mistake still compiles.
 func TestADR022EmittersAreOnTarget(t *testing.T) {
 	t.Parallel()
 
 	alpha := map[string]bool{
-		header.GroupVersion:             true,
-		header.RecipeResultGroupVersion: true,
+		header.RetiredGroupVersionV1Alpha2: true,
+		header.RetiredGroupVersionV1Alpha3: true,
 	}
 
 	for _, row := range adr022Map() {
 		t.Run(row.kind, func(t *testing.T) {
 			t.Parallel()
 			if alpha[row.emitted] {
-				t.Errorf("emitted apiVersion %q is still an alpha value; Release N+1 "+
-					"switched every emitter to its §2 target", row.emitted)
+				t.Errorf("emitted apiVersion %q is a retired value; no reader has "+
+					"accepted it since Release N+2", row.emitted)
 			}
 			if row.emitted != row.target {
 				t.Errorf("emitted apiVersion %q is not the §2 target %q; update this "+

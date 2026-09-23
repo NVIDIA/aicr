@@ -19,18 +19,34 @@ import (
 	"time"
 )
 
-// Test API version constant - matches aicr.run/v1alpha2 used by snapshotter and recipe packages
-const testAPIVersion = "aicr.run/v1alpha2"
+// testAPIVersion is an arbitrary well-formed value for the Init/InitWithTime
+// cases below, which exercise header construction rather than acceptance. It
+// tracks the stable target so a reader does not have to wonder whether the
+// choice is load-bearing.
+const testAPIVersion = GroupVersionV1
+
+// TestRetiredGroupVersionsKeepTheirHistoricalStrings pins the withdrawn values
+// to the exact bytes older artifacts carry on disk. They are no longer accepted
+// anywhere, so nothing else would catch a typo here -- and a typo would silently
+// cost the remediation clause RetirementNote exists to produce, leaving a user
+// with a pre-v1.0.0 artifact staring at a bare "unsupported apiVersion".
+func TestRetiredGroupVersionsKeepTheirHistoricalStrings(t *testing.T) {
+	t.Parallel()
+
+	retired := map[string]string{
+		RetiredGroupVersionV1Alpha2: "aicr.run/v1alpha2",
+		RetiredGroupVersionV1Alpha3: "aicr.run/v1alpha3",
+	}
+	for got, want := range retired {
+		if got != want {
+			t.Errorf("retired group/version = %q, want %q", got, want)
+		}
+	}
+}
 
 func TestGroupVersion(t *testing.T) {
 	t.Parallel()
 
-	if GroupVersion != testAPIVersion {
-		t.Errorf("GroupVersion = %q, want %q", GroupVersion, testAPIVersion)
-	}
-	if want := APIGroup + "/" + APIVersionV1Alpha2; GroupVersion != want {
-		t.Errorf("GroupVersion = %q, want %q", GroupVersion, want)
-	}
 	versions := map[string]string{
 		GroupVersionV1:      APIGroup + "/" + APIVersionV1,
 		GroupVersionV1Beta1: APIGroup + "/" + APIVersionV1Beta1,
@@ -51,8 +67,9 @@ func TestIsSupportedAPIVersion(t *testing.T) {
 		in   string
 		want bool
 	}{
-		{"current", "aicr.run/v1alpha2", true},
 		{"target", "aicr.run/v1", true},
+		{"retired alpha2 rejected", "aicr.run/v1alpha2", false},
+		{"retired alpha3 rejected", "aicr.run/v1alpha3", false},
 		{"authoring target rejected", "aicr.run/v1beta1", false},
 		{"profile target rejected", "aicr.run/v1beta2", false},
 		{"old group+version rejected", "aicr.nvidia.com/v1alpha1", false},
@@ -83,22 +100,29 @@ func TestSchemaTrackAPIVersions(t *testing.T) {
 		{
 			name:     "authoring",
 			check:    IsSupportedAuthoringAPIVersion,
-			accepted: []string{GroupVersion, GroupVersionV1Beta1},
-			rejected: []string{"", GroupVersionV1, RecipeResultGroupVersion, GroupVersionV1Beta2},
+			accepted: []string{GroupVersionV1Beta1},
+			rejected: []string{
+				"", GroupVersionV1, GroupVersionV1Beta2,
+				RetiredGroupVersionV1Alpha2, RetiredGroupVersionV1Alpha3,
+			},
 		},
 		{
 			name:     "profile",
 			check:    IsSupportedProfileAPIVersion,
-			accepted: []string{RecipeResultGroupVersion, GroupVersionV1Beta2},
-			rejected: []string{"", GroupVersion, GroupVersionV1, GroupVersionV1Beta1},
+			accepted: []string{GroupVersionV1Beta2},
+			rejected: []string{
+				"", GroupVersionV1, GroupVersionV1Beta1,
+				RetiredGroupVersionV1Alpha2, RetiredGroupVersionV1Alpha3,
+			},
 		},
 		{
-			// BundleInfo has no alpha to retire, so GroupVersion is rejected
-			// here while the shared stable-track predicate still accepts it.
 			name:     "bundleinfo",
 			check:    IsSupportedBundleInfoAPIVersion,
 			accepted: []string{GroupVersionV1},
-			rejected: []string{"", GroupVersion, RecipeResultGroupVersion, GroupVersionV1Beta1, GroupVersionV1Beta2},
+			rejected: []string{
+				"", GroupVersionV1Beta1, GroupVersionV1Beta2,
+				RetiredGroupVersionV1Alpha2, RetiredGroupVersionV1Alpha3,
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -125,11 +149,11 @@ func TestIsSupportedRecipeResultAPIVersion(t *testing.T) {
 		version string
 		want    bool
 	}{
-		{version: GroupVersion, want: true},
-		{version: RecipeResultGroupVersion, want: true},
 		{version: GroupVersionV1, want: true},
 		{version: GroupVersionV1Beta2, want: true},
 		{version: GroupVersionV1Beta1, want: false},
+		{version: RetiredGroupVersionV1Alpha2, want: false},
+		{version: RetiredGroupVersionV1Alpha3, want: false},
 		{version: "", want: false},
 		{version: "aicr.run/v1alpha4", want: false},
 	}

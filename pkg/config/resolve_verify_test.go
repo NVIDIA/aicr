@@ -282,7 +282,7 @@ func TestVerificationAccessor(t *testing.T) {
 func TestVerifyTrustRejectsIgnoreTlogField(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	doc := "kind: AICRConfig\napiVersion: aicr.run/v1alpha2\n" +
+	doc := "kind: AICRConfig\napiVersion: aicr.run/v1beta1\n" +
 		"spec:\n  verify:\n    trust:\n      ignoreTlog: true\n"
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatalf("write temp config: %v", err)

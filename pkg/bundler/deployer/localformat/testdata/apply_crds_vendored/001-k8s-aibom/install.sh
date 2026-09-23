@@ -34,7 +34,7 @@ if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
   bash ./apply-crds.sh
 fi
 
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} k8s-aibom ./ \
-  --namespace k8s-aibom-system --create-namespace \
+helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'k8s-aibom' ./ \
+  --namespace 'k8s-aibom-system' --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}

@@ -25,7 +25,7 @@ import (
 )
 
 const constraintPathTestBase = `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -49,7 +49,7 @@ func TestBuildMetadataStore_RejectsBadConstraintPath(t *testing.T) {
 			files: map[string][]byte{
 				"overlays/base.yaml": []byte(constraintPathTestBase),
 				"overlays/leaf.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: leaf
 spec:
@@ -69,7 +69,7 @@ spec:
 			name: "base constraint",
 			files: map[string][]byte{
 				"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -88,7 +88,7 @@ spec:
 			files: map[string][]byte{
 				"overlays/base.yaml": []byte(constraintPathTestBase),
 				"mixins/os-bad.yaml": []byte(`kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: os-bad
 spec:
@@ -106,7 +106,7 @@ spec:
 			files: map[string][]byte{
 				"overlays/base.yaml": []byte(constraintPathTestBase),
 				"overlays/leaf.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: leaf
 spec:
@@ -129,7 +129,7 @@ spec:
 			files: map[string][]byte{
 				"overlays/base.yaml": []byte(constraintPathTestBase),
 				"overlays/profiled.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   name: profiled
 spec:
@@ -184,7 +184,7 @@ func TestBuildMetadataStore_AcceptsNonMeasurementPhaseConstraints(t *testing.T) 
 	provider := newInMemoryProvider("phase-constraints", map[string][]byte{
 		"overlays/base.yaml": []byte(constraintPathTestBase),
 		"overlays/leaf.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: leaf
 spec:
@@ -224,7 +224,7 @@ func TestBuildMetadataStore_AcceptsVirtualNodeSetPath(t *testing.T) {
 	provider := newInMemoryProvider("virtual-path", map[string][]byte{
 		"overlays/base.yaml": []byte(constraintPathTestBase),
 		"overlays/leaf.yaml": fmt.Appendf(nil, `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: leaf
 spec:

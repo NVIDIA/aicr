@@ -33,7 +33,7 @@ func makeSnapshot(measurements ...*measurement.Measurement) *snapshotter.Snapsho
 	snap := snapshotter.NewSnapshot()
 	snap.Header = header.Header{
 		Kind:       header.KindSnapshot,
-		APIVersion: header.GroupVersion,
+		APIVersion: header.GroupVersionV1,
 		Metadata:   map[string]string{},
 	}
 	snap.Measurements = measurements

@@ -34,14 +34,14 @@ a bug worth [filing](https://github.com/NVIDIA/aicr/issues/new/choose).
 ### Alpha artifact `apiVersion` values
 
 **Surface:** bundle and artifact schemas ·
-**Deprecated in:** v0.22 · **Removed in:** v1.0.0
+**Deprecated in:** v0.22 · **Removed in:** v1.0.0 — **this removal has happened**
 
 Every artifact AICR generates carried an alpha `apiVersion` — `aicr.run/v1alpha2`
-for most kinds, `aicr.run/v1alpha3` for profile-bearing recipes. Those values are
-being replaced by maturity-appropriate targets, per
+for most kinds, `aicr.run/v1alpha3` for profile-bearing recipes. Those values were
+replaced by maturity-appropriate targets, per
 [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 
-| Kind | Retiring | Replacement |
+| Kind | Retired | Replacement |
 |---|---|---|
 | `Snapshot`, default `RecipeResult`, `RecipeCriteria`, `BundleProvenance` | `aicr.run/v1alpha2` | `aicr.run/v1` |
 | `AICRConfig`, catalog `RecipeMetadata`, `RecipeMixin`, `ComponentRegistry` | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
@@ -54,11 +54,34 @@ produced them. Files you authored — `AICRConfig`, and any external
 are edited by hand. AICR has no conversion layer and does not rewrite your
 catalog.
 
-**The window is v0.22 only.** v0.21 and v0.22 read both the alpha and the target
-values; v1.0.0 reads only the target. An archived artifact whose source cannot be
-recaptured stays readable only with a retained v0.21 or v0.22 binary. See
+**The window was v0.22 only, and it has closed.** v0.21 and v0.22 read both the
+alpha and the target values; v1.0.0 reads only the target, and rejects an alpha or
+absent `apiVersion` with a message naming the value, the expected value, and the
+release that withdrew it. An archived artifact whose source cannot be recaptured
+stays readable only with a retained v0.21 or v0.22 binary. See
 [catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 for the release-by-release table.
+
+**Go importers.** The retirement also removed the exported `pkg/header`
+identifiers that named the alpha values. `pkg/header` sits outside the
+`pkg/client/v1` SDK surface the API compatibility gate covers, so this reaches
+you as a compile error rather than a recorded API break.
+
+| Removed | Replace with |
+|---|---|
+| `APIVersionV1Alpha2` | the bare segment for your track — `APIVersionV1`, `APIVersionV1Beta1`, or `APIVersionV1Beta2` |
+| `APIVersionV1Alpha3` | `APIVersionV1Beta2`; it only ever named the profile-bearing track |
+| `GroupVersion` | the full group/version for your track — `GroupVersionV1`, `GroupVersionV1Beta1`, or `GroupVersionV1Beta2` |
+| `RecipeResultGroupVersion` | `GroupVersionV1Beta2`, for the same reason |
+| `WarnDeprecatedAPIVersion` | nothing — a retired value is rejected now, not warned about. `RetirementNote` supplies the `(… was retired in v1.0.0)` clause for the rejection message |
+| `ResetAPIVersionRecorderForTest` | nothing — the warning recorder it reset is gone |
+
+The two constant families are not interchangeable: an `APIVersion*` constant is
+a bare segment (`v1beta1`), while a `GroupVersion*` constant carries the group
+as well (`aicr.run/v1beta1`). Use the Kind table above to pick your track, and
+alias the constant rather than the string it happens to equal — the tracks hold
+distinct values now, so a collapsed alias shows up as a wrong value rather than
+a latent one.
 
 ### Empty `apiVersion` on artifacts
 
