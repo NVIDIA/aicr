@@ -381,7 +381,8 @@ The fields are:
   default the pool falls on. `NotConfigured` (config absent) or
   `NotInstalled` (empty or unspecified) is emitted instead only when the
   pool's `version` can't be parsed, so that resolution can't run. An
-  unrecognized `gpuDriverVersion` string is preserved verbatim.
+  unrecognized `gpuDriverVersion` string is emitted as `Unknown(value)`,
+  namespaced so it can never collide with a normalized state.
   Disagreeing accelerators within a pool, or disagreeing pools, aggregate
   to `Mixed`. The key is **omitted entirely** when the dump contains no GPU
   pools.
@@ -392,9 +393,9 @@ The fields are:
 
 Interpretation is fail-closed: `Disabled` is the only value a declared
 `gpuStack` profile constraint accepts. `Installed`, `NotConfigured`,
-`NotInstalled`, `Mixed`, and verbatim-unknown values all match no
-constraint, so profile-qualified resolution fails closed with the observed
-value as the actual. Only the `bundle-installer` value declares a
+`NotInstalled`, `Mixed`, and `Unknown(value)` all match no constraint, so
+profile-qualified resolution fails closed with the observed value as the
+actual. Only the `bundle-installer` value declares a
 constraint on this reading. The default `gke-default` value resolves from
 the `NodeTopology.gpu-nodes.label` opt-out label alone and never requires
 this projection. When `bundle-installer` is selected and the subtype or the

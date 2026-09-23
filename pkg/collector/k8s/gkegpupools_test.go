@@ -211,17 +211,31 @@ func TestProjectGKEGPUPools(t *testing.T) {
 			wantPools:  "gpu1=Mixed",
 		},
 		{
-			// An unknown provider value is preserved verbatim so the
-			// fail-closed error names what was actually observed.
+			// An unknown provider value is namespaced so the
+			// fail-closed error names what was actually observed
+			// without colliding with a normalized state.
 			name: "unknown driver version preserved",
 			content: `[
 			  {"name":"gpu1","config":{"accelerators":[
 			    {"acceleratorType":"nvidia-h100-80gb","gpuDriverInstallationConfig":{"gpuDriverVersion":"FUTURE_MODE"}}
 			  ]}}
 			]`,
-			wantDriver: "FUTURE_MODE",
+			wantDriver: "Unknown(FUTURE_MODE)",
 			wantCount:  1,
-			wantPools:  "gpu1=FUTURE_MODE",
+			wantPools:  "gpu1=Unknown(FUTURE_MODE)",
+		},
+		{
+			// A gpuDriverVersion that happens to spell a normalized
+			// state's name must not resolve as that state.
+			name: "unknown driver version matching a normalized state name stays namespaced",
+			content: `[
+			  {"name":"gpu1","config":{"accelerators":[
+			    {"acceleratorType":"nvidia-h100-80gb","gpuDriverInstallationConfig":{"gpuDriverVersion":"Disabled"}}
+			  ]}}
+			]`,
+			wantDriver: "Unknown(Disabled)",
+			wantCount:  1,
+			wantPools:  "gpu1=Unknown(Disabled)",
 		},
 		{
 			// A pool with no accelerators is not a GPU pool.

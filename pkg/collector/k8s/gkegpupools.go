@@ -151,7 +151,8 @@ type gkeNodePoolAutoscaling struct {
 //     gkeOmittedDriverMode), falling back to NotConfigured or
 //     NotInstalled when the version can't be resolved.
 //   - Disagreement, within a pool or across pools, sets it to Mixed.
-//   - Anything else is preserved verbatim.
+//   - Anything else is namespaced as Unknown(value), so it can never
+//     collide with a normalized state such as Disabled.
 //
 // The key is omitted when there are no GPU pools. A read or decode
 // failure returns an error rather than a degraded reading, so a typoed
@@ -211,9 +212,10 @@ func gkeAcceleratorInstallMode(acc gkeAccelerator, poolVersion string, autoprovi
 	if _, ok := gkeGPUDriverVersionInstalled[version]; ok {
 		return gkeDriverInstalled
 	}
-	// An unknown provider value is preserved verbatim, so the fail-closed
-	// error names what was actually observed.
-	return version
+	// An unknown provider value is namespaced so it can never collide
+	// with a normalized state string such as Disabled, while the
+	// fail-closed error still names what was actually observed.
+	return "Unknown(" + version + ")"
 }
 
 // aggregateGKEGPUDriver returns the single mode shared by modes, or
