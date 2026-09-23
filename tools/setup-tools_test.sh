@@ -403,10 +403,22 @@ for entry in "${bin_refs[@]}"; do
     if (( line_no > helper_start && line_no < helper_end )); then
         continue
     fi
+    # Excepted only when every /usr/local/bin path the line names is an
+    # exception, each compared whole. A substring test let `/usr/local/bin/yq`
+    # vouch for `/usr/local/bin/yq-helper`, and let a trailing comment that
+    # mentions an excepted path vouch for whatever the line actually installs.
+    mapfile -t named_paths < <(grep -oE '/usr/local/bin/[[:alnum:]._-]+' <<< "${code}" || true)
     excepted=false
-    for exception in "${BIN_INSTALL_EXCEPTIONS[@]}"; do
-        [[ "${code}" == *"${exception}"* ]] && excepted=true
-    done
+    if (( ${#named_paths[@]} > 0 )); then
+        excepted=true
+        for named in "${named_paths[@]}"; do
+            listed=false
+            for exception in "${BIN_INSTALL_EXCEPTIONS[@]}"; do
+                [[ "${named}" == "${exception}" ]] && listed=true
+            done
+            "${listed}" || { excepted=false; break; }
+        done
+    fi
     "${excepted}" && continue
     unsubstituted="${code}"
     while [[ "${unsubstituted}" =~ ${safe_subst_re} ]]; do
