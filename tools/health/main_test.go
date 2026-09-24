@@ -578,7 +578,6 @@ func TestRenderMatrixLinksPresentCoordinate(t *testing.T) {
 				Criteria:    crit,
 				LeafOverlay: "h100-eks-ubuntu-training-kubeflow",
 				Structure:   health.StructureHealth{Status: health.StatusPass},
-				Result:      &recipe.RecipeResult{Criteria: crit},
 			},
 			{
 				Criteria:    &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100},
