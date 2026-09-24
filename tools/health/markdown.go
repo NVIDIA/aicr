@@ -15,12 +15,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/evidence/project"
+	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/testgrid"
@@ -64,6 +69,13 @@ type markdownOptions struct {
 	// pre-RQ1 behavior), so rendering degrades safely if the manifest is absent.
 	Presence *testgrid.Presence
 
+	// Allowlist resolves evidence signer identities to their trust class.
+	Allowlist *project.Allowlist
+
+	// EvidenceDir optionally overrides the evidence directory path (defaults to
+	// verifier.EvidenceDirName when empty).
+	EvidenceDir string
+
 	// Deterministic suppresses per-run metadata (the generated timestamp) so
 	// the output is byte-stable and committable.
 	Deterministic bool
@@ -100,7 +112,7 @@ func (s *stickyWriter) Write(p []byte) (int, error) {
 // renderMatrix writes the recipe-health matrix as Markdown. The report's
 // Combos are already sorted deterministically by health.Compute, so rendering
 // preserves that order and adds no ordering of its own.
-func renderMatrix(w io.Writer, report *health.Report, opts markdownOptions) error {
+func renderMatrix(ctx context.Context, w io.Writer, report *health.Report, opts markdownOptions) error {
 	sw := &stickyWriter{w: w}
 
 	if !opts.NoTitle {
@@ -115,7 +127,7 @@ func renderMatrix(w io.Writer, report *health.Report, opts markdownOptions) erro
 	}
 
 	writeSummary(sw, report)
-	writeMatrix(sw, report, opts.Presence)
+	writeMatrix(ctx, sw, report, opts.Presence, opts.Allowlist, opts.EvidenceDir)
 
 	if sw.err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to write recipe-health markdown", sw.err)
@@ -146,12 +158,22 @@ func writeSummary(sw *stickyWriter, report *health.Report) {
 }
 
 // writeMatrix emits the per-recipe matrix table.
-func writeMatrix(sw *stickyWriter, report *health.Report, presence *testgrid.Presence) {
+func writeMatrix(
+	ctx context.Context,
+	sw *stickyWriter,
+	report *health.Report,
+	presence *testgrid.Presence,
+	allowlist *project.Allowlist,
+	evidenceDir string,
+) {
+
 	fmt.Fprintf(sw, "## Recipes\n\n")
 	fmt.Fprintln(sw, "| Recipe | Service | Accelerator | OS | Intent | Platform | Status | Coverage | Evidence |")
 	fmt.Fprintln(sw, "|--------|---------|-------------|----|--------|----------|--------|----------|----------|")
 	for _, c := range report.Combos {
 		crit := c.Criteria
+		evidence := evidenceCellWithContext(ctx, crit, presence, allowlist, c.Result, evidenceDir)
+
 		fmt.Fprintf(sw, "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			c.LeafOverlay,
 			dimCell(string(crit.Service)),
@@ -161,7 +183,7 @@ func writeMatrix(sw *stickyWriter, report *health.Report, presence *testgrid.Pre
 			dimCell(string(crit.Platform)),
 			c.Structure.Status,
 			coverageCell(c.Structure.Coverage),
-			evidenceCell(crit, presence),
+			evidence,
 		)
 	}
 	fmt.Fprintln(sw)
@@ -170,14 +192,35 @@ func writeMatrix(sw *stickyWriter, report *health.Report, presence *testgrid.Pre
 // evidenceCell renders the Evidence column for one recipe. It emits a
 // deterministic Markdown deep-link into the dashboard only when the recipe
 // resolves to a concrete coordinate that has a committed dashboard presence;
-// otherwise it renders evidencePending. Link construction is pure and offline
-// (pkg/testgrid.LinkFor over pkg/recipe.CoordinateFor), so the generator stays
-// hermetic and byte-deterministic. The cell never carries a status or a
-// pass/fail/count token — it points at the live board and nothing more, per
+// otherwise it renders evidencePending. When an allowlisted evidence pointer
+// is associated with the recipe, it renders the signer's trust class alongside
+// the deep-link (e.g. "[coord](url) · first-party"). Link construction is pure
+// and offline (pkg/testgrid.LinkFor over pkg/recipe.CoordinateFor), so the generator
+// stays hermetic and byte-deterministic. The cell never carries a status or a
+// pass/fail/count token — it carries no pass/fail verdict or count, per
 // #1283 (RQ2 owns keeping the link honest; #1224 owns any later freshness
 // token). A recipe with a wildcard/absent required dimension (e.g. a100-any)
 // has no concrete coordinate and stays pending.
-func evidenceCell(crit *recipe.Criteria, presence *testgrid.Presence) string {
+func evidenceCell(
+	crit *recipe.Criteria,
+	presence *testgrid.Presence,
+	allowlist *project.Allowlist,
+) string {
+
+	return evidenceCellWithContext(context.Background(), crit, presence, allowlist, nil, "")
+}
+
+// evidenceCellWithContext is evidenceCell with an explicit RecipeResult and evidence
+// directory override, primarily used by writeMatrix and unit tests.
+func evidenceCellWithContext(
+	ctx context.Context,
+	crit *recipe.Criteria,
+	presence *testgrid.Presence,
+	allowlist *project.Allowlist,
+	result *recipe.RecipeResult,
+	evidenceDir string,
+) string {
+
 	if presence == nil {
 		return evidencePending
 	}
@@ -186,7 +229,77 @@ func evidenceCell(crit *recipe.Criteria, presence *testgrid.Presence) string {
 		return evidencePending
 	}
 	path := co.Path()
-	return fmt.Sprintf("[%s](%s)", path, testgrid.LinkFor(co))
+	link := fmt.Sprintf("[%s](%s)", path, testgrid.LinkFor(co))
+	if class, ok := resolveTrustClass(ctx, crit, result, allowlist, evidenceDir); ok {
+		return fmt.Sprintf("%s · %s", link, class)
+	}
+	return link
+}
+
+// resolveTrustClass resolves the latest allowlisted evidence pointer for the given
+// recipe and returns its trust class, or ("", false) if none exists.
+// evidenceDir defaults to verifier.EvidenceDirName ("recipes/evidence") when empty.
+func resolveTrustClass(
+	ctx context.Context,
+	crit *recipe.Criteria,
+	result *recipe.RecipeResult,
+	allowlist *project.Allowlist,
+	evidenceDir string,
+) (project.Class, bool) {
+
+	if allowlist == nil || crit == nil {
+		return "", false
+	}
+	if evidenceDir == "" {
+		evidenceDir = verifier.EvidenceDirName
+	}
+	var res *recipe.RecipeResult
+	if result != nil {
+		res = result
+	} else {
+		res = &recipe.RecipeResult{Criteria: crit}
+	}
+	slug := attestation.RecipeNameFor(res)
+	if slug == "" {
+		return "", false
+	}
+	pointers, err := verifier.DiscoverPointers(evidenceDir, slug)
+	if err != nil || len(pointers) == 0 {
+		return "", false
+	}
+
+	var (
+		bestTime  time.Time
+		bestClass project.Class
+		bestPath  string
+		found     bool
+	)
+
+	for _, p := range pointers {
+		readCtx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
+		ptr, err := verifier.LoadAndValidatePointerContext(readCtx, p)
+		cancel()
+		if err != nil || ptr == nil || len(ptr.Attestations) == 0 {
+			continue
+		}
+		signer := ptr.Attestations[0].Signer
+		if signer == nil {
+			continue
+		}
+		class, ok := allowlist.Classify(signer.Issuer, signer.Identity)
+		if !ok {
+			continue
+		}
+		attTime := ptr.Attestations[0].AttestedAt
+		if !found || attTime.After(bestTime) || (attTime.Equal(bestTime) && p < bestPath) {
+			found = true
+			bestTime = attTime
+			bestClass = class
+			bestPath = p
+		}
+	}
+
+	return bestClass, found
 }
 
 // dimCell renders a single criteria dimension. An unspecified dimension ("any"

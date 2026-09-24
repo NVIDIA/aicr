@@ -173,6 +173,9 @@ type ComboHealth struct {
 	// Structure is the structural-soundness axis. A future validation-posture
 	// axis is added here as a separate field, never fused into Structure.
 	Structure StructureHealth `json:"structure" yaml:"structure"`
+
+	// Result is the resolved RecipeResult (nil when resolution failed).
+	Result *recipe.RecipeResult `json:"-" yaml:"-"`
 }
 
 // Report is the catalog-wide health snapshot.
@@ -262,6 +265,7 @@ func computeCombo(entry recipe.CatalogEntry, result *recipe.RecipeResult, err er
 		Criteria:    entry.Criteria,
 		LeafOverlay: entry.Name,
 		Structure:   structure,
+		Result:      result,
 	}
 }
 

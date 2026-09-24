@@ -42,6 +42,8 @@ import (
 	"path/filepath"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/project"
+	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/testgrid"
@@ -73,7 +75,26 @@ func main() {
 	}
 }
 
+// resolveEvidenceDir locates the committed evidence directory, falling back to
+// the repo root when run from tools/health.
+func resolveEvidenceDir() string {
+	evidenceDir := verifier.EvidenceDirName
+	if _, err := os.Stat(filepath.Join(evidenceDir, verifier.AllowlistFileName)); os.IsNotExist(err) {
+		fallback := filepath.Join("..", "..", verifier.EvidenceDirName)
+		if _, err := os.Stat(filepath.Join(fallback, verifier.AllowlistFileName)); err == nil {
+			evidenceDir = fallback
+		}
+	}
+	return evidenceDir
+}
+
 func run(ctx context.Context, outDir, summaryOut, aicrVersion string, deterministic, noTitle bool) error {
+	evidenceDir := resolveEvidenceDir()
+	allowlist, err := project.LoadAllowlist(filepath.Join(evidenceDir, verifier.AllowlistFileName))
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "load evidence allowlist", err)
+	}
+
 	// Presence is read from the committed manifest embedded in pkg/testgrid, so
 	// the Evidence deep-links are constructed offline and the run stays
 	// hermetic — no dashboard fetch.
@@ -103,11 +124,13 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 
 	mdPath := filepath.Join(outDir, matrixFile)
 	if err := docgen.WriteRendered(mdPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, func(w io.Writer) error {
-		return renderMatrix(w, report, markdownOptions{
+		return renderMatrix(ctx, w, report, markdownOptions{
 			AICRVersion:   aicrVersion,
 			Deterministic: deterministic,
 			NoTitle:       noTitle,
 			Presence:      presence,
+			Allowlist:     allowlist,
+			EvidenceDir:   evidenceDir,
 		})
 	}); err != nil {
 		return err
