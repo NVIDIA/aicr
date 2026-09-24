@@ -350,6 +350,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"inference-gateway",
 				"pod-autoscaling",
 				"cluster-autoscaling",
+				"secure-accelerator-access",
 			},
 			wantDRAConstraint: false,
 		},
@@ -381,6 +382,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"inference-gateway",
 				"pod-autoscaling",
 				"cluster-autoscaling",
+				"secure-accelerator-access",
 			},
 			wantDRAConstraint: false,
 		},
@@ -413,6 +415,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"inference-gateway",
 				"pod-autoscaling",
 				"cluster-autoscaling",
+				"secure-accelerator-access",
 			},
 			wantDRAConstraint: false,
 		},
@@ -707,6 +710,39 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
 			requiredManifestComponents: []string{"kubeflow-trainer"},
 			requiredChecks:             []string{"platform-health", "robust-controller", "secure-accelerator-access"},
+		},
+		{
+			name: "l40s-oke-inference",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceOKE
+				c.Accelerator = CriteriaAcceleratorL40S
+				c.OS = CriteriaOSOracleLinux
+				c.Intent = CriteriaIntentInference
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+				"secure-accelerator-access",
+			},
+			wantDRAConstraint: false,
 		},
 		{
 			name: "l40s-oke-training-kubeflow",
