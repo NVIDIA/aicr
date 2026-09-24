@@ -169,11 +169,13 @@ components:
     manifestsUseChartCRDs: true
     healthCheck:
       assertFile: checks/network-operator/health-check.yaml
+    upgrades:
+      file: components/network-operator/upgrades.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
       # renovate: datasource=helm depName=network-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
-      defaultVersion: "26.4.1"
+      defaultVersion: "26.7.0"
       defaultNamespace: nvidia-network-operator
     nodeScheduling:
       system:
