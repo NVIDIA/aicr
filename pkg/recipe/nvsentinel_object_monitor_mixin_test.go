@@ -47,7 +47,7 @@ func nvsentinelLeaf(mixins []string, overrides map[string]any) RecipeMetadataSpe
 	return RecipeMetadataSpec{
 		Mixins: mixins,
 		ComponentRefs: []ComponentRef{{
-			Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.20.0",
+			Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.22.0",
 			Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm,
 			Namespace: "nvsentinel", Overrides: overrides,
 		}},
