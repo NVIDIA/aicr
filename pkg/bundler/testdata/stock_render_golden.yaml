@@ -340,10 +340,10 @@ a100-oke-ubuntu-training-kubeflow:
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   013-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: f2d4ced5702d6a760716af1595cea4c047f1f5928f6034ffd95f3b4ba6792679
-  bundle-info.yaml: b6fb8cdc1c8f3582f40326b3488556605de77186f22ce525712f479865edff03
-  checksums.txt: f7164628d8254530783c82aa885aa135205e726782281f1c5970a9f55c7192a6
+  bundle-info.yaml: 831a29533abc5f1a361ca6ee155982d55fc941b4883b8c873815aed83f920aa6
+  checksums.txt: 62f30befd9cd2be05ed6567728ce0478f2a8a6c33af1593e20171b312318809a
   deploy.sh: 8ebf4bd801a6d8fd6cba8979dc354e9aeeb8d5cfccbee9e6e7262417b175c6f4
-  recipe.yaml: d9b594a7f2329bc874db13c31edf95a60d3a761e190c0854063cb9e94fc5fb8b
+  recipe.yaml: c56ddd28d53fca95452ee3e660e58a6e2e3640ac8fea94f504fe4ab56838a2a5
 aks-ubuntu:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -3575,10 +3575,10 @@ l40s-oke-training-kubeflow:
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 51f87f76c5be2d17b58a0879a12acefada1a293440b9cfb3b6efd63e6c5c4037
-  bundle-info.yaml: e74746518ea26fea2bd654514a2052859aa90f163424bcefd190d7a44dd98416
-  checksums.txt: c1d1ce434afd441d79a6694bb38ef6b3619dd326228dc575cb9259ddc6864920
+  bundle-info.yaml: dee583ba4adae0396796162ec619446ae6bef307540540d7d94cd8770f1f6c06
+  checksums.txt: 32debe99bdcae4303ab60aedc44c9f35b9eb55b6f0ebe010df8af06d59b641f9
   deploy.sh: 83fa4613633138d6b344997098cc0b2f77082f6fc1ba1cca6cef729b1a316cd3
-  recipe.yaml: 44174bc018d441a74b96d4ef166f7a2a61a2931f7522b33b8ca2acd989b73471
+  recipe.yaml: d73941db47a045ac757c0d38a904a764af88cfea4e0519bf6f9458f622952837
 monitoring-hpa:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -4087,10 +4087,10 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: cf2965e834609a01c3e379075191ef1d21390144bca3e48cfc85804be915733c
-  bundle-info.yaml: 962b520f8d148f3b97cdcf7f9386fc19c1a308d51ff10c546bd3197cc6518619
-  checksums.txt: b59d37a2f99dbc76b3ecf5bf37b0b2138e4fdfe3a193eb7db75255a090779e4a
+  bundle-info.yaml: 59dc8f21409463fe4c6efdf10d124838f453a61417f89d777198b5d1e294b022
+  checksums.txt: 78b28c6536b987f41687262eab2c88184a74f02497f12421ce4f4747b37623c7
   deploy.sh: 5b2acd33c456f23e8d1f4d574f94b9ba2bce52147876f165a54e3395e55de09b
-  recipe.yaml: b730750944d39fed9f2004bb4c0d56aca1a6b55c4d7cef05e83520aa0ccf0bbb
+  recipe.yaml: 61dec3a3b786d5db1c67e22227821bcb1c48c8bfe94d99cf93b469a24ec72587
 rtx-pro-6000-lke-ubuntu-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -4217,10 +4217,10 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   013-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: e75e81963ce8a5bf94857278ecdc755be467ca67a4a5e2a875a7c8112df9501e
-  bundle-info.yaml: 2ee3b3f07a9f10989fc99da9e158428e37c7da43e54a3d1a40e365f7ef8eec92
-  checksums.txt: 53eb64f4fcd07933503e0a4716005177b4d2f4afb1ce3fd2b3d7ebb1b5245bab
+  bundle-info.yaml: bdaf500e768da963a88b1c978b124a85668e8d7f3e119df3ede2c937b450404b
+  checksums.txt: 3e2a84bdb267e14f459366b8c03ec4f4bf522587dbda047e6ed5d2dc72c835e3
   deploy.sh: 8ebf4bd801a6d8fd6cba8979dc354e9aeeb8d5cfccbee9e6e7262417b175c6f4
-  recipe.yaml: e21fc2c18a4e98c99cb512cdc07d285d56c2025c55ab861b1d0bd0baf31f0865
+  recipe.yaml: 96a7cd76be7b4bbd0155f490dca024105bc9787a3b9b2e058670f0ca07c27368
 vr200-rke2-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

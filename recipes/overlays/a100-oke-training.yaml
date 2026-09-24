@@ -79,4 +79,3 @@ spec:
         - gang-scheduling
         - pod-autoscaling
         - cluster-autoscaling
-        - secure-accelerator-access

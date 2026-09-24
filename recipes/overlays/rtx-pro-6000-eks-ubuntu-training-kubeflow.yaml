@@ -44,3 +44,4 @@ spec:
     conformance:
       checks:
         - robust-controller
+        - secure-accelerator-access
