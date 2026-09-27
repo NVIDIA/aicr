@@ -53,9 +53,14 @@ func TestLoadFromFile(t *testing.T) {
 			wantErr:     false,
 		},
 		{
-			name:        "empty apiVersion allowed for backward compat",
+			// Tolerated until ADR-022 N+2 (#2417) retired it. Kept as a
+			// rejection rather than deleted: a reintroduced tolerance would
+			// otherwise widen the gate silently.
+			name:        "empty apiVersion rejected",
 			yamlContent: "kind: Snapshot\nmeasurements:\n  - type: K8s\n",
-			wantErr:     false,
+			wantErr:     true,
+			errContain:  "an absent apiVersion was accepted before",
+			wantCode:    errors.ErrCodeInvalidRequest,
 		},
 		{
 			name:        "unsupported apiVersion rejected",
@@ -80,7 +85,7 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "arbitrary YAML with no kind and no measurements rejected",
-			yamlContent: "foo: bar\n",
+			yamlContent: "apiVersion: " + FullAPIVersion + "\nfoo: bar\n",
 			wantErr:     true,
 			errContain:  "no usable measurements",
 			wantCode:    errors.ErrCodeInvalidRequest,
@@ -94,21 +99,21 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "snapshot with only a nil measurement entry rejected",
-			yamlContent: "kind: Snapshot\nmeasurements:\n  - null\n",
+			yamlContent: "kind: Snapshot\napiVersion: " + FullAPIVersion + "\nmeasurements:\n  - null\n",
 			wantErr:     true,
 			errContain:  "no usable measurements",
 			wantCode:    errors.ErrCodeInvalidRequest,
 		},
 		{
 			name:        "snapshot with only a typeless measurement object rejected",
-			yamlContent: "kind: Snapshot\nmeasurements:\n  - {}\n",
+			yamlContent: "kind: Snapshot\napiVersion: " + FullAPIVersion + "\nmeasurements:\n  - {}\n",
 			wantErr:     true,
 			errContain:  "no usable measurements",
 			wantCode:    errors.ErrCodeInvalidRequest,
 		},
 		{
 			name:        "kind-less snapshot with measurements allowed for backward compat",
-			yamlContent: "measurements:\n  - type: K8s\n",
+			yamlContent: "apiVersion: " + FullAPIVersion + "\nmeasurements:\n  - type: K8s\n",
 			wantErr:     false,
 		},
 	}
@@ -146,7 +151,7 @@ func TestLoadFromFile(t *testing.T) {
 func TestLoadFromFile_CustomResourceDetectionRoundTrip(t *testing.T) {
 	snapshot := NewSnapshot()
 	snapshot.Kind = header.KindSnapshot
-	snapshot.APIVersion = header.GroupVersion
+	snapshot.APIVersion = header.GroupVersionV1
 	snapshot.Measurements = []*measurement.Measurement{{
 		Type: measurement.TypeK8s,
 		Subtypes: []measurement.Subtype{

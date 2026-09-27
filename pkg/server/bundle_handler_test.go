@@ -84,11 +84,11 @@ func TestDecodeRecipeResultRequestStrictForConfiguredRecipes(t *testing.T) {
 	}{
 		{
 			name: "legacy permits unknown field",
-			body: `{"apiVersion":"aicr.run/v1alpha2","kind":"RecipeResult","legacyExtension":true}`,
+			body: `{"apiVersion":"aicr.run/v1","kind":"RecipeResult","legacyExtension":true}`,
 		},
 		{
 			name: "configured recipe succeeds",
-			body: `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}}}`,
+			body: `{"apiVersion":"aicr.run/v1beta2","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}}}`,
 		},
 		{
 			name: "Release N target configured recipe succeeds",
@@ -96,7 +96,7 @@ func TestDecodeRecipeResultRequestStrictForConfiguredRecipes(t *testing.T) {
 		},
 		{
 			name:    "configured rejects unknown field",
-			body:    `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}},"unknownField":true}`,
+			body:    `{"apiVersion":"aicr.run/v1beta2","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}},"unknownField":true}`,
 			wantErr: true,
 		},
 		{
@@ -106,12 +106,12 @@ func TestDecodeRecipeResultRequestStrictForConfiguredRecipes(t *testing.T) {
 		},
 		{
 			name:    "rejects trailing document",
-			body:    `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult"} {}`,
+			body:    `{"apiVersion":"aicr.run/v1beta2","kind":"RecipeResult"} {}`,
 			wantErr: true,
 		},
 		{
 			name:    "legacy rejects trailing document too",
-			body:    `{"apiVersion":"aicr.run/v1alpha2","kind":"RecipeResult"} {}`,
+			body:    `{"apiVersion":"aicr.run/v1","kind":"RecipeResult"} {}`,
 			wantErr: true,
 		},
 	}
@@ -632,7 +632,7 @@ func TestBundleHandler_EmptyComponentRefs(t *testing.T) {
 	t.Parallel()
 	h := newTestBundleHandler(t)
 
-	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "RecipeResult", "componentRefs": []}`
+	body := `{"apiVersion": "aicr.run/v1", "kind": "RecipeResult", "componentRefs": []}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -687,7 +687,7 @@ func TestBundleHandler_VendorChartsFalseAllowed(t *testing.T) {
 
 	// Empty componentRefs is rejected downstream — proves we got PAST the
 	// vendor-charts gate rather than being short-circuited by it.
-	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "RecipeResult", "componentRefs": []}`
+	body := `{"apiVersion": "aicr.run/v1", "kind": "RecipeResult", "componentRefs": []}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/bundle?vendor-charts=false", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -708,7 +708,7 @@ func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
 	t.Parallel()
 	h := newTestBundleHandler(t)
 
-	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "RecipeResult", "componentRefs": [` +
+	body := `{"apiVersion": "aicr.run/v1", "kind": "RecipeResult", "componentRefs": [` +
 		`{"name": "gpu-operator", "type": "Helm", "version": "v1", "tag": "v2"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -719,12 +719,14 @@ func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
 	}
 }
 
-// TestBundleHandler_LegacyRecipeHeaders pins the backward compatibility the
-// BundleRecipeRequest schema advertises: POST /v1/bundle accepts a recipe whose
-// header fields are absent or empty.
-//
-// The handler validates supported non-empty apiVersions while preserving the
-// absent/empty tolerance for artifacts that predate those fields. The legacy
+// TestBundleHandler_LegacyRecipeHeaders pins what the BundleRecipeRequest
+// schema still advertises after ADR-022 N+2 (#2417), and what it no longer
+// does. The kind tolerance survives: kind may be absent or empty. The
+// apiVersion tolerance did not -- absent and empty are now rejected alongside
+// the alpha values, so those cases assert a 400 rather than being deleted.
+// Keeping both halves in one table is the point: they were a single "legacy
+// headers" tolerance and only one of them retired, which is exactly the kind
+// of split a reader would otherwise get wrong. The legacy
 // `kind: Recipe` this contract published through v0.18.0 is no longer
 // accepted; see TestBundleHandler_RejectsLegacyRecipeKind. The canonical case is included deliberately as a
 // control: it proves a 200 here means the body was accepted, not that the
@@ -748,8 +750,9 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		mutate func(map[string]any)
+		name       string
+		mutate     func(map[string]any)
+		wantStatus int // zero means http.StatusOK
 	}{
 		{
 			name:   "canonical headers (control)",
@@ -767,6 +770,7 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 				delete(body, "kind")
 				delete(body, "apiVersion")
 			},
+			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name: "both headers empty-string",
@@ -774,6 +778,7 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 				body["kind"] = ""
 				body["apiVersion"] = ""
 			},
+			wantStatus: http.StatusBadRequest,
 		},
 		// The schema constrains apiVersion and kind independently — neither is
 		// in a required[] and each admits its own empty value — and
@@ -793,6 +798,7 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 			mutate: func(body map[string]any) {
 				delete(body, "apiVersion")
 			},
+			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name: "kind empty, apiVersion canonical",
@@ -805,6 +811,7 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 			mutate: func(body map[string]any) {
 				body["apiVersion"] = ""
 			},
+			wantStatus: http.StatusBadRequest,
 		},
 	}
 
@@ -828,8 +835,17 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 			w := httptest.NewRecorder()
 			h.HandleBundles(w, req)
 
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+			want := tt.wantStatus
+			if want == 0 {
+				want = http.StatusOK
+			}
+			if w.Code != want {
+				t.Fatalf("status = %d, want %d. Body: %s", w.Code, want, w.Body.String())
+			}
+			if want != http.StatusOK {
+				// A retired header shape stops here; there is no emitted
+				// artifact to round-trip.
+				return
 			}
 
 			// Round-trip: the emitted artifact must carry the canonical kind

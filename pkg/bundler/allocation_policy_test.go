@@ -206,7 +206,7 @@ func TestMake_DynamicAllocationPolicyKeyRejected(t *testing.T) {
 	)
 	b := newPolicyTestBundler(t, cfg)
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{

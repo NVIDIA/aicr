@@ -60,7 +60,7 @@ func TestResolveRecipeForMirrorRejectsTCPXOInterfacesWithRecipe(t *testing.T) {
 	t.Run("config document", func(t *testing.T) {
 		t.Parallel()
 		cfgPath := filepath.Join(t.TempDir(), "aicr-config.yaml")
-		if err := os.WriteFile(cfgPath, []byte(`apiVersion: aicr.run/v1alpha2
+		if err := os.WriteFile(cfgPath, []byte(`apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test

@@ -304,7 +304,7 @@ func buildProviderWithServiceCriteria(t *testing.T, tag, serviceValue string) Da
 	t.Helper()
 
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -312,7 +312,7 @@ spec:
 `)
 
 	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: %s-overlay
 spec:

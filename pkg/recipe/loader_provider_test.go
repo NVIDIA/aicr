@@ -30,7 +30,7 @@ import (
 func newTestLayeredProvider(t *testing.T) *LayeredDataProvider {
 	t.Helper()
 	tmp := t.TempDir()
-	registry := `apiVersion: aicr.run/v1alpha2
+	registry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `
@@ -53,7 +53,7 @@ func writeOverlayFile(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "overlay.yaml")
-	overlay := `apiVersion: aicr.run/v1alpha2
+	overlay := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: provider-bound-overlay
@@ -98,7 +98,7 @@ func TestLoadFromFileWithProvider(t *testing.T) {
 		layered := newTestLayeredProvider(t)
 		dir := t.TempDir()
 		path := filepath.Join(dir, "recipe.yaml")
-		content := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n"
+		content := "kind: RecipeResult\napiVersion: aicr.run/v1\ncriteria:\n  service: eks\n"
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatalf("write recipe: %v", err)
 		}
@@ -114,7 +114,7 @@ func TestLoadFromFileWithProvider(t *testing.T) {
 
 	t.Run("profile overlay in active catalog applies its default", func(t *testing.T) {
 		externalDir := t.TempDir()
-		registry := `apiVersion: aicr.run/v1alpha2
+		registry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `
@@ -127,7 +127,7 @@ components: []
 		}
 		path := filepath.Join(overlaysDir, "direct-profile.yaml")
 		content := `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   name: direct-profile
 spec:
@@ -151,7 +151,7 @@ spec:
 			t.Fatalf("write profile overlay: %v", err)
 		}
 		alternate := `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   name: alternate-profile
 spec:
@@ -226,7 +226,7 @@ spec:
 	t.Run("nil provider behaves like LoadFromFile", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "recipe.yaml")
-		content := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n"
+		content := "kind: RecipeResult\napiVersion: aicr.run/v1\ncriteria:\n  service: eks\n"
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatalf("write recipe: %v", err)
 		}
@@ -253,7 +253,7 @@ spec:
 		dir := t.TempDir()
 		path := filepath.Join(dir, "recipe.yaml")
 		content := "kind: RecipeResult\n" +
-			"apiVersion: aicr.run/v1alpha2\n" +
+			"apiVersion: aicr.run/v1\n" +
 			"criteria:\n  service: eks\n" +
 			"componentRefs:\n" +
 			"  - name: gpu-operator\n" +
@@ -289,7 +289,7 @@ func TestLoadFromFileWithProviderProfile(t *testing.T) {
 	newProfileCatalog := func(t *testing.T) (*LayeredDataProvider, string) {
 		t.Helper()
 		externalDir := t.TempDir()
-		registry := `apiVersion: aicr.run/v1alpha2
+		registry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `
@@ -301,7 +301,7 @@ components: []
 			t.Fatalf("create overlays directory: %v", err)
 		}
 		overlay := `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   name: two-value-profile
 spec:
@@ -382,7 +382,7 @@ spec:
 		layered := newTestLayeredProvider(t)
 		dir := t.TempDir()
 		path := filepath.Join(dir, "recipe.yaml")
-		content := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n"
+		content := "kind: RecipeResult\napiVersion: aicr.run/v1\ncriteria:\n  service: eks\n"
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatalf("write recipe: %v", err)
 		}

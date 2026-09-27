@@ -222,10 +222,10 @@ install_nvsentinel() {
   done
 
   (cd "${CRDS_DIR}" && chmod +x install.sh &&
-    KUBECONFIG_FLAG="--kube-context ${KUBE_CONTEXT}" ./install.sh) ||
+    KUBE_CONTEXT="${KUBE_CONTEXT}" ./install.sh) ||
     err "prometheus-operator-crds install failed"
   (cd "${BUNDLE_DIR}" && chmod +x install.sh &&
-    KUBECONFIG_FLAG="--kube-context ${KUBE_CONTEXT}" ./install.sh) ||
+    KUBE_CONTEXT="${KUBE_CONTEXT}" ./install.sh) ||
     err "nvsentinel install failed"
 
   # install.sh runs `helm upgrade --install` without --wait (COMPONENT_WAIT_ARGS

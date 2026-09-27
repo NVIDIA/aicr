@@ -133,14 +133,14 @@ func TestSubjectDigest_DiffersOnMaterialChange(t *testing.T) {
 func TestSubjectDigest_BindsSlurmAccountingMode(t *testing.T) {
 	t.Parallel()
 
-	disabled := []byte(`apiVersion: aicr.run/v1alpha3
+	disabled := []byte(`apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 configuration:
   slurm:
     accounting:
       mode: disabled
 `)
-	customerManaged := []byte(`apiVersion: aicr.run/v1alpha3
+	customerManaged := []byte(`apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 configuration:
   slurm:

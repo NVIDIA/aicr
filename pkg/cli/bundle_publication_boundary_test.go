@@ -1337,7 +1337,7 @@ func runDeadlineBundleCommand(
 	t.Chdir(workDir)
 	recipePath := filepath.Join(workDir, "recipe.yaml")
 	const recipe = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: test
 componentRefs: []

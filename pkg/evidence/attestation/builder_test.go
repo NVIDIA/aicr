@@ -59,7 +59,7 @@ func TestBuild_OptInOnlyServiceIsNotInferable(t *testing.T) {
 	t.Log("Building evidence for the generic GB300 recipe against a metal3 snapshot")
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: header.GroupVersion,
+		APIVersion: header.GroupVersionV1,
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceGeneric,
 			Accelerator: recipe.CriteriaAcceleratorGB300,
@@ -75,7 +75,7 @@ func TestBuild_OptInOnlyServiceIsNotInferable(t *testing.T) {
 	bundle, err := Build(context.Background(), BuildOptions{
 		OutputDir:    t.TempDir(),
 		Recipe:       rec,
-		RecipeYAML:   []byte("apiVersion: " + header.GroupVersion + "\nkind: RecipeResult\n"),
+		RecipeYAML:   []byte("apiVersion: " + header.GroupVersionV1 + "\nkind: RecipeResult\n"),
 		Snapshot:     snap,
 		SnapshotYAML: []byte("measurements: []\n"),
 		BOM:          BOMInputs{Body: []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[]}`), CycloneDXVersion: "1.6"},
@@ -103,7 +103,7 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 	dir := t.TempDir()
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: header.GroupVersion,
+		APIVersion: header.GroupVersionV1,
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
 			Accelerator: recipe.CriteriaAcceleratorH100,
@@ -123,7 +123,7 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 	bundle, err := Build(context.Background(), BuildOptions{
 		OutputDir:    dir,
 		Recipe:       rec,
-		RecipeYAML:   []byte("apiVersion: " + header.GroupVersion + "\nkind: RecipeResult\n"),
+		RecipeYAML:   []byte("apiVersion: " + header.GroupVersionV1 + "\nkind: RecipeResult\n"),
 		Snapshot:     snap,
 		SnapshotYAML: []byte("measurements: []\n"),
 		BOM:          BOMInputs{Body: bom, CycloneDXVersion: "1.6"},

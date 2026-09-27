@@ -2750,7 +2750,7 @@ func TestRecipeResultNormalizeKind(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			r := &RecipeResult{Kind: tt.kind}
+			r := &RecipeResult{APIVersion: RecipeResultAPIVersion, Kind: tt.kind}
 			err := r.NormalizeKind()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NormalizeKind() error = %v, wantErr %v", err, tt.wantErr)

@@ -1124,22 +1124,20 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** As of v0.22, the ADR-022 emitter switch, AICR emits
-> `aicr.run/v1` for snapshots and default recipes, `aicr.run/v1beta1` for config
-> and ordinary catalog inputs, and `aicr.run/v1beta2` for profile-bearing
-> recipes. Readers additionally still accept the superseded
-> `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, so artifacts produced by v0.21 or
-> earlier keep loading. Unsupported artifact headers
-> fail fast; raw external catalog headers are checked before merge or
-> hydration. Recapture, regenerate, or update the authored header with a
-> version supported by the running AICR release. See
+> **apiVersion gate:** AICR emits `aicr.run/v1` for snapshots and default
+> recipes, `aicr.run/v1beta1` for config and ordinary catalog inputs, and
+> `aicr.run/v1beta2` for profile-bearing recipes, and as of v1.0.0 those are the
+> only values it reads. The superseded `aicr.run/v1alpha2` and
+> `aicr.run/v1alpha3` were retired in v1.0.0 (ADR-022 N+2), along with the empty
+> header the snapshot, recipe and criteria readers had tolerated. v0.22 was the
+> last release that read them, and it warned; v1.0.0 rejects instead, naming the
+> observed value, the expected value and the release that withdrew it.
+> Unsupported artifact headers fail fast; raw external catalog headers are
+> checked before merge or hydration. Recapture, regenerate, or update the
+> authored header with a version supported by the running AICR release. See
 > [ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md)
 > and
-> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md). v1.0.0 stops
-> accepting the alpha values, along with the empty header that the snapshot,
-> recipe, and criteria readers still tolerate. Reading either now logs a
-> deprecation warning naming the file. `AICRConfig` and external catalog headers already reject an
-> empty value, so they have no tolerance to retire.
+> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 > [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 > has the release-by-release table.
 
@@ -3020,6 +3018,36 @@ The deploy script installs components in the order specified by `deploymentOrder
 Unknown flags are rejected with an error to catch typos (e.g., `--bes-effort` or `--retires N`).
 
 > **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Nodewright node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
+
+##### Cluster connection environment
+
+`deploy.sh` and each component's `install.sh` act on whichever cluster the
+environment selects. Both are standalone entry points, so the same variables
+apply whether you run the whole bundle or a single component by hand.
+
+| Variable | Effect |
+|----------|--------|
+| `KUBE_CONTEXT` | Context to act on. Rendered as `--kube-context` for `helm` and `--context` for `kubectl`, and exported to each component's `install.sh`. |
+| `KUBECONFIG` | Path to a kubeconfig. Read natively by both `helm` and `kubectl`, so no flag is derived from it. |
+| `KUBECONFIG_FLAG` | Deprecated. A literal `helm` flag string; only `--kube-context` and `--kubeconfig` are translated, with a warning. |
+
+```bash
+KUBE_CONTEXT=my-cluster ./deploy.sh
+
+# Or a single component, from its own folder:
+cd 001-gpu-operator && KUBE_CONTEXT=my-cluster bash install.sh
+```
+
+Prefer `KUBE_CONTEXT`. Setting it alongside `KUBECONFIG_FLAG=--kube-context` is
+accepted while both name the same context; only a mismatch is rejected. A
+`KUBECONFIG_FLAG` carrying an option that is not translated, or naming a
+different context than `KUBE_CONTEXT`, fails before the first cluster call
+rather than falling back to the ambient context.
+
+When an unsupported or malformed option is rejected, the message names the
+option but not its argument, so a flag carrying a credential does not reach the
+log. The context-mismatch message is the exception: it names both contexts,
+which identify clusters rather than authenticate to them.
 
 **Retry behavior:**
 

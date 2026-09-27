@@ -1,0 +1,157 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# EKS UAT cluster on the CT account H100 pool (reservation aws-h100-ct,
+# infra/uat/reservations.yaml).
+#
+# A sibling of cluster-config.yaml rather than an edit to it: the two rows hold
+# independent leases (the concurrency group is uat-<reservation-name>), so the
+# established lane keeps running nightly on its own capacity while this one is
+# brought up. Structurally identical apart from the account, the admin role, and
+# the reservation — same region, AZs, instance types, and pinned AMI.
+
+apiVersion: github.com/mchmarny/cluster/v1alpha1
+kind: Cluster
+
+deployment:
+  id: aicr-uat
+  provider: eks
+  # The pipeline derives AWS_ACCOUNT_ID from this field alone (uat-aws.yaml),
+  # so it is the single source of truth for which account a run provisions
+  # into. Prereqs applied here: infra/uat-aws-account (GitHub OIDC provider +
+  # github-actions-role-aicr) and the remote Terraform state bucket, since
+  # state: tenancy keeps state alongside the capacity.
+  tenancy: "036338176747"
+  location: us-east-1
+  state: tenancy
+  destroy: false
+  tags:
+    env: dev
+
+cluster:
+  eks:
+    version: "1.35"
+    # This account's CS-Admin SSO role. The name is not portable between
+    # accounts — the suffix is per-account — so it differs from the sibling
+    # config's value.
+    #
+    # Not omitted and not empty: the actuator writes an EKS access entry per
+    # adminRole, and these clusters use API auth rather than an aws-auth
+    # ConfigMap, so with no entry an operator has no path to the cluster at
+    # all. The CI OIDC role is deliberately NOT listed — it is the cluster
+    # creator and receives cluster-admin via
+    # bootstrap_cluster_creator_admin_permissions, so an explicit entry
+    # collides with the bootstrap one and 409s.
+    adminRoles:
+      - AWSReservedSSO_CS-Admin_41c4b4abb8231e94
+    controlPlane:
+      allowedCidrs:
+        - 216.228.127.128/30
+        - 52.41.222.58/32
+        - 54.68.11.139/32
+        - 128.77.49.32/30
+    addOns:
+      coreDns: ""
+      kubeProxy: ""
+      vpcCni: ""
+
+network:
+  eks:
+    # No securityGroups.additionalRules. This block carried a single 4222
+    # ingress rule for NATS, which AICR no longer installs by default as of
+    # the dynamo-platform 1.4+ bump (#1983) — the subchart is still bundled,
+    # the chart just defaults global.nats.install to false.
+    #
+    # Its replacement planes need no rule here. Dynamo now talks
+    # frontend<->worker directly: request and response streams on OS-assigned
+    # TCP ports, KV events over ZMQ on fixed TCP 5557. UAT puts both roles on
+    # the gpu-worker node group (SERVE_GPU_NODE_SELECTOR_* in
+    # tests/uat/lib/phases.sh), and the actuator's worker security group
+    # already allows all traffic from itself, so that traffic never needs an
+    # explicit rule — nor does it if the roles move between worker node
+    # groups, which share that security group.
+    #
+    # Two things WOULD need rules. Re-enabling NATS on a standing cluster
+    # (docs/user/component-catalog.md) brings back the 4222 requirement.
+    # Splitting Frontend and Worker across separate security groups instead
+    # needs bidirectional OS-assigned-port rules plus TCP 5557 — see
+    # docs/integrator/eks-dynamo-networking.md for that contract.
+    cidrs:
+      host: 10.0.0.0/16
+      pod: 100.65.0.0/16
+    subnets:
+      public:
+        - cidr: 10.0.1.0/27
+          zone: us-east-1a
+        - cidr: 10.0.2.0/27
+          zone: us-east-1c
+      system:
+        - cidr: 10.0.4.0/22
+          zone: us-east-1a
+        - cidr: 10.0.8.0/22
+          zone: us-east-1c
+      worker:
+        - cidr: 10.0.128.0/17
+          zone: us-east-1e
+          disableEndpoints: true
+      pod:
+        - cidr: 100.65.0.0/16
+          zone: us-east-1e
+          disableEndpoints: true
+
+compute:
+  eks:
+    nodeGroups:
+      system:
+        instanceType: m7i.xlarge
+        capacity:
+          desired: 3
+        labels:
+          nodeGroup: system-worker
+          dedicated: system-workload
+      workers:
+        - name: gpu-worker
+          instanceType: p5.48xlarge
+          # Pin the worker AMI. Absent imageId, the actuator resolves
+          # data.aws_ami.ubuntu_eks (most_recent Canonical ubuntu-eks/k8s_1.35
+          # for this arch, x86_64 here), which drifted to ubuntu-resolute-26.04
+          # on 2026-08-05 — the same drift that broke the GB200 arm64 lane. This
+          # pins the last 24.04 (noble) amd64 build,
+          # ubuntu-noble-24.04-amd64-server-20260714, k8s 1.35, us-east-1.
+          # Re-resolve when eks.version bumps (AMI is version- and region-specific).
+          imageId: ami-0f89c7be98052c189
+          capacity:
+            # Two GPU nodes: activates the multi-node NCCL East-West fabric
+            # check (nccl-all-reduce-bw, which skips on a single GPU node) and
+            # lets the TrainJob (numNodes: 2) span both nodes. Requires the
+            # capacity reservation below to hold >=2 p5.48xlarge instances —
+            # the post-lease capacity assertion in uat-aws.yaml fails closed
+            # otherwise.
+            desired: 2
+            reservation:
+              preference: capacity-reservations-only
+              # Verified against EC2: p5.48xlarge in us-east-1e, matching the
+              # worker/pod subnet pin above — a reservation is AZ-scoped, so a
+              # mismatch would leave the node group unable to draw from it
+              # under capacity-reservations-only. Standing reservation (no end
+              # date), 12 instances provisioned, so the post-lease capacity
+              # assertion (TotalInstanceCount >= desired) passes at desired: 2.
+              target: cr-0fbe17cfb8701249e
+          labels:
+            nodeGroup: gpu-worker
+            dedicated: user-workload
+          taints:
+            - key: skyhook.nvidia.com
+              value: runtime-required
+              effect: NoSchedule

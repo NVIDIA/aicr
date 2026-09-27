@@ -1,0 +1,13 @@
+attestations:
+  - attestedAt: 2026-09-22T21:02:12Z
+    bundle:
+      digest: sha256:fd486505df97716e14158229b5338f560484557c64ded4abbee99f3992b1681f
+      oci: ghcr.io/mikecook/aicr-evidence:gb200-gke-cos-inference-gpustack-bundle-installer-195ecefed827
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: 1082845+mikecook@users.noreply.github.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 121334860
+profile: gpuStack=bundle-installer
+recipe: gb200-gke-cos-inference-gpustack-bundle-installer
+schemaVersion: 1.0.0

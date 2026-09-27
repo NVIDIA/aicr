@@ -475,8 +475,9 @@ subtype carries. Adding `items` beside `data` is additive-only, so the snapshot
 directly, and ADR-011 requires its encoding and semantics to stay as published.
 That is why membership is cross-referenced rather than dropped. The next
 snapshot `apiVersion` removes `data`, at which point items become
-self-contained and `node-list-ref` is no longer emitted — the decoder keeps
-reading it for as long as `v1alpha2` snapshots are accepted.
+self-contained and `node-list-ref` is no longer emitted — the decoder kept
+reading it while `v1alpha2` snapshots were accepted. v1.0.0 retired that input
+(ADR-022 N+2), so the compatibility path can be revisited.
 
 Minimal evidence keeps `NodeTopology.summary` and drops `taint` and `label`;
 redaction never carries `items` across the publication boundary.

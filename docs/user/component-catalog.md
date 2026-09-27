@@ -805,24 +805,29 @@ chart's `crds/` directory on upgrade, so a cluster that missed the CRD step can
 run a new controller against the previous schema while the older version stays
 served and the controller keeps working.
 
-`k8s-aibom` is marked `ownsCRDs` in the registry, so the deployers update its
-CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` and
-`helmfile` through the generated `apply-crds.sh`, and Argo CD by applying them
-as ordinary manifests each sync.
+`k8s-aibom` is marked `ownsCRDs` in the registry, so most deployers update its
+CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` through
+the generated `apply-crds.sh`, and Argo CD by applying them as ordinary
+manifests each sync. `helmfile` has no equivalent automation — see
+[Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
+for the manual step it always requires.
 
 **That automation is tied to the registry-pinned coordinates, not to the
-component.** `ownsCRDs` records an audit of one specific chart, so Flux, `helm`,
-and `helmfile` all check that the componentRef still resolves to the registry's
-`source`, `chart`, and `version` before acting, and do nothing when any of the
-three is overridden. A recipe that overrides the version — including the
-override described under [Overriding the chart version](#overriding-the-chart-version-requires-overriding-this-assertion)
-below — therefore upgrades the controller with **no** CRD update on those three
+component.** `ownsCRDs` records an audit of one specific chart, so Flux and
+`helm` both check that the componentRef still resolves to the registry's
+`source`, `chart`, and `version` before acting, and do nothing when either is
+overridden. A recipe that overrides the version — including the override
+described under [Overriding the chart version](#overriding-the-chart-version-requires-overriding-this-assertion)
+below — therefore upgrades the controller with **no** CRD update on those two
 deployers, silently. Such a recipe needs its own audit of the chart it points
 at and its own CRD step; the fallback command below is the manual form. Argo CD
 is unaffected, since it applies whatever CRDs the rendered chart contains
-regardless of provenance. The assertion is still worth making on every
-deployer, because it proves the deployed CRDs match the pinned chart rather
-than merely that some deployer was expected to update them.
+regardless of provenance. `helmfile` is also unaffected by this particular
+caveat, in the sense that there is nothing to disable: it never acts on
+`ownsCRDs`, checked or not, so its manual step is required unconditionally.
+The assertion is still worth making on every deployer, because it proves the
+deployed CRDs match the pinned chart rather than merely that some deployer was
+expected to update them.
 
 Both CRDs are asserted separately, so a failure names which one is stranded
 and a partially applied CRD set cannot pass. If this check fails after a chart
@@ -880,8 +885,9 @@ that claims a decision it never applied.
 The same selection is available in an `AICRConfig` document as
 `spec.recipe.configuration.runtimeInventory.mode`.
 
-**Overriding the chart version requires overriding this assertion.** Assert
-content is static YAML with no templating, so the expected storage version is
+#### Overriding the chart version requires overriding this assertion
+
+Assert content is static YAML with no templating, so the expected storage version is
 a literal tied to the registry's pinned chart, currently `v1beta1` for chart
 1.3.0. Charts 1.2.0 and earlier declare only `v1alpha1`. A recipe that sets
 `version` on the `k8s-aibom` componentRef to a chart with a different storage
@@ -927,47 +933,93 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**CRDs are applied for you; the manual command is a fallback.** The chart
+**CRDs are applied for you on every deployer except `helmfile`.** The chart
 ships its CRDs under `crds/`. Helm installs that directory on first install and
 never touches it again on upgrade, so a chart bump whose CRDs changed would
 leave the previous schema in place and the API server would silently prune the
 new controller's writes to added fields.
 
-Every deployer closes that on its own, by a different route; see the deployer
-table below. `helm` and `helmfile` bundles carry an `apply-crds.sh` in the
+Every deployer except `helmfile` closes that on its own, by a different route;
+see the deployer table below. `helm` bundles carry an `apply-crds.sh` in the
 component's folder, run automatically before the upgrade; `flux` and Argo CD
-apply the CRDs through their own controllers.
+apply the CRDs through their own controllers. `helmfile` has no automated
+equivalent: the manual command below is always required for its `ownsCRDs`
+components.
 
-Run the command below by hand only when you are upgrading outside a generated
-bundle, or when `apply-crds.sh` failed and you are reproducing it:
+When you run the command below depends on your deployer, because only some of
+them do it for you:
+
+- **`helmfile`: always, including from a generated bundle.** Nothing runs it
+  for you on this deployer, so it is a required step before every `ownsCRDs`
+  upgrade, not a fallback.
+- **`helm`: only** when you are upgrading outside a generated bundle, or when
+  the bundle's `apply-crds.sh` failed and you are reproducing it by hand.
+- **`flux`, `argocd`, `argocd-helm`: not needed.** Their controllers apply the
+  CRDs themselves.
 
 ```bash
+set -euo pipefail
+
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
 VERSION="1.3.0"   # replace with the version you are upgrading to
 
 work="$(mktemp -d)"
-helm pull "${CHART}" --version "${VERSION}" --destination "${work}"
-tar -xzf "${work}"/*.tgz -C "${work}"
+trap 'rm -rf "${work}"' EXIT
 
-# One kubectl call per CRD file, create first and replace if it exists.
-find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \) \
-  | sort \
-  | while read -r crd; do
-      grep -q '[^[:space:]]' "${crd}" || continue
-      kubectl create -f "${crd}" 2>/dev/null || kubectl replace -f "${crd}"
-    done
+# Every step below is checked explicitly rather than left to `set -e`. This
+# block gets pasted into a shell, often only in part, and a copy that loses
+# the `set -e` line would otherwise carry on past a failure in silence.
+if ! helm pull "${CHART}" --version "${VERSION}" --destination "${work}"; then
+  echo "ERROR: helm pull failed for ${CHART} ${VERSION}" >&2
+  exit 1
+fi
+if ! tar -xzf "${work}"/*.tgz -C "${work}"; then
+  echo "ERROR: could not extract the chart archive" >&2
+  exit 1
+fi
+
+# Collect first, so discovering nothing is an error rather than a loop that
+# runs zero times and exits 0.
+crds=()
+while IFS= read -r crd; do
+  crds+=("${crd}")
+done < <(find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \) | sort)
+
+if [ ${#crds[@]} -eq 0 ]; then
+  echo "ERROR: no CRDs found under crds/ in ${CHART} ${VERSION}" >&2
+  exit 1
+fi
+
+# One kubectl call per CRD file, server-side applied under Helm's own field
+# manager so a field or spec.versions entry the new chart removes is pruned.
+for crd in "${crds[@]}"; do
+  grep -q '[^[:space:]]' "${crd}" || continue
+  if ! kubectl apply --server-side --force-conflicts --field-manager=helm -f "${crd}"; then
+    echo "ERROR: failed to apply ${crd}." >&2
+    echo "       Stopping: the remaining CRDs are unapplied, so do not upgrade" >&2
+    echo "       the controller until this is resolved." >&2
+    exit 1
+  fi
+done
 ```
 
-Three details are load-bearing, and the obvious shorter forms fail on them:
+Four details are load-bearing, and the obvious shorter forms fail on them:
 
-- **Create-or-replace, not `kubectl apply`.** Server-side apply deletes a field
-  the manifest omits only when no other manager owns it, and Helm created these
-  CRDs. A schema field or `spec.versions` entry that the new chart *removes*
-  therefore survives an apply that exits 0, leaving the controller and the
-  schema out of step. Replace makes the chart authoritative for the whole
-  object. This is why `ownsCRDs` requires that no CRD use
-  `spec.conversion.strategy: Webhook`: replace discards a `caBundle` injected at
-  runtime.
+- **Server-side apply under `--field-manager=helm`, not `kubectl replace` or a
+  bare `kubectl apply --server-side`.** A chart's raw CRD manifest carries no
+  `metadata.resourceVersion`, and Kubernetes rejects an update without one, so
+  `replace` fails on exactly the upgrade this command exists for — verified on
+  a live cluster, the API returns `Conflict`. A bare `apply --server-side`
+  fails differently: it deletes a field the manifest omits only when the
+  applying manager owns it, and Helm owns these CRDs, so a schema field or
+  `spec.versions` entry the new chart *removes* would survive under the
+  default `kubectl` manager. Applying as `--field-manager=helm` adopts Helm's
+  fieldset instead, so the removal actually takes; verified on a live cluster
+  against both Helm 3 (manager `helm`, operation Update) and Helm 4 (manager
+  `helm`, operation Apply). `--force-conflicts` is required because other
+  managers may hold individual fields, including a `caBundle` a webhook
+  injects at runtime — which is why `ownsCRDs` requires that no CRD use
+  `spec.conversion.strategy: Webhook`.
 - **Read the CRDs from the chart archive, not from `helm show crds`.** That
   command's output shape differs by major version: Helm 4 prepends `---` before
   every CRD, Helm 3 prepends one only for `show all` and emits nothing between
@@ -976,6 +1028,14 @@ Three details are load-bearing, and the obvious shorter forms fail on them:
   coordinates, not content. Reading CRDs through them and letting the upgrade
   resolve them again is two fetches, and a mutable tag does not promise the same
   bytes.
+- **Fail closed.** `set -euo pipefail` plus collecting the file list before the
+  loop is what makes a failure stop the upgrade instead of reading as success.
+  A `find ... | while read` pipeline reports only the last iteration's status,
+  so an earlier failed apply is masked by a later one that succeeds, and a
+  chart whose `crds/` is empty or moved runs the loop zero times and exits 0.
+  Either way you would proceed to upgrade the controller against a stale or
+  partial schema — the exact failure this command exists to prevent, and it
+  matters most on `helmfile`, where nothing else covers it.
 
 The generated `apply-crds.sh` does exactly this, with each call bounded; it is
 the reference if you need the details.
@@ -985,7 +1045,7 @@ Which deployers need that step differs, so check yours:
 | Deployer | CRD behavior on upgrade | Manual step needed |
 |---|---|---|
 | `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs` |
-| `helmfile` | Upgrades through Helm, so it skips `crds/` too; the release carries a `presync` hook running the same `apply-crds.sh` | Only for components without `ownsCRDs` |
+| `helmfile` | Upgrades through Helm, so it skips `crds/` too; no automation exists, because a `presync` hook fires only for releases `helmfile apply` decides to sync, so it would hold on a chart bump and silently not hold on an unchanged rerun | Always |
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
 
@@ -1004,8 +1064,9 @@ each with the schema its own chart pins. Requiring the opt-in is what
 prevents that, so it stays opt-in.
 
 A component qualifies only if it solely owns every CRD it ships and ships none
-using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`
-injected at runtime. `kubeflow-trainer` is excluded for that second reason.
+using `spec.conversion.strategy: Webhook`, since `--force-conflicts` reclaims
+a `caBundle` injected at runtime. `kubeflow-trainer` is excluded for that
+second reason.
 Currently `gatekeeper`, `k8s-aibom`, `nvcre`, and `nvsentinel` qualify; the
 audited chart version for each is pinned in `pkg/recipe/ownscrds_audit_test.go`,
 so bumping a pin without re-auditing fails CI.

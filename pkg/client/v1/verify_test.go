@@ -341,7 +341,7 @@ func TestRecipeDigest_IsDeterministicHex(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "recipe.yaml")
-	if err := os.WriteFile(path, []byte("kind: RecipeResult\napiVersion: aicr.run/v1alpha2\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("kind: RecipeResult\napiVersion: aicr.run/v1\n"), 0o600); err != nil {
 		t.Fatalf("write recipe: %v", err)
 	}
 
