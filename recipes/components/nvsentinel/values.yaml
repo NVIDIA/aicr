@@ -28,6 +28,31 @@ global:
   tolerations:
     - operator: Exists
 
+  # The chart default is docker.io/bitnamilegacy/os-shell:12-debian-12-r30,
+  # which no bump can fix: bitnamilegacy is Bitnami's frozen archive, and
+  # every nvsentinel release through v1.24.0 pins that same tag. It carries
+  # 13 critical / 109 high fixable findings and will never receive a patch.
+  #
+  # Nothing about the image is load-bearing. It runs one command --
+  # `chown`/`chmod` on a mounted path -- under runAsUser 0 with every
+  # capability dropped but CHOWN, readOnlyRootFilesystem and seccomp
+  # RuntimeDefault. Upstream's own chart unit test substitutes busybox for
+  # it (charts/nic-health-monitor/tests/pc_auth_strictness_test.yaml), so
+  # the image is interchangeable by upstream's own reckoning.
+  #
+  # The digest is the one AICR already ships in the network-operator and
+  # gpu-operator manifests, so the repo carries a single busybox identity to
+  # bump. Tag-plus-digest is the same form those manifests use; the digest
+  # is what resolves, the tag is there to read.
+  #
+  # Reaches two init containers, both mixin-gated: fix-state-permissions in
+  # the nic-health-monitor DaemonSet (nvsentinel-nic-health-monitor mixin,
+  # composed by the aks and oke-ol overlays) and fix-audit-log-permissions
+  # in platform-connectors / labeler (nvsentinel-observability mixin).
+  initContainerImage:
+    repository: docker.io/library/busybox
+    tag: "1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
+
 networkPolicy:
   enabled: false
 

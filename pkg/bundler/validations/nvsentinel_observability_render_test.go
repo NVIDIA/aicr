@@ -44,10 +44,12 @@ const nvsentinelObservabilityChartTimeout = 90 * time.Second
 // itself never sets it.
 const nvsentinelObservabilityTestEndpoint = "otel-collector.example:4317"
 
-// nvsentinelAuditInitImage is the third-party image the audit-logging init
-// container runs, as disclosed in docs/user/container-images.md's opt-in
-// image note. Kept in lockstep with that note.
-const nvsentinelAuditInitImage = "docker.io/bitnamilegacy/os-shell:12-debian-12-r30"
+// nvsentinelAuditInitImage is the image the audit-logging init container
+// runs, as disclosed in docs/user/container-images.md's opt-in image note.
+// Kept in lockstep with that note. AICR overrides the chart's frozen
+// bitnamilegacy default here, so this string also guards the override:
+// dropping it renders the chart value and fails rather than shipping.
+const nvsentinelAuditInitImage = "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 
 // requireHelmForObservabilityRender gates this file's live-render test on a
 // helm binary, matching pkg/bundler/deployer/argocdhelm's requireHelm: a
