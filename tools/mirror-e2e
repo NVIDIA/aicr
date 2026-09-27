@@ -85,14 +85,15 @@ OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.20.
 
 # The images the nvsentinel-nic-health-monitor mixin pulls in. The subchart
 # image is invisible to the static BOM for the same reason as the object
-# monitor's. The init-container image is the chart's global.initContainerImage
-# and is versioned independently of nvsentinel, so its tag does not move with
+# monitor's. The init-container image is global.initContainerImage, which
+# AICR overrides in recipes/components/nvsentinel/values.yaml and which is
+# versioned independently of nvsentinel, so its tag does not move with
 # defaultVersion; discovery walks a different path for init containers than
 # for main ones, so asserting only the subchart image would let an
 # init-container regression through.
 NIC_HEALTH_MONITOR_IMAGES=(
     "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.20.0"
-    "docker.io/bitnamilegacy/os-shell:12-debian-12-r30"
+    "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 )
 
 # Every mixin-gated image, asserted in all three `mirror list` formats.

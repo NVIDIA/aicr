@@ -34,7 +34,7 @@ GO_MOD_FILE="${CHECK_TOOLS_GO_MOD_FILE:-${REPO_ROOT}/go.mod}"
 # Check if yq is available
 if ! command -v yq &>/dev/null; then
     log_error "yq is required for this script"
-    log_info "Install: brew install yq (macOS) or see https://github.com/mikefarah/yq"
+    log_info "Install it with: make tools-setup"
     exit 1
 fi
 
