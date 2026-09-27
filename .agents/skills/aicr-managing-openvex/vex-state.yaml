@@ -59,7 +59,29 @@
 # A post-merge check belongs here rather than only in a PR description, because
 # the skill reads this file and does not read PR descriptions. A check recorded
 # only in a PR is a check nobody runs.
-deferred_verifications: []
+deferred_verifications:
+  - id: busybox-init-image-scans-in-ci
+    opened: 2026-09-27
+    check: >-
+      The scan matrix entry for the nvsentinel init-container image was
+      repointed from docker.io/bitnamilegacy/os-shell:12-debian-12-r30 to
+      docker.io/library/busybox:1.38.0@sha256:fd7dc986... in
+      .github/workflows/vuln-scan-images.yaml. That entry puts a digest in
+      the matrix `tag` field, which no other row does, so the composed
+      reference is `<image>:<tag-with-digest>`. Run `gh workflow run "Weekly
+      Image Vulnerability Scan" --repo NVIDIA/aicr --ref main` and read the
+      busybox scan-result artifact.
+    resolves_when: >-
+      that run's artifact contains a `busybox: ...` line with 0 critical and
+      0 high, and no `os-shell` line appears in any artifact
+    caveat: >-
+      The override itself was verified by `helm template` against the v1.20.0
+      chart with both gating toggles on: three init containers
+      (fix-state-permissions, and fix-audit-log-permissions on
+      platform-connectors and labeler) render busybox and zero os-shell
+      references remain. What is unverified is only whether the CI scan step
+      accepts the tag-plus-digest matrix value, not whether the override
+      works.
 
 known_negatives:
   - id: no-fixed-cpython-3.13-for-cve-2026-82049
@@ -147,20 +169,47 @@ deliberate_exclusions:
       release even though the weekly scan never sees it. The `invalidated_by`
       above still stands for vuln-scan-images.yaml, which remains amd64-only.
 
-  - id: object-monitor-go-cves-are-a-pin-bump
+  - id: nvsentinel-image-cves-are-a-pin-bump
     decided: 2026-09-17
+    rechecked: 2026-09-27
     decision: >-
-      The 9 High findings on ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
-      (8 Go stdlib advisories plus GHSA-2v4p-qf9q-27wj in grpc) get no VEX
-      statement. AICR does not build that image -- the scan matrix pins it to
+      The HIGH+ findings on all four scanned nvsentinel images get no VEX
+      statement. AICR does not build them -- the scan matrix pins each to
       nvsentinel's registry defaultVersion, currently v1.20.0 -- and the fix is
-      reachable by bumping that pin: v1.21.0, v1.22.0 and v1.23.0 each scan with
-      zero fixed-state findings at any severity. Remediation is tracked as the
-      nvsentinel bump (#2596, drift verdict `take` for v1.20.0 -> v1.23.0), not
-      here. A statement would also be a reachability claim about a third party's
-      Go binary that this repo has no source to support.
+      reachable by bumping that pin. Remediation is tracked as the nvsentinel
+      bump (#2596), not here. A statement would also be a reachability claim
+      about a third party's Go binary that this repo has no source to support.
+      Scope widened at the 2026-09-27 recheck: this was written for
+      kubernetes-object-monitor alone, but the 2026-09-24 scan surfaced the
+      same situation on three more images, and one entry covers them all.
+    evidence_2026_09_27: >-
+      grype 0.119.0, `--only-fixed -c .grype.yaml`, each image at both pins.
+      v1.20.0 -> v1.24.0 HIGH+: kubernetes-object-monitor 9 -> 0,
+      nic-health-monitor 8 -> 0, preflight 6 -> 0, preflight-dcgm-diag 1 -> 0.
+      The v1.20.0 column reproduces the weekly scan's counts exactly. Posted to
+      #2596 as issuecomment-5856671971, so do not re-derive it there.
     invalidated_by: >-
       the nvsentinel defaultVersion in recipes/registry.yaml advancing past
-      v1.20.0, which removes the findings outright; or an object-monitor release
+      v1.20.0, which removes the findings outright; or an nvsentinel release
       carrying HIGH+ findings with no clean successor version, which would make
       the suppression question real for the first time
+
+  - id: busybox-init-image-unfixed-highs
+    decided: 2026-09-27
+    decision: >-
+      docker.io/library/busybox:1.38.0 carries three High NVD CPE matches --
+      CVE-2026-38753, CVE-2026-38754, CVE-2026-38755 -- that are deliberately
+      NOT suppressed. Grype reports each with `fix-state: unknown`, so
+      `--only-fixed` already withholds them from the reported counts, and
+      pre-suppressing them would hide them the moment a fix ships. They are
+      also `nvd:cpe` matches against the busybox version range rather than
+      distro-tracked advisories, which is the noisiest source grype has.
+      Accepting them is not a new decision: this is the same digest AICR
+      already ships in the network-operator and gpu-operator manifests, and
+      it replaced an image with 13 critical / 109 high *fixable* findings.
+    invalidated_by: >-
+      a busybox release fixing any of the three (then bump the digest in
+      recipes/components/nvsentinel/values.yaml and the two manifests that
+      share it, together -- the repo deliberately carries one busybox
+      identity), or grype reclassifying them with a known fix state, at which
+      point they must surface rather than be pre-suppressed
