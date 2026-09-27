@@ -1,0 +1,44 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: network-operator
+transitions:
+  - from: ">=26.4.1 <26.7.0"
+    to: "=26.7.0"
+    verdict: safe
+    verifiedBy: >-
+      Static comparison of the official 26.4.1 and 26.7.0 Helm artifacts and
+      the Mellanox/network-operator v26.7.0 source. The chart's enabled
+      upgradeCRDs hook applies the changed CRDs before upgrade, its keepNCP
+      hook preserves the live NicClusterPolicy, and the status.state=ready and
+      ds-owner=NicClusterPolicy contracts consumed by AICR remain present.
+    summary: >-
+      Network Operator 26.7.0 updates its operator, operand images and CRDs,
+      adds NicClusterPolicy conditions, and raises the chart's Kubernetes
+      requirement from 1.21 to 1.32; no operator action is required on an AICR
+      supported cluster.
+    precondition: >-
+      The target cluster runs Kubernetes 1.32 or newer, as required by the
+      26.7.0 chart metadata. AICR recipes satisfy this floor; external users
+      overriding recipe constraints must verify it before upgrading.
+    reversible: false
+    reversibleNotes: >-
+      The chart updates CRDs in place and the new operator may write the added
+      status.conditions field. No downgrade procedure was validated.
+    references:
+      - https://github.com/Mellanox/network-operator/releases/tag/v26.7.0
+      - https://github.com/Mellanox/network-operator/blob/v26.7.0/deployment/network-operator/values.yaml
+      - https://github.com/Mellanox/network-operator/blob/v26.7.0/docs/heterogeneous-cluster-support.md

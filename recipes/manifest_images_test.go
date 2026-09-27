@@ -102,7 +102,7 @@ var imageDigestExemptions = map[string]imageDigestExemption{
 	// NicClusterPolicy (network-operator AKS): repository/image/version
 	// triplet schema; no digest field.
 	"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2":               {"network-operator/manifests/nic-cluster-policy-aks", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.4.1": {"network-operator/manifests/nic-cluster-policy-", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
+	"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.7.0": {"network-operator/manifests/nic-cluster-policy-", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 	"nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host":                    {"network-operator/manifests/nic-cluster-policy-aks", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 	"nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0":               {"network-operator/manifests/nic-cluster-policy-generic-gb300", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 	"ghcr.io/mellanox/nic-configuration-operator:v1.3.1":                          {"network-operator/manifests/nic-cluster-policy-generic-gb300", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},

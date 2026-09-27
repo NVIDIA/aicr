@@ -359,12 +359,9 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 }
 
 // objectMonitorOperandIdentities records, per operator, the label its operand
-// DaemonSet pods carry and the component version that label was READ OFF A
-// LIVE DEPLOYMENT at.
+// DaemonSet pods carry and the component version that label was verified at.
 //
-// Neither label is a documented API. Both were obtained by installing the
-// operator at the version below, driving it to create its operands, and reading
-// the labels off the result. They are not the same label between the two
+// Neither label is a stable API. They are not the same label between the two
 // operators, which is exactly why neither can be assumed.
 //
 // The two were verified to different depths, and that difference matters:
@@ -378,12 +375,12 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 //	                 operator's own Deployment (ReplicaSet-owned) and
 //	                 nvidia-cuda-validator (a ClusterPolicy-owned Pod, not a
 //	                 DaemonSet).
-//	network-operator verified only on Kind, against a hand-written
-//	                 NicClusterPolicy, on the mofed driver and rdma-shared-dp
-//	                 operands. No AICR cluster with network-operator was
-//	                 available to confirm it, and AICR ships its own
-//	                 NicClusterPolicy manifests which may enable other
-//	                 operands. Treat this one as the weaker of the two.
+//	network-operator verified in the v26.7.0 source and its heterogeneous
+//	                 cluster documentation. The preceding 26.4.1 behavior was
+//	                 exercised on Kind against a hand-written NicClusterPolicy,
+//	                 on the mofed driver and rdma-shared-dp operands. No AICR
+//	                 hardware cluster with network-operator was available to
+//	                 confirm 26.7.0; treat this as the weaker of the two.
 var objectMonitorOperandIdentities = []struct {
 	component    string
 	verifiedAt   string
@@ -400,7 +397,7 @@ var objectMonitorOperandIdentities = []struct {
 	},
 	{
 		component:    "network-operator",
-		verifiedAt:   "26.4.1",
+		verifiedAt:   "26.7.0",
 		label:        "ds-owner",
 		policy:       "network-operator-pod-health",
 		notCoveredBy: "nv-ipam-node, which omits the label upstream",

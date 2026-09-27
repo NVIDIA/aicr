@@ -37,7 +37,7 @@ const readinessFileName = "readiness.yaml"
 
 // networkOperatorComponentName is the ref name of the Helm-deployed
 // network-operator component whose gate asserts a NicClusterPolicy CR.
-// The pinned upstream chart (26.4.1) does not template NCP even with
+// The pinned upstream chart (26.7.0) does not template NCP even with
 // deployCR=true, so overlays that do not attach one explicitly (kind,
 // Talos base) have nothing to gate on — the readiness gate must skip
 // itself in that case, or it will poll to --max-wait timeout on every

@@ -17,7 +17,7 @@
 # Validates that the NVIDIA Network Operator is running and healthy in
 # the nvidia-network-operator namespace. Also asserts
 # nicclusterpolicies.mellanox.com is Established=True (verified against
-# chart 26.4.1; re-verify on defaultVersion bump). Chart 26.4.1 also
+# chart 26.7.0; re-verify on defaultVersion bump). Chart 26.7.0 also
 # ships nicnodepolicies.mellanox.com, deliberately NOT asserted here:
 # no in-tree recipe instantiates a CR against it, so it fails the same
 # load-bearing-only bar the rest of this PR's assertions are held to.

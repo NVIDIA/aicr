@@ -59,7 +59,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kueue | helm | kueue | 0.19.3 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.4.1 | 12 |
+| network-operator | helm | nvidia/network-operator | 26.7.0 | 12 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
@@ -265,11 +265,11 @@ _No images extracted._
 - `ghcr.io/mellanox/nic-configuration-operator-daemon:v1.3.1`
 - `ghcr.io/mellanox/nic-configuration-operator:v1.3.1`
 - `ghcr.io/mellanox/nvidia-k8s-ipam:v0.2.0`
-- `nvcr.io/nvidia/cloud-native/network-operator:v26.4.1`
+- `nvcr.io/nvidia/cloud-native/network-operator:v26.7.0`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
-- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.4.1`
+- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.7.0`
 
 ### network-operator-ocp
 
