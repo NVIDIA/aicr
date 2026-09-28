@@ -16,19 +16,37 @@ package main
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
+
+	"github.com/Masterminds/semver/v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// Candidate is one version Renovate offers for a pin. Renovate emits at most
+// one per update type.
+type Candidate struct {
+	Version    string `json:"version"`
+	UpdateType string `json:"updateType"`
+}
+
 // Lookup is what Renovate found for one annotated pin. An empty Latest means
 // the pin is current; a non-empty Problem means Renovate could not resolve it,
 // which is reported as unknown and never as current.
+//
+// Candidates carries every recognized update, not just the winning one.
+// Reporting only Latest hid the safer step whenever both existed: in the
+// 2026-09-28 run kube-prometheus-stack offered minor 84.5.0 next to major
+// 91.5.2, and a reviewer reading the digest saw only the major (#2791). Latest
+// still names the highest-ranked candidate, because Summary.Behind counts rows
+// by it and changing the winner would move the headline counts.
 type Lookup struct {
 	DepName    string
 	Current    string
 	Latest     string
 	UpdateType string
+	Candidates []Candidate
 	Problem    string
 }
 
@@ -70,6 +88,42 @@ type rawReport struct {
 // are not selectable — a rollback is not forward drift and must never be
 // reported as Latest.
 var updateRank = map[string]int{"digest": 1, "pin": 2, "patch": 3, "minor": 4, "major": 5}
+
+// versionLess orders two chart versions by SemVer precedence. String order
+// alone would be wrong here: "1.10.0" sorts before "1.9.0" lexically, which
+// would put the larger step first and contradict the safest-first order
+// Alternatives is documented to have.
+//
+// Not every chart version is valid SemVer, so the comparison is grouped:
+// everything that parses sorts ahead of everything that does not, and each
+// group is ordered on its own terms. Comparing a mixed pair on whichever basis
+// happens to apply is not transitive -- "1.9.0" < "1.10.0" by SemVer,
+// "1.10.0" < "1.5.0_invalid" by string, and "1.5.0_invalid" < "1.9.0" by
+// string, which is a cycle. sort.Slice is undefined on a comparator that
+// cycles, so that would have made the order depend on whatever sequence
+// Renovate emitted -- the exact non-determinism this tiebreaker exists to
+// remove.
+//
+// Within the parseable group, SemVer-equal versions that differ as strings
+// ("1.0.0" and "v1.0.0") fall back to string order, which keeps the order
+// total without breaking transitivity: it is a tiebreak inside an equivalence
+// class, not a second basis for comparison.
+func versionLess(a, b string) bool {
+	av, aerr := semver.NewVersion(a)
+	bv, berr := semver.NewVersion(b)
+	switch {
+	case aerr == nil && berr != nil:
+		return true
+	case aerr != nil && berr == nil:
+		return false
+	case aerr != nil && berr != nil:
+		return a < b
+	}
+	if av.Equal(bv) {
+		return a < b
+	}
+	return av.LessThan(bv)
+}
 
 // ParseRenovateReport extracts the registry-chart deps from a Renovate report
 // written with RENOVATE_REPORT_TYPE=file.
@@ -128,10 +182,29 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 							continue
 						}
 						hasRecognizedUpdate = true
+						l.Candidates = append(l.Candidates, Candidate{Version: u.NewValue, UpdateType: u.UpdateType})
 						if r >= best {
 							best, l.Latest, l.UpdateType = r, u.NewValue, u.UpdateType
 						}
 					}
+					// Safest-first, by the same rank that picks Latest. Renovate's
+					// array order is not contractual, and an unstable order here
+					// would churn the committed artifact between identical runs --
+					// the reproducibility the report is read for.
+					//
+					// Version breaks a rank tie so the order is total. Renovate
+					// emits at most one update per type, which would make ties
+					// unreachable, but that is its behavior rather than a
+					// guarantee -- and falling back to array order on a tie is
+					// exactly the non-contractual ordering this sort exists to
+					// remove.
+					sort.Slice(l.Candidates, func(i, j int) bool {
+						a, b := l.Candidates[i], l.Candidates[j]
+						if ra, rb := updateRank[a.UpdateType], updateRank[b.UpdateType]; ra != rb {
+							return ra < rb
+						}
+						return versionLess(a.Version, b.Version)
+					})
 					// If no recognized updates exist, surface the unsupported type and
 					// any malformed entries as diagnostics instead of leaving the pin
 					// looking current.

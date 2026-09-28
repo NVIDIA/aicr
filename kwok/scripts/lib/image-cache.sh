@@ -240,8 +240,18 @@ image_cache_load() {
 }
 
 # The public images the KWOK lanes preload. Must match what install-infra.sh
-# actually installs -- it reads these same two settings.
-IMAGE_CACHE_IMAGES=(registry gitea)
+# actually installs -- it reads these same settings.
+#
+# `argocd_redis` is not a component AICR installs directly: it is the one image
+# inside the Argo CD chart hosted on the same throttled ECR Public namespace as
+# `registry` (#2501). The chart's other images (quay.io, ghcr.io) are left to
+# the kubelet because neither has been observed shedding a pull.
+#
+# Adding a name here does not wire it up: the `prime-images` matrix in
+# .github/workflows/kwok-recipes.yaml fills the cache, and a restore step, an
+# env var, and a load call in .github/actions/kwok-test/action.yml drain it. A
+# name present here but missing from either file caches nothing and only warns.
+IMAGE_CACHE_IMAGES=(registry gitea argocd_redis)
 
 # image_cache_settings reads the pinned image refs out of SETTINGS_FILE and
 # prints `<name>_image=` / `<name>_key=` lines, ready to append to
