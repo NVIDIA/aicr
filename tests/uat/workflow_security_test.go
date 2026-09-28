@@ -748,6 +748,52 @@ func TestUATRunBlocksNeverSpliceAttackerChosenRefs(t *testing.T) {
 	}
 }
 
+// TestExpressionContextsReadIndexSyntax pins the index form of a context
+// reference. Actions accepts github['head_ref'] wherever it accepts
+// github.head_ref, so a scanner that only follows dots reads the first as the
+// bare "github", and TestUATRunBlocksNeverSpliceAttackerChosenRefs passes a run
+// block that splices the branch name. Each case names the paths the scanner
+// must return and whether the splice guard must reject the expression. The
+// brackets-inside-literals case holds the other side: a rewrite that ignores
+// quoting reads '{0}[' ... ']' as one index and hides the context between them.
+func TestExpressionContextsReadIndexSyntax(t *testing.T) {
+	derived := map[string]bool{"BRANCH": true}
+	tests := []struct {
+		name       string
+		expression string
+		contexts   []string
+		attacker   bool
+	}{
+		{"dotted head_ref", " github.head_ref ", []string{"github.head_ref"}, true},
+		{"indexed head_ref", " github['head_ref'] ", []string{"github.head_ref"}, true},
+		{"indexed ref_name", " github['ref_name'] ", []string{"github.ref_name"}, true},
+		{"spaced index", " github[ 'head_ref' ] ", []string{"github.head_ref"}, true},
+		{"fully indexed event", " github['event']['pull_request']['title'] ", []string{"github.event.pull_request.title"}, true},
+		{"indexed event tail", " github.event['pull_request']['title'] ", []string{"github.event.pull_request.title"}, true},
+		{"mixed dotted and indexed", " github.event.pull_request['head']['ref'] ", []string{"github.event.pull_request.head.ref"}, true},
+		{"indexed inside format", " format('{0}', github['head_ref']) ", []string{"format", "github.head_ref"}, true},
+		{"brackets inside literals", " format('{0}[', github.head_ref, ']') ", []string{"format", "github.head_ref"}, true},
+		{"indexed derived env", " env['BRANCH'] ", []string{"env.BRANCH"}, true},
+		{"indexed sha", " github['sha'] ", []string{"github.sha"}, false},
+		{"indexed repository", " github['repository'] ", []string{"github.repository"}, false},
+		{"indexed underived env", " env['RUNNER_LABEL'] ", []string{"env.RUNNER_LABEL"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contexts := expressionContexts(tt.expression)
+			if !slices.Equal(contexts, tt.contexts) {
+				t.Errorf("expressionContexts(%q) = %q, want %q", tt.expression, contexts, tt.contexts)
+			}
+			attacker := slices.ContainsFunc(contexts, func(context string) bool {
+				return isAttackerChosenContext(context, derived)
+			})
+			if attacker != tt.attacker {
+				t.Errorf("expression %q judged attacker-chosen = %v, want %v", tt.expression, attacker, tt.attacker)
+			}
+		})
+	}
+}
+
 // TestUATKindSimJobPinsMainRef holds the sim lane to the scope its own header
 // claims ("manual dispatch, main tip"). workflow_dispatch offers a ref picker,
 // so without a ref term the job runs whatever branch the dispatcher selects —
