@@ -102,6 +102,8 @@ components:
     hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/gpu-operator/health-check.yaml
+    upgrades:
+      file: components/gpu-operator/upgrades.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator

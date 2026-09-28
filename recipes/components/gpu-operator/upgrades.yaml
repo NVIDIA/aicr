@@ -1,0 +1,41 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: gpu-operator
+transitions:
+  # Coverage starts at v26.7.0: moves from older releases cross the v26.7.0
+  # boundary (DRA driver 0.5.0, driverInstallDir) that no record assesses, so
+  # they report unknown rather than borrowing this verdict.
+  - from: ">=26.7.0 <26.7.1"
+    to: "=26.7.1"
+    verdict: safe
+    verifiedBy: >-
+      Live Helm upgrade on an EKS GB300 cluster (2x p6e-gb300r.36xlarge,
+      k8s 1.35.6), 2026-09-28: v26.7.0 to v26.7.1 with DRA driver 0.5.0;
+      ClusterPolicy ready, all operand DaemonSets on the new images, driver
+      reloaded cleanly on both nodes. Upstream v26.7.1 release notes.
+    summary: >-
+      Patch release. The operand image bumps include k8s-driver-manager, which
+      changes the driver DaemonSet, so with driver.upgradePolicy.autoUpgrade
+      the operator cycles the driver pod node by node and evicts GPU workloads
+      on each node in turn; the driver version itself is unchanged. The
+      computedomains CRD now matches the DRA driver's, but Helm and Flux never
+      upgrade an installed CRD, so a cluster first installed with v26.7.0 keeps
+      the copy that requires spec.numNodes.
+    references:
+      - https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/26.7/release-notes.html#v26-7-1
+      - https://github.com/NVIDIA/gpu-operator/pull/2863
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#gpu-operator-and-nvidia-dra-driver-gpu-shared-computedomain-crd

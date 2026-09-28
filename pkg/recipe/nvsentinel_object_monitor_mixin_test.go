@@ -369,7 +369,8 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 //
 // The two were verified to different depths, and that difference matters:
 //
-//	gpu-operator     confirmed on a live EKS H100 cluster. All 9 operand
+//	gpu-operator     confirmed on a live EKS H100 cluster (v26.7.0) and re-read
+//	                 on a live EKS GB300 cluster (v26.7.1). All 9 operand
 //	                 DaemonSets carry it, INCLUDING nvidia-driver-daemonset,
 //	                 nvidia-container-toolkit-daemonset and nvidia-dcgm, and
 //	                 the running Pods inherit it (the predicate matches Pods,
