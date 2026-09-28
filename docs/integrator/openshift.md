@@ -58,7 +58,8 @@ The Operator Lifecycle Manager provides a declarative approach to managing opera
 - **Certified Operators**: OCP components use Red Hat-certified operator catalogs (`certified-operators`, `redhat-operators`) when available
 - **Security Context Constraints (SCC)**: Operators may require privileged access for driver installation
 - **Entitlement**: RHEL-based driver builds may require Red Hat entitlement ConfigMaps
-- **Version Alignment**: Operator channel versions must align with OpenShift Container Platform (OCP) version
+- **Version Alignment**: Operator channel versions must align with OpenShift Container Platform (OCP) version. The GPU Operator Subscription tracks the certified `v26.7` channel, which is published for OCP 4.18 through 4.22.
+- **Channel changes upgrade in place**: every AICR Subscription uses `installPlanApproval: Automatic`, so redeploying a bundle whose channel moved upgrades the running operator immediately. Moving the GPU Operator from `v25.10` to `v26.7` goes straight to v26.7.1 in one step.
 
 ### Readiness Gates
 
@@ -228,7 +229,7 @@ oc get csv -n <operator-namespace>
 
 ```text
 NAME                                  DISPLAY        VERSION   REPLACES   PHASE
-<operator-name>.v25.10.1              <Display>      25.10.1              Succeeded
+<operator-name>.v26.7.1               <Display>      26.7.1               Succeeded
 ```
 
 **Check operator Deployment:**
