@@ -457,11 +457,14 @@ func TestParseRenovateReportCandidateOrderIsTotal(t *testing.T) {
                       {"newValue":"` + second + `","updateType":"minor"}]}]}]}}}}`
 	}
 
-	ascending, err := ParseRenovateReport([]byte(report("1.1.0", "1.2.0")))
+	// 1.9.0 against 1.10.0: lexically "1.10.0" sorts first, which would put the
+	// larger step ahead of the smaller one and contradict the safest-first
+	// ordering Alternatives is documented to have.
+	ascending, err := ParseRenovateReport([]byte(report("1.9.0", "1.10.0")))
 	if err != nil {
 		t.Fatalf("ParseRenovateReport: %v", err)
 	}
-	descending, err := ParseRenovateReport([]byte(report("1.2.0", "1.1.0")))
+	descending, err := ParseRenovateReport([]byte(report("1.10.0", "1.9.0")))
 	if err != nil {
 		t.Fatalf("ParseRenovateReport: %v", err)
 	}
@@ -475,7 +478,30 @@ func TestParseRenovateReportCandidateOrderIsTotal(t *testing.T) {
 			t.Fatalf("input order changed the result: %+v vs %+v", got, rev)
 		}
 	}
-	if got[0].Version != "1.1.0" {
-		t.Errorf("tie not broken by version: got %+v", got)
+	if got[0].Version != "1.9.0" {
+		t.Errorf("tie not broken by semver precedence: got %+v", got)
+	}
+}
+
+// Not every chart version parses as SemVer, and an unparseable pair still has
+// to order deterministically or the artifact churns between identical runs.
+func TestParseRenovateReportCandidateOrderHandlesNonSemver(t *testing.T) {
+	report := func(first, second string) string {
+		return `{"repositories":{"r":{"packageFiles":{"custom.regex":[{"packageFile":"recipes/registry.yaml","deps":[
+          {"depName":"dup","depType":"registry-chart","datasource":"docker","currentValue":"1.0.0",
+           "updates":[{"newValue":"` + first + `","updateType":"minor"},
+                      {"newValue":"` + second + `","updateType":"minor"}]}]}]}}}}`
+	}
+	a, err := ParseRenovateReport([]byte(report("not-a-version", "also-not")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	b, err := ParseRenovateReport([]byte(report("also-not", "not-a-version")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	if a["dup"].Candidates[0] != b["dup"].Candidates[0] {
+		t.Errorf("unparseable versions did not order deterministically: %+v vs %+v",
+			a["dup"].Candidates, b["dup"].Candidates)
 	}
 }

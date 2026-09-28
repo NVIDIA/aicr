@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -86,6 +88,25 @@ type rawReport struct {
 // are not selectable — a rollback is not forward drift and must never be
 // reported as Latest.
 var updateRank = map[string]int{"digest": 1, "pin": 2, "patch": 3, "minor": 4, "major": 5}
+
+// versionLess orders two chart versions by SemVer precedence, falling back to
+// string order when either does not parse. String order alone would be wrong
+// here: "1.10.0" sorts before "1.9.0" lexically, which would put the larger
+// step first and contradict the safest-first order Alternatives is documented
+// to have. Not every chart version is valid SemVer, and an unparseable pair
+// still has to order deterministically or the artifact churns between runs
+// over identical input.
+func versionLess(a, b string) bool {
+	av, aerr := semver.NewVersion(a)
+	bv, berr := semver.NewVersion(b)
+	if aerr != nil || berr != nil {
+		return a < b
+	}
+	if av.Equal(bv) {
+		return a < b
+	}
+	return av.LessThan(bv)
+}
 
 // ParseRenovateReport extracts the registry-chart deps from a Renovate report
 // written with RENOVATE_REPORT_TYPE=file.
@@ -165,7 +186,7 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 						if ra, rb := updateRank[a.UpdateType], updateRank[b.UpdateType]; ra != rb {
 							return ra < rb
 						}
-						return a.Version < b.Version
+						return versionLess(a.Version, b.Version)
 					})
 					// If no recognized updates exist, surface the unsupported type and
 					// any malformed entries as diagnostics instead of leaving the pin
