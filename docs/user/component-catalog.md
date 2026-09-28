@@ -714,7 +714,7 @@ The `aws-ebs-csi-driver` controller calls the Amazon EBS API to create, attach, 
 
 The default EKS node role does not include EBS permissions, so a cluster with none of these paths installs the driver cleanly and then cannot provision any volume. For the required permissions, use the upstream [driver permissions guide](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/v1.59.0/docs/install.md#set-up-driver-permissions) and the AWS [Amazon EBS CSI driver](https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html) page rather than a policy name copied from here; AWS maintains more than one managed policy for the driver.
 
-The `aws-ebs-csi-driver` health check verifies only that the controller and node pods are running. It does not exercise the EBS API, so it passes on a cluster with no credential path.
+The `aws-ebs-csi-driver` health check verifies only that the controller Deployment has an available replica and that no driver pod is in an unhealthy state such as `Pending` or `CrashLoopBackOff`. It does not exercise the EBS API, so it passes on a cluster with no credential path.
 
 ### Troubleshooting provisioning failures
 
