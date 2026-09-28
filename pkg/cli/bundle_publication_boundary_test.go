@@ -1162,14 +1162,6 @@ func TestImageRefsRejectsCaseAndUnsafeFinalTargets(t *testing.T) {
 	}
 	assertInvalidImageRefsTarget(t, bundle, symlinkTarget)
 
-	realParent := realTempDir(t)
-	parentAliasBase := realTempDir(t)
-	parentAlias := filepath.Join(parentAliasBase, "linked-parent")
-	if err := os.Symlink(realParent, parentAlias); err != nil {
-		t.Fatalf("Symlink(parent) error = %v", err)
-	}
-	assertInvalidImageRefsTarget(t, bundle, filepath.Join(parentAlias, "refs.txt"))
-
 	t.Run("Unix socket", func(t *testing.T) {
 		socketBase, socketBaseErr := filepath.EvalSymlinks(filepath.FromSlash("/tmp"))
 		if socketBaseErr != nil {
@@ -1199,6 +1191,49 @@ func assertInvalidImageRefsTarget(t *testing.T, bundle *bundleOutputTarget, path
 	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 		t.Fatalf("prepareImageRefsTarget(%q) error = %v, want invalid request", path, err)
 	}
+}
+
+func TestImageRefsAcceptsSymlinkedParent(t *testing.T) {
+	bundleDir := filepath.Join(realTempDir(t), "bundle")
+	if err := os.Mkdir(bundleDir, 0o755); err != nil {
+		t.Fatalf("Mkdir(bundle) error = %v", err)
+	}
+	bundle := mustPreparedBundleOutput(t, bundleDir)
+
+	realParent := realTempDir(t)
+	alias := filepath.Join(realTempDir(t), "linked-parent")
+	if err := os.Symlink(realParent, alias); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	target, err := prepareImageRefsTarget(context.Background(), bundle, filepath.Join(alias, "refs.txt"))
+	if err != nil {
+		t.Fatalf("prepareImageRefsTarget() error = %v, want success through symlinked parent", err)
+	}
+	t.Cleanup(func() { _ = target.close() })
+
+	if err = target.writeAtomic(context.Background(), []byte("sha256:abc\n")); err != nil {
+		t.Fatalf("writeAtomic() error = %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(realParent, "refs.txt"))
+	if err != nil || string(got) != "sha256:abc\n" {
+		t.Fatalf("refs.txt = %q, err = %v", got, err)
+	}
+}
+
+func TestImageRefsStillRejectsSymlinkedFinalTarget(t *testing.T) {
+	bundleDir := filepath.Join(realTempDir(t), "bundle")
+	if err := os.Mkdir(bundleDir, 0o755); err != nil {
+		t.Fatalf("Mkdir(bundle) error = %v", err)
+	}
+	bundle := mustPreparedBundleOutput(t, bundleDir)
+
+	parent := realTempDir(t)
+	link := filepath.Join(parent, "refs.txt")
+	if err := os.Symlink(filepath.Join(parent, "elsewhere"), link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	assertInvalidImageRefsTarget(t, bundle, link)
 }
 
 func TestPushOCIBundleRejectsInSourceTempAndPreservesSource(t *testing.T) {

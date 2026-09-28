@@ -29,14 +29,21 @@ const schemaVersion = 1
 // Row is one chart's drift. Components lists every AICR component sharing the
 // chart pin — the OpenShift twins (prometheus-adapter, nvidia-dra-driver-gpu,
 // k8s-nim-operator) always move together, so they collapse into one row.
+//
+// Alternatives lists the candidates Latest beat, smaller step first, and is
+// omitted when there are none. Latest is never repeated in it: the row already
+// names that version, and listing it twice would read as two distinct options.
+// The field is additive, so schemaVersion stays 1 -- a consumer that ignores it
+// reads exactly what it read before.
 type Row struct {
-	Components []string `json:"components"`
-	Chart      string   `json:"chart"`
-	Registry   string   `json:"registry"`
-	Datasource string   `json:"datasource"`
-	Current    string   `json:"current"`
-	Latest     string   `json:"latest"`
-	UpdateType string   `json:"updateType"`
+	Components   []string    `json:"components"`
+	Chart        string      `json:"chart"`
+	Registry     string      `json:"registry"`
+	Datasource   string      `json:"datasource"`
+	Current      string      `json:"current"`
+	Latest       string      `json:"latest"`
+	UpdateType   string      `json:"updateType"`
+	Alternatives []Candidate `json:"alternatives,omitempty"`
 }
 
 // Unresolved is a pin Renovate could not look up. It is reported as unknown and
@@ -74,6 +81,20 @@ type Meta struct {
 }
 
 type groupKey struct{ chart, registry, current string }
+
+// alternativesTo returns the candidates other than the one Latest names,
+// preserving the safest-first order ParseRenovateReport established. It matches
+// on version rather than update type because Latest is itself a version, so the
+// comparison needs no assumption about types being unique.
+func alternativesTo(l Lookup) []Candidate {
+	var out []Candidate
+	for _, c := range l.Candidates {
+		if c.Version != l.Latest {
+			out = append(out, c)
+		}
+	}
+	return out
+}
 
 // BuildReport joins the registry's annotated pins against Renovate's lookups.
 func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, error) {
@@ -138,13 +159,14 @@ func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, erro
 				continue
 			}
 			drift[key] = &Row{
-				Components: []string{p.Component},
-				Chart:      p.Chart,
-				Registry:   p.Repository,
-				Datasource: p.Datasource,
-				Current:    p.Version,
-				Latest:     l.Latest,
-				UpdateType: l.UpdateType,
+				Components:   []string{p.Component},
+				Chart:        p.Chart,
+				Registry:     p.Repository,
+				Datasource:   p.Datasource,
+				Current:      p.Version,
+				Latest:       l.Latest,
+				UpdateType:   l.UpdateType,
+				Alternatives: alternativesTo(l),
 			}
 		}
 	}

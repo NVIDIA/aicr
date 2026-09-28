@@ -14,7 +14,10 @@
 
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const sampleReport = `{
   "repositories": {
@@ -382,5 +385,191 @@ func TestParseRenovateReportUnsupportedUpdateTypes(t *testing.T) {
 					l.Latest, l.UpdateType, l.Problem, tt.wantLatest, tt.wantType, tt.wantProb)
 			}
 		})
+	}
+}
+
+// Renovate emits one entry per update type, and the report used to keep only
+// the highest-ranked one. That discarded the safer step when both existed: in
+// the 2026-09-28 run kube-prometheus-stack offered minor 84.5.0 alongside major
+// 91.5.2, and only the major reached the digest (#2791). Candidates keeps all
+// of them, ordered safest-first so the ordering is stable across runs.
+func TestParseRenovateReportCollectsAllCandidates(t *testing.T) {
+	got, err := ParseRenovateReport([]byte(sampleReport))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		dep  string
+		want []Candidate
+	}{
+		{
+			name: "every recognized update is kept, ranked safest first",
+			dep:  "ghcr.io/nvidia/nvsentinel",
+			want: []Candidate{
+				{Version: "v1.20.3", UpdateType: "patch"},
+				{Version: "v1.23.0", UpdateType: "minor"},
+			},
+		},
+		{"a current pin has no candidates", "cert-manager", nil},
+		{"an unresolved pin has no candidates", "no-lookup-chart", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, ok := got[tt.dep]
+			if !ok {
+				t.Fatalf("dep %q missing from result", tt.dep)
+			}
+			if len(l.Candidates) != len(tt.want) {
+				t.Fatalf("got %d candidates %v, want %d %v",
+					len(l.Candidates), l.Candidates, len(tt.want), tt.want)
+			}
+			for i := range tt.want {
+				if l.Candidates[i] != tt.want[i] {
+					t.Errorf("candidate %d: got %+v, want %+v", i, l.Candidates[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// Latest stays the highest-ranked candidate. Summary.Behind counts rows whose
+// Latest is non-empty, so changing which candidate wins would silently change
+// the headline counts this report has always published.
+func TestParseRenovateReportLatestStillWins(t *testing.T) {
+	got, err := ParseRenovateReport([]byte(sampleReport))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	l := got["ghcr.io/nvidia/nvsentinel"]
+	if l.Latest != "v1.23.0" || l.UpdateType != "minor" {
+		t.Errorf("got Latest=%q UpdateType=%q, want v1.23.0/minor", l.Latest, l.UpdateType)
+	}
+}
+
+// Renovate emits at most one update per type, so a rank tie should be
+// unreachable -- but that is its behavior, not a guarantee, and the sort must
+// not fall back to the array order it exists to normalize. Feeding two entries
+// of the same type in both orders must produce the same Candidates.
+func TestParseRenovateReportCandidateOrderIsTotal(t *testing.T) {
+	report := func(first, second string) string {
+		return `{"repositories":{"r":{"packageFiles":{"custom.regex":[{"packageFile":"recipes/registry.yaml","deps":[
+          {"depName":"dup","depType":"registry-chart","datasource":"docker","currentValue":"1.0.0",
+           "updates":[{"newValue":"` + first + `","updateType":"minor"},
+                      {"newValue":"` + second + `","updateType":"minor"}]}]}]}}}}`
+	}
+
+	// 1.9.0 against 1.10.0: lexically "1.10.0" sorts first, which would put the
+	// larger step ahead of the smaller one and contradict the safest-first
+	// ordering Alternatives is documented to have.
+	ascending, err := ParseRenovateReport([]byte(report("1.9.0", "1.10.0")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	descending, err := ParseRenovateReport([]byte(report("1.10.0", "1.9.0")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+
+	got, rev := ascending["dup"].Candidates, descending["dup"].Candidates
+	if len(got) != 2 || len(rev) != 2 {
+		t.Fatalf("got %d and %d candidates, want 2 each", len(got), len(rev))
+	}
+	for i := range got {
+		if got[i] != rev[i] {
+			t.Fatalf("input order changed the result: %+v vs %+v", got, rev)
+		}
+	}
+	if got[0].Version != "1.9.0" {
+		t.Errorf("tie not broken by semver precedence: got %+v", got)
+	}
+}
+
+// Not every chart version parses as SemVer, and an unparseable pair still has
+// to order deterministically or the artifact churns between identical runs.
+func TestParseRenovateReportCandidateOrderHandlesNonSemver(t *testing.T) {
+	report := func(first, second string) string {
+		return `{"repositories":{"r":{"packageFiles":{"custom.regex":[{"packageFile":"recipes/registry.yaml","deps":[
+          {"depName":"dup","depType":"registry-chart","datasource":"docker","currentValue":"1.0.0",
+           "updates":[{"newValue":"` + first + `","updateType":"minor"},
+                      {"newValue":"` + second + `","updateType":"minor"}]}]}]}}}}`
+	}
+	a, err := ParseRenovateReport([]byte(report("not-a-version", "also-not")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	b, err := ParseRenovateReport([]byte(report("also-not", "not-a-version")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	if a["dup"].Candidates[0] != b["dup"].Candidates[0] {
+		t.Errorf("unparseable versions did not order deterministically: %+v vs %+v",
+			a["dup"].Candidates, b["dup"].Candidates)
+	}
+}
+
+// versionLess has to be a strict weak order, not merely deterministic per
+// pair: sort.Slice is undefined on a comparator that cycles, so a mixed set of
+// parseable and unparseable versions could order differently per input order.
+// Grouping parseable ahead of unparseable is what removes the cycle
+// "1.9.0" < "1.10.0" < "1.5.0_invalid" < "1.9.0" that comparing each pair on
+// its own terms produced.
+func TestVersionLessIsTransitive(t *testing.T) {
+	vs := []string{"1.9.0", "1.10.0", "1.5.0_invalid", "2.0.0", "not-a-version", "v1.9.0"}
+	for _, a := range vs {
+		for _, b := range vs {
+			for _, c := range vs {
+				if versionLess(a, b) && versionLess(b, c) && !versionLess(a, c) {
+					t.Errorf("not transitive: %q<%q and %q<%q but not %q<%q", a, b, b, c, a, c)
+				}
+			}
+		}
+	}
+	// Asymmetry: a<b and b<a cannot both hold.
+	for _, a := range vs {
+		for _, b := range vs {
+			if versionLess(a, b) && versionLess(b, a) {
+				t.Errorf("not asymmetric: %q and %q each compare less than the other", a, b)
+			}
+		}
+	}
+}
+
+// The mixed set must land the same way regardless of the order Renovate
+// happened to emit it in.
+func TestParseRenovateReportMixedVersionOrderIsStable(t *testing.T) {
+	build := func(vs ...string) string {
+		ups := make([]string, 0, len(vs))
+		for _, v := range vs {
+			ups = append(ups, `{"newValue":"`+v+`","updateType":"minor"}`)
+		}
+		return `{"repositories":{"r":{"packageFiles":{"custom.regex":[{"packageFile":"recipes/registry.yaml","deps":[
+          {"depName":"mixed","depType":"registry-chart","datasource":"docker","currentValue":"1.0.0",
+           "updates":[` + strings.Join(ups, ",") + `]}]}]}}}}`
+	}
+	forward, err := ParseRenovateReport([]byte(build("1.9.0", "1.10.0", "1.5.0_invalid")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	reverse, err := ParseRenovateReport([]byte(build("1.5.0_invalid", "1.10.0", "1.9.0")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	got, rev := forward["mixed"].Candidates, reverse["mixed"].Candidates
+	if len(got) != 3 || len(rev) != 3 {
+		t.Fatalf("got %d and %d candidates, want 3 each", len(got), len(rev))
+	}
+	for i := range got {
+		if got[i] != rev[i] {
+			t.Fatalf("input order changed the result:\n  %+v\n  %+v", got, rev)
+		}
+	}
+	// Parseable versions first, in SemVer order; unparseable last.
+	want := []string{"1.9.0", "1.10.0", "1.5.0_invalid"}
+	for i, w := range want {
+		if got[i].Version != w {
+			t.Errorf("position %d: got %q, want %q (full: %+v)", i, got[i].Version, w, got)
+		}
 	}
 }

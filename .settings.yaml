@@ -25,7 +25,7 @@ build_tools:
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
   crane: 'v0.22.1'
   # renovate: datasource=github-releases depName=orhun/git-cliff depType=build_tools
-  git_cliff: '2.14.1'
+  git_cliff: '2.14.2'
 
 # Linting
 linting:
@@ -240,6 +240,18 @@ testing_tools:
   # the first stable line with native OCI artifact source (issue #843).
   # renovate: datasource=helm depName=argo-cd registryUrl=https://argoproj.github.io/argo-helm depType=testing_tools
   argocd_chart: '9.5.14'
+  # Redis as rendered by argocd_chart above, cached so the KWOK lanes do not
+  # pull it anonymously at job time (issue #2501). The ECR Public namespace
+  # shares the throttle bucket registry_image already hit: in run
+  # 36290149406 six argocd lanes died on `429 Too Many Requests` for this ref.
+  #
+  # NOT independently versioned, and deliberately carries no `renovate:`
+  # annotation: its only correct value is whatever argocd_chart renders. A bot
+  # bumping it to the newest redis would cache an image the chart never pulls
+  # and quietly restore the 429. On an argocd_chart bump, re-derive it with
+  #   helm template argo/argo-cd --version <chart> | grep -oE 'image: .*redis.*'
+  # and update this line in the same PR.
+  argocd_redis_image: 'ecr-public.aws.com/docker/library/redis:8.2.3-alpine'
   # sigstore scaffold umbrella chart for the private-Sigstore signing e2e
   # (Fulcio + Rekor + CTLog + Trillian). Deploys plain Deployment + ClusterIP
   # Services reachable via port-forward on macOS and Linux (issue #1215).

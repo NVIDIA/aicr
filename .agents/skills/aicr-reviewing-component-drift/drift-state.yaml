@@ -2,18 +2,111 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Carries context between invocations of aicr-reviewing-component-drift: what
-# was reviewed at which version pair, what verdict it got, and what would change
-# a hold. The weekly Slack digest is stateless by design, so it repeats the same
-# components until someone acts; this file is what keeps the review from
-# repeating with it.
+# was reviewed at which candidate set, what verdict it got, and what would
+# change a hold. The weekly Slack digest is stateless by design, so it repeats
+# the same components until someone acts; this file is what keeps the review
+# from repeating with it.
+#
+# `candidates` is the whole set the verdict was formed against, not just the
+# pair: a new candidate can appear while `from` and `to` both stay put, and a
+# verdict keyed on the pair alone would be reused without anyone seeing it.
+# Entries below that predate this field carry none, which Step 1 treats as
+# changed -- they are re-derived rather than confirmed.
 #
 # reviews:
 #   - component: nvsentinel
 #     from: v1.20.0
 #     to: v1.23.0
+#     candidates:            # verbatim from the report: latest + alternatives[]
+#       - minor v1.23.0
+#       - patch v1.20.3
+#     recommends: v1.20.3    # omit when the row had no alternatives
 #     verdict: hold          # take | hold | defer
 #     reviewed: 2026-09-21
 #     reason: CRD migration needs an ADR-021 record first
 #     revisit_when: an upgrade record exists for v1.20 -> v1.23
 
-reviews: []
+reviews:
+  - component: agentgateway
+    from: v1.5.0
+    to: v2.2.1
+    verdict: hold
+    reviewed: 2026-09-28
+    reason: >-
+      Upstream has no v2.x; latest release is v1.5.0. The v2.2.x tags in
+      cr.agentgateway.dev are the kgateway lineage. Same regression #1476 fixed.
+    revisit_when: agentgateway/agentgateway actually cuts a v2.x release
+  - component: agentgateway-crds
+    from: v1.5.0
+    to: v2.2.1
+    verdict: hold
+    reviewed: 2026-09-28
+    reason: Lockstep with agentgateway; same wrong-lineage tag.
+    revisit_when: agentgateway/agentgateway actually cuts a v2.x release
+  - component: kai-scheduler
+    from: v0.16.9
+    to: v0.20.1
+    verdict: hold
+    reviewed: 2026-09-28
+    reason: >-
+      v0.20.1 is retracted upstream. The max-semver pick also hides the real
+      candidates: v0.16.10 (same-line patch, 2026-09-28) and v0.18.0 (Latest,
+      2026-09-23).
+    revisit_when: >-
+      someone evaluates v0.16.10 or v0.18.0 on their own merits; the digest's
+      v0.20.1 never becomes correct
+  - component: grove
+    from: v0.1.0-alpha.12
+    to: v0.1.0-alpha.13
+    verdict: hold
+    reviewed: 2026-09-28
+    reason: >-
+      upgrades.yaml holds one transition (<0.1.0-alpha.12 -> 0.1.0-alpha.12,
+      manual). Bumping to alpha.13 leaves a hole below the pin, so
+      check-upgrade-records in `make lint` fails.
+    revisit_when: >-
+      an alpha.12 -> alpha.13 transition is authored with real evidence; the
+      prior hop was manual for a dropped CRD, so safe is not assumable
+  - component: kube-prometheus-stack
+    from: 84.4.0
+    to: 91.5.2
+    verdict: defer
+    reviewed: 2026-09-28
+    reason: >-
+      appVersion lockstep with prometheus-operator-crds is clean (both v0.90.1
+      -> v0.94.1), but this is a 7-chart-version major colliding with the
+      aks.yaml 83.7.0 pin exemption (#700).
+    revisit_when: after the v1.0.0 tag, and with the AKS exemption addressed
+  - component: prometheus-operator-crds
+    from: 28.0.1
+    to: 32.0.1
+    verdict: defer
+    reviewed: 2026-09-28
+    reason: >-
+      Must move with kube-prometheus-stack (appVersion v0.90.1 -> v0.94.1). A
+      lagging CRDs pin also breaks nvsentinel and k8s-ephemeral-storage-metrics.
+    revisit_when: taken together with kube-prometheus-stack
+  - component: nvsentinel
+    from: v1.20.0
+    to: v1.25.0
+    verdict: hold
+    reviewed: 2026-09-28
+    reason: >-
+      PR #2711 is already bumping nvsentinel to v1.22.0 for the VR200
+      metadata-collector; taking a bump from the digest would conflict with it.
+      The digest's own v1.24.0 was stale on arrival: v1.25.0 shipped 2026-09-28
+      09:41 UTC, two hours after the 07:35 report. nvsentinel has released one
+      minor per week since v1.18 (2026-08-10) with no gaps, so every weekly
+      digest row for it is stale within days.
+    revisit_when: >-
+      #2711 merges; settle the target there against whatever is current that
+      day rather than against a digest row
+  - component: aws-efa
+    from: v0.5.29
+    to: v0.5.32
+    verdict: defer
+    reviewed: 2026-09-28
+    reason: >-
+      Chart is tracked but the device-plugin image is in Renovate ignoreDeps and
+      must be coordinated with EKS add-on releases.
+    revisit_when: a matching EKS add-on release is confirmed
