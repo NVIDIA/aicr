@@ -44,10 +44,12 @@ const runtimeInventoryValuesFile = "components/k8s-aibom/values.yaml"
 type RuntimeInventoryMode string
 
 const (
-	// RuntimeInventoryEnabled keeps the component the recipe declares. It
-	// confirms an existing selection rather than granting one: a recipe that
-	// declines the component is rejected instead of re-enabled, so this cannot
-	// be used to opt a recipe into a combination it deliberately excludes.
+	// RuntimeInventoryEnabled keeps or grants the component depending on what
+	// the recipe already resolves: it confirms an existing selection when the
+	// recipe declares the component, grants it (GKE only, #2962) when the
+	// recipe neither declares nor declines it, and is rejected -- not
+	// re-enabled -- when the recipe explicitly declines it, so this cannot be
+	// used to opt a recipe into a combination it deliberately excludes.
 	RuntimeInventoryEnabled RuntimeInventoryMode = "enabled"
 	// RuntimeInventoryDisabled removes it from the resolved recipe.
 	RuntimeInventoryDisabled RuntimeInventoryMode = "disabled"

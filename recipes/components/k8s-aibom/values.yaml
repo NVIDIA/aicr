@@ -13,9 +13,11 @@
 # limitations under the License.
 
 # k8s-aibom Helm values
-# Optional runtime AI-workload inventory. One stock recipe selects it,
-# h100-gke-cos-inference (ADR-019 stock-adoption amendment); its only
-# descendant, h100-gke-cos-inference-dynamo, declines it.
+# Optional runtime AI-workload inventory. One stock recipe selects it by
+# default, h100-gke-cos-inference (ADR-019 stock-adoption amendment); its
+# descendant, h100-gke-cos-inference-dynamo, declines it. Any GKE recipe can
+# also receive these values via `aicr recipe --runtime-inventory enabled`
+# (#2962), so a change here is no longer scoped to that one recipe.
 #
 # The digest and defaults below were qualified as one coherent v1.5.1 artifact
 # set under ADR-019, re-pinned from v1.3.0. Both v1alpha1 and v1beta1 remain

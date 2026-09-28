@@ -63,10 +63,17 @@ spec:
     # the step as proving more than it does.
     #
     # NOTE the asymmetry with the AIBOMControllerConfig step below, which
-    # still reads aibom.k8saibom.dev/v1alpha1. That is deliberate and
-    # verified against the rendered chart: 1.3.0 moves CRD *storage* to
-    # v1beta1 while still rendering the controller config CR itself at
-    # v1alpha1, and both versions stay served. Do not "fix" the two to match.
+    # still asserts aibom.k8saibom.dev/v1alpha1. Verified against the
+    # rendered chart: 1.5.1 renders that CR at v1beta1 (1.3.0 rendered it at
+    # v1alpha1), and both CRD versions are unchanged across that jump --
+    # v1alpha1 stays served, v1beta1 stays served and storage. So the
+    # assertion still resolves, but now through v1alpha1 being served rather
+    # than by matching the object's actual rendered apiVersion. Moving the
+    # assertion to v1beta1 to match the rendered object needs live-cluster
+    # confirmation that the conversion path behaves the same as serving the
+    # rendered version directly, which a GKE UAT lane provides; until that
+    # evidence lands, this stays at v1alpha1. Do not "fix" it to v1beta1
+    # without that evidence.
     #
     # The controller's own readiness is a separate signal and not one AICR
     # owns: upstream shipped a start-ordering race from v1.1.0 through v1.2.0
