@@ -2265,6 +2265,18 @@ func TestApplyInheritedIdentityRegistryFields(t *testing.T) {
 			want:  ComponentRef{Name: "c"},
 		},
 		{
+			name:  "a dropped pre-manifest file is restored and an added one is left out",
+			ref:   ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "new.yaml"}},
+			prior: ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "b.yaml"}},
+			want:  ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "b.yaml"}},
+		},
+		{
+			name:  "an empty prior pre-manifest set replaces a non-empty default",
+			ref:   ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml"}},
+			prior: ComponentRef{Name: "c"},
+			want:  ComponentRef{Name: "c"},
+		},
+		{
 			name:  "empty prior chart, source and path do not clobber the defaults",
 			ref:   ComponentRef{Name: "c", Chart: "chart", Source: "https://x.example", Path: "p"},
 			prior: ComponentRef{Name: "c"},
@@ -2285,7 +2297,7 @@ func TestApplyInheritedIdentityRegistryFields(t *testing.T) {
 }
 
 func TestApplyInheritedIdentityManifestFilesDoNotAlias(t *testing.T) {
-	prior := []ComponentRef{{Name: "c", ManifestFiles: []string{"a.yaml"}}}
+	prior := []ComponentRef{{Name: "c", ManifestFiles: []string{"a.yaml"}, PreManifestFiles: []string{"pre.yaml"}}}
 	refs := []ComponentRef{{Name: "c"}}
 	if err := ApplyInheritedIdentity(refs, prior); err != nil {
 		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
@@ -2293,6 +2305,10 @@ func TestApplyInheritedIdentityManifestFilesDoNotAlias(t *testing.T) {
 	refs[0].ManifestFiles[0] = "mutated.yaml"
 	if prior[0].ManifestFiles[0] != "a.yaml" {
 		t.Error("mutating the inherited set changed the prior recipe's slice")
+	}
+	refs[0].PreManifestFiles[0] = "mutated.yaml"
+	if prior[0].PreManifestFiles[0] != "pre.yaml" {
+		t.Error("mutating the inherited pre-manifest set changed the prior recipe's slice")
 	}
 }
 
@@ -2321,6 +2337,10 @@ func TestApplyInheritedIdentityRejects(t *testing.T) {
 			ComponentRef{Name: "c", ManifestFiles: []string{"../../etc/passwd"}}, "valid path"},
 		{"absolute manifest file", []ComponentRef{{Name: "c"}},
 			ComponentRef{Name: "c", ManifestFiles: []string{"/etc/passwd"}}, "valid path"},
+		{"pre-manifest file escaping the data root", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", PreManifestFiles: []string{"../../etc/passwd"}}, "pre-manifest file"},
+		{"absolute pre-manifest file", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", PreManifestFiles: []string{"/etc/passwd"}}, "pre-manifest file"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

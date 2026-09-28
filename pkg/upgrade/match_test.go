@@ -1379,10 +1379,12 @@ func TestMatchIdentitiesRegistryDerivedFields(t *testing.T) {
 	base := Identity{
 		Version: "1.0.0", Namespace: "ns", Chart: "old-chart", Source: "https://old.example",
 		Path: "deploy/a", Type: "Helm", ManifestFiles: []string{"a.yaml", "b.yaml"},
+		PreManifestFiles: []string{"pre-a.yaml", "pre-b.yaml"},
 	}
 	with := func(mutate func(*Identity)) Identity {
 		id := base
 		id.ManifestFiles = append([]string(nil), base.ManifestFiles...)
+		id.PreManifestFiles = append([]string(nil), base.PreManifestFiles...)
 		mutate(&id)
 		return id
 	}
@@ -1406,6 +1408,19 @@ func TestMatchIdentitiesRegistryDerivedFields(t *testing.T) {
 			[]IdentityChange{{Field: "manifestFiles", From: "a.yaml,b.yaml", To: "a.yaml,b.yaml,c.yaml", Added: []string{"c.yaml"}}}},
 		{"an emptied manifest set", with(func(i *Identity) { i.ManifestFiles = nil }),
 			[]IdentityChange{{Field: "manifestFiles", From: "a.yaml,b.yaml", To: "", Removed: []string{"a.yaml", "b.yaml"}}}},
+		{"a dropped pre-manifest file", with(func(i *Identity) { i.PreManifestFiles = []string{"pre-a.yaml"} }),
+			[]IdentityChange{{Field: "preManifestFiles", From: "pre-a.yaml,pre-b.yaml", To: "pre-a.yaml",
+				Removed: []string{"pre-b.yaml"}}}},
+		{"an added pre-manifest file", with(func(i *Identity) {
+			i.PreManifestFiles = []string{"pre-a.yaml", "pre-b.yaml", "pre-c.yaml"}
+		}),
+			[]IdentityChange{{Field: "preManifestFiles", From: "pre-a.yaml,pre-b.yaml",
+				To: "pre-a.yaml,pre-b.yaml,pre-c.yaml", Added: []string{"pre-c.yaml"}}}},
+		{"an emptied pre-manifest set", with(func(i *Identity) { i.PreManifestFiles = nil }),
+			[]IdentityChange{{Field: "preManifestFiles", From: "pre-a.yaml,pre-b.yaml", To: "",
+				Removed: []string{"pre-a.yaml", "pre-b.yaml"}}}},
+		{"a reordered pre-manifest set is not a move",
+			with(func(i *Identity) { i.PreManifestFiles = []string{"pre-b.yaml", "pre-a.yaml"} }), nil},
 		{"a reordered manifest set is not a move", with(func(i *Identity) { i.ManifestFiles = []string{"b.yaml", "a.yaml"} }), nil},
 		{"an unstated chart is not a move", with(func(i *Identity) { i.Chart = "" }), nil},
 		{"an unstated source is not a move", with(func(i *Identity) { i.Source = "" }), nil},
@@ -1442,6 +1457,18 @@ func TestMatchIdentitiesManifestMoveIsNamedInExplanation(t *testing.T) {
 		t.Fatalf("MatchIdentities() returned %d rows, want 1", len(got))
 	}
 	if want := "its manifestFiles drop b.yaml and add c.yaml"; !strings.Contains(got[0].Explanation, want) {
+		t.Errorf("explanation %q does not contain %q", got[0].Explanation, want)
+	}
+}
+
+func TestMatchIdentitiesPreManifestMoveIsNamedInExplanation(t *testing.T) {
+	got := MatchIdentities(Set{},
+		map[string]Identity{"c": {Version: "1.0.0", PreManifestFiles: []string{"rbac.yaml"}}},
+		map[string]Identity{"c": {Version: "1.0.0", PreManifestFiles: []string{"rbac.yaml", "scc.yaml"}}})
+	if len(got) != 1 {
+		t.Fatalf("MatchIdentities() returned %d rows, want 1", len(got))
+	}
+	if want := "its preManifestFiles add scc.yaml"; !strings.Contains(got[0].Explanation, want) {
 		t.Errorf("explanation %q does not contain %q", got[0].Explanation, want)
 	}
 }

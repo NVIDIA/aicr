@@ -66,16 +66,18 @@ func TestComponentIdentities(t *testing.T) {
 			},
 		},
 		{
-			name: "path and manifest files come from the resolved recipe",
+			name: "path and manifest lists come from the resolved recipe",
 			in: &RecipeResult{
 				Components: []ComponentRef{{Name: "synthetic-kustomize", Kind: "Kustomize", Tag: "v1.0.0"}},
 				internal: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{
 					Name: "synthetic-kustomize", Path: "deploy/prod", ManifestFiles: []string{"a.yaml"},
+					PreManifestFiles: []string{"pre.yaml"},
 				}}},
 			},
 			want: map[string]upgrade.Identity{
 				"synthetic-kustomize": {
 					Version: "v1.0.0", Type: "Kustomize", Path: "deploy/prod", ManifestFiles: []string{"a.yaml"},
+					PreManifestFiles: []string{"pre.yaml"},
 				},
 			},
 		},

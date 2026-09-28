@@ -262,14 +262,14 @@ func inheritedRecipePath(ref string) (string, error) {
 // every Kustomize component, and the matcher skips equal pins, so a tag move
 // would vanish from the report rather than be carried as unversioned.
 //
-// Namespace, chart, source, path, kind and manifest files ride along because a
+// Namespace, chart, source, path, kind and manifest lists ride along because a
 // recipe is regenerated from scratch on every AICR upgrade. A moved registry
 // default relocates or replaces the install, and Helm cannot move a release
 // between namespaces, so applying the new recipe installs a second copy beside
 // the running one. A version-only projection reports that as no change at all.
 //
-// Path and manifest files are not on the public ComponentRef, so they are read
-// from the resolved recipe behind it when there is one.
+// Path and the manifest lists are not on the public ComponentRef, so they are
+// read from the resolved recipe behind it when there is one.
 func componentIdentities(r *RecipeResult) map[string]upgrade.Identity {
 	if r == nil {
 		return nil
@@ -291,6 +291,7 @@ func componentIdentities(r *RecipeResult) map[string]upgrade.Identity {
 			if ref := r.internal.GetComponentRef(c.Name); ref != nil {
 				id.Path = ref.Path
 				id.ManifestFiles = ref.ManifestFiles
+				id.PreManifestFiles = ref.PreManifestFiles
 			}
 		}
 		table[c.Name] = id

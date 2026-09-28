@@ -101,23 +101,29 @@ const (
 // objects. Helm cannot move a release between namespaces. A renamed chart or
 // moved source shares no version line with the old one. A kustomize path
 // selects a different manifest set at the same tag. A dropped manifest file
-// deletes a live object under GitOps prune.
+// deletes a live object under GitOps prune, and a pre-install manifest is a
+// prerequisite the bundle applies before the release.
 //
-// Every field but Version and ManifestFiles counts only when both sides state
-// it. ManifestFiles is a set, compared without regard to order.
+// Every field but Version, ManifestFiles and PreManifestFiles counts only when
+// both sides state it. The two manifest lists are sets, compared without regard
+// to order.
 type Identity struct {
-	Version       string
-	Namespace     string
-	Chart         string
-	Source        string
-	Path          string
-	Type          string
-	ManifestFiles []string
+	Version          string
+	Namespace        string
+	Chart            string
+	Source           string
+	Path             string
+	Type             string
+	ManifestFiles    []string
+	PreManifestFiles []string
 }
 
-// fieldManifestFiles is the IdentityChange.Field of the manifest file set, the
-// one field whose move also fills Added and Removed.
-const fieldManifestFiles = "manifestFiles"
+// The IdentityChange.Field of each manifest file set, the fields whose move
+// also fills Added and Removed.
+const (
+	fieldManifestFiles    = "manifestFiles"
+	fieldPreManifestFiles = "preManifestFiles"
+)
 
 // IdentityChange names one field that moved between the compared artifacts.
 //
@@ -126,9 +132,9 @@ const fieldManifestFiles = "manifestFiles"
 // is never one of them. The version axis is ComponentResult.From and To, and
 // the records assess it.
 //
-// For manifestFiles From and To are the whole sorted sets joined by commas, and
-// Added and Removed name the entries that differ. They are empty on every
-// scalar field.
+// For manifestFiles and preManifestFiles From and To are the whole sorted sets
+// joined by commas, and Added and Removed name the entries that differ. They
+// are empty on every scalar field.
 type IdentityChange struct {
 	Field   string
 	From    string
@@ -346,7 +352,7 @@ func MatchIdentities(set Set, from, to map[string]Identity) []ComponentResult {
 // as a value would report a relocation nobody performed for every component the
 // moment one of the two artifacts stops carrying the field.
 //
-// The manifest file set is the exception. An artifact that lists none is
+// The manifest file sets are the exception. An artifact that lists none is
 // stating that, and the move that matters most is the one that empties it.
 func identityChanges(from, to Identity) []IdentityChange {
 	var moved []IdentityChange
@@ -364,15 +370,23 @@ func identityChanges(from, to Identity) []IdentityChange {
 			moved = append(moved, IdentityChange{Field: f.field, From: f.from, To: f.to})
 		}
 	}
-	was, now := sets.New(from.ManifestFiles...), sets.New(to.ManifestFiles...)
-	if added, removed := now.Difference(was), was.Difference(now); added.Len() > 0 || removed.Len() > 0 {
-		moved = append(moved, IdentityChange{
-			Field:   fieldManifestFiles,
-			From:    strings.Join(sets.List(was), ","),
-			To:      strings.Join(sets.List(now), ","),
-			Added:   slices.Sorted(maps.Keys(added)),
-			Removed: slices.Sorted(maps.Keys(removed)),
-		})
+	for _, f := range []struct {
+		field    string
+		from, to []string
+	}{
+		{fieldManifestFiles, from.ManifestFiles, to.ManifestFiles},
+		{fieldPreManifestFiles, from.PreManifestFiles, to.PreManifestFiles},
+	} {
+		was, now := sets.New(f.from...), sets.New(f.to...)
+		if added, removed := now.Difference(was), was.Difference(now); added.Len() > 0 || removed.Len() > 0 {
+			moved = append(moved, IdentityChange{
+				Field:   f.field,
+				From:    strings.Join(sets.List(was), ","),
+				To:      strings.Join(sets.List(now), ","),
+				Added:   slices.Sorted(maps.Keys(added)),
+				Removed: slices.Sorted(maps.Keys(removed)),
+			})
+		}
 	}
 	return moved
 }
@@ -443,8 +457,8 @@ func withIdentityChanges(r ComponentResult, moved []IdentityChange) ComponentRes
 func movedPhrase(moved []IdentityChange) string {
 	parts := make([]string, len(moved))
 	for i, c := range moved {
-		if c.Field == fieldManifestFiles {
-			parts[i] = "its manifestFiles " + setChangePhrase(c.Added, c.Removed)
+		if c.Field == fieldManifestFiles || c.Field == fieldPreManifestFiles {
+			parts[i] = "its " + c.Field + " " + setChangePhrase(c.Added, c.Removed)
 			continue
 		}
 		parts[i] = fmt.Sprintf("its %s moves from %s to %s", c.Field, c.From, c.To)

@@ -289,18 +289,18 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 // ApplyInheritedIdentity overwrites each ref's deployment identity with the one
 // a prior recipe resolved for the same component, so an AICR upgrade does not
 // silently relocate or replace a running component when a registry default
-// moves. The identity is the namespace, chart, source, kustomize path and
-// manifest file set. Version, tag, values and overrides are configuration and
-// stay as resolved. A component the prior recipe does not name keeps its
-// defaults. It is a first deploy as far as that artifact knows.
+// moves. The identity is the namespace, chart, source, kustomize path and the
+// manifest and pre-manifest file sets. Version, tag, values and overrides are
+// configuration and stay as resolved. A component the prior recipe does not
+// name keeps its defaults. It is a first deploy as far as that artifact knows.
 //
 // A scalar field the prior recipe leaves empty is not inherited, so an artifact
-// that never carried it does not blank the default. The manifest file set is
-// the exception. It is restored whole, even when empty, because a resolved
-// recipe that lists none is stating that, and dropping or adding an entry moves
-// the identity that upgrade-check compares. A component whose deployment type
-// differs from the prior one is rejected. No chart, source or path carries
-// across a Helm and Kustomize flip.
+// that never carried it does not blank the default. The manifest and
+// pre-manifest file sets are the exception. Each is restored whole, even when
+// empty, because a resolved recipe that lists none is stating that, and
+// dropping or adding an entry moves the identity that upgrade-check compares.
+// A component whose deployment type differs from the prior one is rejected. No
+// chart, source or path carries across a Helm and Kustomize flip.
 //
 // Runs after ApplyRegistryDefaults rather than inside it, because that method is
 // exported and called from four packages.
@@ -358,6 +358,7 @@ func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 			refs[i].Path = p.Path
 		}
 		refs[i].ManifestFiles = slices.Clone(p.ManifestFiles)
+		refs[i].PreManifestFiles = slices.Clone(p.PreManifestFiles)
 	}
 	return nil
 }
@@ -390,6 +391,11 @@ func validateInheritedIdentity(p ComponentRef) error {
 	for _, f := range p.ManifestFiles {
 		if !filepath.IsLocal(f) {
 			return bad("manifest file", f, "a valid path", "must be a relative path inside the data root")
+		}
+	}
+	for _, f := range p.PreManifestFiles {
+		if !filepath.IsLocal(f) {
+			return bad("pre-manifest file", f, "a valid path", "must be a relative path inside the data root")
 		}
 	}
 	return nil
