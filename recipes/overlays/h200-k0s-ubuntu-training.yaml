@@ -64,16 +64,16 @@ spec:
     - name: nvsentinel
       type: Helm
       overrides:
+        # metadata-collector keeps the chart default runtimeClassName
+        # (nvidia). Unlike the vr200-rke2-ubuntu leaves, k0s is not on the
+        # CDI+NRI path: the toolkit drop-in registers a real nvidia runtime
+        # handler, so no host driver-library mounts are needed.
         labeler:
           # With a host-provided driver there is no driver pod for the
           # NVSentinel labeler to observe; without this, several
           # NVSentinel DaemonSets come up with 0 desired pods while the
           # rest of the stack looks healthy.
           assumeDriverInstalled: true
-        # metadata-collector keeps the chart default runtimeClassName
-        # (nvidia). Unlike the vr200-rke2-ubuntu leaves, k0s is not on the
-        # CDI+NRI path: the toolkit drop-in registers a real nvidia runtime
-        # handler, so no host driver-library mounts are needed.
 
   validation:
     deployment:
