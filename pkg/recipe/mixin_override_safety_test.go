@@ -218,7 +218,7 @@ func TestMixinNVSentinelObservability_ComposesCleanly(t *testing.T) {
 	spec := RecipeMetadataSpec{
 		Mixins: []string{"nvsentinel-observability"},
 		ComponentRefs: []ComponentRef{
-			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.20.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
+			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.22.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
 		},
 	}
 
@@ -339,7 +339,7 @@ func TestMixinNVSentinelObservability_LeafSuppliesEndpoint(t *testing.T) {
 		Mixins: []string{"nvsentinel-observability"},
 		ComponentRefs: []ComponentRef{
 			{
-				Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.20.0",
+				Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.22.0",
 				Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel",
 				Overrides: map[string]any{
 					"global": map[string]any{"tracing": map[string]any{"endpoint": endpoint}},
@@ -393,7 +393,7 @@ func TestMixinNVSentinelObservability_RejectsLeafCollision(t *testing.T) {
 		Mixins: []string{"nvsentinel-observability"},
 		ComponentRefs: []ComponentRef{
 			{
-				Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.20.0", Source: "oci://ghcr.io/nvidia",
+				Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.22.0", Source: "oci://ghcr.io/nvidia",
 				Type: ComponentTypeHelm, Namespace: "nvsentinel",
 				Overrides: map[string]any{
 					"global": map[string]any{
@@ -444,7 +444,7 @@ func TestMixinNVSentinelObservability_RejectsMultiMixinCollision(t *testing.T) {
 	spec := RecipeMetadataSpec{
 		Mixins: []string{"nvsentinel-observability", "nvsentinel-observability"},
 		ComponentRefs: []ComponentRef{
-			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.20.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
+			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.22.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
 		},
 	}
 
@@ -526,7 +526,7 @@ func TestMergeMixins_RejectsDuplicateComponentRefNameWithinOneMixin(t *testing.T
 	spec := RecipeMetadataSpec{
 		Mixins: []string{"test-duplicate-refs"},
 		ComponentRefs: []ComponentRef{
-			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.20.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
+			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.22.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
 		},
 	}
 

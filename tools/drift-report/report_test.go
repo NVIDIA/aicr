@@ -15,6 +15,7 @@
 package main
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -216,10 +217,17 @@ func TestBuildReportTotalOutageAllUnresolved(t *testing.T) {
 }
 
 func TestBuildReportIsDeterministic(t *testing.T) {
+	// nvsentinel carries multiple candidates: Alternatives is the newest
+	// ordering in the artifact, so the determinism this test names has to cover
+	// it rather than only the single-candidate rows it covered before.
 	lookups := map[string]Lookup{
-		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0", Latest: "v1.23.0", UpdateType: "minor"},
-		"prometheus-adapter":        {Current: "5.3.0", Latest: "5.4.0", UpdateType: "minor"},
-		"cert-manager":              {Current: "v1.20.2"},
+		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0", Latest: "v1.23.0", UpdateType: "minor",
+			Candidates: []Candidate{
+				{Version: "v1.20.3", UpdateType: "patch"},
+				{Version: "v1.23.0", UpdateType: "minor"},
+			}},
+		"prometheus-adapter": {Current: "5.3.0", Latest: "5.4.0", UpdateType: "minor"},
+		"cert-manager":       {Current: "v1.20.2"},
 	}
 	a, err := BuildReport(testPins(), lookups, Meta{Commit: "abc1234"})
 	if err != nil {
@@ -231,5 +239,70 @@ func TestBuildReportIsDeterministic(t *testing.T) {
 	}
 	if !reflect.DeepEqual(a, b) {
 		t.Error("two builds over identical input differ; ordering is not deterministic")
+	}
+}
+
+// Alternatives carries the candidates Latest beat, so a reviewer sees the
+// smaller step when one exists. Latest itself is never repeated there: the row
+// already names it, and duplicating it would read as two separate options.
+func TestBuildReportSurfacesAlternatives(t *testing.T) {
+	pins := []Pin{{
+		Component: "kube-prometheus-stack", Chart: "kube-prometheus-stack",
+		Repository: "https://prometheus-community.github.io/helm-charts",
+		Datasource: "helm", Version: "84.4.0", DepName: "kube-prometheus-stack",
+	}}
+	lookups := map[string]Lookup{"kube-prometheus-stack": {
+		DepName: "kube-prometheus-stack", Current: "84.4.0",
+		Latest: "91.5.2", UpdateType: "major",
+		Candidates: []Candidate{
+			{Version: "84.5.0", UpdateType: "minor"},
+			{Version: "91.5.2", UpdateType: "major"},
+		},
+	}}
+
+	r, err := BuildReport(pins, lookups, Meta{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if len(r.Drift) != 1 {
+		t.Fatalf("got %d drift rows, want 1", len(r.Drift))
+	}
+	got := r.Drift[0]
+	if got.Latest != "91.5.2" || got.UpdateType != "major" {
+		t.Errorf("headline changed: got %q/%q, want 91.5.2/major", got.Latest, got.UpdateType)
+	}
+	want := []Candidate{{Version: "84.5.0", UpdateType: "minor"}}
+	if len(got.Alternatives) != len(want) || got.Alternatives[0] != want[0] {
+		t.Errorf("got alternatives %+v, want %+v", got.Alternatives, want)
+	}
+}
+
+// The common case is one candidate, which is the one Latest already names.
+// Alternatives must stay absent there so those rows keep the bytes they have
+// always had -- a diffable artifact is the point of committing it. In the
+// 2026-09-28 report that is 25 of the 26 drift rows.
+func TestBuildReportOmitsAlternativesWhenOnlyOneCandidate(t *testing.T) {
+	pins := []Pin{{
+		Component: "kueue", Chart: "kueue", Repository: "oci://registry.k8s.io/kueue/charts",
+		Datasource: "docker", Version: "0.19.3", DepName: "kueue",
+	}}
+	lookups := map[string]Lookup{"kueue": {
+		DepName: "kueue", Current: "0.19.3", Latest: "0.19.6", UpdateType: "patch",
+		Candidates: []Candidate{{Version: "0.19.6", UpdateType: "patch"}},
+	}}
+
+	r, err := BuildReport(pins, lookups, Meta{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if len(r.Drift[0].Alternatives) != 0 {
+		t.Errorf("got alternatives %+v, want none", r.Drift[0].Alternatives)
+	}
+	blob, err := json.Marshal(r.Drift[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(blob), "alternatives") {
+		t.Errorf("alternatives key present in JSON for a single-candidate row: %s", blob)
 	}
 }
