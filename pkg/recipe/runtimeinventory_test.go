@@ -173,7 +173,66 @@ func TestApplyBuildConfigRuntimeInventoryRejectsAbsentComponent(t *testing.T) {
 	}
 }
 
+// A GKE recipe that neither declares nor declines the component gains it when
+// the caller opts in, and the granted ref carries the registry's chart, source
+// and version so the bundle renders the qualified artifact.
+func TestApplyRuntimeInventoryGrantsOnGKE(t *testing.T) {
+	result := &RecipeResult{
+		Criteria:      &Criteria{Service: CriteriaServiceGKE, Intent: CriteriaIntentTraining},
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+	}
+
+	if err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled); err != nil {
+		t.Fatalf("applyRuntimeInventoryMode: %v", err)
+	}
+
+	ref := result.GetComponentRef("k8s-aibom")
+	if ref == nil {
+		t.Fatal("k8s-aibom was not granted to a GKE recipe that opted in")
+	}
+	if !ref.IsEnabled() {
+		t.Error("granted ref is not enabled")
+	}
+	if ref.Version == "" || ref.Source == "" {
+		t.Errorf("granted ref missing registry defaults: version=%q source=%q", ref.Version, ref.Source)
+	}
+	if ref.ValuesFile != "components/k8s-aibom/values.yaml" {
+		t.Errorf("granted ref valuesFile = %q, want components/k8s-aibom/values.yaml", ref.ValuesFile)
+	}
+	mode, recorded := result.RuntimeInventoryMode()
+	if !recorded || mode != RuntimeInventoryEnabled {
+		t.Errorf("selection not recorded: mode=%q recorded=%v", mode, recorded)
+	}
+}
+
 func modePtr(m RuntimeInventoryMode) *RuntimeInventoryMode { return &m }
+
+// A granted component must appear in deploymentOrder. The order is derived by
+// TopologicalSort over ComponentRefs and recomputed because applyBuildConfig
+// sets selected=true; if the grant ever moves after that recompute, the
+// emitted recipe would list a component the same document omits from its order.
+func TestGrantedRuntimeInventoryEntersDeploymentOrder(t *testing.T) {
+	result := &RecipeResult{
+		Criteria:      &Criteria{Service: CriteriaServiceGKE, Intent: CriteriaIntentInference},
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+	}
+	mode := RuntimeInventoryEnabled
+	cfg := &buildConfig{runtimeInventoryMode: &mode}
+
+	if err := applyBuildConfig(result, cfg); err != nil {
+		t.Fatalf("applyBuildConfig: %v", err)
+	}
+
+	var found bool
+	for _, name := range result.DeploymentOrder {
+		if name == "k8s-aibom" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("k8s-aibom missing from deploymentOrder %v", result.DeploymentOrder)
+	}
+}
 
 // TestApplyBuildConfigPreservesBothConfigurations covers a regression found in
 // review: applyBuildConfig applies the runtime inventory selection first, and
