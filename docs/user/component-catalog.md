@@ -702,7 +702,7 @@ See `demos/workloads/inference/nimservice-hf-nocred.yaml` for a complete example
 
 The `aws-ebs-csi-driver` controller calls the Amazon EBS API to create, attach, and delete volumes. AICR installs the driver but does not give it AWS credentials: the stock values leave `ebs-csi-controller-sa` in `kube-system` without an IAM role annotation. The cluster must supply EBS permissions through one of these paths:
 
-- **EKS Pod Identity.** Create a Pod Identity association for `kube-system/ebs-csi-controller-sa`. The association lives in EKS, outside the Helm release, so it needs no bundle override.
+- **EKS Pod Identity.** Create a Pod Identity association for `kube-system/ebs-csi-controller-sa`. The association lives in EKS, outside the Helm release, so it needs no bundle override. It delivers credentials only through the [EKS Pod Identity Agent](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html), which AICR does not install, so install or verify the agent first.
 - **IAM roles for service accounts (IRSA).** Annotate the controller ServiceAccount with the role ARN at bundle time. The annotation key contains dots, so pass it as a JSON object:
 
   ```shell
@@ -726,9 +726,10 @@ A `Pending` PVC alone does not identify the cause. Confirm it from the driver's 
 # Provisioning events on the stuck claim
 kubectl describe pvc <name> -n <namespace>
 
-# The sidecar that issues CreateVolume, and the driver that calls the EBS API
-kubectl logs -n kube-system deploy/ebs-csi-controller -c csi-provisioner --tail=100
-kubectl logs -n kube-system deploy/ebs-csi-controller -c ebs-plugin --tail=100
+# The sidecar that issues CreateVolume, and the driver that calls the EBS API.
+# The controller runs two replicas and only the leader provisions, so read both pods.
+kubectl logs -n kube-system deploy/ebs-csi-controller -c csi-provisioner --all-pods=true --prefix --tail=100
+kubectl logs -n kube-system deploy/ebs-csi-controller -c ebs-plugin --all-pods=true --prefix --tail=100
 ```
 
 Credential errors in the `ebs-plugin` log — no credential provider found, an unauthorized operation, or a failed role assumption — confirm a missing or insufficient credential path. Fix the path using one of the options above, then let the provisioner retry; the PVC binds once `CreateVolume` succeeds.
