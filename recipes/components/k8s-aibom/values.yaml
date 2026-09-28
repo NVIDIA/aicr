@@ -17,15 +17,22 @@
 # h100-gke-cos-inference (ADR-019 stock-adoption amendment); its only
 # descendant, h100-gke-cos-inference-dynamo, declines it.
 #
-# The digest and defaults below were qualified as one coherent v1.3.0 artifact
-# set under ADR-019, re-pinned from v1.2.0 when upstream graduated CRD storage
-# to v1beta1. Both v1alpha1 and v1beta1 remain served, and the chart still
-# renders AIBOMControllerConfig at v1alpha1.
+# The digest and defaults below were qualified as one coherent v1.5.1 artifact
+# set under ADR-019, re-pinned from v1.3.0. Both v1alpha1 and v1beta1 remain
+# served, storage unchanged on v1beta1; the chart now renders
+# AIBOMControllerConfig at v1beta1 (v1.3.0 rendered it at v1alpha1).
+#
+# v1.5.0 added an AIBOMControllerConfig `verification` block (Sigstore/Rekor
+# model-signature verification). It is deliberately left unset: absent or
+# disabled reproduces pre-v1.5.0 behavior exactly, which is what ADR-019's
+# secure-inactive-by-default rule asks for. Enabling it is separate scope --
+# the `verified` tier additionally needs a signer-identity constraint, so
+# turning it on without one records signatures as `claimed` anyway.
 
 image:
   repository: ghcr.io/googlecloudplatform/k8s-aibom
   tag: ""
-  digest: sha256:f8e48d4edc44e6ee8e40a2ac6c5f60b190aa18d411a75702dc5798a77a039e8d
+  digest: sha256:7b02731563a5ec524ed3396a07a524b02e3f51e17c976e02e65fc680b51e8164
 
 # Make pod readiness reflect the current AIBOMControllerConfig status rather
 # than process liveness alone. Invalid current configuration must fail closed.
