@@ -106,6 +106,18 @@ func TestVR200NVSentinelNRIHostMountReenable(t *testing.T) {
 				t.Fatalf("labeler.assumeDriverInstalled = false, want true on host-managed-driver clusters (#2175).")
 			}
 
+			// The subchart must actually be on. Every assertion below
+			// reads the metadata-collector override block, which an
+			// overlay can keep verbatim while re-adding the
+			// global.metadataCollector.enabled=false this change removed
+			// — the chart then renders no DaemonSet and the host-mount
+			// wiring below is asserted against a pod spec that does not
+			// exist. Absent is the wanted state (the chart defaults the
+			// subchart on); only an explicit false is a regression.
+			if enabled, set := nestedMetadataCollectorEnabled(values); set && !enabled {
+				t.Fatal("global.metadataCollector.enabled = false — the subchart renders no DaemonSet, so every host-mount assertion below would pass against nothing.")
+			}
+
 			collector, ok := values["metadata-collector"].(map[string]any)
 			if !ok {
 				t.Fatal("metadata-collector overrides missing — the assertions below would be vacuous")
@@ -167,6 +179,24 @@ func TestVR200NVSentinelNRIHostMountReenable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// nestedMetadataCollectorEnabled reads global.metadataCollector.enabled,
+// reporting whether an overlay set it at all. Unset is the wanted state
+// on the VR200 leaves: the chart defaults the subchart on, so only an
+// explicit value can turn it off.
+func nestedMetadataCollectorEnabled(values map[string]any) (value, set bool) {
+	global, ok := values["global"].(map[string]any)
+	if !ok {
+		return false, false
+	}
+	collector, ok := global["metadataCollector"].(map[string]any)
+	if !ok {
+		return false, false
+	}
+	enabled, ok := collector["enabled"].(bool)
+
+	return enabled, ok
 }
 
 // hasEnvVar reports whether env carries a Kubernetes-shaped env var
