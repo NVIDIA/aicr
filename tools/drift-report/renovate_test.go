@@ -384,3 +384,98 @@ func TestParseRenovateReportUnsupportedUpdateTypes(t *testing.T) {
 		})
 	}
 }
+
+// Renovate emits one entry per update type, and the report used to keep only
+// the highest-ranked one. That discarded the safer step when both existed: in
+// the 2026-09-28 run kube-prometheus-stack offered minor 84.5.0 alongside major
+// 91.5.2, and only the major reached the digest (#2791). Candidates keeps all
+// of them, ordered safest-first so the ordering is stable across runs.
+func TestParseRenovateReportCollectsAllCandidates(t *testing.T) {
+	got, err := ParseRenovateReport([]byte(sampleReport))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		dep  string
+		want []Candidate
+	}{
+		{
+			name: "every recognized update is kept, ranked safest first",
+			dep:  "ghcr.io/nvidia/nvsentinel",
+			want: []Candidate{
+				{Version: "v1.20.3", UpdateType: "patch"},
+				{Version: "v1.23.0", UpdateType: "minor"},
+			},
+		},
+		{"a current pin has no candidates", "cert-manager", nil},
+		{"an unresolved pin has no candidates", "no-lookup-chart", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, ok := got[tt.dep]
+			if !ok {
+				t.Fatalf("dep %q missing from result", tt.dep)
+			}
+			if len(l.Candidates) != len(tt.want) {
+				t.Fatalf("got %d candidates %v, want %d %v",
+					len(l.Candidates), l.Candidates, len(tt.want), tt.want)
+			}
+			for i := range tt.want {
+				if l.Candidates[i] != tt.want[i] {
+					t.Errorf("candidate %d: got %+v, want %+v", i, l.Candidates[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// Latest stays the highest-ranked candidate. Summary.Behind counts rows whose
+// Latest is non-empty, so changing which candidate wins would silently change
+// the headline counts this report has always published.
+func TestParseRenovateReportLatestStillWins(t *testing.T) {
+	got, err := ParseRenovateReport([]byte(sampleReport))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	l := got["ghcr.io/nvidia/nvsentinel"]
+	if l.Latest != "v1.23.0" || l.UpdateType != "minor" {
+		t.Errorf("got Latest=%q UpdateType=%q, want v1.23.0/minor", l.Latest, l.UpdateType)
+	}
+}
+
+// Renovate emits at most one update per type, so a rank tie should be
+// unreachable -- but that is its behavior, not a guarantee, and the sort must
+// not fall back to the array order it exists to normalize. Feeding two entries
+// of the same type in both orders must produce the same Candidates.
+func TestParseRenovateReportCandidateOrderIsTotal(t *testing.T) {
+	report := func(first, second string) string {
+		return `{"repositories":{"r":{"packageFiles":{"custom.regex":[{"packageFile":"recipes/registry.yaml","deps":[
+          {"depName":"dup","depType":"registry-chart","datasource":"docker","currentValue":"1.0.0",
+           "updates":[{"newValue":"` + first + `","updateType":"minor"},
+                      {"newValue":"` + second + `","updateType":"minor"}]}]}]}}}}`
+	}
+
+	ascending, err := ParseRenovateReport([]byte(report("1.1.0", "1.2.0")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	descending, err := ParseRenovateReport([]byte(report("1.2.0", "1.1.0")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+
+	got, rev := ascending["dup"].Candidates, descending["dup"].Candidates
+	if len(got) != 2 || len(rev) != 2 {
+		t.Fatalf("got %d and %d candidates, want 2 each", len(got), len(rev))
+	}
+	for i := range got {
+		if got[i] != rev[i] {
+			t.Fatalf("input order changed the result: %+v vs %+v", got, rev)
+		}
+	}
+	if got[0].Version != "1.1.0" {
+		t.Errorf("tie not broken by version: got %+v", got)
+	}
+}

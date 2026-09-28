@@ -85,6 +85,16 @@ Report `unresolved[]` to the user before reviewing anything: those pins are
 unknown, not current, and a persistent entry is a broken datasource worth
 fixing ahead of any bump.
 
+**Read `alternatives[]` on every row that has one.** `latest` is the largest
+step Renovate offers, not the only one and not necessarily the one to take. A
+row carrying `alternatives` has a smaller step available — usually the one worth
+recommending, since it crosses fewer upstream changes. Name both in the verdict
+and say which you are recommending; a verdict that discusses only `latest` when
+the row offered a minor beside a major has reviewed the wrong upgrade (#2791).
+
+The field is absent when Renovate offered exactly one candidate, which is the
+common case. It is additive, so `schemaVersion` stays `1`.
+
 ## Step 3 — Gather evidence per component
 
 Ordered by how often each is what actually bites.
@@ -150,7 +160,9 @@ Write Markdown to a temp file (`"$TMPDIR"/aicr-drift-review-<date>.md`) and
 summarize it in chat. Rank components by (blocking findings, then update type,
 then age of the pin). Per component:
 
-- **Verdict:** take / hold / defer, one line of why
+- **Verdict:** take / hold / defer, one line of why. When the row carries
+  `alternatives`, name which version the verdict is about — a bare "take" is
+  ambiguous once more than one is on offer
 - **Evidence:** the findings from Step 3 that produced the verdict, with the
   specific values path, image, or release note that matters
 - **Cost:** what a bump would require — a values-file edit, a new upgrade

@@ -16,19 +16,35 @@ package main
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// Candidate is one version Renovate offers for a pin. Renovate emits at most
+// one per update type.
+type Candidate struct {
+	Version    string `json:"version"`
+	UpdateType string `json:"updateType"`
+}
+
 // Lookup is what Renovate found for one annotated pin. An empty Latest means
 // the pin is current; a non-empty Problem means Renovate could not resolve it,
 // which is reported as unknown and never as current.
+//
+// Candidates carries every recognized update, not just the winning one.
+// Reporting only Latest hid the safer step whenever both existed: in the
+// 2026-09-28 run kube-prometheus-stack offered minor 84.5.0 next to major
+// 91.5.2, and a reviewer reading the digest saw only the major (#2791). Latest
+// still names the highest-ranked candidate, because Summary.Behind counts rows
+// by it and changing the winner would move the headline counts.
 type Lookup struct {
 	DepName    string
 	Current    string
 	Latest     string
 	UpdateType string
+	Candidates []Candidate
 	Problem    string
 }
 
@@ -128,10 +144,29 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 							continue
 						}
 						hasRecognizedUpdate = true
+						l.Candidates = append(l.Candidates, Candidate{Version: u.NewValue, UpdateType: u.UpdateType})
 						if r >= best {
 							best, l.Latest, l.UpdateType = r, u.NewValue, u.UpdateType
 						}
 					}
+					// Safest-first, by the same rank that picks Latest. Renovate's
+					// array order is not contractual, and an unstable order here
+					// would churn the committed artifact between identical runs --
+					// the reproducibility the report is read for.
+					//
+					// Version breaks a rank tie so the order is total. Renovate
+					// emits at most one update per type, which would make ties
+					// unreachable, but that is its behavior rather than a
+					// guarantee -- and falling back to array order on a tie is
+					// exactly the non-contractual ordering this sort exists to
+					// remove.
+					sort.Slice(l.Candidates, func(i, j int) bool {
+						a, b := l.Candidates[i], l.Candidates[j]
+						if ra, rb := updateRank[a.UpdateType], updateRank[b.UpdateType]; ra != rb {
+							return ra < rb
+						}
+						return a.Version < b.Version
+					})
 					// If no recognized updates exist, surface the unsupported type and
 					// any malformed entries as diagnostics instead of leaving the pin
 					// looking current.
