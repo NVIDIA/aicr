@@ -371,10 +371,11 @@ aicr validate -r recipe.yaml -s snapshot.yaml \
 The supplied runtime **owns its fabric wiring end to end**: because the recipe
 opted in explicitly, the validator bypasses the compiled applicability gate and
 skips every service-specific *setup* step — EFA/TCPXO/RDMA NIC discovery, the
-GB200-NVreg / GKE-TCPXO preflights, and NVLS/IMEX auto-provisioning. It renders
-the runtime, sizes it (against the runtime's own `nodeSelector` when it pins
-one, so `WorkerCount` matches placement), applies it alongside the shared
-`TrainJob`, and evaluates the bandwidth threshold from the launcher logs.
+GB200-NVreg / GKE-TCPXO preflights, and NVLS/IMEX auto-provisioning (except as
+described for IMEX below). It renders the runtime, sizes it (against the
+runtime's own `nodeSelector` when it pins one, so `WorkerCount` matches
+placement), applies it alongside the shared `TrainJob`, and evaluates the
+bandwidth threshold from the launcher logs.
 Transport verification is **not** skipped: pairing the runtime with the `-net`
 or `-nvls` check still asserts that transport actually carried traffic (the NCCL
 markers are fabric-agnostic), so a named variant can't pass on bandwidth alone.
@@ -395,6 +396,15 @@ What it must honor:
 - The runtime should pin its own worker `nodeSelector`/`tolerations`, or pass
   `--node-selector` to `aicr validate`, so workers land on the intended GPU
   nodes.
+- **IMEX access uses the validator-managed claim template.** The benchmark runs
+  in a per-run namespace that does not exist before the run, so nothing can be
+  pre-created there for the runtime. To get an IMEX channel, reference the
+  ResourceClaimTemplate `nccl-all-reduce-imex` from the pod's `resourceClaims`.
+  The validator then creates the ComputeDomain that backs it, on any check
+  variant, and waits for the template before starting the run.
+- Any other pod-level `resourceClaimTemplateName`, and any
+  `resourceClaimName`, is rejected: no such claim could exist in the per-run
+  namespace.
 
 `nccl-benchmark-runtime-ref` and `nccl-benchmark-profile` are mutually
 exclusive — a recipe supplies its own runtime **or** borrows an embedded one,
@@ -402,7 +412,8 @@ never both. An absent or blank ref falls back to criteria/profile-derived
 applicability. A malformed ref, or a file missing from `--data`, is rejected by
 `aicr validate` **before any validator Job is deployed** (a resolution error on
 stderr). A resolved file that is not a `TrainingRuntime` with a `node`
-replicatedJob **fails the check itself** (in the pod). Either way it fails
+replicatedJob, or that references an unsupported claim, **fails the check
+itself** (in the pod), before any benchmark resources are applied. Either way it fails
 rather than silently skipping.
 
 > **Sizing note.** The worker cohort is sized against the runtime's own
