@@ -2852,10 +2852,10 @@ h100-gke-cos-training-slurm:
   020-slinky-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-topograph/install.sh: 19c15d32f7578504e561768affa18c21390db951c791a33998fd2bab58a881d8
   020-slinky-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
-  020-slinky-topograph/values.yaml: 83a1582f2ab8f283e77367a998d5f5d8ea686466d42c2dd5645fba1fba96bcc6
+  020-slinky-topograph/values.yaml: 433c88d6355bfefd023c111e008a39e7c07c913401708a2641717ca5a796a1dd
   README.md: 180997c1a1da0df6766b8f53153117069ed3c2598df31f239dca5b4fae538d70
   bundle-info.yaml: 4dc8edca83dd0ea54f7861df1b318479b625071ae28e64054c347d9a0a967261
-  checksums.txt: 69251f709f9ae3cfc80b4febb9bcd962d1d0ea1734ba59ea0fe37eb4d4d54ea7
+  checksums.txt: bf7fcc70a791e98ae2300de5d47a4b04b3b69a11a09f62da7b70aeb636952655
   deploy.sh: 26b5bbeba08ab0830741d513d86fb9b24a204d48968b95c88fb5eadc9fe67cba
   recipe.yaml: b3d709d000e79fdf78dffc7b195b3602d8eda90f26beb9be0610e8b2e9854cf7
 h100-kind-inference-dynamo:
@@ -3074,10 +3074,10 @@ h100-kind-training-slurm:
   017-slinky-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-topograph/install.sh: 19c15d32f7578504e561768affa18c21390db951c791a33998fd2bab58a881d8
   017-slinky-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
-  017-slinky-topograph/values.yaml: ead36c362fbd40fa1257039e02155764f59bd28d38f41ee478a6005aa9184bae
+  017-slinky-topograph/values.yaml: 4392d5c24c812f456c976cd34549a27c8c5369199c3075c430a075811a45c4cd
   README.md: 3cd7aec77838f0718b649765a0021e1a82a70ab8ff41a98922ea9fdb71535a46
   bundle-info.yaml: be9a1832a2f8d4cb8f13893bf0dff6bdfb026b95537a8b3fdcd1994e31d4e9c7
-  checksums.txt: b9f572879bf2dfcbcb99ccf244831c306dce3e507c79ca914d4f1c63e87b70c0
+  checksums.txt: be4c23d29c5a1b25c3f9198fe1fa9ddbdad1ddd39efb59812a5c5279cc7dd302
   deploy.sh: a9268f292354d1038ae6c7401d39c2fd190aafd3e2f0f7a3820ee740e685255b
   recipe.yaml: f285815d67756bc9eb1ad14f14013d5f65643cd791d7c1f50e01036d91105704
 h200-any:
