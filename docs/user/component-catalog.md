@@ -1594,13 +1594,14 @@ also installs `computedomains` from its chart. This pairing has not yet been
 verified on a live OpenShift cluster; see
 [NVIDIA/aicr#2969](https://github.com/NVIDIA/aicr/issues/2969).
 
-### `mariadb-operator`: `26.6.0` (or earlier) to `26.10.0`
+### `mariadb-operator`: `26.6.0` (or earlier) to `26.10.1`
 
 `26.10.0` changes the replication configuration rendered by the MariaDB init
 container and the replication liveness probe served by the agent, so the data
-plane has to move with the operator. `updateStrategy.autoUpdateDataPlane`
-defaults to `false`, so an operator upgraded without setting it first runs
-`26.10.0` against init and agent containers left at the prior version.
+plane has to move with the operator, and `26.10.1` keeps that requirement.
+`updateStrategy.autoUpdateDataPlane` defaults to `false`, so an operator
+upgraded without setting it first runs `26.10.1` against init and agent
+containers left at the prior version.
 
 The init container and agent are the HA data plane, so they exist only where
 Galera or replication is enabled. AICR's accounting database ships as a single
@@ -1612,8 +1613,11 @@ any HA `MariaDB` the same operator manages. List what you have with:
 kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,IMAGE:.spec.image,GALERA:.spec.galera.enabled,REPLICATION:.spec.replication.enabled
 ```
 
-Fresh installs are unaffected. To migrate an existing cluster, set the flag
-**before** the operator moves, then upgrade CRDs first and the operator second:
+Fresh installs are unaffected, and so is a cluster already on `26.10.0`:
+upstream's `26.10.1` guide applies only when coming from before `26.10.x`, and
+`26.10.1` adds only optional CRD fields. To migrate an existing cluster from
+`26.6.0` or earlier, set the flag **before** the operator moves, then upgrade
+CRDs first and the operator second:
 
 1. Enable data-plane auto-update on every **HA** MariaDB the operator manages.
    AICR's own accounting database is `mariadb` in namespace `slurm` and is not
@@ -1622,7 +1626,7 @@ Fresh installs are unaffected. To migrate an existing cluster, set the flag
    kubectl patch mariadb mariadb -n slurm --type merge \
      -p '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
    ```
-2. Upgrade `mariadb-operator-crds` to `26.10.0` **in place**. Confirm which
+2. Upgrade `mariadb-operator-crds` to `26.10.1` **in place**. Confirm which
    namespace the existing release is in first, because Helm scopes a release
    by namespace: without `--namespace` the request lands in whatever namespace
    the kubeconfig context points at, `--install` does not find the existing
@@ -1633,16 +1637,16 @@ Fresh installs are unaffected. To migrate an existing cluster, set the flag
    helm list -A | grep mariadb-operator-crds
    helm upgrade --install mariadb-operator-crds \
      oci://ghcr.io/mariadb-operator/charts/mariadb-operator-crds \
-     --version 26.10.0 --namespace mariadb-system
+     --version 26.10.1 --namespace mariadb-system
    ```
    Never `helm uninstall` the CRD chart: that deletes the CRDs and
    cascade-deletes every `MariaDB`, `User`, `Database` and `Grant` with them.
-3. Upgrade `mariadb-operator` to `26.10.0` (re-run `install.sh`, `helmfile
+3. Upgrade `mariadb-operator` to `26.10.1` (re-run `install.sh`, `helmfile
    apply`, or sync the release).
 4. For each HA MariaDB patched in step 1, wait for the roll to finish before
    continuing. The operator applies the new init and agent images
    asynchronously, and reverting the flag mid-update strands that resource on
-   the old data-plane version against a `26.10.0` operator:
+   the old data-plane version against a `26.10.1` operator:
    ```bash
    kubectl wait mariadb <name> -n <namespace> \
      --for=condition=Updated=True --timeout=15m
@@ -1656,8 +1660,8 @@ Fresh installs are unaffected. To migrate an existing cluster, set the flag
 5. Return the flag to `false` so a later operator bump does not update the data
    plane unattended. If the field is managed in git, set it there.
 
-The same release changes the operator's default server image to
-`mariadb:12.3.3`. AICR pins `mariadb:11.8.8` in
+`26.10.0` also changes the operator's default server image to
+`mariadb:12.3.3`, and `26.10.1` keeps it. AICR pins `mariadb:11.8.8` in
 `recipes/components/slurm-accounting-mariadb/values.yaml`, so a cluster bundled
 from this recipe stays on `11.8.8`; the pin also puts the server image into the
 rendered `MariaDB` resource, where the BOM records it. Any `MariaDB` that omits

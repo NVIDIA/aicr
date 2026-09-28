@@ -16,28 +16,33 @@ apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: mariadb-operator
 transitions:
-  # from opens below the pin rather than at 26.6.0: upstream uses CalVer and
-  # the only 26.x releases are 26.3.0, 26.6.0 and 26.10.0, so an operator
-  # arriving from any of them crosses the same boundary. Naming 26.6.0 as the
-  # floor would leave every earlier pin matching nothing.
+  # from opens below 26.10.0 rather than at 26.6.0: upstream uses CalVer and
+  # the only 26.x releases below 26.10.0 are 26.3.0 and 26.6.0, so an operator
+  # arriving from either crosses the same boundary. Naming 26.6.0 as the floor
+  # would leave every earlier pin matching nothing.
+  #
+  # to reaches 26.10.1 because upstream's 26.10.1 guide takes an operator
+  # from before 26.10.x straight to 26.10.1 with this same procedure; a
+  # ceiling at 26.10.0 would block that jump at 26.10.0.
   #
   # verdict is manual, not safe, and carries no verifiedBy: no UAT lane or
   # KWOK run has exercised this transition. The procedure below is transcribed
   # from upstream's own upgrade guide, not vouched for by a run here.
   - from: "<26.10.0"
-    to: "26.10.0"
+    to: ">=26.10.0 <=26.10.1"
     verdict: manual
     summary: >-
       26.10.0 changes the replication configuration rendered by the MariaDB
       init container and the replication liveness probe served by the agent,
-      so the data plane must move with the operator. autoUpdateDataPlane
-      defaults to false, so an operator upgraded without setting it first runs
-      26.10.0 against init and agent containers left at the prior version.
-      The release also changes the operator's default server image to
-      mariadb:12.3.3; AICR pins mariadb:11.8.8 in the slurm-accounting-mariadb
-      values, so a cluster bundled from this recipe is unaffected, but any
-      MariaDB CR that omits spec.image will come up on a new MariaDB major
-      version. The init container and agent are the HA data plane, so they
+      so the data plane must move with the operator, and 26.10.1 keeps that
+      requirement. autoUpdateDataPlane defaults to false, so an operator
+      upgraded without setting it first runs 26.10.1 against init and agent
+      containers left at the prior version. 26.10.0 also changes the
+      operator's default server image to mariadb:12.3.3; AICR pins
+      mariadb:11.8.8 in the slurm-accounting-mariadb values, so a cluster
+      bundled from this recipe is unaffected, but any MariaDB CR that omits
+      spec.image will come up on a new MariaDB major version. The init
+      container and agent are the HA data plane, so they
       exist only where Galera or replication is enabled; the data-plane steps
       below are inert on a single-instance non-HA MariaDB, which is what the
       accounting database AICR ships is by default.
@@ -73,7 +78,7 @@ transitions:
               `helm list -A | grep mariadb-operator-crds`, then upgrade in
               place: `helm upgrade --install mariadb-operator-crds
               oci://ghcr.io/mariadb-operator/charts/mariadb-operator-crds
-              --version 26.10.0 --namespace mariadb-system`, substituting the
+              --version 26.10.1 --namespace mariadb-system`, substituting the
               namespace the previous command reported.
             reason: >-
               CRDs go first, and in place. helm uninstall on the CRD chart
@@ -90,7 +95,7 @@ transitions:
             description: >-
               Re-run install.sh (helm) or helmfile apply (helmfile).
             reason: >-
-              Moves the operator to 26.10.0 once the new CRD schema is
+              Moves the operator to 26.10.1 once the new CRD schema is
               Established.
           - id: await-dataplane-update
             description: >-
@@ -103,7 +108,7 @@ transitions:
               The operator applies the new init and agent images
               asynchronously, so reverting the flag while a resource is still
               updating strands it on the old data-plane version against a
-              26.10.0 operator, which is the skew this record exists to
+              26.10.1 operator, which is the skew this record exists to
               prevent. Name each resource rather than passing --all: the
               Updated condition is absent until an update is triggered, and
               kubectl wait does not return early on an absent condition, so a
@@ -130,7 +135,7 @@ transitions:
               promptly after patching.
           - id: sync-crds
             description: >-
-              Sync or reconcile the mariadb-operator-crds release to 26.10.0
+              Sync or reconcile the mariadb-operator-crds release to 26.10.1
               before the operator release.
             reason: >-
               Neither Flux nor Argo CD applies a changed crds/ directory on
@@ -140,7 +145,7 @@ transitions:
             description: >-
               Sync or reconcile the mariadb-operator release.
             reason: >-
-              Moves the operator to 26.10.0 once the new CRD schema is
+              Moves the operator to 26.10.1 once the new CRD schema is
               Established.
           - id: await-dataplane-update
             description: >-
@@ -153,7 +158,7 @@ transitions:
               The operator applies the new init and agent images
               asynchronously, so reverting the flag while a resource is still
               updating strands it on the old data-plane version against a
-              26.10.0 operator, which is the skew this record exists to
+              26.10.1 operator, which is the skew this record exists to
               prevent. Name each resource rather than passing --all: the
               Updated condition is absent until an update is triggered, and
               kubectl wait does not return early on an absent condition, so a
@@ -170,3 +175,27 @@ transitions:
     references:
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.0.md
       - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.0
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
+      - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.1
+
+  # from starts at 26.10.0: an operator below it crosses the 26.10.0
+  # boundary, which the record above describes through 26.10.1.
+  - from: ">=26.10.0 <26.10.1"
+    to: "26.10.1"
+    verdict: safe
+    verifiedBy: >-
+      Upstream upgrade guide UPGRADE_26.10.1.md (mariadb-operator), which
+      applies only when updating from a version prior to 26.10.x and
+      otherwise allows upgrading directly, and the 26.10.1 release note,
+      which describes it as a patch release on top of 26.10.0. The CRD delta
+      adds optional fields only. Under AICR's values the mariadb-operator
+      render moves only the operator image tag, the version labels and the
+      config checksum that tracks them, and the mariadb-cluster render moves
+      only its chart label.
+    summary: >-
+      Patch release within 26.10.x that adds only optional CRD fields: MariaDB
+      updateStrategy.mariadbAutoUpgradeEnabled, false by default, and MaxScale
+      filters and volumes. Nothing to change on upgrade.
+    references:
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
+      - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.1

@@ -57,8 +57,8 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.6 | 1 |
-| mariadb-operator | helm | mariadb-operator | 26.10.0 | 1 |
-| mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.0 | 0 |
+| mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
+| mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
 | network-operator | helm | nvidia/network-operator | 26.4.1 | 12 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
@@ -79,7 +79,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm-operator | helm | slurm-operator | 1.2.2 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.2 | 0 |
 | slinky-topograph | helm | topograph/topograph | 1.0.0 | 1 |
-| slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.0 | 1 |
+| slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.1 | 1 |
 
 ## Version variants
 
@@ -249,7 +249,7 @@ _No images extracted._
 
 ### mariadb-operator
 
-- `ghcr.io/mariadb-operator/mariadb-operator:26.10.0`
+- `ghcr.io/mariadb-operator/mariadb-operator:26.10.1`
 
 ### mariadb-operator-crds
 
