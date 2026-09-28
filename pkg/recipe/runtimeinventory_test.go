@@ -498,6 +498,9 @@ func TestApplyRuntimeInventoryDisabledStillRequiresDeclaration(t *testing.T) {
 	if err := applyRuntimeInventoryMode(result, RuntimeInventoryDisabled); err == nil {
 		t.Fatal("want rejection for disabled-without-declaration, got nil")
 	}
+	if result.GetComponentRef("k8s-aibom") != nil {
+		t.Error("component was added despite the error")
+	}
 }
 
 // Nil criteria must not panic and must not grant.
@@ -507,5 +510,8 @@ func TestApplyRuntimeInventoryNilCriteriaDoesNotGrant(t *testing.T) {
 	}
 	if err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled); err == nil {
 		t.Fatal("want rejection with nil criteria, got a grant")
+	}
+	if result.GetComponentRef("k8s-aibom") != nil {
+		t.Error("component was added despite the error")
 	}
 }

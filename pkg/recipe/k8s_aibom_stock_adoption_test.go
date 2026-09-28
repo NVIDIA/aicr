@@ -192,21 +192,28 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 	}
 }
 
-// Without the flag, GKE criteria resolve exactly as before: only the
-// h100/COS/inference combination carries the component. The grant is opt-in; a
-// recipe that gains it without anyone asking is the failure this pins.
+// This test does not pass a BuildOption, so cfg.runtimeInventoryMode stays
+// nil and applyRuntimeInventoryMode is never invoked (see accounting.go
+// around the runtimeInventoryMode branch) -- it does not exercise the grant
+// function at all. Coverage for the grant itself (including the reject
+// paths) lives in the applyRuntimeInventoryMode tests in
+// runtimeinventory_test.go.
+//
+// What this test does pin: that no stock GKE recipe declares k8s-aibom by
+// default beyond the one that already does, and that the grant is not wired
+// into ordinary resolution through some path other than
+// applyRuntimeInventoryMode. The h100/inference and h100/training rows are
+// intentionally omitted here because TestK8sAIBOMStockAdoption in this file
+// already pins both ("target stock recipe declares and enables the
+// component" and "a sibling stock recipe does not declare it at all"); the
+// a100/training and b200/inference rows below add accelerator sampling
+// breadth that nothing else covers.
 func TestGKECriteriaUnchangedWithoutOptIn(t *testing.T) {
 	cases := []struct {
 		name        string
 		criteria    *recipe.Criteria
 		wantEnabled bool
 	}{
-		{"h100 inference is the default-on recipe", &recipe.Criteria{
-			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
-			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference}, true},
-		{"h100 training does not gain it", &recipe.Criteria{
-			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
-			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}, false},
 		{"a100 training does not gain it", &recipe.Criteria{
 			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorA100,
 			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}, false},
