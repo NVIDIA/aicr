@@ -81,7 +81,8 @@ func docsAICRConfigBlocks(t *testing.T, path string) []string {
 //
 // The second bug is a documented example on a deprecated apiVersion. Nothing
 // here checked the header, and the reference drifted onto aicr.run/v1alpha2
-// twice without failing anything, because the loader still accepts it.
+// twice without failing anything, because the loader accepted it until
+// header.AlphaRemovedIn.
 //
 // The gate is kept honest by the floor below: a config that carries no
 // spec.validate section passes trivially, so a restructure that stopped the
@@ -112,11 +113,11 @@ func TestDocsValidateConfigExamplesPassOurOwnGuards(t *testing.T) {
 		}
 
 		// A documented block must carry the CURRENT authoring apiVersion, not
-		// merely a supported one. header.IsSupportedAuthoringAPIVersion still
-		// accepts aicr.run/v1alpha2, so a block on it loads clean while
-		// teaching readers a value whose every load emits a deprecation
-		// notice (header.WarnDeprecatedAPIVersion, removed in
-		// header.AlphaRemovedIn). The want is read from appcfg.APIVersion,
+		// merely a supported one. The authoring track accepts only its current
+		// value today, so a retired one already fails the load above; this
+		// check is for the next authoring-track bump, which stages readers
+		// before emitters and so keeps loading the outgoing value for its
+		// deprecation window. The want is read from appcfg.APIVersion,
 		// which aliases header.AuthoringGroupVersion, rather than written as
 		// a literal: a literal would pin this release's answer and go stale
 		// at the next authoring-track bump, which is the drift it exists to

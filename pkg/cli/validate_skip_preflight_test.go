@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 )
 
 // skipPreflightRecipeYAML is the same criteria-less RecipeResult that
@@ -34,7 +35,7 @@ import (
 // whole-GPU advertiser that validation-input construction requires. The recipe
 // declares no checks, so the only skip-list defect either case below can hit is
 // the unknown-name one, which is the defect under test.
-const skipPreflightRecipeYAML = "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\n" +
+const skipPreflightRecipeYAML = "kind: RecipeResult\napiVersion: " + header.StableGroupVersion + "\n" +
 	"metadata:\n  version: test\ncomponentRefs:\n  - name: gpu-operator\n    type: Helm\n" +
 	"    source: https://helm.ngc.nvidia.com/nvidia\n    version: v25.10.0\n" +
 	"    overrides:\n      devicePlugin:\n        enabled: true\n"

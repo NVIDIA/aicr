@@ -27,6 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -39,8 +40,7 @@ import (
 // catalog load. Two phases of the resulting recipe declare different numbers
 // of checks, which is what lets the assertion below tell a per-phase count
 // from a constant.
-const phaseLogOverlayYAML = `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+const phaseLogOverlayYAML = "kind: RecipeMetadata\napiVersion: " + header.AuthoringGroupVersion + `
 metadata:
   name: aicr-phase-log-test
 spec:

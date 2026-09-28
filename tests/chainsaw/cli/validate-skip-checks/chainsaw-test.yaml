@@ -65,7 +65,7 @@ spec:
               # nothing left to run.
               cat > "${WORK}/empties-a-phase.yaml" << CONFIG
               kind: AICRConfig
-              apiVersion: aicr.run/v1alpha2
+              apiVersion: aicr.run/v1beta1
               metadata:
                 name: cli-validate-skip-checks
               spec:
