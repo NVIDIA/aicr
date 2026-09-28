@@ -66,7 +66,7 @@ func TestEvidenceDigestCmd_RejectsMissingRecipe(t *testing.T) {
 func TestEvidenceDigestCmd_PrintsHexDigest(t *testing.T) {
 	dir := t.TempDir()
 	recipeFile := filepath.Join(dir, "recipe.yaml")
-	body := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\n"
+	body := "kind: RecipeResult\napiVersion: aicr.run/v1\n"
 	if err := os.WriteFile(recipeFile, []byte(body), 0o600); err != nil {
 		t.Fatalf("write recipe: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestEvidenceDigestCmd_PrintsHexDigest(t *testing.T) {
 func TestEvidenceDigestCmd_DeterministicAcrossRuns(t *testing.T) {
 	dir := t.TempDir()
 	recipeFile := filepath.Join(dir, "recipe.yaml")
-	body := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\n"
+	body := "kind: RecipeResult\napiVersion: aicr.run/v1\n"
 	if err := os.WriteFile(recipeFile, []byte(body), 0o600); err != nil {
 		t.Fatalf("write recipe: %v", err)
 	}
@@ -118,10 +118,10 @@ func TestEvidenceDigestCmd_DiffersOnContentChange(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.yaml")
 	b := filepath.Join(dir, "b.yaml")
-	if err := os.WriteFile(a, []byte("kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n"), 0o600); err != nil {
+	if err := os.WriteFile(a, []byte("kind: RecipeResult\napiVersion: aicr.run/v1\ncriteria:\n  service: eks\n"), 0o600); err != nil {
 		t.Fatalf("write a: %v", err)
 	}
-	if err := os.WriteFile(b, []byte("kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: gke\n"), 0o600); err != nil {
+	if err := os.WriteFile(b, []byte("kind: RecipeResult\napiVersion: aicr.run/v1\ncriteria:\n  service: gke\n"), 0o600); err != nil {
 		t.Fatalf("write b: %v", err)
 	}
 
@@ -150,10 +150,10 @@ func TestEvidenceDigestCmd_StableAcrossVersionChange(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.yaml")
 	b := filepath.Join(dir, "b.yaml")
-	if err := os.WriteFile(a, []byte("kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: v1.0.0\ncriteria:\n  service: eks\n"), 0o600); err != nil {
+	if err := os.WriteFile(a, []byte("kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: v1.0.0\ncriteria:\n  service: eks\n"), 0o600); err != nil {
 		t.Fatalf("write a: %v", err)
 	}
-	if err := os.WriteFile(b, []byte("kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: v2.0.0\ncriteria:\n  service: eks\n"), 0o600); err != nil {
+	if err := os.WriteFile(b, []byte("kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: v2.0.0\ncriteria:\n  service: eks\n"), 0o600); err != nil {
 		t.Fatalf("write b: %v", err)
 	}
 
@@ -204,7 +204,7 @@ func TestEvidenceDigestCmd_ProfileSelectionChangesDigest(t *testing.T) {
 func TestEvidenceDigestCmd_RejectsProfileOnFullResultInput(t *testing.T) {
 	dir := t.TempDir()
 	recipeFile := filepath.Join(dir, "recipe.yaml")
-	body := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: aks\n"
+	body := "kind: RecipeResult\napiVersion: aicr.run/v1\ncriteria:\n  service: aks\n"
 	if err := os.WriteFile(recipeFile, []byte(body), 0o600); err != nil {
 		t.Fatalf("write recipe: %v", err)
 	}

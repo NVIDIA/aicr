@@ -42,8 +42,8 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **58**
-- Pass: **58** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **60**
+- Pass: **60** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -59,12 +59,14 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | l40s-any | — | l40s | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | rtx-pro-6000-any | — | rtx-pro-6000 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | monitoring-hpa | — | — | — | — | — | pass | R:0 D:0 P:0 C:0 | pending |
+| aks-ubuntu | aks | — | ubuntu | — | — | pass | R:0 D:0 P:0 C:5 | pending |
 | a100-aks-ubuntu-training-kubeflow | aks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | h100-aks-ubuntu-inference-dynamo | aks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | h100-aks-ubuntu-training-kubeflow | aks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
 | h100-aks-ubuntu-training-slurm | aks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
 | bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
 | h100-bcm-ubuntu-training-kubeflow | bcm | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:6 | pending |
+| eks-ubuntu | eks | — | ubuntu | — | — | pass | R:0 D:0 P:0 C:5 | pending |
 | a100-eks-ubuntu-training-kubeflow | eks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/gb200-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb200-ubuntu/inference-dynamo) |
 | gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | [eks/gb200-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb200-ubuntu/training-kubeflow) |

@@ -81,6 +81,8 @@ func TestMetaKeysMatchEmittedMetadata(t *testing.T) {
 	dir := t.TempDir()
 
 	recipe := `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   service: eks
   accelerator: h100

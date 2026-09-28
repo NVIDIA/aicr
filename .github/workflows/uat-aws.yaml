@@ -555,10 +555,10 @@ jobs:
       # (uat-run.yaml) is now the contention gate, so this is no longer a
       # race-and-fail pre-flight: by the time it runs we hold the lease and no
       # other UAT run is consuming the reservation. It asserts the reservation
-      # is provisioned large enough for the desired GPU count — a genuinely
-      # exhausted/undersized reservation still fails, but transient contention
-      # (another run's not-yet-released nodes) no longer does, because we check
-      # the reservation's TOTAL size, not its momentary AvailableInstanceCount.
+      # is provisioned large enough for the desired GPU count, and — where the
+      # reservation is shared with consumers outside AICR — that enough of it is
+      # actually free right now. The two are separate failures: an undersized
+      # reservation is a misconfiguration, a squeezed one is contention.
       # Skipped for daytime-down, which provisions nothing.
       #
       # Uses the runner-preinstalled yq because Install tools runs later; if the
@@ -583,9 +583,15 @@ jobs:
           echo "Reservation: ${RESERVATION}, desired: ${DESIRED}"
 
           # TotalInstanceCount = the reservation's provisioned size (fixed by the
-          # reservation, not by concurrent consumption). AvailableInstanceCount
-          # is logged for context but is intentionally NOT the assertion: with
-          # the lease held, "unavailable" means our own prior run, not a rival.
+          # reservation, not by concurrent consumption), so it is what catches an
+          # undersized reservation.
+          #
+          # AvailableInstanceCount is asserted too. It once was not, on the
+          # reasoning that with the lease held "unavailable" could only mean our
+          # own prior run rather than a rival — true only where the reservation
+          # belongs to AICR alone, and not true of a RAM-shared pool where other
+          # teams' clusters target the same reservation ID. Observed: a
+          # non-AICR cluster took 4 of 12 instances mid-run.
           CAP=$(aws ec2 describe-capacity-reservations \
             --capacity-reservation-ids "${RESERVATION}" \
             --query 'CapacityReservations[0].[TotalInstanceCount,AvailableInstanceCount]' \
@@ -601,6 +607,26 @@ jobs:
           fi
           if [[ "${TOTAL}" -lt "${DESIRED}" ]]; then
             echo "::error::Reservation ${RESERVATION} is undersized: need ${DESIRED} instances, reservation holds only ${TOTAL}"
+            exit 1
+          fi
+          if [[ -z "${AVAILABLE}" || "${AVAILABLE}" == "None" ]]; then
+            echo "::error::could not read AvailableInstanceCount for reservation ${RESERVATION}"
+            exit 1
+          fi
+          # Fail fast, NOT a guarantee: availability is a snapshot, so a rival
+          # launch between here and Bringup can still take the capacity. The
+          # value is turning a ~20-minute opaque node-group launch failure
+          # (preference: capacity-reservations-only never spills to on-demand)
+          # into a seconds-long failure that names who holds the instances.
+          if [[ "${AVAILABLE}" -lt "${DESIRED}" ]]; then
+            echo "::error::Reservation ${RESERVATION} has only ${AVAILABLE} of ${TOTAL} instances free;" \
+                 "this run needs ${DESIRED}. The reservation is shared, so another consumer holds them."
+            echo "Current consumers of ${RESERVATION} (instance / cluster):"
+            aws ec2 describe-instances \
+              --filters "Name=capacity-reservation-id,Values=${RESERVATION}" \
+                        "Name=instance-state-name,Values=running,pending" \
+              --query 'Reservations[].Instances[].[InstanceId,Tags[?Key==`aws:eks:cluster-name`]|[0].Value]' \
+              --output text || echo "  (consumer lookup failed)"
             exit 1
           fi
 

@@ -230,6 +230,15 @@ type AgentConfig struct {
 	// contract as AKSGPUPoolsPath: projected controller-side and merged
 	// into the snapshot as the oke-addons subtype.
 	OKEAddonsPath string
+
+	// GKEGPUPoolsPath points at an operator-supplied
+	// `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump on the machine running this client. The
+	// snapshotter projects it, controller-side and before any cluster
+	// work, into the snapshot's K8s.gke-gpu-pools.gpu-driver-installation
+	// reading. The file never enters the cluster. Empty disables the
+	// projection.
+	GKEGPUPoolsPath string
 }
 
 // Criteria is the facade-owned, semver-stable shape of a recipe-resolution
@@ -569,7 +578,7 @@ type RecipeResult struct {
 }
 
 // SelectedProfile is the stable facade projection of a recipe profile.
-// It is populated only for aicr.run/v1beta2 (or legacy aicr.run/v1alpha3) results; an unprofiled
+// It is populated only for aicr.run/v1beta2 results; an unprofiled
 // composition leaves it nil.
 type SelectedProfile struct {
 	// Name is the declaration this selection came from, e.g. "gpuStack".

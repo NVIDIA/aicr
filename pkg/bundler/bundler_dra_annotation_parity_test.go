@@ -89,7 +89,7 @@ func TestMake_DRAIntegration_GeneratedArtifactParity(t *testing.T) {
 			}
 
 			rr := &recipe.RecipeResult{
-				APIVersion: "aicr.run/v1alpha2",
+				APIVersion: "aicr.run/v1",
 				Kind:       "Recipe",
 				Criteria: &recipe.Criteria{
 					Service:     "eks",
@@ -210,7 +210,7 @@ func TestMake_DRAIntegration_AllDeployersCarryDerivedValues(t *testing.T) {
 			}
 
 			rr := &recipe.RecipeResult{
-				APIVersion: "aicr.run/v1alpha2",
+				APIVersion: "aicr.run/v1",
 				Kind:       "Recipe",
 				Criteria: &recipe.Criteria{
 					Service:     "eks",
@@ -309,7 +309,7 @@ func TestMake_DRAChartVersionAnnotation_DisabledRecipeUnaffected(t *testing.T) {
 	}
 
 	rr := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",

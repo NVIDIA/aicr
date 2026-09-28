@@ -199,7 +199,7 @@ func TestQueryCmdCriteriaStrictRejectsExternalCriteria(t *testing.T) {
 	t.Setenv("AICR_CRITERIA_STRICT", "")
 	dataDir := writeQueryExternalCriteriaCatalog(t)
 	configPath := filepath.Join(t.TempDir(), "aicr-config.yaml")
-	config := `apiVersion: aicr.run/v1alpha2
+	config := `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: query-strict-test
@@ -268,7 +268,7 @@ spec:
 func writeQueryExternalCriteriaCatalog(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	registry := `apiVersion: aicr.run/v1alpha2
+	registry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `
@@ -279,7 +279,7 @@ components: []
 	if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
 		t.Fatalf("create overlays directory: %v", err)
 	}
-	overlay := `apiVersion: aicr.run/v1alpha2
+	overlay := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: external-query
@@ -414,7 +414,7 @@ func TestRecipeAndQueryRejectRepeatedGKETCPXOInterfaces(t *testing.T) {
 func priorRecipeFile(t *testing.T, path, component, namespace string) string {
 	t.Helper()
 	doc := fmt.Sprintf(`kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: test
 componentRefs:

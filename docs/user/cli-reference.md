@@ -102,7 +102,8 @@ aicr snapshot [flags]
 | `--limits` | | string | | Override agent container resource limits as a comma-separated list of `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when `--limits` does not already contain that key — an explicit `--limits nvidia.com/gpu=N` wins. Reads `AICR_LIMITS` env when unset. |
 | `--cluster-config` | | string | | Path to a pre-existing k8s-launch-kit (l8k) `cluster-config.yaml`. Ingests the file's per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) into the snapshot as a `NetworkTopology` Measurement. **Local agent mode only for now** (`AICR_AGENT_MODE=true`) — Job-mode rejects this flag with an `INVALID_REQUEST` error until ConfigMap mounting is implemented. Mutually exclusive with `--discover-network` at the collector level — file path wins when both are set, so callers can default discovery from a flag without inadvertent cluster contact. Reads `AICR_CLUSTER_CONFIG_PATH` env when unset. |
 | `--oke-addons` | | string | | Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. Projects the `NvidiaGpuPlugin` add-on's control-plane state into the `K8s.oke-addons.nvidia-gpu-plugin` snapshot reading (`installed` / `absent`); any other add-on lifecycle state projects a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode; a bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_OKE_ADDONS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json > addons.json && aicr snapshot --oke-addons addons.json -o snapshot.yaml`. |
-| `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem. Projects each NVIDIA GPU agent pool's `gpuProfile.driver` into the `K8s.aks-gpu-pools.gpu-driver` snapshot reading (`Install` / `None`); mixed or AKS-managed pools project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state (ADR-015 DD3). AMD GPU pools (NG family, MI300X-class ND sizes, Radeon NV sizes) are excluded. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode; a bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json && aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml`. GKE needs no equivalent flag: its ownership signal is a node label the standard snapshot's topology readings already capture. |
+| `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem. Projects each NVIDIA GPU agent pool's `gpuProfile.driver` into the `K8s.aks-gpu-pools.gpu-driver` snapshot reading (`Install` / `None`); mixed or AKS-managed pools project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state (ADR-015 DD3). AMD GPU pools (NG family, MI300X-class ND sizes, Radeon NV sizes) are excluded. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode; a bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json && aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml`. |
+| `--gke-gpu-pools` | | string | | Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem. Projects each GPU pool's `gpuDriverInstallationConfig.gpuDriverVersion` into the `K8s.gke-gpu-pools.gpu-driver-installation` snapshot reading (`Installed` / `Disabled`). Mixed or unrecognized driver-version values project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state. Only the GKE `bundle-installer` gpuStack value declares a constraint on this reading. The default `gke-default` value resolves from the opt-out node label alone and needs no pool dump. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode. A bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_GKE_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `gcloud container node-pools list --cluster <cluster> --format=json > pools.json && aicr snapshot --gke-gpu-pools pools.json -o snapshot.yaml`. |
 | `--discover-network` | | bool | false | Opt into live k8s-launch-kit (l8k) discovery: bootstraps an in-cluster nic-configuration daemon, walks the cluster's NICs, and emits a `NetworkTopology` Measurement. **NOT read-only** — writes `nvidia.kubernetes-launch-kit.machine` / `.gpu` labels on matched nodes and patches `NicClusterPolicy` via server-side apply. Job-mode is supported (the snapshot Job's ClusterRole gains discovery-specific RBAC when this flag is set). Reads `AICR_DISCOVER_NETWORK` env when unset. |
 
 **Output Destinations:**
@@ -385,7 +386,10 @@ for default-provisioned clusters with no node label) and `bundle-installer`
 `gke-no-default-nvidia-gpu-device-plugin=true` and, because that label
 forfeits GKE's managed driver install, are created
 `gpu-driver-version=disabled` — the bundle's `gcp-driver-installer`
-component supplies the driver with a recipe-pinned version); because the GKE
+component supplies the driver with a recipe-pinned version, and a snapshot
+carrying the label without a matching `K8s.gke-gpu-pools.gpu-driver-installation`
+reading (`--gke-gpu-pools`) fails the `bundle-installer` selection closed);
+because the GKE
 values govern advertisement, the #1327 allocation-policy paths are
 closure-locked in addition to the declared owned paths — see
 [GKE GPU setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) and
@@ -405,7 +409,8 @@ Selection and verification are independent: `--profile` (or the default)
 always decides the selected value — never the snapshot — and a supplied
 `--snapshot` always verifies the selection against the cluster's recorded
 readings (fail-closed on mismatch or a missing reading; on AKS, the pool
-mode from `--aks-gpu-pools`). Without a snapshot no check can run at
+mode from `--aks-gpu-pools`; on GKE `bundle-installer`, the pool mode from
+`--gke-gpu-pools`). Without a snapshot no check can run at
 generation; the recorded constraint is enforced at `aicr validate`
 readiness instead. See the with/without matrices in
 [AKS GPU setup](../integrator/aks-gpu-setup.md#gpu-driver-setup) and
@@ -1086,6 +1091,7 @@ aicr validate [flags]
 | `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
 | `--oke-addons` | | string | | Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem, projected into the `K8s.oke-addons.nvidia-gpu-plugin` reading when validate captures a live snapshot. Ignored when `--snapshot` supplies a pre-captured snapshot — capture that snapshot with the same flag instead. Reads `AICR_OKE_ADDONS_PATH` env when unset. |
 | `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem, projected into the `K8s.aks-gpu-pools.gpu-driver` reading when validate captures a live snapshot (ADR-015 DD3). Ignored when `--snapshot` supplies a pre-captured snapshot — capture that snapshot with the same flag instead. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. |
+| `--gke-gpu-pools` | | string | | Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem, projected into the `K8s.gke-gpu-pools.gpu-driver-installation` reading when validate captures a live snapshot. Ignored when `--snapshot` supplies a pre-captured snapshot. Capture that snapshot with the same flag instead. Reads `AICR_GKE_GPU_POOLS_PATH` env when unset. |
 | `--no-cluster` | | bool | false | Skip cluster access (test mode): skips RBAC and Job deployment, reports checks as skipped. An offline dry-run does not sign or push a recipe-evidence attestation, so `--emit-attestation`/`--push` and `spec.validate.evidence.attestation` are ignored in this mode. Cannot be combined with `--cncf-submission` (that collector requires a live cluster); `--evidence-dir` conformance markdown is still rendered locally |
 | `--evidence-dir` | | string | | Directory to write conformance evidence artifacts |
 | `--cncf-submission` | | bool | false | Generate CNCF conformance submission artifacts |
@@ -1125,22 +1131,20 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** As of v0.22, the ADR-022 emitter switch, AICR emits
-> `aicr.run/v1` for snapshots and default recipes, `aicr.run/v1beta1` for config
-> and ordinary catalog inputs, and `aicr.run/v1beta2` for profile-bearing
-> recipes. Readers additionally still accept the superseded
-> `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, so artifacts produced by v0.21 or
-> earlier keep loading. Unsupported artifact headers
-> fail fast; raw external catalog headers are checked before merge or
-> hydration. Recapture, regenerate, or update the authored header with a
-> version supported by the running AICR release. See
+> **apiVersion gate:** AICR emits `aicr.run/v1` for snapshots and default
+> recipes, `aicr.run/v1beta1` for config and ordinary catalog inputs, and
+> `aicr.run/v1beta2` for profile-bearing recipes, and as of v1.0.0 those are the
+> only values it reads. The superseded `aicr.run/v1alpha2` and
+> `aicr.run/v1alpha3` were retired in v1.0.0 (ADR-022 N+2), along with the empty
+> header the snapshot, recipe and criteria readers had tolerated. v0.22 was the
+> last release that read them, and it warned; v1.0.0 rejects instead, naming the
+> observed value, the expected value and the release that withdrew it.
+> Unsupported artifact headers fail fast; raw external catalog headers are
+> checked before merge or hydration. Recapture, regenerate, or update the
+> authored header with a version supported by the running AICR release. See
 > [ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md)
 > and
-> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md). v1.0.0 stops
-> accepting the alpha values, along with the empty header that the snapshot,
-> recipe, and criteria readers still tolerate. Reading either now logs a
-> deprecation warning naming the file. `AICRConfig` and external catalog headers already reject an
-> empty value, so they have no tolerance to retire.
+> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 > [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 > has the release-by-release table.
 
@@ -3057,6 +3061,36 @@ The deploy script installs components in the order specified by `deploymentOrder
 Unknown flags are rejected with an error to catch typos (e.g., `--bes-effort` or `--retires N`).
 
 > **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Nodewright node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
+
+##### Cluster connection environment
+
+`deploy.sh` and each component's `install.sh` act on whichever cluster the
+environment selects. Both are standalone entry points, so the same variables
+apply whether you run the whole bundle or a single component by hand.
+
+| Variable | Effect |
+|----------|--------|
+| `KUBE_CONTEXT` | Context to act on. Rendered as `--kube-context` for `helm` and `--context` for `kubectl`, and exported to each component's `install.sh`. |
+| `KUBECONFIG` | Path to a kubeconfig. Read natively by both `helm` and `kubectl`, so no flag is derived from it. |
+| `KUBECONFIG_FLAG` | Deprecated. A literal `helm` flag string; only `--kube-context` and `--kubeconfig` are translated, with a warning. |
+
+```bash
+KUBE_CONTEXT=my-cluster ./deploy.sh
+
+# Or a single component, from its own folder:
+cd 001-gpu-operator && KUBE_CONTEXT=my-cluster bash install.sh
+```
+
+Prefer `KUBE_CONTEXT`. Setting it alongside `KUBECONFIG_FLAG=--kube-context` is
+accepted while both name the same context; only a mismatch is rejected. A
+`KUBECONFIG_FLAG` carrying an option that is not translated, or naming a
+different context than `KUBE_CONTEXT`, fails before the first cluster call
+rather than falling back to the ambient context.
+
+When an unsupported or malformed option is rejected, the message names the
+option but not its argument, so a flag carrying a credential does not reach the
+log. The context-mismatch message is the exception: it names both contexts,
+which identify clusters rather than authenticate to them.
 
 **Retry behavior:**
 

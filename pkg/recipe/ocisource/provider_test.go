@@ -632,7 +632,7 @@ func TestProviderRealLayeringValidationAndParentLifetime(t *testing.T) {
 		append([]byte("# OCI override\n"), base...), 0o600); writeErr != nil {
 		t.Fatalf("WriteFile(base) error = %v", writeErr)
 	}
-	registry := `apiVersion: aicr.run/v1alpha2
+	registry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: custom-oci-component
@@ -747,7 +747,7 @@ func TestNewRejectsMalformedMaterializedCatalog(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(child, "overlays"), 0o700); err != nil {
 		t.Fatalf("MkdirAll(overlays) error = %v", err)
 	}
-	registry := `apiVersion: aicr.run/v1alpha2
+	registry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `
@@ -755,7 +755,7 @@ components: []
 		filepath.Join(child, recipe.RegistryFileName), []byte(registry), 0o600); err != nil {
 		t.Fatalf("WriteFile(registry) error = %v", err)
 	}
-	malformed := `apiVersion: aicr.run/v1alpha3
+	malformed := `apiVersion: aicr.run/v1beta2
 kind: RecipeMetadata
 metadata:
   name: malformed
