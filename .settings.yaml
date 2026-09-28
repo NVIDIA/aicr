@@ -25,7 +25,7 @@ build_tools:
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
   crane: 'v0.22.1'
   # renovate: datasource=github-releases depName=orhun/git-cliff depType=build_tools
-  git_cliff: '2.14.1'
+  git_cliff: '2.14.2'
 
 # Linting
 linting:

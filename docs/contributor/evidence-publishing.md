@@ -126,7 +126,10 @@ declaration default and `aicr validate` has no `--profile` flag:
 # AKS only: capture the pool projection first.
 az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json
 aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml
-# GKE: a plain `aicr snapshot -o snapshot.yaml` suffices.
+# GKE gke-default: a plain `aicr snapshot -o snapshot.yaml` suffices.
+# GKE bundle-installer: also capture the pool projection.
+#   gcloud container node-pools list --cluster <cluster> --format=json > pools.json
+#   aicr snapshot --gke-gpu-pools pools.json -o snapshot.yaml
 aicr recipe -s snapshot.yaml \
   --intent <training|inference> \
   --profile gpuStack=<value> \
@@ -138,8 +141,10 @@ aicr validate -r recipe.yaml -s snapshot.yaml ... # rest as above
 
 On AKS, capture the snapshot with the pool projection (resolution fails
 closed without the `K8s.aks-gpu-pools.gpu-driver` reading); on GKE the
-plain snapshot already carries the node labels the profile constraints
-read. Then hydrate the recipe with the target leaf's criteria AND the
+plain snapshot already carries the node labels `gke-default`'s constraint
+reads, but `bundle-installer` also needs the `--gke-gpu-pools` projection
+(resolution fails closed without the `K8s.gke-gpu-pools.gpu-driver-installation`
+reading). Then hydrate the recipe with the target leaf's criteria AND the
 profile selection, and validate that recipe. A v2 pointer records its
 selection in a `profile:` field — replay it verbatim. Legacy v1 pointers
 (`schemaVersion: 1.0.0`, e.g. the pre-profile `h100-gke-cos-training`
