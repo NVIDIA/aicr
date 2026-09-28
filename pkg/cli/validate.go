@@ -66,6 +66,7 @@ type validateAgentConfig struct {
 	debug              bool
 	requireGPU         bool
 	aksGPUPoolsPath    string
+	gkeGPUPoolsPath    string
 
 	// runID correlates this run's live-capture snapshot agent with the
 	// validator Jobs runValidation deploys for the same `aicr validate`
@@ -114,6 +115,7 @@ func parseValidateAgentConfig(
 		debug:              cmd.Bool("debug"),
 		requireGPU:         boolFlagOrConfig(cmd, "require-gpu", opts.RequireGPU),
 		aksGPUPoolsPath:    cmd.String("aks-gpu-pools"),
+		gkeGPUPoolsPath:    cmd.String("gke-gpu-pools"),
 		runID:              runID,
 		okeAddonsPath:      cmd.String("oke-addons"),
 	}
@@ -286,6 +288,7 @@ func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 		Privileged:         true,
 		RequireGPU:         c.requireGPU,
 		AKSGPUPoolsPath:    c.aksGPUPoolsPath,
+		GKEGPUPoolsPath:    c.gkeGPUPoolsPath,
 		RunID:              c.runID,
 		NameBase:           validateNameBase,
 		OKEAddonsPath:      c.okeAddonsPath,
@@ -633,6 +636,12 @@ func validateCmdFlags() []cli.Flag {
 			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
 			Category: catAgentDeployment,
 		},
+		&cli.StringFlag{
+			Name:     "gke-gpu-pools",
+			Usage:    "Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem. When validate captures a live snapshot, each GPU pool's gpuDriverInstallationConfig.gpuDriverVersion is projected into the K8s gke-gpu-pools subtype so profile constraints recorded in GKE recipes can evaluate. Ignored when --snapshot supplies a pre-captured snapshot.",
+			Sources:  cli.EnvVars("AICR_GKE_GPU_POOLS_PATH"),
+			Category: catAgentDeployment,
+		},
 	}
 	flags = append(flags, validateEvidenceFlags()...)
 	return append(flags,
@@ -764,6 +773,13 @@ func warnIgnoredOKEAddons(cmd *cli.Command, snapshotFilePath string) {
 	warnIgnoredProjection(cmd, snapshotFilePath, "oke-addons", "AICR_OKE_ADDONS_PATH")
 }
 
+// warnIgnoredGKEGPUPools warns when a --gke-gpu-pools flag or
+// AICR_GKE_GPU_POOLS_PATH env var is ignored because the snapshot being
+// validated was already captured without the projection.
+func warnIgnoredGKEGPUPools(cmd *cli.Command, snapshotFilePath string) {
+	warnIgnoredProjection(cmd, snapshotFilePath, "gke-gpu-pools", "AICR_GKE_GPU_POOLS_PATH")
+}
+
 func warnIgnoredProjection(cmd *cli.Command, snapshotFilePath, flagName, envVar string) {
 	shouldLog, atWarn := classifyIgnoredProjection(
 		os.Args[1:], os.Getenv(envVar),
@@ -840,7 +856,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", flagPush, flagIdentityToken); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", "gke-gpu-pools", flagPush, flagIdentityToken); err != nil {
 				return err
 			}
 
@@ -903,6 +919,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", input.SnapshotPath)
 			warnIgnoredAKSGPUPools(cmd, snapshotFilePath)
 			warnIgnoredOKEAddons(cmd, snapshotFilePath)
+			warnIgnoredGKEGPUPools(cmd, snapshotFilePath)
 			kubeconfig := cmd.String("kubeconfig")
 
 			if recipeFilePath == "" {
