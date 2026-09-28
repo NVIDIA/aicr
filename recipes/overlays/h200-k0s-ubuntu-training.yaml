@@ -76,8 +76,10 @@ spec:
             # label that never materializes with a host-provided driver,
             # leaving a permanently 0-desired DaemonSet that the
             # expected-resources validator rejects as a forbidden shape
-            # (observed on the reference cluster). Same pairing as the
-            # vr200-rke2-ubuntu leaves.
+            # (observed on the reference cluster). The vr200-rke2-ubuntu
+            # leaves paired the same way until nvsentinel v1.22.0 (#2596);
+            # they now re-enable the collector with host driver-library
+            # mounts instead.
             enabled: false
 
   validation:
