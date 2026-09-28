@@ -8,21 +8,21 @@ description: |
   classifies unclassified ones — applying only user-confirmed changes
   via `gh` CLI. Also backfills Priority on Done issues that opened and
   closed between runs, and asserts that every issue on the board carries
-  both Status and Priority before reporting. Triggers on backlog hygiene
-  before sprint planning or release prep, or when the user files a new
-  issue and asks to classify it on the board.
+  both Status and Priority before reporting. On project 248 it also audits
+  the full Ready queue, P1 blockers, and P2 Backlog assignments. Triggers
+  on backlog hygiene before sprint planning or release prep, or when the
+  user files a new issue and asks to classify it on the board.
 ---
 
 # AICR Issue Triage
 
-Review a GitHub Projects v2 board, produce structured recommendations across
-six actionable buckets plus a no-change list, get explicit user confirmation,
-then apply the approved changes via `gh`.
+Review a GitHub Projects v2 board, produce exact per-issue recommendations,
+get explicit user confirmation, then apply the approved changes via `gh`.
 
 The run ends on a board-wide invariant: **every issue carries both Status and
-Priority**. Five of the six buckets work the active slice; the sixth exists
-because an issue that opens and closes between two runs is never in that slice,
-and its empty Priority would otherwise be unreachable forever.
+Priority**. Active issues receive placement and closure verdicts. Done issues
+with no Priority receive a separate backfill verdict, since an issue that opens
+and closes between runs never appears in the active slice.
 
 **Default board:** <https://github.com/orgs/NVIDIA/projects/248> (AICR). Pass
 `owner/number` as the skill arg to triage a different board.
@@ -168,7 +168,7 @@ repo="<owner/repo>"     # content.repository, e.g. NVIDIA/aicr
 # multi-repo board overwrite the others.
 OPEN="${TMPDIR:-/tmp}/aicr-triage-open-${repo//\//-}.json"
 
-gh issue list -R "$repo" --state open --limit 500 --json number,updatedAt > "$OPEN" \
+gh issue list -R "$repo" --state open --limit 500 --json number,updatedAt,assignees > "$OPEN" \
   || { echo "open-issue fetch failed for $repo — stop and report"; exit 1; }
 
 # --limit truncates silently, and a truncated page would mark open issues closed.
@@ -185,9 +185,9 @@ by definition; running it through here would report every one as an anomaly.
 Backfill items need no extra fetch at all — title, labels, and body are already
 in the dump, and Step 4 derives their Priority from exactly that.
 
-Before any **Close**, or any verdict that **changes an already-set Status or
-Priority**, read the full comment thread — the blocker or supersession evidence
-usually lives there:
+Before any **Close**, or any verdict that **changes an already-set Status,
+Priority, or assignee**, read the full comment thread — the blocker or
+supersession evidence may live there:
 
 ```bash
 n="<issue-number>"; repo="<owner/repo>"
@@ -204,13 +204,14 @@ it no item's open/closed state is known.
 ### 4. Classify
 
 Each issue gets one verdict. Precedence, highest first: **Manual Review > Close >
-Incomplete > Demote > Promote > First-time > No change.**
+Incomplete > Board-policy correction > Demote > Promote > First-time > No change.**
 
-Those seven verdicts apply to `$ACTIVE`. `$BACKFILL` has exactly one verdict,
+Those active-issue verdicts apply to `$ACTIVE`. `$BACKFILL` has exactly one verdict,
 **Backfill**, defined at the end of this section; the precedence list never
 reaches it because the two slices are disjoint.
 
-**A verdict writes every field whose correct value differs from the current one.**
+**A verdict writes every field or assignment whose correct value differs from
+the current one.**
 The bucket names below label the shape of that difference for reporting and
 confirmation; they do not cap which fields are written. An issue that is `Ready` +
 `P2` but belongs at `Backlog` + `P1` gets both edits under one Demote verdict.
@@ -248,10 +249,39 @@ forever.
 
 **Promote P2 → P1** — priority should increase:
 
-- A bug actively being worked on
+- A current, consequential failure whose impact warrants moving ahead of other
+  Ready work; `In progress` alone is not evidence
 - A direct unblocker for other tracked work
 - The cross-cutting parent of a set of epics that is the next priority
 - In review and important to ship soon
+
+**Board-policy correction — NVIDIA project 248 only.** Audit *every* active
+P2 Ready issue, P1 Backlog issue, and P2 Backlog assignment, including items that
+would otherwise receive No change. Do not stop after finding a few candidates:
+
+- **P2 Ready:** Promote to P1 Ready only for an actionable current release
+  dependency, observed false pass or failed install, material safety or security
+  exposure, or another verified near-term blocker. Demote broad platform
+  expansion, efficiency, speculative hardening, and work awaiting a prerequisite
+  to P2 Backlog. Keep P2 Ready only when there is a concrete near-term reason to
+  work it without displacing P1s. If an open non-draft PR is already in review,
+  propose In review instead of leaving the issue in Ready. Do not target a fixed
+  number of Ready issues or reuse issue numbers from an older run.
+- **P1 Backlog:** Keep it only when the issue is blocked by another *currently
+  P1 Ready* issue. If unblocked and still P1-worthy, propose P1 Ready. If its
+  blocker is not P1 Ready, evaluate whether that blocker itself warrants P1 Ready;
+  otherwise propose P2 Backlog for the dependent issue. Do not move an active
+  In progress blocker backward to Ready just to satisfy this rule.
+- **P2 Backlog:** It must be unassigned. Include removal of every current
+  assignee in the proposed action, including for issues newly demoted there.
+  Assignment alone is not evidence that work has started.
+
+Check formal `blockedBy` links, issue text and comments, current blocker board
+state, linked PRs, and release state before naming a dependency. A missing formal
+link does not disprove an explicit dependency in the issue body. Treat old
+`updatedAt` dates as weak evidence: bulk edits and comments can change them.
+Apply these rules to First-time and Incomplete targets too, so a field hole is
+not filled with a policy-violating placement.
 
 **First-time classification** — no Status set:
 
@@ -307,6 +337,12 @@ The proposed action names the exact write — "Status → Backlog, Priority → 
 because First-time and Incomplete each admit several target combinations, and
 current-state plus reasoning does not say which one is being approved. If an
 exact action cannot be stated, the item goes to Manual Review, not into a bucket.
+Name assignee removals explicitly. For project 248, summarize the disposition
+of the entire P2 Ready and P1 Backlog slices: promotion, demotion, other status
+correction, and deliberate retention. Show before/after counts and list any
+remaining P2 Ready issues with their near-term reason. A high-priority issue
+waiting for a P1 Ready release step may be proposed as P1 Backlog rather than
+misstated as Ready.
 
 This table is the only gate before writes to a shared board, so apply the
 escaping convention to every cell, reasoning included.
@@ -332,12 +368,18 @@ Where `AskUserQuestion` is unavailable, present each bucket as a numbered list
 and require a reply of accepted numbers, "all", or "none". Do not proceed
 without an explicit answer.
 
+The approval covers only the displayed actions. If an issue comment is proposed,
+show its **exact body** and obtain explicit approval to post it. No-change
+verdicts do not generate comments. A fresh user instruction that names an exact
+operation and target may itself authorize that operation; still refresh the
+target before writing. Approval of one batch does not authorize a later batch.
+
 Backfill is confirmed like any other bucket and is never auto-applied, but it may
 be offered as grouped options — several `owner/repo#N — Priority → P2` rows in one
 option — since the writes are uniform and low-risk. Keep any row you scored P1 as
 its own option: that is the judgment call worth accepting or rejecting on its own.
 
-**No field is edited and no issue is closed without this confirmation.** Board
+**No field or assignment is edited and no issue is closed without this confirmation.** Board
 changes are visible org-wide and closures are hard to reverse; the value here is
 the analysis, and the mutation is opt-in.
 
@@ -345,8 +387,14 @@ the analysis, and the mutation is opt-in.
 
 Combine every field change the Step 4 rules independently require into one
 confirmed verdict, then run the field stanza below once per changed field — and
-only for those fields. Every applied verdict gets a comment; a Close edits no
-fields and comments before closing.
+only for those fields. Remove assignees only when the approved target is P2
+Backlog. Post a comment only when its exact body was also approved; a closure
+requires an approved explanation before closing.
+
+Immediately before writes, refresh the project items, field/option IDs,
+affected issue assignees, and any load-bearing blocker or PR state. Compare each
+source state with the approved recommendation. If one changed, stop that item's
+write and report it for re-review; do not silently overwrite a concurrent edit.
 
 **Failure contract.** Any nonzero exit in this step stops the run. Report three
 states, not one:
@@ -356,9 +404,9 @@ states, not one:
   accepted the write, so do not retry it or assume it failed
 - **not attempted** — everything after it
 
-**Concurrency and connectivity are out of scope** — no locking, no pre-write
-re-validation, no retry: report and stop. Consequence: a concurrent edit made
-between Step 2 and Step 7 is silently overwritten.
+There is no board lock. Keep the read-to-write interval short and stop on a
+concurrent mismatch. After a timeout, re-read the target before any retry;
+GitHub may have accepted the write despite the client error.
 
 Run one self-contained shell call per item:
 
@@ -381,16 +429,24 @@ gh project item-edit \
   || { echo "$label edit failed for #$n — outcome unknown; stop and report"; exit 1; }
 ```
 
-**Comment on every applied verdict** — board field edits leave no trace in the
-issue timeline. Pipe the body in from a **quoted** heredoc, which blocks
-expansion and command substitution.
+For a P2 Backlog target, remove all current issue assignees after the board
+field edits. `gh issue edit` takes comma-separated logins, not project item IDs:
+
+```bash
+n="<issue-number>"; repo="<owner/repo>"
+assignees="<comma-separated logins from the refreshed issue>"
+[ -z "$assignees" ] || gh issue edit "$n" -R "$repo" --remove-assignee "$assignees"
+```
+
+If the user approved an exact comment body, pipe that body from a quoted
+heredoc, which blocks expansion and command substitution.
 
 ```bash
 n="<issue-number>"; repo="<owner/repo>"
 
-# Field updates — comment after the edits land:
+# Only for an explicitly approved comment — after the edits land:
 gh issue comment "$n" -R "$repo" --body-file - <<'BODY'
-Triaged: <verdict>. <one or two sentences of reasoning>
+<exact approved body>
 BODY
 ```
 
@@ -399,9 +455,10 @@ Body format: first line starts with `Triaged:` (field updates), `Closing:`
 of reasoning. For closures, say what changed, where the work lives now, and how
 to reopen.
 
-A Backfill comment lands on a **closed** thread, so it must not read as a reopen
-or a request for action. Lead with `Records backfill:`, name the value and why it
-was missing, and say plainly that nothing else changed:
+A Backfill comment, when separately approved, lands on a **closed** thread, so
+it must not read as a reopen or a request for action. Lead with `Records
+backfill:`, name the value and why it was missing, and say plainly that nothing
+else changed:
 
 ```bash
 n="<issue-number>"; repo="<owner/repo>"
@@ -415,8 +472,9 @@ the Done column reflects what shipped. No action needed — nothing is reopening
 BODY
 ```
 
-**Closures comment first, then close** — nothing may close without a visible
-reason, so a failed comment aborts before the close:
+**Closures comment first, then close** — include the exact closure comment in
+the approval request. Nothing may close without an approved visible reason, so
+a failed comment aborts before the close:
 
 ```bash
 n="<issue-number>"
@@ -462,6 +520,11 @@ Re-run the Step 2 fetch and confirm the outcome for every changed item. Field
 edits are confirmed in `$ACTIVE`. **Closures and Backfill writes must be confirmed
 in `$ITEMS`** — `$ACTIVE` drops Done items, so both vanish from it — and a
 closure's Status must read Done; anything else goes to Manual Review.
+Re-fetch issue assignees and verify every P2 Backlog issue is unassigned, not
+just the ones changed in this run. On project 248, verify every P1 Backlog issue
+has a current P1 Ready blocker and that every P2 Ready retention was deliberate.
+If an invariant fails because the user did not approve a proposed correction,
+report that exception precisely rather than claiming the board is clean.
 
 **Then assert the board-wide invariant.** Per-item verification only proves the
 writes this run intended; it cannot see a hole no bucket claimed. This check can,
@@ -488,6 +551,10 @@ carries both Status and Priority" is the sentence that makes the run trustworthy
 and silence reads the same whether the check passed or was skipped. Any issue it
 lists is a rule gap: name it under Manual Review, and say which slice should have
 caught it so the next edit to this skill has somewhere to start.
+
+For project 248, also report the P2 Ready count, the count of assigned P2
+Backlog issues, and the P1 Backlog blocker audit. The target is a focused Ready
+queue supported by current evidence, not a fixed numeric quota.
 
 Print three tables. All render issue-derived text, so the escaping convention
 applies here as it does in Step 5.
