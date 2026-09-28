@@ -1,0 +1,122 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# k8s-aibom entered the registry pinned at v1.3.0 (see "k8s-aibom Runtime
+# Inventory" in docs/user/component-catalog.md), and v1.3.0 is the only
+# version AICR has ever shipped through it. from starts there rather than
+# reaching for a wider floor: charts v1.0.0 through v1.2.0 all declared
+# v1alpha1 as the storage version, so a jump from one of them crosses the
+# v1alpha1-to-v1beta1 storage boundary the v1.2.0-to-v1.3.0 move already
+# made, a different mechanism this record has not examined and does not
+# vouch for.
+#
+# verdict is manual rather than safe. The CRD schema diff between v1.3.0 and
+# v1.5.1 is purely additive (188 lines added, 0 removed, confined to an
+# optional verification block on AIBOMControllerConfig) and the served and
+# storage version configuration is unchanged across both charts, but no live
+# cluster has exercised this specific transition yet. The GKE UAT lanes that
+# will are a later task tracked against #2962; until they land this stays
+# manual rather than safe.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: k8s-aibom
+transitions:
+  - from: ">=1.3.0 <1.5.1"
+    to: "1.5.1"
+    verdict: manual
+    verifiedBy: >-
+      CRD schema diff (helm show crds
+      oci://ghcr.io/googlecloudplatform/charts/k8s-aibom --version 1.3.0 vs
+      --version 1.5.1): 188 lines added, 0 removed, all confined to the
+      optional verification block. Served/storage version
+      configuration (v1alpha1 served, v1beta1 served and storage) is
+      identical in both charts. aicr bundle render/bundle pass confirmed
+      clean generation at v1.5.1 with no rendering errors. No live-cluster
+      reconciliation has been run for this transition yet.
+    summary: >-
+      The CRD change itself is additive only, and an absent or disabled
+      verification block reproduces pre-v1.5.0 behavior exactly. The chart's
+      rendered AIBOMControllerConfig/default CR does move from v1alpha1 to
+      v1beta1 in its template, but both stay served, so that move is a
+      template change rather than an API break. The one real mechanism:
+      helmfile has no automated CRD-update path for ownsCRDs components,
+      unlike helm, flux and argocd, so a plain chart bump on helmfile leaves
+      the pre-v1.5.1 schema in place and the API server rejects any attempt
+      to set the new verification block as an unknown field until the CRDs
+      are applied by hand.
+    reversible: false
+    affectedResources:
+      - group: aibom.k8saibom.dev
+        kinds:
+          - AIBOMControllerConfig
+    stepsByDeployer:
+      - deployers: [helmfile]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Before upgrading the release, apply the v1.5.1 CRDs directly
+              using the CRD-apply command under "Upgrade, uninstall, and
+              troubleshooting" in docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/googlecloudplatform/charts/k8s-aibom and
+              VERSION=1.5.1.
+            reason: >-
+              helmfile has no automated equivalent for ownsCRDs components;
+              it is the one deployer that never updates them for you. Without
+              this step the API server keeps validating against the
+              pre-v1.5.1 schema, so the new optional verification field is
+              rejected as unknown even though the v1.5.1 controller image
+              understands it.
+          - id: verify-reconcile
+            description: >-
+              kubectl get aibomcontrollerconfig default -o yaml and confirm
+              apiVersion is aibom.k8saibom.dev/v1beta1 and status.conditions
+              reports Ready=True observed at the current generation. Then
+              kubectl get crd aibomcontrollerconfigs.aibom.k8saibom.dev
+              aiboms.aibom.k8saibom.dev -o
+              jsonpath='{.status.storedVersions}' and confirm both list
+              v1beta1.
+            reason: >-
+              No live cluster has exercised this transition yet, so this
+              manual confirmation stands in for the GKE UAT lanes tracked
+              against #2962 until they land.
+      - steps:
+          - id: verify-crd-update
+            description: >-
+              After the automated CRD update (flux's spec.upgrade.crds
+              CreateReplace, helm's generated apply-crds.sh, or Argo CD
+              applying the chart's crds/ as ordinary manifests each sync),
+              confirm the new schema actually landed: kubectl get crd
+              aibomcontrollerconfigs.aibom.k8saibom.dev
+              aiboms.aibom.k8saibom.dev -o
+              jsonpath='{.status.storedVersions}' and expect v1beta1 for
+              both.
+            reason: >-
+              v1beta1 was already the storage version at v1.3.0, so the
+              shipped health check's storage-version assertion cannot tell a
+              clean v1.5.1 CRD update apart from a stranded v1.3.0 one the
+              way it catches an actual storage-version boundary crossing;
+              confirm directly instead of relying on it here.
+          - id: verify-reconcile
+            description: >-
+              kubectl get aibomcontrollerconfig default -o yaml and confirm
+              apiVersion is aibom.k8saibom.dev/v1beta1 and status.conditions
+              reports Ready=True observed at the current generation.
+            reason: >-
+              No live cluster has exercised this transition yet, so this
+              manual confirmation stands in for the GKE UAT lanes tracked
+              against #2962 until they land.
+    references:
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#k8s-aibom-runtime-inventory
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/releases
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/docs/compatibility.md

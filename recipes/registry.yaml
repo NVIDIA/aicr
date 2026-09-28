@@ -797,6 +797,8 @@ components:
     hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/k8s-aibom/health-check.yaml
+    upgrades:
+      file: components/k8s-aibom/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/googlecloudplatform/charts
       defaultChart: k8s-aibom
