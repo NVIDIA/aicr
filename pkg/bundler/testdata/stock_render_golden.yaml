@@ -3657,8 +3657,8 @@ ocp-inference-nim:
   005-gpu-operator-ocp-olm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-gpu-operator-ocp-olm/install.sh: ce9870dee972e18bdab6794a09f9ae33605a5548a8ebab08ef450db2c0ec7284
   005-gpu-operator-ocp-olm/templates/operatorgroup.yaml: b42a77a3d0234ef0873b291911a300a9d34bc0ee188a673efc83c8521cd89031
-  005-gpu-operator-ocp-olm/templates/subscription.yaml: 403ede5c3c8eec60d2baa9ca4e4b96d787957a261518cd2e5c9db57e73b38380
-  005-gpu-operator-ocp-olm/values.yaml: b7f6d0c348bdeb239349627c46ab0ac5b87676a49366dc99218dbf3c11562843
+  005-gpu-operator-ocp-olm/templates/subscription.yaml: fde5dba0e6bd296c27841ba89d6bf82188a08eb2d94b1ee2e02bb97170372608
+  005-gpu-operator-ocp-olm/values.yaml: 9f03a7f41913fad4f38131a48b79d3ca4d17c81ae30ca98da04fa7660f78069b
   006-network-operator-ocp-olm/Chart.yaml: 1f8bd6266a40e8313c9de72aef2e5f49cfb15dcd7deb0d96a7f4608fb73c16a7
   006-network-operator-ocp-olm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-network-operator-ocp-olm/install.sh: 8bb212a3f425ac4dd6f1d90d9a48731c5cc711695ab7ffd3598931febc22d21f
@@ -3711,7 +3711,7 @@ ocp-inference-nim:
   015-prometheus-adapter-ocp-post/values.yaml: 4b424b0499653496b19f128ee249ae6ec84d113c87786af22a73315056e558c9
   README.md: d5734584eeb2d506ee617b3d6daab561771b3dbe289d5ff300456a25781b3a54
   bundle-info.yaml: 867dcd5523ffcac5983948d5951a92566cef561b4f4712333375f303616f5394
-  checksums.txt: 11034afbf340443f66b1ced1e105e92fd6b7b0af6deb1cac87942d5a3974bca1
+  checksums.txt: 676bbdad74afef55707680cac36443a1f1b8a02c3fb1c9d7b2f80bcee8892348
   deploy.sh: 24cf97959d5e99177292e20d3494d221cbfe6b75a6e9420954eb2d255b5a41e9
   recipe.yaml: b4b646b39d7705617b4bbf4c272eac65a02e2781ca5da593c6ab2715c95fb54a
 ocp-training:
@@ -3741,8 +3741,8 @@ ocp-training:
   005-gpu-operator-ocp-olm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-gpu-operator-ocp-olm/install.sh: ce9870dee972e18bdab6794a09f9ae33605a5548a8ebab08ef450db2c0ec7284
   005-gpu-operator-ocp-olm/templates/operatorgroup.yaml: b42a77a3d0234ef0873b291911a300a9d34bc0ee188a673efc83c8521cd89031
-  005-gpu-operator-ocp-olm/templates/subscription.yaml: 403ede5c3c8eec60d2baa9ca4e4b96d787957a261518cd2e5c9db57e73b38380
-  005-gpu-operator-ocp-olm/values.yaml: b7f6d0c348bdeb239349627c46ab0ac5b87676a49366dc99218dbf3c11562843
+  005-gpu-operator-ocp-olm/templates/subscription.yaml: fde5dba0e6bd296c27841ba89d6bf82188a08eb2d94b1ee2e02bb97170372608
+  005-gpu-operator-ocp-olm/values.yaml: 9f03a7f41913fad4f38131a48b79d3ca4d17c81ae30ca98da04fa7660f78069b
   006-network-operator-ocp-olm/Chart.yaml: 1f8bd6266a40e8313c9de72aef2e5f49cfb15dcd7deb0d96a7f4608fb73c16a7
   006-network-operator-ocp-olm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-network-operator-ocp-olm/install.sh: 8bb212a3f425ac4dd6f1d90d9a48731c5cc711695ab7ffd3598931febc22d21f
@@ -3786,7 +3786,7 @@ ocp-training:
   013-prometheus-adapter-ocp-post/values.yaml: 4b424b0499653496b19f128ee249ae6ec84d113c87786af22a73315056e558c9
   README.md: 85af5865e9553756b98eb2e59149c8f1cee5069810174582c89d448f699e30c1
   bundle-info.yaml: 5896360f8e8f55c3284676d13799c7c13c8aff8709e2c9ada7932d7b4caf3d5b
-  checksums.txt: 03c57e9e56f97ce6fbfa5514212205f51750c55a246390633d45b3a151c9ddb9
+  checksums.txt: d025c06d7a4b12a0d6826c4b90b9506dc5bbba0c76eaff19f47e2a6a6a118ae7
   deploy.sh: 57db5c15a9f544ccf2f58e52e0de14b990672c2cc82af04cb6f12b83a46b94f1
   recipe.yaml: be82f14aba09224250a0cdfba0af51aadb4719d346f35bd3ac14b8e0724de710
 rtx-pro-6000-any:

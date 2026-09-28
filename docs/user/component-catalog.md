@@ -1365,6 +1365,14 @@ therefore keeps that release's stricter copy after upgrading. Set `spec.numNodes
 explicitly on every `ComputeDomain`, as AICR's own manifests do; `0` is valid
 under both copies.
 
+**OpenShift (OLM).** The `gpu-operator-ocp-olm` Subscription tracks the
+certified `v26.7` channel, whose v26.7.1 bundle ships the same
+`computedomains` schema as the DRA driver chart. Its CSV declares ownership of
+`computedomains` and `computedomaincliques`, while `nvidia-dra-driver-gpu-ocp`
+also installs `computedomains` from its chart. This pairing has not yet been
+verified on a live OpenShift cluster; see
+[NVIDIA/aicr#2969](https://github.com/NVIDIA/aicr/issues/2969).
+
 ### `agentgateway`: upgrading across breaking releases
 
 AICR pins the `agentgateway` and `agentgateway-crds` charts in the component
