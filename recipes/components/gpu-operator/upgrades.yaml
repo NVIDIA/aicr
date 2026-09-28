@@ -32,9 +32,11 @@ transitions:
       changes the driver DaemonSet, so with driver.upgradePolicy.autoUpgrade
       the operator cycles the driver pod node by node and evicts GPU workloads
       on each node in turn; the driver version itself is unchanged. The
-      computedomains CRD now matches the DRA driver's, but Helm and Flux never
-      upgrade an installed CRD, so a cluster first installed with v26.7.0 keeps
-      the copy that requires spec.numNodes.
+      computedomains CRD now matches the DRA driver's, but AICR's Helm and
+      Flux deployments leave an installed copy unchanged (gpu-operator is not
+      ownsCRDs, and the chart's CRD upgrade hook skips computedomains), so a
+      cluster first installed with v26.7.0 keeps the copy that requires
+      spec.numNodes.
     references:
       - https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/26.7/release-notes.html#v26-7-1
       - https://github.com/NVIDIA/gpu-operator/pull/2863

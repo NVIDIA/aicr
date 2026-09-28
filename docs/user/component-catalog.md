@@ -1355,9 +1355,13 @@ once the `gpu-operator` `Application` syncs v26.7.1, because both
 `gpu-operator` back to v26.7.0 alongside a DRA driver brings the reconcile
 loop back on Argo CD; move that pin to v26.7.1.
 
-**Helm and Flux.** Both install `crds/` only when the CRD is absent and never
-upgrade it. A cluster first installed with `gpu-operator` v26.7.0 therefore
-keeps that release's stricter copy after upgrading. Set `spec.numNodes`
+**Helm and Flux.** AICR's Helm and Flux deployments leave an installed
+`computedomains` CRD unchanged on upgrade. `gpu-operator` is not marked
+`ownsCRDs`, so its Flux `HelmRelease` keeps helm-controller's default
+`spec.upgrade.crds: Skip` and the `helm` deployer generates no CRD step for it;
+the chart's own CRD upgrade hook (`operator.upgradeCRD`) does not cover
+`computedomains`. A cluster first installed with `gpu-operator` v26.7.0
+therefore keeps that release's stricter copy after upgrading. Set `spec.numNodes`
 explicitly on every `ComputeDomain`, as AICR's own manifests do; `0` is valid
 under both copies.
 
