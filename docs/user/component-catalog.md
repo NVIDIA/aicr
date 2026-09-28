@@ -1183,9 +1183,20 @@ Which deployers need that step differs, so check yours:
 | Deployer | CRD behavior on upgrade | Manual step needed |
 |---|---|---|
 | `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs` |
-| `helmfile` | Upgrades through Helm, so it skips `crds/` too; no automation exists, because a `presync` hook fires only for releases `helmfile apply` decides to sync, so it would hold on a chart bump and silently not hold on an unchanged rerun | Always |
+| `helmfile` | Upgrades through Helm, so it skips `crds/` too; no automation exists, because a `presync` hook fires only for releases `helmfile apply` decides to sync, so it would hold on a chart bump and silently not hold on an unchanged rerun | Assume yes — see note below |
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
+
+**On `helmfile`'s "assume yes".** helmfile never updates CRDs for you, so the
+deployer itself can never narrow the step — that much is unconditional. Whether
+a *particular* version bump actually needs it is a different question, and the
+only thing that can answer it is the component's ADR-021 upgrade record for
+that transition. Some transitions genuinely do not need it: the k8s-aibom
+v1.3.0 to v1.5.1 bump upgrades cleanly on stale CRDs at default values, and
+needs the manual apply only when the same upgrade sets `config.verification`.
+Absent a record that says so, assume the step is required — applying CRDs that
+were already current is harmless, while skipping a needed apply fails the
+release partway through, after the workload has already rolled.
 
 Argo CD is the one deployer that upgrades CRDs for *every* component rather
 than only the opted-in ones, because including them is how it renders a Helm
