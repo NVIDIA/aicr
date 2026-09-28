@@ -310,3 +310,44 @@ func TestGKECriteriaAcceptOptIn(t *testing.T) {
 		})
 	}
 }
+
+// The opt-in has to move the component and its health check together, which is
+// what ADR-019 means by adopting a component rather than a chart.
+//
+// This fails closed in the dangerous direction: the deployment validator skips
+// a component carrying no asserts rather than failing it, so a grant that
+// loses them reports a passing check against a controller that never came up.
+// Comparing against the declaring recipe rather than asserting non-empty also
+// catches a grant that hydrates from the wrong source.
+func TestGrantedRefCarriesSameHealthCheckAsDeclaring(t *testing.T) {
+	refFor := func(t *testing.T, c *recipe.Criteria, opts ...recipe.BuildOption) *recipe.ComponentRef {
+		t.Helper()
+		builder := recipe.NewBuilder(recipe.WithVersion(stockAdoptionVersion))
+		result, err := builder.BuildFromCriteria(context.Background(), c, opts...)
+		if err != nil {
+			t.Fatalf("BuildFromCriteria() error = %v", err)
+		}
+		ref := result.GetComponentRef("k8s-aibom")
+		if ref == nil {
+			t.Fatal("k8s-aibom absent from the resolved recipe")
+		}
+		return ref
+	}
+
+	declared := refFor(t, &recipe.Criteria{
+		Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
+		OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference})
+
+	granted := refFor(t, &recipe.Criteria{
+		Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorA100,
+		OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining},
+		recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryEnabled))
+
+	if declared.HealthCheckAsserts == "" {
+		t.Fatal("declaring recipe carries no healthCheckAsserts; the comparison below would be vacuous")
+	}
+	if granted.HealthCheckAsserts != declared.HealthCheckAsserts {
+		t.Errorf("granted healthCheckAsserts != declaring (%d vs %d bytes); deployment validation would skip the granted component",
+			len(granted.HealthCheckAsserts), len(declared.HealthCheckAsserts))
+	}
+}

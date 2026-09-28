@@ -77,7 +77,7 @@ securityContext:
 # workloads memory reached 67-69MiB and steady-state CPU was 1-2m, both well
 # inside the requests below. Convergence completed within 10s.
 #
-# The figures above are the original v1.3.0 KWOK measurement, carried forward
+# The figures above are that original v1.3.0 measurement, carried forward
 # rather than re-derived. The v1.5.1 controller was spot-checked against them
 # on live GKE (2026-09-28): 2m CPU and 21MiB at a handful of workloads, well
 # inside the requests below. That confirms v1.5.1 did not regress the floor;

@@ -878,11 +878,19 @@ against v1.3.0 on its Kind 1.36.1 node image at initial qualification; that is
 qualification evidence for the original ADR-019 adoption, not an extension of
 upstream's support statement. The v1.3.0 → v1.5.1 transition itself is
 verified by CRD schema diff and a clean `aicr bundle` render — an
-additive-only CRD change with served/storage configuration unchanged — with
-no live-cluster reconciliation exercised for the transition yet; see the
-component's
+additive-only CRD change with served/storage configuration unchanged — and
+was then executed end to end on a live GKE cluster (`v1.35.6-gke.1250000`):
+install v1.3.0, upgrade to v1.5.1, with the shipped health check passing
+against the upgraded cluster. See the component's
 [upgrade record](https://github.com/NVIDIA/aicr/blob/main/recipes/components/k8s-aibom/upgrades.yaml)
-for the evidence that remains outstanding.
+for that evidence and the steps it produced.
+
+Two things are deliberately **not** covered by that run. The health check's
+`AIBOMControllerConfig` assertion still targets `v1alpha1` rather than the
+`v1beta1` the chart now renders (see [Health and readiness](#health-and-readiness)),
+and the resource envelope below carries forward a v1.3.0 measurement — v1.5.1
+was spot-checked against it, but the 1,001-workload ceiling has only ever been
+measured on v1.3.0.
 
 ### Health and readiness
 
@@ -938,7 +946,9 @@ at and its own CRD step; the fallback command below is the manual form. Argo CD
 is unaffected, since it applies whatever CRDs the rendered chart contains
 regardless of provenance. `helmfile` is also unaffected by this particular
 caveat, in the sense that there is nothing to disable: it never acts on
-`ownsCRDs`, checked or not, so its manual step is required unconditionally.
+`ownsCRDs`, checked or not, so no version override can take its automation
+away. Whether a given bump actually needs the manual step is a separate
+question, answered per transition by the upgrade record.
 The assertion is still worth making on every deployer, because it proves the
 deployed CRDs match the pinned chart rather than merely that some deployer was
 expected to update them.

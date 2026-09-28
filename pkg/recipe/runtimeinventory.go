@@ -109,25 +109,32 @@ func (r *RecipeResult) RuntimeInventoryMode() (RuntimeInventoryMode, bool) {
 // (#2962). The registry is the single source for chart, repository and
 // version, so a granted recipe and a declaring one render the same artifact.
 func grantRuntimeInventoryComponent(result *RecipeResult) error {
-	registry, err := GetComponentRegistry()
+	registry, err := GetComponentRegistryFor(result.provider)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to load the component registry to grant the runtime inventory component", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load the component registry to grant the runtime inventory component")
 	}
-	config := registry.Get(runtimeInventoryComponentName)
-	if config == nil {
+	if registry.Get(runtimeInventoryComponentName) == nil {
 		return errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("component %q is not in the registry; cannot grant it",
 				runtimeInventoryComponentName))
 	}
 
-	ref := ComponentRef{
+	result.ComponentRefs = append(result.ComponentRefs, ComponentRef{
 		Name:       runtimeInventoryComponentName,
 		Type:       ComponentTypeHelm,
 		ValuesFile: runtimeInventoryValuesFile,
+	})
+
+	// The package-level pass rather than ref.ApplyRegistryDefaults: only this
+	// one hydrates healthCheck.assertFile, and finalizeRecipeResult's
+	// recipe-wide hydration has already run by the time the grant appends. A
+	// ref defaulted the per-ref way carries no asserts, and a component with
+	// no asserts is skipped by the deployment validator rather than failing —
+	// so the gap would surface as a passing check, not a missing one.
+	if err := applyRegistryDefaults(result.provider, result.ComponentRefs[len(result.ComponentRefs)-1:]); err != nil {
+		return err
 	}
-	ref.ApplyRegistryDefaults(config)
-	result.ComponentRefs = append(result.ComponentRefs, ref)
 	return nil
 }
 
@@ -154,10 +161,21 @@ func applyRuntimeInventoryMode(result *RecipeResult, mode RuntimeInventoryMode) 
 	if result.GetComponentRef(runtimeInventoryComponentName) == nil {
 		gke := result.Criteria != nil && result.Criteria.Service == CriteriaServiceGKE
 		if parsed != RuntimeInventoryEnabled || !gke {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("runtime inventory mode %q requires the recipe to declare component %q; "+
-					"this recipe does not resolve it",
-					parsed, runtimeInventoryComponentName))
+			msg := fmt.Sprintf("runtime inventory mode %q requires the recipe to declare component %q; "+
+				"this recipe does not resolve it",
+				parsed, runtimeInventoryComponentName)
+			// Naming the service is what separates "I typo'd --service" from
+			// "this recipe genuinely lacks the component"; without it the
+			// message sends a GKE-expecting user hunting for a declaration.
+			if parsed == RuntimeInventoryEnabled {
+				service := "unset"
+				if result.Criteria != nil && result.Criteria.Service != "" {
+					service = string(result.Criteria.Service)
+				}
+				msg += fmt.Sprintf(", and %q adds it only to a %q recipe (this one is %q)",
+					RuntimeInventoryEnabled, CriteriaServiceGKE, service)
+			}
+			return errors.New(errors.ErrCodeInvalidRequest, msg)
 		}
 		if err := grantRuntimeInventoryComponent(result); err != nil {
 			return err

@@ -94,8 +94,11 @@ transitions:
           - id: verify-reconcile
             description: >-
               kubectl get aibomcontrollerconfig default -o yaml and confirm
-              apiVersion is aibom.k8saibom.dev/v1beta1 and status.conditions
-              reports Ready=True observed at the current generation.
+              status.conditions reports Ready=True at the object's current
+              observedGeneration. Do not also check apiVersion here: kubectl
+              resolves the CRD's preferred version, which is v1beta1 on the
+              v1.3.0 and v1.5.1 CRDs alike, so that clause reads the same on a
+              cluster still stranded on the old schema.
             reason: >-
               A Ready controller does not by itself mean the new config was
               accepted: readiness.failOnInvalidConfig is off by default, so
@@ -125,8 +128,11 @@ transitions:
           - id: verify-reconcile
             description: >-
               kubectl get aibomcontrollerconfig default -o yaml and confirm
-              apiVersion is aibom.k8saibom.dev/v1beta1 and status.conditions
-              reports Ready=True observed at the current generation.
+              status.conditions reports Ready=True at the object's current
+              observedGeneration. Do not also check apiVersion here: kubectl
+              resolves the CRD's preferred version, which is v1beta1 on the
+              v1.3.0 and v1.5.1 CRDs alike, so that clause reads the same on a
+              cluster still stranded on the old schema.
             reason: >-
               A Ready controller does not by itself mean the new config was
               accepted: readiness.failOnInvalidConfig is off by default, so
