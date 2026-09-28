@@ -77,10 +77,12 @@ securityContext:
 # workloads memory reached 67-69MiB and steady-state CPU was 1-2m, both well
 # inside the requests below. Convergence completed within 10s.
 #
-# These numbers are carried forward across the v1.3.0 -> v1.5.1 bump, not
-# re-measured against the v1.5.1 controller. Confirming the v1.5.1 controller
-# still sits inside them -- or updating them -- is live GKE evidence owned by
-# this plan's Task 8.
+# The figures above are the original v1.3.0 KWOK measurement, carried forward
+# rather than re-derived. The v1.5.1 controller was spot-checked against them
+# on live GKE (2026-09-28): 2m CPU and 21MiB at a handful of workloads, well
+# inside the requests below. That confirms v1.5.1 did not regress the floor;
+# it does not re-establish the 1,001-workload ceiling, which has only ever
+# been measured against v1.3.0.
 resources:
   requests:
     cpu: 50m

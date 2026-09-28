@@ -900,12 +900,31 @@ chart's `crds/` directory on upgrade, so a cluster that missed the CRD step can
 run a new controller against the previous schema while the older version stays
 served and the controller keeps working.
 
+**That assertion only catches a missed CRD step when the transition actually
+moves the storage version.** Both v1.3.0 and v1.5.1 store `v1beta1`, so a
+cluster stranded on the v1.3.0 CRDs after a v1.5.1 bump passes the check while
+missing the new schema — measured on GKE, such a cluster reports the release
+deployed, the controller `1/1` Ready on the v1.5.1 image, and `storedVersions`
+`v1beta1` on both CRDs. To confirm the v1.5.1 CRDs specifically, look for the
+field they add rather than the storage version:
+
+```bash
+kubectl get crd aibomcontrollerconfigs.aibom.k8saibom.dev \
+  -o jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.verification.type}'
+# expect: object   (empty means the v1.3.0 schema is still in place)
+```
+
 `k8s-aibom` is marked `ownsCRDs` in the registry, so most deployers update its
 CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` through
 the generated `apply-crds.sh`, and Argo CD by applying them as ordinary
 manifests each sync. `helmfile` has no equivalent automation — see
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
-for the manual step it always requires.
+for the manual step. Whether a given bump needs that step depends on whether
+the upgrade uses anything the new schema adds: a v1.3.0 to v1.5.1 bump on
+default values upgrades cleanly on `helmfile` against the old CRDs, but the
+same bump setting `config.verification` aborts the release with
+`.spec.verification: field not declared in schema` after the Deployment has
+already advanced. When in doubt, apply the CRDs first; it is never harmful.
 
 **That automation is tied to the registry-pinned coordinates, not to the
 component.** `ownsCRDs` records an audit of one specific chart, so Flux and
