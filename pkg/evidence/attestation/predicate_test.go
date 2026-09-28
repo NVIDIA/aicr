@@ -162,8 +162,8 @@ func TestBuildStatement_ReturnsValidIntotoJSON(t *testing.T) {
 	if err := json.Unmarshal(stmt, &parsed); err != nil {
 		t.Fatalf("statement is not JSON: %v", err)
 	}
-	if parsed["predicateType"] != PredicateTypeV1 {
-		t.Errorf("predicateType = %v, want %v", parsed["predicateType"], PredicateTypeV1)
+	if parsed["predicateType"] != PredicateTypeV3 {
+		t.Errorf("predicateType = %v, want %v", parsed["predicateType"], PredicateTypeV3)
 	}
 	subj, ok := parsed["subject"].([]any)
 	if !ok || len(subj) != 1 {
@@ -194,7 +194,7 @@ func TestBuildArtifactStatement_SubjectIsArtifactDigest(t *testing.T) {
 		},
 	})
 	artifactDigest := strings.Repeat("b", 64)
-	stmt, err := BuildArtifactStatement("ghcr.io/example/aicr-evidence", artifactDigest, pred)
+	stmt, err := BuildArtifactStatement("ghcr.io/example/aicr-evidence", artifactDigest, "", pred)
 	if err != nil {
 		t.Fatalf("BuildArtifactStatement: %v", err)
 	}
@@ -202,8 +202,8 @@ func TestBuildArtifactStatement_SubjectIsArtifactDigest(t *testing.T) {
 	if err := json.Unmarshal(stmt, &parsed); err != nil {
 		t.Fatalf("statement is not JSON: %v", err)
 	}
-	if parsed["predicateType"] != PredicateTypeV1 {
-		t.Errorf("predicateType = %v, want %v", parsed["predicateType"], PredicateTypeV1)
+	if parsed["predicateType"] != PredicateTypeV3 {
+		t.Errorf("predicateType = %v, want %v", parsed["predicateType"], PredicateTypeV3)
 	}
 	subj, ok := parsed["subject"].([]any)
 	if !ok || len(subj) != 1 {
@@ -266,7 +266,7 @@ func TestBuildArtifactStatement_RejectsBadInputs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := BuildArtifactStatement(tt.ociRef, tt.artifactDigest, tt.pred)
+			_, err := BuildArtifactStatement(tt.ociRef, tt.artifactDigest, "", tt.pred)
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tt.wantContains)
 			}
@@ -277,19 +277,18 @@ func TestBuildArtifactStatement_RejectsBadInputs(t *testing.T) {
 	}
 }
 
-// TestStatementPredicateTypeSelection pins the v1/v2 statement split: a
-// profile-bearing predicate upgrades the statement to PredicateTypeV2;
-// unprofiled predicates stay on v1 byte-identically (ADR-015
-// descriptor-currentness cut-over).
+// TestStatementPredicateTypeSelection pins that newly produced evidence is
+// always typed PredicateTypeV3, whether or not the predicate carries a
+// profile block.
 func TestStatementPredicateTypeSelection(t *testing.T) {
-	if got := StatementPredicateType(&Predicate{}); got != PredicateTypeV1 {
-		t.Errorf("unprofiled type = %q, want %q", got, PredicateTypeV1)
+	if got := StatementPredicateType(&Predicate{}); got != PredicateTypeV3 {
+		t.Errorf("unprofiled type = %q, want %q", got, PredicateTypeV3)
 	}
 	profiled := &Predicate{Profile: &ProfilePredicate{
 		Selection: "gpuStack=gke-default", PolicyDescriptorIdentity: "abc",
 	}}
-	if got := StatementPredicateType(profiled); got != PredicateTypeV2 {
-		t.Errorf("profiled type = %q, want %q", got, PredicateTypeV2)
+	if got := StatementPredicateType(profiled); got != PredicateTypeV3 {
+		t.Errorf("profiled type = %q, want %q", got, PredicateTypeV3)
 	}
 }
 

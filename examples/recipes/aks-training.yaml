@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
   appliedOverlays:
@@ -77,7 +77,7 @@ componentRefs:
     chart: kai-scheduler
     type: Helm
     source: oci://ghcr.io/kai-scheduler/kai-scheduler
-    version: v0.14.1
+    version: v0.16.9
     valuesFile: components/kai-scheduler/values.yaml
     dependencyRefs:
       - gpu-operator
@@ -127,7 +127,7 @@ componentRefs:
       topologyUpdater:
         enable: true
   - name: nodewright-customizations
-    namespace: skyhook
+    namespace: nodewright
     type: Helm
     source: ""
     overrides:
@@ -140,11 +140,11 @@ componentRefs:
     manifestFiles:
       - components/nodewright-customizations/manifests/tuning.yaml
   - name: nodewright-operator
-    namespace: skyhook
+    namespace: nodewright
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.17.1
+    version: v0.19.0
     valuesFile: components/nodewright-operator/values.yaml
   - name: nvidia-dra-driver-gpu
     namespace: nvidia-dra-driver

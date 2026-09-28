@@ -12,33 +12,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Dependabot owns GitHub Actions bumps ONLY. Everything else here is Renovate's
+# (.github/renovate.json5).
+#
+# The split is not stylistic. Renovate disables its own github-actions manager
+# because GitHub's auto-issued GITHUB_TOKEN cannot push to `.github/workflows/*`
+# regardless of the `permissions:` block — that needs a GitHub App or PAT with
+# `workflows` scope, which this repo deliberately does not run. Dependabot has
+# no such restriction, so Actions are the one ecosystem it must keep.
+#
+# The gomod, docker and terraform ecosystems were removed here because Renovate
+# already covers all three, and running both produced duplicate PRs for the same
+# bump — #2731 (Dependabot) and #2742 (Renovate) each bumped golang.org/x/term
+# to 0.46.0 and both merged. Beyond the noise, only Renovate can carry a Go
+# module bump correctly here: the custom.regex managers that own `.settings.yaml`
+# and the postUpgradeTasks that refresh the checksum pins are Renovate features,
+# so a Dependabot gomod PR can move a version that a `.settings.yaml` pin is
+# supposed to track and leave the pin behind.
+#
+# Dependabot SECURITY updates are unaffected by this file. They are a repository
+# setting (`automated-security-fixes`, enabled), not part of `updates:` above, so
+# they keep covering gomod and every other ecosystem after this change and remain
+# the low-latency path for a CVE. Keep them enabled; that is what makes ceding
+# routine gomod bumps safe.
+#
+# Do not assume Renovate is the CVE backstop. It reads the same alerts (GET
+# /repos/{owner}/{repo}/dependabot/alerts, hence `security-events: read` in
+# renovate.yaml) and surfaces them in PR bodies, but bypassing the cooldown for
+# a vulnerability requires an explicit `vulnerabilityAlerts` block in
+# renovate.json5, and there isn't one — so a Renovate-raised fix is still
+# subject to the 3-day global / 7-day automerge minimumReleaseAge soak.
+#
+# Trade-off this change does make: routine (non-security) gomod patch bumps lose
+# their same-day path. Dependabot ran daily and dependabot-auto-merge.yaml
+# auto-merged semver-patch immediately; Renovate holds a patch for 7 days and
+# only runs on weekday mornings. That cooldown is deliberate — it is the main
+# defense for auto-merged bumps — but it means a routine patch now lands roughly
+# a week later than it used to.
 version: 2
 updates:
-  - package-ecosystem: "gomod"
-    directory: "/"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 10
-    labels: ["dependencies"]
-    commit-message:
-      prefix: "chore: deps"
-    # Group related Kubernetes dependencies into single PRs
-    # Reduces PR noise and ensures compatible versions
-    groups:
-      kubernetes:
-        patterns:
-          - "k8s.io/*"
-          - "sigs.k8s.io/*"
-        exclude-patterns:
-          # klog has independent versioning
-          - "k8s.io/klog/v2"
-      golang-x:
-        patterns:
-          - "golang.org/x/*"
-      opencontainers:
-        patterns:
-          - "github.com/opencontainers/*"
-
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -53,22 +65,3 @@ updates:
       codeql-action:
         patterns:
           - "github/codeql-action*"
-
-  - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 5
-    labels: ["dependencies"]
-    commit-message:
-      prefix: "chore: deps"
-
-  - package-ecosystem: "terraform"
-    directories:
-      - "/infra/**"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 10
-    labels: ["dependencies"]
-    commit-message:
-      prefix: "chore: deps"

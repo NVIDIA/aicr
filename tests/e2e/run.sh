@@ -1158,7 +1158,7 @@ test_validate_deployment_checks() {
   local recipe_file="${validate_dir}/recipe-with-constraints.yaml"
   cat > "$recipe_file" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1215,7 +1215,7 @@ RECIPE
   local recipe_file_fail="${validate_dir}/recipe-with-failing-constraint.yaml"
   cat > "$recipe_file_fail" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1282,7 +1282,7 @@ RECIPE
   local recipe_er_fail="${validate_dir}/recipe-expected-resources-fail.yaml"
   cat > "$recipe_er_fail" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1403,7 +1403,7 @@ RECIPE
       local recipe_manual="${validate_dir}/recipe-manual-pass.yaml"
       cat > "$recipe_manual" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1461,7 +1461,7 @@ RECIPE
       local recipe_merge="${validate_dir}/recipe-manual-merge.yaml"
       cat > "$recipe_merge" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1549,7 +1549,7 @@ RECIPE
   local recipe_chainsaw="${validate_dir}/recipe-chainsaw.yaml"
   cat > "$recipe_chainsaw" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1605,7 +1605,7 @@ RECIPE
   local recipe_chainsaw_fail="${validate_dir}/recipe-chainsaw-fail.yaml"
   cat > "$recipe_chainsaw_fail" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1693,7 +1693,7 @@ test_validate_job_deployment() {
   local recipe_file="${validate_dir}/recipe.yaml"
   cat > "$recipe_file" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:

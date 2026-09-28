@@ -15,6 +15,7 @@
 package header
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -23,13 +24,15 @@ import (
 // readers select a version by wire kind and schema track; see ADR-022.
 //
 // Three tracks exist. StableGroupVersion, AuthoringGroupVersion, and
-// ProfileGroupVersion name the value each track emits today; GroupVersionV1,
-// GroupVersionV1Beta1, and GroupVersionV1Beta2 name where each is headed.
-// StableGroupVersion and AuthoringGroupVersion carry the same string during
-// the reader-first release and diverge at the emitter switch, so a package
-// emitter must alias the constant for its track rather than the string it
-// happens to equal. Aliasing GroupVersion directly is what made the switch a
-// refactor instead of an edit.
+// ProfileGroupVersion name the value each track emits; since the v0.22 emitter
+// switch (#2416) each equals its target, GroupVersionV1, GroupVersionV1Beta1
+// and GroupVersionV1Beta2 respectively.
+//
+// The three carried one shared string before the v0.22 emitter switch, which is
+// what let a package alias that string directly and still look correct while
+// emitting the wrong value later. Alias the constant for your track, never the
+// string it happens to equal; the tracks hold distinct values now and a
+// collapsed alias shows up as a wrong value rather than a latent one.
 //
 // Evolution policy (see docs/design/011-artifact-apiversion-policy.md and
 // docs/design/022-artifact-maturity-and-deprecation.md): schema changes within
@@ -47,13 +50,6 @@ const (
 	// APIGroup is the API group for AICR artifacts.
 	APIGroup = Domain
 
-	// APIVersionV1Alpha2 is the current artifact API version segment.
-	APIVersionV1Alpha2 = "v1alpha2"
-
-	// APIVersionV1Alpha3 is the strict RecipeResult schema carrying typed
-	// desired-state configuration. Other artifact kinds remain on v1alpha2.
-	APIVersionV1Alpha3 = "v1alpha3"
-
 	// APIVersionV1Beta1 is the ADR-022 target for authoring and configuration
 	// artifacts: AICRConfig, ordinary RecipeMetadata, RecipeMixin, and
 	// ComponentRegistry.
@@ -67,26 +63,20 @@ const (
 	// Snapshot, default RecipeResult, RecipeCriteria, and BundleProvenance.
 	APIVersionV1 = "v1"
 
-	// GroupVersion is the canonical "group/version" string for AICR artifacts.
-	GroupVersion = APIGroup + "/" + APIVersionV1Alpha2
-
-	// RecipeResultGroupVersion is the current configured RecipeResult schema.
-	RecipeResultGroupVersion = APIGroup + "/" + APIVersionV1Alpha3
-
 	// StableGroupVersion is the value emitted for the ADR-022 stable artifact
 	// track: Snapshot, the default RecipeResult, RecipeCriteria, and
-	// BundleProvenance. Its §2 target is GroupVersionV1.
-	StableGroupVersion = GroupVersion
+	// BundleProvenance. It reached its §2 target in v0.22 (#2416).
+	StableGroupVersion = GroupVersionV1
 
 	// AuthoringGroupVersion is the value emitted for the ADR-022 authoring and
 	// configuration track: AICRConfig, ordinary RecipeMetadata, RecipeMixin,
-	// and ComponentRegistry. Its §2 target is GroupVersionV1Beta1.
-	AuthoringGroupVersion = GroupVersion
+	// and ComponentRegistry. It reached its §2 target in v0.22 (#2416).
+	AuthoringGroupVersion = GroupVersionV1Beta1
 
 	// ProfileGroupVersion is the value emitted for the ADR-022 profile-bearing
-	// track: profile RecipeMetadata and RecipeResult. Its §2 target is
-	// GroupVersionV1Beta2.
-	ProfileGroupVersion = RecipeResultGroupVersion
+	// track: profile RecipeMetadata and RecipeResult. It reached its §2 target
+	// in v0.22 (#2416).
+	ProfileGroupVersion = GroupVersionV1Beta2
 
 	// GroupVersionV1Beta1 is the target authoring/configuration group/version.
 	GroupVersionV1Beta1 = APIGroup + "/" + APIVersionV1Beta1
@@ -98,6 +88,61 @@ const (
 	GroupVersionV1 = APIGroup + "/" + APIVersionV1
 )
 
+// Retired artifact API versions. ADR-022 §3 bound the alpha values to N+2,
+// which is v1.0.0 (#2417); at that release they left every accepted set.
+//
+// They survive only so a rejection can name what the value was. An artifact
+// written by an older aicr is a common and recoverable situation, and
+// "unsupported apiVersion" alone does not tell its author that the value was
+// withdrawn deliberately or which release withdrew it. Never add either to an
+// accepted set — RetirementNote is their only legitimate consumer.
+const (
+	RetiredGroupVersionV1Alpha2 = APIGroup + "/v1alpha2"
+	RetiredGroupVersionV1Alpha3 = APIGroup + "/v1alpha3"
+)
+
+// AlphaRemovedIn is the release that stopped reading the alpha apiVersion
+// values and the legacy empty header.
+const AlphaRemovedIn = "v1.0.0"
+
+// RetirementNote returns a parenthetical explaining that an apiVersion was
+// withdrawn, or "" for any other value — including one that is merely unknown,
+// where there is nothing specific to say.
+//
+// Callers append it to a message that already names the observed value, the
+// expected value, and how to regenerate the artifact. Splitting it out this way
+// keeps each caller's message in its own vocabulary ("recapture the snapshot",
+// "regenerate the criteria") while the reason an old artifact stopped working
+// is worded once.
+//
+// An absent apiVersion gets no note here, because whether that value ever
+// loaded is a property of the calling reader rather than of the value. Readers
+// that did accept it call RetirementNoteWithAbsent instead.
+func RetirementNote(apiVersion string) string {
+	switch apiVersion {
+	case RetiredGroupVersionV1Alpha2, RetiredGroupVersionV1Alpha3:
+		return fmt.Sprintf(" (%s was retired in %s)", apiVersion, AlphaRemovedIn)
+	default:
+		return ""
+	}
+}
+
+// RetirementNoteWithAbsent is RetirementNote for the five readers whose
+// tolerance of an absent apiVersion survived until AlphaRemovedIn: the Snapshot,
+// RecipeCriteria, and RecipeResult inputs whose artifacts predate the field.
+//
+// Every other reader must call RetirementNote. An AICRConfig never loaded
+// without a header, and a RecipeMetadata overlay stopped in v0.21 with the
+// catalog scanner (#2421) — telling either author the value "was accepted"
+// until v1.0.0 sends them looking for a regression that never happened, which
+// is worse than the bare "unsupported apiVersion" this clause exists to improve.
+func RetirementNoteWithAbsent(apiVersion string) string {
+	if apiVersion == "" {
+		return fmt.Sprintf(" (an absent apiVersion was accepted before %s)", AlphaRemovedIn)
+	}
+	return RetirementNote(apiVersion)
+}
+
 // IsSupportedAPIVersion reports whether v is an artifact apiVersion this binary
 // understands. The empty string is intentionally NOT supported here: callers
 // that tolerate a missing apiVersion for backward compatibility with older
@@ -107,36 +152,28 @@ const (
 // reading authoring or profile-bearing artifacts must use the corresponding
 // schema-track helper instead of treating versions as globally interchangeable.
 func IsSupportedAPIVersion(v string) bool {
-	switch v {
-	case GroupVersion, GroupVersionV1:
-		return true
-	default:
-		return false
-	}
+	return v == GroupVersionV1
 }
 
 // IsSupportedAuthoringAPIVersion reports whether v is accepted for an
-// ADR-022 authoring/configuration artifact during the Release N reader-first
-// window.
+// ADR-022 authoring/configuration artifact.
 func IsSupportedAuthoringAPIVersion(v string) bool {
-	switch v {
-	case GroupVersion, GroupVersionV1Beta1:
-		return true
-	default:
-		return false
-	}
+	return v == GroupVersionV1Beta1
 }
 
 // IsSupportedProfileAPIVersion reports whether v is accepted for a
-// profile-bearing RecipeMetadata or RecipeResult during the Release N
-// reader-first window.
+// profile-bearing RecipeMetadata or RecipeResult.
 func IsSupportedProfileAPIVersion(v string) bool {
-	switch v {
-	case RecipeResultGroupVersion, GroupVersionV1Beta2:
-		return true
-	default:
-		return false
-	}
+	return v == GroupVersionV1Beta2
+}
+
+// IsSupportedBundleInfoAPIVersion reports whether v is accepted for a
+// BundleInfo. Unlike the other stable-track artifacts, this kind shipped
+// directly at its ADR-022 target with no alpha predecessor, so no BundleInfo
+// carrying a retired value ever legitimately existed. Kept distinct from
+// IsSupportedAPIVersion, which the two now agree with only by coincidence.
+func IsSupportedBundleInfoAPIVersion(v string) bool {
+	return v == StableGroupVersion
 }
 
 // IsSupportedRecipeResultAPIVersion reports whether v is a RecipeResult
@@ -156,6 +193,7 @@ const (
 	KindSnapshot     Kind = "Snapshot"
 	KindRecipe       Kind = "Recipe"
 	KindRecipeResult Kind = "RecipeResult"
+	KindBundleInfo   Kind = "BundleInfo"
 )
 
 // String returns the string representation of the Kind.

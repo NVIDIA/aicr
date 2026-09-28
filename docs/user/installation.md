@@ -71,7 +71,8 @@ sudo chmod +x /usr/local/bin/aicr
 ### Option 4: Build from Source
 
 **Requirements:**
-- Go 1.26 or higher
+- Go 1.27 or higher (the toolchain CI builds with is pinned in
+  [`.go-version`](https://github.com/NVIDIA/aicr/blob/main/.go-version))
 
 ```shell
 go install github.com/NVIDIA/aicr/cmd/aicr@latest
@@ -206,6 +207,6 @@ rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/aicr.fish"
 
 ## Getting Help
 
-- **Documentation**: [User Documentation](index.md)
+- **Documentation**: [User Documentation](https://github.com/NVIDIA/aicr/blob/main/docs/user/index.md)
 - **Issues**: [GitHub Issues](https://github.com/NVIDIA/aicr/issues)
 - **API Server**: See [Kubernetes Deployment](../integrator/kubernetes-deployment.md)

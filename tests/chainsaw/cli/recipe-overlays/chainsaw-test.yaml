@@ -68,6 +68,15 @@ spec:
                 [ -n "$service" ] && flags="${flags} --service ${service}"
                 [ -n "$platform" ] && flags="${flags} --platform ${platform}"
 
+                # h100-gke-cos-training-kubeflow ships torch-distributed-tcpxo and
+                # fails closed at recipe generation without the ordered eth1..eth8 ->
+                # network mapping (issue #2296). This is a no-cluster smoke test, so
+                # the fixed introspection-shaped value is the right input here — it is
+                # never deployed; the recipe+bundle just must generate.
+                if [ "$basename" = "h100-gke-cos-training-kubeflow" ]; then
+                  flags="${flags} --gke-tcpxo-interfaces eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3,eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"
+                fi
+
                 echo "=== ${basename}: recipe (service=${service:-default} accel=${accelerator} os=${os_val} intent=${intent} platform=${platform:-none}) ==="
                 ${AICR_BIN} recipe ${flags} -o "${test_dir}/recipe.yaml" || { echo "FAIL: recipe generation for ${basename}" >&2; exit 1; }
 

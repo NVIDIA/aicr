@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,43 @@ func TestGenerate_Scenarios(t *testing.T) {
 				}
 			}(),
 			goldens: []string{"helmfile.yaml", "level-0.yaml", "level-1.yaml", "README.md"},
+		},
+		{
+			// k8s-aibom is marked ownsCRDs, and this deployer still emits no
+			// CRD step for it. A presync hook fires only for releases
+			// helmfile decides to sync, and `helmfile apply` selects on
+			// detected change, so the step would hold on a chart bump and
+			// silently not hold on an unchanged rerun. The golden pins the
+			// absence: no hooks key on the release (#2525).
+			name: "owns_crds_no_hook",
+			gen: &Generator{
+				RecipeResult: recipeWith(
+					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.3.0",
+						"oci://ghcr.io/googlecloudplatform/charts"),
+				),
+				ComponentValues: map[string]map[string]any{
+					"k8s-aibom": {"replicaCount": 1},
+				},
+				Version: testBundlerVersion,
+			},
+			goldens: []string{"helmfile.yaml"},
+		},
+		{
+			// The same component with its version overridden away from the
+			// registry pin, kept as the sibling case so the two goldens stay
+			// comparable if a CRD step is ever added back here.
+			name: "owns_crds_version_override",
+			gen: &Generator{
+				RecipeResult: recipeWith(
+					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.2.0",
+						"oci://ghcr.io/googlecloudplatform/charts"),
+				),
+				ComponentValues: map[string]map[string]any{
+					"k8s-aibom": {"replicaCount": 1},
+				},
+				Version: testBundlerVersion,
+			},
+			goldens: []string{"helmfile.yaml"},
 		},
 		{
 			// cluster-values.yaml must be referenced in the release's
@@ -236,6 +274,82 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	checksumsPath := filepath.Join(outputDir, "checksums.txt")
 	if _, statErr := os.Stat(checksumsPath); statErr != nil {
 		t.Fatalf("checksums.txt missing: %v", statErr)
+	}
+}
+
+// TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
+// output.Releases with the layout it actually wrote to outputDir, mirroring
+// the helm deployer's equivalent coverage (pkg/bundler/deployer/helm).
+func TestGenerateReportsLayout(t *testing.T) {
+	// ComponentRefs declaration order, DeploymentOrder, and alphabetical
+	// component-name order are all deliberately distinct here:
+	//   - declaration (the ref() call order below): gpu-operator,
+	//     cert-manager, nfd
+	//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real
+	//     dependency order — nfd labels nodes before gpu-operator consumes
+	//     those labels)
+	//   - alphabetical: cert-manager, gpu-operator, nfd
+	// so the primaryOrder assertion below can only pass if Generate genuinely
+	// honors DeploymentOrder rather than sorting by name or falling back to
+	// declaration order (e.g. a dropped SortComponentRefsByDeploymentOrder
+	// call). recipeWith sets DeploymentOrder from declaration order, so it is
+	// overwritten below — this divergence from recipeWith's usual behavior is
+	// intentional, not a bug to "fix" back into agreement.
+	recipeResult := recipeWith(
+		ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3",
+			"https://helm.ngc.nvidia.com/nvidia"),
+		ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2",
+			"https://charts.jetstack.io"),
+		ref("nfd", "node-feature-discovery", "node-feature-discovery", "v0.16.4",
+			"https://kubernetes-sigs.github.io/node-feature-discovery-charts"),
+	)
+	recipeResult.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"nfd":          {"enabled": true},
+			"gpu-operator": {"driver": map[string]any{"enabled": true}},
+		},
+		Version: testBundlerVersion,
+	}
+	outputDir := t.TempDir()
+
+	out, err := g.Generate(context.Background(), outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if out.Entrypoint != "helmfile.yaml" {
+		t.Errorf("Entrypoint = %q, want helmfile.yaml", out.Entrypoint)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position, since the artifact carries no ordinal field. Extract
+	// the primary releases (Name == Component; excludes injected -pre/-post
+	// entries) and confirm their relative order matches the recipe's
+	// DeploymentOrder — a sort or reversal of out.Releases must fail this
+	// check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, recipeResult.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, recipeResult.DeploymentOrder)
 	}
 }
 

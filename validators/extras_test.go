@@ -120,3 +120,31 @@ func TestEmitExtraWriteError(t *testing.T) {
 		t.Errorf("EmitExtra() error = %v, want ErrCodeInternal", err)
 	}
 }
+
+func TestEmitRuntimeProvenance(t *testing.T) {
+	var buf bytes.Buffer
+	orig := extrasOut
+	extrasOut = &buf
+	defer func() { extrasOut = orig }()
+
+	if err := EmitRuntimeProvenance(nil); err != nil || buf.Len() != 0 {
+		t.Fatalf("nil record must be a no-op: err=%v out=%q", err, buf.String())
+	}
+	in := &ctrf.RuntimeProvenance{ShippedDigest: "a", DerivedDigest: "b",
+		OverriddenPaths: []string{"spec.containers[node].image"}, InheritedPaths: []string{"spec.hostNetwork"}}
+	if err := EmitRuntimeProvenance(in); err != nil {
+		t.Fatal(err)
+	}
+	line := strings.TrimSuffix(buf.String(), "\n")
+	payload, ok := strings.CutPrefix(line, ctrf.ProvenanceLinePrefix)
+	if !ok {
+		t.Fatalf("line %q lacks the provenance prefix", line)
+	}
+	var got ctrf.RuntimeProvenance
+	if err := json.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ShippedDigest != "a" || got.DerivedDigest != "b" || len(got.OverriddenPaths) != 1 || len(got.InheritedPaths) != 1 {
+		t.Errorf("round-trip = %+v", got)
+	}
+}

@@ -86,7 +86,16 @@ extract_sha() {
     echo "ERROR: no checksum entry matching ${pattern} in ${CHECKSUMS_URL}" >&2
     exit 1
   fi
-  echo "${line%% *}"
+  local sha="${line%% *}"
+  # Same check as update-oras-checksums. The value is interpolated into the
+  # awk regex in the verification below, where a metacharacter would change
+  # what is matched rather than being compared literally, and it is written
+  # into .settings.yaml for tools/setup-tools to pin against at install time.
+  if [[ ! "${sha}" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "ERROR: extracted value is not a sha256: '${sha}'" >&2
+    exit 1
+  fi
+  echo "${sha}"
 }
 
 LINUX_AMD64=$(extract_sha linux amd64)
@@ -111,6 +120,7 @@ awk -v amd64="${LINUX_AMD64}" -v arm64="${LINUX_ARM64}" \
     # Enter helm_diff_checksums block.
     /^  helm_diff_checksums:[[:space:]]*$/ { in_block = 1; print; next }
     # Leave the block when we hit any other top-level (2-space) key.
+    in_block && /^[^ ]/ { in_block = 0 }
     in_block && /^  [a-zA-Z_]/ && !/^    / { in_block = 0 }
     in_block && /^    linux_amd64:[[:space:]]*'\''[0-9a-f]{64}'\''/  { print "    linux_amd64: \x27" amd64 "\x27"; next }
     in_block && /^    linux_arm64:[[:space:]]*'\''[0-9a-f]{64}'\''/  { print "    linux_arm64: \x27" arm64 "\x27"; next }
@@ -127,6 +137,7 @@ verify_block() {
   local key="$1" sha="$2"
   if ! awk -v key="$key" -v sha="$sha" '
         /^  helm_diff_checksums:[[:space:]]*$/ { in_block = 1; next }
+        in_block && /^[^ ]/ { in_block = 0 }
         in_block && /^  [a-zA-Z_]/ && !/^    / { in_block = 0 }
         in_block && $0 ~ "^    " key ":[[:space:]]*'\''" sha "'\''$" { found = 1 }
         END { exit !found }
@@ -147,6 +158,7 @@ for block in chainsaw_checksums helmfile_checksums; do
   for sha in "${LINUX_AMD64}" "${LINUX_ARM64}" "${DARWIN_AMD64}" "${DARWIN_ARM64}"; do
     if awk -v block="${block}" -v sha="$sha" '
           $0 ~ "^  " block ":[[:space:]]*$" { in_block = 1; next }
+          in_block && /^[^ ]/ { in_block = 0 }
           in_block && /^  [a-zA-Z_]/ && !/^    / { in_block = 0 }
           in_block && index($0, sha) > 0 { found = 1 }
           END { exit !found }

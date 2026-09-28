@@ -20,6 +20,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -589,6 +590,110 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	}
 	if !strings.Contains(checksumContent, "README.md") {
 		t.Error("checksums.txt should contain README.md")
+	}
+}
+
+// TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
+// output.Releases with the layout it actually wrote to outputDir, mirroring
+// the helm deployer's equivalent coverage (pkg/bundler/deployer/helm).
+// argocd additionally sets Manifest on every release: it writes an
+// application.yaml declaring each release, which helm-orchestrated releases
+// do not have.
+func TestGenerateReportsLayout(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	// ComponentRefs declaration order, DeploymentOrder, and alphabetical
+	// component-name order are all deliberately distinct here:
+	//   - declaration: gpu-operator, cert-manager, nfd
+	//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real
+	//     dependency order — nfd labels nodes before gpu-operator consumes
+	//     those labels)
+	//   - alphabetical: cert-manager, gpu-operator, nfd
+	// so the primaryOrder assertion below can only pass if Generate genuinely
+	// honors DeploymentOrder rather than sorting by name or falling back to
+	// declaration order (e.g. a dropped SortComponentRefsByDeploymentOrder
+	// call).
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      "helm",
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "nfd",
+			Namespace: "node-feature-discovery",
+			Chart:     "node-feature-discovery",
+			Version:   "v0.16.4",
+			Type:      "helm",
+			Source:    "https://kubernetes-sigs.github.io/node-feature-discovery-charts",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		Version:      "v0.9.0",
+	}
+
+	out, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if out.Entrypoint != "app-of-apps.yaml" {
+		t.Errorf("Entrypoint = %q, want app-of-apps.yaml", out.Entrypoint)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+	}
+
+	for _, r := range out.Releases {
+		if r.Manifest == "" {
+			t.Errorf("release %q reports no manifest; argocd declares every release in an application.yaml", r.Name)
+			continue
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Manifest)); statErr != nil {
+			t.Errorf("release %q claims manifest %q, which does not exist: %v", r.Name, r.Manifest, statErr)
+		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position, since the artifact carries no ordinal field. Extract
+	// the primary releases (Name == Component; excludes injected -pre/-post/
+	// -readiness entries) and confirm their relative order matches the
+	// recipe's DeploymentOrder — a sort or reversal of out.Releases must
+	// fail this check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, recipeResult.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, recipeResult.DeploymentOrder)
 	}
 }
 

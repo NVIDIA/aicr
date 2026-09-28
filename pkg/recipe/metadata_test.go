@@ -2180,6 +2180,195 @@ func TestComponentRefApplyRegistryDefaults_ManifestFiles(t *testing.T) {
 	})
 }
 
+// TestApplyInheritedIdentity verifies that a prior recipe's resolved namespaces
+// survive re-resolution against a registry whose defaults have moved.
+func TestApplyInheritedIdentity(t *testing.T) {
+	tests := []struct {
+		name   string
+		refs   []ComponentRef
+		prior  []ComponentRef
+		wantNS map[string]string
+	}{
+		{
+			name:   "prior namespace wins over registry default",
+			refs:   []ComponentRef{{Name: "nodewright-operator", Namespace: "nodewright"}},
+			prior:  []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}},
+			wantNS: map[string]string{"nodewright-operator": "skyhook"},
+		},
+		{
+			name:   "empty prior namespace does not clobber the default",
+			refs:   []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			prior:  []ComponentRef{{Name: "gpu-operator", Namespace: ""}},
+			wantNS: map[string]string{"gpu-operator": "gpu-operator"},
+		},
+		{
+			name:   "component absent from prior keeps the default",
+			refs:   []ComponentRef{{Name: "new-thing", Namespace: "new-thing"}},
+			prior:  []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			wantNS: map[string]string{"new-thing": "new-thing"},
+		},
+		{
+			name:   "nil prior is a no-op",
+			refs:   []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			prior:  nil,
+			wantNS: map[string]string{"gpu-operator": "gpu-operator"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := slices.Clone(tt.refs)
+			ApplyInheritedIdentity(refs, tt.prior)
+			for _, ref := range refs {
+				if got := ref.Namespace; got != tt.wantNS[ref.Name] {
+					t.Errorf("%s namespace = %q, want %q", ref.Name, got, tt.wantNS[ref.Name])
+				}
+			}
+		})
+	}
+}
+
+// TestApplyInheritedIdentityRebindsHealthCheck pins the interaction between the
+// two halves of --inherit-from: a health check is static YAML naming wherever
+// the registry currently puts the component, so a preserved namespace that left
+// the assertions behind would fail validation against the very deployment
+// inheritance just kept in place.
+//
+// The kube-system assertion is the control. A check may legitimately assert
+// against a namespace the component does not live in, and those must survive.
+func TestApplyInheritedIdentityRebindsHealthCheck(t *testing.T) {
+	const check = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+spec:
+  steps:
+    - name: validate-deployment-exists
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: skyhook-operator-controller-manager
+                namespace: nodewright
+    - name: validate-unrelated-namespace
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: kube-proxy
+                namespace: kube-system
+`
+
+	refs := []ComponentRef{{
+		Name:               "nodewright-operator",
+		Namespace:          "nodewright",
+		HealthCheckAsserts: check,
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	if got := refs[0].Namespace; got != "skyhook" {
+		t.Fatalf("namespace = %q, want skyhook", got)
+	}
+	if strings.Contains(refs[0].HealthCheckAsserts, "namespace: nodewright") {
+		t.Errorf("health check still asserts the registry namespace:\n%s", refs[0].HealthCheckAsserts)
+	}
+	if !strings.Contains(refs[0].HealthCheckAsserts, "namespace: skyhook") {
+		t.Errorf("health check does not assert the inherited namespace:\n%s", refs[0].HealthCheckAsserts)
+	}
+	if !strings.Contains(refs[0].HealthCheckAsserts, "namespace: kube-system") {
+		t.Errorf("unrelated namespace assertion was rewritten:\n%s", refs[0].HealthCheckAsserts)
+	}
+}
+
+// TestApplyInheritedIdentityRebindsEveryDocument pins that rebinding preserves
+// a multi-document health check. Nothing restricts the field to one document,
+// and decoding only the first would silently drop the rest on re-serialization,
+// leaving a check that passes without verifying what it claims to. The second
+// document also holds the only matching namespace, so a first-document-only
+// implementation would additionally fail to rebind at all.
+func TestApplyInheritedIdentityRebindsEveryDocument(t *testing.T) {
+	const check = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: first-doc
+spec:
+  steps:
+    - name: unrelated
+      try:
+        - assert:
+            resource:
+              kind: DaemonSet
+              metadata:
+                namespace: kube-system
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: second-doc
+spec:
+  steps:
+    - name: operator
+      try:
+        - assert:
+            resource:
+              kind: Deployment
+              metadata:
+                namespace: nodewright
+`
+
+	refs := []ComponentRef{{
+		Name:               "nodewright-operator",
+		Namespace:          "nodewright",
+		HealthCheckAsserts: check,
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	got := refs[0].HealthCheckAsserts
+	if !strings.Contains(got, "first-doc") {
+		t.Errorf("the first document was dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "second-doc") {
+		t.Errorf("the second document was dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "namespace: skyhook") {
+		t.Errorf("the second document's namespace was not rebound:\n%s", got)
+	}
+	if !strings.Contains(got, "namespace: kube-system") {
+		t.Errorf("an unrelated namespace was rewritten:\n%s", got)
+	}
+}
+
+// TestApplyInheritedIdentityLeavesRefIntactOnRebindFailure pins the all-or-
+// nothing contract: a ref changes both its namespace and its health check, or
+// neither. Assigning the namespace first would leave the new value beside
+// assertions still naming the old one, and the "already inherited" guard would
+// then skip the ref on a retry, stranding the stale YAML permanently.
+func TestApplyInheritedIdentityLeavesRefIntactOnRebindFailure(t *testing.T) {
+	refs := []ComponentRef{{
+		Name:      "nodewright-operator",
+		Namespace: "nodewright",
+		// Not parseable as YAML, so rebinding cannot succeed.
+		HealthCheckAsserts: "spec:\n  steps:\n   - bad\n  indent: [oops\n",
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	err := ApplyInheritedIdentity(refs, prior)
+	if err == nil {
+		t.Fatal("ApplyInheritedIdentity() = nil error, want a parse failure")
+	}
+	if got := refs[0].Namespace; got != "nodewright" {
+		t.Errorf("namespace = %q, want it left at nodewright: a failed rebind must not "+
+			"half-apply the inheritance", got)
+	}
+}
+
 // TestComponentRefMergeWithPath verifies that the Path field is correctly merged
 // when merging ComponentRefs (overlay into base).
 func TestComponentRefMergeWithPath(t *testing.T) {
@@ -2258,6 +2447,19 @@ func TestComponentRefMergeWithPath(t *testing.T) {
 	})
 }
 
+// tcpxoRequiredBuildOpts supplies the generation-time TCPXO interface mapping
+// when (and only when) the criteria select the h100 GKE kubeflow family — the
+// one recipe that ships torch-distributed-tcpxo and therefore fails closed
+// without the recorded mapping.
+func tcpxoRequiredBuildOpts(cr *Criteria) []BuildOption {
+	if cr.Service == CriteriaServiceGKE && cr.Accelerator == CriteriaAcceleratorH100 &&
+		cr.Platform == CriteriaPlatformKubeflow {
+
+		return []BuildOption{WithGKETCPXOInterfaces(tcpxoTestMapping())}
+	}
+	return nil
+}
+
 // TestNFDTopologyUpdater_OverlayCoverage verifies that every GPU overlay
 // rooted at a real-cluster platform base resolves to
 // componentRefs[nfd].overrides.topologyUpdater.enable=true, and that the
@@ -2309,6 +2511,8 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"rtx-pro-6000-lke-inference", criteria{CriteriaServiceLKE, CriteriaAcceleratorRTXPro6000, "", CriteriaIntentInference, ""}, true},
 		{"b200-gke-cos-training", criteria{CriteriaServiceGKE, CriteriaAcceleratorB200, CriteriaOSCOS, CriteriaIntentTraining, ""}, true},
 		{"b200-gke-cos-inference", criteria{CriteriaServiceGKE, CriteriaAcceleratorB200, CriteriaOSCOS, CriteriaIntentInference, ""}, true},
+		{"gb200-gke-cos-training", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, ""}, true},
+		{"gb200-gke-cos-inference", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentInference, ""}, true},
 		// Deeper specialized leaves — inherited via base: chain; a future overlay
 		// that replaces (rather than deep-merges) componentRefs would break these.
 		// H100 EKS Ubuntu variants
@@ -2328,6 +2532,10 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
 		{"h100-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"h100-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
+		// GB200 GKE COS platform variants (GKE uses COS, no Ubuntu variant)
+		{"gb200-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"gb200-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
+		{"gb200-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// GB200 EKS Ubuntu variants
 		{"gb200-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"gb200-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
@@ -2390,7 +2598,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 				cr.Platform = tt.c.platform
 			}
 
-			result, err := builder.BuildFromCriteria(ctx, cr)
+			result, err := builder.BuildFromCriteria(ctx, cr, tcpxoRequiredBuildOpts(cr)...)
 			if err != nil {
 				t.Fatalf("BuildFromCriteria(%+v): %v", tt.c, err)
 				return
@@ -2484,6 +2692,38 @@ func TestDeepMergeMap_NoSliceAliasing(t *testing.T) {
 	}
 }
 
+// TestRecipeMetadataSpecMerge_DoesNotCorruptSourceOverrides covers Merge's
+// initial componentMap population: s.ComponentRefs can itself alias a cached
+// source (e.g. initBaseMergedSpec copies s.Base.Spec.ComponentRefs by
+// struct, which doesn't deep-copy the Overrides map). Without cloning on
+// entry, a second layer's Overrides for the same component would be
+// deep-merged straight into that aliased map, corrupting the cached source
+// for every later build that reuses it.
+func TestRecipeMetadataSpecMerge_DoesNotCorruptSourceOverrides(t *testing.T) {
+	source := RecipeMetadataSpec{
+		ComponentRefs: []ComponentRef{
+			{Name: "x", Overrides: map[string]any{"a": 1}},
+		},
+	}
+
+	// Mirrors initBaseMergedSpec's copy pattern: a struct-level copy that
+	// leaves the Overrides map aliased to source.
+	merged := RecipeMetadataSpec{
+		ComponentRefs: make([]ComponentRef, len(source.ComponentRefs)),
+	}
+	copy(merged.ComponentRefs, source.ComponentRefs)
+
+	merged.Merge(&RecipeMetadataSpec{
+		ComponentRefs: []ComponentRef{
+			{Name: "x", Overrides: map[string]any{"b": 2}},
+		},
+	})
+
+	if _, leaked := source.ComponentRefs[0].Overrides["b"]; leaked {
+		t.Fatalf("source was mutated by the merge: %#v", source.ComponentRefs[0].Overrides)
+	}
+}
+
 // TestRecipeResultNormalizeKind pins the ingest-boundary kind contract: the
 // legacy shapes this API accepted through v0.18.0 are rewritten to the
 // canonical kind so the emitted artifact reloads, the canonical value is a
@@ -2510,7 +2750,7 @@ func TestRecipeResultNormalizeKind(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			r := &RecipeResult{Kind: tt.kind}
+			r := &RecipeResult{APIVersion: RecipeResultAPIVersion, Kind: tt.kind}
 			err := r.NormalizeKind()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NormalizeKind() error = %v, wantErr %v", err, tt.wantErr)
@@ -2533,5 +2773,72 @@ func TestRecipeResultNormalizeKindNilReceiver(t *testing.T) {
 	var r *RecipeResult
 	if err := r.NormalizeKind(); err != nil {
 		t.Errorf("NormalizeKind() on nil receiver = %v, want nil", err)
+	}
+}
+
+// TestGB200GKEIncludesRDMA: gke+gb200+cos must resolve to the GB200 GKE
+// leaf (not gke-cos + gb200-any) and keep gke-gb200-rdma plus the
+// dma-buf kernel-module ConfigMap.
+func TestGB200GKEIncludesRDMA(t *testing.T) {
+	builder := NewBuilder()
+	if builder == nil {
+		t.Fatal("NewBuilder() returned nil")
+	}
+	leaves := []struct {
+		label    string
+		intent   CriteriaIntentType
+		platform CriteriaPlatformType // empty for the unspecialized base leaf
+		// wantPerf is explicit per leaf. The Slurm leaf does not declare
+		// nccl-all-reduce-bw-nvls even though its intent is training, so
+		// this cannot be derived from intent alone.
+		wantPerf bool
+	}{
+		{"training", CriteriaIntentTraining, "", true},
+		{"inference", CriteriaIntentInference, "", false},
+		{"training-kubeflow", CriteriaIntentTraining, CriteriaPlatformKubeflow, true},
+		{"training-slurm", CriteriaIntentTraining, CriteriaPlatformSlurm, false},
+		{"inference-dynamo", CriteriaIntentInference, CriteriaPlatformDynamo, false},
+	}
+
+	ctx := context.Background()
+	for _, leaf := range leaves {
+		cr := NewCriteria()
+		cr.Service = CriteriaServiceGKE
+		cr.Accelerator = CriteriaAcceleratorGB200
+		cr.OS = CriteriaOSCOS
+		cr.Intent = leaf.intent
+		cr.Platform = leaf.platform
+		result, err := builder.BuildFromCriteria(ctx, cr)
+		if err != nil {
+			t.Fatalf("BuildFromCriteria(gke/gb200/cos/%s): %v", leaf.label, err)
+		}
+		if result.GetComponentRef("gke-gb200-rdma") == nil {
+			t.Errorf("gke-gb200-rdma missing from resolved gke/gb200/cos/%s recipe", leaf.label)
+		}
+		gpuOp := result.GetComponentRef("gpu-operator")
+		if gpuOp == nil {
+			t.Fatalf("gpu-operator missing from resolved gke/gb200/cos/%s recipe", leaf.label)
+		}
+		km, ok := gpuOp.Overrides["driver"].(map[string]any)
+		if !ok {
+			t.Errorf("gpu-operator.driver override missing for gke/gb200/cos/%s", leaf.label)
+			continue
+		}
+		cfg, ok := km["kernelModuleConfig"].(map[string]any)
+		if !ok || cfg["name"] != "nvidia-kernel-module-params" {
+			t.Errorf("kernelModuleConfig.name = %v, want nvidia-kernel-module-params for gke/gb200/cos/%s", km["kernelModuleConfig"], leaf.label)
+		}
+		checkPresent := performanceCheckPresent(result.Validation, "nccl-all-reduce-bw-nvls")
+		floor, floorFound := findPerformanceConstraint(result.Validation, "nccl-all-reduce-bw-nvls")
+		if leaf.wantPerf {
+			if !checkPresent {
+				t.Errorf("performance check nccl-all-reduce-bw-nvls missing for gke/gb200/cos/%s", leaf.label)
+			}
+			if !floorFound || floor != ">= 250" {
+				t.Errorf("nccl-all-reduce-bw-nvls = %q found=%v, want >= 250 for gke/gb200/cos/%s", floor, floorFound, leaf.label)
+			}
+		} else if checkPresent || floorFound {
+			t.Errorf("gke/gb200/cos/%s must not declare NCCL performance; check=%v floor=%q", leaf.label, checkPresent, floor)
+		}
 	}
 }

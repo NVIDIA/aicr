@@ -64,11 +64,11 @@ inputs:
     required: false
     default: ''
   upload_artifacts:
-    description: 'Whether to upload debug artifacts on failure'
+    description: 'Whether to upload the CTRF results (every outcome) and debug artifacts (on failure)'
     required: false
     default: 'true'
   artifact_retention_days:
-    description: 'Number of days to retain debug artifacts'
+    description: 'Number of days to retain the CTRF results and debug artifacts'
     required: false
     default: '7'
   job_timeout_minutes:
@@ -205,11 +205,22 @@ runs:
         path: /tmp/kwok-image-cache/gitea
         key: ${{ steps.images.outputs.gitea_key }}
 
+    # Only the argocd-* deployers install the Argo CD chart (see
+    # install-infra.sh), so the flux and helm lanes skip a restore they would
+    # never use. This covers argocd-oci, argocd-helm-oci and argocd-git.
+    - name: Restore Argo CD Redis image
+      if: startsWith(inputs.deployer, 'argocd-')
+      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      with:
+        path: /tmp/kwok-image-cache/argocd_redis
+        key: ${{ steps.images.outputs.argocd_redis_key }}
+
     - name: Load cached images
       shell: bash
       env:
         REGISTRY_IMAGE: ${{ steps.images.outputs.registry_image }}
         GITEA_IMAGE: ${{ steps.images.outputs.gitea_image }}
+        ARGOCD_REDIS_IMAGE: ${{ steps.images.outputs.argocd_redis_image }}
         DEPLOYER: ${{ inputs.deployer }}
       run: |
         set -uo pipefail
@@ -229,6 +240,9 @@ runs:
         load_image /tmp/kwok-image-cache/registry "${REGISTRY_IMAGE}"
         if [[ "${DEPLOYER}" == *-git ]]; then
           load_image /tmp/kwok-image-cache/gitea "${GITEA_IMAGE}"
+        fi
+        if [[ "${DEPLOYER}" == argocd-* ]]; then
+          load_image /tmp/kwok-image-cache/argocd_redis "${ARGOCD_REDIS_IMAGE}"
         fi
 
     - name: Run KWOK recipe test
@@ -272,6 +286,18 @@ runs:
         for cluster in $(kind get clusters 2>/dev/null); do
           kind export logs "/tmp/kwok-kind-logs/${cluster}" --name "$cluster" || true
         done
+
+    # run-all-recipes.sh records one CTRF test per (recipe, deployer) cell in
+    # /tmp/kwok-debug-artifacts/kwok-results.json (#1806). Upload it on every
+    # outcome so a green lane leaves structured evidence too, not only a red one.
+    - name: Upload CTRF results
+      if: always() && inputs.upload_artifacts == 'true'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      with:
+        name: kwok-results-${{ inputs.recipe }}-${{ inputs.deployer }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: /tmp/kwok-debug-artifacts/kwok-results.json
+        retention-days: ${{ inputs.artifact_retention_days }}
+        if-no-files-found: warn
 
     - name: Upload debug artifacts
       if: failure() && inputs.upload_artifacts == 'true'

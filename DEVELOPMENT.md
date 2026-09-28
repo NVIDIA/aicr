@@ -24,7 +24,7 @@ make lint           # Run linters
 make build          # Build binaries
 
 # 3. Before submitting PR
-make qualify        # Full check: test-coverage + lint + tuning-check + e2e + scan + license-check + api-diff + openapi-diff
+make qualify        # Full check: test-coverage + lint + tuning-check + coverage-check + e2e + scan + license-check + api-diff + openapi-diff
 ```
 
 ## Prerequisites
@@ -33,11 +33,11 @@ make qualify        # Full check: test-coverage + lint + tuning-check + e2e + sc
 
 | Tool | Purpose | Installation |
 |------|---------|--------------|
-| **Go 1.26+** | Language runtime | [golang.org/dl](https://golang.org/dl/) |
+| **Go 1.27+** | Language runtime (exact CI toolchain pinned in `.go-version`) | [golang.org/dl](https://golang.org/dl/) |
 | **make** | Build automation | Pre-installed on macOS; `apt install make` on Ubuntu/Debian |
 | **git** | Version control | Pre-installed on most systems |
 | **Docker** | Container builds | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
-| **yq** | YAML processing | Required for `make tools-setup/check`. See [github.com/mikefarah/yq](https://github.com/mikefarah/yq) |
+| **yq** | YAML processing | Installed by `make tools-setup`: the pinned version on Linux, via Homebrew on macOS. `make tools-check` needs it |
 
 ### Development Tools (installed by `make tools-setup`)
 
@@ -70,11 +70,9 @@ On Ubuntu 24.04+ and other systems using PEP 668, system-wide pip installs are b
 sudo apt-get install -y make git curl pipx
 pipx ensurepath
 pipx install yamllint
-
-# Install yq
-sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-sudo chmod +x /usr/local/bin/yq
 ```
+
+`make tools-setup` installs yq itself, at the version pinned in `.settings.yaml`, checksum-verified. It keeps a yq that is already on `PATH`, so run `make tools-update` to replace a hand-installed one.
 
 ## Development Setup
 
@@ -218,7 +216,7 @@ make test-coverage
 ### 4. Lint Your Code
 
 ```bash
-# Run all linters (Go, YAML, license headers, agents sync, docs filename/MDX gates, chart-version pins)
+# Run all linters (Go, YAML, license headers, agents sync, docs gates, chart-version pins)
 make lint
 
 # Or run individually for a faster loop (all of these already run as part of `make lint`)
@@ -229,11 +227,18 @@ make license      # Add/verify license headers (may modify files)
 # Docs published to Fern are parsed as MDX; both checks gate the merge
 make check-docs-mdx        # fast pattern approximation (no dependencies)
 make check-docs-mdx-parse  # real MDX parser, authoritative (needs Node 20+)
+
+# YAML-labelled code blocks throughout docs/ must contain parseable YAML
+make check-docs-yaml       # syntax only; partial YAML fragments are valid
 ```
 
 `check-docs-mdx-parse` warns and skips when Node is unavailable locally, but
 hard-fails in CI. See
 [Docs MDX Gate](docs/contributor/tests.md#docs-mdx-gate).
+
+`check-docs-yaml` has the same local-warning and CI-hard-fail behavior for a
+missing Node runtime. See
+[Docs YAML Fence Gate](docs/contributor/tests.md#docs-yaml-fence-gate).
 
 ### 5. Run E2E Tests
 
@@ -263,7 +268,7 @@ Before submitting a PR, run everything:
 make qualify
 ```
 
-This runs: `test-coverage` → `lint` → `tuning-check` → `e2e` → `scan` → `license-check` → `api-diff` → `openapi-diff`
+This runs: `test-coverage` → `lint` → `tuning-check` → `coverage-check` → `e2e` → `scan` → `license-check` → `api-diff` → `openapi-diff`
 
 ## Local Kubernetes Development
 
@@ -444,13 +449,13 @@ make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
 
 Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates scheduling (node selectors, tolerations, resource requests) but not runtime behavior (no container execution or GPU functionality).
 
-For the deployer matrix (argocd / argocd-helm OCI lanes), see [Deployer Coverage Matrix](docs/contributor/tests.md#deployer-coverage-matrix).
+For the deployer matrix (Argo CD and Flux, OCI and Git source lanes), see [Deployer Coverage Matrix](docs/contributor/tests.md#deployer-coverage-matrix).
 
 | Command | Description |
 |---------|-------------|
 | `make kwok-test-all` | Test all recipes in shared cluster (serial) |
 | `make kwok-e2e RECIPE=<name>` | Full e2e: cluster, nodes, validate |
-| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<name>` | Validate single recipe under a specific deployer (`helm`, `argocd-oci`, `argocd-helm-oci`) |
+| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<name>` | Validate single recipe under a specific deployer (`helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git`) |
 | `make kwok-test RECIPE=<name>` | Validate bundle scheduling on an existing KWOK cluster |
 | `make kwok-cluster` | Create Kind cluster with KWOK |
 | `make kwok-nodes RECIPE=<name>` | Create KWOK nodes from a recipe overlay |
@@ -466,10 +471,10 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 
 | Target | Description |
 |--------|-------------|
-| `make qualify` | Full qualification (test-coverage, lint, tuning-check, e2e, scan, license-check, api-diff, openapi-diff) |
+| `make qualify` | Full qualification (test-coverage, lint, tuning-check, coverage-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
-| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs filename/MDX gates, and chart-version pins |
+| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, and chart-version pins |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
 | `make e2e` | CLI end-to-end tests |
@@ -479,7 +484,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make kwok-test-all` | Test all recipes with KWOK (serial, shared cluster) |
 | `make kwok-e2e RECIPE=<name>` | Test single recipe with KWOK (e.g., gb200-eks-training) |
 | `make check-health COMPONENT=<name>` | Run chainsaw health check directly against Kind cluster |
-| `make check-health-all` | Run all chainsaw health checks against Kind cluster |
+| `make check-health-all` | Run chainsaw health checks for every registry-linked component against Kind cluster (opt-in-only checks like `nvsentinel-observability` run via `check-health COMPONENT=<name>`) |
 | `make validate-local RECIPE=<path>` | Build validator image, load into Kind, run deployment validation |
 
 ### Build & Release
@@ -606,15 +611,16 @@ the Helm uninstall in its namespace, the CRD pattern match, and the namespace
 deletion. Fence it out of all three phases:
 
 ```bash
-tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com
+tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com,nodewright.nvidia.com
 ```
 
 Both flags are repeatable and accept comma-separated values. `--exclude-ns`
 protects a namespace from Helm uninstall and namespace deletion; `--exclude-crd`
 protects CRDs whose name contains the given match from deletion, applied *after*
 pattern matching so a broad pattern (`nvidia.com`) cannot pull an excluded
-group's CRDs (`skyhook.nvidia.com`) back in. Run with `--dry-run` first to
-confirm what will and will not be removed.
+group's CRDs (`skyhook.nvidia.com`, and its v0.18.0 rename
+`nodewright.nvidia.com`) back in. Run with `--dry-run` first to confirm what
+will and will not be removed.
 
 ### Debugging Tests
 
@@ -671,7 +677,8 @@ Runs chainsaw directly against the Kind cluster. Fast (~5s), validates YAML synt
 # Run health check for a single component
 make check-health COMPONENT=nvsentinel
 
-# Run all health checks
+# Run health checks for every registry-linked component
+# (opt-in-only checks are excluded; run those with check-health COMPONENT=<name>)
 make check-health-all
 
 # List available components

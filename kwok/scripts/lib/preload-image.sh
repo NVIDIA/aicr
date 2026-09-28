@@ -57,17 +57,21 @@ PRELOAD_PROBE_TIMEOUT=5
 
 # Side-load an image into the Kind node so the kubelet never pulls it.
 #
-# The registry and Gitea Deployments are the only two workloads in the KWOK
-# lanes whose images come from a public registry, and both used to be pulled by
-# the kubelet inside a 120s rollout budget with no retry. That made every lane
+# The registry and Gitea Deployments were the first workloads in the KWOK lanes
+# whose images come from a public registry, and both used to be pulled by the
+# kubelet inside a 120s rollout budget with no retry. That made every lane
 # depend on a single upstream reach at exactly the wrong moment: an ECR blip
 # surfaced as "Registry Deployment did not become Ready within 120s", exit 20,
 # and a red matrix cell with nothing wrong in the repo. It was the single
 # largest source of KWOK-lane failures.
 #
+# Argo CD's Redis joined them later (#2501). It differs in that its Deployment
+# comes from the chart rather than this repo, so it is preloaded before
+# `helm install` rather than before an applied manifest.
+#
 # Pulling on the host instead has three advantages: `docker pull` can be
 # retried without holding a rollout budget open, the runner's Docker cache
-# survives across lanes in a job, and both Deployments already set
+# survives across lanes in a job, and every one of these Deployments sets
 # imagePullPolicy: IfNotPresent, so a preloaded image is used as-is.
 #
 # BEST EFFORT BY DESIGN. Every failure path here logs and returns 0, leaving

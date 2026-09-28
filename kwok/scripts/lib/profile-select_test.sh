@@ -62,7 +62,7 @@ write_profile() {
     dir=$(dirname "${path}")
     mkdir -p "${dir}"
     {
-        echo "apiVersion: aicr.run/v1alpha2"
+        echo "apiVersion: aicr.run/v1beta1"
         echo "kind: KWOKNodeProfile"
         echo "metadata:"
         echo "  name: ${name}"
@@ -198,7 +198,7 @@ write_overlay() {
     dir=$(dirname "${path}")
     mkdir -p "${dir}"
     {
-        echo "apiVersion: aicr.run/v1alpha2"
+        echo "apiVersion: aicr.run/v1beta1"
         echo "kind: recipeMetadata"
         echo "metadata:"
         echo "  name: fixture"
@@ -234,7 +234,7 @@ check "resolve-any-collapses-to-defaults" 0 "eks h100" "" "${got_rc}" "${got_out
 # "" via a quoted empty string). Both must still collapse to defaults;
 # write_overlay can't emit these forms so build the fixture directly.
 cat > "${OVERLAY_DIR}/null-and-empty.yaml" <<'EOF'
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: recipeMetadata
 metadata:
   name: fixture
@@ -526,7 +526,7 @@ check "profile_status-any-service-treated-as-no-match" 0 "${PROFILE_SELECT_RC_NO
 # echo "0" (unique match found) and select_profiles must have been
 # invoked with the defaulted (eks, h100) pair.
 cat > "${OVERLAY_DIR}/ps-generic-tier1.yaml" <<'EOF'
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: recipeMetadata
 metadata:
   name: ps-generic-tier1

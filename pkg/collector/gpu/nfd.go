@@ -77,7 +77,7 @@ func (d *NFDHardwareDetector) Detect(ctx context.Context) (*HardwareInfo, error)
 	// Check context between discovery phases
 	select {
 	case <-ctx.Done():
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "NFD detection canceled after PCI discovery", ctx.Err())
+		return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "detecting NFD labels after PCI discovery")
 	default:
 	}
 

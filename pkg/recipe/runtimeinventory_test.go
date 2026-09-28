@@ -26,7 +26,7 @@ import (
 func runtimeInventoryTestResult() *RecipeResult {
 	return &RecipeResult{
 		Kind:       RecipeResultKind,
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		ComponentRefs: []ComponentRef{
 			{Name: "gpu-operator", Type: ComponentTypeHelm, Namespace: "gpu-operator"},
 			{
@@ -157,7 +157,7 @@ func TestApplyBuildConfigRuntimeInventoryRejectsAbsentComponent(t *testing.T) {
 			t.Parallel()
 			result := &RecipeResult{
 				Kind:       RecipeResultKind,
-				APIVersion: "aicr.run/v1alpha2",
+				APIVersion: "aicr.run/v1",
 				ComponentRefs: []ComponentRef{
 					{Name: "gpu-operator", Type: ComponentTypeHelm, Namespace: "gpu-operator"},
 				},

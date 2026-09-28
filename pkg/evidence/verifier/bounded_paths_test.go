@@ -42,7 +42,7 @@ func TestVerifierFilesystemPathsAreBounded(t *testing.T) {
 	// A real predicate, so the phase-digest pass actually reads ctrf/ files.
 	// An empty one would short-circuit before touching the filesystem and the
 	// case would vacuously pass.
-	pred, err := loadUnsignedPredicate(context.Background(), mat)
+	pred, _, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestVerifierFilesystemPathsAreBounded(t *testing.T) {
 			return err
 		}},
 		{"loadUnsignedPredicate", func(ctx context.Context) error {
-			_, err := loadUnsignedPredicate(ctx, mat)
+			_, _, err := loadUnsignedPredicate(ctx, mat)
 			return err
 		}},
 		{"CheckPhaseDigestsContext", func(ctx context.Context) error {

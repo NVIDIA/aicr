@@ -114,19 +114,23 @@ type Fingerprint struct {
 	GPUNodeCount IntDimension `json:"gpuNodeCount" yaml:"gpuNodeCount"`
 }
 
-// DimensionMatch is the three-way per-dimension outcome of Match.
+// DimensionMatch is the per-dimension outcome of Match.
 //
 // "unknown" means the criteria specifies a value but the fingerprint
 // could not determine it (e.g., recipe intent or platform are
-// recipe-author choices not detectable from cluster state). Unknowns
-// surface in MatchResult.PerDimension for human review without
-// counting as a contradiction in the overall MatchResult.Matched flag.
+// recipe-author choices not detectable from cluster state).
+// "not-inferable" means the criteria specifies an opt-in-only value
+// (recipe.CriteriaRegistry.IsOptInOnly) that no measurement can ever
+// yield, so the fingerprint's captured value is recorded but cannot
+// contradict it. Neither counts as a contradiction in the overall
+// MatchResult.Matched flag; both surface in PerDimension for review.
 type DimensionMatch string
 
 const (
-	DimensionMatched    DimensionMatch = "matched"
-	DimensionMismatched DimensionMatch = "mismatched"
-	DimensionUnknown    DimensionMatch = "unknown"
+	DimensionMatched      DimensionMatch = "matched"
+	DimensionMismatched   DimensionMatch = "mismatched"
+	DimensionUnknown      DimensionMatch = "unknown"
+	DimensionNotInferable DimensionMatch = "not-inferable"
 )
 
 // DimensionName is a typed criteria dimension key.
@@ -159,17 +163,18 @@ type DimensionDiff struct {
 	// this dimension. Empty when the dimension was not captured.
 	FingerprintProvides string `json:"fingerprintProvides,omitempty" yaml:"fingerprintProvides,omitempty"`
 
-	// Match is the three-way outcome.
+	// Match is the comparison outcome.
 	Match DimensionMatch `json:"match" yaml:"match"`
 }
 
 // MatchResult is the structured outcome of Fingerprint.Match.
 //
-// Matched is true when no dimension is Mismatched. Unknown dimensions
-// (e.g., criteria.intent / criteria.platform when the fingerprint does
-// not capture them) do not flip Matched to false: they surface in
-// PerDimension for the maintainer to evaluate, but the fingerprint
-// itself cannot disprove a match it does not capture.
+// Matched is true when no dimension is Mismatched. Unknown and
+// not-inferable dimensions (criteria.intent / criteria.platform when
+// the fingerprint does not capture them; an opt-in-only service such as
+// generic) do not flip Matched to false: they surface in PerDimension
+// for the maintainer to evaluate, but the fingerprint cannot disprove a
+// match it does not capture or that no measurement can produce.
 //
 // PerDimension is an ordered slice so iteration is deterministic and
 // serialization is stable. Use Find for lookup by name.

@@ -53,6 +53,10 @@ info:
     - **External data overlays** (`aicr recipe --data`, `aicr bundle --data`) — overlays
       custom components and overlays from a local directory onto embedded recipe data.
 
+    - **Namespace inheritance** (`aicr recipe --inherit-from`) reads a prior recipe file or
+      bundle directory from the local filesystem, so the resolved recipe keeps the namespaces
+      that artifact already deployed into instead of re-deriving them from the registry.
+
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -120,6 +124,7 @@ paths:
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
       responses:
         '200':
           description: Headers for the response GET would return
@@ -184,6 +189,7 @@ paths:
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
       responses:
         "200":
           description: Resolved legacy, profile-bearing, or accounting-configured recipe
@@ -262,6 +268,7 @@ paths:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
       requestBody:
         required: true
         content:
@@ -369,6 +376,7 @@ paths:
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
         - $ref: "#/components/parameters/Selector"
       responses:
         '200':
@@ -437,6 +445,7 @@ paths:
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
         - $ref: "#/components/parameters/Selector"
       responses:
         "200":
@@ -525,6 +534,7 @@ paths:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
       requestBody:
         required: true
         content:
@@ -626,8 +636,7 @@ paths:
         Renders a deployment bundle and returns it as a ZIP archive. The body is
         an already-selected RecipeResult, so this route has no profile-selection
         field; select the profile when resolving the recipe. Default recipes
-        stamped aicr.run/v1alpha2, aicr.run/v1, or omitting apiVersion are
-        accepted; profile recipes stamped aicr.run/v1alpha3 or aicr.run/v1beta2
+        must be stamped aicr.run/v1; profile recipes stamped aicr.run/v1beta2
         are decoded strictly. Content-Type must be application/json or
         application/x-yaml. The query parameters below control deployer, value
         overrides, node scheduling, workload gating and attestation.
@@ -911,7 +920,7 @@ components:
       description: Kubernetes service/environment type.
       schema:
         type: string
-        enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, any]
+        enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s, any]
         default: any
     Accelerator:
       name: accelerator
@@ -986,6 +995,17 @@ components:
         type: string
         enum: [disabled, customer-managed, aicr-provided]
         default: disabled
+    GKETCPXOInterfaces:
+      name: gkeTcpxoInterfaces
+      in: query
+      required: false
+      description: >-
+        Ordered eth1..eth8 to GPU-NIC Network mapping for the
+        torch-distributed-tcpxo runtime, as eth1=<network>,...,eth8=<network>.
+        Required when the resolved recipe ships that runtime (service=gke,
+        accelerator=h100, platform=kubeflow).
+      schema:
+        type: string
     Selector:
       name: selector
       in: query
@@ -1220,7 +1240,7 @@ components:
         service:
           type: string
           description: Kubernetes service type
-          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, any]
+          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s, any]
           example: eks
         accelerator:
           type: string
@@ -1366,7 +1386,7 @@ components:
               type: object
               description: >
                 Selected profile identity and declaration-wide lock surface.
-                Present only when apiVersion is aicr.run/v1alpha3.
+                Present only when apiVersion is aicr.run/v1beta2.
               required: [name, value, ownedPaths]
               additionalProperties: false
               properties:
@@ -1430,6 +1450,8 @@ components:
                 mode:
                   type: string
                   enum: [enabled, disabled]
+            gke:
+              $ref: "#/components/schemas/GKERecipeConfiguration"
         componentRefs:
           type: array
           items:
@@ -1600,13 +1622,11 @@ components:
       description: >
         Complete legacy, profile-aware, or Slurm-accounting-aware recipe
         response with metadata and component references. Recipes without typed
-        configuration emitted by this release use aicr.run/v1alpha2;
-        profile-bearing recipes and recipes carrying
-        configuration.slurm.accounting use aicr.run/v1alpha3. The schema also
-        admits both ADR-022 targets, aicr.run/v1 for the default track and
-        aicr.run/v1beta2 for the profile track, so a client generated from this
-        spec tolerates them a release before the emitter switch. This release
-        emits neither.
+        configuration emitted by this release use aicr.run/v1; profile-bearing
+        recipes and recipes carrying configuration.slurm.accounting use
+        aicr.run/v1beta2. The superseded aicr.run/v1alpha2 and
+        aicr.run/v1alpha3 were removed in v1.0.0 (ADR-022 N+2), so a response
+        captured before the emitter switch no longer validates.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
@@ -1614,12 +1634,41 @@ components:
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha2, aicr.run/v1alpha3, aicr.run/v1, aicr.run/v1beta2]
-              example: aicr.run/v1alpha2
+              enum: [aicr.run/v1, aicr.run/v1beta2]
+              example: aicr.run/v1
             kind:
               type: string
               enum: [RecipeResult]
               example: RecipeResult
+
+    GKERecipeConfiguration:
+      type: object
+      description: GKE-specific typed desired state
+      required: [tcpxoInterfaces]
+      additionalProperties: false
+      properties:
+        tcpxoInterfaces:
+          type: array
+          description: >-
+            Ordered eth1..eth8 to GPU-NIC Network mapping rendered into the
+            torch-distributed-tcpxo ClusterTrainingRuntime. Exactly eight
+            entries; interface names cover eth1..eth8 once; networks are
+            unique.
+          minItems: 8
+          maxItems: 8
+          items:
+            type: object
+            required: [interfaceName, network]
+            additionalProperties: false
+            properties:
+              interfaceName:
+                type: string
+                pattern: "^eth[1-8]$"
+              network:
+                type: string
+                description: Device-type GKE Network name (41 chars max)
+                maxLength: 41
+                pattern: "^[a-z]([-a-z0-9]*[a-z0-9])?$"
 
     ConfiguredRecipeConfiguration:
       allOf:
@@ -1652,21 +1701,23 @@ components:
                 mode:
                   type: string
                   enum: [enabled, disabled]
+            gke:
+              $ref: "#/components/schemas/GKERecipeConfiguration"
 
     ProfileRecipeResponse:
       allOf:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
           description: >
-            Closed profile-bearing RecipeResult shape. aicr.run/v1alpha3 is
-            emitted; aicr.run/v1beta2 is accepted during ADR-022 Release N.
-            Unknown fields are rejected at its typed object boundaries.
+            Closed profile-bearing RecipeResult shape. aicr.run/v1beta2 is the
+            only accepted value; the superseded aicr.run/v1alpha3 was removed in
+            v1.0.0. Unknown fields are rejected at its typed object boundaries.
           required: [metadata, componentRefs]
           additionalProperties: false
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha3, aicr.run/v1beta2]
+              enum: [aicr.run/v1beta2]
             kind:
               type: string
               enum: [RecipeResult]
@@ -1802,15 +1853,16 @@ components:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
           description: >
-            Closed accounting-configured RecipeResult shape without a selected
-            profile. aicr.run/v1alpha3 is emitted; aicr.run/v1beta2 is
-            accepted during ADR-022 Release N.
+            Closed typed-configuration RecipeResult shape without a selected
+            profile (Slurm accounting, runtime inventory, or GKE TCPXO
+            interfaces). aicr.run/v1beta2 is the only accepted value; the
+            superseded aicr.run/v1alpha3 was removed in v1.0.0.
           required: [metadata, configuration, componentRefs]
           additionalProperties: false
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha3, aicr.run/v1beta2]
+              enum: [aicr.run/v1beta2]
             kind:
               type: string
               enum: [RecipeResult]
@@ -1855,7 +1907,6 @@ components:
               allOf:
                 - $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
                 - type: object
-                  required: [slurm]
             componentRefs:
               type: array
               minItems: 1
@@ -1947,16 +1998,15 @@ components:
 
     LegacyBundleRecipeRequest:
       description: >
-        Additive legacy RecipeResult accepted by POST /v1/bundle: any
-        combination of apiVersion absent, empty, aicr.run/v1alpha2, or
-        aicr.run/v1 with kind absent, empty, or RecipeResult. One branch
-        covers the whole legacy square because DecodeRecipeResult accepts
-        every cell of it — kind is enforced only when non-empty, and only the
-        profile track requires it.
+        Additive default RecipeResult accepted by POST /v1/bundle:
+        apiVersion aicr.run/v1 with kind absent, empty, or RecipeResult. Kind
+        is enforced only when non-empty, and only the profile track requires
+        it. The apiVersion tolerances this branch used to carry — absent,
+        empty, and aicr.run/v1alpha2 — were removed in v1.0.0 (ADR-022 N+2).
         The legacy kind Recipe, published through v0.18.0, is no longer
         accepted on any path.
-        metadata.selectedProfile remains reserved for v1alpha3/v1beta2.
-        configuration is likewise reserved for v1alpha3/v1beta2; default request
+        metadata.selectedProfile remains reserved for v1beta2.
+        configuration is likewise reserved for v1beta2; default request
         headers cannot carry typed Slurm accounting configuration.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
@@ -1967,9 +2017,8 @@ components:
             apiVersion:
               type: string
               description: >
-                aicr.run/v1alpha2, aicr.run/v1, absent, or empty after a legacy struct
-                round trip
-              enum: ["", aicr.run/v1alpha2, aicr.run/v1]
+                aicr.run/v1
+              enum: [aicr.run/v1]
             kind:
               type: string
               description: >
@@ -1983,11 +2032,12 @@ components:
     BundleRecipeRequest:
       description: >
         Version-partitioned RecipeResult accepted by POST /v1/bundle.
-        Default input with apiVersion aicr.run/v1alpha2, aicr.run/v1, or no
-        apiVersion remains additive; v1alpha3/v1beta2 input is closed and requires either
-        metadata.selectedProfile or configuration.slurm.accounting. The
+        Default input with apiVersion aicr.run/v1 remains additive; v1beta2
+        input is closed and requires either
+        metadata.selectedProfile or a typed configuration section
+        (configuration.slurm, configuration.runtimeInventory, or configuration.gke). The
         branches are disjoint on apiVersion:
-        the default branch admits only absent/empty/v1alpha2/v1 and prohibits
+        the default branch admits only v1 and prohibits
         selectedProfile, while both configured branches require the profile track.
       oneOf:
         - $ref: "#/components/schemas/LegacyBundleRecipeRequest"

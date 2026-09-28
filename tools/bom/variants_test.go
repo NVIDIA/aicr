@@ -49,7 +49,7 @@ func writeRecipeTree(t *testing.T, sources map[string]string) string {
 	return root
 }
 
-const variantTestRegistry = `apiVersion: aicr.run/v1alpha2
+const variantTestRegistry = `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: kube-prometheus-stack
@@ -76,7 +76,7 @@ func TestDeriveVariants(t *testing.T) {
 	root := writeRecipeTree(t, map[string]string{
 		// Two sources pin the SAME divergent version -> one aggregated variant.
 		"overlays/aks.yaml": `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: aks
 spec:
@@ -85,7 +85,7 @@ spec:
       version: "83.7.0"
 `,
 		"mixins/platform-x.yaml": `kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: platform-x
 spec:
@@ -95,7 +95,7 @@ spec:
 `,
 		// Default-equal pin -> no variant.
 		"overlays/base.yaml": `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -105,7 +105,7 @@ spec:
 `,
 		// Non-registry component and a Kustomize tag-only ref -> no variant.
 		"overlays/extra.yaml": `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: extra
 spec:
@@ -149,7 +149,7 @@ spec:
 func TestDeriveVariantsMultipleVersionsSameComponent(t *testing.T) {
 	root := writeRecipeTree(t, map[string]string{
 		"overlays/a.yaml": `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: a
 spec:
@@ -158,7 +158,7 @@ spec:
       version: "83.7.0"
 `,
 		"overlays/b.yaml": `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: b
 spec:
@@ -282,7 +282,7 @@ func TestLoadRecipeSourcesAcceptsLegacyEmptyKindOverlay(t *testing.T) {
 	// The canonical store treats an overlay without a kind as legacy
 	// RecipeMetadata; the BOM loader must not reject what the store loads.
 	root := writeRecipeTree(t, map[string]string{
-		"overlays/legacy.yaml": "apiVersion: aicr.run/v1alpha2\nmetadata:\n  name: legacy\nspec:\n  componentRefs:\n    - name: kube-prometheus-stack\n      version: \"83.7.0\"\n",
+		"overlays/legacy.yaml": "apiVersion: aicr.run/v1beta1\nmetadata:\n  name: legacy\nspec:\n  componentRefs:\n    - name: kube-prometheus-stack\n      version: \"83.7.0\"\n",
 	})
 	sources, err := loadRecipeSources(context.Background(), root)
 	if err != nil {
@@ -302,7 +302,7 @@ func TestLoadRecipeSourcesDiscoversNestedOverlays(t *testing.T) {
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("mkdir nested: %v", err)
 	}
-	overlay := "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: team-a-leaf\nspec:\n  componentRefs:\n    - name: kube-prometheus-stack\n      version: \"83.7.0\"\n"
+	overlay := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: team-a-leaf\nspec:\n  componentRefs:\n    - name: kube-prometheus-stack\n      version: \"83.7.0\"\n"
 	if err := os.WriteFile(filepath.Join(nested, "leaf.yaml"), []byte(overlay), 0o600); err != nil {
 		t.Fatalf("write nested overlay: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestLoadRecipeSourcesDiscoversNestedOverlays(t *testing.T) {
 func TestDeriveVariantsRejectsPaddedPin(t *testing.T) {
 	root := writeRecipeTree(t, map[string]string{
 		"overlays/padded.yaml": `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: padded
 spec:
@@ -352,7 +352,7 @@ spec:
 func TestDeriveVariantsSkipsExplicitNonHelmType(t *testing.T) {
 	root := writeRecipeTree(t, map[string]string{
 		"overlays/typed.yaml": `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: typed
 spec:
@@ -431,7 +431,7 @@ func TestLoadRecipeSourcesKindPerDirectory(t *testing.T) {
 	// kind in the overlay walk, contributes no pins); a RecipeMetadata under
 	// mixins/ is a hard error (the store rejects wrong-kind mixin files).
 	root := writeRecipeTree(t, map[string]string{
-		"overlays/misplaced.yaml": "kind: RecipeMixin\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: misplaced\nspec:\n  componentRefs:\n    - name: kube-prometheus-stack\n      version: \"83.7.0\"\n",
+		"overlays/misplaced.yaml": "kind: RecipeMixin\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: misplaced\nspec:\n  componentRefs:\n    - name: kube-prometheus-stack\n      version: \"83.7.0\"\n",
 	})
 	sources, err := loadRecipeSources(context.Background(), root)
 	if err != nil {
@@ -442,7 +442,7 @@ func TestLoadRecipeSourcesKindPerDirectory(t *testing.T) {
 	}
 
 	root2 := writeRecipeTree(t, map[string]string{
-		"mixins/misplaced.yaml": "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: misplaced\nspec:\n  componentRefs: []\n",
+		"mixins/misplaced.yaml": "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: misplaced\nspec:\n  componentRefs: []\n",
 	})
 	if _, err := loadRecipeSources(context.Background(), root2); err == nil {
 		t.Fatal("loadRecipeSources accepted a RecipeMetadata under mixins/ (the canonical store hard-errors)")
@@ -459,7 +459,7 @@ func TestDeriveVariantsRendersPinWithEmptyRegistryDefault(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 	}
-	registry := `apiVersion: aicr.run/v1alpha2
+	registry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: unpinned-helm
@@ -472,7 +472,7 @@ components:
 		t.Fatalf("write registry: %v", err)
 	}
 	overlay := `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: pinned-leaf
 spec:
@@ -507,7 +507,7 @@ func TestLoadRecipeSourcesRejectsEscapingSymlink(t *testing.T) {
 	// same-repo-root design prevents. os.Root confines resolution.
 	root := writeRecipeTree(t, nil)
 	outside := filepath.Join(t.TempDir(), "outside.yaml")
-	if err := os.WriteFile(outside, []byte("kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: outside\nspec:\n  componentRefs: []\n"), 0o600); err != nil {
+	if err := os.WriteFile(outside, []byte("kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: outside\nspec:\n  componentRefs: []\n"), 0o600); err != nil {
 		t.Fatalf("write outside: %v", err)
 	}
 	if err := os.Symlink(outside, filepath.Join(root, "recipes", "overlays", "escape.yaml")); err != nil {
@@ -528,7 +528,7 @@ func TestLoadRecipeSourcesRejectsEscapingSymlink(t *testing.T) {
 
 func TestLoadRecipeSourcesPreCanceledContext(t *testing.T) {
 	root := writeRecipeTree(t, map[string]string{
-		"overlays/base.yaml": "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: base\nspec:\n  componentRefs: []\n",
+		"overlays/base.yaml": "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: base\nspec:\n  componentRefs: []\n",
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -547,7 +547,7 @@ func TestLoadRecipeSourcesRejectsDuplicateNames(t *testing.T) {
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	overlay := "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: dup\nspec:\n  componentRefs: []\n"
+	overlay := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: dup\nspec:\n  componentRefs: []\n"
 	if err := os.WriteFile(filepath.Join(root, "recipes", "overlays", "dup.yaml"), []byte(overlay), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestLoadRecipeSourcesRejectsMixinUnknownField(t *testing.T) {
 	// silently parse to an empty source.
 	root := writeRecipeTree(t, map[string]string{
 		"mixins/typo.yaml": `kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: typo
 spec:

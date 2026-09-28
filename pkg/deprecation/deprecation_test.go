@@ -47,9 +47,9 @@ func TestNoticeMessage(t *testing.T) {
 			name: "without replacement",
 			notice: Notice{
 				Subject:   "apiVersion aicr.run/v1alpha2",
-				RemovedIn: "v0.23",
+				RemovedIn: "v1.0.0",
 			},
-			want: "apiVersion aicr.run/v1alpha2 is deprecated and will be removed in v0.23",
+			want: "apiVersion aicr.run/v1alpha2 is deprecated and will be removed in v1.0.0",
 		},
 	}
 

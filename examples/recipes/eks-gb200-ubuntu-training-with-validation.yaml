@@ -16,7 +16,7 @@
 # This shows how to configure validation checks for different deployment phases
 
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
   appliedOverlays:
@@ -145,11 +145,11 @@ componentRefs:
       - cert-manager
 
   - name: nodewright-operator
-    namespace: skyhook
+    namespace: nodewright
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.17.1
+    version: v0.19.0
     valuesFile: components/nodewright-operator/values.yaml
     overrides:
       customization: ubuntu

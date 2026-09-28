@@ -93,6 +93,16 @@ func TestGPUCensusVerdict(t *testing.T) {
 			reasonContains: "cordoned",
 		},
 		{
+			// Same incident state under the key the operator defaults to from
+			// v0.18.0. Matching only the legacy prefix reported these nodes
+			// ready mid-tuning, which is a false pass rather than a miss.
+			name:           "count matches but one nodewright-tainted",
+			json:           nodesJSON(readyNode("n1"), nodewrightTaintedNode("n2")),
+			expected:       "2",
+			wantSettled:    false,
+			reasonContains: "cordoned",
+		},
+		{
 			// Cordoned via spec.unschedulable rather than a taint.
 			name:           "count matches but one unschedulable",
 			json:           nodesJSON(readyNode("n1"), unschedulableNode("n2")),
@@ -227,6 +237,15 @@ func unschedulableNode(name string) string {
 func skyhookTaintedNode(name string) string {
 	return node(name, "True", false,
 		`[{"key":"skyhook.nvidia.com/tuning","effect":"NoSchedule"}]`)
+}
+
+// nodewrightTaintedNode is Ready but carries the operator's default
+// runtime-required taint from v0.18.0, verbatim: the key is the bare
+// nodewright.nvidia.com domain and runtime-required is the value, which is the
+// shape the chart's runtimeRequiredTaint default parses to.
+func nodewrightTaintedNode(name string) string {
+	return node(name, "True", false,
+		`[{"key":"nodewright.nvidia.com","value":"runtime-required","effect":"NoSchedule"}]`)
 }
 
 // node renders one node object with the fields gpu_census_verdict inspects:

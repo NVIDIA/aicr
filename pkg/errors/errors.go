@@ -168,3 +168,29 @@ func PropagateOrWrap(err error, fallbackCode ErrorCode, message string) error {
 	}
 	return Wrap(fallbackCode, message, err)
 }
+
+// WrapCtxErr wraps a dead context's error (typically ctx.Err()) as a
+// StructuredError, distinguishing operator cancellation from deadline
+// expiration: cause chaining context.Canceled maps to ErrCodeCanceled (the
+// caller asked to stop, not a fault worth retrying); anything else — a bare
+// context.DeadlineExceeded, or a cause chaining it — falls back to
+// fallbackCode, which callers pass as ErrCodeTimeout at nearly every call
+// site. Cancellation outranks the fallback even when cause also chains a
+// DeadlineExceeded, mirroring IsTransient's precedence. cause is preserved as
+// the returned error's Unwrap chain, so stderrors.Is(err, context.Canceled)
+// and stderrors.Is(err, context.DeadlineExceeded) keep working upstream.
+// Callers should have already confirmed cause != nil.
+func WrapCtxErr(cause error, fallbackCode ErrorCode, message string) *StructuredError {
+	if stderrors.Is(cause, context.Canceled) {
+		return Wrap(ErrCodeCanceled, message, cause)
+	}
+	return Wrap(fallbackCode, message, cause)
+}
+
+// WrapCtxErrWithContext is WrapCtxErr with an attached debugging context map,
+// mirroring the New/NewWithContext and Wrap/WrapWithContext pairing.
+func WrapCtxErrWithContext(cause error, fallbackCode ErrorCode, message string, context map[string]any) *StructuredError {
+	err := WrapCtxErr(cause, fallbackCode, message)
+	err.Context = context
+	return err
+}

@@ -1,0 +1,23 @@
+UPGRADE CHECK
+  deployer  helm
+
+COMPONENT  FROM     TO     VERDICT  NOTES
+---------  ----     --     -------  -----
+newgate    oldgate  1.3.1  manual   replaces oldgate, 2 steps
+
+newgate replaces oldgate  (manual)
+  oldgate is superseded by newgate for inference routing.
+
+  recorded manual: newgate replaces oldgate, which is migration work rather
+  than a version bump
+
+  STEPS (deployer: helm)
+    1. port-route-resources
+       Re-author the oldgate route resources as newgate equivalents.
+       Why: nothing migrates them automatically; field names and defaults
+       differ.
+    2. retire-oldgate
+       Uninstall the oldgate release once newgate is serving traffic.
+       Why: AICR leaves it installed and will not remove it.
+
+1 component change, 1 needs attention

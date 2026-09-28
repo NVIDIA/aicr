@@ -14,6 +14,8 @@
 
 package localformat
 
+import "github.com/NVIDIA/aicr/pkg/bundler/deployer"
+
 // FolderKind classifies a written folder by the presence/absence of Chart.yaml.
 type FolderKind int
 
@@ -75,4 +77,27 @@ type Folder struct {
 	// ManifestsUseChartCRDs components) instead of re-deriving the
 	// folder shape from release-name suffixes alone.
 	CarriesPostManifests bool
+	// AppliesCRDs is true when this folder carries an apply-crds.sh: the
+	// component owns its CRDs and that script must run before the
+	// release's `helm upgrade`. install.sh already invokes it; the field
+	// exposes the same decision to deployers that bypass install.sh
+	// (helmfile emits a presync hook from it), so the hook cannot name a
+	// script the writers did not emit.
+	AppliesCRDs bool
+}
+
+// Releases maps the written folders to deployer.Release entries, preserving
+// folder order (which is deployment order). Manifest is left empty; deployers
+// that add a per-folder declaration file set it afterwards.
+func (r WriteResult) Releases() []deployer.Release {
+	out := make([]deployer.Release, 0, len(r.Folders))
+	for _, f := range r.Folders {
+		out = append(out, deployer.Release{
+			Name:      f.Name,
+			Component: f.Parent,
+			Namespace: f.Namespace,
+			Path:      f.Dir,
+		})
+	}
+	return out
 }

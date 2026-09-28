@@ -41,6 +41,20 @@ const aicrPURLPrefix = "aicr-"
 // release rather than produce a VEX bound to nothing.
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
+// projectionTooling is what every projection reports for `tooling`, replacing
+// whatever the source carried. OpenVEX v0.2.0 defines the field as an
+// identifier for what generated the document, and the projection is generated
+// here, so naming this tool is both the accurate answer and the one a consumer
+// expecting `vexctl v0.2.0` can parse. The curation half is stated too, because
+// the statements themselves are hand-written, not derived by a scanner.
+//
+// Replacing rather than dropping is deliberate: the field is the one place the
+// spec provides for that provenance, and a fixed constant also means the value
+// is structurally independent of the committed source, so a `tooling` that
+// grows again in .openvex.json cannot reach a signed attestation
+// (NVIDIA/aicr#2706).
+const projectionTooling = "openvex-bind (github.com/NVIDIA/aicr/tools/openvex-bind); statements curated manually"
+
 // Options names the platform manifest a projection binds to.
 type Options struct {
 	// Image is the image name without tag or digest, e.g.
@@ -64,13 +78,15 @@ type Result struct {
 
 // Bind projects the committed OpenVEX document onto one platform manifest.
 //
-// Two things happen and nothing else does. Statements that do not name this
+// Three things happen and nothing else does. Statements that do not name this
 // image are dropped, because binding them to this digest would publish a
 // signed claim about a product they were never triaged against. Statements
 // that do name it keep their status, justification, impact statement and
 // subcomponents byte-for-byte, with `products` replaced by the single
 // digest-qualified identifier `pkg:oci/<basename>@<digest>` that makes the
-// claim verifiable against the manifest it ships with.
+// claim verifiable against the manifest it ships with. The document-level
+// `tooling` field is set to projectionTooling; every other document field
+// passes through.
 //
 // The output is a pure function of (source, Image, Digest): no wall clock, no
 // UUID, and encoding/json orders object keys, so re-running on the same inputs
@@ -136,6 +152,7 @@ func Bind(source []byte, o Options) (*Result, error) {
 	// which image and platform it covers.
 	doc["@id"] = sourceID + "#" + name + "@" + o.Digest
 	doc["statements"] = kept
+	doc["tooling"] = projectionTooling
 
 	rendered, err := encodeDocument(doc)
 	if err != nil {

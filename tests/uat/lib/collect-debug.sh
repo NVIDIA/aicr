@@ -87,7 +87,7 @@ CLUSTER_DEBUG_LOG_NAMESPACES="${CLUSTER_DEBUG_LOG_NAMESPACES:-skyhook gpu-operat
 # gate keys off of, and its full YAML carries the per-package/per-node status
 # history that explains a re-tuning race. Best-effort — a kind absent on this
 # cloud/recipe just no-ops.
-CLUSTER_DEBUG_CLUSTER_RESOURCES="${CLUSTER_DEBUG_CLUSTER_RESOURCES:-skyhooks.skyhook.nvidia.com clusterpolicies.nvidia.com nodefeatures.nfd.k8s-sigs.io resourceslices.resource.k8s.io deviceclasses.resource.k8s.io}"
+CLUSTER_DEBUG_CLUSTER_RESOURCES="${CLUSTER_DEBUG_CLUSTER_RESOURCES:-nodewrights.nodewright.nvidia.com skyhooks.skyhook.nvidia.com clusterpolicies.nvidia.com nodefeatures.nfd.k8s-sigs.io resourceslices.resource.k8s.io deviceclasses.resource.k8s.io}"
 
 # Per-command wall-clock bound. A single slow/unreachable kubectl call (stale
 # creds, an apiserver hiccup, describe over many nodes) must not consume the whole
@@ -165,15 +165,27 @@ capture_skyhook_snapshot() {
       echo "# teardown-time reading."
       echo
       echo "----- Skyhook CRs (full YAML: per-package/per-node status) -----"
+      # NodeWright first: from operator v0.18.0 it is the reconciled object and
+      # the only one carrying status, while the mirrored Skyhook stays empty.
+      # Both are dumped because either kind may be absent depending on the
+      # operator version, and `|| true` keeps a missing kind from ending the
+      # capture.
+      _cd_bounded kubectl get nodewrights.nodewright.nvidia.com -A -o yaml 2>&1 || true
       _cd_bounded kubectl get skyhooks.skyhook.nvidia.com -A -o yaml 2>&1 || true
       echo
       echo "----- node reboot fingerprint (bootID / kernel / Ready transition / taints) -----"
       _cd_node_reboot_fingerprint
       echo
-      echo "----- skyhook namespace pods (tuning package pods) -----"
-      _cd_bounded kubectl get pods -n skyhook -o wide 2>&1 || true
-      echo "----- skyhook namespace events (by time) -----"
-      _cd_bounded kubectl get events -n skyhook --sort-by=.lastTimestamp 2>&1 || true
+      # Both namespaces: the registry default is nodewright, but a cluster
+      # deployed before that move still runs in skyhook and Helm cannot
+      # relocate a release. Collecting only one would come back empty on
+      # exactly the cluster whose upgrade is being debugged.
+      for _cd_nw_ns in nodewright skyhook; do
+        echo "----- ${_cd_nw_ns} namespace pods (tuning package pods) -----"
+        _cd_bounded kubectl get pods -n "${_cd_nw_ns}" -o wide 2>&1 || true
+        echo "----- ${_cd_nw_ns} namespace events (by time) -----"
+        _cd_bounded kubectl get events -n "${_cd_nw_ns}" --sort-by=.lastTimestamp 2>&1 || true
+      done
     } | tee "${out}"
     echo "::endgroup::"
     exit 0

@@ -41,7 +41,15 @@
 #
 # Everything else applies to both. These are the OpenVEX v0.2.0 contract:
 #
-#   document   -> @context, @id, author, timestamp, version, statements
+#   document   -> @context, @id, author, timestamp, version, statements, and
+#                 no document-level string field longer than
+#                 OPENVEX_MAX_DOC_FIELD_BYTES. Every string the spec defines at
+#                 this level (@context, @id, author, role, tooling, timestamp)
+#                 is an identifier, not prose, and `tooling` grew to an 8,010
+#                 byte revision changelog that shipped on all seven release
+#                 images before anyone noticed (NVIDIA/aicr#2706). Statement
+#                 fields are deliberately NOT bounded: impact_statement is
+#                 evidence and is expected to run to paragraphs.
 #   statement  -> vulnerability.name, status from the four-label enum, and
 #                 at least one identifiable product. The spec marks
 #                 `products` optional only because it can cascade from an
@@ -64,6 +72,15 @@
 # `env:` so the source check and the projection check cannot be pinned to
 # different versions of the spec.
 OPENVEX_CONTEXT="https://openvex.dev/ns/v0.2.0"
+
+# OPENVEX_MAX_DOC_FIELD_BYTES bounds every document-level string. The longest
+# legitimate value is the projection `@id`: the source URL plus
+# `#<image>@sha256:<64 hex>`, 129 bytes for the longest released image name.
+# 256 leaves room for roughly double that and for a tool identifier carrying a
+# repository URL and a version, while sitting below 372 bytes, the smallest
+# `tooling` value that ever held prose here. The first revision that turned the
+# field into a changelog would therefore have failed this check.
+OPENVEX_MAX_DOC_FIELD_BYTES=256
 
 OPENVEX_RULES="$(
   cat <<'JQ'
@@ -126,7 +143,10 @@ def statement($index; $s):
   (if (field(.; "statements") | type) != "array" then "statements must be an array"
    elif $require_statements and (listing(field(.; "statements")) | length) == 0
    then "statements must not be empty"
-   else empty end)
+   else empty end),
+  (to_entries[]
+   | select((.value | type) == "string" and (.value | utf8bytelength) > $max_doc_field)
+   | "document field \(.key) is \(.value | utf8bytelength) bytes, over the \($max_doc_field) byte bound for a document-level identifier")
 ]
 + (listing(field(.; "statements")) | to_entries | map(statement(.key; .value)) | add // [])
 | .[]
@@ -171,6 +191,7 @@ validate_openvex() {
     --arg context "${OPENVEX_CONTEXT}" \
     --arg digest "${digest}" \
     --argjson require_statements "${require_statements}" \
+    --argjson max_doc_field "${OPENVEX_MAX_DOC_FIELD_BYTES}" \
     "${OPENVEX_RULES}" "${file}")"; then
     echo "::error::OpenVEX ${mode} document is not valid JSON: ${file}"
     return 1

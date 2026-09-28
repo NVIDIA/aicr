@@ -145,13 +145,12 @@ jobs:
       # is the same zero-fetch false pass the retired probe workflow existed to
       # catch.
       #
-      # The cost of ordering it here: the `go install` in install-go-licenses
-      # (inside go-build-release) now also resolves through the proxy, which
-      # inverts the usual guidance to install build tooling first. Accepted
-      # because the repository is virtual and re-fetches from upstream on a
-      # miss, so an unmirrored public module is a cache fill rather than a
-      # failure. Every other release tool — ko, syft, goreleaser, crane, helm —
-      # comes from a GitHub release over curl and never touches GOPROXY.
+      # The cost of ordering it here used to be that the `go install` in
+      # install-go-licenses (inside go-build-release) resolved a module the warm
+      # cache did not cover. #2667 removed that: go-licenses is now built from
+      # the main module, so `go mod download` above covers it and the build needs
+      # no fetch at all. Every other release tool — ko, syft, goreleaser, crane,
+      # helm — comes from a GitHub release over curl and never touches GOPROXY.
       - name: Configure the DGXC Go proxy
         uses: ./.github/actions/setup-dgxc-goproxy
         with:
@@ -219,11 +218,17 @@ jobs:
         with:
           workflow_file: on-tag.yaml
 
-      # Re-mint rather than reuse. One straggler still needs a live credential
-      # this late: the `go install` of go-licenses inside go-build-release
-      # resolves its own module, which the warm cache above does not cover. By
-      # the time we get here the original token may be past its ~15-minute
-      # lifetime, and a 401 would fail the release intermittently.
+      # Re-mint rather than reuse. The straggler this was originally added for
+      # is gone: #2667 moved go-licenses from `go install` -- which resolved its
+      # own module outside the warm cache -- to a `go build` from the main
+      # module, whose graph the `go mod download` above already covers. Measured
+      # on a cold module cache, `go mod download` followed by `go build` of both
+      # go-licenses and apidiff succeeds with GOPROXY=off.
+      #
+      # Kept because the step below still resolves through the proxy under
+      # `enforced` mode on any cache miss -- goreleaser cross-builds six
+      # binaries here -- and by this point the original token may be past its
+      # ~15-minute lifetime, where a 401 would fail the release intermittently.
       #
       # This is safe and cheap. GitHub's OIDC request credential
       # (ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN) is available for the life of the
@@ -356,7 +361,7 @@ jobs:
         run: echo "GOMODCACHE=${RUNNER_TEMP}/aicr-release-modcache" >> "$GITHUB_ENV"
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
@@ -406,7 +411,7 @@ jobs:
         run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
 
       - name: Build and push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           file: ${{ matrix.dockerfile || format('validators/{0}/Dockerfile', matrix.phase) }}
@@ -467,7 +472,7 @@ jobs:
         run: echo "GOMODCACHE=${RUNNER_TEMP}/aicr-release-modcache" >> "$GITHUB_ENV"
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
@@ -527,7 +532,7 @@ jobs:
           file dist/gate
 
       - name: Build and push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           file: cmd/gate/Dockerfile
@@ -574,7 +579,7 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
 
       # Inline by design: this job creates only run-unique candidate manifests.
       # The shared docker-manifest action also writes public aliases, which must
@@ -744,7 +749,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security
         if: hashFiles('results.sarif') != '' || steps.scan.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: 'anchore-image-${{ matrix.image.key }}-${{ matrix.platform.arch }}'

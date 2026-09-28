@@ -73,6 +73,12 @@ const (
 	// (`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`); the dump is a
 	// short per-cluster add-on list, so 1 MiB is generous.
 	MaxOKEAddonsBytes = int64(1 << 20) // 1 MiB
+
+	// MaxGKEGPUPoolsBytes caps the size of a --gke-gpu-pools JSON file
+	// (the `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump) read into memory via io.LimitReader. A real
+	// pool list is a few KiB.
+	MaxGKEGPUPoolsBytes = int64(1 << 20) // 1 MiB
 )
 
 // Handler timeouts for HTTP request processing.
@@ -146,14 +152,16 @@ const (
 	// ValidationOperationTimeout is the facade-level upper bound for
 	// Client.ValidateState when the caller's context has no deadline
 	// (controller/library callers; the CLI runs uncapped). It must exceed the
-	// LARGEST per-check Job timeout so that inner timeout fires first and the
+	// LARGEST rendered per-check Job deadline (catalog timeout plus
+	// ValidatorJobDeadlineHeadroom) so that inner timeout fires first and the
 	// run surfaces a structured per-check error rather than the wrapping
 	// context's bare deadline-exceeded. The largest is the inference-perf
 	// catalog timeout (65m, which covers the model-cache populate + cold-start
-	// benchmark phases), not CheckExecutionTimeout (55m, the fallback when no
-	// catalog timeout is set). 75m keeps margin above 65m for orchestration
-	// overhead (snapshot agent, RBAC, namespace setup, cleanup). The
-	// catalog-vs-facade relationship is asserted in
+	// benchmark phases) plus the 3m30s headroom, i.e. 68m30s — not
+	// CheckExecutionTimeout (55m, the fallback when no catalog timeout is
+	// set). 75m keeps margin above that 68m30s rendered deadline for
+	// orchestration overhead (snapshot agent, RBAC, namespace setup,
+	// cleanup). The catalog-vs-facade relationship is asserted in
 	// pkg/validator/catalog/catalog_test.go.
 	ValidationOperationTimeout = 75 * time.Minute
 
@@ -357,6 +365,12 @@ const (
 	// CLISnapshotTimeout is the default timeout for snapshot operations.
 	CLISnapshotTimeout = 5 * time.Minute
 
+	// CLIUpgradeCheckTimeout bounds one `aicr upgrade-check` run. The command
+	// performs two recipe operations, each already bounded by
+	// RecipeOperationTimeout, plus the registry's upgrade-record reads, so the
+	// ceiling is derived from the operation it repeats rather than picked.
+	CLIUpgradeCheckTimeout = 3 * RecipeOperationTimeout
+
 	// OIDCAuthTimeout is the maximum time to wait for a user to complete
 	// any interactive OIDC authentication flow — browser callback or
 	// device-code (RFC 8628). Prevents indefinite blocking if the flow is
@@ -441,12 +455,12 @@ const (
 )
 
 // GPU deployment-readiness poll configuration. The deployment-phase Go checks
-// verifyNodewrightReady (Skyhook status.status == "complete") and
+// verifyNodewrightReady (NodeWright status.status == "complete") and
 // verifyDRAKubeletPluginReady (DRA kubelet-plugin DaemonSet fully rolled out)
 // poll their signal until it is healthy *continuously* for the stability
 // window, or the timeout elapses.
 //
-// Rationale: Skyhook node tuning reboots the GPU node one or more times (the
+// Rationale: Nodewright node tuning reboots the GPU node one or more times (the
 // tuning packages carry interrupt: reboot) and re-opens status=in_progress
 // after each reboot and for each newly-joined GPU node. While a GPU node is
 // draining/rebooting/rejoining, the DRA kubelet-plugin DaemonSet also churns:
@@ -579,7 +593,9 @@ const (
 const (
 	// CheckExecutionTimeout is the parent context timeout for checks running
 	// inside a K8s Job. Must be long enough for the slowest behavioral check
-	// and shorter than the catalog-level Job timeout (activeDeadlineSeconds).
+	// and shorter than the catalog's own check timeout (AICR_CHECK_TIMEOUT) —
+	// not the Job's activeDeadlineSeconds, which adds
+	// ValidatorJobDeadlineHeadroom on top of that check timeout.
 	//
 	// The ceiling is set by the cold-start inference benchmark, which runs
 	// the following phases serially under the parent ctx:
@@ -924,6 +940,15 @@ const (
 	// supply-chain artifacts.
 	MaxAttestationFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
 
+	// MaxBundleInfoBytes caps the size of a bundle's bundle-info.yaml, on
+	// write as well as on read, so an oversize record is refused before it
+	// ships rather than on the consumer's side. The record is a build stamp
+	// plus one entry per emitted release,
+	// bounded in practice by the 999-folder NNN- prefix limit; 1 MiB is
+	// orders of magnitude above a real one and matches MaxChecksumFileBytes
+	// for parity across bundle-root metadata reads.
+	MaxBundleInfoBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxManifestFileBytes caps the size of an in-bundle manifest.json
 	// file read by the verifier. A manifest entry is ~150 bytes (path +
 	// size + sha256); 1 MiB allows ~6k entries — well above any realistic
@@ -1140,9 +1165,46 @@ const (
 
 // Validator constants.
 const (
-	// ValidatorWaitBuffer is added to the catalog timeout when waiting for Job
-	// completion. Accounts for pod scheduling, image pull, and graceful termination.
-	ValidatorWaitBuffer = 30 * time.Second
+	// ValidatorWaitBuffer is added to the catalog timeout when the orchestrator
+	// waits for Job completion. It must exceed the delay between Job creation
+	// and the validator container's first instruction, or the orchestrator
+	// abandons the wait before the check's own clean exit and reports an
+	// orchestrator timeout in place of the check's verdict.
+	ValidatorWaitBuffer = K8sPodReadyTimeout + ValidatorTerminationGracePeriod
+
+	// ValidatorJobDeadlineHeadroom is the gap between a check's own budget
+	// (AICR_CHECK_TIMEOUT) and the Job's activeDeadlineSeconds. Sized so the
+	// orchestrator is always the tighter clock: on exhaustion the check
+	// self-terminates and its pod stays Failed-but-present for log extraction,
+	// instead of the Job controller deleting it as an active pod (issue #2473).
+	ValidatorJobDeadlineHeadroom = ValidatorWaitBuffer + JobEnvelopeMargin
+
+	// ValidatorMinCompletionWait floors the orchestrator's Job-completion wait
+	// once that wait has been rebased onto the Job's observed start time. The
+	// rebase subtracts however long the create/apply response took to arrive,
+	// and the floor engages as soon as the rebased remainder drops below it —
+	// not only once that remainder goes zero or negative — since an unfloored
+	// wait that short risks reporting an orchestrator timeout before the check
+	// ran. The floor does not license outrunning the Job's own deadline:
+	// v1.OrchestratorWaitFor caps it to ValidatorPreDeadlineMargin short of
+	// that deadline while the deadline is still ahead. Once it is not, the
+	// floored wait is all that remains, and one SIGTERM-to-SIGKILL window is
+	// the shortest span in which the orchestrator can still read the terminal
+	// condition Kubernetes stamped on the Job it has already ended.
+	ValidatorMinCompletionWait = ValidatorTerminationGracePeriod
+
+	// ValidatorPreDeadlineMargin is how far short of the Job's
+	// activeDeadlineSeconds v1.OrchestratorWaitFor holds the orchestrator's
+	// Job-completion wait. That wait exists to read the check's own verdict,
+	// and the Job deadline destroys it: the Job controller deletes the
+	// still-active pod whose logs carry it (issue #2473). A wait ending at the
+	// same instant as the deadline leaves which of the two lands first to
+	// scheduling chance, so the margin is subtracted to make the ordering
+	// strict. It is a tie-breaker rather than a budget for any work, sized to
+	// exceed the resolution at which the two events can be distinguished while
+	// staying negligible against ValidatorMinCompletionWait, the shortest wait
+	// it ever trims.
+	ValidatorPreDeadlineMargin = 1 * time.Second
 
 	// ValidatorDefaultTimeout is the default per-validator timeout if not
 	// specified in the catalog. Used as fallback only.
@@ -1282,6 +1344,27 @@ const (
 	// remote-backed DataProvider. Eight preserves useful parallelism while
 	// keeping per-request resource use predictable.
 	HelmValueResolutionConcurrency = 8
+)
+
+// Bundle deploy-time timeouts.
+const (
+	// BundleCRDStepTimeout bounds every helm and kubectl call in a bundle's
+	// generated apply-crds.sh: the release lookup, the registry read, and the
+	// apply. That script runs inside the deploy path, where a command that
+	// never returns hangs the whole rollout instead of failing it, since
+	// deploy.sh retries a component that exits non-zero but cannot interrupt
+	// one still running. A wedged registry and a wedged apiserver both produce
+	// that, so reads and the write are bounded alike. Matches
+	// MirrorHelmTemplateTimeout, the other per-chart helm invocation.
+	// Operators can override per-run with AICR_CRD_STEP_TIMEOUT.
+	//
+	// 30s rather than the 90s a lone helm invocation would justify, because
+	// deploy.sh multiplies it: a component that keeps failing is retried six
+	// times with backoff, so three bounded calls at 90s each can consume ~31
+	// minutes and exceed the CI job budget before the retry loop ever reports
+	// anything. A CRD read or apply that needs more than 30s is already
+	// pathological, and the override exists for the exception.
+	BundleCRDStepTimeout = 30 * time.Second
 )
 
 // Mirror discovery timeouts and defaults.

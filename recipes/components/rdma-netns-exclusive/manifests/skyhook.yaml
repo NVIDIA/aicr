@@ -23,18 +23,18 @@
 # read-only (0444) and `rdma system set netns exclusive` returns EBUSY whenever
 # non-init net namespaces exist (always true on a running node). ib_core also
 # can't be unloaded live (the whole mlx5 stack depends on it). So the setting is
-# persisted via modprobe.d and Skyhook reboots the node to apply it (ib_core is
-# a loadable module on the VR200 reference image, loaded post-root, so
+# persisted via modprobe.d and NodeWright reboots the node to apply it (ib_core
+# is a loadable module on the VR200 reference image, loaded post-root, so
 # modprobe.d — not initramfs/GRUB — is sufficient).
 #
 # Node-wide change (affects every RDMA user on the host) and interrupting: nodes
-# reboot one at a time (interruptionBudget). Requires the Skyhook operator
+# reboot one at a time (interruptionBudget). Requires the NodeWright operator
 # (nodewright-operator) — declared as a dependencyRef on the componentRef.
-apiVersion: skyhook.nvidia.com/v1alpha1
-kind: Skyhook
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
 metadata:
   annotations:
-    # Helm hooks ensure this CR is applied after the Skyhook CRD is installed
+    # Helm hooks ensure this CR is applied after the NodeWright CRD is installed
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "10"
     "helm.sh/hook-delete-policy": before-hook-creation

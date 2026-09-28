@@ -14,10 +14,8 @@
 
 # DraNet DRA network driver health check.
 #
-# Validates that DraNet is running and healthy in kube-system and has published
-# its DeviceClass. The DaemonSet must roll out fully — numberReady ==
-# desiredNumberScheduled (with desiredNumberScheduled > 0 to guard against a
-# vacuous pass on a 0-node selector). Container-state errors are label-scoped
+# Validates that DraNet is running and healthy in kube-system and has
+# published its DeviceClass. Container-state errors are label-scoped
 # because kube-system is a shared namespace.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
@@ -36,9 +34,15 @@ spec:
               metadata:
                 name: dranet
                 namespace: kube-system
-              status:
-                (desiredNumberScheduled > `0`): true
-                (numberReady == desiredNumberScheduled): true
+              # numberReady alone accepts a stale rollout. A node still
+              # running the previous revision's pod counts as ready too,
+              # so updatedNumberScheduled must also match. observedGeneration
+              # confirms status reflects the current spec, not a reconcile
+              # from before the latest update.
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
     - name: validate-deviceclass-exists
       try:
         - assert:

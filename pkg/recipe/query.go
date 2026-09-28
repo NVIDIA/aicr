@@ -110,6 +110,13 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 				"mode": string(result.Configuration.RuntimeInventory.Mode),
 			}
 		}
+		if result.Configuration.GKE != nil {
+			mapping := make([]any, 0, len(result.Configuration.GKE.TCPXOInterfaces))
+			for _, entry := range result.Configuration.GKE.TCPXOInterfaces {
+				mapping = append(mapping, map[string]any{"interfaceName": entry.InterfaceName, "network": entry.Network})
+			}
+			configuration["gke"] = map[string]any{"tcpxoInterfaces": mapping}
+		}
 		hydrated["configuration"] = configuration
 	}
 

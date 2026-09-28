@@ -15,19 +15,22 @@ Releases follow a **bi-weekly cadence**. A new release is cut every two weeks.
 
 ## Supported Versions
 
-AICR is pre-1.0 and ships from a single active release line. Only the latest
-released minor receives security fixes. Earlier minors are end-of-life: fixes
-are not backported to them, and the upgrade path is forward to the latest
-release.
+AICR supports the latest released minor and the one before it. Both receive
+security fixes, so you have a full release of overlap to upgrade in rather than
+having to move the day a new minor ships. Anything older is end-of-life: fixes
+do not reach it, and the upgrade path is forward to a supported release.
 
 | Version | Status |
 |---------|--------|
-| `0.20.x` (latest released minor) | Supported: receives security fixes |
-| `< 0.20` | End-of-life: upgrade to the latest release |
+| `0.22.x` (latest released minor) | Supported: receives security fixes |
+| `0.21.x` (previous minor) | Supported: receives security fixes |
+| `< 0.21` | End-of-life: upgrade to a supported release |
 
-A fix ships in a new patch or minor release cut from `main` under the cadence
-above, never as a backport to an end-of-life version. When AICR reaches 1.0
-this policy is revised and a longer support window published here.
+A fix lands on `main` first and ships in a new patch or minor release cut from
+`main` under the cadence above. Reaching the previous minor additionally
+requires the manual path in [Hotfix Procedure](#hotfix-procedure), because
+there is no long-lived release branch to merge into. A fix is never backported
+to an end-of-life version.
 
 This section says which versions a fix lands in. It does not say how to report
 one: security issues go to NVIDIA PSIRT rather than through GitHub, and
@@ -59,6 +62,22 @@ Adding a value to a *response* enum is additive for the server and breaking for
 a client that switches exhaustively on it, so it is announced but does not owe a
 window. Adding a value to a *request* enum is always additive; removing one is
 always breaking.
+
+### Criteria enums name recognized values, not covered ones
+
+The recipe criteria enums — `service`, `accelerator`, `os`, `intent`,
+`platform`, in `api/aicr/v1/server.yaml` and `pkg/recipe/criteria.go` — are a
+namespace of values AICR *recognizes*. They are not an assertion that a recipe
+covers every one of them. A recognized value with no recipe behind it resolves
+to `INVALID_REQUEST` naming the gap, which is the intended behavior: the
+request was well-formed and the answer is that coverage does not exist.
+
+At v1.0.0 the following carry no recipe and resolve that way: `os=rhel`,
+`os=amazonlinux`, `os=talos`, `service=metal3`, `platform=runai`. This is a
+recorded decision, not an oversight. **Do not remove them as cleanup.** Under
+the table above, removing a value from a request enum is always breaking on
+both the CLI and REST surfaces, so after v1.0.0 it requires the next major.
+Coverage arrives by adding a recipe, which is additive and needs no window.
 
 ### Notice owed before removal
 
@@ -135,12 +154,15 @@ Two candidates existed and neither turns out to be a real exercise:
   yet, that owes no notice window — it is a pre-adoption restructure. Spending
   two releases deprecating an endpoint nobody calls would buy a worse end state
   (two frozen path families instead of one) for the sake of a dry run.
-- **The ADR-022 alpha migration runs warn-then-remove across v0.22 and v0.23**
-  and will be the first end-to-end use of the loader-warning arm — once
-  [#2416](https://github.com/NVIDIA/aicr/issues/2416) wires `deprecation.Warn`
-  into the artifact loaders, which is still outstanding. Even then, alpha owes
-  no window under the table above, so it demonstrates the mechanism working
-  rather than the policy being honored.
+- **The ADR-022 alpha migration ran warn-then-remove across v0.22 and v1.0.0**
+  and was the first end-to-end use of the loader-warning arm:
+  [#2416](https://github.com/NVIDIA/aicr/issues/2416) wired `deprecation.Warn`
+  into the snapshot, recipe, catalog and criteria loaders in v0.22, so reading
+  an alpha or headerless artifact named the file and the release that would stop
+  reading it. [#2417](https://github.com/NVIDIA/aicr/issues/2417) completed the
+  remove arm in v1.0.0: those loaders now reject, and the warning helper is gone
+  because no case survived it. Alpha owes no window under the table above, so
+  this demonstrated the mechanism working rather than the policy being honored.
 
 What that leaves untested is the *obligation*, not the machinery. The
 per-surface mechanisms have unit coverage in `pkg/deprecation` and `pkg/server`.
@@ -178,22 +200,38 @@ ADR-022 §3, bound to these releases:
 |---|---|---|---|
 | v0.21 | alpha and target | alpha | [#2404](https://github.com/NVIDIA/aicr/pull/2404) |
 | v0.22 | alpha and target | target | [#2416](https://github.com/NVIDIA/aicr/issues/2416) |
-| v0.23 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
+| v1.0.0 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
 
-Cutting v0.22 or v0.23 means completing the corresponding issue in that release,
+Cutting v0.22 or v1.0.0 means completing the corresponding issue in that release,
 not after it. The consumer-facing form of this table, including the per-kind
 target values, is in
 [`docs/integrator/data-extension.md`](docs/integrator/data-extension.md#catalog-and-binary-compatibility).
 
 ## What Goes Into a Release
 
-A release includes everything merged to `main` since the last tag. There is no cherry-picking or feature branching for releases — if it's on `main`, it ships.
+A release includes everything merged to `main` since the last tag. There is no cherry-picking or feature branching for the release itself — if it's on `main`, it ships. The one exception is a security fix reaching the previous supported minor, which has no branch to merge into and uses the manual path in [Hotfix Procedure](#hotfix-procedure).
 
 **Before cutting a release, verify:**
 
 - All CI checks pass on `main` (`make qualify`)
 - No known regressions since the last release
 - Breaking changes use `feat!:` or `fix!:` commit prefix (drives changelog and signals consumers)
+
+**After a minor release publishes, verify:**
+
+- The supported minor and the end-of-life threshold are bumped in **both**
+  [Supported Versions](#supported-versions) here and the matching table in
+  `SECURITY.md`. `TestSupportedVersionsMatchSecurityPolicy` fails when the two
+  files disagree, so they cannot drift apart — but nothing catches them going
+  stale *together*, and that is the only way this has ever been wrong. Patch
+  releases do not move either value.
+- Any deprecation whose removal **shipped in this release** is moved from
+  `## Active` to `## Removed` in
+  [`docs/user/deprecations.md`](docs/user/deprecations.md), per that page's own
+  rule. Nothing gates this, and the timing is easy to get wrong in both
+  directions: the entry belongs under `## Active` right up to the tag, because
+  until then no released binary behaves the new way, and it becomes misleading
+  the moment the tag lands.
 
 ## Quality Gates
 
@@ -263,14 +301,16 @@ run:
 
 Both inputs have to match what the release job used, or the comparison measures
 drift rather than reproducibility. The release generated from the RC tag's tree
-with the toolchain pinned in `.settings.yaml`, so pin both locally: run from a
+with the toolchain pinned at that tree, so pin both locally: run from a
 worktree at the tag rather than the ambient checkout, and confirm the local
-`go` and `go-licenses` match their pins first.
+`go` and `go-licenses` match their pins first. `go` is pinned in
+`.go-version`; `go-licenses` is built from this module, so its pin is the
+`go.mod` require line.
 
 ```bash
 git worktree add /tmp/rc-verify vX.Y.Z-rc1
 cd /tmp/rc-verify
-make tools-check   # go and go_licenses must match .settings.yaml
+make tools-check   # go must match .go-version, go-licenses its go.mod require
 gh release download vX.Y.Z-rc1 -p THIRD_PARTY_NOTICES.md -D /tmp/rc
 make notices
 diff /tmp/rc/THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
@@ -281,7 +321,7 @@ is host-independent, which is what the generator's fixed platform matrix and
 `LC_ALL=C` sort exist to guarantee. A missing asset means the `extra_files` glob
 found nothing. A diff means generation is not reproducible and the release
 should not be promoted until it is understood — but check `make tools-check`
-first: a `⚠` on `go` or `go_licenses` means the local toolchain, not the
+first: a `⚠` on `go` or `go-licenses` means the local toolchain, not the
 generator, explains the difference.
 
 Pre-releases exercise the full build/test/scan/attest pipeline. After those
@@ -327,7 +367,19 @@ For critical fixes between regular releases:
 
 1. Fix on `main` first (PR, review, merge as normal)
 2. Cut a patch release: `make bump-patch`
-3. For patching older release lines (rare): cherry-pick from `main` onto a hotfix branch, tag manually
+3. To reach the previous supported minor (see [Supported Versions](#supported-versions)): cherry-pick from `main` onto a hotfix branch cut from that minor's latest tag, and tag manually. Step 2 only ever patches the latest minor, so this is the only way to reach an older one — there is no long-lived release branch to cut from
+
+**Bring the release tooling forward with the fix.** A tag push runs the
+workflows as they exist *on the pushed ref*, so a branch cut from an older tag
+builds, scans, and attests with that tag's `.github/` tree rather than with
+`main`'s. Between v0.21.1 and v0.22.0, for example,
+[#2729](https://github.com/NVIDIA/aicr/pull/2729) moved SLSA provenance from the
+index digest alone onto each platform manifest as well; a hotfix cut from
+v0.21.1 without it publishes weaker provenance than
+[SECURITY.md](SECURITY.md#supply-chain-security) promises for a tagged release.
+Cherry-pick any `.github/workflows/**` and `.github/actions/**` change affecting
+build, scan, or attestation onto the hotfix branch before tagging, and verify
+the published attestations match what a current release carries.
 
 ## Release Pipeline
 
@@ -374,18 +426,18 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/`):
 
 | Image | Base | Description |
 |-------|------|-------------|
-| `aicr` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Pure-Go CLI/agent (driver-free GPU discovery) |
-| `aicrd` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Minimal API server |
-| `aicr-gate` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Bundle readiness-gate Job image (emitted by `aicr bundle --readiness-hooks`) |
+| `aicr` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Pure-Go CLI/agent (driver-free GPU discovery) |
+| `aicrd` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Minimal API server |
+| `aicr-gate` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Bundle readiness-gate Job image (emitted by `aicr bundle --readiness-hooks`) |
 
 Published to GitHub Container Registry (`ghcr.io/nvidia/aicr-validators/`):
 
 | Image | Base | Description |
 |-------|------|-------------|
-| `deployment` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Deployment validator |
-| `performance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Performance validator |
-| `conformance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Conformance validator |
-| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.1.2` | AIPerf benchmark runner (built from `python:3.13-slim`) |
+| `deployment` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Deployment validator |
+| `performance` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Performance validator |
+| `conformance` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Conformance validator |
+| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.1.4` | AIPerf benchmark runner (built from `python:3.13-slim`) |
 
 Stable releases promote `vX.Y.Z` and `latest`; prereleases promote their
 `vX.Y.Z-rcN` version tags but never `latest`. The release workflow also retains
@@ -441,7 +493,7 @@ digest you verify against depends on what you are asking for:
 
 | Predicate | Attached to | Verify against |
 |-----------|-------------|----------------|
-| SLSA provenance (`slsaprovenance1`) | multi-arch index | `crane digest <image>:<tag>` |
+| SLSA provenance (`slsaprovenance1`) | multi-arch index **and** each per-platform child manifest | `crane digest <image>:<tag>`, or `crane digest --platform <os>/<arch> <image>:<tag>` |
 | SBOM (`cyclonedx`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
 | OpenVEX (`openvex`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
 
@@ -474,7 +526,9 @@ gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/performance@${PERF_I
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/conformance@${CONF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/aiperf-bench@${AIPERF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
-# Cosign — only provenance is on the index. Pin the workflow *and* the exact
+# Cosign — provenance is the only predicate on the index (it is also on each
+# child manifest; the index copy is what an admission policy can reach). Pin
+# the workflow *and* the exact
 # tag ref (same binding as --source-ref above): without
 # --certificate-github-workflow-ref, the identity regexp alone would accept
 # an attestation signed for any release tag on a digest this tag was

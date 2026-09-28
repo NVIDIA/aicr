@@ -1043,19 +1043,9 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"gang-scheduling",
 		"pod-autoscaling",
 		"cluster-autoscaling",
-		"robust-controller",
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 	}
-	// The gb200/gb300 EKS Slurm leaves differ from the h100 list above in two
-	// INDEPENDENT ways; do not collapse them into one explanation:
-	//   + slinky-slurm-imex-channel — added by the leaf, genuinely IMEX-specific.
-	//   - robust-controller, secure-accelerator-access — absent because
-	//     gb200-eks-training.yaml and gb300-eks-training.yaml do not declare
-	//     them while h100-eks-training.yaml does. That is a property of the
-	//     accelerator training bases, NOT of IMEX or of Slurm; gb300 is not
-	//     categorically excluded, since gb300-eks-ubuntu-inference-dynamo
-	//     declares both. Naming this fixture for IMEX would misattribute it.
 	gbEKSSlurmConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
@@ -1065,6 +1055,7 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"gang-scheduling",
 		"pod-autoscaling",
 		"cluster-autoscaling",
+		"secure-accelerator-access",
 		"slinky-slurm-health",
 		"slinky-slurm-imex-channel",
 	}
@@ -1468,7 +1459,7 @@ func TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests(t *testing.T) {
 		},
 	}
 
-	if _, err := store.mergeMixins(&spec); err != nil {
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
 		t.Fatalf("mergeMixins: %v", err)
 	}
 
@@ -1578,22 +1569,26 @@ func TestMixinComponentRefSafeForMerge(t *testing.T) {
 			wantOffending: "valuesFile",
 		},
 		{
-			name: "overrides set -> conflict",
+			// mixinComponentRefSafeForMerge alone no longer flags Overrides:
+			// it is validated separately by mixinOverridesSafeForMerge
+			// (registry allowlist + collision check), see
+			// TestMixinOverridesSafeForMerge.
+			name: "overrides set alone -> safe at this layer",
 			ref: ComponentRef{
 				Name:      "gpu-operator",
 				Overrides: map[string]any{"driver": map[string]any{"enabled": false}},
 			},
-			wantSafe:      false,
-			wantOffending: "overrides",
+			wantSafe: true,
 		},
 		{
-			name: "dependencyRefs set -> conflict",
+			// Additive: the merge unions and deduplicates, so a mixin can add
+			// an edge but cannot drop one the chain declared.
+			name: "dependencyRefs set -> safe",
 			ref: ComponentRef{
 				Name:           "gpu-operator",
 				DependencyRefs: []string{"cert-manager"},
 			},
-			wantSafe:      false,
-			wantOffending: "dependencyRefs",
+			wantSafe: true,
 		},
 		{
 			name:          "cleanup=true -> conflict",
@@ -2330,6 +2325,7 @@ func TestEvaluateMixinConstraintsReturnsErrorWhenConstraintCannotBeMappedToCandi
 	}
 
 	result, err := store.evaluateMixinConstraints(
+		t.Context(),
 		&RecipeMetadataSpec{
 			Constraints: []Constraint{
 				{Name: "OS.kernel", Value: ">= 6.8"},
@@ -2384,6 +2380,7 @@ func TestEvaluateMixinConstraintsRejectsIncompleteConstraint(t *testing.T) {
 			}
 
 			_, err := store.evaluateMixinConstraints(
+				t.Context(),
 				&RecipeMetadataSpec{Constraints: []Constraint{tt.constraint}},
 				func(_ Constraint) ConstraintEvalResult {
 					return ConstraintEvalResult{
@@ -2411,7 +2408,7 @@ func TestMalformedMixinRejected(t *testing.T) {
 		{
 			name: "mixin with forbidden base field",
 			content: `kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: bad-mixin
 spec:
@@ -2424,7 +2421,7 @@ spec:
 		{
 			name: "mixin with forbidden criteria field",
 			content: `kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: bad-mixin
 spec:
@@ -2438,7 +2435,7 @@ spec:
 		{
 			name: "mixin with forbidden validation field",
 			content: `kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: bad-mixin
 spec:
@@ -2700,7 +2697,7 @@ func buildProviderWithOverlays(t *testing.T, overlayFileName string) DataProvide
 	}
 
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -2708,7 +2705,7 @@ spec:
 `)
 
 	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: %s
 spec:
@@ -2729,13 +2726,13 @@ func TestLoadMetadataStore_ProfileMetadataRequiresKind(t *testing.T) {
 
 	provider := newInMemoryProvider("missing-kind", map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
   componentRefs: []
 `),
-		"overlays/profile.yaml": []byte(`apiVersion: aicr.run/v1alpha3
+		"overlays/profile.yaml": []byte(`apiVersion: aicr.run/v1beta2
 metadata:
   name: profile
 spec:
@@ -2792,7 +2789,7 @@ spec: {}
 `),
 		"evidence/unrelated.yaml": []byte("signers:\n  first-party: []\n"),
 		"strict-config.yaml": []byte(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   recipe:
     criteriaStrict: true
@@ -2821,7 +2818,7 @@ spec:
 func TestLoadMetadataStore_AcceptsReleaseNProfileTarget(t *testing.T) {
 	provider := newInMemoryProvider("target-profile-catalog", map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -2854,7 +2851,7 @@ spec:
 
 func TestLoadMetadataStore_RejectsInvalidCatalogHeaders(t *testing.T) {
 	validBase := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -2881,7 +2878,7 @@ spec:
 		{
 			name:    "wrong AICR kind",
 			path:    "overlays/bad.yaml",
-			data:    []byte("kind: RecipeMetdata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: bad\nspec: {}\n"),
+			data:    []byte("kind: RecipeMetdata\napiVersion: aicr.run/v1\nmetadata:\n  name: bad\nspec: {}\n"),
 			wantSub: `kind "RecipeMetdata"`,
 		},
 		{
@@ -3967,7 +3964,7 @@ func TestLoadMetadataStore_ExternalOverlayNodesError(t *testing.T) {
 	t.Cleanup(ResetMetadataStoreForTesting)
 
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -3975,7 +3972,7 @@ spec:
 `)
 	// External overlay with criteria.nodes set — must be rejected.
 	externalYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: nodes-gated
 spec:
@@ -4041,14 +4038,14 @@ func TestLoadMetadataStore_EmbeddedOverlayNodesDoesNotError(t *testing.T) {
 	t.Cleanup(ResetMetadataStoreForTesting)
 
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
   componentRefs: []
 `)
 	embeddedYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: nodes-embedded
 spec:

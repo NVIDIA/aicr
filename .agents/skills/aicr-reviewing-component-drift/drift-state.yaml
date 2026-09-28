@@ -1,0 +1,19 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Carries context between invocations of aicr-reviewing-component-drift: what
+# was reviewed at which version pair, what verdict it got, and what would change
+# a hold. The weekly Slack digest is stateless by design, so it repeats the same
+# components until someone acts; this file is what keeps the review from
+# repeating with it.
+#
+# reviews:
+#   - component: nvsentinel
+#     from: v1.20.0
+#     to: v1.23.0
+#     verdict: hold          # take | hold | defer
+#     reviewed: 2026-09-21
+#     reason: CRD migration needs an ADR-021 record first
+#     revisit_when: an upgrade record exists for v1.20 -> v1.23
+
+reviews: []

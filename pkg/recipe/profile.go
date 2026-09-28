@@ -596,8 +596,9 @@ func ValidateRecipeMetadataProfile(metadata *RecipeMetadata) error {
 				metadata.APIVersion))
 	case metadata.Spec.Profile != nil && !profileVersion:
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("RecipeMetadata declares spec.profile but uses apiVersion %q; expected %q or %q",
-				metadata.APIVersion, RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
+			fmt.Sprintf("RecipeMetadata declares spec.profile but uses apiVersion %q%s; expected %q",
+				metadata.APIVersion, header.RetirementNote(metadata.APIVersion),
+				header.GroupVersionV1Beta2))
 	case metadata.Spec.Profile != nil:
 		_, err := ValidateProfileDeclaration(metadata.Spec.Profile)
 		return err
@@ -614,7 +615,7 @@ func (r *RecipeResult) ValidateProfileContract() error {
 		return nil
 	}
 	switch {
-	case r.APIVersion == "" || header.IsSupportedAPIVersion(r.APIVersion):
+	case header.IsSupportedAPIVersion(r.APIVersion):
 		if r.Metadata.SelectedProfile != nil {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("recipe apiVersion %q cannot carry metadata.selectedProfile", r.APIVersion))
@@ -634,9 +635,9 @@ func (r *RecipeResult) ValidateProfileContract() error {
 		}
 	default:
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("recipe has unsupported apiVersion %q; expected %q, %q, %q, or %q",
-				r.APIVersion, RecipeResultAPIVersion, header.GroupVersionV1,
-				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
+			fmt.Sprintf("recipe has unsupported apiVersion %q%s; expected %q or %q",
+				r.APIVersion, header.RetirementNoteWithAbsent(r.APIVersion),
+				header.GroupVersionV1, header.GroupVersionV1Beta2))
 	}
 
 	selected := r.Metadata.SelectedProfile

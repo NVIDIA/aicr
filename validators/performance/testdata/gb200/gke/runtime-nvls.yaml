@@ -1,0 +1,223 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL all-reduce TrainingRuntime for GB200 on GKE, NVLS-transport variant.
+#
+# Validates Multi-Node NVLink (MNNVL / NVLS) across the A4X nodes' IMEX domain.
+#
+# IMEX wiring is handled by the validator itself: before the TrainJob is
+# applied, applyNCCLComputeDomain() creates a resource.nvidia.com/v1beta1
+# ComputeDomain CR in this namespace. The NVIDIA DRA driver reconciles the CR
+# into a ResourceClaimTemplate named "nccl-all-reduce-imex" (matching
+# ncclIMEXClaimTemplateName in the validator Go code), and the worker pods
+# below reference that template via resourceClaims. At pod admission the
+# kubelet therefore mounts /dev/nvidia-caps-imex-channels into each worker,
+# which is what MNNVL needs to open NVLS multicast groups across nodes.
+#
+# Cluster prerequisite: nvidia-dra-driver-gpu must be installed with the
+# resource.nvidia.com/v1beta1 ComputeDomain CRD present. Without it the
+# validator's CR creation fails up front with a clear NotFound error.
+
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: nccl-all-reduce-runtime
+  namespace: ${NAMESPACE}
+  labels:
+    trainer.kubeflow.org/framework: mpi
+spec:
+  mlPolicy:
+    mpi:
+      mpiImplementation: OpenMPI
+      numProcPerNode: ${GPU_COUNT_PER_NODE}
+      runLauncherAsNode: false
+      sshAuthMountPath: /tmp/mpi-keys
+  template:
+    spec:
+      network:
+        enableDNSHostnames: true
+        publishNotReadyAddresses: true
+      replicatedJobs:
+      - name: launcher
+        replicas: 1
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    set -x
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/id_rsa /root/.ssh/id_rsa
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/id_rsa /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  terminationMessagePolicy: FallbackToLogsOnError
+                  env:
+                  - name: LD_LIBRARY_PATH
+                    value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+                  command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    set -o pipefail
+                    /usr/local/mpi/bin/mpirun "$@" 2>&1 | tee /tmp/nccl-results.out
+                    rc=${PIPESTATUS[0]}
+                    if [ "$rc" -eq 0 ]; then
+                      pat='^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[[:alpha:]]+|Avg bus bandwidth'
+                      grep -E "$pat" /tmp/nccl-results.out 2>/dev/null | tail -c 3900 > /dev/termination-log 2>/dev/null || true
+                    fi
+                    exit "$rc"
+                  - bash
+                  args:
+                  - -np
+                  - "${GPU_COUNT}"
+                  - --allow-run-as-root
+                  - --mca
+                  - plm_rsh_args
+                  - -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ConnectionAttempts=300
+                  - --mca
+                  - oob_tcp_if_include
+                  - eth0
+                  - --mca
+                  - btl_tcp_if_include
+                  - eth0
+                  - -x
+                  - UCX_NET_DEVICES=eth0
+                  - -x
+                  - LD_LIBRARY_PATH=/home/kubernetes/bin/nvidia/lib64:/home/kubernetes/bin/gib
+                  # INFO emits the "NVLS multicast support is available"
+                  # hardware-capability banner and, when NCCL actually builds
+                  # an NVLS communicator, a "NVLS comm 0x<addr>" init line.
+                  # verifyTransportFromLogs greps the latter as proof of use
+                  # (per-channel "[send] via NVLS" lines were dropped in
+                  # NCCL 2.27).
+                  - -x
+                  - NCCL_DEBUG=INFO
+                  - -x
+                  - NCCL_NET=gIB
+                  # Force MNNVL/NVLS on. If the IMEX domain isn't wired up,
+                  # NCCL initialization will surface the error loudly.
+                  - -x
+                  - NCCL_NVLS_ENABLE=1
+                  - -x
+                  - NCCL_SOCKET_IFNAME=eth0
+                  - /usr/local/bin/${TEST_TYPE}_mpi
+                  - -b
+                  - ${MIN_MESSAGE_SIZE}
+                  - -e
+                  - ${MAX_MESSAGE_SIZE}
+                  - -f
+                  - "2"
+                  - -g
+                  - "1"
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 128Mi
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+      - name: node
+        template:
+          spec:
+            template:
+              metadata:
+                annotations:
+                  networking.gke.io/default-interface: eth0
+                  networking.gke.io/interfaces: '[{"interfaceName":"eth0","network":"default"},{"interfaceName":"eth1","network":"gvnic-1"},{"interfaceName":"eth2","network":"rdma-0"},{"interfaceName":"eth3","network":"rdma-1"},{"interfaceName":"eth4","network":"rdma-2"},{"interfaceName":"eth5","network":"rdma-3"}]'
+              spec:
+                # IMEX channel claim: the DRA driver auto-generated this
+                # ResourceClaimTemplate (name matches ncclIMEXClaimTemplateName
+                # in the validator Go code) when the ComputeDomain CR was
+                # reconciled. Without this block, /dev/nvidia-caps-imex-channels
+                # would not be mounted and NCCL would fail with
+                # "Cuda failure 800 'operation not permitted'" at MNNVL init.
+                resourceClaims:
+                - name: imex-channel
+                  resourceClaimTemplateName: nccl-all-reduce-imex
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command: ["sh", "-c"]
+                  args:
+                  - |
+                    set -x &&
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    chmod 700 /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 600 /root/.ssh/id_rsa &&
+                    chmod 644 /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys &&
+                    export LD_LIBRARY_PATH=/home/kubernetes/bin/nvidia/lib64:/home/kubernetes/bin/gib:${LD_LIBRARY_PATH} &&
+                    export NCCL_NET=gIB &&
+                    if [ -f /home/kubernetes/bin/gib/scripts/set_nccl_env.sh ]; then . /home/kubernetes/bin/gib/scripts/set_nccl_env.sh; fi &&
+                    env | grep -E '^NCCL_|^CUDA_|^LD_LIBRARY_PATH' > /root/.ssh/environment &&
+                    echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config &&
+                    /usr/sbin/sshd -De
+                  resources:
+                    claims:
+                    - name: imex-channel
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: dshm
+                    mountPath: /dev/shm
+                  - name: nvidia-host
+                    mountPath: /home/kubernetes/bin/nvidia
+                    readOnly: true
+                  - name: gib-host
+                    mountPath: /home/kubernetes/bin/gib
+                    readOnly: true
+                volumes:
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+                - name: nvidia-host
+                  hostPath:
+                    path: /home/kubernetes/bin/nvidia
+                - name: gib-host
+                  hostPath:
+                    path: /home/kubernetes/bin/gib
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher

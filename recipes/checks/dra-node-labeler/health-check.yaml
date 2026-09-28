@@ -1,0 +1,57 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# dra-node-labeler health check.
+#
+# The labeler mirrors nvidia.com/gpu.present onto the DRA eviction label the
+# kubelet plugin selects on. A labeler that never starts takes the kubelet
+# plugin to DESIRED=0 and removes every ResourceSlice, so the DaemonSet must
+# roll out fully: updatedNumberScheduled == desiredNumberScheduled, with
+# desiredNumberScheduled > 0 as a guard against a vacuous pass when no node
+# carries gpu.present yet. A pod that restarts (RunContainerError, a script
+# that exits non-zero) fails the pod assertion.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: dra-node-labeler-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-daemonset-fully-rolled-out
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: dra-node-labeler
+                namespace: gpu-operator
+              status:
+                (desiredNumberScheduled > `0`): true
+                (updatedNumberScheduled == desiredNumberScheduled): true
+                (numberReady == desiredNumberScheduled): true
+    - name: validate-pods-healthy
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: gpu-operator
+                labels:
+                  app: dra-node-labeler
+              status:
+                phase: Running
+                (containerStatuses[?restartCount > `0`] | length(@)): 0

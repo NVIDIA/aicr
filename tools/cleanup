@@ -70,7 +70,7 @@ Options:
 
 Exclusions fence out-of-band / platform-owned installs that AICR does not own.
 Example: nodewright/skyhook installed out-of-band, excluded from the recipe:
-  tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com
+  tools/cleanup --exclude-ns skyhook --exclude-crd 'skyhook.nvidia.com, nodewright.nvidia.com'
 EOF
 }
 
@@ -118,6 +118,11 @@ AICR_NAMESPACES=(
     gpu-operator
     nvidia-network-operator
     cert-manager
+    nodewright
+    # Kept alongside nodewright: the registry default moved, but a cluster
+    # deployed before that move still has its operator in skyhook, and Helm
+    # cannot relocate a release. Both are AICR's to clean until no such
+    # cluster remains. Mirrors the two API groups listed below.
     skyhook
     nvsentinel
     nvidia-dra-driver
@@ -165,6 +170,7 @@ AICR_CRD_PATTERNS=(
     mellanox.com
     cert-manager.io
     skyhook.nvidia.com
+    nodewright.nvidia.com
     nvsentinel.nvidia.com
     monitoring.coreos.com
     scheduling.run.ai
@@ -175,6 +181,7 @@ AICR_CRD_PATTERNS=(
     agentgateway.dev
     apps.nvidia.com
     kueue.x-k8s.io
+    jobset.x-k8s.io
     kubeflow.org
     trainer.kubeflow.org
     slinky.slurm.net

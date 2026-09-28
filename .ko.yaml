@@ -22,6 +22,9 @@
 # ko has no user default of its own, so images built through this file run as
 # the base's nvs (UID 1000) unless the invocation passes --image-user. The
 # published images do not come from here — goreleaser pins user 65532 directly.
-# The base also declares WorkingDir=/app without shipping an /app directory;
-# ko has no override for it, so it reaches every image built FROM it (#2652).
-defaultBaseImage: nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
+# The base declares WorkingDir=/app and ko has no override for it, so that
+# value reaches every image built FROM it. v4.1.3 is the first tag that also
+# ships an /app directory; on anything older, runtimes that refuse to create a
+# missing working directory (Cloud Run, Knative) cannot start the image, so
+# never pin this below v4.1.3 (#2652).
+defaultBaseImage: nvcr.io/nvidia/distroless/static:v4.1.3@sha256:ec947edce045116008a8aeab38c5da643fbf110990b133bad200dbf5e4b6e296

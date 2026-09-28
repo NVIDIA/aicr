@@ -45,23 +45,22 @@ type PredicateInputs struct {
 	Redaction *RedactionInfo
 
 	// Profile is nil for unprofiled recipes and set for profile-bearing
-	// ones; it selects PredicateTypeV2 for the enclosing statement.
+	// ones.
 	Profile *ProfilePredicate
 }
 
-// BuildPredicate constructs the predicate body from inputs (the shared
-// shape behind predicateType v1 for unprofiled recipes and v2 when
-// Profile is set — see StatementPredicateType). The
-// returned Predicate has deterministic field ordering: ValidatorImages
-// is sorted by image, Phases iteration order is the canonical
-// AllPhases sequence (the map is fine because Go's JSON marshaller
-// sorts map keys).
+// BuildPredicate constructs the predicate body from in. The result matches
+// the shape PredicateTypeV3 requires (see StatementPredicateType) whether
+// or not the recipe is profile-bearing. ValidatorImages is sorted by image
+// for deterministic field ordering.
 func BuildPredicate(in PredicateInputs) *Predicate {
 	images := append([]ValidatorImage(nil), in.ValidatorImages...)
 	sort.Slice(images, func(i, j int) bool {
 		return images[i].Image < images[j].Image
 	})
 
+	// Filters to the canonical phase set. Any key in in.Phases outside
+	// AllPhases is silently dropped.
 	phases := map[Phase]PhaseSummary{}
 	for _, p := range AllPhases {
 		if v, ok := in.Phases[p]; ok {
@@ -86,21 +85,22 @@ func BuildPredicate(in PredicateInputs) *Predicate {
 	}
 }
 
-// StatementPredicateType returns the predicate type a predicate requires:
-// PredicateTypeV2 when it carries a profile block, PredicateTypeV1
-// otherwise.
-func StatementPredicateType(pred *Predicate) string {
-	if pred != nil && pred.Profile != nil {
-		return PredicateTypeV2
-	}
-	return PredicateTypeV1
+// StatementPredicateType returns the predicate type for newly produced
+// evidence, always PredicateTypeV3. PredicateTypeV1 and V2 are assigned
+// only to historic evidence already on disk.
+func StatementPredicateType(_ *Predicate) string {
+	return PredicateTypeV3
 }
 
-// ValidatePredicateTypeCoherence enforces the bidirectional type contract
-// shared by every evidence consumer: v1 must not carry a profile block, v2
-// must carry a well-formed one, and any other type is unknown. A profiled
-// recipe attested under v1 would silently lose its descriptor identity —
-// exactly the pre-expansion evidence the v2 cut-over exists to invalidate.
+// ValidatePredicateTypeCoherence enforces the type contract shared by every
+// evidence consumer. v1 must not carry a profile block, and v2 must carry a
+// well-formed one. A profiled recipe attested under v1 would silently lose
+// its descriptor identity, exactly the pre-expansion evidence the v2
+// cut-over exists to invalidate. v3 allows either. Its profile block's
+// presence reflects whether the recipe carries metadata.selectedProfile,
+// not the predicate type, so a present block is validated the same way v2
+// validates one, but is never required. Any other predicateType is
+// rejected as unknown.
 func ValidatePredicateTypeCoherence(predicateType string, pred *Predicate) error {
 	switch predicateType {
 	case PredicateTypeV1:
@@ -114,13 +114,10 @@ func ValidatePredicateTypeCoherence(predicateType string, pred *Predicate) error
 			return errors.New(errors.ErrCodeInvalidRequest,
 				"predicateType "+PredicateTypeV2+" requires the predicate profile block")
 		}
-		if pred.Profile.Selection == "" || pred.Profile.PolicyDescriptorIdentity == "" {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				"predicate profile block requires selection and policyDescriptorIdentity")
-		}
-		if _, err := recipe.ParseProfileSelection(pred.Profile.Selection); err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest,
-				"predicate profile block carries a malformed selection", err)
+		return validateProfileBlock(pred.Profile)
+	case PredicateTypeV3:
+		if pred != nil && pred.Profile != nil {
+			return validateProfileBlock(pred.Profile)
 		}
 		return nil
 	default:
@@ -129,15 +126,30 @@ func ValidatePredicateTypeCoherence(predicateType string, pred *Predicate) error
 	}
 }
 
+// validateProfileBlock checks that p carries a non-empty Selection
+// matching the recipe profile grammar and a non-empty
+// PolicyDescriptorIdentity.
+func validateProfileBlock(p *ProfilePredicate) error {
+	if p.Selection == "" || p.PolicyDescriptorIdentity == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"predicate profile block requires selection and policyDescriptorIdentity")
+	}
+	if _, err := recipe.ParseProfileSelection(p.Selection); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			"predicate profile block carries a malformed selection", err)
+	}
+	return nil
+}
+
 // SubjectName returns the in-toto subject[0].name for a recipe.
 func SubjectName(recipeName string) string {
 	return SubjectNamePrefix + recipeName
 }
 
 // BuildStatement constructs the in-toto Statement carrying our
-// recipe-evidence predicate, typed via StatementPredicateType (v1 for
-// unprofiled recipes, v2 when the predicate carries a profile block).
-// The returned bytes are protobuf-canonical JSON suitable
+// recipe-evidence predicate, typed via StatementPredicateType (always
+// PredicateTypeV3 for a newly built predicate). The returned bytes are
+// protobuf-canonical JSON suitable
 // for DSSE wrapping. The recipe canonicalization happens upstream;
 // callers pass in the already-computed subject digest.
 func BuildStatement(recipeName, recipeSubjectDigest string, pred *Predicate) ([]byte, error) {
@@ -193,7 +205,17 @@ func BuildStatement(recipeName, recipeSubjectDigest string, pred *Predicate) ([]
 // discovery anchors on the artifact digest, so the signed subject must
 // match. Recipe identity is preserved via predicate.recipe.{name,digest},
 // which BuildArtifactStatement requires to be populated.
-func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]byte, error) {
+//
+// predicateType is taken from the caller rather than derived via
+// StatementPredicateType. A freshly built bundle types it V3, but a bundle
+// reconstructed from an on-disk statement (Publish, SignExisting) must
+// re-sign under the type it was ORIGINALLY built with, because
+// pred.Recipe.Digest was computed with that type's canonicalization
+// algorithm. Stamping every reconstructed bundle V3 here would sign a V3
+// statement around a legacy digest, which the verifier's
+// SubjectDigestForType then recomputes under V3 canonicalization and
+// rejects as a mismatch.
+func BuildArtifactStatement(ociRef, artifactDigest, predicateType string, pred *Predicate) ([]byte, error) {
 	if ociRef == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "OCI reference is required")
 	}
@@ -209,8 +231,11 @@ func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]b
 	if pred.Recipe.Name == "" || pred.Recipe.Digest == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "predicate.recipe.{name,digest} must be populated for artifact-subject statement")
 	}
+	if predicateType == "" {
+		predicateType = StatementPredicateType(pred)
+	}
 	// Producer-side coherence — same rationale as BuildStatement.
-	if err := ValidatePredicateTypeCoherence(StatementPredicateType(pred), pred); err != nil {
+	if err := ValidatePredicateTypeCoherence(predicateType, pred); err != nil {
 		return nil, err
 	}
 
@@ -227,7 +252,7 @@ func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]b
 				Digest: map[string]string{"sha256": artifactDigest},
 			},
 		},
-		PredicateType: StatementPredicateType(pred),
+		PredicateType: predicateType,
 		Predicate:     predicate,
 	}
 	if vErr := stmt.Validate(); vErr != nil {

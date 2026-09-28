@@ -53,6 +53,10 @@ type SignatureResult struct {
 	// this over the unsigned statement.intoto.json when present —
 	// THIS is the value the signer attested to.
 	Predicate *attestation.Predicate
+
+	// PredicateType is the predicateType recorded alongside Predicate in
+	// the verified DSSE payload.
+	PredicateType string
 }
 
 // VerifySignature performs sigstore-go verification of the bundle's
@@ -116,7 +120,7 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 		return nil, payloadErr
 	}
 
-	subjectHex, predicate, parseStmtErr := parseStatement(stmtBytes)
+	subjectHex, predicateType, predicate, parseStmtErr := parseStatement(stmtBytes)
 	if parseStmtErr != nil {
 		return nil, parseStmtErr
 	}
@@ -188,7 +192,7 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 			"hint", "consider --expected-issuer / --expected-identity-regexp to fail on unexpected signers")
 	}
 
-	return &SignatureResult{Signer: claims, Predicate: predicate}, nil
+	return &SignatureResult{Signer: claims, Predicate: predicate, PredicateType: predicateType}, nil
 }
 
 func buildIdentityMatcher(opts VerifyOptions) (verify.CertificateIdentity, error) {
@@ -250,8 +254,8 @@ func extractStatementBytes(b *bundle.Bundle) ([]byte, error) {
 }
 
 // parseStatement extracts the subject sha256 (hex, no prefix) plus the
-// predicate body from an in-toto Statement JSON.
-func parseStatement(stmtBytes []byte) (subjectHex string, predicate *attestation.Predicate, err error) {
+// predicateType and predicate body from an in-toto Statement JSON.
+func parseStatement(stmtBytes []byte) (subjectHex, predicateType string, predicate *attestation.Predicate, err error) {
 	var stmt struct {
 		Subject []struct {
 			Digest map[string]string `json:"digest"`
@@ -260,20 +264,20 @@ func parseStatement(stmtBytes []byte) (subjectHex string, predicate *attestation
 		Predicate     attestation.Predicate `json:"predicate"`
 	}
 	if uErr := json.Unmarshal(stmtBytes, &stmt); uErr != nil {
-		return "", nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+		return "", "", nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"DSSE payload is not a valid in-toto Statement", uErr)
 	}
 	if len(stmt.Subject) == 0 {
-		return "", nil, errors.New(errors.ErrCodeInvalidRequest, "Statement has no subject")
+		return "", "", nil, errors.New(errors.ErrCodeInvalidRequest, "Statement has no subject")
 	}
 	subjectHex = stmt.Subject[0].Digest["sha256"]
 	if subjectHex == "" {
-		return "", nil, errors.New(errors.ErrCodeInvalidRequest, "Statement subject has no sha256 digest")
+		return "", "", nil, errors.New(errors.ErrCodeInvalidRequest, "Statement subject has no sha256 digest")
 	}
 	if cErr := attestation.ValidatePredicateTypeCoherence(stmt.PredicateType, &stmt.Predicate); cErr != nil {
-		return "", nil, cErr
+		return "", "", nil, cErr
 	}
-	return subjectHex, &stmt.Predicate, nil
+	return subjectHex, stmt.PredicateType, &stmt.Predicate, nil
 }
 
 func looksLikeJSON(b []byte) bool {

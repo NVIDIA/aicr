@@ -29,7 +29,7 @@
 #   scheduling on this exact value today — it exists only to keep this
 #   profile's shape consistent with the other accelerated profiles.
 
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: KWOKNodeProfile
 metadata:
   name: accelerated-vr200

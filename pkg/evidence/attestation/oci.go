@@ -51,10 +51,10 @@ type PushOptions struct {
 	AICRVersion string
 
 	// PredicateType is the in-toto predicate type of the bundle's
-	// statement (PredicateTypeV1 or PredicateTypeV2). It feeds the OCI
-	// manifest's org.opencontainers.image.description annotation so a v2
-	// (profiled) bundle is not mislabeled as recipe-evidence/v1 in
-	// registry UIs. Empty falls back to a version-neutral description.
+	// statement (PredicateTypeV1, V2, or V3). It feeds the OCI manifest's
+	// org.opencontainers.image.description annotation so the bundle is not
+	// mislabeled under a different predicate version in registry UIs.
+	// Empty falls back to a version-neutral description.
 	PredicateType string
 
 	// PlainHTTP forces HTTP (used for local registry tests).

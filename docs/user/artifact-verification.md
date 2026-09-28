@@ -51,7 +51,8 @@ export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}@${DIGEST}")
 export AICR_ISSUER="https://token.actions.githubusercontent.com"
 export AICR_SIGNER="https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}"
 
-# Build provenance (attached to the multi-platform index digest)
+# Build provenance (attached to the index digest and to each platform manifest;
+# any of the three verifies, and the index copy is the one an admission policy can reach)
 gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr \
   --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml \
   --source-ref "refs/tags/${TAG}" \

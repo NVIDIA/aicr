@@ -58,8 +58,8 @@ and toolkit, its device plugin advertises, and the DRA kubelet plugin reads
 the driver userspace from the operator install path
 (`/run/nvidia/driver` — the profile moves `nvidiaDriverRoot` in lockstep;
 see the driver-ownership coherence rules). **Remove the `NvidiaGpuPlugin`
-cluster add-on** (Terraform `addons = { NvidiaGpuPlugin = { remove = true }
-}`, or the add-on lifecycle API) — that removal IS the qualification
+cluster add-on** (Terraform `addons = { NvidiaGpuPlugin = { remove = true } }`,
+or the add-on lifecycle API) — that removal IS the qualification
 contract. Disabling the plugin only via the
 `oci.oraclecloud.com/disable-gpu-device-plugin` node label is out of
 contract: it leaves the add-on installed, which qualifies as `oci-managed`

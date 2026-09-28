@@ -230,6 +230,15 @@ type AgentConfig struct {
 	// contract as AKSGPUPoolsPath: projected controller-side and merged
 	// into the snapshot as the oke-addons subtype.
 	OKEAddonsPath string
+
+	// GKEGPUPoolsPath points at an operator-supplied
+	// `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump on the machine running this client. The
+	// snapshotter projects it, controller-side and before any cluster
+	// work, into the snapshot's K8s.gke-gpu-pools.gpu-driver-installation
+	// reading. The file never enters the cluster. Empty disables the
+	// projection.
+	GKEGPUPoolsPath string
 }
 
 // Criteria is the facade-owned, semver-stable shape of a recipe-resolution
@@ -368,10 +377,22 @@ type RecipeRequest struct {
 	// for newly resolved Slurm recipes.
 	AccountingMode string
 
+	// InheritFrom is a prior recipe file or bundle directory whose resolved
+	// namespaces this resolution preserves. Empty means resolve from the
+	// registry alone. A cm:// URI is rejected: not supported yet (#2830).
+	InheritFrom string
+
 	// PinnedName reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable; set the criteria
 	// fields above instead.
 	PinnedName string
+
+	// GKETCPXOInterfaces is the ordered eth1..eth8 → VPC network mapping
+	// rendered into the torch-distributed-tcpxo ClusterTrainingRuntime, in
+	// the string form "eth1=<network>,...,eth8=<network>". Required — with
+	// no default — when the resolved recipe ships that runtime (h100 GKE
+	// kubeflow training); rejected for recipes that do not.
+	GKETCPXOInterfaces string
 
 	// PinnedVersion reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable.
@@ -383,13 +404,13 @@ type RecipeResolveOption func(*recipeResolveConfig)
 
 type recipeResolveConfig struct {
 	profile              string
+	inheritFrom          string
 	accountingMode       *recipe.AccountingMode
 	runtimeInventoryMode *recipe.RuntimeInventoryMode
+	tcpxoInterfaces      *[]recipe.NetworkInterfaceMapping
 
-	// relaxDerived records that WithSnapshotCriteriaRelaxation was passed.
-	// Kept separate from stated because an empty stated set is meaningful
-	// (every dimension derived, all relaxable) and must not read as "option
-	// absent".
+	// relaxDerived records opt-in to snapshot-criteria relaxation.
+	// An empty stated set means every dimension was derived, not option absent.
 	relaxDerived bool
 	stated       statedDimensionSet
 
@@ -413,6 +434,20 @@ func (cfg *recipeResolveConfig) recordOptErr(err error) {
 func WithProfile(profile string) RecipeResolveOption {
 	return func(cfg *recipeResolveConfig) {
 		cfg.profile = profile
+	}
+}
+
+// WithInheritFrom names a prior recipe file or bundle directory whose resolved
+// namespaces this resolve keeps, so a moved registry default does not relocate
+// a component that is already running. A component the prior artifact does not
+// name keeps its registry default. Empty resolves from the registry alone.
+//
+// The reference is read when the resolve runs: a cm:// URI, an unreadable
+// path, or a directory holding no recipe is rejected with
+// ErrCodeInvalidRequest rather than silently resolving as a first deploy.
+func WithInheritFrom(ref string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		cfg.inheritFrom = ref
 	}
 }
 
@@ -448,6 +483,27 @@ func WithRuntimeInventoryMode(mode string) RecipeResolveOption {
 			return
 		}
 		cfg.runtimeInventoryMode = &parsed
+	}
+}
+
+// WithGKETCPXOInterfaces supplies the ordered eth1..eth8 → VPC network
+// mapping for a criteria- or snapshot-based resolve call, in the string form
+// "eth1=<network>,...,eth8=<network>". The value is recorded in the emitted
+// recipe (configuration.gke.tcpxoInterfaces) and rendered into the
+// torch-distributed-tcpxo ClusterTrainingRuntime's
+// networking.gke.io/interfaces annotation.
+//
+// Required — with no default — when the resolved recipe ships that runtime;
+// rejected when it does not. An empty or malformed value is rejected when
+// the resolve call runs.
+func WithGKETCPXOInterfaces(value string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		parsed, err := recipe.ParseGKETCPXOInterfaces(value)
+		if err != nil {
+			cfg.recordOptErr(err)
+			return
+		}
+		cfg.tcpxoInterfaces = &parsed
 	}
 }
 
@@ -522,7 +578,7 @@ type RecipeResult struct {
 }
 
 // SelectedProfile is the stable facade projection of a recipe profile.
-// It is populated only for aicr.run/v1alpha3 results; an unprofiled
+// It is populated only for aicr.run/v1beta2 results; an unprofiled
 // composition leaves it nil.
 type SelectedProfile struct {
 	// Name is the declaration this selection came from, e.g. "gpuStack".
@@ -669,8 +725,14 @@ type ComponentRef struct {
 	// Kind is the deployment kind, e.g. "Helm" or "Kustomize".
 	Kind string
 
-	// Version is the component chart/manifest version.
+	// Version is the component chart/manifest version. Empty for a
+	// Kustomize component, which pins Tag instead.
 	Version string
+
+	// Tag is the resource tag a Kustomize component is pinned to
+	// (the registry's kustomize.defaultTag). Empty for Helm
+	// components, which pin Version instead.
+	Tag string
 
 	// Source is the upstream artifact location: a Helm chart
 	// repository URL for Helm components (e.g.

@@ -191,6 +191,45 @@ spec:
                 name: syslog-health-monitor-regular
                 namespace: nvsentinel
               ((status.observedGeneration || `0`) < metadata.generation): true
+        # nic-health-monitor: same negative form again. Its chart
+        # condition (global.nicHealthMonitor.enabled) is off in every
+        # recipe except those composing the nvsentinel-nic-health-monitor
+        # mixin, so on the other platforms these four ops pass vacuously
+        # on a 404 and only bite where the mixin is applied.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: nic-health-monitor
+                namespace: nvsentinel
+              status:
+                (desiredNumberScheduled > `0`): false
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: nic-health-monitor
+                namespace: nvsentinel
+              status:
+                (numberReady < desiredNumberScheduled): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: nic-health-monitor
+                namespace: nvsentinel
+              ((status.updatedNumberScheduled || `0`) < status.desiredNumberScheduled): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: nic-health-monitor
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
     - name: validate-all-pods-healthy
       try:
         # Assert no pods are in unhealthy phases (Pending / Failed /

@@ -177,7 +177,7 @@ func ResolveSigningConfig(ctx context.Context) (*root.SigningConfig, error) {
 
 	select {
 	case <-ctx.Done():
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "signing config fetch timed out", ctx.Err())
+		return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "fetching signing config")
 	case r := <-ch:
 		return r.sc, r.err
 	}
@@ -306,7 +306,7 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 
 	select {
 	case <-ctx.Done():
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "TUF update timed out", ctx.Err())
+		return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "updating TUF metadata")
 	case result := <-ch:
 		if result.err != nil {
 			return nil, result.err

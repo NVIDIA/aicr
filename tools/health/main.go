@@ -43,6 +43,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/health"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/testgrid"
 	"github.com/NVIDIA/aicr/tools/internal/docgen"
 )
@@ -73,19 +74,27 @@ func main() {
 }
 
 func run(ctx context.Context, outDir, summaryOut, aicrVersion string, deterministic, noTitle bool) error {
-	// Provider nil resolves against the package-global embedded catalog, so the
-	// run is hermetic — no repo-root or filesystem inputs beyond the binary.
-	report, err := health.Compute(ctx, health.Options{Version: aicrVersion})
-	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "compute recipe health")
-	}
-
 	// Presence is read from the committed manifest embedded in pkg/testgrid, so
 	// the Evidence deep-links are constructed offline and the run stays
 	// hermetic — no dashboard fetch.
 	presence, err := testgrid.LoadPresence()
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load testgrid presence")
+	}
+
+	// Provider nil resolves against the package-global embedded catalog, so the
+	// run is hermetic — no repo-root or filesystem inputs beyond the binary.
+	//
+	// RetainNonLeaf keeps a coordinate that carries published evidence in the
+	// matrix even after a platform sibling turns its overlay into a non-leaf.
+	// Without it the row — and with it the only live validation.aicr.run link
+	// for that coordinate — would silently disappear (NVIDIA/aicr#2564).
+	report, err := health.Compute(ctx, health.Options{
+		Version:       aicrVersion,
+		RetainNonLeaf: hasPublishedEvidence(presence),
+	})
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "compute recipe health")
 	}
 
 	if mkErr := os.MkdirAll(outDir, 0o755); mkErr != nil {
@@ -117,4 +126,22 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 
 	fmt.Printf("health: wrote %s (%d recipes)\n", mdPath, len(report.Combos))
 	return nil
+}
+
+// hasPublishedEvidence returns the health.Options.RetainNonLeaf predicate:
+// an entry is retained when its criteria map to a concrete coordinate that
+// the committed presence manifest lists. An entry whose criteria carry an
+// "any"/empty required dimension has no concrete coordinate and so can never
+// match a manifest entry; it is not retained.
+func hasPublishedEvidence(presence *testgrid.Presence) func(recipe.CatalogEntry) bool {
+	if presence == nil {
+		return nil
+	}
+	return func(entry recipe.CatalogEntry) bool {
+		co, err := recipe.CoordinateFor(entry.Criteria)
+		if err != nil {
+			return false
+		}
+		return presence.Has(co)
+	}
 }

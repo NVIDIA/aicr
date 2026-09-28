@@ -309,13 +309,14 @@ http://127.0.0.1:9090/chat.html
     gang-scheduling          Gang scheduling co-scheduling test
     secure-access            Secure accelerator access (device-plugin or DRA
                              ResourceClaim isolation, policy/mode-selected)
-    accelerator-metrics      Accelerator & AI service metrics
+    accelerator-metrics      Accelerator metrics (DCGM exporter)
+    ai-service-metrics       AI service metrics via Prometheus
     inference-gateway        Inference API gateway conditions
     robust-operator          Robust AI operator + webhook test
     pod-autoscaling          HPA pod autoscaling (scale-up + scale-down)
     cluster-autoscaling      Cluster autoscaling (ASG configuration)
 
-    Short aliases: dra, gang, secure, metrics, gateway, operator, hpa
+    Short aliases: dra, gang, secure, metrics, service-metrics, gateway, operator, hpa
 
 ```
 

@@ -57,6 +57,11 @@ Each stage transforms input data into a different format:
   `aicr snapshot --oke-addons <file>` (the `NvidiaGpuPlugin` add-on's
   control-plane state). Same up-front validation and attach/merge flow
   as `aks-gpu-pools`
+- **gke-gpu-pools**: Orchestration-layer projection, not a collector.
+  Produced from the explicit operator-supplied pool dump passed to
+  `aicr snapshot --gke-gpu-pools <file>` (per-pool
+  `gpuDriverInstallationConfig.gpuDriverVersion` install modes). Same
+  up-front validation and attach/merge flow as `aks-gpu-pools`
 
 **GPU Hardware:**
 - Source: NFD/PCI enumeration via sysfs (driver-free; no `nvidia-smi`)
@@ -66,7 +71,7 @@ Each stage transforms input data into a different format:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Snapshot (aicr.run/v1alpha2)                      │
+│ Snapshot (aicr.run/v1)                                  │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
 │   timestamp: RFC3339 string                             │
@@ -86,7 +91,8 @@ Each stage transforms input data into a different format:
 │   │   └─ subtypes: [server, image, policy, node,        │
 │   │                 slinky-slurm, mariadb-operator,      │
 │   │                 aks-gpu-pools (with --aks-gpu-pools),│
-│   │                 oke-addons (with --oke-addons)]      │
+│   │                 oke-addons (with --oke-addons),      │
+│   │                 gke-gpu-pools (with --gke-gpu-pools)]│
 │   │       ├─ data: map[string]Reading                   │
 │   │       └─ slinky-slurm.items: []ItemEntry            │
 │   │             (allowlisted resource context + data)   │
@@ -128,7 +134,7 @@ metadata:
 data:
   snapshot.yaml: |
     # Complete snapshot YAML stored as ConfigMap data
-    apiVersion: aicr.run/v1alpha2
+    apiVersion: aicr.run/v1
     kind: Snapshot
     measurements: [...]
 ```
@@ -181,9 +187,9 @@ type Reading interface {
   cancel-on-error collector is supported, but today per-collector errors
   are swallowed.)
 - Provider projections follow the opposite failure policy: the
-  `aks-gpu-pools` and `oke-addons` projections are explicit operator
-  input, so a malformed pool or add-on file ABORTS the snapshot before
-  any collector runs
+  `aks-gpu-pools`, `oke-addons`, and `gke-gpu-pools` projections are
+  explicit operator input, so a malformed pool or add-on file ABORTS
+  the snapshot before any collector runs
   (`pkg/snapshotter/snapshot.go`) — it must never ride the
   degrade-to-warning path and masquerade as a snapshot whose reading is
   merely unavailable.
@@ -283,8 +289,8 @@ For the resolver internals (specificity scoring, deep-merge semantics) see
 
 ### Recipe Data Structure
 
-Unprofiled recipe results retain `aicr.run/v1alpha2`. Selecting a configuration
-profile produces `aicr.run/v1alpha3` and records the selected profile and its
+Unprofiled recipe results carry `aicr.run/v1`. Selecting a configuration
+profile produces `aicr.run/v1beta2` and records the selected profile and its
 owned value paths in result metadata.
 
 ```text
@@ -296,7 +302,7 @@ owned value paths in result metadata.
 │   appliedOverlays: inheritance chain (root to leaf)     │
 │   excludedOverlays: matched-but-excluded overlays       │
 │   selectedProfile: name, value, and ownedPaths          │
-│                    (v1alpha3 only)                      │
+│                    (v1beta2 only)                       │
 │                                                         │
 │ criteria: Criteria (6 dimensions — see mapping above)   │
 │                                                         │
@@ -697,7 +703,7 @@ spec:
 **JSON:**
 ```json
 {
-  "apiVersion": "aicr.run/v1alpha2",
+  "apiVersion": "aicr.run/v1",
   "kind": "Snapshot",
   "measurements": [...]
 }
@@ -705,7 +711,7 @@ spec:
 
 **YAML:**
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 kind: Snapshot
 measurements:
   - type: K8s
@@ -748,11 +754,14 @@ HTTP Request → Middleware Chain → Handler → Response
 
 1. Metrics Middleware (record request)
 2. Version Middleware (check API version)
-3. RequestID Middleware (add/echo request ID)
-4. Panic Recovery (catch panics)
-5. Rate Limit (100 req/s)
+3. Deprecation Middleware (Deprecation/Sunset/Link headers)
+4. RequestID Middleware (add/echo request ID)
+5. Timeout (90s request context)
 6. Logging (structured logs)
-7. Handler:
+7. Panic Recovery (catch panics)
+8. Rate Limit (100 req/s)
+9. Body Limit (8 MiB)
+10. Handler:
    ├─ Recipe/query routes
    │  ├─ Parse query parameters
    │  ├─ Build Query
@@ -803,7 +812,7 @@ X-RateLimit-Reset: 1735650000
   distinct from the in-process caches above
 
 **Bundle Templates:**
-- Location: `pkg/bundler/*/templates/*.tmpl`
+- Location: `pkg/bundler/deployer/*/templates/*.tmpl`
 - Embedded at compile time: `//go:embed templates/*.tmpl`
 - Parsed once per bundler initialization
 

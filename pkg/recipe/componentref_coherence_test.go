@@ -124,7 +124,7 @@ func TestComponentRefCoherenceProblem(t *testing.T) {
 
 func TestRecipeResultValidateCoherence(t *testing.T) {
 	// Coherent set → no error.
-	ok := &RecipeResult{ComponentRefs: []ComponentRef{
+	ok := &RecipeResult{APIVersion: RecipeResultAPIVersion, ComponentRefs: []ComponentRef{
 		{Name: "h", Type: ComponentTypeHelm, Source: "https://charts", Chart: "h", Version: "v1"},
 		{Name: "k", Type: ComponentTypeKustomize, Path: "deploy"},
 	}}
@@ -133,7 +133,7 @@ func TestRecipeResultValidateCoherence(t *testing.T) {
 	}
 
 	// Two incoherent refs → single ErrCodeInvalidRequest naming both.
-	bad := &RecipeResult{ComponentRefs: []ComponentRef{
+	bad := &RecipeResult{APIVersion: RecipeResultAPIVersion, ComponentRefs: []ComponentRef{
 		{Name: "h", Type: ComponentTypeHelm, Source: "https://charts", Chart: "h", Version: "v1", Tag: "v2"},
 		{Name: "k", Type: ComponentTypeKustomize, Source: "git://x", Tag: "v1"}, // no path
 	}}
@@ -151,7 +151,7 @@ func TestRecipeResultValidateCoherence(t *testing.T) {
 	}
 
 	// A DISABLED incoherent ref is skipped (excluded from the bundle).
-	disabled := &RecipeResult{ComponentRefs: []ComponentRef{
+	disabled := &RecipeResult{APIVersion: RecipeResultAPIVersion, ComponentRefs: []ComponentRef{
 		{Name: "h", Type: ComponentTypeHelm, Tag: "v2", Overrides: map[string]any{"enabled": false}},
 	}}
 	if err := disabled.ValidateCoherence(); err != nil {
@@ -183,6 +183,7 @@ func TestPrepareAndValidate_PropagatesRegistryError(t *testing.T) {
 	// caller must see the underlying (retryable) internal error, not a
 	// non-retryable "unsupported type" rejection.
 	r := &RecipeResult{
+		APIVersion:    RecipeResultAPIVersion,
 		provider:      failingRegistryProvider{},
 		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Source: "https://charts", Chart: "gpu-operator", Version: "v1"}}, // type-less
 	}
@@ -201,6 +202,7 @@ func TestPrepareAndValidate_PropagatesRegistryError(t *testing.T) {
 	// When no ref needs back-fill, the registry is never touched, so a failing
 	// provider does not cause an error.
 	ok := &RecipeResult{
+		APIVersion:    RecipeResultAPIVersion,
 		provider:      failingRegistryProvider{},
 		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm, Source: "https://charts", Chart: "gpu-operator", Version: "v1"}},
 	}
@@ -212,7 +214,8 @@ func TestPrepareAndValidate_PropagatesRegistryError(t *testing.T) {
 	// skips disabled refs, so a registry failure caused solely by an irrelevant
 	// disabled ref must not fail an otherwise-usable recipe.
 	disabledStub := &RecipeResult{
-		provider: failingRegistryProvider{},
+		APIVersion: RecipeResultAPIVersion,
+		provider:   failingRegistryProvider{},
 		ComponentRefs: []ComponentRef{
 			{Name: "enabled-helm", Type: ComponentTypeHelm, Source: "https://charts", Chart: "enabled-helm", Version: "v1"},
 			{Name: "legacy-stub", Overrides: map[string]any{"enabled": false}}, // type-less + disabled
@@ -230,7 +233,8 @@ func TestPrepareAndValidate_PropagatesRegistryError(t *testing.T) {
 func TestPrepareAndValidate_BackfillLoopSkipsDisabled(t *testing.T) {
 	dp := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	r := &RecipeResult{
-		provider: dp,
+		APIVersion: RecipeResultAPIVersion,
+		provider:   dp,
 		ComponentRefs: []ComponentRef{
 			{Name: "gpu-operator", Source: "https://charts", Chart: "gpu-operator", Version: "v1"}, // enabled + type-less -> back-filled
 			{Name: "network-operator", Overrides: map[string]any{"enabled": false}},                // disabled + type-less registry component -> loop must skip
@@ -287,7 +291,7 @@ func TestPrepareAndValidate_RejectsReservedDeployerName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &RecipeResult{ComponentRefs: tt.refs}
+			r := &RecipeResult{APIVersion: RecipeResultAPIVersion, ComponentRefs: tt.refs}
 			err := r.PrepareAndValidate()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("PrepareAndValidate() error = %v, wantErr %v", err, tt.wantErr)
@@ -381,7 +385,7 @@ func TestPrepareAndValidate_RejectsDuplicateNames(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &RecipeResult{ComponentRefs: tt.refs}
+			r := &RecipeResult{APIVersion: RecipeResultAPIVersion, ComponentRefs: tt.refs}
 			err := r.PrepareAndValidate()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("PrepareAndValidate() error = %v, wantErr %v", err, tt.wantErr)

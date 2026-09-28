@@ -44,21 +44,21 @@
 {{- $cust := index .Values "nodewright-customizations" }}
 {{- /* tuningEnabled (default true) disables node tuning uniformly across the */}}
 {{- /* nodewright tuning manifests (cf. tuning.yaml). Here nvidia-tuned is the */}}
-{{- /* CR's only package, so the gate suppresses the whole Skyhook CR. */}}
+{{- /* CR's only package, so the gate suppresses the whole NodeWright CR. */}}
 {{- /* Sprig-safe: only an explicit false disables (absent/true render); a */}}
 {{- /* "| default true" would swallow an explicit false under --deployer flux. */}}
 {{- if and (ne (toString (index $cust "enabled")) "false") (ne (toString (index $cust "tuningEnabled")) "false") }}
 ---
-apiVersion: skyhook.nvidia.com/v1alpha1
-kind: Skyhook
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
 metadata:
   annotations:
-    # No Helm hooks: this Skyhook CR is release-managed so that disabling tuning
-    # (tuningEnabled=false) actually retracts it. As a hook it would be orphaned
-    # under Flux on a true->false flip (before-hook-creation never fires once the
-    # CR leaves the render). Ordering after the Skyhook CRD is handled by the
-    # component dependency on nodewright-operator, not an intra-release hook;
-    # helm/argo already strip these hooks at bundle time.
+    # No Helm hooks: this NodeWright CR is release-managed so that disabling
+    # tuning (tuningEnabled=false) actually retracts it. As a hook it would be
+    # orphaned under Flux on a true->false flip (before-hook-creation never
+    # fires once the CR leaves the render). Ordering after the NodeWright CRD
+    # is handled by the component dependency on nodewright-operator, not an
+    # intra-release hook; helm/argo already strip these hooks at bundle time.
     aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/part-of: skyhook-operator
@@ -122,8 +122,8 @@ spec:
   packages:
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
-      version: "0.9.0"
-      containerSHA: sha256:a33d0d5e0a0c7f192a34042f7ff14b7a98f10bae97bb4cf820ea9cd0ce013320
+      version: "0.10.0"
+      containerSHA: sha256:124f3bdedbb651125cec1bf20d3e2f7fcbbe10588c44f36d8e5680b38b9ef8f6
       # Required by the rke2 service: the accelerator's [bootloader] stanza is
       # written during config and none of it is live until the node reboots.
       interrupt:

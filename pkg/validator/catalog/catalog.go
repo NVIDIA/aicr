@@ -24,6 +24,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/opencontainers/go-digest"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
@@ -116,6 +118,119 @@ func ResolveImage(image, version, commit string) string {
 	}
 	return image
 }
+
+// TrustedValidatorRepoPrefix is the repository namespace whose tag conventions
+// AICR's own workflows enforce: on-tag.yaml freezes :vX.Y.Z there, on-push.yaml
+// writes :sha-<commit> there, and the UAT lanes write :uat-<run_id> there.
+// Those guarantees are properties of the publisher, not of the tag text.
+const TrustedValidatorRepoPrefix = "ghcr.io/nvidia/aicr-validators/"
+
+// IsImmutableRef reports whether image is a reference that dereferences to the
+// same content every time it is resolved. It is an allowlist: anything not
+// positively recognized — including a tag shape or registry added later — is
+// reported mutable so a caller gating on provenance fails closed.
+//
+// Two ways to qualify:
+//
+//  1. A digest-pinned ref (name@<alg>:<hex>), from any registry. The digest is
+//     the pin, so no publisher promise is needed.
+//  2. A tag AICR's CI freezes, AND a repository under
+//     TrustedValidatorRepoPrefix where that freezing actually happens:
+//     :vX.Y.Z and :vX.Y.Z-<prerelease> (on-tag.yaml; the goreleaser -next
+//     snapshot string is excluded — no image is ever published under it),
+//     :sha-<40-hex> (on-push.yaml), and :uat-<run_id> (the UAT lanes, scoped
+//     to one run of one commit, so a re-run rebuilds the same source).
+//
+// The prefix requirement is the load-bearing half. Tag syntax is not proof of
+// immutability: a third-party or mirrored registry reached via an external
+// catalog or AICR_VALIDATOR_IMAGE_REGISTRY may repoint its own :v1.0.0 freely,
+// and nothing in this repository constrains it. Such a ref must be digest-
+// pinned to vouch for provenance.
+//
+// Mutable: :edge and :latest (both advance by design — see the publishing
+// table in docs/contributor/validator.md), an untagged ref (an implicit
+// :latest), any tag outside the trusted prefix, and every other tag.
+//
+// Within the trusted prefix this is the inverse contract of ResolveImage:
+// every tag ResolveImage derives on its own must be accepted, so the two must
+// be changed together. A new resolution path added without a matching shape
+// below fails TestIsImmutableRefAcceptsResolveImageOutput rather than a UAT lane.
+func IsImmutableRef(image string) bool {
+	if image == "" {
+		return false
+	}
+	if strings.Contains(image, "@") {
+		// Only a well-formed digest is a pin. replaceTag treats any '@' as
+		// digest-pinned because preserving a ref it does not understand is the
+		// safe move there; here the safe move is the opposite, so a ref whose
+		// digest does not parse is reported mutable rather than trusted.
+		return isDigestPinned(image)
+	}
+	if !strings.HasPrefix(image, TrustedValidatorRepoPrefix) {
+		return false
+	}
+	// Find the tag separator as the last ':' after the last '/', so a
+	// registry port (`localhost:5001/…`) is not mistaken for a tag.
+	slash := strings.LastIndex(image, "/")
+	colon := strings.LastIndex(image, ":")
+	if colon <= slash {
+		// Untagged: the runtime resolves this as :latest, which moves.
+		return false
+	}
+	tag := image[colon+1:]
+	return isImmutableReleaseTag(tag) || shaTagPattern.MatchString(tag) || uatTagPattern.MatchString(tag)
+}
+
+// isImmutableReleaseTag reports whether tag is a release alias on-tag.yaml
+// froze. Deliberately NOT isReleaseVersion: that predicate classifies the
+// binary's own version string, where goreleaser may have stripped the leading
+// "v" (which is why replaceLatestTag adds one back). Image tags have no such
+// variant — on-tag.yaml only triggers on `v[0-9]+.[0-9]+.[0-9]+*` and
+// release-images.sh re-checks `^v`, so nothing is ever published as `:1.0.0`.
+// Accepting the bare form here would vouch for a tag CI never wrote.
+func isImmutableReleaseTag(tag string) bool {
+	if snapshotSuffixPattern.MatchString(tag) {
+		return false
+	}
+	return releaseTagPattern.MatchString(tag)
+}
+
+// isDigestPinned reports whether image ends in a digest that actually
+// identifies content (name@<algorithm>:<encoded>, with or without a tag before
+// the '@').
+//
+// Delegated to go-digest rather than matched with a regexp because the encoded
+// length is a property of the algorithm: sha256 is exactly 64 hex characters,
+// and a generic "at least 32 hex" rule would accept a truncated sha256 that
+// pins nothing. Validate also enforces lowercase hex and rejects algorithms it
+// does not implement, which is the direction this gate wants — an algorithm no
+// verifier here can compute is not evidence of anything.
+func isDigestPinned(image string) bool {
+	at := strings.LastIndex(image, "@")
+	if at <= 0 || at == len(image)-1 {
+		return false
+	}
+	return digest.Digest(image[at+1:]).Validate() == nil
+}
+
+// releaseTagPattern matches a published release image alias. Stricter than
+// releaseVersionPattern in two ways, both to mirror what actually ships: the
+// "v" is required (see isImmutableReleaseTag), and the numeric components
+// reject leading zeros, matching RELEASE_TAG_PATTERN in release-images.sh —
+// `v01.0.0` is not a tag any release writes.
+var releaseTagPattern = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[A-Za-z0-9.]+)?$`)
+
+// shaTagPattern matches the :sha-<commit> tags on-push.yaml publishes for main
+// commits. The body is exactly 40 hex because on-push.yaml tags with
+// `sha-${{ github.sha }}`, always the full commit, and goreleaser stamps the
+// binary with .FullCommit (enforced by TestResolveImageCIContract). A shorter
+// prefix is therefore a tag no image was ever published under — and is
+// ambiguous across history besides — so it must not vouch for provenance.
+var shaTagPattern = regexp.MustCompile(`^sha-[0-9a-f]{40}$`)
+
+// uatTagPattern matches the :uat-<run_id> tags the UAT workflows push for
+// main-tip cells (AICR_VALIDATOR_IMAGE_TAG=uat-${{ github.run_id }}).
+var uatTagPattern = regexp.MustCompile(`^uat-\d+$`)
 
 // releaseVersionPattern matches the version strings on-tag.yaml turns into
 // validator image tags: strict semver (vX.Y.Z) or a single pre-release
