@@ -973,7 +973,7 @@ components:
       defaultRepository: oci://registry.k8s.io/kueue/charts
       defaultChart: kueue
       # renovate: datasource=docker depName=registry.k8s.io/kueue/charts/kueue
-      defaultVersion: "0.19.5"
+      defaultVersion: "0.19.6"
       defaultNamespace: kueue-system
     nodeScheduling:
       system:
