@@ -191,3 +191,115 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 		})
 	}
 }
+
+// Without the flag, GKE criteria resolve exactly as before: only the
+// h100/COS/inference combination carries the component. The grant is opt-in; a
+// recipe that gains it without anyone asking is the failure this pins.
+func TestGKECriteriaUnchangedWithoutOptIn(t *testing.T) {
+	cases := []struct {
+		name        string
+		criteria    *recipe.Criteria
+		wantEnabled bool
+	}{
+		{"h100 inference is the default-on recipe", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference}, true},
+		{"h100 training does not gain it", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}, false},
+		{"a100 training does not gain it", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorA100,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}, false},
+		{"b200 inference does not gain it", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorB200,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference}, false},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := recipe.NewBuilder(recipe.WithVersion(stockAdoptionVersion))
+			result, err := builder.BuildFromCriteria(context.Background(), tt.criteria)
+			if err != nil {
+				t.Fatalf("BuildFromCriteria() error = %v", err)
+			}
+			ref := result.GetComponentRef("k8s-aibom")
+			enabled := ref != nil && ref.IsEnabled()
+			if enabled != tt.wantEnabled {
+				t.Errorf("k8s-aibom enabled = %v, want %v (no flag was passed)", enabled, tt.wantEnabled)
+			}
+		})
+	}
+}
+
+// GKE criteria accept the opt-in regardless of workload shape -- that is the
+// #2962 contract: one mechanism, no per-recipe special cases. The dynamo
+// platform is the deliberate exception and must still be rejected.
+func TestGKECriteriaAcceptOptIn(t *testing.T) {
+	optIn := []recipe.BuildOption{
+		recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryEnabled),
+	}
+
+	cases := []struct {
+		name     string
+		criteria *recipe.Criteria
+		wantErr  bool
+	}{
+		{"training", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}, false},
+		// a100, not h100: h100-gke-cos-training-kubeflow additionally requires
+		// --gke-tcpxo-interfaces (torch-distributed-tcpxo), a build gate
+		// unrelated to k8s-aibom. a100-gke-cos-training-kubeflow carries no
+		// such requirement and still exercises platform=kubeflow under the
+		// opt-in.
+		{"training on kubeflow", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorA100,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining,
+			Platform: recipe.CriteriaPlatformKubeflow}, false},
+		{"training on slurm", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining,
+			Platform: recipe.CriteriaPlatformSlurm}, false},
+		{"a100 training", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorA100,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}, false},
+		// Declines the component because k8s-aibom alongside grove and
+		// dynamo-platform is unqualified. Widening adoption does not qualify it.
+		{"dynamo still declines", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference,
+			Platform: recipe.CriteriaPlatformDynamo}, true},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := recipe.NewBuilder(recipe.WithVersion(stockAdoptionVersion))
+			result, err := builder.BuildFromCriteria(context.Background(), tt.criteria, optIn...)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("BuildFromCriteria() error = nil, want rejection: a recipe-level decline must not be overridable")
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("BuildFromCriteria() error = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("BuildFromCriteria() error = %v, want the opt-in accepted", err)
+			}
+			ref := result.GetComponentRef("k8s-aibom")
+			if ref == nil || !ref.IsEnabled() {
+				t.Fatal("k8s-aibom was not granted")
+			}
+			var ordered bool
+			for _, n := range result.DeploymentOrder {
+				if n == "k8s-aibom" {
+					ordered = true
+				}
+			}
+			if !ordered {
+				t.Errorf("k8s-aibom missing from deploymentOrder %v", result.DeploymentOrder)
+			}
+		})
+	}
+}
