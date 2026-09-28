@@ -1375,6 +1375,77 @@ func TestMatchIdentitiesIdentityAxis(t *testing.T) {
 	}
 }
 
+func TestMatchIdentitiesRegistryDerivedFields(t *testing.T) {
+	base := Identity{
+		Version: "1.0.0", Namespace: "ns", Chart: "old-chart", Source: "https://old.example",
+		Path: "deploy/a", Type: "Helm", ManifestFiles: []string{"a.yaml", "b.yaml"},
+	}
+	with := func(mutate func(*Identity)) Identity {
+		id := base
+		id.ManifestFiles = append([]string(nil), base.ManifestFiles...)
+		mutate(&id)
+		return id
+	}
+
+	tests := []struct {
+		name string
+		to   Identity
+		want []IdentityChange
+	}{
+		{"chart", with(func(i *Identity) { i.Chart = "new-chart" }),
+			[]IdentityChange{{Field: "chart", From: "old-chart", To: "new-chart"}}},
+		{"source", with(func(i *Identity) { i.Source = "https://new.example" }),
+			[]IdentityChange{{Field: "source", From: "https://old.example", To: "https://new.example"}}},
+		{"path", with(func(i *Identity) { i.Path = "deploy/b" }),
+			[]IdentityChange{{Field: "path", From: "deploy/a", To: "deploy/b"}}},
+		{"type", with(func(i *Identity) { i.Type = "Kustomize" }),
+			[]IdentityChange{{Field: "type", From: "Helm", To: "Kustomize"}}},
+		{"a dropped manifest file", with(func(i *Identity) { i.ManifestFiles = []string{"a.yaml"} }),
+			[]IdentityChange{{Field: "manifestFiles", From: "a.yaml,b.yaml", To: "a.yaml", Removed: []string{"b.yaml"}}}},
+		{"an added manifest file", with(func(i *Identity) { i.ManifestFiles = []string{"a.yaml", "b.yaml", "c.yaml"} }),
+			[]IdentityChange{{Field: "manifestFiles", From: "a.yaml,b.yaml", To: "a.yaml,b.yaml,c.yaml", Added: []string{"c.yaml"}}}},
+		{"an emptied manifest set", with(func(i *Identity) { i.ManifestFiles = nil }),
+			[]IdentityChange{{Field: "manifestFiles", From: "a.yaml,b.yaml", To: "", Removed: []string{"a.yaml", "b.yaml"}}}},
+		{"a reordered manifest set is not a move", with(func(i *Identity) { i.ManifestFiles = []string{"b.yaml", "a.yaml"} }), nil},
+		{"an unstated chart is not a move", with(func(i *Identity) { i.Chart = "" }), nil},
+		{"an unstated source is not a move", with(func(i *Identity) { i.Source = "" }), nil},
+		{"an unstated path is not a move", with(func(i *Identity) { i.Path = "" }), nil},
+		{"an unstated type is not a move", with(func(i *Identity) { i.Type = "" }), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchIdentities(Set{}, map[string]Identity{"c": base}, map[string]Identity{"c": tt.to})
+			if tt.want == nil {
+				if len(got) != 0 {
+					t.Fatalf("MatchIdentities() = %+v, want no rows", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].Change != ChangeIdentity {
+				t.Fatalf("MatchIdentities() = %+v, want one identity row", got)
+			}
+			if !reflect.DeepEqual(got[0].IdentityChanges, tt.want) {
+				t.Errorf("identityChanges = %+v, want %+v", got[0].IdentityChanges, tt.want)
+			}
+			if got[0].Verdict != VerdictUnknown || !got[0].FailsRun() {
+				t.Errorf("verdict = %q, FailsRun = %v, want unknown and failing", got[0].Verdict, got[0].FailsRun())
+			}
+		})
+	}
+}
+
+func TestMatchIdentitiesManifestMoveIsNamedInExplanation(t *testing.T) {
+	got := MatchIdentities(Set{},
+		map[string]Identity{"c": {Version: "1.0.0", ManifestFiles: []string{"a.yaml", "b.yaml"}}},
+		map[string]Identity{"c": {Version: "1.0.0", ManifestFiles: []string{"a.yaml", "c.yaml"}}})
+	if len(got) != 1 {
+		t.Fatalf("MatchIdentities() returned %d rows, want 1", len(got))
+	}
+	if want := "its manifestFiles drop b.yaml and add c.yaml"; !strings.Contains(got[0].Explanation, want) {
+		t.Errorf("explanation %q does not contain %q", got[0].Explanation, want)
+	}
+}
+
 func TestMatchIdentitiesDoesNotSplitAComponentAcrossAxes(t *testing.T) {
 	got := MatchIdentities(Set{},
 		map[string]Identity{"c": {Version: "1.0.0", Namespace: "gpu-operator"}},

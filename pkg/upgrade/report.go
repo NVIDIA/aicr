@@ -247,7 +247,7 @@ func reportIdentityChanges(changes []IdentityChange) []ReportIdentityChange {
 	}
 	out := make([]ReportIdentityChange, len(changes))
 	for i, c := range changes {
-		out[i] = ReportIdentityChange(c)
+		out[i] = ReportIdentityChange{Field: c.Field, From: c.From, To: c.To}
 	}
 	return out
 }

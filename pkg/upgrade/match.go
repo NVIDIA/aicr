@@ -16,12 +16,15 @@ package upgrade
 
 import (
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // ChangeKind says what a component did between the two tables.
@@ -94,22 +97,44 @@ const (
 )
 
 // Identity is what a recipe pins for a component beyond its version. A move
-// here is invisible to a version comparison but relocates running objects, and
-// Helm cannot move a release between namespaces.
+// here is invisible to a version comparison but relocates or replaces running
+// objects. Helm cannot move a release between namespaces. A renamed chart or
+// moved source shares no version line with the old one. A kustomize path
+// selects a different manifest set at the same tag. A dropped manifest file
+// deletes a live object under GitOps prune.
+//
+// Every field but Version and ManifestFiles counts only when both sides state
+// it. ManifestFiles is a set, compared without regard to order.
 type Identity struct {
-	Version   string
-	Namespace string
+	Version       string
+	Namespace     string
+	Chart         string
+	Source        string
+	Path          string
+	Type          string
+	ManifestFiles []string
 }
+
+// fieldManifestFiles is the IdentityChange.Field of the manifest file set, the
+// one field whose move also fills Added and Removed.
+const fieldManifestFiles = "manifestFiles"
 
 // IdentityChange names one field that moved between the compared artifacts.
 //
-// Field is the Identity field's name lowercased ("namespace"), so a consumer
-// branches on it without parsing prose. Version is never one of them: the
-// version axis is ComponentResult.From and To, and the records assess it.
+// Field is the Identity field's name in lower camel case ("namespace",
+// "manifestFiles"), so a consumer branches on it without parsing prose. Version
+// is never one of them. The version axis is ComponentResult.From and To, and
+// the records assess it.
+//
+// For manifestFiles From and To are the whole sorted sets joined by commas, and
+// Added and Removed name the entries that differ. They are empty on every
+// scalar field.
 type IdentityChange struct {
-	Field string
-	From  string
-	To    string
+	Field   string
+	From    string
+	To      string
+	Added   []string
+	Removed []string
 }
 
 // ComponentResult is one row of an upgrade check.
@@ -316,17 +341,37 @@ func MatchIdentities(set Set, from, to map[string]Identity) []ComponentResult {
 
 // identityChanges lists the non-version fields that moved.
 //
-// A field counts only when both sides state it. An empty string is a fact the
-// artifact did not carry rather than a move to the default namespace, so
-// treating it as a value would report a relocation nobody performed for every
-// component the moment one of the two artifacts stops carrying the field.
+// A scalar field counts only when both sides state it. An empty string is a fact
+// the artifact did not carry rather than a move to the default, so treating it
+// as a value would report a relocation nobody performed for every component the
+// moment one of the two artifacts stops carrying the field.
+//
+// The manifest file set is the exception. An artifact that lists none is
+// stating that, and the move that matters most is the one that empties it.
 func identityChanges(from, to Identity) []IdentityChange {
 	var moved []IdentityChange
-	if from.Namespace != "" && to.Namespace != "" && from.Namespace != to.Namespace {
+	for _, f := range []struct {
+		field    string
+		from, to string
+	}{
+		{"namespace", from.Namespace, to.Namespace},
+		{"type", from.Type, to.Type},
+		{"chart", from.Chart, to.Chart},
+		{"source", from.Source, to.Source},
+		{"path", from.Path, to.Path},
+	} {
+		if f.from != "" && f.to != "" && f.from != f.to {
+			moved = append(moved, IdentityChange{Field: f.field, From: f.from, To: f.to})
+		}
+	}
+	was, now := sets.New(from.ManifestFiles...), sets.New(to.ManifestFiles...)
+	if added, removed := now.Difference(was), was.Difference(now); added.Len() > 0 || removed.Len() > 0 {
 		moved = append(moved, IdentityChange{
-			Field: "namespace",
-			From:  from.Namespace,
-			To:    to.Namespace,
+			Field:   fieldManifestFiles,
+			From:    strings.Join(sets.List(was), ","),
+			To:      strings.Join(sets.List(now), ","),
+			Added:   slices.Sorted(maps.Keys(added)),
+			Removed: slices.Sorted(maps.Keys(removed)),
 		})
 	}
 	return moved
@@ -334,9 +379,11 @@ func identityChanges(from, to Identity) []IdentityChange {
 
 // identityAdvice is the tail both identity explanations share: why no record
 // covers the move, and why it cannot ride along with an upgrade.
-const identityAdvice = "Transition records assess version boundaries, so none assesses a relocation. " +
-	"Helm cannot move a release between namespaces either, so applying the new recipe installs a " +
-	"second copy beside the running one: move the release deliberately, then re-run this check"
+const identityAdvice = "Transition records assess version boundaries, so none assesses a change of " +
+	"identity. Applying the new recipe would deploy different objects than the running release. " +
+	"A namespace move installs a second copy because Helm cannot move a release between " +
+	"namespaces. A dropped manifest file deletes a live object under GitOps prune. " +
+	"Make the change deliberately, then re-run this check"
 
 // relocation is the row for a component that held its version and moved anyway.
 //
@@ -396,7 +443,23 @@ func withIdentityChanges(r ComponentResult, moved []IdentityChange) ComponentRes
 func movedPhrase(moved []IdentityChange) string {
 	parts := make([]string, len(moved))
 	for i, c := range moved {
+		if c.Field == fieldManifestFiles {
+			parts[i] = "its manifestFiles " + setChangePhrase(c.Added, c.Removed)
+			continue
+		}
 		parts[i] = fmt.Sprintf("its %s moves from %s to %s", c.Field, c.From, c.To)
+	}
+	return strings.Join(parts, " and ")
+}
+
+// setChangePhrase states a set move as what left and what arrived.
+func setChangePhrase(added, removed []string) string {
+	var parts []string
+	if len(removed) > 0 {
+		parts = append(parts, "drop "+strings.Join(removed, ", "))
+	}
+	if len(added) > 0 {
+		parts = append(parts, "add "+strings.Join(added, ", "))
 	}
 	return strings.Join(parts, " and ")
 }

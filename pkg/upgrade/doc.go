@@ -57,13 +57,14 @@
 // registry. Match is the same question for a caller holding versions alone.
 //
 // An identity moves on two axes. Only the version axis is assessed by anybody,
-// because that is what a record describes; a namespace move is invisible to a
-// version comparison yet relocates running objects, and Helm cannot move a
-// release between namespaces. So a component that moved on the identity axis
-// alone gets a ChangeIdentity row that a version comparison would not report at
-// all, a component that moved on both gets one row carrying both, and a safe
-// verdict is withdrawn to unknown wherever the identity moved: the record
-// vouched for a version hop and was never asked about a relocation.
+// because that is what a record describes. A move of namespace, chart, source,
+// kustomize path, deployment type or manifest file set is invisible to a
+// version comparison yet relocates or replaces running objects, and Helm cannot
+// move a release between namespaces. So a component that moved on the identity
+// axis alone gets a ChangeIdentity row that a version comparison would not
+// report at all, a component that moved on both gets one row carrying both, and
+// a safe verdict is withdrawn to unknown wherever the identity moved. The
+// record vouched for a version hop and was never asked about a relocation.
 //
 // On the version axis, a record is *crossed* when the source sits below the
 // floor its `to` names and the target reaches it. Crossing is a property of the
