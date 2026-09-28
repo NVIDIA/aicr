@@ -70,17 +70,10 @@ spec:
           # NVSentinel DaemonSets come up with 0 desired pods while the
           # rest of the stack looks healthy.
           assumeDriverInstalled: true
-        global:
-          metadataCollector:
-            # The collector's node selector requires a driver-installed
-            # label that never materializes with a host-provided driver,
-            # leaving a permanently 0-desired DaemonSet that the
-            # expected-resources validator rejects as a forbidden shape
-            # (observed on the reference cluster). The vr200-rke2-ubuntu
-            # leaves paired the same way until nvsentinel v1.22.0 (#2596);
-            # they now re-enable the collector with host driver-library
-            # mounts instead.
-            enabled: false
+        # metadata-collector keeps the chart default runtimeClassName
+        # (nvidia). Unlike the vr200-rke2-ubuntu leaves, k0s is not on the
+        # CDI+NRI path: the toolkit drop-in registers a real nvidia runtime
+        # handler, so no host driver-library mounts are needed.
 
   validation:
     deployment:
