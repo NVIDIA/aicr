@@ -32,7 +32,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **prometheus-operator-crds** | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
 | **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
-| **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work zero-config. Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
+| **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work without naming a class. **The driver still needs AWS credentials, which AICR does not configure** — see [EBS CSI Driver Credentials](#ebs-csi-driver-credentials). Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Installed by one stock recipe, `h100-gke-cos-inference`; every other stock recipe leaves it out. Decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
@@ -697,6 +697,42 @@ Model-specific NIM repositories (for example `nim/meta/llama-3.1-8b-instruct`) s
 Note that pairing a model-specific image with an unrelated `hf://` model is off-label: the container runs its own profile against the downloaded weights. It works, but `nim/nvidia/llm-nim` is the image intended for arbitrary Hugging Face models — and because that repository is gated, choosing it trades the credential-free property for a supported pairing. Pin an image tag rather than `latest` so the pairing you validated is the one you ship.
 
 See `demos/workloads/inference/nimservice-hf-nocred.yaml` for a complete example.
+
+## EBS CSI Driver Credentials
+
+The `aws-ebs-csi-driver` controller calls the Amazon EBS API to create, attach, and delete volumes. AICR installs the driver but does not give it AWS credentials: the stock values leave `ebs-csi-controller-sa` in `kube-system` without an IAM role annotation. The cluster must supply EBS permissions through one of these paths:
+
+- **EKS Pod Identity.** Create a Pod Identity association for `kube-system/ebs-csi-controller-sa`. The association lives in EKS, outside the Helm release, so it needs no bundle override. It delivers credentials only through the [EKS Pod Identity Agent](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html), which AICR does not install, so install or verify the agent first.
+- **IAM roles for service accounts (IRSA).** Annotate the controller ServiceAccount with the role ARN at bundle time. The annotation key contains dots, so pass it as a JSON object:
+
+  ```shell
+  aicr bundle -r recipe.yaml \
+    --set-json awsebscsidriver:controller.serviceAccount.annotations='{"eks.amazonaws.com/role-arn":"arn:aws:iam::<account>:role/<ebs-csi-role>"}'
+  ```
+
+- **Node instance role.** Attach the permissions to the node IAM role. The controller must then reach the instance metadata service for credentials, and because it does not use host networking, IMDSv2 needs a hop limit of at least 2. Upstream does not recommend this path for production, because every pod that can reach IMDS inherits the permissions.
+
+The default EKS node role does not include EBS permissions, so a cluster with none of these paths installs the driver cleanly and then cannot provision any volume. For the required permissions, use the upstream [driver permissions guide](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/v1.59.0/docs/install.md#set-up-driver-permissions) and the AWS [Amazon EBS CSI driver](https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html) page rather than a policy name copied from here; AWS maintains more than one managed policy for the driver.
+
+The `aws-ebs-csi-driver` health check verifies only that the controller Deployment has an available replica and that no driver pod is in an unhealthy state such as `Pending` or `CrashLoopBackOff`. It does not exercise the EBS API, so it passes on a cluster with no credential path.
+
+### Troubleshooting provisioning failures
+
+On the stock EKS overlay, `kube-prometheus-stack` creates a PVC for Prometheus, so a missing credential path usually surfaces there first as a failing `kube-prometheus-stack` health check: the Prometheus StatefulSet never becomes ready because its PVC stays `Pending`. Any other PVC bound to `ebs-csi-default-sc` fails the same way.
+
+A `Pending` PVC alone does not identify the cause. Confirm it from the driver's own diagnostics:
+
+```shell
+# Provisioning events on the stuck claim
+kubectl describe pvc <name> -n <namespace>
+
+# The sidecar that issues CreateVolume, and the driver that calls the EBS API.
+# The controller runs two replicas and only the leader provisions, so read both pods.
+kubectl logs -n kube-system deploy/ebs-csi-controller -c csi-provisioner --all-pods=true --prefix --tail=100
+kubectl logs -n kube-system deploy/ebs-csi-controller -c ebs-plugin --all-pods=true --prefix --tail=100
+```
+
+Credential errors in the `ebs-plugin` log — no credential provider found, an unauthorized operation, or a failed role assumption — confirm a missing or insufficient credential path. Fix the path using one of the options above, then let the provisioner retry; the PVC binds once `CreateVolume` succeeds.
 
 ## Inference Gateway Network Exposure
 
