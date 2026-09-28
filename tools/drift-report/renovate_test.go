@@ -14,7 +14,10 @@
 
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const sampleReport = `{
   "repositories": {
@@ -503,5 +506,70 @@ func TestParseRenovateReportCandidateOrderHandlesNonSemver(t *testing.T) {
 	if a["dup"].Candidates[0] != b["dup"].Candidates[0] {
 		t.Errorf("unparseable versions did not order deterministically: %+v vs %+v",
 			a["dup"].Candidates, b["dup"].Candidates)
+	}
+}
+
+// versionLess has to be a strict weak order, not merely deterministic per
+// pair: sort.Slice is undefined on a comparator that cycles, so a mixed set of
+// parseable and unparseable versions could order differently per input order.
+// Grouping parseable ahead of unparseable is what removes the cycle
+// "1.9.0" < "1.10.0" < "1.5.0_invalid" < "1.9.0" that comparing each pair on
+// its own terms produced.
+func TestVersionLessIsTransitive(t *testing.T) {
+	vs := []string{"1.9.0", "1.10.0", "1.5.0_invalid", "2.0.0", "not-a-version", "v1.9.0"}
+	for _, a := range vs {
+		for _, b := range vs {
+			for _, c := range vs {
+				if versionLess(a, b) && versionLess(b, c) && !versionLess(a, c) {
+					t.Errorf("not transitive: %q<%q and %q<%q but not %q<%q", a, b, b, c, a, c)
+				}
+			}
+		}
+	}
+	// Asymmetry: a<b and b<a cannot both hold.
+	for _, a := range vs {
+		for _, b := range vs {
+			if versionLess(a, b) && versionLess(b, a) {
+				t.Errorf("not asymmetric: %q and %q each compare less than the other", a, b)
+			}
+		}
+	}
+}
+
+// The mixed set must land the same way regardless of the order Renovate
+// happened to emit it in.
+func TestParseRenovateReportMixedVersionOrderIsStable(t *testing.T) {
+	build := func(vs ...string) string {
+		ups := make([]string, 0, len(vs))
+		for _, v := range vs {
+			ups = append(ups, `{"newValue":"`+v+`","updateType":"minor"}`)
+		}
+		return `{"repositories":{"r":{"packageFiles":{"custom.regex":[{"packageFile":"recipes/registry.yaml","deps":[
+          {"depName":"mixed","depType":"registry-chart","datasource":"docker","currentValue":"1.0.0",
+           "updates":[` + strings.Join(ups, ",") + `]}]}]}}}}`
+	}
+	forward, err := ParseRenovateReport([]byte(build("1.9.0", "1.10.0", "1.5.0_invalid")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	reverse, err := ParseRenovateReport([]byte(build("1.5.0_invalid", "1.10.0", "1.9.0")))
+	if err != nil {
+		t.Fatalf("ParseRenovateReport: %v", err)
+	}
+	got, rev := forward["mixed"].Candidates, reverse["mixed"].Candidates
+	if len(got) != 3 || len(rev) != 3 {
+		t.Fatalf("got %d and %d candidates, want 3 each", len(got), len(rev))
+	}
+	for i := range got {
+		if got[i] != rev[i] {
+			t.Fatalf("input order changed the result:\n  %+v\n  %+v", got, rev)
+		}
+	}
+	// Parseable versions first, in SemVer order; unparseable last.
+	want := []string{"1.9.0", "1.10.0", "1.5.0_invalid"}
+	for i, w := range want {
+		if got[i].Version != w {
+			t.Errorf("position %d: got %q, want %q (full: %+v)", i, got[i].Version, w, got)
+		}
 	}
 }

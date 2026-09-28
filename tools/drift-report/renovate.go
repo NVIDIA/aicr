@@ -89,17 +89,34 @@ type rawReport struct {
 // reported as Latest.
 var updateRank = map[string]int{"digest": 1, "pin": 2, "patch": 3, "minor": 4, "major": 5}
 
-// versionLess orders two chart versions by SemVer precedence, falling back to
-// string order when either does not parse. String order alone would be wrong
-// here: "1.10.0" sorts before "1.9.0" lexically, which would put the larger
-// step first and contradict the safest-first order Alternatives is documented
-// to have. Not every chart version is valid SemVer, and an unparseable pair
-// still has to order deterministically or the artifact churns between runs
-// over identical input.
+// versionLess orders two chart versions by SemVer precedence. String order
+// alone would be wrong here: "1.10.0" sorts before "1.9.0" lexically, which
+// would put the larger step first and contradict the safest-first order
+// Alternatives is documented to have.
+//
+// Not every chart version is valid SemVer, so the comparison is grouped:
+// everything that parses sorts ahead of everything that does not, and each
+// group is ordered on its own terms. Comparing a mixed pair on whichever basis
+// happens to apply is not transitive -- "1.9.0" < "1.10.0" by SemVer,
+// "1.10.0" < "1.5.0_invalid" by string, and "1.5.0_invalid" < "1.9.0" by
+// string, which is a cycle. sort.Slice is undefined on a comparator that
+// cycles, so that would have made the order depend on whatever sequence
+// Renovate emitted -- the exact non-determinism this tiebreaker exists to
+// remove.
+//
+// Within the parseable group, SemVer-equal versions that differ as strings
+// ("1.0.0" and "v1.0.0") fall back to string order, which keeps the order
+// total without breaking transitivity: it is a tiebreak inside an equivalence
+// class, not a second basis for comparison.
 func versionLess(a, b string) bool {
 	av, aerr := semver.NewVersion(a)
 	bv, berr := semver.NewVersion(b)
-	if aerr != nil || berr != nil {
+	switch {
+	case aerr == nil && berr != nil:
+		return true
+	case aerr != nil && berr == nil:
+		return false
+	case aerr != nil && berr != nil:
 		return a < b
 	}
 	if av.Equal(bv) {
