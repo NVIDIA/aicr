@@ -102,11 +102,13 @@ components:
     hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/gpu-operator/health-check.yaml
+    upgrades:
+      file: components/gpu-operator/upgrades.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
       # renovate: datasource=helm depName=gpu-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
-      defaultVersion: v26.7.0
+      defaultVersion: v26.7.1
       defaultNamespace: gpu-operator
     nodeScheduling:
       system:

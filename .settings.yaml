@@ -129,11 +129,11 @@ security_tools:
 # E2E Testing Tools
 testing_tools:
   # renovate: datasource=github-releases depName=kubernetes/kubernetes depType=testing_tools
-  kubectl: 'v1.37.0'
+  kubectl: 'v1.37.1'
   # kubelogin: Entra exec-plugin for AKS kubeconfigs, installed by uat-azure.yaml
   # via `az aks install-cli` (which defaults to latest without an explicit pin).
   # renovate: datasource=github-releases depName=Azure/kubelogin depType=testing_tools
-  kubelogin: 'v0.2.19'
+  kubelogin: 'v0.2.20'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.33.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
@@ -217,7 +217,7 @@ testing_tools:
   # provider drives it over plain HTTP in dev mode (no TLS needed). Pinned (never
   # :latest) for reproducibility.
   # renovate: datasource=docker depName=openbao/openbao depType=testing_tools
-  openbao_image: 'openbao/openbao:2.6.2'
+  openbao_image: 'openbao/openbao:2.7.0'
   # mkcert issues a trusted localhost cert for MiniStack's TLS and installs its CA
   # into the system trust store, so the Go AWS SDK accepts the awskms:// endpoint.
   # renovate: datasource=github-releases depName=FiloSottile/mkcert depType=testing_tools
@@ -294,7 +294,7 @@ testing:
 
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
-  gpu_operator_chart_version: 'v26.7.0'
+  gpu_operator_chart_version: 'v26.7.1'
   # Base image for the CI smoke-test snapshot-agent image. The agent binary is
   # static Go and detects GPUs driver-free via NFD/PCI, so it no longer needs a
   # CUDA base / nvidia-smi. Matches the NVIDIA static distroless base used for

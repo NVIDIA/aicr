@@ -37,11 +37,12 @@
 # guessable -- both were read off live deployments at the versions this repo
 # pins:
 #
-#   gpu-operator v26.7.0      app.kubernetes.io/managed-by = gpu-operator
-#                             Confirmed on a live EKS H100 cluster: all 9 operand
-#                             DaemonSets including driver, toolkit and dcgm, and
-#                             the running Pods inherit it. The bundled NFD
-#                             subchart does not carry it and is out of scope.
+#   gpu-operator v26.7.1      app.kubernetes.io/managed-by = gpu-operator
+#                             Confirmed on a live EKS H100 cluster at v26.7.0 and
+#                             re-read on a live EKS GB300 cluster at v26.7.1: all
+#                             9 operand DaemonSets including driver, toolkit and
+#                             dcgm, and the running Pods inherit it. The bundled
+#                             NFD subchart does not carry it and is out of scope.
 #   network-operator 26.4.1   ds-owner = NicClusterPolicy
 #                             Kind-only, and the label is per-operand rather than
 #                             universal: mofed + rdma-shared-dp carry it,
