@@ -210,7 +210,7 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 | `faultRemediation` | decides the remediation action |
 | `janitor` / `janitorProvider` | executes it — reboot or terminate |
 
-Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.20.0`, the version pinned in `recipes/registry.yaml`.
+Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.22.0`, the version pinned in `recipes/registry.yaml`.
 
 `nicHealthMonitor` is the one entry above that AICR's shipped recipes turn back on, and only on AKS and OKE — see [NIC and fabric fault detection](#nic-and-fabric-fault-detection).
 

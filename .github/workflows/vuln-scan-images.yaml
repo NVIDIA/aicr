@@ -355,17 +355,17 @@ jobs:
           # TestPreflightImagesPinnedEverywhere and
           # TestNICHealthMonitorImagePinnedEverywhere fail if these drift apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
-            tag: v1.20.0
+            tag: v1.22.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
-            tag: v1.20.0
+            tag: v1.22.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
-            tag: v1.20.0
+            tag: v1.22.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
-            tag: v1.20.0
+            tag: v1.22.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
-            tag: v1.20.0
+            tag: v1.22.0
           - image: ghcr.io/nvidia/nvsentinel/nic-health-monitor
-            tag: v1.20.0
+            tag: v1.22.0
           # Versioned independently of the nvsentinel chart -- this comes from
           # global.initContainerImage, not the chart's appVersion, so it does
           # not move with defaultVersion. Digest-pinned, so the tag is only
