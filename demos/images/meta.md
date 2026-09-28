@@ -9,14 +9,14 @@ Visual: Vertical stack of 6 stat cards, each with a large bold number and muted 
 
 ```
 ┌─────────────────────────────────────────────┐
-│  33  Registered Components                  │
+│  48  Registered Components                  │
 │  Helm and Kustomize charts in the registry  │
 ├─────────────────────────────────────────────┤
-│  97  Overlay Files                          │
+│ 127  Overlay Files                          │
 │  Specialization overlays across all         │
 │  criteria combinations                      │
 ├─────────────────────────────────────────────┤
-│  31  values.yaml Files                      │
+│  44  values.yaml Files                      │
 │  Files named exactly values.yaml            │
 │  under recipes/components/                  │
 ├─────────────────────────────────────────────┤
@@ -105,7 +105,7 @@ Visual: Horizontal bar chart, 3 bars for the same workload across services
 | Service  | Components | Service-Specific Additions / Omissions        |
 |----------|------------|-----------------------------------------------|
 | EKS      | 14         | aws-efa, aws-ebs-csi-driver, nodewright-customizations |
-| GKE/COS  | 13         | gke-nccl-tcpxo, nodewright-customizations, COS GPU overrides |
+| GKE/COS  | 14         | gke-nccl-tcpxo, nodewright-customizations, COS GPU overrides |
 | Kind     | 12         | network-operator; no cloud CSI/EFA            |
 
 Caption: "Same intent, different service = different component sets and values"

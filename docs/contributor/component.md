@@ -83,6 +83,7 @@ operator:
 
 - `validations:` — bundle-time misconfiguration warnings ([validator.md](validator.md#component-validations-bundle-time))
 - `healthCheck.assertFile:` — chainsaw conformance assertions ([validator.md](validator.md))
+- `upgrades.file:` — path to a `ComponentUpgrades` transition record ([recipe.md](recipe.md#transition-records))
 - `manifestFiles:` — manifest YAMLs (paths relative to the recipes data
   root) bundled with the component whenever a recipe references it and the
   componentRef declares none; shipped in the injected `-post` local chart
@@ -145,7 +146,9 @@ One-liner per field:
 | `sharedStorageClassPaths` | Where `--shared-storage-class` is written for shared filesystem PVCs |
 | `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
+| `upgrades.file` | Path to a `ComponentUpgrades` transition record (relative to data dir); empty means no transition records ([recipe.md](recipe.md#transition-records)) |
 | `manifestFiles` | Default manifest YAML paths bundled when the componentRef declares none (ref-declared lists take precedence). No opt-out: an empty ref-declared list is indistinguishable from absent (len == 0 → defaults filled) — to suppress the defaults, declare a replacement list. Helm components only; the loader rejects the combination with `kustomize:` |
+| `mixinSafeOverridePaths` | Exact dotted value paths (e.g. `global.tracing.enabled`) a `RecipeMixin` may set on this component via `Overrides`. Empty (the default) means the component hasn't opted into mixin overrides — a mixin introducing it fresh still has unrestricted `valuesFile`/`overrides`, but once the component is already in the chain (or has a non-empty allowlist), every mixin Overrides path is validated against this list ([recipe.md](recipe.md#mixin-composition)) |
 | `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` | Narrow service-specific flags (see godoc) |
 
 ## `nodeScheduling.system` vs `accelerated`
@@ -162,23 +165,30 @@ This is the field most contributors get wrong on first PR.
   `--accelerated-node-selector` and `--accelerated-node-toleration`
   values here.
 
-Concrete example from `gpu-operator`:
+Concrete example from `nvidia-dra-driver-gpu`, which routes both sides:
 
 ```yaml
 nodeScheduling:
   system:
     nodeSelectorPaths:
-      - operator.nodeSelector
-      - node-feature-discovery.master.nodeSelector
+      - controller.nodeSelector
     tolerationPaths:
-      - operator.tolerations
+      - controller.tolerations
   accelerated:
     nodeSelectorPaths:
-      - daemonsets.nodeSelector
-      - node-feature-discovery.worker.nodeSelector
+      - kubeletPlugin.nodeSelector
     tolerationPaths:
-      - daemonsets.tolerations
+      - kubeletPlugin.tolerations
 ```
+
+The controller (a Deployment) lands on management nodes; the kubelet-plugin
+DaemonSet lands on GPU nodes — each routed by its own selector/toleration
+pair.
+
+`gpu-operator` is the exception worth knowing: its `accelerated` block is
+tolerations-only. Its operand DaemonSets have no chart/CRD nodeSelector
+field — the operator self-places via its GFD/NFD deploy labels — so only
+`tolerationPaths: [daemonsets.tolerations]` is routable there (#2474).
 
 Wrong column = workloads land on the wrong node class. A DaemonSet
 placed under `system` will miss GPU nodes; an operator under
@@ -328,7 +338,7 @@ is a worked example of the latter.
 ## `deploymentOrder`
 
 `RecipeResult.DeploymentOrder` is **derived**, not authored.
-`TopologicalSort` in `pkg/recipe/metadata_store.go` orders components
+`TopologicalSort` in `pkg/recipe/metadata.go` orders components
 by `componentRefs[].dependencyRefs` declared in the overlay. When no
 dependencies are declared, the order falls back to the order in
 which components are listed in the overlay's `componentRefs`. Express

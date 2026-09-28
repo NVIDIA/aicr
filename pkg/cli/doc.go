@@ -54,7 +54,7 @@
 // Config file format (YAML or JSON):
 //
 //	kind: AICRConfig
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1beta1
 //	metadata:
 //	  name: my-deployment
 //	spec:

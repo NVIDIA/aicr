@@ -17,7 +17,7 @@ It is the live complement to two **offline, structural** surfaces:
 - [Recipe Health](./recipe-health.md) — the catalog-wide structural state of every recipe, computed hermetically with no cluster.
 - [Recipe & CLI Coverage Matrix](./coverage-matrix.md) — which journeys and CLI verbs are exercised in-repo, and how often.
 
-Neither of those reports live pass/fail; the TestGrid does. The three surfaces coexist and never duplicate each other — see [How it relates to recipe health](#how-it-relates-to-recipe-health) below. The full design contract is recorded in [ADR-012](../design/012-recipe-coordinate-mapping.md).
+Neither of those reports live pass/fail; the TestGrid does. The three surfaces coexist and never duplicate each other — see [How it relates to recipe health](#how-it-relates-to-recipe-health) below. The full design contract is recorded in [ADR-012](https://github.com/NVIDIA/aicr/blob/main/docs/design/012-recipe-coordinate-mapping.md).
 
 ## How to read it — CSP-first navigation
 
@@ -72,7 +72,7 @@ Trust in a column comes from its provenance metadata. Each build column carries 
 | `source_class` | verified origin class: NVIDIA `uat`, or allowlisted `community`/partner evidence |
 | `evidence_digest` | the digest of the underlying signed evidence artifact |
 
-`signer_identity` and `signer_issuer` together identify **community-submitted** results versus **NVIDIA UAT** runs and key the latest-per-signer default scope. The publisher verifies those certificate claims against the checked-in signer allowlist and derives `source_class`; callers cannot assign their own trust class. Allowlisted partner evidence is represented as `community` because TestGrid's wire contract distinguishes first-party UAT from external evidence. `evidence_digest` is the verifiable anchor: every cell traces back to a signed [conformance evidence](../design/007-recipe-evidence.md) artifact you can verify independently with [artifact verification](./artifact-verification.md).
+`signer_identity` and `signer_issuer` together identify **community-submitted** results versus **NVIDIA UAT** runs and key the latest-per-signer default scope. The publisher verifies those certificate claims against the checked-in signer allowlist and derives `source_class`; callers cannot assign their own trust class. Allowlisted partner evidence is represented as `community` because TestGrid's wire contract distinguishes first-party UAT from external evidence. `evidence_digest` is the verifiable anchor: every cell traces back to a signed [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) artifact you can verify independently with [artifact verification](./artifact-verification.md).
 
 ## Interim evidence dashboard
 
@@ -80,7 +80,7 @@ The [Evidence Corroboration Dashboard](./evidence-dashboard.md) is the
 **interim static GitHub Pages surface** for the same evidence. It reads the
 same verified, source-keyed evidence tree (in the same layout) and
 derives recipe coordinates using the same shared mapping function
-(`pkg/recipe.CoordinateFor`, [ADR-012](../design/012-recipe-coordinate-mapping.md)).
+(`pkg/recipe.CoordinateFor`, [ADR-012](https://github.com/NVIDIA/aicr/blob/main/docs/design/012-recipe-coordinate-mapping.md)).
 It is published at [`https://validation.aicr.run`](https://validation.aicr.run)
 and rebuilt on every merge to `main` by a deterministic Go generator —
 no live workers, no GKE cluster.

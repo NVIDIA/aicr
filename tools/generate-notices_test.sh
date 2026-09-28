@@ -38,53 +38,84 @@ if [[ ! -f "${INSTALL_ACTION}" ]]; then
     echo "FAIL: ${INSTALL_ACTION} is missing" >&2
     exit 1
 fi
+# #2667 replaced `GOFLAGS= go install pkg@version` with a `go build` from this
+# module, so the tool's dependencies are covered by the committed go.sum and the
+# install no longer depends on sum.golang.org being reachable. The GOROOT
+# contract above is unchanged by that and still has to be asserted: `go build`
+# inherits an exported -trimpath exactly as `go install` did. Measured on a
+# -trimpath build of go-licenses v2.0.1, `go-licenses csv` emits zero rows and
+# exits 0, against three rows from a build with GOFLAGS pinned.
+#
+# GOFLAGS is therefore required to be pinned to -mod=readonly rather than
+# cleared: an empty GOFLAGS keeps -trimpath out but also drops readonly, and CI
+# must not rewrite the manifest it is validating.
+#
+# `go install` of go-licenses is now rejected outright, anywhere -- including
+# here. It is the construct that reintroduces the checksum-database dependency.
+# `[^;&|]*` between the verb and the module path, never `.*`: the trailing
+# `[^;&|]*$` is what proves the GOFLAGS prefix belongs to THIS build, and `.*`
+# matches command separators, which silently reopens that hole. A line reading
+# `GOFLAGS=-mod=readonly go build -o x ./other && go build -o y <go-licenses>`
+# would then pass with the go-licenses build unguarded.
+readonly REQUIRED_BUILD_RE="^[[:space:]]*GOFLAGS=-mod=readonly go build[[:space:]]+[^;&|]*github\.com/google/go-licenses[^;&|]*$"
+
 # Anchor to the executable line, not the file. The action explains the GOFLAGS
 # contract in a comment that contains the same literal, so an unanchored
 # whole-file grep is satisfied by the prose and stays green even when the real
-# `run:` step drops `GOFLAGS=` - the exact regression this guard exists for.
-if ! grep -Eq "^[[:space:]]*GOFLAGS= go install[[:space:]]+['\"]?github\.com/google/go-licenses" \
-    "${INSTALL_ACTION}"; then
-    echo "FAIL: the go-licenses install action does not clear GOFLAGS" >&2
+# `run:` step drops the pin - the exact regression this guard exists for.
+if ! grep -Eq "${REQUIRED_BUILD_RE}" "${INSTALL_ACTION}"; then
+    echo "FAIL: the go-licenses install action does not build it from this" >&2
+    echo "module with GOFLAGS pinned to -mod=readonly. An inherited -trimpath" >&2
+    echo "produces a binary that silently reports everything as stdlib." >&2
     exit 1
 fi
-# The assertion above proves at least one correct install exists, not that every
-# install is correct. A second install line appended to this action without
-# GOFLAGS= would leave it green. The .github/ scan below excludes this
-# canonical action directory, so the per-line check here is what catches a
-# second unguarded install inside install-go-licenses itself.
+
+# The assertion above proves at least one correct build exists, not that every
+# go-licenses build is correct. A second line appended to this action without
+# the pin would leave it green. The .github/ scan below excludes this canonical
+# action directory, so the per-line check here is what catches a second
+# unguarded build inside install-go-licenses itself.
 #
-# Every go-licenses install line must therefore MATCH IN FULL: a GOFLAGS-cleared
-# install and nothing else, bar a trailing comment. Excluding lines that merely
-# contain "GOFLAGS= go install" somewhere is not enough - `GOFLAGS= go install
-# <other>; go install <go-licenses>` contains it while leaving the go-licenses
-# install unguarded. `[^;&|]*$` rejects that by banning command separators, so
-# each line carries exactly one install and the prefix provably applies to it.
-install_violations=0
-while IFS= read -r install_line; do
-    if ! grep -Eq "^[[:space:]]*GOFLAGS= go install[[:space:]]+['\"]?github\.com/google/go-licenses[^;&|]*$" \
-        <<<"${install_line}"; then
-        echo "FAIL: ${INSTALL_ACTION}: go-licenses install is not GOFLAGS-cleared," >&2
+# Every go-licenses build line must therefore MATCH IN FULL: a pinned build and
+# nothing else, bar a trailing comment. Excluding lines that merely contain the
+# pinned prefix somewhere is not enough - `GOFLAGS=-mod=readonly go build
+# <other>; go build <go-licenses>` contains it while leaving the go-licenses
+# build unguarded. `[^;&|]*$` rejects that by banning command separators, so
+# each line carries exactly one build and the prefix provably applies to it.
+build_violations=0
+while IFS= read -r build_line; do
+    if ! grep -Eq "${REQUIRED_BUILD_RE}" <<<"${build_line}"; then
+        echo "FAIL: ${INSTALL_ACTION}: go-licenses build does not pin GOFLAGS," >&2
         echo "or chains other commands onto the same line:" >&2
-        echo "  ${install_line}" >&2
-        install_violations=1
+        echo "  ${build_line}" >&2
+        build_violations=1
     fi
-done < <(grep -E "^[[:space:]]*[^#]*go install[[:space:]]+['\"]?github\.com/google/go-licenses" \
+done < <(grep -E "^[[:space:]]*[^#]*go build[[:space:]]+.*github\.com/google/go-licenses" \
     "${INSTALL_ACTION}")
-if [[ ${install_violations} -ne 0 ]]; then
+if [[ ${build_violations} -ne 0 ]]; then
     exit 1
 fi
-# Reject every inline install, not just one that forgets GOFLAGS: an inline step
-# also escapes the pinned version the composite action takes from
-# .settings.yaml, so a workflow could silently run a different go-licenses. The
-# leading pattern skips commented-out lines. The quote is optional and accepts
-# either form because every install site in this repo quotes the module path: a
-# pattern requiring bare whitespace matched only a form nobody writes, and one
-# accepting just `"` still let a single-quoted install through.
+
+# No `go install` of go-licenses anywhere under .github/, canonical action
+# included: it resolves outside the main module, so nothing it pulls is covered
+# by go.sum and every dependency is authenticated against sum.golang.org on each
+# run. That is the gate exposure #2667 removed.
+if install_hits="$(grep -rEn "^[[:space:]]*[^#]*go install[[:space:]]+['\"]?github\.com/google/go-licenses" \
+    "${REPO_ROOT}/.github/")"; then
+    echo "FAIL: go-licenses is installed with 'go install pkg@version', which" >&2
+    echo "depends on sum.golang.org. Build it from this module instead (#2667):" >&2
+    printf '  %s\n' "${install_hits}" >&2
+    exit 1
+fi
+# Reject every inline build, not just one that forgets the GOFLAGS pin: an
+# inline step also escapes the GOROOT contract the composite action carries, so
+# a workflow could silently run a go-licenses that reports nothing. The leading
+# pattern skips commented-out lines.
 #
 # Scan all of .github/ except the canonical install-go-licenses action itself —
-# that is where the real `GOFLAGS= go install` lives, so including it would flag
-# the install this guard exists to steer people toward. Every other .github/
-# consumer (workflows and composite actions) must use the shared action.
+# that is where the real build lives, so including it would flag the very thing
+# this guard exists to steer people toward. Every other .github/ consumer
+# (workflows and composite actions) must use the shared action.
 #
 # Exclusion is path-aware (exact canonical directory), not --exclude-dir by
 # basename: a same-named directory elsewhere under .github/ must still fail.
@@ -98,10 +129,10 @@ while IFS= read -r match; do
     esac
     echo "${match}" >&2
     found_inline=1
-done < <(grep -rEn "^[[:space:]]*[^#]*go install[[:space:]]+['\"]?github\.com/google/go-licenses" \
+done < <(grep -rEn "^[[:space:]]*[^#]*go build[[:space:]]+.*github\.com/google/go-licenses" \
     "${REPO_ROOT}/.github/" || true)
 if [[ ${found_inline} -ne 0 ]]; then
-    echo "FAIL: a .github/ workflow or action installs go-licenses inline;" >&2
+    echo "FAIL: a .github/ workflow or action builds go-licenses inline;" >&2
     echo "use the ./.github/actions/install-go-licenses composite action instead." >&2
     exit 1
 fi
@@ -112,10 +143,10 @@ EXCLUDE_REGRESSION_TMP="$(mktemp -d "${TMPDIR:-/tmp}/aicr-notices-exclude.XXXXXX
 mkdir -p \
     "${EXCLUDE_REGRESSION_TMP}/.github/actions/install-go-licenses" \
     "${EXCLUDE_REGRESSION_TMP}/.github/workflows/install-go-licenses"
-printf '%s\n' "GOFLAGS= go install 'github.com/google/go-licenses/v2@v0.0.0'" \
+printf '%s\n' "GOFLAGS=-mod=readonly go build -o gl github.com/google/go-licenses/v2" \
     > "${EXCLUDE_REGRESSION_TMP}/.github/actions/install-go-licenses/action.yml"
 expected_sneaky="${EXCLUDE_REGRESSION_TMP}/.github/workflows/install-go-licenses/sneaky.yml"
-printf '%s\n' "GOFLAGS= go install 'github.com/google/go-licenses/v2@v0.0.0'" \
+printf '%s\n' "GOFLAGS=-mod=readonly go build -o gl github.com/google/go-licenses/v2" \
     > "${expected_sneaky}"
 regression_hits=0
 regression_match_path=""
@@ -127,7 +158,7 @@ while IFS= read -r match; do
     esac
     regression_match_path="${path}"
     regression_hits=$((regression_hits + 1))
-done < <(grep -rEn "^[[:space:]]*[^#]*go install[[:space:]]+['\"]?github\.com/google/go-licenses" \
+done < <(grep -rEn "^[[:space:]]*[^#]*go build[[:space:]]+.*github\.com/google/go-licenses" \
     "${EXCLUDE_REGRESSION_TMP}/.github/" || true)
 rm -rf "${EXCLUDE_REGRESSION_TMP}"
 # hits==1 alone is ambiguous: a filter that drops sneaky.yml and keeps the

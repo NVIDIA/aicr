@@ -1,0 +1,37 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# dra-node-labeler values.
+#
+# The bundler owns labelKey and labelValue: when --dra-eviction-node-label
+# (scheduling.draEvictionNodeLabel) is set they are overwritten with the
+# configured pair so the labeler, the DRA kubelet plugin's nodeSelector and
+# the GPU Operator Driver Manager's NODE_LABEL_FOR_GPU_POD_EVICTION agree.
+# Without the flag the bundler removes this component from the bundle
+# entirely; see docs/user/cli-reference.md, "DRA Driver Upgrade Eviction".
+labelKey: nvidia.com/dra-kubelet-plugin
+labelValue: "true"
+
+# enabled gates whether the manifest renders any objects (ADR-015: the manifest
+# renders NOTHING unless enabled is true). It is default-off and opt-in: the
+# bundler flips it true in the same --dra-eviction-node-label path that keeps
+# this component in the bundle (pkg/bundler injectDRAEvictionLabel), so the two
+# always agree. Default-off fails closed for the validator, which resolves the
+# recipe's effective values WITHOUT the bundle-time flag: on the default path
+# (no eviction opt-in) the component renders no objects, so the deployment
+# validator suppresses its health check instead of asserting a DaemonSet the
+# bundler never deployed (issue #2846). This is a component enablement gate,
+# distinct from the ComponentRef `enabled` override that IsEnabled reads; the
+# manifest keys on this Helm value, not on that override.
+enabled: false

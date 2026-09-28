@@ -43,7 +43,7 @@ Each subdirectory is one collector; one collector emits one
 | Kind | Package | Emits | Notes |
 |------|---------|-------|-------|
 | GPU | `pkg/collector/gpu` | `TypeGPU` | One subtype: `hardware` (NFD/PCI enumeration; resolves the accelerator SKU from the PCI device ID). Driver-free — no nvidia-smi. Degrades to no subtype when sysfs is unavailable. |
-| Kubernetes | `pkg/collector/k8s` | `TypeK8s` | Server version, image inventory, GPU Operator ClusterPolicy, node-local info, secret-safe Slinky resource topology, and official MariaDB Operator API conflict evidence. Uses the singleton `pkg/k8s/client`. |
+| Kubernetes | `pkg/collector/k8s` | `TypeK8s` | Server version, image inventory, GPU Operator ClusterPolicy, node-local info, secret-safe Slinky resource topology, official MariaDB Operator API conflict evidence, and OKE legacy device-plugin conflict evidence. Uses the singleton `pkg/k8s/client`. |
 | OS | `pkg/collector/os` | `TypeOS` | Subtypes for `release` (`/etc/os-release`), `grub`, `kmod`, `sysctl`. |
 | SystemD | `pkg/collector/systemd` | `TypeSystemD` | D-Bus probe of configured services. Routes to Talos via factory when `os: talos`. |
 | Topology | `pkg/collector/topology` | `TypeNodeTopology` | Cluster-wide taints and labels across all nodes, in two encodings — lossless `Items` plus the legacy folded `Data` map — see [Cross-cutting topology collector](#cross-cutting-topology-collector). |
@@ -348,13 +348,18 @@ split:
 
 - **Per-provider, never shared: the projection itself.** Each cloud
   expresses driver ownership in a different object with different
-  semantics (GKE: node-pool `gpuDriverInstallationConfig`). A new
-  provider gets its own projector reading that provider's documented
-  output format and emitting its own namespaced subtype
-  (`aks-gpu-pools` today; a GKE analog adds `gke-gpu-pools` beside
-  it). Do not widen an existing provider's subtype or invent a
-  cross-provider pools schema — unified schemas blur the fail-closed
-  constraint semantics profile declarations depend on.
+  semantics. A new provider gets its own projector reading that
+  provider's documented output format and emitting its own
+  namespaced subtype: `aks-gpu-pools`
+  ([`aksgpupools.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/aksgpupools.go),
+  AgentPool `gpuProfile.driver`), `oke-addons`
+  ([`okeaddons.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/okeaddons.go),
+  the `NvidiaGpuPlugin` add-on's lifecycle state), and `gke-gpu-pools`
+  ([`gkegpupools.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/gkegpupools.go),
+  node-pool `gpuDriverInstallationConfig`). Do not widen an existing
+  provider's subtype or invent a cross-provider pools schema.
+  Unified schemas blur the fail-closed constraint semantics profile
+  declarations depend on.
 - **Shared: everything around the projection.** The bounded,
   fail-loud file reader (`readBoundedPoolsFile` in
   `providerpools.go`: Lstat regular-file gate + `os.Open` +
@@ -364,10 +369,10 @@ split:
   explicit operator input out of the snapshotter's degrade-to-warning
   collector policy.
 - **Additive flags.** New providers add sibling flags
-  (`--gke-gpu-pools`, ...), never a generic flag with a provider
-  discriminator — the flag name tells the operator exactly which
-  cloud CLI command produces the input, and the parser knows the
-  schema without sniffing.
+  (`--aks-gpu-pools`, `--oke-addons`, `--gke-gpu-pools`), never a
+  generic flag with a provider discriminator. The flag name tells
+  the operator exactly which cloud CLI command produces the input,
+  and the parser knows the schema without sniffing.
 
 Because the input arrives via an explicit flag, every failure is an
 error, never a degraded measurement — the opposite of the live

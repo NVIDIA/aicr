@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -852,5 +853,39 @@ func TestSurveyComponentSourceOnlyChartFallback(t *testing.T) {
 	manifestOnly := component{Name: "nodewright-customizations", DisplayName: "nodewright"}
 	if got := manifestOnly.effectiveChart(); got != "" {
 		t.Errorf("manifest-only effectiveChart() = %q, want empty", got)
+	}
+}
+
+// draNodeLabelerImageRE matches a literal, digest-pinned alpine/kubectl
+// reference. The registry host stays explicit because short-name-enforcing
+// runtimes reject unqualified references, and the tag is constrained to a
+// version shape so a floating tag such as :latest cannot satisfy it.
+var draNodeLabelerImageRE = regexp.MustCompile(`^docker\.io/alpine/kubectl:[0-9]+(?:\.[0-9]+)*@sha256:[0-9a-f]{64}$`)
+
+// TestSurveyComponent_DRANodeLabelerImageInventoried pins the supply-chain
+// contract for dra-node-labeler: its one executable image is a literal,
+// digest-pinned reference in the embedded manifest, so the manifest walk (no
+// Helm rendering) must inventory exactly that reference (#2813 review).
+func TestSurveyComponent_DRANodeLabelerImageInventoried(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("repo root: %v", err)
+	}
+	c := component{
+		Name:        "dra-node-labeler",
+		DisplayName: "dra-node-labeler",
+		Helm:        helmCfg{DefaultNamespace: "gpu-operator"},
+	}
+	got, surveyErr := surveyComponent(context.Background(), repoRoot, c, nil, true)
+	if surveyErr != nil {
+		t.Fatalf("surveyComponent() error = %v", surveyErr)
+	}
+	// Shape rather than an exact digest: Renovate rotates the digest as upstream
+	// rebuilds the tag.
+	if len(got.Images) != 1 || !draNodeLabelerImageRE.MatchString(got.Images[0]) {
+		t.Fatalf("dra-node-labeler images = %v, want exactly one matching %s; a templated image renders as a placeholder and drops out of the BOM", got.Images, draNodeLabelerImageRE)
+	}
+	if got.Type != kindManifest {
+		t.Errorf("type = %q, want %q", got.Type, kindManifest)
 	}
 }

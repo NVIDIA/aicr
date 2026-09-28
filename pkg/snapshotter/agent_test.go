@@ -291,14 +291,32 @@ func TestParseTaint(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:     "taint with value containing equals",
+			// '=' is not a legal label-value character, so the second '='
+			// makes the value invalid rather than part of it.
+			name:     "invalid value - contains equals",
 			taintStr: "key=value=with=equals:NoSchedule",
-			want: &corev1.Taint{
-				Key:    "key",
-				Value:  "value=with=equals",
-				Effect: corev1.TaintEffectNoSchedule,
-			},
-			wantErr: false,
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			// A key with whitespace would word-split in the generated
+			// deploy.sh stale-taint cleanup and select unrelated taints.
+			name:     "invalid key - contains whitespace",
+			taintStr: "foo bar=true:NoSchedule",
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid key - bad prefix",
+			taintStr: "not_a_dns/gate=true:NoSchedule",
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid value - too long",
+			taintStr: "gate=" + strings.Repeat("v", 64) + ":NoSchedule",
+			want:     nil,
+			wantErr:  true,
 		},
 		{
 			name:     "empty taint string",
@@ -693,7 +711,7 @@ func TestAgentConfigWithTemplatePath(t *testing.T) {
 // "unmodeledField" key stands in for a field a NEWER agent image emits that
 // this binary's Snapshot type does not know about — the reason delivery must
 // write raw bytes instead of re-serializing the parsed struct.
-const snapshotFixture = `apiVersion: aicr.run/v1alpha2
+const snapshotFixture = `apiVersion: aicr.run/v1
 kind: Snapshot
 metadata:
   version: v9.9.9
@@ -741,13 +759,13 @@ func TestDeliverSnapshot_HonorsFormat(t *testing.T) {
 			name:       "json",
 			format:     serializer.FormatJSON,
 			wantPrefix: "{",
-			wantHas:    []string{`"apiVersion": "aicr.run/v1alpha2"`, `"fromANewerAgent": true`},
+			wantHas:    []string{`"apiVersion": "aicr.run/v1"`, `"fromANewerAgent": true`},
 		},
 		{
 			name:       "table",
 			format:     serializer.FormatTable,
 			wantPrefix: "FIELD",
-			wantHas:    []string{"APIVersion", "aicr.run/v1alpha2"},
+			wantHas:    []string{"APIVersion", "aicr.run/v1"},
 		},
 	}
 	for _, tt := range tests {
@@ -798,7 +816,7 @@ func TestDeliverSnapshot_JSONDecodesAsSnapshot(t *testing.T) {
 	if err := json.Unmarshal(data, &snap); err != nil {
 		t.Fatalf("delivered .json does not decode as JSON: %v\n%s", err, data)
 	}
-	if snap.APIVersion != "aicr.run/v1alpha2" || snap.Metadata["version"] != "v9.9.9" {
+	if snap.APIVersion != "aicr.run/v1" || snap.Metadata["version"] != "v9.9.9" {
 		t.Errorf("decoded snapshot = %+v, want the fixture's apiVersion and metadata", snap.Header)
 	}
 

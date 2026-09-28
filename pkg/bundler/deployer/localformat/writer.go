@@ -51,6 +51,16 @@ type Component struct {
 	// Values hydrated by the component bundler
 	Values       map[string]any
 	DynamicPaths []string // paths moved from values.yaml into cluster-values.yaml
+	// OwnsCRDs emits an apply-crds.sh beside install.sh, which applies the
+	// chart's CRDs ahead of `helm upgrade` (see the template for why Helm
+	// alone leaves them at their day-one schema). Callers set it from
+	// deployer.ResolveCRDOwners, never from the registry flag directly:
+	// the flag records an audit of the registry-pinned chart, so a ref
+	// overriding source, chart, or version must not inherit it.
+	//
+	// Only primary Helm folders honor it. Injected -pre/-post/-readiness
+	// wrappers carry AICR-rendered manifests, not a chart with crds/.
+	OwnsCRDs bool
 }
 
 // WriteResult is the typed return shape from Write. Callers consume
@@ -234,10 +244,20 @@ func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injection
 	// The injected folder carries recipe-side content that accompanies the
 	// parent component, so it inherits the parent's payload version rather
 	// than claiming one of its own.
+	// The readiness folder keeps its annotations. Unlike every other folder
+	// here it is 100% bundler-authored: gatemanifest.Render builds it from
+	// the deployer, and already picks the right annotations for that
+	// deployer -- Helm hooks for helm, argocd.argoproj.io/sync-options for
+	// Argo CD, and deliberately no helm.sh/hook for Argo. Stripping
+	// afterwards overrides a decision made with strictly more information.
+	//
+	// This is keyed on the PHASE, not on the deployer: localformat still
+	// knows nothing about which deployer is consuming it.
 	f, err := writeLocalHelmFolder(
 		opts.OutputDir, auxDir, idx, c,
 		manifests, renderInputFor(c),
 		auxName, c.Name, true, stampFor(c, opts.AICRVersion),
+		phase == phaseReadiness,
 	)
 	if err != nil {
 		return nil, err
@@ -552,7 +572,8 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			// that aren't preceded by a pre folder.
 			f, err := writeLocalHelmFolder(opts.OutputDir, dir, idx, c,
 				manifests, renderInputFor(c),
-				c.Name, c.Name, true, stampFor(c, opts.AICRVersion))
+				c.Name, c.Name, true, stampFor(c, opts.AICRVersion),
+				false)
 			if err != nil {
 				return WriteResult{}, err
 			}

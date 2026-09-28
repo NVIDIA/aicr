@@ -69,6 +69,12 @@ type NodeSnapshotter struct {
 	// contract as AKSGPUPoolsPath: projected fail-loud into the K8s
 	// measurement's oke-addons subtype before any collector runs.
 	OKEAddonsPath string
+
+	// GKEGPUPoolsPath, when set, points at an operator-supplied
+	// `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump, projected fail-loud into the K8s measurement's
+	// gke-gpu-pools subtype before any collector runs.
+	GKEGPUPoolsPath string
 }
 
 // Measure collects configuration measurements and serializes the snapshot.
@@ -162,6 +168,13 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	}
 	if n.OKEAddonsPath != "" {
 		subtype, err := k8s.ProjectOKEAddons(ctx, n.OKEAddonsPath)
+		if err != nil {
+			return err
+		}
+		projections = append(projections, subtype)
+	}
+	if n.GKEGPUPoolsPath != "" {
+		subtype, err := k8s.ProjectGKEGPUPools(ctx, n.GKEGPUPoolsPath)
 		if err != nil {
 			return err
 		}
@@ -380,7 +393,7 @@ func warnOnGPUPlacementMismatch(snap *Snapshot) {
 }
 
 // attachProviderProjection merges an operator-supplied provider projection
-// (aks-gpu-pools, oke-addons) into the snapshot's K8s measurement. The
+// (aks-gpu-pools, oke-addons, gke-gpu-pools) into the snapshot's K8s measurement. The
 // projection is explicit input, not cluster state, so a degraded
 // collection (no K8s measurement at all) still carries it — a minimal K8s
 // measurement is created if needed.

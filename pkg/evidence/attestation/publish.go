@@ -155,7 +155,7 @@ func loadOnDiskBundle(ctx context.Context, dir string) (*Bundle, string, error) 
 	if err != nil {
 		return nil, "", err
 	}
-	pred, stmt, err := readBundlePredicate(ctx, summaryDir)
+	pred, predicateType, stmt, err := readBundlePredicate(ctx, summaryDir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -174,6 +174,7 @@ func loadOnDiskBundle(ctx context.Context, dir string) (*Bundle, string, error) 
 		Advertiser:               advertiser,
 		PolicyDescriptorIdentity: descriptorIdentity,
 		SubjectDigest:            pred.Recipe.Digest,
+		PredicateType:            predicateType,
 		Predicate:                pred,
 		StatementJSON:            stmt,
 	}
@@ -338,9 +339,13 @@ func hasBundleMarkersWithStat(
 }
 
 // readBundlePredicate reads the bundle's unsigned in-toto Statement and
-// returns the predicate body plus the raw statement bytes. Mirrors the
-// verifier's loadUnsignedPredicate: the predicate is trusted as-is.
-func readBundlePredicate(ctx context.Context, summaryDir string) (*Predicate, []byte, error) {
+// returns the predicate body, the statement's own recorded predicateType,
+// and the raw statement bytes, mirroring the verifier's loadUnsignedPredicate.
+// The predicate is trusted as-is. The recorded predicateType (not a
+// recomputed StatementPredicateType(pred)) is what loadOnDiskBundle carries
+// forward on Bundle.PredicateType, so a reconstructed legacy bundle re-signs
+// under the algorithm its recipe.digest was actually computed with.
+func readBundlePredicate(ctx context.Context, summaryDir string) (*Predicate, string, []byte, error) {
 	path := filepath.Join(summaryDir, StatementFilename)
 	// Bound the read two ways: by size — a publish target may be an
 	// attacker-influenced bundle root (extracted archive, symlinked path)
@@ -362,10 +367,10 @@ func readBundlePredicate(ctx context.Context, summaryDir string) (*Predicate, []
 		body = b
 		return nil
 	}); rerr != nil {
-		return nil, nil, rerr
+		return nil, "", nil, rerr
 	}
 	if int64(len(body)) > defaults.MaxAttestationFileBytes {
-		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
+		return nil, "", nil, errors.New(errors.ErrCodeInvalidRequest,
 			"in-toto Statement exceeds maximum size of "+
 				strconv.FormatInt(defaults.MaxAttestationFileBytes, 10)+" bytes")
 	}
@@ -374,10 +379,10 @@ func readBundlePredicate(ctx context.Context, summaryDir string) (*Predicate, []
 		Predicate     Predicate `json:"predicate"`
 	}
 	if uErr := json.Unmarshal(body, &envelope); uErr != nil {
-		return nil, nil, errors.Wrap(errors.ErrCodeInvalidRequest, "statement is not valid JSON", uErr)
+		return nil, "", nil, errors.Wrap(errors.ErrCodeInvalidRequest, "statement is not valid JSON", uErr)
 	}
 	if cErr := ValidatePredicateTypeCoherence(envelope.PredicateType, &envelope.Predicate); cErr != nil {
-		return nil, nil, cErr
+		return nil, "", nil, cErr
 	}
-	return &envelope.Predicate, body, nil
+	return &envelope.Predicate, envelope.PredicateType, body, nil
 }

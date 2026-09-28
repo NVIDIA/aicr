@@ -63,6 +63,12 @@ type EvidenceOptions struct {
 	// payloads instead of the redacted defaults).
 	Full bool
 
+	// AllowMutableValidatorTags emits even when a validator image resolves to
+	// a moving tag (`:edge`, `:latest`, anything not a release, `:sha-<commit>`
+	// or `:uat-<run_id>` ref). Emission otherwise fails closed, because the
+	// predicate identifies validators by tag alone. See #2873.
+	AllowMutableValidatorTags bool
+
 	// Commit is the build commit used to resolve the validator catalog for
 	// the bundle's BOM. The Client's version is used for the catalog version
 	// and stamped as AICRVersion; commit has no Client-level home, so it is
@@ -154,14 +160,17 @@ func (c *Client) EmitRecipeEvidence(
 	}
 
 	_, err = evattest.Emit(ctx, evattest.EmitOptions{
-		OutDir:       opts.OutDir,
-		BOMPath:      opts.BOMPath,
-		Push:         opts.Push,
-		PlainHTTP:    opts.PlainHTTP,
-		InsecureTLS:  opts.InsecureTLS,
-		NoSign:       opts.NoSign,
-		Full:         opts.Full,
-		Recipe:       rec.Resolved(),
+		OutDir:      opts.OutDir,
+		BOMPath:     opts.BOMPath,
+		Push:        opts.Push,
+		PlainHTTP:   opts.PlainHTTP,
+		InsecureTLS: opts.InsecureTLS,
+		NoSign:      opts.NoSign,
+		Full:        opts.Full,
+		Recipe:      rec.Resolved(),
+
+		AllowMutableValidatorTags: opts.AllowMutableValidatorTags,
+
 		Snapshot:     toInternalSnapshot(snap),
 		PhaseResults: toInternalPhaseResults(results),
 		Catalog:      cat,

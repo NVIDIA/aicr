@@ -43,6 +43,13 @@ type recipeEvidenceConfig struct {
 	// raw payloads. CLI-only — there is no config-file equivalent.
 	Full bool
 
+	// AllowMutableValidatorTags emits despite a validator image resolving to a
+	// moving tag (see attestation.EmitOptions.AllowMutableValidatorTags).
+	// CLI-only, mirroring Full and NoSign: a config file is committed, and an
+	// opt-out of a provenance guard should be a deliberate per-invocation act
+	// rather than a setting a later run inherits silently.
+	AllowMutableValidatorTags bool
+
 	// OIDC token resolution is deferred until adjacent to SignStatement
 	// (see attestation.Emit): Fulcio binds the token to a fresh nonce at
 	// issue, and a multi-minute validation run between resolve and sign
@@ -74,6 +81,9 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, att aicr.EvidenceOptions) *reci
 		InsecureTLS: boolFlagOrConfig(cmd, flagInsecureTLS, att.InsecureTLS),
 		NoSign:      cmd.Bool(flagNoSign),
 		Full:        cmd.Bool(flagFull),
+
+		AllowMutableValidatorTags: cmd.Bool(flagAllowMutableValidatorTags),
+
 		OIDCResolve: oidcResolveOptionsFromFlags(cmd),
 		AssumeYes:   cmd.Bool(flagAssumeYes),
 	}
@@ -159,6 +169,9 @@ func emitRecipeEvidence(
 		NoSign:      cfg.NoSign,
 		Full:        cfg.Full,
 		Commit:      commit,
+
+		AllowMutableValidatorTags: cfg.AllowMutableValidatorTags,
+
 		OIDCResolve: cfg.OIDCResolve,
 	})
 }

@@ -16,8 +16,8 @@
 # autoTaintNewNodes defaults to true.
 # When no --accelerated-node-toleration is passed, ParseTolerations() returns
 # a "tolerate all" default (operator: Exists with no key).
-apiVersion: skyhook.nvidia.com/v1alpha1
-kind: Skyhook
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
 metadata:
   name: tuning
 spec:

@@ -71,8 +71,9 @@ var hostPathDirOrCreate = corev1.HostPathDirectoryOrCreate
 
 // gkeTCPXOPreflightApplies reports whether the TCPXO readiness preflight should
 // run for the given (variant, accelerator, service) tuple. Mirrors
-// gb200NetPreflightApplies to keep the call site in validateNcclAllReduceBw
-// uncluttered. Scoped to the GKE H100 default-variant path — the only
+// graceBlackwellNetPreflightApplies to keep the call site in
+// validateNcclAllReduceBw uncluttered. Scoped to the GKE H100 default-variant
+// path — the only
 // combination that renders testdata/h100/gke/runtime.yaml with the TCPXO
 // sidecar and host-artifact dependency.
 func gkeTCPXOPreflightApplies(variant ncclVariant, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) bool {

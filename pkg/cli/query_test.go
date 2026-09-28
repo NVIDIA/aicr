@@ -17,8 +17,10 @@ package cli
 import (
 	"bytes"
 	stderrors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -197,7 +199,7 @@ func TestQueryCmdCriteriaStrictRejectsExternalCriteria(t *testing.T) {
 	t.Setenv("AICR_CRITERIA_STRICT", "")
 	dataDir := writeQueryExternalCriteriaCatalog(t)
 	configPath := filepath.Join(t.TempDir(), "aicr-config.yaml")
-	config := `apiVersion: aicr.run/v1alpha2
+	config := `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: query-strict-test
@@ -266,7 +268,7 @@ spec:
 func writeQueryExternalCriteriaCatalog(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	registry := `apiVersion: aicr.run/v1alpha2
+	registry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `
@@ -277,7 +279,7 @@ components: []
 	if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
 		t.Fatalf("create overlays directory: %v", err)
 	}
-	overlay := `apiVersion: aicr.run/v1alpha2
+	overlay := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: external-query
@@ -363,5 +365,167 @@ func TestRecipeCommandRejectsRuntimeInventoryWithoutComponent(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "requires the recipe to declare component") {
 		t.Fatalf("command error = %v, want the missing-component rejection", err)
+	}
+}
+
+// TestRecipeAndQueryRejectRepeatedGKETCPXOInterfaces covers the single-value
+// contract for the required mapping: urfave/cli keeps the last repeated value
+// silently, so the flag must be in each command's validateSingleValueFlags
+// list (CodeRabbit PR #2705).
+func TestRecipeAndQueryRejectRepeatedGKETCPXOInterfaces(t *testing.T) {
+	mapping := "eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3," +
+		"eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"
+
+	tests := []struct {
+		name string
+		cmd  func() *cli.Command
+		args []string
+	}{
+		{
+			name: "recipe",
+			cmd:  recipeCmd,
+			args: []string{"recipe", "--service", "gke", "--accelerator", "h100",
+				"--os", "cos", "--intent", "training", "--platform", "kubeflow",
+				"--gke-tcpxo-interfaces", mapping, "--gke-tcpxo-interfaces", mapping},
+		},
+		{
+			name: "query",
+			cmd:  queryCmd,
+			args: []string{"query", "--service", "gke", "--selector", "deploymentOrder",
+				"--gke-tcpxo-interfaces", mapping, "--gke-tcpxo-interfaces", mapping},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd().Run(t.Context(), tt.args)
+			if err == nil || !strings.Contains(err.Error(),
+				"flag --gke-tcpxo-interfaces can only be specified once") {
+
+				t.Fatalf("%s error = %v, want repeated flag rejection", tt.name, err)
+			}
+		})
+	}
+}
+
+// priorRecipeFile writes a hydrated recipe naming one component at the
+// namespace a previous resolution installed it into. Only the namespace is
+// read back; the other fields are the minimum a hydrated recipe must carry to
+// pass the loader's coherence rules.
+func priorRecipeFile(t *testing.T, path, component, namespace string) string {
+	t.Helper()
+	doc := fmt.Sprintf(`kind: RecipeResult
+apiVersion: aicr.run/v1
+metadata:
+  version: test
+componentRefs:
+  - name: %s
+    type: Helm
+    source: https://charts.invalid/prior
+    version: 1.0.0
+    namespace: %s
+`, component, namespace)
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("setup: write prior recipe: %v", err)
+	}
+	return path
+}
+
+// runQueryValue runs `aicr query` and returns what it printed. The command is
+// its own root here, so cmd.Writer is the cmd.Root().Writer the action writes
+// the selected value to.
+func runQueryValue(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := queryCmd()
+	var out bytes.Buffer
+	cmd.Writer = &out
+	if err := cmd.Run(t.Context(), args); err != nil {
+		t.Fatalf("query %v: %v", args, err)
+	}
+	return strings.TrimSpace(out.String())
+}
+
+// TestQueryCmd_InheritFrom proves --inherit-from reaches the resolver on BOTH
+// paths buildRecipeFromCmdWithConfig routes through: the criteria-only
+// resolver and the snapshot one. The flag is declared on the recipe flag
+// block, which queryCmdFlags reuses; query is the command that can read the
+// result back, because it prints the selected value to cmd.Root().Writer
+// while recipe writes its document straight to a file.
+func TestQueryCmd_InheritFrom(t *testing.T) {
+	const (
+		component      = "gpu-operator"
+		movedNamespace = "legacy-gpu-operator"
+	)
+	selector := "components." + component + ".namespace"
+
+	dir := t.TempDir()
+	prior := priorRecipeFile(t, filepath.Join(dir, "prior.yaml"), component, movedNamespace)
+	snapFile := filepath.Join(dir, "snapshot.yaml")
+	// v1.34.0 clears the strictest readiness constraint on the criteria below.
+	writeSnapshotWithVersion(t, snapFile, "v1.34.0")
+
+	tests := []struct {
+		name  string
+		extra []string
+	}{
+		{name: "criteria path"},
+		{name: "snapshot path", extra: []string{"--snapshot", snapFile}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := slices.Concat([]string{
+				"query", "--selector", selector,
+				"--service", "eks", "--accelerator", "h100",
+				"--intent", "training",
+			}, tt.extra)
+
+			// Baseline first: the registry default has to differ from the
+			// inherited value, or the assertion below would hold either way.
+			base := runQueryValue(t, args...)
+			if base == movedNamespace {
+				t.Fatalf("setup: %s already resolves to %q, so the test would assert nothing",
+					component, movedNamespace)
+			}
+
+			got := runQueryValue(t, slices.Concat(args, []string{"--inherit-from", prior})...)
+			if got != movedNamespace {
+				t.Errorf("%s = %q, want the inherited %q (default is %q); --inherit-from did not reach the resolver",
+					selector, got, movedNamespace, base)
+			}
+		})
+	}
+}
+
+// TestRecipeAndQueryRejectRepeatedInheritFrom covers the single-value contract:
+// urfave/cli silently keeps the last repeated value, so a second
+// --inherit-from would pin namespaces from an artifact the operator did not
+// think they had named.
+func TestRecipeAndQueryRejectRepeatedInheritFrom(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  func() *cli.Command
+		args []string
+	}{
+		{
+			name: "recipe",
+			cmd:  recipeCmd,
+			args: []string{"recipe", "--service", "eks",
+				"--inherit-from", "a.yaml", "--inherit-from", "b.yaml"},
+		},
+		{
+			name: "query",
+			cmd:  queryCmd,
+			args: []string{"query", "--service", "eks", "--selector", "deploymentOrder",
+				"--inherit-from", "a.yaml", "--inherit-from", "b.yaml"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd().Run(t.Context(), tt.args)
+			if err == nil || !strings.Contains(err.Error(),
+				"flag --inherit-from can only be specified once") {
+
+				t.Fatalf("%s error = %v, want repeated flag rejection", tt.name, err)
+			}
+		})
 	}
 }

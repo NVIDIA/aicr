@@ -253,8 +253,11 @@ func TestComponentRegistry_NodeSchedulingPaths(t *testing.T) {
 	if len(gpuOp.GetSystemTolerationPaths()) == 0 {
 		t.Error("gpu-operator should have system toleration paths")
 	}
-	if len(gpuOp.GetAcceleratedNodeSelectorPaths()) == 0 {
-		t.Error("gpu-operator should have accelerated node selector paths")
+	// gpu-operator has NO accelerated node selector paths by design: the chart and
+	// ClusterPolicy CRD have no daemonsets.nodeSelector, so the route was removed
+	// (#2474). The operator places operands via its own GFD/NFD deploy labels.
+	if len(gpuOp.GetAcceleratedNodeSelectorPaths()) != 0 {
+		t.Error("gpu-operator should have no accelerated node selector paths (daemonsets.nodeSelector does not exist)")
 	}
 	if len(gpuOp.GetAcceleratedTolerationPaths()) == 0 {
 		t.Error("gpu-operator should have accelerated toleration paths")
@@ -1259,7 +1262,7 @@ func TestHelmConfig_DefaultNamespace(t *testing.T) {
 		{"network-operator", "nvidia-network-operator"},
 		{"cert-manager", "cert-manager"},
 		{"nvsentinel", "nvsentinel"},
-		{"nodewright-operator", "skyhook"},
+		{"nodewright-operator", "nodewright"},
 		{"kube-prometheus-stack", "monitoring"},
 	}
 
@@ -1278,7 +1281,7 @@ func TestHelmConfig_DefaultNamespace(t *testing.T) {
 
 func TestHelmConfig_DefaultNamespaceParsing(t *testing.T) {
 	yamlData := `
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: test-component
@@ -1316,7 +1319,7 @@ func TestKustomizeConfig_Parsing(t *testing.T) {
 	)
 
 	yamlData := `
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: my-kustomize-app
@@ -1377,7 +1380,7 @@ func buildProviderWithRegistry(t *testing.T, tag string) DataProvider {
 		compName = "evict-only"
 	}
 
-	registryYAML := []byte("apiVersion: aicr.run/v1alpha2\n" +
+	registryYAML := []byte("apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: " + compName + "\n" +
@@ -1536,7 +1539,7 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 	}{
 		{
 			name: "component named deployer rejected",
-			registryYAML: "apiVersion: aicr.run/v1alpha2\n" +
+			registryYAML: "apiVersion: aicr.run/v1beta1\n" +
 				"kind: ComponentRegistry\n" +
 				"components:\n" +
 				"  - name: deployer\n" +
@@ -1545,7 +1548,7 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 		},
 		{
 			name: "component aliasing deployer via valueOverrideKeys rejected",
-			registryYAML: "apiVersion: aicr.run/v1alpha2\n" +
+			registryYAML: "apiVersion: aicr.run/v1beta1\n" +
 				"kind: ComponentRegistry\n" +
 				"components:\n" +
 				"  - name: my-operator\n" +
@@ -1582,7 +1585,7 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 // load time instead (same fail-closed contract as the reserved
 // deployer-key guard above).
 func TestLoadRegistry_RejectsKustomizeManifestFiles(t *testing.T) {
-	registryYAML := "apiVersion: aicr.run/v1alpha2\n" +
+	registryYAML := "apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: my-kustomize-app\n" +
@@ -1652,5 +1655,123 @@ func TestComponentRegistry_ManifestFilesResolve(t *testing.T) {
 	if !slices.Equal(kueue.ManifestFiles, wantManifests) {
 		t.Errorf("kueue manifestFiles = %v, want %v (dependency-ordered quota CRs)",
 			kueue.ManifestFiles, wantManifests)
+	}
+}
+
+func TestComponentConfigUpgradesFile(t *testing.T) {
+	registryYAML := []byte("apiVersion: " + ComponentRegistryAPIVersion + "\n" +
+		"kind: " + ComponentRegistryKind + "\n" +
+		"components:\n" +
+		"  - name: nodewright-operator\n" +
+		"    displayName: NodeWright Operator\n" +
+		"    upgrades:\n" +
+		"      file: components/nodewright-operator/upgrades.yaml\n")
+
+	var registry ComponentRegistry
+	if err := yaml.Unmarshal(registryYAML, &registry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(registry.Components) != 1 {
+		t.Fatalf("components = %d, want 1", len(registry.Components))
+	}
+	if got := registry.Components[0].Upgrades.File; got != "components/nodewright-operator/upgrades.yaml" {
+		t.Errorf("Upgrades.File = %q, want %q", got, "components/nodewright-operator/upgrades.yaml")
+	}
+}
+
+func TestComponentConfigUpgradesAbsent(t *testing.T) {
+	registryYAML := []byte("apiVersion: " + ComponentRegistryAPIVersion + "\n" +
+		"kind: " + ComponentRegistryKind + "\n" +
+		"components:\n" +
+		"  - name: nfd\n" +
+		"    displayName: Node Feature Discovery\n")
+
+	var registry ComponentRegistry
+	if err := yaml.Unmarshal(registryYAML, &registry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := registry.Components[0].Upgrades.File; got != "" {
+		t.Errorf("Upgrades.File = %q, want empty for a component with no upgrades key", got)
+	}
+}
+
+func TestValidateMixinSafeOverridePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		paths   []string
+		wantErr string
+	}{
+		{name: "empty allowlist is valid"},
+		{name: "well-formed unique leaf paths", paths: []string{"global.tracing.enabled", "global.auditLogging.enabled"}},
+		{name: "empty string entry", paths: []string{""}, wantErr: "not a well-formed dotted path"},
+		{name: "leading dot", paths: []string{".global.tracing.enabled"}, wantErr: "not a well-formed dotted path"},
+		{name: "trailing dot", paths: []string{"global.tracing.enabled."}, wantErr: "not a well-formed dotted path"},
+		{name: "double dot", paths: []string{"global..enabled"}, wantErr: "not a well-formed dotted path"},
+		{name: "literal duplicate", paths: []string{"global.tracing.enabled", "global.tracing.enabled"}, wantErr: "more than once"},
+		{name: "ancestor/descendant pair", paths: []string{"global.tracing", "global.tracing.enabled"}, wantErr: "one an ancestor of the other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := &ComponentConfig{Name: "test-component", MixinSafeOverridePaths: tt.paths}
+			err := validateMixinSafeOverridePaths(comp)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestComponentRegistryValidate_MixinSafeOverridePaths pins the allowlist
+// rules to the EXPORTED contract, not just the loader path: a registry
+// constructed directly (SDK callers, an external --data catalog assembled in
+// Go) never goes through loadComponentRegistryFor, so Validate() is the only
+// gate it sees. The sibling test above calls the private helper and would
+// stay green even if Validate() dropped the check entirely.
+func TestComponentRegistryValidate_MixinSafeOverridePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		paths   []string
+		wantErr string
+	}{
+		{name: "well-formed allowlist passes", paths: []string{"global.tracing.enabled"}},
+		{name: "malformed path is rejected", paths: []string{"global..enabled"}, wantErr: "not a well-formed dotted path"},
+		{name: "duplicate entry is rejected", paths: []string{"global.tracing.enabled", "global.tracing.enabled"}, wantErr: "more than once"},
+		{name: "ancestor/descendant pair is rejected", paths: []string{"global.tracing", "global.tracing.enabled"}, wantErr: "one an ancestor of the other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &ComponentRegistry{
+				Components: []ComponentConfig{{
+					Name:                   "test-component",
+					DisplayName:            "Test Component",
+					MixinSafeOverridePaths: tt.paths,
+				}},
+			}
+			errs := registry.Validate()
+			if tt.wantErr == "" {
+				if len(errs) != 0 {
+					t.Fatalf("Validate() = %v, want no errors", errs)
+				}
+				return
+			}
+			found := false
+			for _, err := range errs {
+				if strings.Contains(err.Error(), tt.wantErr) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("Validate() = %v, want an error containing %q", errs, tt.wantErr)
+			}
+		})
 	}
 }

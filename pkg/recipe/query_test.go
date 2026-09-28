@@ -239,7 +239,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("basic result", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Criteria: &Criteria{
 				Service:     "eks",
 				Accelerator: "h100",
@@ -296,6 +296,7 @@ func TestHydrateResult(t *testing.T) {
 
 	t.Run("typed configuration", func(t *testing.T) {
 		result := &RecipeResult{
+			APIVersion: RecipeResultAPIVersion,
 			Configuration: &RecipeConfiguration{
 				Slurm: &SlurmConfiguration{
 					Accounting: &SlurmAccountingConfiguration{
@@ -325,7 +326,7 @@ func TestHydrateResult(t *testing.T) {
 		// Manifest-only Helm refs have no chart and must stay chartless.
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			ComponentRefs: []ComponentRef{
 				{
 					Name:    "source-only",
@@ -371,7 +372,7 @@ func TestHydrateResult(t *testing.T) {
 		// the OpenAPI schema so `aicr query` can select it.
 		result := &RecipeResult{
 			Kind:            "RecipeResult",
-			APIVersion:      "aicr.run/v1alpha2",
+			APIVersion:      "aicr.run/v1",
 			DeploymentOrder: []string{},
 		}
 		result.Metadata.GPUDriverState = GPUDriverStateAbsent
@@ -414,7 +415,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("excluded overlays include reasons", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:            "RecipeResult",
-			APIVersion:      "aicr.run/v1alpha2",
+			APIVersion:      "aicr.run/v1",
 			DeploymentOrder: []string{},
 		}
 		result.Metadata.ExcludedOverlays = []ExcludedOverlay{
@@ -449,7 +450,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("nil criteria", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 		}
 
 		hydrated, err := HydrateResult(result)
@@ -464,7 +465,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("constraints with optional fields", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Constraints: []Constraint{
 				{Name: "k8s", Value: ">= 1.30"},
 				{Name: "gpu-mem", Value: ">= 80", Severity: "error", Remediation: "upgrade GPU", Unit: "GB"},
@@ -505,7 +506,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("component optional fields", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			ComponentRefs: []ComponentRef{
 				{
 					Name:           "kustomize-app",

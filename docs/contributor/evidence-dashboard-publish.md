@@ -41,7 +41,7 @@ GCS source-keyed tree (read-only)
 ```
 
 The byte-deterministic generator (no clock, no random — see
-[`tools/corroborate`](../../tools/corroborate/README.md)) makes the publish a
+[`tools/corroborate`](https://github.com/NVIDIA/aicr/blob/main/tools/corroborate/README.md)) makes the publish a
 straight deploy: there is no drift-PR for the site. The in-job determinism
 gate runs the generator twice and diffs the output, so a non-reproducible
 build fails loudly instead of shipping.

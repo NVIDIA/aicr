@@ -44,6 +44,32 @@
 # chart, not standalone sub-charts).
 fullnameOverride: slinky-topograph
 
+# TEMPORARY — remove once upstream publishes the release image to the new
+# package. Tracked on #2793, which stays open until this override is gone.
+# Upstream: dsx-ai-factory/topograph#545.
+#
+# The topograph repository moved from NVIDIA to dsx-ai-factory. The chart
+# published as 1.0.0 at the new index was built from `main`, where
+# image.repository already points at ghcr.io/dsx-ai-factory/topograph — but
+# no release image has been pushed there yet (only three dev tags), so a
+# default install renders ghcr.io/dsx-ai-factory/topograph:v1.0.0 and lands
+# in ImagePullBackOff.
+#
+# ghcr.io/nvidia/topograph is still public and serves the genuine multi-arch
+# v1.0.0 release image (created 2026-08-18, matching the v1.0.0 release), and
+# the chart's appVersion is still v1.0.0, so this override pulls exactly the
+# image the release intended. It pairs that image with a chart cut from
+# `main`, whose only runtime deltas are CPU values and a narrowed
+# ClusterRole: `nodes` drops `get` (keeping `list`), and `nodes/patch` and
+# `apps/daemonsets/get` are removed entirely. The v1.0.0 image reaches none
+# of those on our paths -- `nodes/patch` is behind `useDynamicNodes`, which
+# we leave unset; `nodes/get` is used only by the k8s/lambdai engines and
+# the node-data-broker's own role; and `daemonsets/get` only by the
+# infiniband-k8s provider. We run engine `slinky` with provider `gcp` or
+# `test`. Every other packaged template is unchanged between the two.
+image:
+  repository: ghcr.io/nvidia/topograph
+
 service:
   type: ClusterIP
   port: 49021

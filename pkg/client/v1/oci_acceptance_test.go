@@ -421,7 +421,7 @@ func entryNames(entries []os.DirEntry) []string {
 	return names
 }
 
-const acceptanceRegistryYAML = `apiVersion: aicr.run/v1alpha2
+const acceptanceRegistryYAML = `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `

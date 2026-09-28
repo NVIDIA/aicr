@@ -80,6 +80,9 @@ func stripHelmTemplates(data []byte) []byte {
 // non-empty digest is validated as sha256:<64 lowercase hex chars> and folded
 // in as an @<digest> suffix.
 //
+// A scalar that is itself a serialized YAML document is also recursed into,
+// e.g. a ConfigMap data value embedding a whole manifest.
+//
 // Helm template directives ({{ ... }}) are replaced with a placeholder before
 // parsing, so files mixing YAML with Helm templates (those under
 // recipes/components/*/manifests/ that are processed as chart templates) can
@@ -189,7 +192,29 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 		// is still surveyed. Rare in K8s manifests but cheap to handle.
 		return walkForImages(n.Alias, seen)
 	case yaml.ScalarNode:
-		// Scalar leaf — no nested image references.
+		return walkEmbeddedYAMLScalar(n, seen)
+	}
+	return nil
+}
+
+// walkEmbeddedYAMLScalar recurses into n if its value is itself a
+// serialized YAML document, merging any images found into seen. It returns
+// nil, not an error, when n's value isn't valid YAML (a script, a
+// certificate). An invalid image descriptor inside a real embedded document
+// still returns an error.
+func walkEmbeddedYAMLScalar(n *yaml.Node, seen map[string]struct{}) error {
+	if !strings.Contains(n.Value, "\n") {
+		return nil
+	}
+	imgs, err := ExtractImagesFromYAML([]byte(n.Value))
+	if err != nil {
+		if IsInvalidStructuredImageDescriptor(err) {
+			return err
+		}
+		return nil
+	}
+	for _, img := range imgs {
+		seen[img] = struct{}{}
 	}
 	return nil
 }

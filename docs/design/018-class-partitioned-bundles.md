@@ -135,7 +135,7 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
 - name: kube-prometheus-stack
   displayName: Kube Prometheus Stack
   class: ops
-  ...
+  # Additional component fields omitted.
 ```
 
 - Allowed values are the known class names; the initial set is `core` and

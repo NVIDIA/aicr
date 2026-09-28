@@ -1,0 +1,219 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Written while the pin was still v0.17.1, under the rule-2 allowance that lets
+# manual and blocked describe a boundary above it. The pin is now v0.19.0, and
+# v0.18.0 below is the rename release rather than the current pin.
+#
+# Two boundaries. The rename is the only one that asks anything of an operator,
+# so its to range reaches through v0.19.0: a jump from below v0.18.0 straight to
+# v0.19.0 lands on the rename steps rather than being told to stop partway,
+# because the v0.19.0 boundary it also crosses is safe and adds no work.
+#
+# Transcribed from NVIDIA/nodewright docs/getting-started/migration.md, which
+# remains the authoritative account. AICR's own reasons for holding are
+# "Upgrade Notes" > nodewright-operator in docs/user/component-catalog.md.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: nodewright-operator
+transitions:
+  - from: "<0.18.0"
+    to: ">=0.18.0 <=0.19.0"
+    verdict: manual
+    summary: >-
+      v0.18.0 renames skyhook.nvidia.com/v1alpha1 Skyhook to
+      nodewright.nvidia.com/v1alpha1 NodeWright, moves DeploymentPolicy to the
+      same group, and shifts the on-node annotation, label and finalizer
+      prefix. An operator-side mirror migrates the objects for you, but
+      completion status is then written only on the new kind and the attempt
+      to mirror it back to the legacy object fails in a reconcile conflict
+      loop, so Skyhook.status stays empty forever on a cluster where tuning
+      has genuinely finished. Anything still reading the legacy status waits
+      on a value that never arrives. The legacy object also goes read-only:
+      the post-rename admission webhook rejects any spec, pause or disable
+      change to it, so the first attempt to alter tuning after the upgrade
+      fails rather than the cluster merely reporting the wrong status.
+      Deletions and identical re-applies are still accepted, which is why a
+      steady-state sync keeps working and the break only surfaces on a real
+      edit.
+    precondition: >-
+      Every Skyhook is complete with no nodes in progress. Upstream makes this
+      a requirement rather than a recommendation: the migration relabels the
+      operator's package and per-node ConfigMaps so the post-rename operator
+      adopts them instead of recreating them, and that flow assumes no
+      in-flight package work to disrupt. Check with `kubectl get
+      skyhooks.skyhook.nvidia.com -o
+      custom-columns=NAME:.metadata.name,STATUS:.status.status,INPROGRESS:.status.nodesInProgress`
+      and proceed only when nothing is actively rolling out. paused and
+      disabled objects are fine to leave as they are — the mirror carries that
+      state onto the NodeWright — but do not unpause or enable one until its
+      pre-upgrade package pods are gone.
+    reversible: false
+    affectedResources:
+      - group: skyhook.nvidia.com
+        kinds:
+          - Skyhook
+          - DeploymentPolicy
+    stepsByDeployer:
+      - deployers: [argocd, argocd-helm, flux]
+        steps:
+          - id: expect-operator-downtime-during-the-hook
+            description: >-
+              The chart runs a selector-migration pre-upgrade hook that DELETES
+              the operator Deployment before it is recreated, because
+              spec.selector is immutable and the rename changes it. If that
+              hook fails, the sync can stop with the Deployment already gone
+              and no operator running. Re-sync to recover.
+            reason: >-
+              Verified on the helm path, where a hook Job that tripped its
+              deadline left the namespace with zero operator pods and the
+              release in `failed`. The deletion itself is correct: it avoids a
+              release wedged on "Pending termination" when the running operator
+              predates label-based webhook discovery. The hook ships in the
+              chart rather than the deployer, so any path that runs the chart's
+              hooks carries the same gap between delete and recreate; the
+              failure was not reproduced on argocd or flux specifically.
+          - id: upgrade-operator
+            description: >-
+              Bump the operator's chart version in its own Application or
+              HelmRelease and sync it, before touching any CR.
+            reason: >-
+              The chart ships both groups' CRDs and RBAC, and the mirror
+              imports each Skyhook into a NodeWright. Per-node state is copied
+              to the nodewright.nvidia.com/* prefix, so packages are not
+              re-run. The new objects are outside the reconciler's inventory
+              at this point, so it neither prunes nor flags them.
+          - id: rename-crs-in-one-commit
+            description: >-
+              In a single git commit, remove each Skyhook manifest and add the
+              NodeWright equivalent: apiVersion skyhook.nvidia.com/v1alpha1
+              becomes nodewright.nvidia.com/v1alpha1, kind Skyhook becomes
+              NodeWright, metadata.name is unchanged. DeploymentPolicy changes
+              apiVersion only. Then sync or reconcile.
+            reason: >-
+              The reconciler adopts the mirror-created NodeWright and prunes
+              the Skyhook in one pass. Leaving both in git opens a window where
+              the mirror and the reconciler both write the NodeWright and a
+              stale Skyhook re-import stomps the git edit; do not reach for
+              kubectl here, since anything applied by hand is reverted on the
+              next reconcile. Rewrite apiVersion and kind only: a blanket
+              substitution also rewrites nodeSelectors and
+              podNonInterruptLabels, which name your labels rather than the
+              operator's, and pointing them at keys nothing carries makes the
+              CR match no node.
+          - id: verify-migration
+            description: >-
+              kubectl get nodewrights.nodewright.nvidia.com lists a NodeWright
+              for each former Skyhook, node annotations are present under the
+              nodewright.nvidia.com/ prefix, and no package re-ran.
+            reason: >-
+              Confirms the mirror adopted live lifecycle position rather than
+              handing the new object a fresh rollout.
+      - steps:
+          - id: expect-operator-downtime-during-the-hook
+            description: >-
+              The chart runs a selector-migration pre-upgrade hook that DELETES
+              the operator Deployment before helm recreates it. If that hook's
+              Job fails or exceeds its deadline, helm aborts the upgrade with
+              the Deployment already gone, so the namespace is left with no
+              operator at all and the release sits in `failed`. Re-run the same
+              helm upgrade to recover; it completes once the hook Job passes.
+            reason: >-
+              Observed on a kind cluster crossing v0.17.1 to v0.19.0: the hook
+              pod exited 0 having deleted the Deployment, but the Job tripped
+              its activeDeadlineSeconds while its image was still being pulled,
+              and helm treated the Job failure as an aborted upgrade. The
+              deletion is deliberate: the hook deletes when the live selector
+              would have to change (spec.selector is immutable) or when the
+              running operator predates label-based webhook discovery, which is
+              what fired here. Such an operator looks its webhook
+              configurations up by name, the upgrade renames them, so it never
+              goes Ready, never releases the webhook bootstrap lease and is
+              never terminated by the rolling update, wedging the release on
+              "Pending termination". A short operator gap is the cheaper
+              failure. The exposure is that gap widening, not the deletion.
+          - id: upgrade-operator
+            description: >-
+              helm upgrade the operator chart, before touching any CR.
+            reason: >-
+              The chart ships both groups' CRDs and RBAC, and the mirror
+              imports each Skyhook into a NodeWright. Per-node state is copied
+              to the nodewright.nvidia.com/* prefix, so packages are not
+              re-run.
+          - id: rename-crs
+            description: >-
+              Rewrite your CR manifests and apply them:
+              sed -e '/^ *apiVersion:/ s|skyhook\.nvidia\.com/|nodewright.nvidia.com/|'
+              -e 's|^\( *kind: *\)Skyhook[[:space:]]*$|\1NodeWright|'
+              my-skyhook.yaml > my-nodewright.yaml
+            reason: >-
+              The mirror already created the object, so this applies as a
+              no-op adoption rather than a fresh create. Rewrite apiVersion
+              and kind only: a blanket substitution also rewrites
+              nodeSelectors and podNonInterruptLabels, which name your labels
+              rather than the operator's, and that turns a no-op adoption into
+              a real spec change against keys nothing carries.
+          - id: delete-legacy-crs
+            description: >-
+              Once the NodeWright exists and reconciles: kubectl delete
+              skyhook.skyhook.nvidia.com <name>, then kubectl delete
+              deploymentpolicy.skyhook.nvidia.com <name>.
+            reason: >-
+              Skyhooks must go before the DeploymentPolicy they reference. The
+              NodeWright survives, because the mirror never deletes it. Legacy
+              per-node state and pre-rename package pods are kept for the
+              LEGACY_CLEANUP_DELAY rollback window and pruned later, not now.
+              Do not remove the skyhook.nvidia.com CRD itself until every
+              legacy object is gone, since that cascade-deletes whatever
+              remains.
+          - id: verify-migration
+            description: >-
+              kubectl get nodewrights.nodewright.nvidia.com lists a NodeWright
+              for each former Skyhook, node annotations are present under the
+              nodewright.nvidia.com/ prefix, and no package re-ran.
+            reason: >-
+              Confirms the mirror adopted live lifecycle position rather than
+              handing the new object a fresh rollout.
+    references:
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md#prerequisite-all-skyhooks-must-be-complete
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nodewright-operator-v0180-renames-skyhook-to-nodewright
+      - https://github.com/NVIDIA/aicr/issues/2593
+      - https://github.com/NVIDIA/aicr/issues/2594
+
+  # from starts at 0.18.0 rather than reaching lower: this describes the drain
+  # change relative to v0.18.0 behaviour, and anyone below that has the rename
+  # to cross first.
+  - from: ">=0.18.0 <0.19.0"
+    to: "=0.19.0"
+    verdict: safe
+    verifiedBy: >-
+      Upstream release note operator/v0.19.0 (NVIDIA/nodewright), which
+      enumerates the release's two changes: the drain-completion fix and the
+      opt-in spec.runtimeRequiredCordonAfter field. The chart moves only the
+      operator image between v0.18.0 and v0.19.0, and its one CRD edit adds
+      that optional field under templates/, which Helm applies on upgrade like
+      any other template.
+    summary: >-
+      Drain now completes when evicted pods have terminated rather than when
+      their evictions were accepted, so an interrupt starts roughly the longest
+      terminationGracePeriodSeconds on the node later than before, and
+      spec.drainConfig.timeout bounds time-to-drain rather than
+      time-to-accept. Nothing to change on upgrade; set that timeout if you
+      want the new wait bounded.
+    reversible: false
+    references:
+      - https://github.com/NVIDIA/nodewright/blob/main/operator/RELEASE_NOTES.md
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/user-guide/runtime-required.md
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nodewright-operator-v0180-renames-skyhook-to-nodewright

@@ -15,19 +15,24 @@
 package project
 
 import (
+	"encoding/hex"
 	"regexp"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+)
+
+// testIssuer and testIdentity are the verified (issuer, identity) fixture
+// behind this file's golden hash values.
+const (
+	testIssuer   = "https://token.actions.githubusercontent.com"
+	testIdentity = "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main"
 )
 
 func TestSignerIDHash(t *testing.T) {
-	const (
-		issuer   = "https://token.actions.githubusercontent.com"
-		identity = "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main"
-	)
-
 	hexRe := regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-	got := SignerIDHash(issuer, identity)
+	got := SignerIDHash(testIssuer, testIdentity)
 	if !hexRe.MatchString(got) {
 		t.Fatalf("idHash = %q, want 32 lowercase hex chars", got)
 	}
@@ -42,15 +47,15 @@ func TestSignerIDHash(t *testing.T) {
 	}
 
 	// Determinism: same inputs -> same hash.
-	if again := SignerIDHash(issuer, identity); again != got {
+	if again := SignerIDHash(testIssuer, testIdentity); again != got {
 		t.Errorf("idHash not deterministic: %q != %q", got, again)
 	}
 
 	// Different signer -> different hash (collision would be a bug).
-	if other := SignerIDHash(issuer, identity+"x"); other == got {
+	if other := SignerIDHash(testIssuer, testIdentity+"x"); other == got {
 		t.Errorf("distinct identities collided on %q", got)
 	}
-	if other := SignerIDHash(issuer+"x", identity); other == got {
+	if other := SignerIDHash(testIssuer+"x", testIdentity); other == got {
 		t.Errorf("distinct issuers collided on %q", got)
 	}
 }
@@ -61,5 +66,18 @@ func TestSignerIDHash(t *testing.T) {
 func TestSignerIDHashSeparatorUnambiguous(t *testing.T) {
 	if SignerIDHash("ab", "c") == SignerIDHash("a", "bc") {
 		t.Error("issuer/identity boundary is ambiguous — separator not effective")
+	}
+}
+
+// TestSignerIDHashMatchesSharedDigest proves SignerIDHash's output equals
+// the first idHashLen hex chars of attestation.HashIdentityPair's digest.
+func TestSignerIDHashMatchesSharedDigest(t *testing.T) {
+	sum, err := attestation.HashIdentityPair(testIssuer, testIdentity)
+	if err != nil {
+		t.Fatalf("HashIdentityPair: %v", err)
+	}
+	full := hex.EncodeToString(sum[:])
+	if got := SignerIDHash(testIssuer, testIdentity); got != full[:idHashLen] {
+		t.Errorf("SignerIDHash = %q, want prefix of shared digest %q", got, full)
 	}
 }

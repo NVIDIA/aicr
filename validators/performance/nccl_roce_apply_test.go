@@ -48,9 +48,9 @@ var ncclGVRListKinds = map[schema.GroupVersionResource]string{
 	computeDomainGVR:         "ComputeDomainList",
 }
 
-func newFakeDynamicClient(objs ...runtime.Object) dynamic.Interface {
+func newFakeDynamicClient() dynamic.Interface {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
-		runtime.NewScheme(), ncclGVRListKinds, objs...)
+		runtime.NewScheme(), ncclGVRListKinds)
 }
 
 // roceClaimCount walks the RoCE ResourceClaimTemplate to the templated device
@@ -216,6 +216,51 @@ func TestCleanupNCCLResources_RejectsEmptyUID(t *testing.T) {
 	}
 }
 
+// TestCleanupNCCLResources_ReturnsErrorOnTerminationTimeout verifies that a
+// namespace stuck in Terminating (e.g. a stuck DRA/IMEX finalizer) after a
+// successful Delete call is surfaced as a returned ErrCodeTimeout, not
+// silently swallowed — a finalizer-stuck teardown must not report a clean
+// "Deleted" while the ComputeDomain/ResourceClaimTemplate leaks forever.
+// terminationWait is injected as a tiny bound so the test doesn't wait out
+// the real production timeout.
+func TestCleanupNCCLResources_ReturnsErrorOnTerminationTimeout(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
+	nsGVR := v1.SchemeGroupVersion.WithResource("namespaces")
+
+	// Unlike TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace, this
+	// finalizer never clears: every Delete re-stamps DeletionTimestamp
+	// instead of ever letting the object actually disappear, so
+	// waitForNamespaceGone never observes NotFound within the bound. The
+	// fake client's default Delete otherwise ignores Finalizers entirely
+	// and removes the object outright, which is why a pre-seeded
+	// already-Terminating object alone (without this reactor) does not
+	// reproduce a stuck finalizer.
+	fakeClient.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		existing, getErr := fakeClient.Tracker().Get(nsGVR, "", ns)
+		obj, ok := existing.(*v1.Namespace)
+		if getErr != nil || !ok {
+			return false, nil, nil
+		}
+		held := obj.DeepCopy()
+		held.Finalizers = []string{"kubernetes"}
+		now := metav1.Now()
+		held.DeletionTimestamp = &now
+		if err := fakeClient.Tracker().Update(nsGVR, held, ""); err != nil {
+			return true, nil, err
+		}
+		return true, nil, nil
+	})
+
+	err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID, 10*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected a timeout error when the namespace never finishes terminating, got nil")
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+		t.Errorf("got %v, want an ErrCodeTimeout-wrapped termination-wait failure", err)
+	}
+}
+
 // TestCleanupNCCLResources_UIDMismatchPreventsDelete verifies a UID
 // mismatch is treated like NotFound, not a cleanup failure. client-go's
 // fake ObjectTracker ignores Delete preconditions, so this reactor emulates
@@ -307,9 +352,12 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 	}
 }
 
-// TestWaitForNamespaceGone_TimesOutWhenNeverDeleted verifies that
-// waitForNamespaceGone returns ErrCodeTimeout, not a hang, when a
-// namespace's finalizers never clear before the context deadline.
+// TestWaitForNamespaceGone_TimesOutWhenNeverDeleted guards the bounded-wait
+// contract of waitForNamespaceGone itself. If finalizers never clear within
+// the deadline, it must return ErrCodeTimeout rather than hang indefinitely
+// (cleanupNCCLResources surfaces this as a returned ErrCodeTimeout). Calls it
+// directly with a short local context to avoid the real 5-minute
+// production bound.
 func TestWaitForNamespaceGone_TimesOutWhenNeverDeleted(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	now := metav1.Now()
@@ -319,7 +367,6 @@ func TestWaitForNamespaceGone_TimesOutWhenNeverDeleted(t *testing.T) {
 		DeletionTimestamp: &now,
 	}})
 
-	// Short deadline to avoid the real 5-minute production bound.
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -329,37 +376,5 @@ func TestWaitForNamespaceGone_TimesOutWhenNeverDeleted(t *testing.T) {
 	}
 	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
 		t.Errorf("got %v, want an ErrCodeTimeout-wrapped wait failure", err)
-	}
-}
-
-// TestCleanupNCCLResources_ReturnsErrorOnTerminationTimeout verifies that
-// cleanupNCCLResources fails, rather than reporting a false "Deleted",
-// when a namespace is still held by a finalizer after the wait bound
-// expires.
-func TestCleanupNCCLResources_ReturnsErrorOnTerminationTimeout(t *testing.T) {
-	const ns = "aicr-nccl-perf-deadbeef"
-	now := metav1.Now()
-	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: ns, UID: testNamespaceUID,
-	}})
-	fakeClient.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
-		// Accept the delete but never actually remove the object, simulating
-		// a finalizer that never clears within the wait bound below.
-		held := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
-			Name: ns, UID: testNamespaceUID, Finalizers: []string{"kubernetes"}, DeletionTimestamp: &now,
-		}}
-		nsGVR := v1.SchemeGroupVersion.WithResource("namespaces")
-		if err := fakeClient.Tracker().Update(nsGVR, held, ""); err != nil {
-			return true, nil, err
-		}
-		return true, nil, nil
-	})
-
-	err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID, 100*time.Millisecond)
-	if err == nil {
-		t.Fatal("expected cleanup to fail when the namespace never finishes terminating, got nil")
-	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
-		t.Errorf("got %v, want an ErrCodeTimeout-wrapped cleanup failure", err)
 	}
 }

@@ -1,0 +1,144 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Opt-in mixin: turns on NVSentinel's preflight admission webhook, which injects
+# hardware checks into GPU pods before the workload starts. Off by default in
+# every shipped recipe. Full behaviour, opt-in steps and limitations:
+# docs/user/component-catalog.md#preflight-checks.
+#
+# Deploying this mixin injects nothing on its own. An operator must also label
+# each namespace:  kubectl label namespace <ns> nvsentinel.nvidia.com/preflight=enabled
+#
+# Two bundle-time gates guard configurations this mixin cannot express:
+# CheckNVSentinelPreflightDCGMReachable and
+# CheckNVSentinelPreflightGangSchedulerRequired (see recipes/registry.yaml).
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-preflight
+spec:
+  componentRefs:
+    - name: nvsentinel
+      # Ordering only -- the controller resolves the PodGroup CRD at startup and
+      # exits without it. That kai-scheduler stays ENABLED is enforced by
+      # CheckNVSentinelPreflightGangSchedulerRequired, not by this edge.
+      dependencyRefs:
+        - kai-scheduler
+      overrides:
+        global:
+          preflight:
+            enabled: true
+        preflight:
+          # Gates the pod: a failed check exits nonzero, so the workload's
+          # containers never start, and the event reaches the node -- a fatal
+          # result as a NodeCondition, a non-fatal unhealthy one as a
+          # Kubernetes Event. STORE_ONLY would convert the failure to
+          # exit 0 and drop the event, which is the whole point of #2610.
+          # Nothing cordons, drains or reboots -- AICR deploys no remediation
+          # component (all six default off and none is enabled here).
+          processingStrategy: EXECUTE_REMEDIATION
+          webhook:
+            # Chart default is Fail, which would make a webhook outage reject
+            # every pod created in a labeled namespace.
+            failurePolicy: Ignore
+          gangCoordination:
+            # Matches the chart default; pinned because the whole gang path and
+            # its generated RBAC are gated on it.
+            enabled: true
+          # The chart's default ({}) needs native gang APIs that only exist on
+          # K8s 1.35+/1.36+; AICR's floor is 1.32. annotationKeys is required --
+          # upstream refuses to build a discoverer without it and exits at
+          # startup.
+          gangDiscovery:
+            name: kai
+            annotationKeys:
+              - pod-group-name
+            podGroupGVR:
+              group: scheduling.run.ai
+              version: v2alpha2
+              resource: podgroups
+            minCountExpr: "podGroup.spec.minMember"
+          # Restated verbatim from the chart, because defaultEnabled is the only
+          # per-check switch and it lives inside this list. Order is injection
+          # order. TestNVSentinelPreflightInitContainersMatchChart diffs this
+          # against the chart on every render-check run.
+          initContainers:
+            - name: preflight-dcgm-diag
+              inheritUserEnv: true
+              inheritUserVolumeMounts: true
+              image:
+                repository: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
+                tag: ""
+              env:
+                - name: DCGM_HOSTENGINE_ADDR
+                  value: "nvidia-dcgm.gpu-operator.svc:5555"
+                - name: DCGM_DIAG_LEVEL
+                  value: "2"
+                - name: DCGM_DIAG_STATUS_RETRY_MAX_ATTEMPTS
+                  value: "10"
+                - name: DCGM_DIAG_STATUS_RETRY_INTERVAL_SECONDS
+                  value: "10"
+              volumeMounts:
+                - name: nvsentinel-socket
+                  mountPath: /var/run
+            - name: preflight-nccl-loopback
+              inheritUserEnv: true
+              inheritUserVolumeMounts: true
+              image:
+                repository: ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
+                tag: ""
+              env:
+                # The loopback test runs, but its bandwidth threshold does not
+                # gate. The chart's 150 is NVLink-calibrated -- an 8x H100
+                # p5.48xlarge measures 421.86 GB/s bus bandwidth -- while PCIe
+                # parts need ~15, so with a blocking strategy it would fail
+                # healthy l40/l40s/rtx-pro-6000 hardware. Skipping the threshold
+                # keeps the connectivity check, which is accelerator-independent.
+                # Revisit if upstream gains per-accelerator thresholds.
+                - name: SKIP_BANDWIDTH_CHECK
+                  value: "true"
+                - name: BW_THRESHOLD_GBPS
+                  value: "150"
+                - name: TEST_SIZE_MB
+                  value: "256"
+              volumeMounts:
+                - name: nvsentinel-socket
+                  mountPath: /var/run
+            - name: preflight-nccl-allreduce
+              # The one deviation from the chart. POD_NAME is injected only for
+              # pods carrying a gang annotation at CREATE, and this check exits
+              # without it -- on by default it strands every plain GPU pod.
+              # The entry stays so the per-pod annotation opt-in still resolves.
+              defaultEnabled: false
+              inheritUserEnv: true
+              inheritUserVolumeMounts: true
+              image:
+                repository: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
+                tag: ""
+              securityContext:
+                capabilities:
+                  add: ["IPC_LOCK"]
+              env:
+                - name: BW_THRESHOLD_GBPS
+                  value: "100"
+                - name: MESSAGE_SIZES
+                  value: "4G"
+                - name: NCCL_DEBUG
+                  value: "INFO"
+                - name: NCCL_DEBUG_SUBSYS
+                  value: "INIT,NET"
+              volumeMounts:
+                - name: nvsentinel-socket
+                  mountPath: /var/run

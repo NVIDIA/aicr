@@ -40,6 +40,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // logWriter returns an io.Writer for streaming agent logs.
@@ -161,6 +162,13 @@ type AgentConfig struct {
 	// snapshot as the oke-addons subtype.
 	OKEAddonsPath string
 
+	// GKEGPUPoolsPath, when set, points at an operator-supplied
+	// `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump on the CALLER's filesystem, projected
+	// controller-side before deploying and merged into the returned
+	// snapshot as the gke-gpu-pools subtype.
+	GKEGPUPoolsPath string
+
 	// DiscoverNetwork enables the in-pod network collector's live l8k
 	// discovery path. Discovery is NOT read-only — it writes node labels
 	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
@@ -273,6 +281,13 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	}
 	if config.OKEAddonsPath != "" {
 		subtype, err := k8scollector.ProjectOKEAddons(ctx, config.OKEAddonsPath)
+		if err != nil {
+			return nil, err
+		}
+		projections = append(projections, subtype)
+	}
+	if config.GKEGPUPoolsPath != "" {
+		subtype, err := k8scollector.ProjectGKEGPUPools(ctx, config.GKEGPUPoolsPath)
 		if err != nil {
 			return nil, err
 		}
@@ -428,7 +443,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 }
 
 // mergeProviderProjection attaches a controller-side provider projection
-// (aks-gpu-pools, oke-addons) to the
+// (aks-gpu-pools, oke-addons, gke-gpu-pools) to the
 // snapshot the agent Job returned. The merge is performed on generic maps,
 // NOT through the controller's typed Snapshot struct: the agent image is
 // user-pinnable, so a newer agent may emit fields this binary's struct does
@@ -1025,8 +1040,10 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 	return result, nil
 }
 
-// ParseTaint parses a single taint string in format "key=value:effect" or "key:effect".
-// Returns a corev1.Taint struct.
+// ParseTaint parses a single taint string in format "key=value:effect" or
+// "key:effect". The key and value must satisfy the Kubernetes taint rules
+// (qualified name, label-value syntax), so a malformed string is rejected here
+// rather than reaching the API server or the generated deploy script.
 func ParseTaint(taintStr string) (*corev1.Taint, error) {
 	if taintStr == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "taint string cannot be empty")
@@ -1055,6 +1072,14 @@ func ParseTaint(taintStr string) (*corev1.Taint, error) {
 	// Validate key is not empty
 	if key == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, key cannot be empty", taintStr))
+	}
+	if errs := validation.IsQualifiedName(key); len(errs) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid taint key %q: %s", key, strings.Join(errs, "; ")))
+	}
+	if errs := validation.IsValidLabelValue(value); len(errs) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid taint value %q: %s", value, strings.Join(errs, "; ")))
 	}
 
 	if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {

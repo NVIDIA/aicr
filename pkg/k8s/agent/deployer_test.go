@@ -1964,7 +1964,7 @@ func TestParseConfigMapName(t *testing.T) {
 
 func TestDeployer_GetSnapshot(t *testing.T) {
 	// Create ConfigMap with snapshot data
-	snapshotYAML := `apiVersion: aicr.run/v1alpha2
+	snapshotYAML := `apiVersion: aicr.run/v1
 kind: Snapshot
 metadata:
   created: "2025-01-15T10:30:00Z"

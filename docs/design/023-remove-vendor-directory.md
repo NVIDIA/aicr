@@ -3,6 +3,9 @@
 ## Status
 
 **Accepted** — 2026-08-25. Implements [#2374](https://github.com/NVIDIA/aicr/issues/2374).
+**Updated** — 2026-09-11 ([#2667](https://github.com/NVIDIA/aicr/issues/2667)): the
+`go install` straggler described under "Ordering constraints that are load-bearing"
+no longer exists.
 
 Sequenced after [#2372](https://github.com/NVIDIA/aicr/issues/2372) (adopt the
 DGXC Go proxy) and [#2375](https://github.com/NVIDIA/aicr/issues/2375) (move it
@@ -77,9 +80,13 @@ that installs cosign, generates a SLSA predicate, downloads six release tools an
 cross-builds six binaries with retrying attestation hooks. A `go mod download`
 placed directly after the mint removes the timing dependency entirely: every
 later `go` command in the job resolves from a warm cache and needs no credential.
-The one straggler — the `go install` of `go-licenses`, a separate module the warm
-cache does not cover — is handled by re-minting before it. That is free: GitHub's
-OIDC request credential is valid for the life of the job, so the exchange can be
+This had one straggler at the time: the `go install` of `go-licenses`, a separate
+module the warm cache did not cover, handled by re-minting before it. #2667 has
+since removed it — go-licenses is a `tool` directive built from the main module,
+whose graph `go mod download` already covers — so no step in the job now depends
+on a credential minted that late. The re-mint is retained as protection against a
+late cache miss in goreleaser's cross-builds. It is free either way: GitHub's OIDC
+request credential is valid for the life of the job, so the exchange can be
 repeated without new permissions or a stored secret.
 
 **Container builds cannot reach this proxy at all.** `setup-dgxc-goproxy`
@@ -102,9 +109,10 @@ network egress from those image builds.
   step and the vendor-sync check both disappear (~48 commits of friction per
   quarter).
 - No `vendor/` merge conflicts on concurrent dependency changes.
-- Every module is now verified against `go.sum` and `sum.golang.org` on every
-  build — cryptographic verification against a public transparency log, with no
-  CI step to forget and nobody reading 34k-line diffs.
+- Every module is now verified against `go.sum` on every build, with
+  `sum.golang.org` consulted when a module is first added — cryptographic
+  verification against a public transparency log, with no CI step to forget and
+  nobody reading 34k-line diffs.
 
 ### Lost
 

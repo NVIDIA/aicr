@@ -772,6 +772,18 @@ func TestTemplatePath(t *testing.T) {
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"),
 		},
+		{
+			// NVLS uses NVLink/IMEX, not a fabric-selected NIC, so a stray
+			// AICR_NCCL_FABRIC=roce must not redirect it to testdata/roce/,
+			// which has no runtime-nvls.yaml for any service.
+			name:        "gke gb200 NVLS variant ignores roce fabric",
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			service:     recipe.CriteriaServiceGKE,
+			variant:     variantNVLS,
+			fabric:      fabricRoCE,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "gb200", "gke", "runtime-nvls.yaml"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -957,18 +969,24 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			name:    "NET EKS GB200",
 			variant: variantNET,
 			service: recipe.CriteriaServiceEKS,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
 			name:    "NVLS EKS GB200",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceEKS,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
 			name:    "NVLS OKE GB200",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceOKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
+			name:    "NVLS GKE GB200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceGKE,
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
 		},
 		{
@@ -1001,6 +1019,10 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 	}
 	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceAny]; len(accels) != 2 {
 		t.Errorf("variantDefault Any count = %d, want 2 (B200, GB200)", len(accels))
+	}
+	wantGKE := []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100}
+	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceGKE]; !reflect.DeepEqual(accels, wantGKE) {
+		t.Errorf("variantDefault GKE = %v, want %v", accels, wantGKE)
 	}
 	// AKS ND-series H100 runs the default variant over NCCL's built-in
 	// IB/verbs transport (testdata/h100/aks/runtime.yaml).

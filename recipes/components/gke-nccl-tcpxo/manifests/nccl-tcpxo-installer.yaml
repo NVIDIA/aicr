@@ -69,9 +69,9 @@ spec:
           hostPath:
             path: /home/kubernetes/bin
       initContainers:
-        # ubuntu:24.04 LTS digest-pinned for reproducibility. Bump the tag
+        # ubuntu:26.04 LTS digest-pinned for reproducibility. Bump the tag
         # and digest together when refreshing.
-        - image: "ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b"
+        - image: "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
           name: pre-installation
           securityContext:
             privileged: true

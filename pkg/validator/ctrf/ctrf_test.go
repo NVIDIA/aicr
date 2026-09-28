@@ -567,3 +567,25 @@ func TestBuilderStdoutNotCapturedWhenEmpty(t *testing.T) {
 		t.Errorf("Stdout should be nil for empty slice, got %v", report.Results.Tests[0].Stdout)
 	}
 }
+
+func TestBuilderAddResultCopiesRuntimeProvenance(t *testing.T) {
+	b := NewBuilder("aicr", "1.0.0", testPhase)
+	src := &RuntimeProvenance{ShippedDigest: "a", DerivedDigest: "b",
+		OverriddenPaths: []string{"spec.containers[node].args"}, InheritedPaths: []string{"spec.hostNetwork"}}
+	b.AddResult(&ValidatorResult{Name: "nccl", Phase: testPhase, ExitCode: 0, RuntimeProvenance: src})
+	b.AddResult(&ValidatorResult{Name: "plain", Phase: testPhase, ExitCode: 0})
+
+	// Mutate the caller-owned record after insertion: the report must not move.
+	src.ShippedDigest = "tampered"
+	src.OverriddenPaths[0] = "tampered"
+	src.InheritedPaths = append(src.InheritedPaths, "tampered")
+
+	report := b.Build()
+	got := report.Results.Tests[0].RuntimeProvenance
+	if got == nil || got.ShippedDigest != "a" || got.OverriddenPaths[0] != "spec.containers[node].args" || len(got.InheritedPaths) != 1 {
+		t.Errorf("RuntimeProvenance = %+v, want the pre-mutation copy", got)
+	}
+	if report.Results.Tests[1].RuntimeProvenance != nil {
+		t.Errorf("RuntimeProvenance must be nil when the result carries none")
+	}
+}

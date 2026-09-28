@@ -39,14 +39,15 @@ import (
 // (CriteriaServiceAny, CriteriaAcceleratorAny, etc.) is the same
 // string in its typed form; CriteriaAnyValue is the bare-string
 // constant for matching logic that operates on stringified values
-// (e.g., pkg/fingerprint.matchDim's three-way comparison).
+// (e.g., pkg/fingerprint.matchDim's comparison).
 const CriteriaAnyValue = "any"
 
 // CriteriaServiceType represents the Kubernetes service/platform type for criteria.
 //
 // CriteriaServiceGeneric is self-managed Kubernetes with no distinguishing
 // distro or provisioning system; unlike CriteriaServiceAny, it is a concrete
-// service, not the wildcard.
+// service, not the wildcard. It is opt-in-only (CriteriaRegistry.IsOptInOnly):
+// a snapshot reports the provisioner it sees, never generic.
 type CriteriaServiceType string
 
 // CriteriaServiceType constants for supported Kubernetes services.
@@ -63,6 +64,7 @@ const (
 	CriteriaServiceMetal3  CriteriaServiceType = "metal3"
 	CriteriaServiceRKE2    CriteriaServiceType = "rke2"
 	CriteriaServiceGeneric CriteriaServiceType = "generic"
+	CriteriaServiceK0s     CriteriaServiceType = "k0s"
 )
 
 // ParseService parses a string into a CriteriaServiceType against this
@@ -103,6 +105,8 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceMetal3, nil
 	case "rke2":
 		return CriteriaServiceRKE2, nil
+	case "k0s":
+		return CriteriaServiceK0s, nil
 	default:
 		if r.Has(FieldService, s) {
 			return CriteriaServiceType(normalizeCriteriaValue(s)), nil
@@ -116,7 +120,7 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 // across `--data` configurations; for the union of static + registry
 // (including values contributed by `--data`), use AllCriteriaServiceTypes.
 func GetCriteriaServiceTypes() []string {
-	return []string{"aks", "bcm", "eks", "generic", "gke", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
+	return []string{"aks", "bcm", "eks", "generic", "gke", "k0s", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
 }
 
 // AllServiceTypes returns the union of the static OSS list and values
@@ -375,7 +379,7 @@ func mergeCriteriaTypes(staticTypes, registered []string) []string {
 // Criteria represents the input parameters for recipe matching.
 // All fields are optional and default to "any" if not specified.
 type Criteria struct {
-	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic).
+	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
 	// Accelerator is the GPU/accelerator type (h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200).
@@ -850,15 +854,19 @@ const RecipeCriteriaKind = "RecipeCriteria"
 // constant; the track's target is header.GroupVersionV1.
 const RecipeCriteriaAPIVersion = header.StableGroupVersion
 
-func validateRecipeCriteriaHeader(kind, apiVersion string) error {
+// validateRecipeCriteriaHeader gates a RecipeCriteria document. source names
+// where the bytes came from — a path, a URL, or the request body — because the
+// same criteria can arrive from any of the three and the header is the one
+// error whose remedy depends on knowing which artifact to edit.
+func validateRecipeCriteriaHeader(source, kind, apiVersion string) error {
 	if kind != "" && kind != RecipeCriteriaKind {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid kind %q, expected %q", kind, RecipeCriteriaKind))
+			fmt.Sprintf("%s has invalid kind %q, expected %q", source, kind, RecipeCriteriaKind))
 	}
-	if apiVersion != "" && !header.IsSupportedAPIVersion(apiVersion) {
+	if !header.IsSupportedAPIVersion(apiVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid apiVersion %q for %s, expected %q or %q; regenerate the criteria with a matching aicr version",
-				apiVersion, RecipeCriteriaKind, RecipeCriteriaAPIVersion, header.GroupVersionV1))
+			fmt.Sprintf("%s has invalid apiVersion %q%s for %s, expected %q; regenerate the criteria with a matching aicr version",
+				source, apiVersion, header.RetirementNoteWithAbsent(apiVersion), RecipeCriteriaKind, header.GroupVersionV1))
 	}
 	return nil
 }
@@ -869,7 +877,7 @@ func validateRecipeCriteriaHeader(kind, apiVersion string) error {
 // Example:
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -881,7 +889,7 @@ type RecipeCriteria struct {
 	// Kind is always "RecipeCriteria".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
+	// APIVersion is the API version (e.g., "aicr.run/v1").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.
@@ -979,7 +987,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec, reg *CriteriaRegistry) (*Cr
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -993,10 +1001,9 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load criteria file", err)
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader(fmt.Sprintf("criteria file %q", path), raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
-
 	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 
@@ -1010,7 +1017,7 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -1033,10 +1040,9 @@ func LoadCriteriaFromFileWithContext(ctx context.Context, path string, reg *Crit
 		return nil, err
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader(fmt.Sprintf("criteria file %q", path), raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
-
 	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 
@@ -1064,7 +1070,7 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string, reg *Crite
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "failed to deserialize criteria")
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader(fmt.Sprintf("criteria URL %q", url), raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
 
@@ -1108,7 +1114,7 @@ func criteriaBodyFormat(contentType string) (serializer.Format, bool) {
 //
 //	{
 //	  "kind": "RecipeCriteria",
-//	  "apiVersion": "aicr.run/v1alpha2",
+//	  "apiVersion": "aicr.run/v1",
 //	  "metadata": {"name": "my-criteria"},
 //	  "spec": {"service": "eks", "accelerator": "h100"}
 //	}
@@ -1147,7 +1153,7 @@ func ParseCriteriaFromBody(body io.Reader, contentType string, reg *CriteriaRegi
 		}
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader("criteria request body", raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
 

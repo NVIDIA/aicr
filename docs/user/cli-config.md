@@ -32,7 +32,7 @@ The schema's source of truth is
 
 ```yaml
 kind: AICRConfig               # required, exactly this value
-apiVersion: aicr.run/v1alpha2  # required; v1beta1 also accepted, see below
+apiVersion: aicr.run/v1beta1   # required; the only accepted value
 metadata:
   name: gke-h100-training      # optional, identifying only
 spec:
@@ -47,11 +47,17 @@ Each `spec.*` section is optional and each command reads only its own section,
 so a file may carry just one section or any combination. A document with none
 of the five sections is rejected.
 
-`AICRConfig` is an authored file, so its `apiVersion` is yours to set. v0.21
-writes and documents `aicr.run/v1alpha2` and the loader also accepts the
-target `aicr.run/v1beta1`; empty and unknown values are rejected. v0.22 switches
-the documented value to the target and v0.23 stops accepting `aicr.run/v1alpha2`,
-so edit your config before upgrading to v0.23. The full release-by-release table
+Reading is per-command; **validation is not**. Every section present in the file
+is checked when the file loads, whichever command loaded it — so a malformed
+`spec.bundle` fails `aicr snapshot --config` too, naming the spec path that is
+wrong. Keep that in mind for a single document spanning several sections: an
+error can name a section the running command never reads.
+
+`AICRConfig` is an authored file, so its `apiVersion` is yours to set. The
+value is `aicr.run/v1beta1`, and as of v1.0.0 it is the only one accepted: the
+superseded `aicr.run/v1alpha2` was read-with-a-warning in v0.22 and is rejected
+now, as are empty and unknown values. A config still carrying it must be edited
+by hand — AICR has no conversion layer. The full release-by-release table
 is in
 [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility);
 the policy behind it is
@@ -85,7 +91,7 @@ by attestation and evidence push is deliberately absent — supply it via the
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: eks-h100-training
 spec:
@@ -96,7 +102,7 @@ spec:
       template: ""                   # optional Go template path
     agent:                           # in-cluster snapshot Job pod
       namespace: aicr-validation
-      image: ""                      # default: ghcr.io/nvidia/aicr:latest
+      image: ""                      # default: matches the CLI version (:latest on dev/-next builds)
       imagePullSecrets: []
       # jobName is an optional PREFIX, not a name — the run ID is always
       # appended. serviceAccountName is exact-if-exists: an existing
@@ -131,6 +137,10 @@ spec:
     #   slurm:                       # only valid when the resolved recipe platform is slurm
     #     accounting:
     #       mode: disabled           # disabled | customer-managed | aicr-provided
+    #   gke:                         # only valid for the h100 gke-cos kubeflow training leaf
+    #     tcpxoInterfaces:           # required when that leaf ships torch-distributed-tcpxo;
+    #       - {interfaceName: eth1, network: <cluster>-gpu-nic-0}  # ordered eth1..eth8 (8 entries);
+    #                                                          # names from the cluster provisioner
     # input:
     #   snapshot: snapshot.yaml      # derive criteria from a snapshot instead
     output:
@@ -146,7 +156,7 @@ spec:
       target: ./bundles              # local dir or oci:// URI
       imageRefs: ""                  # external digest file; OCI output only
     deployment:
-      deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux | ...
+      deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux
       repo: ""
       set: []                        # value overrides, "key:path=value"
       dynamic: []
@@ -253,6 +263,8 @@ exclusive** — query by criteria or derive from a snapshot, not both.
 | `criteria.nodes` | int | Target GPU node count |
 | `profile` | string | Optional configuration profile selection in `name=value` form. Empty applies the resolved declaration's default. |
 | `configuration.slurm.accounting.mode` | string | Slurm accounting ownership: `disabled` (default) \| `customer-managed` \| `aicr-provided`; mirrors `--slurm-accounting-mode`. Only valid when the resolved recipe platform is `slurm` (whether from `criteria.platform`, a snapshot, or `--platform`) — an explicit mode (even `disabled`) on any other platform is rejected with `INVALID_REQUEST` |
+| `configuration.runtimeInventory.mode` | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` \| `disabled`; mirrors `--runtime-inventory` |
+| `configuration.gke.tcpxoInterfaces` | []object | Ordered `interfaceName`/`network` pairs (eth1–eth8) for the `torch-distributed-tcpxo` runtime; mirrors `--gke-tcpxo-interfaces` |
 | `input.snapshot` | string | Snapshot path to derive the recipe from |
 | `output.path` | string | Recipe output path |
 | `output.format` | string | `yaml` \| `json` \| `table` |
@@ -308,7 +320,7 @@ Inputs to `aicr validate`.
 | `evidence.cncf.dir` | string | CNCF AI Conformance evidence directory (`--evidence-dir`) |
 | `evidence.cncf.cncfSubmission` | bool (tri-state) | Emit submission layout; requires `dir` |
 | `evidence.cncf.features` | []string | Empty = all features; honored only with `cncfSubmission` |
-| `evidence.attestation.out` | string | Recipe-evidence result path (v1 for unprofiled recipes, v2 for profiled ones) — setting it **enables** the attestation path |
+| `evidence.attestation.out` | string | Recipe-evidence result path (predicateType v3) — setting it **enables** the attestation path |
 | `evidence.attestation.bom` / `.push` | string | BOM input; OCI ref for the signed bundle push |
 | `evidence.attestation.plainHTTP` / `.insecureTLS` | bool (tri-state) | Push transport options |
 

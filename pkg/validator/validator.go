@@ -359,7 +359,7 @@ func (v *Validator) runPhases(
 	for _, phase := range phases {
 		select {
 		case <-ctx.Done():
-			return results, errors.Wrap(errors.ErrCodeTimeout, "context canceled during phase iteration", ctx.Err())
+			return results, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "iterating validation phases")
 		default:
 		}
 
@@ -532,7 +532,7 @@ func (v *Validator) runPhase(
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled during dependencyAffinity pre-flight", ctx.Err())
+			return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "running dependencyAffinity pre-flight")
 		default:
 		}
 		if err := v1.ValidateDependencyAffinity(entry.DependencyAffinity, validationInput.GetComponentRefs()); err != nil {
@@ -549,7 +549,7 @@ func (v *Validator) runPhase(
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled during entry evaluation", ctx.Err())
+			return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "evaluating validator entries")
 		default:
 		}
 

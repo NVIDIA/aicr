@@ -77,7 +77,7 @@ EnablePCIeGen3: 0
 	}
 }
 
-func TestGB200NetPreflightApplies(t *testing.T) {
+func TestGraceBlackwellNetPreflightApplies(t *testing.T) {
 	tests := []struct {
 		name        string
 		variant     ncclVariant
@@ -113,11 +113,23 @@ func TestGB200NetPreflightApplies(t *testing.T) {
 			"NVLS + GB200 + OKE → not required (NVLink-C2C, no PCIe dma-buf)",
 			variantNVLS, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE, false,
 		},
+		{
+			"NET + GB300 + EKS → check required (same Grace PCI topology as GB200)",
+			variantNET, recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS, true,
+		},
+		{
+			"NVLS + GB300 + EKS → not required (NVLink-C2C, no PCIe dma-buf)",
+			variantNVLS, recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS, false,
+		},
+		{
+			"NET + GB300 + OKE → not required (no GB300 OKE profile today)",
+			variantNET, recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceOKE, false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := gb200NetPreflightApplies(tt.variant, tt.accelerator, tt.service); got != tt.want {
-				t.Errorf("gb200NetPreflightApplies() = %v, want %v", got, tt.want)
+			if got := graceBlackwellNetPreflightApplies(tt.variant, tt.accelerator, tt.service); got != tt.want {
+				t.Errorf("graceBlackwellNetPreflightApplies() = %v, want %v", got, tt.want)
 			}
 		})
 	}

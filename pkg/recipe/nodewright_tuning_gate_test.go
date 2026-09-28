@@ -37,6 +37,7 @@ const (
 	nodewrightTuningGKEManifest     = "components/nodewright-customizations/manifests/tuning-gke.yaml"
 	nodewrightTuningGenericManifest = "components/nodewright-customizations/manifests/tuning-generic.yaml"
 	nodewrightTuningRKE2Manifest    = "components/nodewright-customizations/manifests/tuning-rke2.yaml"
+	nodewrightTuningGB300Manifest   = "components/nodewright-customizations/manifests/tuning-gb300.yaml"
 )
 
 // renderNodewrightTuning renders the tuning manifest with the given component
@@ -207,6 +208,7 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 		nodewrightTuningGKEManifest,
 		nodewrightTuningGenericManifest,
 		nodewrightTuningRKE2Manifest,
+		nodewrightTuningGB300Manifest,
 	}
 	seen := map[string]bool{}
 	for _, leaf := range leaves {
@@ -236,15 +238,15 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 				}
 
 				defaultRender := renderNodewrightTuningRaw(t, content, values)
-				if !strings.Contains(defaultRender, "kind: Skyhook") {
-					t.Fatalf("default rendering must produce the Skyhook CR:\n%s", defaultRender)
+				if !strings.Contains(defaultRender, "kind: NodeWright") {
+					t.Fatalf("default rendering must produce the NodeWright CR:\n%s", defaultRender)
 				}
 
 				disabled := make(map[string]any, len(values)+1)
 				maps.Copy(disabled, values)
 				disabled["tuningEnabled"] = false
-				if got := renderNodewrightTuningRaw(t, content, disabled); strings.Contains(got, "kind: Skyhook") {
-					t.Errorf("tuningEnabled=false must suppress the whole Skyhook CR:\n%s", got)
+				if got := renderNodewrightTuningRaw(t, content, disabled); strings.Contains(got, "kind: NodeWright") {
+					t.Errorf("tuningEnabled=false must suppress the whole NodeWright CR:\n%s", got)
 				}
 
 				enabled := make(map[string]any, len(values)+1)

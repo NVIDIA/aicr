@@ -42,6 +42,12 @@ var deployScriptTemplate string
 // criteriaAny is the wildcard value for criteria fields.
 const criteriaAny = "any"
 
+// fileDeployScript is the orchestration script this deployer writes at the
+// bundle root. Named so the write site (GenerateFromTemplate) and the
+// reported deployer.Output.Entrypoint can't drift apart into referencing two
+// different filenames.
+const fileDeployScript = "deploy.sh"
+
 // ComponentData contains data for rendering per-component template blocks.
 // The helm deployer no longer owns per-component folder content (localformat
 // does). ComponentData now carries only the fields needed by the orchestration
@@ -163,7 +169,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Map ComponentData to localformat.Component and write per-component folders.
 	// localformat owns: folder naming, values.yaml/cluster-values.yaml split,
 	// Chart.yaml, templates/*, install.sh. The helm deployer just orchestrates.
-	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues)
+	// Which components may have their CRDs applied ahead of `helm upgrade`.
+	// Helm never updates a chart's crds/ directory on upgrade, so without
+	// this the bundle pairs a bumped chart with its day-one CRD schema.
+	crdOwners, err := deployer.ResolveCRDOwners(ctx, g.RecipeResult.DataProvider(), g.RecipeResult.ComponentRefs)
+	if err != nil {
+		return nil, err
+	}
+
+	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues, crdOwners)
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
@@ -178,6 +192,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 	g.vendorRecords = writeResult.VendoredCharts
+	output.Entrypoint = fileDeployScript
+	output.Releases = writeResult.Releases()
 	for _, f := range writeResult.Folders {
 		// localformat returns paths relative to outputDir. Downstream consumers
 		// (checksum.WriteChecksums, output.TotalSize, deployment reporting) all
@@ -237,6 +253,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 		output.Files = append(output.Files, provPath)
 		output.TotalSize += provSize
+		output.Provenance = localformat.ProvenanceFileName
 	}
 
 	// Generate checksums.txt if requested
@@ -299,12 +316,13 @@ func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 }
 
 // toLocalformatComponents maps the orchestration ComponentData list to the
-// per-component inputs consumed by localformat.Write. Values and DynamicPaths
-// are looked up by component name from the generator's maps.
+// per-component inputs consumed by localformat.Write. Values, DynamicPaths,
+// and OwnsCRDs are looked up by component name from the caller's maps.
 func toLocalformatComponents(
 	components []ComponentData,
 	values map[string]map[string]any,
 	dynamic map[string][]string,
+	crdOwners map[string]bool,
 ) []localformat.Component {
 
 	out := make([]localformat.Component, 0, len(components))
@@ -320,6 +338,7 @@ func toLocalformatComponents(
 			Path:         c.Path,
 			Values:       values[c.Name],
 			DynamicPaths: dynamic[c.Name],
+			OwnsCRDs:     crdOwners[c.Name],
 		})
 	}
 	return out
@@ -385,7 +404,7 @@ func (g *Generator) generateDeployScript(ctx context.Context, components []Compo
 		ReadinessHelmTimeout: (defaults.ReadinessGateMaxWait + defaults.ReadinessGateHelmTimeoutBuffer).String(),
 	}
 
-	deployPath, deploySize, err := deployer.GenerateFromTemplate(deployScriptTemplate, data, outputDir, "deploy.sh")
+	deployPath, deploySize, err := deployer.GenerateFromTemplate(deployScriptTemplate, data, outputDir, fileDeployScript)
 	if err != nil {
 		return "", 0, err
 	}

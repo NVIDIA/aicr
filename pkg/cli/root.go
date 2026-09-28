@@ -72,10 +72,17 @@ var (
 	}
 
 	formatFlag = func() cli.Flag {
+		return formatFlagDefault(serializer.FormatYAML)
+	}
+
+	// formatFlagDefault is formatFlag with the default chosen by the caller.
+	// A command whose output is a report an operator reads, rather than a
+	// document another tool consumes, defaults to table.
+	formatFlagDefault = func(def serializer.Format) cli.Flag {
 		return withCompletions(&cli.StringFlag{
 			Name:     flagFormat,
 			Aliases:  []string{"t"},
-			Value:    string(serializer.FormatYAML),
+			Value:    string(def),
 			Usage:    fmt.Sprintf("output format (%s)", strings.Join(serializer.SupportedFormats(), ", ")),
 			Category: catOutput,
 		}, serializer.SupportedFormats)
@@ -185,6 +192,7 @@ func newRootCmd() *cli.Command {
 			validateCmd(),
 			evidenceCmd(),
 			diffCmd(),
+			upgradeCheckCmd(),
 			mirrorCmd(),
 			trustCmd(),
 			skillCmd(),

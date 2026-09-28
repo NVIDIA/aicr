@@ -1,0 +1,130 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# node-problem-detector Health Check
+#
+# Validates the node-problem-detector DaemonSet (recipes/components/
+# node-problem-detector/values.yaml sets fullnameOverride:
+# node-problem-detector) is fully, currently rolled out in the
+# node-problem-detector namespace, and that no pod in the namespace is
+# stuck unhealthy.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: node-problem-detector-health-check
+spec:
+  # Real chainsaw budgets assert and error operations separately, each
+  # defaulting to 30s -- too short for a cold pull of
+  # registry.k8s.io/node-problem-detector. Both op types are used below, so
+  # both need raising. Unlike nvsentinel's DaemonSets there is no legitimate
+  # 0-desired state here, so a broken install still fails, just later.
+  timeouts:
+    assert: 180s
+    error: 180s
+  steps:
+    - name: validate-daemonset-rolled-out
+      try:
+        # Assert non-omitempty status fields only, per repo convention
+        # (recipes/checks/nvsentinel/health-check.yaml): numberUnavailable
+        # is omitempty, so it's ABSENT on a healthy DaemonSet and a
+        # `numberUnavailable: 0` assertion would pass vacuously on a
+        # 0-desired DaemonSet too. desiredNumberScheduled and numberReady
+        # are always serialized, so the pair below fails closed on 0
+        # desired -- unlike nvsentinel's driver-label-gated DaemonSets, NPD
+        # has no legitimate 0-desired state: it runs on every node,
+        # including GPU nodes, so a positive assert is correct here.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: node-problem-detector
+                namespace: node-problem-detector
+              status:
+                (desiredNumberScheduled > `0`): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: node-problem-detector
+                namespace: node-problem-detector
+              status:
+                (numberReady < desiredNumberScheduled): true
+        # Stale-rollout guard: numberReady alone can't distinguish a node
+        # still running the previous revision's pod (also Ready) from a
+        # fully current rollout. updatedNumberScheduled/observedGeneration
+        # are themselves omitempty, so they need `|| `0`` null-coalescing.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: node-problem-detector
+                namespace: node-problem-detector
+              ((status.updatedNumberScheduled || `0`) < status.desiredNumberScheduled): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: node-problem-detector
+                namespace: node-problem-detector
+              ((status.observedGeneration || `0`) < metadata.generation): true
+    - name: validate-all-pods-healthy
+      try:
+        # Same shape as recipes/checks/nvsentinel/health-check.yaml's
+        # namespace-wide sweep: unhealthy phases, plus a JMESPath
+        # projection (not a single-element match, which silently passes
+        # multi-container pods) for known-bad container-waiting reasons.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-problem-detector
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-problem-detector
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-problem-detector
+              status:
+                phase: Unknown
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-problem-detector
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-problem-detector
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

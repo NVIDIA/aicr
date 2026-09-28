@@ -32,7 +32,7 @@ All server code lives in [`pkg/server`](https://github.com/NVIDIA/aicr/tree/main
 | `serve.go` | Entry point. Parses env allowlists, constructs `aicr.Client`, wires the recipe, query, and bundle routes, runs `Server.Run` |
 | `server.go` | `Server` struct, options, route mux, lifecycle (`Start`, `Shutdown`, `Run`) |
 | `config.go` | `config` struct and env-var overrides (`PORT`, `SHUTDOWN_TIMEOUT_SECONDS`) |
-| `middleware.go` | 8-layer middleware chain; ordering rationale lives in source comments |
+| `middleware.go` | 9-layer middleware chain; ordering rationale lives in source comments |
 | `recipe_handler.go` | `GET\|POST /v1/recipe` and `/v1/query` adapter over the profile-aware `Client` resolution methods |
 | `bundle_handler.go` | `POST /v1/bundle` adapter over `Client.AdoptRecipe` + `Client.MakeBundle` |
 | `health.go` | `GET /health` and `GET /ready` |
@@ -56,12 +56,13 @@ Order is **outermost first**:
 |---|-------|---------|
 | 1 | `metricsMiddleware` | Start timer, increment in-flight gauge, record duration and status histogram. Outermost so total latency is captured. |
 | 2 | `versionMiddleware` | Parse `Accept` for `application/vnd.nvidia.aicr.v<N>+json`; stash version in context; set `X-API-Version` response header |
-| 3 | `requestIDMiddleware` | Honor `X-Request-Id` if a valid UUID, else mint one; stash in context; echo to response header |
-| 4 | `timeoutMiddleware` | `context.WithTimeout(r.Context(), defaults.ServerHandlerTimeout)` (90s). Bounds every inner layer, including body reads inside the handler. |
-| 5 | `loggingMiddleware` | Captures status via `responseWriter`; logs request start (Debug) and completion (Debug/Warn/Error keyed on status class) |
-| 6 | `panicRecoveryMiddleware` | `defer recover()` → 500 + `panicRecoveries` counter. Inside logging so the completion line still fires. |
-| 7 | `rateLimitMiddleware` | `golang.org/x/time/rate` limiter (default 100 req/s, burst 200). Always emits `X-RateLimit-*` headers, including on the 429 branch. |
-| 8 | `bodyLimitMiddleware` | `http.MaxBytesReader(r.Body, defaults.ServerMaxBodyBytes)` (8 MiB). Innermost so a handler installing a tighter cap composes cleanly. |
+| 3 | `deprecationMiddleware` | Attaches `Deprecation`, `Sunset` and `Link` headers on routes registered via `WithDeprecatedRoutes`. No route is deprecated today. |
+| 4 | `requestIDMiddleware` | Honor `X-Request-Id` if a valid UUID, else mint one; stash in context; echo to response header |
+| 5 | `timeoutMiddleware` | `context.WithTimeout(r.Context(), defaults.ServerHandlerTimeout)` (90s). Bounds every inner layer, including body reads inside the handler. |
+| 6 | `loggingMiddleware` | Captures status via `responseWriter`; logs request start (Debug) and completion (Debug/Warn/Error keyed on status class) |
+| 7 | `panicRecoveryMiddleware` | `defer recover()` → 500 + `panicRecoveries` counter. Inside logging so the completion line still fires. |
+| 8 | `rateLimitMiddleware` | `golang.org/x/time/rate` limiter (default 100 req/s, burst 200). Always emits `X-RateLimit-*` headers, including on the 429 branch. |
+| 9 | `bodyLimitMiddleware` | `http.MaxBytesReader(r.Body, defaults.ServerMaxBodyBytes)` (8 MiB). Innermost so a handler installing a tighter cap composes cleanly. |
 
 Ordering invariants (also documented in source):
 
@@ -346,10 +347,10 @@ would make the diff gate report no breaking changes for anything the truncated
 file omits.
 
 The baseline is a committed snapshot rather than the previous release, unlike
-`api-diff`. The v1 collapse (#2464) is unreleased, so comparing against v0.20.0
-reports 28 breaking changes that are all one already-merged decision — the gate
-would ship pre-loaded with noise that clears itself at v0.21 and teaches
-everyone to skim it in the meantime.
+`api-diff`. When the gate was introduced the v1 collapse (#2464) was still
+unreleased, so a comparison against v0.20.0 reported 28 breaking changes that
+were all one already-merged decision — the gate would have shipped pre-loaded
+with noise and taught everyone to skim it.
 
 ## Artifact Schema Gate
 
@@ -366,8 +367,8 @@ fails for a different reason:
 - **`TestCommittedSchemasAreFresh`** — the committed files match the current Go
   types. Without it the schemas would drift into a snapshot of whatever the
   types looked like when someone last remembered to run the generator.
-- **`TestSchemasDescribeRealArtifacts`** — the 110 committed overlays and 4
-  mixins validate against their schema. Freshness proves the schema matches the
+- **`TestSchemasDescribeRealArtifacts`** — every committed overlay and mixin
+  validates against its schema. Freshness proves the schema matches the
   *type*; this proves the type matches what is actually on disk.
 - **`TestArtifactSchemasAreCompatible`** — the generated schemas are compared to
   the frozen snapshot in `api/aicr/v1/schemas/baseline/`, failing on a removed
@@ -390,7 +391,7 @@ diff is the change under review.
 always written and a consumer may rely on it. `RecipeMetadata`, `RecipeMixin`
 and `RecipeCriteria` are authored by hand, where the encoder's behavior says
 nothing about what a human must supply — `ComponentRef.Source` is written on
-every emit but set by only 17 of the 110 committed overlays. Authored artifacts
+every emit but set by only a minority of the committed overlays. Authored artifacts
 therefore declare nothing required; marking them published a schema that
 rejected the project's own catalog.
 
@@ -414,7 +415,7 @@ anything else** rather than emitting a plausible guess.
 5. **Wire allowlists if needed.** Pass `allowLists` into the handler constructor and call `validateAgainstAllowLists` before the facade call. Do not invent a parallel allowlist path; reuse `aicr.ToInternalAllowLists`.
 6. **Tighten the body cap.** If the endpoint accepts POST bodies and 8 MiB is wrong, define a `defaults.Max<Name>POSTBytes` constant and wrap `r.Body` with `http.MaxBytesReader` inside the handler. Handle `*http.MaxBytesError` explicitly → 413.
 7. **Run the contract tests.**
-   `go test -run '^(TestOpenAPIEnumsMatchGoTypes|TestOpenAPIV1BundleRecipeContract)$' ./pkg/server/...`.
+   `go test -run '^(TestOpenAPIEnumsMatchGoTypes|TestOpenAPIBundleContract)$' ./pkg/server/...`.
    Add cases to `openapi_sync_test.go` if you introduced a new enum-bearing
    field or changed the `/v1/bundle` recipe schema.
 8. **Update [docs/user/api-reference.md](../user/api-reference.md)** in the same PR. CLAUDE.md's docs-updates-with-behavior-changes rule applies.

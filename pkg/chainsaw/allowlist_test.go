@@ -17,6 +17,8 @@ package chainsaw
 import (
 	"context"
 	stderrors "errors"
+	"io/fs"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -391,5 +393,43 @@ func TestValidateTestReadOnly_RegistryContent(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no health checks were validated — registry walker is broken")
+	}
+}
+
+// TestValidateTestReadOnly_AllCheckFiles walks every recipes/checks/*/
+// health-check.yaml directly, not just the registry-linked subset
+// TestValidateTestReadOnly_RegistryContent covers. A standalone, opt-in-only
+// check (e.g. nvsentinel-observability, not referenced by any
+// registry.yaml healthCheck.assertFile) would otherwise never be validated
+// against the read-only operation allowlist at all.
+func TestValidateTestReadOnly_AllCheckFiles(t *testing.T) {
+	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	checked := 0
+	walkErr := provider.WalkDir(context.Background(), "checks", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Base(path) != "health-check.yaml" {
+			return nil
+		}
+		data, readErr := provider.ReadFile(context.Background(), path)
+		if readErr != nil {
+			return readErr
+		}
+		if !IsChainsawTest(string(data)) {
+			return nil
+		}
+		component := filepath.Base(filepath.Dir(path))
+		if valErr := ValidateTestReadOnly(component, string(data)); valErr != nil {
+			t.Errorf("check file %q violates read-only allowlist: %v", path, valErr)
+		}
+		checked++
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("WalkDir: %v", walkErr)
+	}
+	if checked == 0 {
+		t.Fatal("no check files were validated — walker is broken")
 	}
 }

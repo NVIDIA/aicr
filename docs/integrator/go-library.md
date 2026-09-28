@@ -73,7 +73,7 @@ go get github.com/NVIDIA/aicr@latest
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v0.19.0
+go get github.com/NVIDIA/aicr@v0.21.1
 ```
 
 ## Quick start
@@ -244,7 +244,13 @@ reported as no drift.
 // K8s.aks-gpu-pools.gpu-driver reading (a snapshot without it fails
 // closed). On OKE, OKEAddonsPath plays the same role from an
 // `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`
-// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading.
+// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading. On GKE,
+// GKEGPUPoolsPath plays the same role from a
+// `gcloud container node-pools list --cluster <cluster> --format=json`
+// dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
+// It's required only when resolving the GKE `bundle-installer` gpuStack
+// value from a snapshot. The default `gke-default` value needs no pool
+// dump.
 // Give the Job-backed snapshot its own deadline: contexts cap the
 // configured timeouts from the parent side, so reusing the 30-second
 // resolve ctx above would override the 5-minute AgentConfig.Timeout.
@@ -271,11 +277,12 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	// full run-scoped RBAC set. Leaving it unset, as here, keeps the
 	// run-scoped default and never probes for an existing ServiceAccount.
 	Namespace:       "aicr-snapshot",
-	Image:           "ghcr.io/nvidia/aicr:v0.19.0",
+	Image:           "ghcr.io/nvidia/aicr:v0.21.1",
 	Timeout:         5 * time.Minute,
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
 	OKEAddonsPath:   "/path/to/oke-addons.json",    // OKE only
+	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
@@ -603,6 +610,36 @@ For a per-resolution Slurm accounting mode, use
 `ResolveRecipeFromSnapshotWithOptions` with
 `aicr.WithAccountingMode("customer-managed")`. The original criteria and
 snapshot method signatures remain unchanged for source compatibility.
+
+### Keeping a prior artifact's namespaces
+
+A component's namespace is re-derived from the registry on every resolve, so
+a registry default that moved between two AICR releases relocates a component
+that is already running. Helm cannot move a release between namespaces, so the
+bundle installs a second copy beside it. Name the prior artifact to keep its
+namespaces instead:
+
+```go
+result, err := client.ResolveRecipe(ctx, aicr.RecipeRequest{
+	Service:     "eks",
+	Accelerator: "h100",
+	Intent:      "training",
+	InheritFrom: "./bundles-v0.17.0", // or a recipe file
+})
+```
+
+`RecipeRequest.InheritFrom` is honored by `ResolveRecipe`;
+`aicr.WithInheritFrom(ref)` is the equivalent for
+`ResolveRecipeFromCriteriaWithOptions` and
+`ResolveRecipeFromSnapshotWithOptions`. A bundle directory is read through the
+`recipe.yaml` at its root. A component the prior artifact does not name keeps
+the registry default.
+
+The reference is read when the resolve runs, and it fails closed rather than
+silently resolving as a first deploy: a path that does not exist, a directory
+holding no `recipe.yaml`, and a `cm://` URI (not supported yet) each return
+`ErrCodeInvalidRequest`. Nothing is read from a cluster, so no kubeconfig is
+involved.
 
 ### Criteria relaxation on the snapshot path
 
@@ -955,20 +992,37 @@ keeps the two in agreement (`opts.Attest` and `opts.OIDCResolve.Attest` come
 from the same `spec.bundle.attestation.enabled` value), so this only matters
 for a caller who assembles `BundleOptions` by hand.
 
-A KMS key and keyless OIDC are mutually exclusive. `BundleOptions()` rejects a
-whitespace-only `signingKey` (must not be blank after trimming) and rejects
-`signingKey` combined with `fulcioURL`. It deliberately does NOT reject
-`signingKey` combined with `oidcDeviceFlow` at this layer: `BundleOptions()`
-runs before the CLI's flag-over-config merge, so an eager rejection here would
-make `--oidc-device-flow=false` unable to correct a document that sets both —
-the error would fire before that flag is ever read. The CLI's
-`validateSigningKeyExclusivity`, run on the flag-merged options, is what
-catches the `signingKey` + `oidcDeviceFlow` combination for CLI invocations.
-An SDK caller deriving `BundleOptions()` directly and calling `MakeBundle`
-with no flag merge gets no equivalent guard for that specific pair — the
-resulting bundle still signs with the KMS key (`ResolveAttesterLazy` picks KMS
-whenever `SigningKey` is non-empty), matching the pre-#2245 behavior; avoid
-setting both in a document consumed outside the CLI.
+A KMS key and keyless OIDC are mutually exclusive, and the rule lives where
+`spec.bundle` is converted to its typed form rather than in any one derivation:
+a whitespace-only `signingKey` is rejected (it must not be blank after
+trimming), as is `signingKey` combined with `fulcioURL`. Because that
+conversion is what validates the section, a document setting both fails at
+`LoadConfig`, for every command that loads a config rather than only the ones
+that bundle. That is the same reach a malformed `fulcioURL` has always had. The
+`SigningKey` a derivation carries is already trimmed.
+
+This conversion-time rule deliberately does NOT cover `signingKey` combined
+with `oidcDeviceFlow`. Conversion happens before the CLI's flag-over-config
+merge, so rejecting that pair there would make `--oidc-device-flow=false`
+unable to correct a document that sets both — the error would fire before that
+flag is ever read.
+
+That pair is rejected one layer later instead, by `ResolveAttester` and
+`ResolveAttesterLazy`, which is where KMS-versus-keyless is actually decided
+and which every caller reaches after applying its own precedence. The CLI
+merges flags first, so a corrected invocation never arrives there in conflict;
+an SDK caller that derives `BundleOptions()` straight from a document and calls
+`MakeBundle` without merging anything gets `ErrCodeInvalidRequest` rather than a
+bundle signed with the KMS key while its device-flow setting was ignored.
+
+The rejection is conditional on attestation being enabled. Both resolvers
+short-circuit to a no-op attester when `Attest` is false, before the check —
+nothing signs in that case, so there is no mode to conflict over, and
+`MakeBundle` returns normally.
+
+`IdentityToken` is not part of that check. A CI environment can populate it
+without the caller asking for keyless signing, so a non-empty `SigningKey`
+still takes precedence over it rather than failing.
 
 **Device flow needs a prompt writer.** `spec.bundle.attestation.oidcDeviceFlow`
 sets `OIDCResolve.DeviceFlow`, but config cannot carry an `io.Writer`, so the
@@ -1570,7 +1624,7 @@ rest of `EvidenceOptions` stays yours, and the reasons differ:
 |---|---|
 | `Commit` | Names the running binary, not the document. It selects the validator catalog the bundle's BOM is built against. Set it after deriving. |
 | `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file; resolve it at sign time. |
-| `NoSign`, `Full` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. Both weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads — and a checked-in file that can silently disable signing is a supply-chain downgrade no reviewer would see in a diff. |
+| `NoSign`, `Full`, `AllowMutableValidatorTags` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. All three weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads, `AllowMutableValidatorTags` lets the predicate name validator images that can later resolve to different code — and a checked-in file that can silently disable signing or provenance is a supply-chain downgrade no reviewer would see in a diff. |
 
 **Why `plainHTTP` and `insecureTLS` project anyway.** They weaken a run too, so
 the rule above is not "config may never weaken anything" — stated that broadly
@@ -1677,7 +1731,8 @@ the CLI does with `--os`. An unparsed `Talos` would miss the agent's exact
 errors here instead of traveling.
 
 `Kubeconfig`, `Debug`, `ClusterConfigPath`, `AKSGPUPoolsPath`,
-`DiscoverNetwork`, `RunID` and `NameBase` have no config counterpart and stay
+`OKEAddonsPath`, `DiscoverNetwork`, `RunID` and `NameBase` have no config
+counterpart and stay
 zero — they are per-invocation or caller-owned.
 
 **A document with no `spec.snapshot` yields a zero value, which is not a

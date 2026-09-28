@@ -123,6 +123,8 @@ Currently on disk:
 | eks | h100 | `eks/system-m7i.yaml` | `eks/p5-h100.yaml` |
 | eks | gb200 | `eks/system-m7i.yaml` | `eks/p6-gb200.yaml` |
 | eks | gb300 | `eks/system-m7i.yaml` | `eks/p6e-gb300.yaml` |
+| k0s | h200 | `k0s/system-generic.yaml` | `k0s/accelerated-h200.yaml` |
+| rke2 | vr200 | `rke2/system-generic.yaml` | `rke2/accelerated-vr200.yaml` |
 
 **Cluster defaults:** 2 system nodes, 4 GPU nodes, region `us-east-1`. The cluster's GPU total is `4 × spec.gpu.count` of the selected GPU profile, so it varies by accelerator — read the count from the profile rather than assuming a fixed total.
 
@@ -130,10 +132,10 @@ Currently on disk:
 
 | Version | Set by | Is |
 |---------|--------|----|
-| `kindest/node:v1.36.1` | `kind_node_image` in `.settings.yaml` | the real Kind **control plane** — what `discoveryClient.ServerVersion()` reports, and therefore what `K8s.server.version` constraints are checked against |
+| `kindest/node:v1.37.0` | `kind_node_image` in `.settings.yaml` | the real Kind **control plane** — what `discoveryClient.ServerVersion()` reports, and therefore what `K8s.server.version` constraints are checked against |
 | `v1.33.5` | `DEFAULT_K8S_VERSION` in `kwok/scripts/apply-nodes.sh` | the **cosmetic** `kubeletVersion` stamped onto simulated nodes via `node.yaml.tmpl` |
 
-So a recipe requiring `K8s.server.version >= 1.34` is satisfied by the Kind image; the simulated `v1.33.5` is not the cluster's Kubernetes version and does not gate anything. (The two are three minor versions apart — the maximum supported kubelet/API-server skew — but the policy is moot here because no kubelet runs.)
+So a recipe requiring `K8s.server.version >= 1.34` is satisfied by the Kind image; the simulated `v1.33.5` is not the cluster's Kubernetes version and does not gate anything. (The two are four minor versions apart — beyond the maximum supported kubelet/API-server skew — but the policy is moot here because no kubelet runs.)
 
 ## Makefile Targets
 
@@ -166,6 +168,13 @@ the runner:
 Clusters created before a port mapping existed must be recreated
 (`kind delete cluster --name aicr-kwok-test`) to pick it up.
 
+Every lane run records one [CTRF](https://ctrf.io) test per `(recipe,
+deployer)` cell in `/tmp/kwok-debug-artifacts/kwok-results.json` (a setup
+failure before any cell runs is recorded as one `kwok/setup/<deployer>`
+entry with status `other`)
+(`KWOK_RESULTS_FILE` overrides the path); CI uploads it as
+`kwok-results-<recipe>-<deployer>-<run_id>-<attempt>` on every outcome.
+
 Lane details, sync gates, exit codes, and tuning variables are
 documented in
 [docs/contributor/tests.md](../docs/contributor/tests.md) ("KWOK
@@ -180,7 +189,7 @@ A recipe is auto-discovered for KWOK testing if it has `spec.criteria.service` d
 
 ```yaml
 kind: recipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: your-recipe-name
 spec:

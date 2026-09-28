@@ -10,9 +10,9 @@ You may obtain a copy of the License at
 
 # Recipe Health
 
-This page reports the **structural health** of every recipe AICR can resolve — one row per leaf criteria combination (service × accelerator × OS × intent × platform). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](../design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (`gpuStack` on AKS and GKE), the row grades the composition resolved at the **declaration default** (`azure-managed` on AKS, `gke-default` on GKE); per-profile-value rows are a follow-up.
+This page reports the **structural health** of every recipe AICR can resolve — one row per leaf criteria combination (service × accelerator × OS × intent × platform), plus any non-leaf coordinate retained because it carries published dashboard evidence (a plain coordinate that gained a platform sibling keeps its row so its Evidence link is never silently dropped). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (`gpuStack` on AKS, GKE, and OKE), the row grades the composition resolved at the **declaration default** (`azure-managed` on AKS, `gke-default` on GKE, `oci-managed` on OKE); per-profile-value rows are a follow-up.
 
-The matrix is computed **hermetically and offline**: every signal is a pure read of the resolved recipe — no Helm render, no GPU, no cluster, no network. It is regenerated from the recipe catalog by `make recipe-health-docs` and is kept current by a weekly bot PR. `make recipe-health-check` is an advisory staleness check (it is **not** wired into `make qualify` or the merge gate). The full design is recorded in [ADR-009](../design/009-recipe-health-tracking.md).
+The matrix is computed **hermetically and offline**: every signal is a pure read of the resolved recipe — no Helm render, no GPU, no cluster, no network. It is regenerated from the recipe catalog by `make recipe-health-docs` and is kept current by a weekly bot PR. `make recipe-health-check` is an advisory staleness check (it is **not** wired into `make qualify` or the merge gate). The full design is recorded in [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md).
 
 ## What the columns mean
 
@@ -25,7 +25,7 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 
 > **Structural soundness is not a validation verdict.** A recipe that resolves cleanly is *structurally sound*, **not** *validated and performant*. Runtime/validation claims come only from signed conformance evidence, which is out of scope for this matrix today (see the Evidence column below).
 
-**chart_pinned (folded into Status).** One of the graded signals behind `Status` checks that every resolved Helm component references an explicit chart version, per [ADR-006](../design/006-image-pinning-policy.md). This is **layer 1 only** — the chart-version pin — *not* image-digest pinning, and it is a render-free read of the resolved recipe (it does not pull or template the chart).
+**chart_pinned (folded into Status).** One of the graded signals behind `Status` checks that every resolved Helm component references an explicit chart version, per [ADR-006](https://github.com/NVIDIA/aicr/blob/main/docs/design/006-image-pinning-policy.md). This is **layer 1 only** — the chart-version pin — *not* image-digest pinning, and it is a render-free read of the resolved recipe (it does not pull or template the chart).
 
 **Coverage** is a descriptor — it is *never* graded, so a deliberately minimal recipe is never penalized for declaring fewer checks. It is a compact per-phase summary of the **declared** validation checks, in the form `R:n D:n P:n C:n` — the count of named checks declared for the readiness, deployment, performance, and conformance phases respectively.
 
@@ -34,14 +34,16 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 The link is constructed **hermetically and deterministically** from the recipe's resolved criteria using the shared `pkg/recipe.CoordinateFor` mapping — the generator makes no network call, and the coordinate carries **no Kubernetes version**, so a link is stable across k8s-version rolls. The Evidence cell is a link and nothing more: it points at the live board and carries **no** pass/fail state or count. Which recipes are linked is driven by a committed presence manifest (`pkg/testgrid/presence.yaml`); a weekly, warning-only bot keeps it honest by reporting any link that no longer resolves against the live dashboard data (it never blocks merges or edits this doc).
 
 > **Community-source posture is author-asserted provenance, not independently-verified correctness.** A coordinate's tab placement and any community-sourced results on the dashboard are declared by the signing author; corroboration counts agreement at the same AICR version but does not itself certify runtime correctness. Read the linked board accordingly.
+>
+> **Today every committed pointer is `community` class; none is `first-party`.** The signer classes are pinned per class in [`recipes/evidence/allowlist.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/evidence/allowlist.yaml) — `first-party` is the project's own UAT workflows, `community` is individual external contributors, `partner` has nobody onboarded. Every pointer committed under `recipes/evidence/` is community class, published from a contributor fork per [evidence publishing](https://github.com/NVIDIA/aicr/blob/main/docs/contributor/evidence-publishing.md), and admitted by maintainer review. The Evidence column does not render the class, so a deep-link here does not distinguish one from the other — read the class from the allowlist. Surfacing it per row is deferred alongside ADR-009's in-cell freshness state ([#2877](https://github.com/NVIDIA/aicr/issues/2877)).
 
-The deep-link is the current Evidence rendering. It is distinct from — and coexists with — [ADR-009](../design/009-recipe-health-tracking.md)'s deferred, verify-gated *in-cell freshness* state (`unattested` vs aged, derived from a signed attestation's `AttestedAt`): the link points at the live board, and an optional freshness token can later annotate the same cell without replacing the link. See also the [coverage matrix](coverage-matrix.md) for the complementary breadth view.
+The deep-link is the current Evidence rendering. It is distinct from — and coexists with — [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md)'s deferred, verify-gated *in-cell freshness* state (`unattested` vs aged, derived from a signed attestation's `AttestedAt`): the link points at the live board, and an optional freshness token can later annotate the same cell without replacing the link. See also the [coverage matrix](coverage-matrix.md) for the complementary breadth view.
 
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **53**
-- Pass: **53** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **60**
+- Pass: **60** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -57,25 +59,27 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | l40s-any | — | l40s | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | rtx-pro-6000-any | — | rtx-pro-6000 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | monitoring-hpa | — | — | — | — | — | pass | R:0 D:0 P:0 C:0 | pending |
+| aks-ubuntu | aks | — | ubuntu | — | — | pass | R:0 D:0 P:0 C:5 | pending |
 | a100-aks-ubuntu-training-kubeflow | aks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | h100-aks-ubuntu-inference-dynamo | aks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | h100-aks-ubuntu-training-kubeflow | aks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
-| h100-aks-ubuntu-training-slurm | aks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
+| h100-aks-ubuntu-training-slurm | aks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
 | bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
-| h100-bcm-ubuntu-training | bcm | h100 | ubuntu | training | — | pass | R:0 D:4 P:0 C:5 | pending |
+| h100-bcm-ubuntu-training-kubeflow | bcm | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:6 | pending |
+| eks-ubuntu | eks | — | ubuntu | — | — | pass | R:0 D:0 P:0 C:5 | pending |
 | a100-eks-ubuntu-training-kubeflow | eks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
-| gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:8 | pending |
-| gb200-eks-ubuntu-training-slurm | eks | gb200 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
-| gb300-eks-ubuntu-inference-dynamo | eks | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:8 | pending |
-| gb300-eks-ubuntu-training-slurm | eks | gb300 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
+| gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/gb200-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb200-ubuntu/inference-dynamo) |
+| gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | [eks/gb200-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb200-ubuntu/training-kubeflow) |
+| gb200-eks-ubuntu-training-slurm | eks | gb200 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
+| gb300-eks-ubuntu-inference-dynamo | eks | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/gb300-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb300-ubuntu/inference-dynamo) |
+| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | [eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) |
+| gb300-eks-ubuntu-training-slurm | eks | gb300 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-eks-ubuntu-inference-dynamo | eks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/h100-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/h100-ubuntu/inference-dynamo) |
 | h100-eks-ubuntu-inference-nim | eks | h100 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-eks-ubuntu-training-kubeflow | eks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | [eks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow) |
-| h100-eks-ubuntu-training-slurm | eks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
+| h100-eks-ubuntu-training-slurm | eks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
 | h200-eks-inference | eks | h200 | — | inference | — | pass | R:0 D:4 P:0 C:5 | pending |
-| h200-eks-training | eks | h200 | — | training | — | pass | R:0 D:4 P:1 C:10 | pending |
+| h200-eks-training-kubeflow | eks | h200 | — | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
 | rtx-pro-6000-eks-ubuntu-inference-dynamo | eks | rtx-pro-6000 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | rtx-pro-6000-eks-ubuntu-inference-nim | eks | rtx-pro-6000 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:11 | pending |
 | rtx-pro-6000-eks-ubuntu-training-kubeflow | eks | rtx-pro-6000 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:8 | pending |
@@ -83,22 +87,27 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | a100-gke-cos-training-kubeflow | gke | a100 | cos | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | b200-gke-cos-inference-dynamo | gke | b200 | cos | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
 | b200-gke-cos-training-kubeflow | gke | b200 | cos | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
+| gb200-gke-cos-inference-dynamo | gke | gb200 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
+| gb200-gke-cos-training-kubeflow | gke | gb200 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
+| gb200-gke-cos-training-slurm | gke | gb200 | cos | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:5 P:1 C:10 | pending |
-| h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:5 P:0 C:11 | pending |
+| h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:5 P:0 C:10 | pending |
+| h200-k0s-ubuntu-training | k0s | h200 | ubuntu | training | — | pass | R:0 D:4 P:0 C:4 | [k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) |
 | h100-kind-inference-dynamo | kind | h100 | — | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-kind-training-kubeflow | kind | h100 | — | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | h100-kind-training-slurm | kind | h100 | — | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
 | rtx-pro-6000-lke-ubuntu-inference | lke | rtx-pro-6000 | ubuntu | inference | — | pass | R:0 D:4 P:0 C:8 | pending |
-| rtx-pro-6000-lke-ubuntu-training | lke | rtx-pro-6000 | ubuntu | training | — | pass | R:0 D:4 P:0 C:8 | pending |
+| rtx-pro-6000-lke-ubuntu-training-kubeflow | lke | rtx-pro-6000 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:9 | pending |
 | ocp-inference-nim | ocp | — | — | inference | nim | pass | R:0 D:3 P:0 C:11 | pending |
 | ocp-training | ocp | — | — | training | — | pass | R:0 D:3 P:0 C:1 | pending |
 | a100-oke-ubuntu-training-kubeflow | oke | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:8 | pending |
 | gb200-oke-ubuntu-inference-dynamo | oke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| gb200-oke-ubuntu-training-kubeflow | oke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:8 | pending |
+| gb200-oke-ubuntu-training-kubeflow | oke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | pending |
 | l40s-oke-inference | oke | l40s | ol | inference | — | pass | R:0 D:4 P:0 C:8 | pending |
-| l40s-oke-training | oke | l40s | ol | training | — | pass | R:0 D:4 P:0 C:8 | pending |
+| l40s-oke-training-kubeflow | oke | l40s | ol | training | kubeflow | pass | R:0 D:4 P:0 C:9 | pending |
 | vr200-rke2-ubuntu-inference-dynamo | rke2 | vr200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:10 | [rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
 | vr200-rke2-ubuntu-training | rke2 | vr200 | ubuntu | training | — | pass | R:0 D:4 P:1 C:8 | [rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
+| vr200-rke2-ubuntu-training-kubeflow | rke2 | vr200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:9 | [rke2/vr200-ubuntu/training-kubeflow](https://validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow) |
 
 {/* END AICR-HEALTH */}

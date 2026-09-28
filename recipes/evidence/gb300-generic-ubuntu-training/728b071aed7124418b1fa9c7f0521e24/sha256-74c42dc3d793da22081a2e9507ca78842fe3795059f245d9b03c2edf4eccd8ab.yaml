@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-09-19T02:57:39Z
+    bundle:
+      digest: sha256:74c42dc3d793da22081a2e9507ca78842fe3795059f245d9b03c2edf4eccd8ab
+      oci: ghcr.io/atif1996/aicr-evidence:gb300-generic-ubuntu-training-6d21f4209def
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: 10677309+atif1996@users.noreply.github.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 116117498
+recipe: gb300-generic-ubuntu-training
+schemaVersion: 1.0.0

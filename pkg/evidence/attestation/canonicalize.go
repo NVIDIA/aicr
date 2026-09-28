@@ -24,13 +24,26 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// CanonicalizeRecipeYAML applies the V1 canonicalizer to a recipe YAML
-// document. The transform: parse, recursively sort mapping keys, strip
-// comments, re-marshal with \n line endings.
-//
-// V1 is intentionally simple: any recipe edit (including non-material
-// reformatting) changes the canonical bytes and invalidates the bundle.
+// CanonicalizeRecipeYAML sorts recipe YAML mapping keys recursively and
+// strips comments. Any edit to input, including to metadata.version (the
+// CLI version that generated the recipe), changes the output. A digest
+// computed from it is therefore sensitive to which aicr binary produced
+// the recipe, not just to recipe content. New evidence should use
+// CanonicalizeRecipeYAMLV3. This form is retained only so already-signed
+// V1/V2 evidence keeps verifying under the algorithm it was signed with.
 func CanonicalizeRecipeYAML(input []byte) ([]byte, error) {
+	return canonicalizeRecipeYAML(input, false)
+}
+
+// CanonicalizeRecipeYAMLV3 applies CanonicalizeRecipeYAML, then strips the
+// top-level metadata.version field (the CLI version that generated the
+// recipe, not recipe content) so two binaries built differently for the
+// same commit and the same recipe produce identical output.
+func CanonicalizeRecipeYAMLV3(input []byte) ([]byte, error) {
+	return canonicalizeRecipeYAML(input, true)
+}
+
+func canonicalizeRecipeYAML(input []byte, stripVersion bool) ([]byte, error) {
 	if len(input) == 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "cannot canonicalize empty recipe")
 	}
@@ -41,6 +54,9 @@ func CanonicalizeRecipeYAML(input []byte) ([]byte, error) {
 	}
 
 	canonicalize(&doc)
+	if stripVersion {
+		stripMetadataVersion(&doc)
+	}
 
 	out, err := yaml.Marshal(&doc)
 	if err != nil {
@@ -50,14 +66,40 @@ func CanonicalizeRecipeYAML(input []byte) ([]byte, error) {
 	return out, nil
 }
 
-// SubjectDigest returns the V1 subject digest for a recipe: the
-// lowercase hex sha256 of the canonical YAML bytes.
+// SubjectDigest returns the lowercase hex sha256 of the
+// CanonicalizeRecipeYAML bytes, the V1/V2 subject digest for a recipe. New
+// evidence should use SubjectDigestV3. This form exists only so
+// already-signed V1/V2 evidence keeps verifying under the algorithm it was
+// signed with.
 func SubjectDigest(recipeYAML []byte) (string, error) {
 	canon, err := CanonicalizeRecipeYAML(recipeYAML)
 	if err != nil {
 		return "", err
 	}
 	return DigestOfCanonical(canon), nil
+}
+
+// SubjectDigestV3 returns the lowercase hex sha256 of the
+// CanonicalizeRecipeYAMLV3 bytes (metadata.version excluded). This is the
+// digest new evidence (PredicateTypeV3) is built and verified against.
+func SubjectDigestV3(recipeYAML []byte) (string, error) {
+	canon, err := CanonicalizeRecipeYAMLV3(recipeYAML)
+	if err != nil {
+		return "", err
+	}
+	return DigestOfCanonical(canon), nil
+}
+
+// SubjectDigestForType returns SubjectDigestV3 for PredicateTypeV3, and
+// SubjectDigest for every other recorded type. Callers verifying existing
+// evidence must pass the type actually recorded on the bundle being
+// checked, never an assumed V3, so historic V1/V2 evidence keeps verifying
+// under the algorithm it was signed with.
+func SubjectDigestForType(recipeYAML []byte, predicateType string) (string, error) {
+	if predicateType == PredicateTypeV3 {
+		return SubjectDigestV3(recipeYAML)
+	}
+	return SubjectDigest(recipeYAML)
 }
 
 // DigestOfCanonical hashes already-canonicalized recipe bytes — for
@@ -108,4 +150,43 @@ func canonicalize(n *yaml.Node) {
 type mapEntry struct {
 	key   *yaml.Node
 	value *yaml.Node
+}
+
+// stripMetadataVersion removes the top-level metadata.version entry from
+// doc, in place. doc must already be canonicalized, so its root is a
+// mapping node. If removing version empties the metadata mapping, the
+// metadata key is removed too, so a recipe whose only metadata field was
+// version canonicalizes identically to one with no metadata key at all. A
+// document with no metadata mapping, no version key within it, or a
+// metadata mapping that stays non-empty after removal, is otherwise left
+// unchanged.
+func stripMetadataVersion(doc *yaml.Node) {
+	if doc == nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		metadata := root.Content[i+1]
+		if root.Content[i].Value != "metadata" || metadata.Kind != yaml.MappingNode {
+			continue
+		}
+		filtered := make([]*yaml.Node, 0, len(metadata.Content))
+		removedVersion := false
+		for j := 0; j+1 < len(metadata.Content); j += 2 {
+			if metadata.Content[j].Value == "version" {
+				removedVersion = true
+				continue
+			}
+			filtered = append(filtered, metadata.Content[j], metadata.Content[j+1])
+		}
+		if removedVersion && len(filtered) == 0 {
+			root.Content = append(root.Content[:i], root.Content[i+2:]...)
+		} else {
+			metadata.Content = filtered
+		}
+		return
+	}
 }

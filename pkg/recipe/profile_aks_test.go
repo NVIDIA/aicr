@@ -404,7 +404,7 @@ func TestAKSLegacyExternalShadowStaysUnprofiled(t *testing.T) {
 	// every other catalog file (values, mixins, leaves) falls through to
 	// the embedded layer.
 	extDir := t.TempDir()
-	registry := "apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"
+	registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
 	if writeErr := os.WriteFile(filepath.Join(extDir, "registry.yaml"), []byte(registry), 0o600); writeErr != nil {
 		t.Fatalf("write external registry.yaml: %v", writeErr)
 	}

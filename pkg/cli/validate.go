@@ -66,6 +66,7 @@ type validateAgentConfig struct {
 	debug              bool
 	requireGPU         bool
 	aksGPUPoolsPath    string
+	gkeGPUPoolsPath    string
 
 	// runID correlates this run's live-capture snapshot agent with the
 	// validator Jobs runValidation deploys for the same `aicr validate`
@@ -114,6 +115,7 @@ func parseValidateAgentConfig(
 		debug:              cmd.Bool("debug"),
 		requireGPU:         boolFlagOrConfig(cmd, "require-gpu", opts.RequireGPU),
 		aksGPUPoolsPath:    cmd.String("aks-gpu-pools"),
+		gkeGPUPoolsPath:    cmd.String("gke-gpu-pools"),
 		runID:              runID,
 		okeAddonsPath:      cmd.String("oke-addons"),
 	}
@@ -286,6 +288,7 @@ func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 		Privileged:         true,
 		RequireGPU:         c.requireGPU,
 		AKSGPUPoolsPath:    c.aksGPUPoolsPath,
+		GKEGPUPoolsPath:    c.gkeGPUPoolsPath,
 		RunID:              c.runID,
 		NameBase:           validateNameBase,
 		OKEAddonsPath:      c.okeAddonsPath,
@@ -513,7 +516,7 @@ func runValidation(
 }
 
 func validateCmdFlags() []cli.Flag {
-	return []cli.Flag{
+	flags := []cli.Flag{
 		&cli.StringFlag{
 			Name:    cmdNameRecipe,
 			Aliases: []string{"r"},
@@ -634,6 +637,29 @@ func validateCmdFlags() []cli.Flag {
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
+			Name:     "gke-gpu-pools",
+			Usage:    "Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem. When validate captures a live snapshot, each GPU pool's gpuDriverInstallationConfig.gpuDriverVersion is projected into the K8s gke-gpu-pools subtype so profile constraints recorded in GKE recipes can evaluate. Ignored when --snapshot supplies a pre-captured snapshot.",
+			Sources:  cli.EnvVars("AICR_GKE_GPU_POOLS_PATH"),
+			Category: catAgentDeployment,
+		},
+	}
+	flags = append(flags, validateEvidenceFlags()...)
+	return append(flags,
+		configFlag(),
+		dataFlag(),
+		outputFlag(),
+		kubeconfigFlag(),
+	)
+}
+
+// validateEvidenceFlags returns the --emit-attestation flag family: what to
+// emit, where to push it, how much of it to ship, and the keyless-signing
+// inputs. Split out of validateCmdFlags to keep that function under the
+// funlen limit; the order here is the order the flags appear under the
+// Evidence heading in `aicr validate --help`.
+func validateEvidenceFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
 			Name:     "evidence-dir",
 			Usage:    "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
 			Category: catEvidence,
@@ -665,6 +691,21 @@ func validateCmdFlags() []cli.Flag {
 	so node names, provider instance IDs, the node label/taint set, OS tuning, and raw container logs are
 	not published. --full restores the complete payloads. The cryptographic verification story
 	(predicate digests, manifest binding, signature) holds either way.`,
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
+			Name: flagAllowMutableValidatorTags,
+			// Deliberately no Sources: an env var set once for a disposable run
+			// would silently disable the gate for every later run in that shell
+			// or CI job — the same "applied from habit" failure AICR_VALIDATOR_IMAGE_TAG
+			// caused in #2873. Opting out must be argued per invocation.
+			Usage: `Emit the attestation even when a validator image resolves to a mutable tag.
+	Emission otherwise fails closed: the predicate identifies the validators that ran by tag alone, so a moving
+	tag (:edge, :latest) leaves the attestation naming a reference that can later resolve to different validator
+	code. Immutable tags are :vX.Y.Z, :sha-<commit>, :uat-<run-id>, and digest-pinned refs.
+	The usual cause is a stale AICR_VALIDATOR_IMAGE_TAG override — unset it before a conformance run rather than
+	reaching for this flag. Reserve the flag for disposable evidence (a local demo, a side-loaded smoke lane).
+	There is no environment-variable or config-file equivalent: the opt-out must be passed per invocation.`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
@@ -714,10 +755,6 @@ func validateCmdFlags() []cli.Flag {
 			Category: catEvidence,
 		},
 		assumeYesFlag(catEvidence),
-		configFlag(),
-		dataFlag(),
-		outputFlag(),
-		kubeconfigFlag(),
 	}
 }
 
@@ -734,6 +771,13 @@ func warnIgnoredAKSGPUPools(cmd *cli.Command, snapshotFilePath string) {
 // warnIgnoredOKEAddons is the OKE analog of warnIgnoredAKSGPUPools.
 func warnIgnoredOKEAddons(cmd *cli.Command, snapshotFilePath string) {
 	warnIgnoredProjection(cmd, snapshotFilePath, "oke-addons", "AICR_OKE_ADDONS_PATH")
+}
+
+// warnIgnoredGKEGPUPools warns when a --gke-gpu-pools flag or
+// AICR_GKE_GPU_POOLS_PATH env var is ignored because the snapshot being
+// validated was already captured without the projection.
+func warnIgnoredGKEGPUPools(cmd *cli.Command, snapshotFilePath string) {
+	warnIgnoredProjection(cmd, snapshotFilePath, "gke-gpu-pools", "AICR_GKE_GPU_POOLS_PATH")
 }
 
 func warnIgnoredProjection(cmd *cli.Command, snapshotFilePath, flagName, envVar string) {
@@ -812,7 +856,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", flagPush, flagIdentityToken); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", "gke-gpu-pools", flagPush, flagIdentityToken); err != nil {
 				return err
 			}
 
@@ -875,6 +919,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", input.SnapshotPath)
 			warnIgnoredAKSGPUPools(cmd, snapshotFilePath)
 			warnIgnoredOKEAddons(cmd, snapshotFilePath)
+			warnIgnoredGKEGPUPools(cmd, snapshotFilePath)
 			kubeconfig := cmd.String("kubeconfig")
 
 			if recipeFilePath == "" {

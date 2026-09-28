@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: h100-gke-cos-training
 
@@ -146,5 +146,4 @@ spec:
         - gang-scheduling
         - pod-autoscaling
         - cluster-autoscaling
-        - robust-controller
         - secure-accelerator-access

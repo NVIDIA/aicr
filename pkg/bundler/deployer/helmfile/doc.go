@@ -57,4 +57,15 @@
 //
 // Cluster pre-flight, finalizer scrubbing, and scorched-earth cleanup are
 // operator-owned concerns; see #632 for the rationale.
+//
+// # CRD upgrades are not automated here
+//
+// Components the registry marks ownsCRDs get an automated CRD step in the
+// helm deployer, whose deploy.sh runs every component on every invocation.
+// Helmfile has no equivalent: a presync hook fires only for releases helmfile
+// decides to sync, and `helmfile apply` selects on detected change, so a
+// bundle that reran unchanged would silently skip the step. Emitting a hook
+// that works only sometimes reads as a guarantee it cannot keep, so this
+// deployer emits none and helmfile users keep the documented manual step in
+// docs/user/component-catalog.md. See #2525.
 package helmfile

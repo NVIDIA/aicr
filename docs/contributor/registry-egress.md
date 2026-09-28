@@ -21,6 +21,7 @@ per-record inventory (image refs, pins, provenance) is produced by `make registr
 | `dl.k8s.io` | binary-release | pull |
 | `docker.gitea.com` | container-image | pull |
 | `docker.io` | container-image | pull |
+| `dsx-ai-factory.github.io` | helm-chart-http | pull |
 | `get.helm.sh` | binary-release | pull |
 | `ghcr.io` | container-image, oci-helm-chart | pull, push |
 | `github-actions` | github-action | pull |
@@ -31,7 +32,6 @@ per-record inventory (image refs, pins, provenance) is produced by `make registr
 | `kind.sigs.k8s.io` | binary-release | pull |
 | `kubernetes-sigs.github.io` | helm-chart-http | pull |
 | `nvcr.io` | container-image | pull |
-| `nvidia.github.io` | helm-chart-http | pull |
 | `open-policy-agent.github.io` | helm-chart-http | pull |
 | `prometheus-community.github.io` | helm-chart-http | pull |
 | `proxy.golang.org` | go-module | pull |
@@ -49,5 +49,6 @@ These egress surfaces are known but not host-gated — the inventory is a floor,
 - kwok/scripts/*.sh (in-cluster registry/gitea/karpenter side-loads)
 - pkg/**/*.go Sigstore endpoint constants (fulcio/rekor/tuf/oidc) — see pkg/defaults/sigstore.go
 - GitHub workflow inline `image:` and docker/login-action registry inputs
+- GitHub workflow and composite-action inline `run:` bodies — the .github pass mines `uses:` refs only, so an installer invoked from a `run:` step (e.g. the `go install` of go-coverage-report in on-push-comment.yaml) reaches hosts this inventory does not record
 - tools/setup-tools: best-effort only — URLs built from shell vars are reported as warnings, not records
 - GitHub Actions per-OWNER trust: all `uses:` collapse to host `github-actions`, so a new third-party action owner is not gated (only SHA-pinning is enforced, by TestExternalActionsArePinned)

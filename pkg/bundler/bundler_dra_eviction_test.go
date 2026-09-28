@@ -519,7 +519,7 @@ func TestMake_DRAEvictionLabelRejectsDynamicManagedPaths(t *testing.T) {
 
 func testDRAEvictionRecipeResult() *recipe.RecipeResult {
 	return &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",

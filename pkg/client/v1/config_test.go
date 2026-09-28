@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func writeConfig(t *testing.T, body string) string {
 // valid AICRConfig. Splitting them also exercises the case a team actually
 // hits: a document that configures some sections and not others.
 
-const recipeConfig = `apiVersion: aicr.run/v1alpha2
+const recipeConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -63,7 +64,7 @@ spec:
       nodes: 8
 `
 
-const snapshotInputConfig = `apiVersion: aicr.run/v1alpha2
+const snapshotInputConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -73,7 +74,7 @@ spec:
       snapshot: ./snapshot.yaml
 `
 
-const verifyConfig = `apiVersion: aicr.run/v1alpha2
+const verifyConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -313,7 +314,7 @@ func TestLoadConfig_Guards(t *testing.T) {
 		// TestLoadConfig_ExternalCatalogCriteria). A negative count is
 		// registry-independent and still fails here.
 		_, err := aicr.LoadConfig(context.Background(), writeConfig(t,
-			"apiVersion: aicr.run/v1alpha2\nkind: AICRConfig\nmetadata:\n  name: t\nspec:\n  recipe:\n    criteria:\n      nodes: -1\n"))
+			"apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nmetadata:\n  name: t\nspec:\n  recipe:\n    criteria:\n      nodes: -1\n"))
 		if err == nil {
 			t.Fatal("expected an error for a negative node count")
 		}
@@ -358,7 +359,7 @@ func TestWrapConfig(t *testing.T) {
 	}
 }
 
-const accountingConfig = `apiVersion: aicr.run/v1alpha2
+const accountingConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -523,7 +524,7 @@ func TestLoadConfig_ExternalCatalogCriteria(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve fixture path: %v", err)
 	}
-	cfgPath := writeConfig(t, `apiVersion: aicr.run/v1alpha2
+	cfgPath := writeConfig(t, `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: external
@@ -598,7 +599,7 @@ func TestLoadConfig_ExternalCatalogCriteriaStillFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve fixture path: %v", err)
 	}
-	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1alpha2
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: external
@@ -626,7 +627,7 @@ spec:
 	}
 }
 
-const runtimeInventoryConfig = `apiVersion: aicr.run/v1alpha2
+const runtimeInventoryConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -832,8 +833,8 @@ func TestConfig_BundleOptions(t *testing.T) {
 	if got, want := opts.OIDCResolve.RekorURL, "https://rekor.example.com"; got != want {
 		t.Errorf("OIDCResolve.RekorURL = %q, want %q", got, want)
 	}
-	// Keyless fixture: no KMS key. Setting both is rejected outright, which
-	// TestConfig_BundleOptions_SigningModeExclusive covers.
+	// Keyless fixture: no KMS key. A document setting both never loads, which
+	// TestConfig_LoadConfig_SigningModes covers.
 	if opts.OIDCResolve.SigningKey != "" {
 		t.Errorf("OIDCResolve.SigningKey = %q, want empty for a keyless config", opts.OIDCResolve.SigningKey)
 	}
@@ -993,59 +994,54 @@ func TestConfig_BundleInputOptions_NilConfig(t *testing.T) {
 	}
 }
 
-// TestConfig_BundleOptions_SigningModeExclusive pins the rule the CLI enforces
-// in validateSigningKeyExclusivity. ResolveAttesterLazy takes the KMS branch
-// whenever SigningKey is non-empty, so accepting both would sign with the key
-// while the document's keyless settings silently did nothing — the caller
-// believing they signed against a named Fulcio.
-func TestConfig_BundleOptions_SigningModeExclusive(t *testing.T) {
+// TestConfig_LoadConfig_SigningModes pins where the rule now bites.
+// BundleSpec.validate resolves the section, so exclusivity is enforced when the
+// DOCUMENT loads — before any derivation, and for every command that loads a
+// config, not only the ones that bundle. That is the same reach a malformed
+// fulcioURL already had; the rule's own cases are covered by
+// TestBundleResolve_SigningKey in pkg/config.
+func TestConfig_LoadConfig_SigningModes(t *testing.T) {
 	const head = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 spec:
   bundle:
+    input:
+      recipe: recipe.yaml
     attestation:
       enabled: true
 `
-	tests := []struct {
-		name    string
-		body    string
-		wantErr bool
-	}{
-		{"kms alone is fine", head + "      signingKey: gcpkms://projects/p/k\n", false},
-		{"keyless alone is fine", head + "      oidcDeviceFlow: true\n      fulcioURL: https://fulcio.example.com\n", false},
-		// oidcDeviceFlow is deliberately NOT checked eagerly here (see the
-		// BundleOptions godoc): --oidc-device-flow=false must be able to
-		// correct a config that sets both, and this layer runs BEFORE the
-		// CLI's flag-over-config merge. validateSigningKeyExclusivity on the
-		// CLI's merged opts still rejects the config-only combination — see
-		// TestBundleCmd_SigningKeyFromConfig's rejectTests in pkg/cli.
-		{"kms plus device flow is allowed at this layer", head + "      signingKey: gcpkms://projects/p/k\n      oidcDeviceFlow: true\n", false},
-		{"kms plus fulcio is rejected", head + "      signingKey: gcpkms://projects/p/k\n      fulcioURL: https://fulcio.example.com\n", true},
-		// rekorURL is NOT a conflict; it has its own rule against signingConfig.
-		{"kms plus rekor is allowed", head + "      signingKey: gcpkms://projects/p/k\n      rekorURL: https://rekor.example.com\n", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, tt.body))
-			if err != nil {
-				if tt.wantErr {
-					return // rejected even earlier, which is also fail-closed
-				}
-				t.Fatalf("LoadConfig: %v", err)
-			}
-			_, err = cfg.BundleOptions()
-			if tt.wantErr && err == nil {
-				t.Fatal("BundleOptions accepted mixed KMS and keyless signing settings")
-			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("BundleOptions rejected a valid single-mode config: %v", err)
-			}
-		})
-	}
+	t.Run("kms plus fulcio does not load", func(t *testing.T) {
+		body := head + "      signingKey: gcpkms://projects/p/k\n      fulcioURL: https://fulcio.example.com\n"
+		_, err := aicr.LoadConfig(context.Background(), writeConfig(t, body))
+		if err == nil {
+			t.Fatal("LoadConfig accepted a document mixing KMS and keyless signing settings")
+		}
+		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("error = %v, want code %v", err, aicrerrors.ErrCodeInvalidRequest)
+		}
+		if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("error %q must name the exclusivity rule", err.Error())
+		}
+	})
+
+	// The pair the rule deliberately excludes has to keep LOADING, or
+	// --oidc-device-flow=false can never correct the document: the CLI reads
+	// that flag only after the config is loaded and derived. The CLI-level
+	// rejection of the config-only combination is
+	// TestBundleCmd_SigningKeyFromConfig in pkg/cli.
+	t.Run("kms plus device flow still loads", func(t *testing.T) {
+		body := head + "      signingKey: gcpkms://projects/p/k\n      oidcDeviceFlow: true\n"
+		if _, err := aicr.LoadConfig(context.Background(), writeConfig(t, body)); err != nil {
+			t.Fatalf("LoadConfig rejected the flag-correctable combination: %v", err)
+		}
+	})
 }
 
-// TestConfig_BundleOptions_SigningKeyTrimmed covers the YAML block-scalar case
-// the CLI trims for: untrimmed, the key fails late in the KMS URI parser.
+// TestConfig_BundleOptions_SigningKeyTrimmed covers the YAML block-scalar case:
+// untrimmed, the key fails late in the KMS URI parser. Normalization is done by
+// Resolve (config.resolveSigningKey) rather than here, so this asserts the
+// derived value inherits it — a derivation that stopped going through Resolve
+// is caught here rather than at sign time.
 func TestConfig_BundleOptions_SigningKeyTrimmed(t *testing.T) {
 	body := `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
@@ -1467,7 +1463,7 @@ func TestConfig_CNCFEvidenceOptions_Absent(t *testing.T) {
 	}
 }
 
-const recipeOutputConfig = `apiVersion: aicr.run/v1alpha2
+const recipeOutputConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test

@@ -106,8 +106,11 @@ func WriteValuesFile(values map[string]any, baseDir, filename string) (string, i
 // \xNN, \uNNNN) is a subset of what YAML's double-quoted style accepts, so
 // the result round-trips. Same reasoning as the %q quoting in the argocd-helm
 // deployer's Chart.yaml writer (#1034).
+//
+// `kubeConn` emits the shell prologue documented on KubeConnection.
 var TemplateFuncs = template.FuncMap{
-	"q": strconv.Quote,
+	"q":        strconv.Quote,
+	"kubeConn": KubeConnection,
 }
 
 // GenerateFromTemplate renders a template and writes it to baseDir/filename.

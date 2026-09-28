@@ -53,12 +53,18 @@ spec:
     # port, tracked in #2473.
     assert: 6m
   steps:
-    - name: validate-skyhook-complete
+    - name: validate-nodewright-complete
       try:
+        # The manifest still declares a Skyhook, but from operator v0.18.0 the
+        # mirror creates a NodeWright of the same name and writes completion
+        # status ONLY there; the legacy object's status stays unset forever.
+        # Asserting the legacy kind therefore burns the whole timeout above on
+        # a cluster whose tuning finished. The name carries across the mirror,
+        # so it stays pinned here — this component ships exactly one CR.
         - assert:
             resource:
-              apiVersion: skyhook.nvidia.com/v1alpha1
-              kind: Skyhook
+              apiVersion: nodewright.nvidia.com/v1alpha1
+              kind: NodeWright
               metadata:
                 name: rdma-netns-exclusive
               status:

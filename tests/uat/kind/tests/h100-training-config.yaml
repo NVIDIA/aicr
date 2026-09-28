@@ -32,7 +32,7 @@
 # execution publishes a uniquely traceable, digest-addressed point under one
 # stable repo. Consumers pin immutably via `@sha256:…`.
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: kind-h100-training-uat
 

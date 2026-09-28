@@ -38,7 +38,7 @@ any phase. If pre-flight fails, no validator Jobs are deployed.
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
 - Cluster service account with RBAC to create Jobs, ConfigMaps, and read cluster state (AICR creates its own `aicr-validation` namespace on first run).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
-- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally). No provider projection flag is needed on GKE — the constraint reads node labels the standard snapshot already carries. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
+- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` additionally re-evaluates `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so the value fails closed. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
 
 ## Training performance validation
 
@@ -47,11 +47,21 @@ that runs `all_reduce_perf` across GPU nodes and measures aggregate bus
 bandwidth. Three check variants are available; the recipe picks the one (or
 ones) that match the target fabric:
 
+**What the bandwidth number describes.** Each `nccl-all-reduce-bw*` result
+carries a `runtimeSource` label: `delivered-artifact` means the benchmark
+runtime was derived from the `ClusterTrainingRuntime` the recipe ships, so the
+number attests to the delivered wiring; `recipe-supplied-runtime` means the
+recipe supplied the runtime itself; `cluster-capability` means the validator's
+own fixture was measured — proof the fabric can reach the floor, not proof of
+what the recipe ships. Only `h100-gke-cos-training-kubeflow` produces
+`delivered-artifact` today. The label is decided from the recipe, not from what
+is installed on the cluster.
+
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
-| `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [GB200 NET preflight](#gb200-net-preflight-gpudirect-rdma-prerequisites). |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 (EKS, OKE); GB300 (generic); VR200 (RKE2). Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE (GPUDirect TCPXO), H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, GB200 + OKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), and VR200 + RKE2. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -72,6 +82,35 @@ on an air-gapped cluster the RoCE NET test cannot bootstrap. This env override i
 interim — snapshot-based fabric auto-detection (and removing the runtime
 package install once a CUDA-13 image ships sshd) is tracked in
 [NVIDIA/aicr#1413](https://github.com/NVIDIA/aicr/issues/1413).
+
+**Overriding the NCCL workload image with `AICR_NCCL_RUNTIME_IMAGE`.** Each
+embedded `nccl-all-reduce-bw` / `-net` / `-nvls` template pins a specific
+launcher/worker workload image — the CUDA/NCCL/MPI/SSH/transport runtime that
+`all_reduce_perf` actually runs in, distinct per platform (e.g. GKE H100/TCPXO
+ships a CUDA 12.9 image today). To qualify a different CUDA/NCCL combination —
+for example CUDA 13 on GKE TCPXO with an R580-or-newer driver — set
+`AICR_NCCL_RUNTIME_IMAGE=<image ref>` in the `aicr validate` environment. The
+resolved image is rendered into every container that carries the workload
+(the launcher's SSH-setup init container and both the launcher's and worker's
+main containers), so a run can never end up on a mixed image set; a
+platform-specific sidecar unrelated to the NCCL workload itself (e.g. GKE's
+`tcpxo-daemon` transport daemon) is left untouched. A malformed image
+reference fails the check immediately, before cluster discovery or NCCL
+benchmark resources are created, rather than silently falling back to the
+compiled default.
+
+This is a different setting from `aicr validate --image` /
+`AICR_VALIDATOR_IMAGE_*` (see [Validator image
+tags](../contributor/validator.md#validator-image-tags)): those control the
+**validator's own** container image (the snapshot/orchestration binary),
+never the inner NCCL workload. `AICR_NCCL_RUNTIME_IMAGE` only applies to the
+three NCCL all-reduce checks, and only to the templates AICR owns — the
+embedded per-platform template and a runtime derived from a delivered
+artifact — it has
+no effect when a recipe [supplies its own benchmark
+runtime](#supplying-a-benchmark-runtime-for-a-private-service), since that
+runtime already owns its image end to end. For reproducible qualification
+runs, prefer pinning by digest (`name@sha256:...`) over a mutable tag.
 
 GB200/EKS recipes (both `training` and `inference` intents) enable `-net` and
 `-nvls` together rather than the auto-detect variant, because those nodes
@@ -154,14 +193,14 @@ driver, and Kubeflow Trainer are installed and healthy before the benchmark):
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
 
-### GB200 NET preflight: GPUDirect RDMA prerequisites
+### Grace Blackwell NET preflight: GPUDirect RDMA prerequisites
 
-Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE), a preflight
-checks each GPU node for the driver-side prerequisite of GPUDirect RDMA.
-Without it NCCL falls back to the Socket transport. The `-net` check catches
-that on its own — it fails on a `Using network Socket` banner rather than
-reporting a figure — so the preflight exists to fail fast, naming the driver,
-instead of after a full benchmark run.
+Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE) or GB300 (EKS), a
+preflight checks each GPU node for the driver-side prerequisite of GPUDirect
+RDMA. Without it NCCL falls back to the Socket transport. The `-net` check
+catches that on its own — it fails on a `Using network Socket` banner rather
+than reporting a figure — so the preflight exists to fail fast, naming the
+driver, instead of after a full benchmark run.
 
 The preflight runs on the default fabric only: EFA on EKS, built-in IB/verbs on
 OKE. `AICR_NCCL_FABRIC=roce` is EKS-only: there it selects a different template
@@ -254,8 +293,8 @@ the GPU nodes, exactly as `service: any` recipes do. When `--node-selector`
 is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
-`gb200/any`, `gb200/eks`, `gb200/oke`, `h100/aks`, `h100/eks`, `h100/gke`,
-`h200/eks`, `vr200/rke2`. A
+`gb200/any`, `gb200/eks`, `gb200/gke`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
+`h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
@@ -472,18 +511,24 @@ relay KV events.
 **Model-weights cache and `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`.** The benchmark downloads
 the model **once** into a PVC and serves all workers from it (on by default;
 avoids per-IP Hugging Face throttling). The cache PVC needs a StorageClass: it
-uses the cluster's **default** StorageClass unless you set
-`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`. On a cluster with **no default
-StorageClass** (common on EKS — e.g. only a non-default `gp2`) and no value set,
-the check **fails fast** in seconds with guidance rather than hanging; set
+uses the cluster's **default** StorageClass unless you set one, with
+precedence **recipe constraint > catalog env > cluster default**. Set it
+per accelerator via the `inference-model-cache-storage-class` performance
+constraint, or globally via
 `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS=<name>` (e.g. `gp2`/`gp3` on EKS,
-`standard-rwo` on GKE) on the `inference-perf` catalog entry's `env` (or via a
-catalog overlay in the `aicr validate --data <dir>` directory), or disable the cache with
-`AICR_INFERENCE_PERF_MODEL_CACHE_SIZE=off`. Like the other
-`AICR_INFERENCE_PERF_*` knobs, this is a **catalog/`--data`** setting — it is
-**not** read from the shell environment of the process running `aicr validate`
-(only `HF_TOKEN` is). AICR-deployed EKS clusters get a default `gp3` StorageClass
-from the `aws-ebs-csi-driver` component, so the cache works there with no knob.
+`standard-rwo` on GKE, **except A4X/GB200 `a4x-highgpu-4g` nodes, which reject
+`standard-rwo`'s `pd-balanced` disks and need a Hyperdisk-backed class
+instead. See [GKE GB200 Storage Prerequisites](../integrator/gke-gb200-networking.md#storage-prerequisites)**)
+on the `inference-perf` catalog entry's `env` (or via a
+catalog overlay in the `aicr validate --data <dir>` directory). On a cluster
+with **no default StorageClass** (common on EKS, since some clusters ship
+only a non-default `gp2`) and neither set, the check **fails fast** in
+seconds with guidance rather than hanging. Disable the cache instead with
+`AICR_INFERENCE_PERF_MODEL_CACHE_SIZE=off`. Unlike the recipe constraint, the
+catalog env knob is **not** read from the shell environment of the process
+running `aicr validate` (only `HF_TOKEN` is). AICR-deployed EKS clusters get a
+default `gp3` StorageClass from the `aws-ebs-csi-driver` component, so the
+cache works there with no knob.
 
 **Debugging a failed run with `AICR_INFERENCE_PERF_NO_CLEANUP`.** By default the
 validator deletes the per-run namespace (DGD, workers, frontend, AIPerf Job) on
@@ -937,8 +982,8 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
-> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` normally reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. One narrow exception remains — the CLI waits `activeDeadlineSeconds` plus a 30s buffer for the Job to become terminal, and that buffer equals the validator pod's termination grace period, so a validator that consumes its full grace can exhaust the wait before the condition is stamped. Such a run falls back to the CLI-wait path and still reports `other`.
-> 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. So does a per-validator wait deadline: `runPhase` hands that error to the timeout handler and records the outcome as a check result rather than propagating it, which is the same path the full-grace exception in note 1 takes. The rule, rather than a list of sources: exit 5 applies whenever an `ErrCodeTimeout` reaches the top-level CLI. A timeout that is converted into a check result instead — whether raised inside a check or by a per-validator wait — surfaces as exit 8.
+> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` normally reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. One narrow exception remains — the CLI waits the catalog timeout plus `ValidatorWaitBuffer` (2m30s) for the Job to become terminal — measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`, which is never later and so only ever ends the wait earlier), so it shares an origin with the Job's clock — a window that is deliberately shorter than the Job's own `activeDeadlineSeconds` (catalog timeout plus `ValidatorJobDeadlineHeadroom`, 3m30s), so a validator whose pod is still running when the CLI's wait expires exhausts the wait before the deadline condition is ever stamped. Such a run falls back to the CLI-wait path and still reports `other`.
+> 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. So does a per-validator wait deadline: `runPhase` hands that error to the timeout handler and records the outcome as a check result rather than propagating it, which is the same path the wait-exhaustion exception in note 1 takes. The rule, rather than a list of sources: exit 5 applies whenever an `ErrCodeTimeout` reaches the top-level CLI. A timeout that is converted into a check result instead — whether raised inside a check or by a per-validator wait — surfaces as exit 8.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
 failure rather than branching on specific values, and should additionally
@@ -1050,7 +1095,7 @@ strategy.
 
 ### Benchmark Job stuck or timed out
 
-Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:`. For `inference-perf`, the full pipeline (workload ready → endpoint health → benchmark) can take up to 30 min on cold-start clusters. If it still times out:
+Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m30s) on top. For `inference-perf`, the full pipeline (model-cache populate → workload ready → endpoint health → benchmark) can take up to ~50 min on cold-start clusters; the catalog budgets a 65 min timeout. If it still times out:
 
 ```bash
 # validator orchestrator Job + AIPerf benchmark Job both live in aicr-validation.

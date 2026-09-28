@@ -205,16 +205,19 @@ const (
 	// recipe and abort under another. Set-but-invalid always fails closed.
 	envRouterMode = "AICR_INFERENCE_PERF_ROUTER_MODE"
 
-	// perfConstraintModel / perfConstraintConcurrency / perfConstraintRoutingMode
-	// name recipe performance.constraints entries that configure the benchmark
-	// per accelerator — symmetric with how inference-throughput / inference-ttft-p99
-	// thresholds already live in the recipe. Resolution precedence is recipe >
-	// catalog env > compiled default for model/concurrency, and recipe > compiled
-	// default for routing mode. Unlike the throughput/TTFT entries these carry
-	// bare values, not comparator expressions.
-	perfConstraintModel       = "inference-model"
-	perfConstraintConcurrency = "inference-concurrency-per-gpu"
-	perfConstraintRoutingMode = "inference-routing-mode"
+	// perfConstraintModel / perfConstraintConcurrency / perfConstraintRoutingMode /
+	// perfConstraintModelCacheStorageClass name recipe performance.constraints
+	// entries that configure the benchmark per accelerator, symmetric with how
+	// inference-throughput / inference-ttft-p99 thresholds already live in the
+	// recipe. Resolution precedence is recipe > catalog env > compiled default
+	// for model, concurrency, and model-cache-storage-class. Routing mode
+	// resolves recipe > compiled default, with no catalog env. Unlike the
+	// throughput/TTFT entries these carry bare values, not comparator
+	// expressions.
+	perfConstraintModel                  = "inference-model"
+	perfConstraintConcurrency            = "inference-concurrency-per-gpu"
+	perfConstraintRoutingMode            = "inference-routing-mode"
+	perfConstraintModelCacheStorageClass = "inference-model-cache-storage-class"
 
 	// inferenceDeploymentName is the DynamoGraphDeployment name for the benchmark
 	// workload. Passed to the template via ${DEPLOYMENT_NAME}.
@@ -406,9 +409,16 @@ type inferenceWorkloadConfig struct {
 	deployedByUs           bool   // true if we (or a prior run we own) created the workload
 	modelCacheSize         string // PVC size (e.g. "100Gi") enabling the model-weights cache; empty = disabled
 	modelCacheStorageClass string // StorageClass for the cache PVC; empty = cluster default
-	gpuNodeInstanceType    string // chosen node's node.kubernetes.io/instance-type; empty if unlabeled
-	routingMode            inferenceRoutingMode
-	routerMode             string // Dynamo frontend DYN_ROUTER_MODE (dynamo-router path only); env > default (see resolveRouterMode)
+	// modelCacheStorageClassFromRecipe is true when modelCacheStorageClass came
+	// from the `inference-model-cache-storage-class` recipe constraint, see
+	// resolveModelCacheStorageClass. That constraint takes precedence over
+	// envModelCacheStorageClass, so checkStorageClassNodeCompatibility uses
+	// this flag to target the right remediation knob in its incompatibility
+	// error.
+	modelCacheStorageClassFromRecipe bool
+	gpuNodeInstanceType              string // chosen node's node.kubernetes.io/instance-type; empty if unlabeled
+	routingMode                      inferenceRoutingMode
+	routerMode                       string // Dynamo frontend DYN_ROUTER_MODE (dynamo-router path only); env > default (see resolveRouterMode)
 
 	// gpuAllocMode is the cluster's detected GPU allocation capability
 	// (allocmode.Detect), probed once per run. Carried for evidence output
@@ -762,21 +772,23 @@ func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*infer
 	}
 
 	runID := deriveRunID()
+	modelCacheStorageClass, modelCacheStorageClassFromRecipe := resolveModelCacheStorageClass(ctx)
 	config := &inferenceWorkloadConfig{
-		runID:                  runID,
-		gpuCount:               gpuCount,
-		gpuCountPerNode:        gpuCountPerNode,
-		concurrency:            concurrencyPerGPU * gpuCount,
-		namespace:              fmt.Sprintf("%s-%s", inferenceWorkloadNamespacePrefix, runID),
-		aiperfJobName:          fmt.Sprintf("%s-%s", aiperfJobNamePrefix, runID),
-		model:                  model,
-		modelCacheSize:         cacheSize,
-		modelCacheStorageClass: strings.TrimSpace(os.Getenv(envModelCacheStorageClass)),
-		gpuNodeInstanceType:    chosen.Labels[instanceTypeLabel],
-		routingMode:            routingMode,
-		routerMode:             routerMode,
-		gpuAllocMode:           mode,
-		draWorkerWiring:        draWiring,
+		runID:                            runID,
+		gpuCount:                         gpuCount,
+		gpuCountPerNode:                  gpuCountPerNode,
+		concurrency:                      concurrencyPerGPU * gpuCount,
+		namespace:                        fmt.Sprintf("%s-%s", inferenceWorkloadNamespacePrefix, runID),
+		aiperfJobName:                    fmt.Sprintf("%s-%s", aiperfJobNamePrefix, runID),
+		model:                            model,
+		modelCacheSize:                   cacheSize,
+		modelCacheStorageClass:           modelCacheStorageClass,
+		modelCacheStorageClassFromRecipe: modelCacheStorageClassFromRecipe,
+		gpuNodeInstanceType:              chosen.Labels[instanceTypeLabel],
+		routingMode:                      routingMode,
+		routerMode:                       routerMode,
+		gpuAllocMode:                     mode,
+		draWorkerWiring:                  draWiring,
 	}
 
 	// Pin every worker to the specific chosen node via kubernetes.io/hostname
@@ -2797,6 +2809,23 @@ func resolveModel(ctx *validators.Context) string {
 		}
 	}
 	return resolveInferenceModel()
+}
+
+// resolveModelCacheStorageClass returns the StorageClass name for the
+// model-weights cache PVC with precedence recipe > catalog env > compiled
+// default, plus whether the value came from the recipe constraint (needed by
+// checkStorageClassNodeCompatibility to target the right remediation knob). A
+// per-accelerator overlay sets it via the `inference-model-cache-storage-class`
+// performance constraint. Absent, or blank, it falls back to
+// envModelCacheStorageClass, then "" (the cluster's default StorageClass,
+// resolved later by defaultStorageClass).
+func resolveModelCacheStorageClass(ctx *validators.Context) (string, bool) {
+	if c, ok := findPerformanceConstraint(ctx, perfConstraintModelCacheStorageClass); ok {
+		if v := strings.TrimSpace(c.Value); v != "" {
+			return v, true
+		}
+	}
+	return strings.TrimSpace(os.Getenv(envModelCacheStorageClass)), false
 }
 
 // resolveRoutingMode returns where routing decisions are made for the

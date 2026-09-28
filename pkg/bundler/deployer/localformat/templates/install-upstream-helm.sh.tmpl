@@ -19,6 +19,7 @@ cd "${SCRIPT_DIR}"
 # shellcheck source=/dev/null
 source ./upstream.env
 
+{{ kubeConn }}
 # Helm 4 uses server-side apply by default; --force-conflicts lets the
 # upgrade overwrite fields that operators (cert-manager, gpu-operator,
 # nvsentinel, ...) own on rotated webhook cert Secrets. Helm 3 uses
@@ -30,11 +31,35 @@ if [[ "${HELM_MAJOR:-0}" -ge 4 ]]; then
   FORCE_CONFLICTS_FLAG="--force-conflicts"
 fi
 
-# CHART carries the full OCI URI for OCI charts and just the chart name for
+{{ if .OwnsCRDs }}# Apply this chart's CRDs before upgrading. Helm installs a chart's crds/
+# directory on first install and never touches it again, so without this a
+# chart bump whose CRDs changed runs the new controller against the old
+# schema. Skipped under --dry-run, which must not touch the cluster.
+if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
+  bash ./apply-crds.sh
+fi
+
+{{ end }}# CHART carries the full OCI URI for OCI charts and just the chart name for
 # HTTP/HTTPS charts. REPO is non-empty only for HTTP/HTTPS charts; the
 # ${REPO:+--repo "${REPO}"} expansion adds --repo iff REPO is set.
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} {{ .Name }} "${CHART}" \
-  ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
-  --namespace {{ .Namespace }} --create-namespace \
+# When apply-crds.sh ran, it pulled the chart and read the CRDs it applied out
+# of that one file. Installing from the same file keeps both phases bound to a
+# single artifact; resolving CHART/VERSION again would be a second fetch that a
+# mutable tag does not promise returns the same bytes.
+CHART_REF="${CHART}"
+CHART_VERSION_ARGS=(--version "${VERSION}")
+# Under --dry-run, apply-crds.sh above never ran, so no pull happened this
+# invocation: any archive present is leftover from an earlier real deploy and
+# is stale by definition, not merely unverified. A dry-run install must preview
+# what the next real run will actually fetch, not bytes that run never touched.
+if [[ -z "${DRY_RUN_FLAG:-}" && -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
+  CHART_REF="${SCRIPT_DIR}/.aicr-chart.tgz"
+  CHART_VERSION_ARGS=()
+  REPO=""
+fi
+
+helm upgrade --install ${FORCE_CONFLICTS_FLAG} {{ .Name | shq }} "${CHART_REF}" \
+  ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
+  --namespace {{ .Namespace | shq }} --create-namespace \
   -f values.yaml -f cluster-values.yaml \
-  ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}
+  ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${HELM_CONN[@]+"${HELM_CONN[@]}"} ${HELM_DEBUG_FLAG:-}

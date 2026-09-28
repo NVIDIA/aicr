@@ -55,7 +55,10 @@ package redact
 
 import (
 	"regexp"
+	"slices"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -73,7 +76,13 @@ const (
 	// v2 added the per-test CTRF Extra allowlist (ctrfExtraAllowlist):
 	// allowlisted structured keys whose values match the key's canonical shape
 	// (count / enum code) now survive minimal redaction.
-	PolicyVersion = "v2"
+	// v3 (#2297): the per-test Extra allowlist admits the NCCL runtime-
+	// provenance key runtimeSource (closed set), and the new bounded
+	// TestResult.RuntimeProvenance carrier survives under the rules in
+	// boundRuntimeProvenance. Nothing previously published changed shape;
+	// verifiers on v2 will see fields they do not expect, which is exactly why
+	// the version moves.
+	PolicyVersion = "v3"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -200,6 +209,20 @@ var ctrfSkipReasons = map[string]struct{}{
 
 func isSkipReason(v string) bool { _, ok := ctrfSkipReasons[v]; return ok }
 
+// ctrfRuntimeSources is the CLOSED set of NCCL benchmark runtime-provenance
+// codes (validators/performance, #2297). The value names WHERE the measured
+// runtime came from — not whether the bandwidth passed — so a reader can tell a
+// number that describes the artifact the recipe ships from one that describes
+// a validator fixture. As with skip reasons, only codes the check mints are
+// listed; a new code must be added here in the same change that emits it.
+var ctrfRuntimeSources = map[string]struct{}{
+	"delivered-artifact":      {}, // derived from the ClusterTrainingRuntime the recipe ships
+	"recipe-supplied-runtime": {}, // nccl-benchmark-runtime(-ref): the recipe supplied the runtime itself
+	"cluster-capability":      {}, // the validator's embedded fixture: proves the fabric, not the shipped artifact
+}
+
+func isRuntimeSource(v string) bool { _, ok := ctrfRuntimeSources[v]; return ok }
+
 // ctrfExtraAllowlist is the fail-closed set of TestResult.Extra keys safe to
 // publish in a minimal (default) evidence bundle, each paired with the
 // validator its value must pass. Every key carries only low-cardinality counts
@@ -212,6 +235,292 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	"nodesValidated": isCountValue, // count of nodes a coverage check actually verified
 	"nodesTotal":     isCountValue, // count of candidate nodes (validated + skipped/cordoned)
 	"skipReason":     isSkipReason, // closed-set code for why a check skipped
+	// NCCL benchmark runtime provenance (#2297): which artifact the bandwidth
+	// number describes. The template digests and path diff that back the claim
+	// are stdout (--full) evidence, not Extra — see validators/performance.
+	"runtimeSource": isRuntimeSource, // closed-set code: delivered-artifact | recipe-supplied-runtime | cluster-capability
+}
+
+// ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.
+var ctrfSHA256Value = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// ctrfProvenancePath bounds a RuntimeProvenance path: the dotted template-key
+// grammar (map keys, [name]-addressed list elements, label/annotation keys with
+// their "/" and "-"), and nothing that could carry free text or an address.
+var ctrfProvenancePath = regexp.MustCompile(`^[A-Za-z0-9._/*\-\[\]]{1,256}$`)
+
+// ctrfListSelector matches a named-list selector segment ("[name]") in a path.
+var ctrfListSelector = regexp.MustCompile(`\[([^\[\]]*)\]`)
+
+// ctrfFabricEnvNames is the EXACT set of env names an env selector may keep:
+// the GPUDirect-TCPXO NCCL configuration the shipped torch-distributed-tcpxo
+// runtime declares (Google's v1.0.15 plugin set) plus the two loader/device
+// variables — the variables the inherited inventory exists to prove were
+// carried. A prefix rule (NCCL_*) was rejected because an operator can name a
+// variable NCCL_CUSTOMER_ACME_PROD; only names on this list are vendor-defined.
+// Every other list element name (containers, volumes, mounts, other env) is
+// operator- or vendor-chosen text and collapses to "[*]". Adding a variable to
+// the shipped runtime that the inventory should name means adding it here in
+// the same change.
+var ctrfFabricEnvNames = map[string]struct{}{
+	"CUDA_VISIBLE_DEVICES":                          {},
+	"LD_LIBRARY_PATH":                               {},
+	"NCCL_BUFFSIZE":                                 {},
+	"NCCL_CROSS_NIC":                                {},
+	"NCCL_DEBUG":                                    {},
+	"NCCL_DEBUG_SUBSYS":                             {},
+	"NCCL_FASTRAK_CTRL_DEV":                         {},
+	"NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL":           {},
+	"NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING":           {},
+	"NCCL_FASTRAK_IFNAME":                           {},
+	"NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY":            {},
+	"NCCL_FASTRAK_NUM_FLOWS":                        {},
+	"NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS":         {},
+	"NCCL_FASTRAK_USE_LLCM":                         {},
+	"NCCL_FASTRAK_USE_SNAP":                         {},
+	"NCCL_MIN_NCHANNELS":                            {},
+	"NCCL_NET_GDR_LEVEL":                            {},
+	"NCCL_NVLS_ENABLE":                              {},
+	"NCCL_NVLSTREE_MAX_CHUNKSIZE":                   {},
+	"NCCL_P2P_NET_CHUNKSIZE":                        {},
+	"NCCL_P2P_NVL_CHUNKSIZE":                        {},
+	"NCCL_P2P_PCI_CHUNKSIZE":                        {},
+	"NCCL_PROTO":                                    {},
+	"NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE": {},
+	"NCCL_SOCKET_IFNAME":                            {},
+	"NCCL_TUNER_CONFIG_PATH":                        {},
+	"NCCL_TUNER_PLUGIN":                             {},
+}
+
+// ctrfProvenanceMaxPaths caps each path list; a derived PodTemplateSpec has a
+// few hundred leaves, so a longer list is not a template inventory.
+const ctrfProvenanceMaxPaths = 1024
+
+// ctrfFreeKeyMaps are the PodTemplateSpec field names whose value is a map
+// with USER-DEFINED keys (map[string]string / map[string]Quantity in the
+// core/v1 API): labels, annotations, nodeSelector, resource limits/requests
+// and overhead (extended-resource names such as acme.internal/x), label
+// selectors' matchLabels, CSI volumeAttributes and flexVolume options. Every
+// other segment of a template path is a Kubernetes API field name. A key under
+// one of these maps is operator text wherever the map sits in the template —
+// a sidecar's resources as much as the pod's labels — so it is collapsed to
+// the map unless the whole key is in ctrfVendorKeys. The maps are leaves in
+// the API (their values are scalars), so the key is always the final segment.
+var ctrfFreeKeyMaps = []string{
+	"annotations", "labels", "nodeSelector", "limits", "requests", "overhead",
+	"matchLabels", "volumeAttributes", "options", "userAnnotations",
+}
+
+// ctrfPodTemplateFields is the EXACT set of JSON field names reachable from a
+// core/v1 PodTemplateSpec (k8s.io/api v0.37.0), generated by reflection over
+// the API types and pinned by TestPodTemplateFieldsMatchAPI. Every structural
+// segment of a provenance path must be one of these — a path is dropped
+// otherwise — so the carrier can only ever describe the Kubernetes schema:
+// an operator cannot smuggle a name through a segment position even if a
+// non-schema key survived CRD pruning or the sentinel line were forged. Keys of
+// free-key maps and [name] selectors are governed by the exact allowlists
+// above, not by this set.
+var ctrfPodTemplateFields = setOf(
+	"accessModes", "action", "activeDeadlineSeconds", "add", "affinity", "allowPrivilegeEscalation",
+	"annotations", "apiGroup", "apiVersion", "appArmorProfile", "args", "audience", "automountServiceAccountToken",
+	"awsElasticBlockStore", "azureDisk", "azureFile", "bindMountOptions", "blockOwnerDeletion",
+	"cachingMode", "capabilities", "cephfs", "certificateChainPath", "chapAuthDiscovery",
+	"chapAuthSession", "cinder", "claimName", "claims", "clusterTrustBundle", "command",
+	"conditionType", "configMap", "configMapKeyRef", "configMapRef", "containerName", "containerPort",
+	"containers", "controller", "creationTimestamp", "credentialBundlePath", "csi", "dataSource",
+	"dataSourceRef", "datasetName", "datasetUUID", "defaultMode", "defaultUser", "deletionGracePeriodSeconds",
+	"deletionTimestamp", "devicePath", "directory", "diskName", "diskURI", "divisor", "dnsConfig",
+	"dnsPolicy", "downwardAPI", "driver", "drop", "effect", "emptyDir", "enableServiceLinks",
+	"endpoints", "env", "envFrom", "ephemeral", "ephemeralContainers", "evictionResponders",
+	"exec", "exitCodes", "expirationSeconds", "failureThreshold", "fc", "fieldPath", "fieldRef",
+	"fieldsType", "fieldsV1", "fileKeyRef", "finalizers", "flexVolume", "flocker", "fsGroup",
+	"fsGroupChangePolicy", "fsType", "gateway", "gcePersistentDisk", "generateName", "generation",
+	"gitRepo", "glusterfs", "gmsaCredentialSpec", "gmsaCredentialSpecName", "group", "grpc",
+	"host", "hostAliases", "hostIP", "hostIPC", "hostNetwork", "hostPID", "hostPath", "hostPort",
+	"hostProcess", "hostUsers", "hostname", "hostnameOverride", "hostnames", "httpGet",
+	"httpHeaders", "image", "imagePullPolicy", "imagePullSecrets", "initContainers", "initialDelaySeconds",
+	"initiatorName", "ip", "iqn", "iscsi", "iscsiInterface", "items", "key", "keyPath",
+	"keyType", "keyring", "kind", "labelSelector", "labels", "level", "lifecycle", "limits",
+	"livenessProbe", "localhostProfile", "lun", "managedFields", "manager", "matchExpressions",
+	"matchFields", "matchLabelKeys", "matchLabels", "maxExpirationSeconds", "maxSkew",
+	"medium", "metadata", "minDomains", "mismatchLabelKeys", "mode", "monitors", "mountPath",
+	"mountPropagation", "name", "nameservers", "namespace", "namespaceSelector", "namespaces",
+	"nfs", "nodeAffinity", "nodeAffinityPolicy", "nodeName", "nodePublishSecretRef", "nodeSelector",
+	"nodeSelectorTerms", "nodeTaintsPolicy", "operation", "operator", "optional", "options",
+	"os", "overhead", "ownerReferences", "partition", "path", "pdID", "pdName", "periodSeconds",
+	"persistentVolumeClaim", "photonPersistentDisk", "podAffinity", "podAffinityTerm",
+	"podAntiAffinity", "podCertificate", "podGroupName", "pool", "port", "portals", "ports",
+	"portworxVolume", "postStart", "preStop", "preemptionPolicy", "preference", "preferredDuringSchedulingIgnoredDuringExecution",
+	"prefix", "priority", "priorityClassName", "privileged", "procMount", "projected",
+	"protectionDomain", "protocol", "pullPolicy", "quobyte", "rbd", "readOnly", "readOnlyRootFilesystem",
+	"readinessGates", "readinessProbe", "recursiveReadOnly", "reference", "registry", "repository",
+	"request", "requests", "requiredDuringSchedulingIgnoredDuringExecution", "resizePolicy",
+	"resource", "resourceClaimName", "resourceClaimTemplateName", "resourceClaims", "resourceFieldRef",
+	"resourceName", "resourceVersion", "resources", "restartPolicy", "restartPolicyRules",
+	"revision", "role", "runAsGroup", "runAsNonRoot", "runAsUser", "runAsUserName", "runtimeClassName",
+	"scaleIO", "schedulerName", "schedulingGates", "schedulingGroup", "scheme", "seLinuxChangePolicy",
+	"seLinuxOptions", "searches", "seccompProfile", "seconds", "secret", "secretFile",
+	"secretKeyRef", "secretName", "secretRef", "securityContext", "selector", "selfLink",
+	"server", "service", "serviceAccount", "serviceAccountName", "serviceAccountToken",
+	"setHostnameAsFQDN", "shareName", "shareProcessNamespace", "signerName", "sizeLimit",
+	"sleep", "sources", "spec", "sslEnabled", "startupProbe", "stdin", "stdinOnce", "stopSignal",
+	"storageClassName", "storageMode", "storagePolicyID", "storagePolicyName", "storagePool",
+	"storageos", "subPath", "subPathExpr", "subdomain", "subresource", "successThreshold",
+	"supplementalGroups", "supplementalGroupsPolicy", "sysctls", "system", "targetContainerName",
+	"targetPortal", "targetWWNs", "tcpSocket", "tenant", "terminationGracePeriodSeconds",
+	"terminationMessagePath", "terminationMessagePolicy", "time", "timeoutSeconds", "tolerationSeconds",
+	"tolerations", "topologyKey", "topologySpreadConstraints", "tty", "type", "uid", "user",
+	"userAnnotations", "value", "valueFrom", "values", "volume", "volumeAttributes", "volumeAttributesClassName",
+	"volumeClaimTemplate", "volumeDevices", "volumeID", "volumeMode", "volumeMounts", "volumeName",
+	"volumeNamespace", "volumePath", "volumes", "vsphereVolume", "weight", "whenUnsatisfiable",
+	"windowsOptions", "workingDir", "wwids",
+)
+
+func setOf(names ...string) map[string]struct{} {
+	out := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		out[n] = struct{}{}
+	}
+	return out
+}
+
+// ctrfVendorKeys is the EXACT set of full label/annotation/nodeSelector keys
+// that are vendor-defined API surface, not operator text, and stay in minimal
+// evidence: the two GKE fabric annotations this carrier exists to prove were
+// inherited, the NRI device annotation, the GKE accelerator selector, the
+// Trainer ancestry label, and the two scheduling keys AICR itself stamps. A
+// domain rule was rejected because the local part is operator-writable
+// (networking.gke.io/customer-prod is a legal key); only whole keys on this
+// list survive, every other key collapses to its map.
+var ctrfVendorKeys = map[string]struct{}{
+	"networking.gke.io/interfaces":                {},
+	"networking.gke.io/default-interface":         {},
+	"devices.gke.io/container.tcpxo-daemon":       {},
+	"cloud.google.com/gke-accelerator":            {},
+	"trainer.kubeflow.org/trainjob-ancestor-step": {},
+	"nvidia.com/gpu":                              {}, // the worker's GPU request — the count the measurement ran on
+	"nvidia.com/gpu.present":                      {},
+	"node.kubernetes.io/instance-type":            {},
+}
+
+// boundRuntimeProvenance applies the minimal-evidence policy to a derived
+// runtime's provenance record: both digests must be lowercase sha256 hex or
+// the whole record is dropped (fail-closed — a record that cannot bind is not
+// evidence); each path must match the template-key grammar; named-list
+// selectors collapse to "[*]" unless they name a variable in the exact fabric
+// env set; keys under operator-keyed maps collapse to the parent unless the
+// whole key is in the exact vendor-key set; lists are deduplicated, sorted and
+// capped. The live runtime is operator-modifiable, so any name it carries is
+// treated as operator text unless an exact allowlist keeps it — there is no
+// prefix or domain rule anywhere in this policy. Returns a fresh record; never
+// mutates in.
+func boundRuntimeProvenance(in *ctrf.RuntimeProvenance) *ctrf.RuntimeProvenance {
+	if in == nil || !ctrfSHA256Value.MatchString(in.ShippedDigest) || !ctrfSHA256Value.MatchString(in.DerivedDigest) {
+		return nil
+	}
+	return &ctrf.RuntimeProvenance{
+		ShippedDigest:   in.ShippedDigest,
+		DerivedDigest:   in.DerivedDigest,
+		OverriddenPaths: boundProvenancePaths(in.OverriddenPaths),
+		InheritedPaths:  boundProvenancePaths(in.InheritedPaths),
+	}
+}
+
+func boundProvenancePaths(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		if !ctrfProvenancePath.MatchString(p) {
+			continue
+		}
+		p = collapseOperatorKey(collapseListSelectors(p))
+		if !structuralSegmentsKnown(p) {
+			continue
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	if len(out) > ctrfProvenanceMaxPaths {
+		out = out[:ctrfProvenanceMaxPaths]
+	}
+	return out
+}
+
+// collapseOperatorKey returns p unchanged unless it addresses a key under a
+// free-key map (ctrfFreeKeyMaps) anywhere in the template, in which case the
+// whole key must be in ctrfVendorKeys; otherwise the path collapses to the map
+// itself. Keys may contain "." (annotation domains), so the map is located by
+// field-name segment, not by splitting the key.
+func collapseOperatorKey(p string) string {
+	best := -1
+	for _, field := range ctrfFreeKeyMaps {
+		for _, marker := range []string{"." + field + ".", field + "."} {
+			idx := strings.Index(p, marker)
+			if idx < 0 || (marker[0] != '.' && idx != 0) {
+				continue
+			}
+			end := idx + len(marker) // first byte of the key
+			if best < 0 || end < best {
+				best = end
+			}
+		}
+	}
+	if best < 0 {
+		return p
+	}
+	if _, vendor := ctrfVendorKeys[p[best:]]; vendor {
+		return p
+	}
+	return p[:best-1]
+}
+
+// structuralSegmentsKnown reports whether every structural segment of an
+// already-collapsed path is a PodTemplateSpec field name. Segments are the
+// dot-separated tokens up to and including the first free-key map field; what
+// follows that field is the map key, which collapseOperatorKey has already
+// reduced to an exact vendor key (and which may itself contain dots). A
+// "[...]" selector suffix is not part of the field name.
+func structuralSegmentsKnown(p string) bool {
+	rest := p
+	for rest != "" {
+		seg, tail, _ := strings.Cut(rest, ".")
+		if i := strings.IndexByte(seg, '['); i >= 0 {
+			seg = seg[:i]
+		}
+		if _, ok := ctrfPodTemplateFields[seg]; !ok {
+			return false
+		}
+		if slices.Contains(ctrfFreeKeyMaps, seg) {
+			return true // the remainder is the (already vetted) map key
+		}
+		rest = tail
+	}
+	return true
+}
+
+// collapseListSelectors rewrites every "[name]" selector in p to "[*]" except
+// an env selector naming a variable in ctrfFabricEnvNames, which is kept
+// because it is the evidence. Container, volume, mount and arbitrary env names
+// are whatever the live runtime carries and are not published.
+func collapseListSelectors(p string) string {
+	return ctrfListSelector.ReplaceAllStringFunc(p, func(sel string) string {
+		name := sel[1 : len(sel)-1]
+		start := strings.Index(p, sel)
+		if _, fabric := ctrfFabricEnvNames[name]; fabric && start >= 0 && strings.HasSuffix(p[:start], "env") {
+			return sel
+		}
+		return "[*]"
+	})
 }
 
 // ctrfAppliedRules is the static, sorted description of the CTRF scrub.
@@ -219,6 +528,7 @@ var ctrfAppliedRules = []string{
 	"ctrf.tests.extra.allowlist",
 	"ctrf.tests.omit:message",
 	"ctrf.tests.omit:stdout",
+	"ctrf.tests.runtimeProvenance.bound",
 }
 
 // Snapshot returns a redacted deep copy of in and the sorted list of applied
@@ -329,6 +639,7 @@ func CTRF(in *ctrf.Report) (*ctrf.Report, []string) {
 			tr.Stdout = nil
 			tr.Message = ""
 			tr.Extra = allowlistExtra(tr.Extra)
+			tr.RuntimeProvenance = boundRuntimeProvenance(tr.RuntimeProvenance)
 			tests[i] = tr
 		}
 		out.Results.Tests = tests
