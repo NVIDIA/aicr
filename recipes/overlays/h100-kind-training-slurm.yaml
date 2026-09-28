@@ -19,8 +19,10 @@ metadata:
 
 spec:
   # H100 + Kind + training with the Slinky operator and a Slinky-managed
-  # Slurm cluster. Kind has no GPUs, so the NodeSet runs CPU-only (no
-  # GRES, no nvidia.com/gpu, no DCGM); useful for no-GPU CI end-to-end.
+  # Slurm cluster. The NodeSet requests no GPUs (no GRES, no
+  # nvidia.com/gpu, no DCGM), but slinky-topograph below groups nodes by
+  # their nvidia.com/gpu.clique label, so the cluster must carry it:
+  # tests/uat/kind/bootstrap-cluster.sh builds one with simulated GPUs.
   base: h100-kind-training
 
   criteria:
@@ -37,15 +39,16 @@ spec:
   # The Slinky operator (CRDs + operator + cluster instance) is declared
   # inline per slurm leaf, mirroring the dynamo-platform pattern in
   # h100-*-inference-dynamo leaves. Inlining lets each leaf carry its
-  # own GPU/GRES tuning (Kind = CPU-only; H100 leaves = `Gres=gpu:h100:8`
+  # own GPU/GRES tuning (Kind = no GRES; H100 leaves = `Gres=gpu:h100:8`
   # + `nvidia.com/gpu: 8`) without fighting the mixin-vs-leaf
   # identity-field guard in mixinComponentRefSafeForMerge
   # (pkg/recipe/metadata_store.go), and keeps base.yaml free of
   # platform-specific components.
   #
-  # Kind has no GPUs, so the NodeSet runs CPU-only: no `extraConfMap.Gres`,
-  # no `slurmd.resources.limits.nvidia.com/gpu`, no DCGM. This makes the
-  # leaf usable as a no-GPU CI smoke test for the operator + chart wiring.
+  # The Slurm config carries no GPU tuning: no `extraConfMap.Gres`, no
+  # `slurmd.resources.limits.nvidia.com/gpu`, no DCGM. The simulated GPUs
+  # exist only at the Kubernetes layer (capacity and clique labels from
+  # tests/uat/kind/setup-gpu-sim.sh), so Slurm jobs cannot request them.
   componentRefs:
     - name: mariadb-operator-crds
       type: Helm
