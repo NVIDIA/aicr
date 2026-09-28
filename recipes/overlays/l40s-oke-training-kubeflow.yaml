@@ -43,9 +43,6 @@ spec:
 
   validation:
     conformance:
-      # Union-merged onto the checks inherited from l40s-oke-training.
-      # robust-controller routes to checkRobustKubeflowTrainer only on leaves
-      # that resolve kubeflow-trainer, so it is declared here rather than on
-      # the plain training base (where it would skip for want of an AI operator).
       checks:
         - robust-controller
+        - secure-accelerator-access

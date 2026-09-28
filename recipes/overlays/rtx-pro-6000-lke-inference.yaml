@@ -91,3 +91,4 @@ spec:
         - inference-gateway
         - pod-autoscaling
         - cluster-autoscaling
+        - secure-accelerator-access
