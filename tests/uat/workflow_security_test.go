@@ -2253,8 +2253,9 @@ func actionsExpressions(text string) []string {
 }
 
 // expressionContexts returns the dotted context paths an Actions expression
-// references. Single-quoted literals are skipped so a format() template does not
-// contribute its own text as an identifier.
+// references. An index segment that follows a path, ['key'], is read as .key,
+// since Actions treats the two alike. Other single-quoted literals are skipped
+// so a format() template does not contribute its own text as an identifier.
 func expressionContexts(expression string) []string {
 	contexts := make([]string, 0)
 	var current strings.Builder
@@ -2273,6 +2274,13 @@ func expressionContexts(expression string) []string {
 			}
 			continue
 		}
+		if current.Len() > 0 {
+			if key, end, ok := expressionIndexSegment(expression, index); ok {
+				current.WriteString("." + key)
+				index = end
+				continue
+			}
+		}
 		switch {
 		case character == '\'':
 			flush()
@@ -2288,6 +2296,34 @@ func expressionContexts(expression string) []string {
 	}
 	flush()
 	return contexts
+}
+
+// expressionIndexSegment reads a property dereference by index, ['key'], at
+// expression[start:], allowing blanks before and inside the brackets. It returns
+// the key and the offset of the closing bracket. A key holding an escaped quote,
+// written as two single quotes, is not recognized, so the caller reads those
+// brackets as punctuation.
+func expressionIndexSegment(expression string, start int) (string, int, bool) {
+	skipBlanks := func(offset int) int {
+		return len(expression) - len(strings.TrimLeft(expression[offset:], " \t\r\n"))
+	}
+	open := skipBlanks(start)
+	if open == len(expression) || expression[open] != '[' {
+		return "", 0, false
+	}
+	quote := skipBlanks(open + 1)
+	if quote == len(expression) || expression[quote] != '\'' {
+		return "", 0, false
+	}
+	length := strings.IndexByte(expression[quote+1:], '\'')
+	if length < 0 {
+		return "", 0, false
+	}
+	closing := skipBlanks(quote + length + 2)
+	if closing == len(expression) || expression[closing] != ']' {
+		return "", 0, false
+	}
+	return expression[quote+1 : quote+1+length], closing, true
 }
 
 // isAttackerChosenContext reports whether an expression referencing context
