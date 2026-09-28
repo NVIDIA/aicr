@@ -445,3 +445,67 @@ func TestQueryHydrationExposesRuntimeInventory(t *testing.T) {
 		t.Errorf("selector returned %v, want %q", got, RuntimeInventoryDisabled)
 	}
 }
+
+// Non-GKE keeps the original rejection. The grant is scoped to the footprint
+// that was qualified; a typo'd criterion landing on EKS must fail loudly.
+func TestApplyRuntimeInventoryDoesNotGrantOffGKE(t *testing.T) {
+	for _, svc := range []CriteriaServiceType{
+		CriteriaServiceEKS, CriteriaServiceAKS, CriteriaServiceOKE, CriteriaServiceGeneric,
+	} {
+		t.Run(string(svc), func(t *testing.T) {
+			result := &RecipeResult{
+				Criteria:      &Criteria{Service: svc},
+				ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+			}
+			err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled)
+			if err == nil {
+				t.Fatalf("service %s: want rejection, got a grant", svc)
+			}
+			if result.GetComponentRef("k8s-aibom") != nil {
+				t.Errorf("service %s: component was added despite the error", svc)
+			}
+		})
+	}
+}
+
+// An explicit decline outranks the opt-in. h100-gke-cos-inference-dynamo
+// declines because k8s-aibom alongside grove and dynamo-platform is a
+// combination nothing has qualified; widening adoption does not qualify it.
+func TestApplyRuntimeInventoryRespectsDeclineOnGKE(t *testing.T) {
+	result := &RecipeResult{
+		Criteria: &Criteria{Service: CriteriaServiceGKE},
+		ComponentRefs: []ComponentRef{{
+			Name: "k8s-aibom", Type: ComponentTypeHelm,
+			Overrides: map[string]any{"install": false},
+		}},
+	}
+	if err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled); err == nil {
+		t.Fatal("want rejection of enable-over-decline, got nil")
+	}
+	if result.GetComponentRef("k8s-aibom").IsEnabled() {
+		t.Error("declined component was re-enabled")
+	}
+}
+
+// `disabled` on a recipe without the component still fails: recording a
+// decline the recipe cannot honor is the same defect the grant fixes, in the
+// other direction.
+func TestApplyRuntimeInventoryDisabledStillRequiresDeclaration(t *testing.T) {
+	result := &RecipeResult{
+		Criteria:      &Criteria{Service: CriteriaServiceGKE},
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+	}
+	if err := applyRuntimeInventoryMode(result, RuntimeInventoryDisabled); err == nil {
+		t.Fatal("want rejection for disabled-without-declaration, got nil")
+	}
+}
+
+// Nil criteria must not panic and must not grant.
+func TestApplyRuntimeInventoryNilCriteriaDoesNotGrant(t *testing.T) {
+	result := &RecipeResult{
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+	}
+	if err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled); err == nil {
+		t.Fatal("want rejection with nil criteria, got a grant")
+	}
+}
