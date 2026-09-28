@@ -1337,43 +1337,27 @@ aicr bundle --recipe recipes/overlays/gb200-gke-cos-inference-dynamo.yaml \
 `a4xStorageClass.create` is a bundling-time toggle read by AICR itself, not
 an `ai-dynamo` chart value. It never reaches the rendered Helm values.
 
-### `gpu-operator` and `nvidia-dra-driver-gpu`: ComputeDomain CRD ownership on Argo CD
+### `gpu-operator` and `nvidia-dra-driver-gpu`: shared ComputeDomain CRD
 
-`gpu-operator` and `nvidia-dra-driver-gpu` (and `nvidia-dra-driver-gpu-ocp`) both
-ship the `computedomains.resource.nvidia.com` CRD. As of `gpu-operator`
-v26.7.0 the two chart copies disagree on schema (`spec.numNodes` required vs.
-optional with a default), so on `--deployer argocd` and `--deployer
-argocd-helm` — where every generated `Application` syncs with
-`automated.selfHeal: true` — Argo CD perpetually reconciles the CRD toward
-whichever `Application` last synced.
+`gpu-operator` and `nvidia-dra-driver-gpu` (and `nvidia-dra-driver-gpu-ocp`)
+both ship the `computedomains.resource.nvidia.com` CRD. In `gpu-operator`
+v26.7.0 the two copies disagreed on schema: the operator's copy required
+`spec.numNodes` and carried no default. `gpu-operator` v26.7.1 ships a copy
+identical to the DRA driver 0.5.0 chart's, so the two charts no longer
+contend.
 
-When a bundle pairs a standalone DRA driver with `gpu-operator` **v26.7.0 or
-newer**, AICR scopes an `ignoreDifferences` entry to the divergent fields on
-the `gpu-operator` `Application`, so the DRA driver's copy stays the effective
-owner and the reconcile loop stops. This is generated automatically — no flag
-or override is needed. Bundles with only one of the two components, or with a
-`gpu-operator` older than v26.7.0 (whose chart ships no `computedomains` CRD
-to contend with), are unaffected and carry no such entry.
+**Argo CD.** Bundles built with `gpu-operator` v26.7.0 carried an
+`ignoreDifferences` entry and `RespectIgnoreDifferences=true` on the
+`gpu-operator` `Application` to stop Argo CD reconciling the CRD back and
+forth. AICR no longer emits either. An existing Argo CD deployment converges
+once the `gpu-operator` `Application` syncs v26.7.1, because both
+`Application`s then apply the same CRD.
 
-**One side effect worth knowing about.** The entry is paired with the
-`RespectIgnoreDifferences=true` sync option, without which Argo CD would
-exclude the fields from its diff but still re-apply them on every sync. That
-option is *Application-wide*, not per-entry: Argo builds the sync-time
-normalizer from this `Application`'s `ignoreDifferences` **plus** any
-`resource.customizations.ignoreDifferences.*` configured cluster-wide in
-`argocd-cm`. So on an Argo instance carrying global ignore rules (webhook
-`caBundle`, HPA-managed `replicas`, aggregated ClusterRole rules), those
-fields also stop being enforced at sync time for the `gpu-operator`
-`Application` specifically — drift in them is preserved rather than corrected
-by `selfHeal`. Argo CD offers no way to scope the option to a single entry.
-
-This is a stopgap, not a durable fix. `Helm` and `Flux` bundles are not
-affected (both install CRDs once and never re-apply them), and the
-OLM-based OCP path (`gpu-operator-ocp`, `gpu-operator-ocp-olm`) is not
-covered — those components install no chart `crds/` of their own, so their
-CRDs come from the OLM `Subscription`/CSV and an `Application`-level
-`ignoreDifferences` has nothing to arbitrate. That conflict is tracked
-separately. See [NVIDIA/aicr#2546](https://github.com/NVIDIA/aicr/issues/2546).
+**Helm and Flux.** Both install `crds/` only when the CRD is absent and never
+upgrade it. A cluster first installed with `gpu-operator` v26.7.0 therefore
+keeps that release's stricter copy after upgrading. Set `spec.numNodes`
+explicitly on every `ComputeDomain`, as AICR's own manifests do; `0` is valid
+under both copies.
 
 ### `agentgateway`: upgrading across breaking releases
 

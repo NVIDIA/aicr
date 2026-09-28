@@ -45,7 +45,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.7.0 | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.1 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.12 | 1 |
@@ -168,19 +168,19 @@ _No images extracted._
 ### gpu-operator
 
 - `docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e`
-- `nvcr.io/nvidia/cloud-native/dcgm:4.6.0-1-ubuntu24.04`
+- `nvcr.io/nvidia/cloud-native/dcgm:4.6.1-1-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6`
-- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.3`
-- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.0`
-- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.0`
+- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.4`
+- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.1`
+- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.1`
 - `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4`
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
-- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.0`
+- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.1`
 - `nvcr.io/nvidia/driver:580.173.02`
-- `nvcr.io/nvidia/gpu-operator:v26.7.0`
-- `nvcr.io/nvidia/k8s-device-plugin:v0.20.0`
-- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.0`
-- `nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless`
+- `nvcr.io/nvidia/gpu-operator:v26.7.1`
+- `nvcr.io/nvidia/k8s-device-plugin:v0.20.1`
+- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.1`
+- `nvcr.io/nvidia/k8s/dcgm-exporter:4.6.1-4.8.4-distroless`
 - `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.6.0`
 
 ### gpu-operator-ocp

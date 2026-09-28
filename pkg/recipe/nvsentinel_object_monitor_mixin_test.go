@@ -393,7 +393,7 @@ var objectMonitorOperandIdentities = []struct {
 }{
 	{
 		component:    "gpu-operator",
-		verifiedAt:   "v26.7.0",
+		verifiedAt:   "v26.7.1",
 		label:        "app.kubernetes.io/managed-by",
 		policy:       "gpu-operator-pods-health",
 		notCoveredBy: "the bundled node-feature-discovery subchart, which is a Helm dependency rather than a ClusterPolicy operand",

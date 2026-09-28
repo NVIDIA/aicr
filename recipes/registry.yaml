@@ -106,7 +106,7 @@ components:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
       # renovate: datasource=helm depName=gpu-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
-      defaultVersion: v26.7.0
+      defaultVersion: v26.7.1
       defaultNamespace: gpu-operator
     nodeScheduling:
       system:
