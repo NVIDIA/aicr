@@ -554,6 +554,7 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		maxNodesPerEntry:   5,
 		clusterConfigPath:  "/l8k/cluster-config.yaml",
 		aksGPUPoolsPath:    "/aks/pools.json",
+		gkeGPUPoolsPath:    "/gke/pools.json",
 		discoverNetwork:    true,
 		requests:           corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
 		limits:             corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")},
@@ -589,6 +590,7 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		{"NodeSelector[k]", ac.NodeSelector["k"], "v"},
 		{"ClusterConfigPath", ac.ClusterConfigPath, "/l8k/cluster-config.yaml"},
 		{"AKSGPUPoolsPath", ac.AKSGPUPoolsPath, "/aks/pools.json"},
+		{"GKEGPUPoolsPath", ac.GKEGPUPoolsPath, "/gke/pools.json"},
 		{"DiscoverNetwork", ac.DiscoverNetwork, true},
 		{"NameBase", ac.NameBase, name},
 	}
