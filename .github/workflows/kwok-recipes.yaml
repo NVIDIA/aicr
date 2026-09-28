@@ -454,8 +454,9 @@ jobs:
           fi
   # ── Image cache priming: one pull per run, not one per matrix job (#2483) ──
   #
-  # The KWOK lanes need two public images — an in-cluster OCI registry, and
-  # Gitea for the *-git deployers. Every matrix job used to pull them itself.
+  # The KWOK lanes need three public images — an in-cluster OCI registry, Gitea
+  # for the *-git deployers, and the Redis the Argo CD chart pulls for the
+  # argocd-* deployers. Every matrix job used to pull them itself.
   # In run 33350102144, 127 jobs pulled registry:3.1.1 at the same moment from
   # the shared GitHub-runner egress IPs; 125 succeeded and the one that was
   # shed reddened main. That is a per-IP throttle, not an outage, so retrying
@@ -471,9 +472,9 @@ jobs:
   # burning a rollout timeout. The summary job fails with it — without that, a
   # failed prime would skip the tiers and the run would report green.
   #
-  # One job per image (rather than one job for both) so a Gitea failure cannot
-  # discard a registry pull that already succeeded: actions/cache saves at the
-  # end of a job only when that job succeeds.
+  # One job per image (rather than one job for all of them) so a Gitea failure
+  # cannot discard a registry pull that already succeeded: actions/cache saves
+  # at the end of a job only when that job succeeds.
   prime-images:
     name: 'Prime Image Cache (${{ matrix.image }})'
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
@@ -483,7 +484,7 @@ jobs:
       fail-fast: false
       matrix:
         # Must match IMAGE_CACHE_IMAGES in kwok/scripts/lib/image-cache.sh.
-        image: [registry, gitea]
+        image: [registry, gitea, argocd_redis]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
