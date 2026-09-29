@@ -853,7 +853,7 @@ block is present only for leaf overlays — non-leaf overlays omit it.
 [
   {
     "name": "gb200-any",
-    "criteria": {"Service": "any", "Accelerator": "gb200", "Intent": "", "OS": "", "Platform": "", "Nodes": 0},
+    "criteria": {"service": "any", "accelerator": "gb200"},
     "is_leaf": true,
     "source": "embedded",
     "health": {
