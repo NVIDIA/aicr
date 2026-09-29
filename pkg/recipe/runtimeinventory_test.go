@@ -173,7 +173,66 @@ func TestApplyBuildConfigRuntimeInventoryRejectsAbsentComponent(t *testing.T) {
 	}
 }
 
+// A GKE recipe that neither declares nor declines the component gains it when
+// the caller opts in, and the granted ref carries the registry's chart, source
+// and version so the bundle renders the qualified artifact.
+func TestApplyRuntimeInventoryGrantsOnGKE(t *testing.T) {
+	result := &RecipeResult{
+		Criteria:      &Criteria{Service: CriteriaServiceGKE, Intent: CriteriaIntentTraining},
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+	}
+
+	if err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled); err != nil {
+		t.Fatalf("applyRuntimeInventoryMode: %v", err)
+	}
+
+	ref := result.GetComponentRef("k8s-aibom")
+	if ref == nil {
+		t.Fatal("k8s-aibom was not granted to a GKE recipe that opted in")
+	}
+	if !ref.IsEnabled() {
+		t.Error("granted ref is not enabled")
+	}
+	if ref.Version == "" || ref.Source == "" {
+		t.Errorf("granted ref missing registry defaults: version=%q source=%q", ref.Version, ref.Source)
+	}
+	if ref.ValuesFile != "components/k8s-aibom/values.yaml" {
+		t.Errorf("granted ref valuesFile = %q, want components/k8s-aibom/values.yaml", ref.ValuesFile)
+	}
+	mode, recorded := result.RuntimeInventoryMode()
+	if !recorded || mode != RuntimeInventoryEnabled {
+		t.Errorf("selection not recorded: mode=%q recorded=%v", mode, recorded)
+	}
+}
+
 func modePtr(m RuntimeInventoryMode) *RuntimeInventoryMode { return &m }
+
+// A granted component must appear in deploymentOrder. The order is derived by
+// TopologicalSort over ComponentRefs and recomputed because applyBuildConfig
+// sets selected=true; if the grant ever moves after that recompute, the
+// emitted recipe would list a component the same document omits from its order.
+func TestGrantedRuntimeInventoryEntersDeploymentOrder(t *testing.T) {
+	result := &RecipeResult{
+		Criteria:      &Criteria{Service: CriteriaServiceGKE, Intent: CriteriaIntentInference},
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+	}
+	mode := RuntimeInventoryEnabled
+	cfg := &buildConfig{runtimeInventoryMode: &mode}
+
+	if err := applyBuildConfig(result, cfg); err != nil {
+		t.Fatalf("applyBuildConfig: %v", err)
+	}
+
+	var found bool
+	for _, name := range result.DeploymentOrder {
+		if name == "k8s-aibom" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("k8s-aibom missing from deploymentOrder %v", result.DeploymentOrder)
+	}
+}
 
 // TestApplyBuildConfigPreservesBothConfigurations covers a regression found in
 // review: applyBuildConfig applies the runtime inventory selection first, and
@@ -384,5 +443,75 @@ func TestQueryHydrationExposesRuntimeInventory(t *testing.T) {
 	}
 	if got != string(RuntimeInventoryDisabled) {
 		t.Errorf("selector returned %v, want %q", got, RuntimeInventoryDisabled)
+	}
+}
+
+// Non-GKE keeps the original rejection. The grant is scoped to the footprint
+// that was qualified; a typo'd criterion landing on EKS must fail loudly.
+func TestApplyRuntimeInventoryDoesNotGrantOffGKE(t *testing.T) {
+	for _, svc := range []CriteriaServiceType{
+		CriteriaServiceEKS, CriteriaServiceAKS, CriteriaServiceOKE, CriteriaServiceGeneric,
+	} {
+		t.Run(string(svc), func(t *testing.T) {
+			result := &RecipeResult{
+				Criteria:      &Criteria{Service: svc},
+				ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+			}
+			err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled)
+			if err == nil {
+				t.Fatalf("service %s: want rejection, got a grant", svc)
+			}
+			if result.GetComponentRef("k8s-aibom") != nil {
+				t.Errorf("service %s: component was added despite the error", svc)
+			}
+		})
+	}
+}
+
+// An explicit decline outranks the opt-in. h100-gke-cos-inference-dynamo
+// declines because k8s-aibom alongside grove and dynamo-platform is a
+// combination nothing has qualified; widening adoption does not qualify it.
+func TestApplyRuntimeInventoryRespectsDeclineOnGKE(t *testing.T) {
+	result := &RecipeResult{
+		Criteria: &Criteria{Service: CriteriaServiceGKE},
+		ComponentRefs: []ComponentRef{{
+			Name: "k8s-aibom", Type: ComponentTypeHelm,
+			Overrides: map[string]any{"install": false},
+		}},
+	}
+	if err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled); err == nil {
+		t.Fatal("want rejection of enable-over-decline, got nil")
+	}
+	if result.GetComponentRef("k8s-aibom").IsEnabled() {
+		t.Error("declined component was re-enabled")
+	}
+}
+
+// `disabled` on a recipe without the component still fails: recording a
+// decline the recipe cannot honor is the same defect the grant fixes, in the
+// other direction.
+func TestApplyRuntimeInventoryDisabledStillRequiresDeclaration(t *testing.T) {
+	result := &RecipeResult{
+		Criteria:      &Criteria{Service: CriteriaServiceGKE},
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+	}
+	if err := applyRuntimeInventoryMode(result, RuntimeInventoryDisabled); err == nil {
+		t.Fatal("want rejection for disabled-without-declaration, got nil")
+	}
+	if result.GetComponentRef("k8s-aibom") != nil {
+		t.Error("component was added despite the error")
+	}
+}
+
+// Nil criteria must not panic and must not grant.
+func TestApplyRuntimeInventoryNilCriteriaDoesNotGrant(t *testing.T) {
+	result := &RecipeResult{
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
+	}
+	if err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled); err == nil {
+		t.Fatal("want rejection with nil criteria, got a grant")
+	}
+	if result.GetComponentRef("k8s-aibom") != nil {
+		t.Error("component was added despite the error")
 	}
 }

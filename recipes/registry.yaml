@@ -797,11 +797,13 @@ components:
     hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/k8s-aibom/health-check.yaml
+    upgrades:
+      file: components/k8s-aibom/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/googlecloudplatform/charts
       defaultChart: k8s-aibom
       # renovate: datasource=docker depName=ghcr.io/googlecloudplatform/charts/k8s-aibom
-      defaultVersion: "1.3.0"
+      defaultVersion: "1.5.1"
       defaultNamespace: k8s-aibom-system
     nodeScheduling:
       system:
@@ -1305,9 +1307,7 @@ components:
     helm:
       # The topograph repository moved from NVIDIA to dsx-ai-factory; GitHub
       # redirects the repository but not its Pages site, so the old index
-      # 404s. Only the 1.0.0 entry in the new index was rewritten to this
-      # host — every earlier version still lists a nvidia.github.io download
-      # URL and cannot be fetched. See issue #2793.
+      # 404s. See issue #2793.
       defaultRepository: https://dsx-ai-factory.github.io/topograph
       defaultChart: topograph/topograph
       # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
