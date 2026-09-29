@@ -260,6 +260,10 @@ renders but pods stay Pending or land on the wrong nodes. Extend
 `kwok/profiles/` rather than relax the recipe — KWOK is the
 simulated reflection of production shape, not a relaxed substitute.
 
+KWOK results are advisory. The `KWOK Test Summary (advisory)` check turns red
+when a tier fails, but it does not block merges. `Merge Gate` is the only
+required check.
+
 For the design rationale and the spike findings that justify the
 chart pin and Repository-secret shape, see
 [ADR-008](https://github.com/NVIDIA/aicr/blob/main/docs/design/008-kwok-deployer-matrix.md);
@@ -272,7 +276,7 @@ see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 
 | Tier | Trigger | Deployers exercised |
 |------|---------|----------------------|
-| Tier 1 — generic overlays | every PR + push | `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` |
+| Tier 1 — generic overlays | every PR + push | `helm` on every generic overlay, plus each other deployer on one probe overlay (`eks`) |
 | Tier 2 — diff-aware accelerator overlays | PR only, conditional on changed files | `helm` only |
 | Tier 3 — full overlay set | push to `main` + nightly schedule | `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` |
 
@@ -284,6 +288,10 @@ see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 | `argocd-git` | repo-server Git clone (in-cluster Gitea) | Argo CD sync | root App Git `repoURL` + `Synced+Healthy` |
 | `flux-oci` | source-controller OCI pull | kustomize-controller apply | all HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `flux-git` | source-controller Git clone (in-cluster Gitea) | kustomize-controller apply | GitRepositories Ready + all HelmReleases `Ready=True` |
+
+Tier 1 crosses the non-`helm` deployers with a single probe overlay because
+the deployer path (bundle push, GitOps wrapper, sync gate) does not depend on
+the recipe. Tier 3 runs the full recipe x deployer cross-product.
 
 Tier 2 stays `helm`-only because its job is to verify accelerator-specific
 overlays still render correctly when their inputs change. The deployer

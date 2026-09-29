@@ -342,7 +342,7 @@ array. The action's header comment explains the full subject policy.
 **Purpose**: KWOK simulated cluster validation of recipe scheduling
 **Jobs**:
 1. **Test**: Calls `kwok-test` action which runs `run-all-recipes.sh` (same as `make kwok-test-all`)
-2. **Summary**: Reports pass/fail
+2. **Summary**: Reports pass/fail (advisory, does not block merges)
 
 ## Architecture Principles
 

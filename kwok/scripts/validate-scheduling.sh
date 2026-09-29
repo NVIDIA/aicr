@@ -1399,6 +1399,17 @@ list_bundle_components() {
     list_bundle_entries "$dir" | { grep -v '^deploy\.sh$' || true; }
 }
 
+# flux_reconcile_now triggers the wrapper Kustomization and its source right
+# away, without waiting for the controllers' interval timers. A failure is only
+# logged, because the sync gate that follows owns pass/fail.
+flux_reconcile_now() {
+    log_info "Forcing Flux reconcile of ${FLUX_KUSTOMIZATION_NAME} (with source)..."
+    if ! flux reconcile kustomization "${FLUX_KUSTOMIZATION_NAME}" \
+            -n flux-system --with-source --timeout=90s; then
+        log_warn "flux reconcile did not converge in 90s. The sync gate will keep waiting"
+    fi
+}
+
 # Deploy bundle to cluster.
 #
 # For DEPLOYER=helm: runs the bundle's generated deploy.sh (unchanged
@@ -1542,6 +1553,8 @@ deploy_bundle() {
             #     Ready condition indefinitely. We assert terminal state via
             #     HelmRelease conditions below instead.
             #   - timeout: 5m — matches KWOK_FLUX_SYNC_TIMEOUT budget.
+            #   - interval/retryInterval: 15s, so a first apply that races
+            #     CRD or source availability retries in seconds.
             log_info "Applying Flux OCIRepository ${FLUX_OCIREPOSITORY_NAME} (ref=${oci_tag})..."
             if ! kubectl apply -f - <<EOF
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -1550,7 +1563,7 @@ metadata:
   name: ${FLUX_OCIREPOSITORY_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   insecure: true
   url: ${OCI_IN_CLUSTER_REF}
   ref:
@@ -1572,9 +1585,10 @@ metadata:
   name: ${FLUX_KUSTOMIZATION_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   prune: true
   wait: false
+  retryInterval: 15s
   timeout: 5m
   sourceRef:
     kind: OCIRepository
@@ -1585,6 +1599,8 @@ EOF
                 log_error "kubectl apply Kustomization failed"
                 return 1
             fi
+
+            flux_reconcile_now
 
             # Preserve wait_for_flux_sync's exit code (50 == sync timeout)
             # so run-all-recipes.sh can apply the 3-strike rule.
@@ -1618,7 +1634,7 @@ metadata:
   name: ${FLUX_GITREPOSITORY_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   url: ${GIT_IN_CLUSTER_URL}
   ref:
     branch: main
@@ -1639,9 +1655,10 @@ metadata:
   name: ${FLUX_KUSTOMIZATION_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   prune: true
   wait: false
+  retryInterval: 15s
   timeout: 5m
   sourceRef:
     kind: GitRepository
@@ -1652,6 +1669,8 @@ EOF
                 log_error "kubectl apply Kustomization failed"
                 return 1
             fi
+
+            flux_reconcile_now
 
             # Preserve wait_for_flux_sync's exit code (50 == sync timeout)
             # so run-all-recipes.sh can apply the 3-strike rule.

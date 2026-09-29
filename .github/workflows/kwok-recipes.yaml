@@ -393,8 +393,18 @@ jobs:
           # --- Tier 3: full matrix (all testable overlays) ---
           tier3="$all"
 
-          tier1_pairs=$(jq -cn --argjson recipes "$tier1" --argjson deployers "$deployers" '
-            [ $recipes[] as $r | $deployers[] as $d | {recipe: $r, deployer: $d} ]
+          # Every generic recipe runs on helm. Each other deployer runs on one
+          # probe recipe, since the deployer path (bundle push, GitOps wrapper,
+          # sync gate) does not depend on the recipe.
+          probe="eks"
+          if ! echo "$tier1" | jq -e --arg p "$probe" 'index($p) != null' >/dev/null; then
+            probe=$(echo "$tier1" | jq -r '.[0] // empty')
+          fi
+          tier1_pairs=$(jq -cn --argjson recipes "$tier1" --argjson deployers "$deployers" --arg probe "$probe" '
+            [ $recipes[] as $r | {recipe: $r, deployer: "helm"} ]
+            + (if $probe == "" then [] else
+                [ $deployers[] | select(. != "helm") | {recipe: $probe, deployer: .} ]
+              end)
           ')
 
           tier2_pairs=$(jq -cn --argjson recipes "$tier2" '
@@ -445,7 +455,7 @@ jobs:
           tier2_count=$(echo "$tier2_pairs" | jq 'length')
           tier3_pairs=$(echo "$tier3_batches" | jq '[.[].pairs[]] | length')
           tier3_batch_count=$(echo "$tier3_batches" | jq 'length')
-          echo "Tier 1 (generic):      $(echo "$tier1" | jq 'length') recipe(s) × $(echo "$deployers" | jq 'length') deployer(s) = ${tier1_count} pair(s)"
+          echo "Tier 1 (generic):      $(echo "$tier1" | jq 'length') recipe(s) × helm + probe '${probe}' × $(echo "$deployers" | jq 'length - 1') other deployer(s) = ${tier1_count} pair(s)"
           echo "Tier 2 (diff-aware):   $(echo "$tier2" | jq 'length') recipe(s) × 1 deployer (helm) = ${tier2_count} pair(s)"
           echo "Tier 3 (full matrix):  $(echo "$tier3" | jq 'length') recipe(s) × $(echo "$deployers" | jq 'length') deployer(s) = ${tier3_pairs} pair(s) in ${tier3_batch_count} batch(es)"
           dropped_count=$(echo "$dropped" | jq 'length')
@@ -454,9 +464,9 @@ jobs:
           fi
   # ── Image cache priming: one pull per run, not one per matrix job (#2483) ──
   #
-  # The KWOK lanes need three public images — an in-cluster OCI registry, Gitea
-  # for the *-git deployers, and the Redis the Argo CD chart pulls for the
-  # argocd-* deployers. Every matrix job used to pull them itself.
+  # The KWOK lanes need four public images: the Kind node image, an in-cluster
+  # OCI registry, Gitea for the *-git deployers, and the Redis the Argo CD chart
+  # pulls for the argocd-* deployers. Every matrix job used to pull them itself.
   # In run 33350102144, 127 jobs pulled registry:3.1.1 at the same moment from
   # the shared GitHub-runner egress IPs; 125 succeeded and the one that was
   # shed reddened main. That is a per-IP throttle, not an outage, so retrying
@@ -484,7 +494,7 @@ jobs:
       fail-fast: false
       matrix:
         # Must match IMAGE_CACHE_IMAGES in kwok/scripts/lib/image-cache.sh.
-        image: [registry, gitea, argocd_redis]
+        image: [registry, gitea, argocd_redis, kind_node]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -516,12 +526,52 @@ jobs:
           set -euo pipefail
           bash kwok/scripts/lib/image-cache.sh save "${CACHE_DIR}" "${IMAGE}"
 
+  # Builds the aicr binary once and shares it with every matrix cell. The
+  # artifact name must match the download in .github/actions/kwok-test.
+  build-aicr:
+    name: Build aicr
+    if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+
+      - name: Setup build tools
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_goreleaser: 'true'
+          goreleaser_version: '${{ steps.versions.outputs.goreleaser }}'
+
+      - name: Build aicr binary
+        run: make build
+
+      - name: Upload aicr binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: kwok-aicr-bin
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
   # Thin caller of the shared kwok-test-run.yaml reusable workflow (#1172).
   # tier1_pairs is well under 256 entries, so it's passed in a single call —
   # no batching needed.
   test-tier1:
     name: 'Tier 1'
-    needs: [discover, prime-images]
+    needs: [discover, prime-images, build-aicr]
     if: >-
       github.event_name != 'schedule' &&
       needs.discover.outputs.tier1_pairs != '[]' &&
@@ -534,7 +584,7 @@ jobs:
   # Helm-only by deliberate policy — see ADR-003 "Tier 2 deployer coverage".
   test-tier2:
     name: 'Tier 2'
-    needs: [discover, prime-images]
+    needs: [discover, prime-images, build-aicr]
     if: >-
       github.event_name == 'pull_request' &&
       needs.discover.outputs.tier2_pairs != '[]' &&
@@ -552,7 +602,7 @@ jobs:
   # single run in its own group so they all run in parallel.
   test-tier3:
     name: 'Tier 3'
-    needs: [discover, prime-images]
+    needs: [discover, prime-images, build-aicr]
     concurrency:
       group: kwok-tier3-${{ github.sha }}-${{ matrix.batch.id }}
       cancel-in-progress: false
@@ -570,18 +620,21 @@ jobs:
 
   # ── Summary: aggregate all tiers ──
   summary:
-    name: KWOK Test Summary
-    needs: [prime-images, test-tier1, test-tier2, test-tier3]
+    name: KWOK Test Summary (advisory)
+    needs: [prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
     steps:
       - name: Check test results
         run: |
-          echo "## KWOK Cluster Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## KWOK Cluster Validation Summary (advisory)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Advisory only. This check does not block merges. The required check is Merge Gate." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           prime="${{ needs.prime-images.result }}"
+          build="${{ needs.build-aicr.result }}"
           tier1="${{ needs.test-tier1.result }}"
           tier2="${{ needs.test-tier2.result }}"
           tier3="${{ needs.test-tier3.result }}"
@@ -589,6 +642,7 @@ jobs:
           echo "| Stage | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Image cache priming | ${prime} |" >> $GITHUB_STEP_SUMMARY
+          echo "| aicr build | ${build} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 1 (generic) | ${tier1} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 2 (diff-aware) | ${tier2} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 3 (full matrix) | ${tier3} |" >> $GITHUB_STEP_SUMMARY
@@ -603,6 +657,12 @@ jobs:
           # nothing.
           if [[ "$prime" == "failure" || "$prime" == "cancelled" ]]; then
             echo "Image cache priming failed or was cancelled — no tier ran" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+
+          # A failed build skips every tier, and the tier checks below tolerate skipped.
+          if [[ "$build" == "failure" || "$build" == "cancelled" ]]; then
+            echo "aicr build failed or was cancelled. No tier ran" >> $GITHUB_STEP_SUMMARY
             failed=true
           fi
 
@@ -625,6 +685,7 @@ jobs:
           fi
 
           if [[ "$failed" == "true" ]]; then
+            echo "::warning::KWOK validation failed. This check is advisory and does not block merges."
             exit 1
           fi
 

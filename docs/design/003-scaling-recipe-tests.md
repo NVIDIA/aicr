@@ -194,17 +194,18 @@ pattern as `tier1_pairs`).
 
 ### Required checks
 
-Branch protection requires a **stable aggregate check**, not individual matrix job
-names (which drift as overlays are added or removed). The `summary` job serves this
-role — it already aggregates results from all tiers.
+KWOK validation is **advisory**. The only required check in the main branch
+ruleset is `Merge Gate`, and KWOK is not part of it.
 
-- **Required check:** `KWOK Test Summary` (the `summary` job) — must be added to
-  the repository branch ruleset so the aggregate result gates merges.
-- **Not required:** Individual `KWOK (recipe-name)` matrix jobs
+- **Advisory aggregate:** `KWOK Test Summary (advisory)` (the `summary` job)
+  aggregates every tier into one stable check name. It fails when a tier fails,
+  so the result stays visible, but it does not block merges.
+- **Not required:** Individual `KWOK (recipe-name)` matrix jobs. Their names
+  drift as overlays are added or removed.
 
-The `summary` job gates on Tier 1 and Tier 2 for PRs, and on all three tiers for
-pushes to `main`. This avoids branch protection brittleness when the overlay set
-changes.
+The `summary` job reports on Tier 1 and Tier 2 for PRs, and on all three tiers for
+pushes to `main`. If KWOK is ever promoted to a merge gate, wire the summary job
+into `merge-gate.yaml` rather than adding it to the ruleset.
 
 ## Consequences
 
