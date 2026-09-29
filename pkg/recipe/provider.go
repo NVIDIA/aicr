@@ -214,6 +214,8 @@ func (p *EmbeddedDataProvider) Source(path string) string {
 
 // LayeredDataProvider overlays an external directory on top of embedded data.
 // For registryFileName: merges external components with embedded (external takes precedence).
+// An external overlay replaces the embedded one at the same path, unless it carries
+// only a profile declaration. That patch adds values to the embedded overlay's profile.
 // For all other files: external completely replaces embedded if present.
 type LayeredDataProvider struct {
 	embedded    *EmbeddedDataProvider
@@ -241,6 +243,10 @@ type LayeredDataProvider struct {
 
 	// Track which files came from external (for debugging)
 	externalFiles map[string]bool
+
+	// patchedOverlays holds the overlay paths whose external file was a profile
+	// patch, recorded by ReadFile so Source can report their embedded origin.
+	patchedOverlays sync.Map
 }
 
 // LayeredProviderConfig configures the layered data provider.
@@ -420,7 +426,9 @@ func (p *LayeredDataProvider) ExternalDir() string {
 
 // ReadFile reads a file, checking external directory first.
 // For registryFileName, returns merged content.
-// For other files, external completely replaces embedded.
+// For an overlay that carries only a profile declaration, returns the embedded overlay
+// with those values added to its profile. For other files, external completely
+// replaces embedded.
 func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, fmt.Sprintf("context canceled before reading %q", path), err)
@@ -444,6 +452,19 @@ func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte
 		data, err := readExternalFile(p.externalDir, path, p.maxFileSize, p.allowSymlinks)
 		if err != nil {
 			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", path))
+		}
+		if isOverlay, _ := filepath.Match("overlays/*.yaml", path); isOverlay {
+			if embeddedData, embErr := p.embedded.ReadFile(ctx, path); embErr == nil {
+				merged, patched, patchErr := patchOverlayProfile(path, embeddedData, data)
+				if patchErr != nil {
+					return nil, patchErr
+				}
+				if patched {
+					p.patchedOverlays.Store(path, struct{}{})
+					slog.Info("external overlay extends the embedded profile", "path", path)
+					data = merged
+				}
+			}
 		}
 		slog.Debug("read from external data directory", "path", path)
 		return data, nil
@@ -522,6 +543,9 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 // Source returns "external" or "embedded" depending on where the file comes from.
 func (p *LayeredDataProvider) Source(path string) string {
 	var source string
+	// The catalog loader reads a file before asking for its source, so ReadFile
+	// has already recorded whether the file was a profile patch.
+	_, patched := p.patchedOverlays.Load(path)
 	switch {
 	case path == registryFileName:
 		// Always merged: registry.yaml is required in external dir (enforced by constructor).
@@ -529,6 +553,10 @@ func (p *LayeredDataProvider) Source(path string) string {
 	case path == catalogFileName && p.externalFiles[catalogFileName]:
 		// Merged only when external catalog exists (catalog is optional).
 		source = sourceMerged
+	case p.externalFiles[path] && patched:
+		// A profile patch adds values to an embedded overlay whose criteria
+		// and identity stay embedded.
+		source = sourceEmbedded
 	case p.externalFiles[path]:
 		source = sourceExternal
 	default:

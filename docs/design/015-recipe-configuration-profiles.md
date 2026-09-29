@@ -403,6 +403,15 @@ criteria-subsumption analysis is complex and the runtime guard is
 complete on its own. This lets `aks` or `gke-cos` declare the profile
 once, inherited by accelerator/intent leaves.
 
+**External catalogs extend the declaration and never redeclare it.** A
+`--data` overlay at the path of the declaring overlay that carries only
+`spec.profile` adds values to that declaration when the catalog loads, so
+the composition still sees exactly one declaration and the algorithm below
+is unchanged. The patch is additive and fail-closed. It may not redeclare
+a value, set `default` or `description`, or name another profile, and union
+totality is evaluated over the merged values, so an added value must own
+the same path set as the declared ones.
+
 ### Optionality and naming
 
 - The `profile` block is **optional**. The field is deliberately
