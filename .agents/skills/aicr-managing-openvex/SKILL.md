@@ -47,9 +47,9 @@ no-ops every statement in the document.
 - A `Weekly Image Vulnerability Scan` run reports HIGH+ CVE(s) on the
   aiperf-bench image and a maintainer needs to add a suppression after
   verifying reachability.
-- A maintainer bumps the aiperf pin (`AIPERF_VERSION` in
-  `validators/performance/aiperf-bench.Dockerfile`) or its dependency
-  pins, fixing a CVE that was previously suppressed → the entry must be
+- A maintainer bumps the aiperf pin (`validators/performance/requirements.txt`
+  and `AIPERF_VERSION` in `validators/performance/aiperf-bench.Dockerfile`)
+  or its dependency pins, fixing a CVE that was previously suppressed → the entry must be
   removed.
 - A maintainer audits the file before a release to drop stale entries.
 - The scan workflow shows non-zero HIGH+ counts but VEX is "supposed to
@@ -317,9 +317,11 @@ For each ID:
 1. **Check upstream first.** Read the GHSA / NVD page. If a fix has
    shipped in a version reachable from aiperf's pins, the right action
    is usually *not* a VEX entry — it's bumping the aiperf pin so the
-   fix lands and the finding disappears. Bump
-   `AIPERF_VERSION` in `validators/performance/aiperf-bench.Dockerfile`,
-   verify with the local repro above, and skip the rest of this section.
+   fix lands and the finding disappears. Bump `aiperf` in
+   `validators/performance/requirements.txt` and `AIPERF_VERSION` in
+   `validators/performance/aiperf-bench.Dockerfile` together (the build
+   fails on a mismatch), run `make python-licenses`, verify with the local
+   repro above, and skip the rest of this section.
 2. **If a bump isn't feasible**, prove non-reachability. The work that
    must be visible in `impact_statement`:
    - Identify the vulnerable function / file in upstream source.
@@ -453,7 +455,8 @@ goes into the document itself.
   bound)
 - Grype config (excludes for source scans only): `.grype.yaml`
 - Image source: `validators/performance/aiperf-bench.Dockerfile`
-- aiperf pin: `AIPERF_VERSION` ARG in that Dockerfile
+- aiperf pin: `validators/performance/requirements.txt` (what installs) and
+  the `AIPERF_VERSION` ARG in that Dockerfile (must match; Renovate moves both)
 - Grype version pin (read from scan-action): `GrypeVersion.js` at the
   pinned scan-action SHA in the workflow
 - Workflow output format (per image, in scan-N artifact):

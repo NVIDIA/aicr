@@ -16,8 +16,9 @@
 # validator. Bakes aiperf at build time so benchmark pods need no PyPI access
 # at runtime (air-gap friendly) and every run uses an identical version.
 #
-# The aiperf pin lives here — bump AIPERF_VERSION and cut a new aicr release
-# to roll forward. Consumers pin to a specific aiperf-bench:<semver> tag or
+# aiperf is pinned in requirements.txt and in AIPERF_VERSION below, which the
+# build requires to match; bump both (plus `make python-licenses`) and cut a
+# new aicr release to roll forward. Consumers pin to a specific aiperf-bench:<semver> tag or
 # let :latest track the CLI version via catalog.Load rewriting.
 #
 # Two-stage build: the `builder` stage carries the full C/C++ toolchain and
@@ -45,10 +46,10 @@
 # Single global default so the builder install and the final-stage
 # io.aicr.aiperf.version label always move together on a bump; each stage
 # redeclares `ARG AIPERF_VERSION` (without a value) to pull it into scope.
-ARG AIPERF_VERSION=0.11.0
+ARG AIPERF_VERSION=0.13.0
 
 # ---- Build stage: toolchain + compile-to-venv (never shipped) ----
-# renovate: pinned to 3.13. aiperf 0.11.0 declares requires-python <3.14, so
+# renovate: pinned to 3.13. aiperf 0.13.0 declares requires-python <3.14, so
 # pip refuses to install it on 3.14 regardless of this stage's toolchain — the
 # 3.14 move is blocked on aiperf upstream supporting 3.14, then a deliberate
 # arm64+amd64-validated bump. Tracked in #1910.
