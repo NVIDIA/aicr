@@ -18,7 +18,7 @@ via its own `install.sh`:
 
 | Component | Version | Namespace | Source |
 |-----------|---------|-----------|--------|
-| k8s-aibom | 1.3.0 | k8s-aibom-system | k8s-aibom (oci://ghcr.io/googlecloudplatform/charts) |
+| k8s-aibom | 1.5.1 | k8s-aibom-system | k8s-aibom (oci://ghcr.io/googlecloudplatform/charts) |
 
 
 

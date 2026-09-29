@@ -2,15 +2,25 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Carries context between invocations of aicr-reviewing-component-drift: what
-# was reviewed at which version pair, what verdict it got, and what would change
-# a hold. The weekly Slack digest is stateless by design, so it repeats the same
-# components until someone acts; this file is what keeps the review from
-# repeating with it.
+# was reviewed at which candidate set, what verdict it got, and what would
+# change a hold. The weekly Slack digest is stateless by design, so it repeats
+# the same components until someone acts; this file is what keeps the review
+# from repeating with it.
+#
+# `candidates` is the whole set the verdict was formed against, not just the
+# pair: a new candidate can appear while `from` and `to` both stay put, and a
+# verdict keyed on the pair alone would be reused without anyone seeing it.
+# Entries below that predate this field carry none, which Step 1 treats as
+# changed -- they are re-derived rather than confirmed.
 #
 # reviews:
 #   - component: nvsentinel
 #     from: v1.20.0
 #     to: v1.23.0
+#     candidates:            # verbatim from the report: latest + alternatives[]
+#       - minor v1.23.0
+#       - patch v1.20.3
+#     recommends: v1.20.3    # omit when the row had no alternatives
 #     verdict: hold          # take | hold | defer
 #     reviewed: 2026-09-21
 #     reason: CRD migration needs an ADR-021 record first
