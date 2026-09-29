@@ -91,10 +91,11 @@ the `< 1.36.0` Kubernetes cap and the Gateway API / LoadBalancer prerequisites
 
 ## Rollout Behavior
 
-**All four VR200 coordinates reboot every GPU node they touch.** Two rebooting Skyhook
-CRs ship in each leaf and are applied when the bundle deploys:
+**All four VR200 coordinates reboot every GPU node they touch.** One
+Skyhook CR (`tuning`, from `nodewright-customizations`) ships in each leaf and
+carries two rebooting packages:
 
-- `tuning-rke2` — writes the native `vr200/rke2` `nvidia-tuned` profile to
+- `nvidia-tuned` — writes the native `vr200/rke2` `nvidia-tuned` profile to
   `/etc/default/grub.d`; the specific profile is intent-dependent, so
   `tuned-adm active` reports different profiles on different leaves:
   - Training (`vr200-rke2-ubuntu-training`) applies `multiNodeTraining`,
@@ -116,52 +117,47 @@ CRs ship in each leaf and are applied when the bundle deploys:
   node — MPI jobs, RDMA-backed storage, other operators — sees the same
   netns-mode change and must tolerate it. **Coordinate with existing RDMA
   users before rollout**, especially on shared reference clusters. Like
-  `tuning-rke2`, this is a kernel-module parameter change that requires
-  a reboot to take effect.
+  `nvidia-tuned`, this is a kernel-module parameter change that requires
+  a reboot to take effect. Enabled by `nodewright-customizations`
+  `rdmaNetnsExclusive: true`, independent of `tuningEnabled`.
 
-Each CR limits its own rollout to one node at a time via
-`interruptionBudget.count: 1`, but that budget is **per-CR and does not
-compose across CRs**. Under the default `sequencing: node`,
-`IsNodeReadyForSkyhook` checks per-node completion of a predecessor rather
-than global completion, so one node can start tuning while another is still
-on the RDMA CR — **concurrent reboots across the two CRs are possible on a
-multi-node cluster today**, and nothing guarantees the RDMA CR exists when
-tuning becomes runnable. Full analysis and the candidate fixes (merge both
-packages into a single Skyhook CR, or `sequencing: all` plus a dependency
-edge) are tracked in [#2572](https://github.com/NVIDIA/aicr/issues/2572).
+Because both packages ride one CR, its `interruptionBudget.count: 1`
+bounds every reboot the recipe causes: one GPU node at a time. Neither
+package depends on the other, so nodewright runs them in the same pass and
+coalesces their reboots — **each GPU node reboots once**, and the rack
+converges in roughly **N × (reboot time)**. Separate CRs could not give
+either guarantee, because an `interruptionBudget` does not compose across
+CRs ([#2572](https://github.com/NVIDIA/aicr/issues/2572)).
 
 **Practical implications:**
 
-- Convergence cost depends on how the two CRs interleave — neither of the
-  bounds below is a Skyhook or nodewright default. The recipe ships each CR
-  with `interruptionBudget.count: 1` (this is per-CR, not a controller
-  default, and does not compose across CRs), and the recipe as shipped does
-  **not** enforce serialization between the two CRs — that is an operator
-  choice tracked in [#2572](https://github.com/NVIDIA/aicr/issues/2572).
-  - **Manually serialized (recommended)** — the operator holds off applying
-    the second CR (or gates it via a sequencing runbook) until the first
-    has drained. Each GPU node then takes two independent reboots, so the
-    rack performs roughly **2N × (reboot time)**.
-  - **Fully overlapped (unattended)** — apply both CRs at once and let the
-    Skyhook controller schedule them freely on the same node set (both
-    select `nvidia.com/gpu.present`). Wall-clock trends toward
-    **~N × (reboot time)** in the best case, but this is exactly the
-    "not a drive-by deploy" behavior below and the concurrent-reboot risk
-    the section above describes.
-
-  Neither shape scales to hundreds of nodes: `count: 1` sizing suits the
-  small NVL72 clusters VR200 Preview targets and gradual rollout onto a
-  cluster already running work.
+- `count: 1` sizing suits the small NVL72 clusters VR200 Preview targets
+  and gradual rollout onto a cluster already running work; it does not
+  scale to hundreds of nodes.
+- The CR is `runtimeRequired`, so each node keeps the runtime-required
+  taint until **both** packages finish on it — workloads never land on a
+  node still in shared RDMA mode.
 - On bare metal with no auto-reimage, BMC access must be ready before
   rollout — a reboot that hangs at BIOS is on you to recover.
 - **This is not a drive-by deploy.** On any cluster with running workloads,
-  apply these CRs deliberately rather than letting both roll unattended.
+  apply the bundle deliberately rather than letting it roll unattended.
+
+**Upgrading from a bundle with a separate `rdma-netns-exclusive`
+component.** Earlier bundles shipped the RDMA mode as its own component and
+CR. A new bundle no longer contains it, so no deployer removes it. After
+upgrading, remove it explicitly — the Helm release, Argo CD `Application`,
+or Flux `HelmRelease` named `rdma-netns-exclusive` (for the Helm deployer,
+`helm uninstall rdma-netns-exclusive -n nodewright`) — and delete the CR if
+it remains (`kubectl delete nodewright rdma-netns-exclusive`). The package
+has no uninstall step, so this leaves the host setting in place. The first
+rollout of the merged CR re-applies the RDMA package on already-tuned nodes,
+which costs one more reboot per GPU node.
 
 ## Coordinating on a Shared Reference Cluster
 
 Coordination on a shared VR200 reference cluster is a **results-validity**
 requirement, not a stability one. `nvidia-tuned` allows multiple Skyhook CRs
-to coexist in `complete` state; adding this recipe's `tuning-rke2` alongside
+to coexist in `complete` state; adding this recipe's `tuning` CR alongside
 an out-of-band tuning CR means the profile actually in effect is decided by
 priority ordering. A measurement taken as-is would be ambiguous about which
 configuration it describes. Deconflict before running validation or capturing
@@ -203,5 +199,5 @@ recipes definition](recipe-development.md#preview-recipes):
 - [#2569](https://github.com/NVIDIA/aicr/issues/2569) —
   `nccl-benchmark-runtime-ref` cannot satisfy namespaced DRA dependencies
   after per-run namespace isolation.
-- [#2572](https://github.com/NVIDIA/aicr/issues/2572) — the two rebooting
-  Skyhook CRs described above and their concurrency shape.
+- [#2572](https://github.com/NVIDIA/aicr/issues/2572) — why the RDMA mode
+  and node tuning share one Skyhook CR instead of two.
