@@ -105,11 +105,12 @@ jobs:
     # the UAT phase-step count uses the larger.
     #
     # UAT-phase-step budgets by (deployer, intent), using the current
-    # timeout-minutes on each step below:
-    #   helmfile+training:  prep 15 + install  90 + validate 40 + train 25 + verify 5 = 175
-    #   helmfile+inference: prep 15 + install  90 + validate 40 + serve 40 + verify 5 = 190
-    #   argocd+training:    prep 15 + install 110 + validate 40 + train 25 + verify 5 = 195   (issue #2194, aws-h100 only)
-    #   argocd+inference:   not shipped today; would be 15 + 110 + 40 + 40 + 5 = 210          (needs cap bump below)
+    # timeout-minutes on each step below (install is deployer-conditional;
+    # readiness is the post-install gate, 65 on both deployers):
+    #   helmfile+training:  prep 15 + install 25 + readiness 65 + validate 40 + train 25 + verify 5 = 175
+    #   helmfile+inference: prep 15 + install 25 + readiness 65 + validate 40 + serve 40 + verify 5 = 190
+    #   argocd+training:    prep 15 + install 45 + readiness 65 + validate 40 + train 25 + verify 5 = 195   (issue #2194, aws-h100 only)
+    #   argocd+inference:   not shipped today; would be 15 + 45 + 65 + 40 + 40 + 5 = 210                   (needs cap bump below)
     #
     # Total = ~30 setup + <UAT> + ~8 debug + ~54 teardown. On today's
     # worst-case (argocd+training or helmfile+inference), ~30 + max(195,190)
@@ -715,7 +716,8 @@ jobs:
       # UAT phases — each step invokes tests/uat/aws/run so the demo
       # (demos/cuj1-training.md) and CI stay in lockstep, and per-phase
       # failures surface as discrete steps in the GitHub Actions UI. Phases
-      # chain on success: prep → install → conformance → train → verify.
+      # chain on success: prep → install → readiness → conformance → train →
+      # verify.
       # The signed evidence bundle is produced by the conformance step; the
       # subsequent train step exercises the deployed stack so the recorded
       # evidence reflects a fully successful run.
@@ -752,17 +754,18 @@ jobs:
       - name: UAT - install (helmfile apply or argocd sync)
         id: install
         if: steps.prep.outcome == 'success'
-        # Step-level timeout must fit the LARGER of the two deployer branches,
-        # because both dispatch from `./run install` and share this cap:
-        #   helmfile: HELMFILE_TIMEOUT_SECONDS 20m + gate 60m = 80m
-        #   argocd:   helm-install 5m + apply+sync 30m + root-grace 2m + gate 60m = 97m
-        # ARGOCD_HELM_TIMEOUT_SECONDS + ARGOCD_SYNC_TIMEOUT_SECONDS +
-        # ARGOCD_ROOT_APP_GRACE_SECONDS + READINESS_TIMEOUT_SECONDS in
-        # tests/uat/lib/phases.sh drive the argocd side. Sized at 110m so the
-        # argocd fail-closed paths (each shared-budget retry loop's `::error::`)
-        # run before GitHub Actions kills the step. The gate's own fail-closed
-        # path still fires within budget on both branches.
-        timeout-minutes: 110
+        # Apply only; the readiness gate is its own step below (#2630), so a gate
+        # that never converges is not reported as an install failure. Sized per
+        # deployer from the shared-budget knobs in tests/uat/lib/phases.sh, with
+        # headroom so each branch's fail-closed `::error::` fires before GitHub
+        # Actions kills the step:
+        #   helmfile: HELMFILE_TIMEOUT_SECONDS 20m                     -> 25
+        #   argocd:   ARGOCD_HELM_TIMEOUT_SECONDS 5m
+        #             + ARGOCD_SYNC_TIMEOUT_SECONDS 30m
+        #             + ARGOCD_ROOT_APP_GRACE_SECONDS 2m = 37m         -> 45
+        # phase_install reads the deployer from the test config, not this input;
+        # a mismatch fails fast at install_argocd's GITHUB_TOKEN guard below.
+        timeout-minutes: ${{ inputs.deployer == 'argocd' && 45 || 25 }}
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -781,6 +784,34 @@ jobs:
           GITHUB_TOKEN: ${{ inputs.deployer == 'argocd' && github.token || '' }}
         run: ./tests/uat/aws/run install "${TEST_CONFIG}"
 
+      # A long argocd apply can consume most of the session minted before
+      # install, and the gate runs up to 60m on top; start it on a fresh one.
+      # The gate also re-mints in-loop (aws_sts_federated_refresh in
+      # tests/uat/aws/run), so this only has to cover the first interval.
+      - name: Refresh AWS credentials before readiness gate
+        if: steps.install.outcome == 'success'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd  # v6.3.0
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Readiness
+
+      # Post-install readiness gate: `aicr validate --phase deployment` until
+      # READINESS_CONSECUTIVE_PASSES consecutive passes, bounded by
+      # READINESS_TIMEOUT_SECONDS (60m) in tests/uat/lib/phases.sh; 65 leaves the
+      # gate's fail-closed diagnostic room to run. Runs on every lifecycle,
+      # including daytime-up, so a held cluster is always a gated one. No
+      # GITHUB_TOKEN: only the argocd apply above needs it.
+      - name: UAT - readiness gate (validate --phase deployment)
+        id: readiness
+        if: steps.install.outcome == 'success'
+        timeout-minutes: 65
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/aws/run readiness "${TEST_CONFIG}"
+
       # Runs ALL validate phases (deployment + conformance + performance), not
       # just conformance. The deployment phase polls component health checks
       # until the GPU stack converges — the readiness barrier the helmfile
@@ -788,9 +819,10 @@ jobs:
       # `conformance` so the train/verify gating below is unaffected.
       # daytime-up provisions and deploys the stack, then HOLDS: the CUJ
       # (conformance/train/verify + evidence) is a nightly-batch concern, so
-      # daytime-up stops after install and leaves the cluster up for handoff.
+      # daytime-up stops after the readiness gate and leaves the cluster up for
+      # handoff.
       - name: Refresh AWS credentials before validate
-        if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
+        if: steps.readiness.outcome == 'success' && inputs.lifecycle != 'daytime-up'
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd  # v6.3.0
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
@@ -799,7 +831,7 @@ jobs:
 
       - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
-        if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
+        if: steps.readiness.outcome == 'success' && inputs.lifecycle != 'daytime-up'
         # Larger budget than conformance-only: the deployment phase waits out
         # cold-start GPU bring-up (driver install/migration). (The performance
         # phase's NCCL benchmark skips on single-GPU-node clusters like this
@@ -1003,6 +1035,7 @@ jobs:
             echo "| Connection | ${{ steps.client.outcome }} |"
             echo "| Prep | ${{ steps.prep.outcome }} |"
             echo "| Install | ${{ steps.install.outcome }} |"
+            echo "| Readiness gate | ${{ steps.readiness.outcome }} |"
             echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Serve | disabled (vLLM excluded from UAT) |"
