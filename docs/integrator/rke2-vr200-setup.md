@@ -144,14 +144,28 @@ CRs ([#2572](https://github.com/NVIDIA/aicr/issues/2572)).
 
 **Upgrading from a bundle with a separate `rdma-netns-exclusive`
 component.** Earlier bundles shipped the RDMA mode as its own component and
-CR. A new bundle no longer contains it, so no deployer removes it. After
-upgrading, remove it explicitly — the Helm release, Argo CD `Application`,
-or Flux `HelmRelease` named `rdma-netns-exclusive` (for the Helm deployer,
-`helm uninstall rdma-netns-exclusive -n nodewright`) — and delete the CR if
-it remains (`kubectl delete nodewright rdma-netns-exclusive`). The package
-has no uninstall step, so this leaves the host setting in place. The first
-rollout of the merged CR re-applies the RDMA package on already-tuned nodes,
-which costs one more reboot per GPU node.
+CR, whose `interruptionBudget` is independent of the merged `tuning` CR's. If
+both are rolling at once, each can reboot a different GPU node:
+
+1. Before upgrading, wait until the old CR reports `complete`
+   (`kubectl get nodewright rdma-netns-exclusive -o jsonpath='{.status.status}'`);
+   a complete CR issues no further reboots. If it cannot complete, stop it
+   with `kubectl annotate nodewright rdma-netns-exclusive
+   nodewright.nvidia.com/disable=true` and wait until every GPU node is
+   `Ready`.
+2. Apply the new bundle.
+3. Remove the old release. Argo CD's app-of-apps prunes the
+   `rdma-netns-exclusive` `Application` once the new bundle replaces the old
+   one in Git, and Flux prunes its `HelmRelease` when the Kustomization sets
+   `prune: true`. The Helm and helmfile deployers leave the release
+   installed; remove it with `helm uninstall rdma-netns-exclusive -n nodewright`.
+4. The CR was a Helm hook, so it can outlive its release. Delete it if it
+   remains: `kubectl delete nodewright rdma-netns-exclusive` (the resource
+   is cluster-scoped).
+
+The package has no uninstall step, so removing the CR leaves the host setting
+in place. The first rollout of the merged CR re-applies the RDMA package on
+already-tuned nodes, which costs one more reboot per GPU node.
 
 ## Coordinating on a Shared Reference Cluster
 
