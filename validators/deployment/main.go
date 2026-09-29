@@ -35,5 +35,6 @@ func main() {
 		"gpu-operator-version": checkGPUOperatorVersion,
 		"check-nvidia-smi":     checkNvidiaSMI,
 		"gke-gpu-nic-networks": checkGKEGPUNICNetworks,
+		"gke-gpu-nic-topology": checkGKEGPUINCTopology,
 	})
 }
