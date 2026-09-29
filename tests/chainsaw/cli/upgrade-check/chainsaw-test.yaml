@@ -63,14 +63,20 @@ spec:
 
               # Rewrite grove's pin in place rather than hardcoding a version,
               # so a later pin bump does not silently turn this into a
-              # no-change comparison. The record matches any source below its
-              # `to` floor, so the older value stays valid as the pin moves.
+              # no-change comparison. The source is the previous pin (the
+              # second-to-last record's `to`), so the jump crosses exactly one
+              # recorded boundary and renders steps; a source below two
+              # boundaries is blocked with none. alpha.8 is the fallback while
+              # grove has a single record.
+              REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel)}"
+              prev="$(awk '/^    to:/{gsub(/[">=< ]/, "", $2); v[++n]=$2} END{if (n >= 2) print v[n-1]}' \
+                "${REPO_ROOT}/recipes/components/grove/upgrades.yaml")"
               line="$(awk '/^  - chart: grove-charts/{f=1} f&&/^    version:/{print NR; exit}' "${WORK}/new.yaml")"
               if [ -z "${line}" ]; then
                 echo "FAIL: no grove version line found; the dynamo recipe no longer carries grove" >&2
                 exit 1
               fi
-              sed "${line}s/version: .*/version: v0.1.0-alpha.8/" \
+              sed "${line}s/version: .*/version: v${prev:-0.1.0-alpha.8}/" \
                 "${WORK}/new.yaml" > "${WORK}/old.yaml"
 
     - name: reports-a-row-and-fails-the-run
