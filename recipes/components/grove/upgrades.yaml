@@ -98,9 +98,12 @@ transitions:
     to: "0.1.0-alpha.13"
     verdict: manual
     verifiedBy: >-
-      Chart diff of grove-charts v0.1.0-alpha.12 vs v0.1.0-alpha.13 (crds/,
-      templates/, values.yaml) and the upstream v0.1.0-alpha.13 release notes,
-      2026-09-28. The upgrade itself was not exercised on a live cluster.
+      Live upgrade on an EKS GB300 cluster, 2026-09-28, following the helm
+      steps below: the CRDs applied and the operator rolled out, a serving
+      Dynamo DGD kept its pods (same UIDs, no restarts), a PodCliqueSet wedged
+      by a 1 -> 0 -> 1 scale on alpha.12 recovered on its own, and a fresh
+      1 -> 0 -> 1 scale recovered in about 13s. Upstream
+      Test_VUPG1_UpgradeFromLatestGitHubRelease asserts the same pod survival.
     summary: >-
       alpha.13 adds status.lastScheduled to the podcliques.grove.io CRD, which
       its PodGang recovery logic reads, and renames the
