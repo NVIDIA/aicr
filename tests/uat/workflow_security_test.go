@@ -794,6 +794,59 @@ func TestExpressionContextsReadIndexSyntax(t *testing.T) {
 	}
 }
 
+// TestExpressionContextsFailClosedOnComputedIndex pins the other half of the
+// index rule. An index the scanner cannot read as a literal ['key'] names a
+// property picked at evaluation time, so no static reading can tell whether it
+// is head_ref or sha, and judging the bare path in front of it guesses "safe".
+// The guard must reject such an expression instead. The last two rows must still
+// pass, so a rule that rejects every bracket, including one inside a string
+// literal, is caught as well.
+func TestExpressionContextsFailClosedOnComputedIndex(t *testing.T) {
+	tests := []struct {
+		name       string
+		expression string
+		attacker   bool
+	}{
+		{"format-built key", " github[format('{0}', 'head_ref')] ", true},
+		{"env-valued key", " github[env.X] ", true},
+		{"input-valued key under event", " github.event[inputs.k] ", true},
+		{"computed key after a literal one", " steps['meta']['outputs'][env.KEY] ", true},
+		{"spaced computed key", " github [ env.X ] ", true},
+		{"computed key inside format", " format('{0}', github[env.X]) ", true},
+		{"computed key on another context", " steps.meta.outputs[env.KEY] ", true},
+		{"brackets inside literals around a safe context", " format('{0}[', github.sha, ']') ", false},
+		{"literal key on a safe context", " github['sha'] ", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contexts := expressionContexts(tt.expression)
+			attacker := slices.ContainsFunc(contexts, func(context string) bool {
+				return isAttackerChosenContext(context, nil)
+			})
+			if attacker != tt.attacker {
+				t.Errorf("expression %q (contexts %q) judged attacker-chosen = %v, want %v",
+					tt.expression, contexts, attacker, tt.attacker)
+			}
+		})
+	}
+}
+
+// TestAttackerChosenEnvKeysFailClosedOnComputedIndex holds the guard's env hop
+// to the same rule. An env entry defined from a computed index is spliced back
+// as ${{ env.NAME }} just as easily as one defined from github.head_ref, so it
+// must count as derived, while one defined from a literal safe key must not.
+func TestAttackerChosenEnvKeysFailClosedOnComputedIndex(t *testing.T) {
+	got := attackerChosenEnvKeys(map[string]string{
+		"COMPUTED": "${{ github[format('{0}', 'head_ref')] }}",
+		"LITERAL":  "${{ github['head_ref'] }}",
+		"SAFE":     "${{ github['sha'] }}",
+	})
+	want := map[string]bool{"COMPUTED": true, "LITERAL": true}
+	if !maps.Equal(got, want) {
+		t.Errorf("attackerChosenEnvKeys() = %v, want %v", got, want)
+	}
+}
+
 // TestUATKindSimJobPinsMainRef holds the sim lane to the scope its own header
 // claims ("manual dispatch, main tip"). workflow_dispatch offers a ref picker,
 // so without a ref term the job runs whatever branch the dispatcher selects —
