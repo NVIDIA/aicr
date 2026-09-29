@@ -13,10 +13,11 @@
 // limitations under the License.
 
 // Command uat-broker is the day/night UAT broker helper (#1274, DC1). It
-// reads the reservation registry (infra/uat/reservations.yaml) and expands
-// the nightly version-matrix schedule. It holds no credentials and performs
-// no network or git I/O — the calling workflow feeds it the registry path
-// and the raw `git tag` list on stdin.
+// reads the reservation registry (infra/uat/reservations.yaml) and the
+// harness-compat floors (tests/uat/compat.yaml, #2860), and expands the
+// nightly version-matrix schedule. It holds no credentials and performs no
+// network or git I/O — the calling workflow feeds it file paths, the raw
+// `git tag` list on stdin, and the git-derived tag-containment file.
 //
 // Subcommands:
 //
@@ -32,11 +33,28 @@
 //	    of {reservation, intent} — one entry per row with a non-empty
 //	    daytime-intent — for the daytime scheduler's dispatch matrix.
 //
-//	uat-broker schedule [--file <registry>] [--reservations a,b] \
-//	    [--previous-n N] [--include-main] < tags
+//	uat-broker schedule [--file <registry>] [--compat <file>] \
+//	    [--ignore-floor-lines n,m] [--reservations a,b] [--previous-n N] \
+//	    [--include-main] < tags
 //	    Read candidate tags from stdin and print the ordered nightly
 //	    version-matrix schedule as JSON: main-first, then the previous N
-//	    stable releases in descending semver order, per reservation.
+//	    stable releases in descending semver order, per reservation. Each
+//	    cell lists its eligible intents and the intents a compat floor
+//	    skipped.
+//
+//	uat-broker compat list [--file <compat>] [--registry <registry>]
+//	    Print one TSV row per (floor row x intent): line, lane, intent,
+//	    floor, where line is the row's min-release source line.
+//
+//	uat-broker compat check [--file <compat>] [--registry <registry>] \
+//	    --containing <file> [--previous-n N] < tags
+//	    Check every floor for over-high values and print the problems as a
+//	    JSON array. Exits 0 whenever the check ran, problems or not.
+//
+//	uat-broker compat gate --cloud <c> --intent <i> --version <v> \
+//	    [--file <compat>] [--registry <registry>]
+//	    Exit 0 when the release meets its floor (or has none); exit 2
+//	    (INVALID_REQUEST) naming the floor when it is below.
 package main
 
 import (
@@ -48,6 +66,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -59,6 +78,13 @@ import (
 // where the workflows invoke the tool.
 const defaultRegistryPath = "infra/uat/reservations.yaml"
 
+// defaultCompatPath is the harness-compat floor file relative to the repo
+// root.
+const defaultCompatPath = "tests/uat/compat.yaml"
+
+// maxContainingBytes bounds the --containing file read.
+const maxContainingBytes int64 = 1 << 20 // 1 MiB
+
 // maxTagsBytes bounds the stdin tag-list read so an oversized stream cannot
 // OOM the process.
 const maxTagsBytes int64 = 1 << 20 // 1 MiB
@@ -69,8 +95,15 @@ Usage:
   uat-broker reservations --name <name> [--file <registry>]   resolve one row as key=value lines
   uat-broker reservations --list [--file <registry>]          list reservation names
   uat-broker reservations --daytime [--file <registry>]       print the daytime rotation as JSON [{reservation,intent}]
-  uat-broker schedule [--file <registry>] [--reservations a,b] [--previous-n N] [--include-main]
-                                                              expand the nightly version matrix (tags on stdin) as JSON`
+  uat-broker schedule [--file <registry>] [--compat <file>] [--ignore-floor-lines n,m]
+                      [--reservations a,b] [--previous-n N] [--include-main]
+                                                              expand the nightly version matrix (tags on stdin) as JSON
+  uat-broker compat list [--file <compat>] [--registry <registry>]
+                                                              list floors as TSV: line, lane, intent, floor
+  uat-broker compat check [--file <compat>] [--registry <registry>] --containing <file> [--previous-n N]
+                                                              check floors for over-high values (tags on stdin); JSON problems
+  uat-broker compat gate --cloud <c> --intent <i> --version <v> [--file <compat>] [--registry <registry>]
+                                                              refuse (exit 2) a release below its floor`
 
 func main() {
 	os.Exit(realMain())
@@ -103,6 +136,8 @@ func parseAndRun(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		err = runReservations(rest, stdout, stderr)
 	case "schedule":
 		err = runSchedule(ctx, rest, stdin, stdout, stderr)
+	case "compat":
+		err = runCompat(ctx, rest, stdin, stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprintln(stdout, usage)
 		return 0
@@ -215,11 +250,15 @@ func runSchedule(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	fs.SetOutput(stderr)
 	var (
 		file        string
+		compatPath  string
+		ignoreCSV   string
 		reservCSV   string
 		previousN   int
 		includeMain bool
 	)
 	fs.StringVar(&file, "file", defaultRegistryPath, "registry path (always loaded — supplies each cell's eligible nightly intents)")
+	fs.StringVar(&compatPath, "compat", defaultCompatPath, "harness-compat floor file gating release cells")
+	fs.StringVar(&ignoreCSV, "ignore-floor-lines", "", "comma-separated min-release line numbers of compat floors NOT to honor (rejected by compat check)")
 	fs.StringVar(&reservCSV, "reservations", "", "comma-separated reservation names to schedule, each of which must exist in --file (default: every row)")
 	fs.IntVar(&previousN, "previous-n", 2, "number of previous stable releases below main to include")
 	fs.BoolVar(&includeMain, "include-main", true, "include the tip-of-main cell first")
@@ -231,16 +270,33 @@ func runSchedule(ctx context.Context, args []string, stdin io.Reader, stdout, st
 			"schedule: unexpected positional arguments: "+strings.Join(fs.Args(), " "))
 	}
 
-	reservations, err := resolveReservations(file, reservCSV)
+	reg, err := uatbroker.LoadRegistryFile(file)
 	if err != nil {
 		return err
+	}
+	reservations, err := resolveReservations(reg, reservCSV)
+	if err != nil {
+		return err
+	}
+	compat, err := uatbroker.LoadCompatFile(compatPath, reg)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(ignoreCSV) != "" {
+		lines, lineErr := parseLineCSV(ignoreCSV)
+		if lineErr != nil {
+			return lineErr
+		}
+		if compat, err = compat.WithoutLines(lines); err != nil {
+			return err
+		}
 	}
 	tags, err := readTags(ctx, stdin)
 	if err != nil {
 		return err
 	}
 
-	schedule := uatbroker.ExpandSchedule(reservations, tags, includeMain, previousN)
+	schedule := uatbroker.ExpandSchedule(reservations, compat, tags, includeMain, previousN)
 
 	// Warn loudly (but do not fail) when the matrix degrades, so a shallow
 	// checkout with no tag history doesn't silently skip the release rows. The
@@ -266,14 +322,10 @@ func runSchedule(ctx context.Context, args []string, stdin io.Reader, stdout, st
 // resolveReservations returns the reservation ROWS to schedule: the
 // --reservations subset when given, otherwise every row in the registry. The
 // registry is always loaded — the schedule attaches each cell's eligible
-// nightly intents (nightly-intents gated by nightly-intent-min-versions),
-// which only the registry row carries; a --reservations name absent from the
-// registry therefore fails loudly rather than scheduling an intent-less row.
-func resolveReservations(file, csv string) ([]uatbroker.Reservation, error) {
-	reg, err := uatbroker.LoadRegistryFile(file)
-	if err != nil {
-		return nil, err
-	}
+// nightly intents, which only the registry row carries; a --reservations name
+// absent from the registry therefore fails loudly rather than scheduling an
+// intent-less row.
+func resolveReservations(reg *uatbroker.Registry, csv string) ([]uatbroker.Reservation, error) {
 	if strings.TrimSpace(csv) == "" {
 		return reg.Reservations, nil
 	}
@@ -298,6 +350,190 @@ func resolveReservations(file, csv string) ([]uatbroker.Reservation, error) {
 		out = append(out, *res)
 	}
 	return out, nil
+}
+
+// runCompat dispatches the compat subcommands.
+func runCompat(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return errors.New(errors.ErrCodeInvalidRequest, "compat: want a subcommand: list, check, or gate")
+	}
+	switch args[0] {
+	case "list":
+		return runCompatList(args[1:], stdout, stderr)
+	case "check":
+		return runCompatCheck(ctx, args[1:], stdin, stdout, stderr)
+	case "gate":
+		return runCompatGate(args[1:], stdout, stderr)
+	default:
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("compat: unknown subcommand %q (want list, check, or gate)", args[0]))
+	}
+}
+
+// compatFlags registers the --file/--registry pair every compat subcommand
+// shares and returns a loader for the validated floor file.
+func compatFlags(fs *flag.FlagSet) func() (*uatbroker.Compat, error) {
+	file := fs.String("file", defaultCompatPath, "path to the harness-compat floor file")
+	registry := fs.String("registry", defaultRegistryPath, "path to the reservation registry (validates floor lanes)")
+	return func() (*uatbroker.Compat, error) {
+		reg, err := uatbroker.LoadRegistryFile(*registry)
+		if err != nil {
+			return nil, err
+		}
+		return uatbroker.LoadCompatFile(*file, reg)
+	}
+}
+
+// parseSubFlags parses a subcommand FlagSet and rejects positional arguments.
+func parseSubFlags(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		if stderrors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return flagParseErr(err, fs.Name())
+	}
+	if fs.NArg() != 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fs.Name()+": unexpected positional arguments: "+strings.Join(fs.Args(), " "))
+	}
+	return nil
+}
+
+// runCompatList prints one TSV row per (floor row x intent) — the input of
+// the workflow's per-line git blame loop.
+func runCompatList(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("compat list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	load := compatFlags(fs)
+	if err := parseSubFlags(fs, args); err != nil {
+		return helpIsNil(err)
+	}
+	compat, err := load()
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	for _, f := range compat.Floors {
+		for _, intent := range f.Intents {
+			fmt.Fprintf(&b, "%d\t%s\t%s\t%s\n", f.Line, f.Lane, intent, f.MinRelease)
+		}
+	}
+	if _, err := io.WriteString(stdout, b.String()); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "write compat list", err)
+	}
+	return nil
+}
+
+// runCompatCheck reads tags from stdin and the --containing file, and prints
+// the CheckFloors problems as a JSON array. Problems are data, not a failure:
+// the caller decides which rows to reject, so the exit is 0 whenever the
+// check ran.
+func runCompatCheck(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("compat check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	load := compatFlags(fs)
+	containingPath := fs.String("containing", "", "file of `<line> <tag>...` records: tags containing the commit that last touched each floor line")
+	previousN := fs.Int("previous-n", -1, "scheduled release window; when >= 0, report floors skipping nothing in it as inert")
+	if err := parseSubFlags(fs, args); err != nil {
+		return helpIsNil(err)
+	}
+	if *containingPath == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "compat check: --containing is required")
+	}
+	compat, err := load()
+	if err != nil {
+		return err
+	}
+	data, err := readBounded(*containingPath, "containing file", maxContainingBytes)
+	if err != nil {
+		return err
+	}
+	containing, err := uatbroker.ParseContaining(data)
+	if err != nil {
+		return err
+	}
+	tags, err := readTags(ctx, stdin)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(uatbroker.CheckFloors(compat, tags, containing, *previousN)); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "encode compat problems", err)
+	}
+	return nil
+}
+
+// runCompatGate refuses a release below its (cloud, intent) floor with an
+// INVALID_REQUEST error naming the floor.
+func runCompatGate(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("compat gate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	load := compatFlags(fs)
+	cloud := fs.String("cloud", "", "reservation cloud (the compat lane)")
+	intent := fs.String("intent", "", "recipe intent")
+	version := fs.String("version", "", "AICR release under test (e.g. v0.21.1)")
+	if err := parseSubFlags(fs, args); err != nil {
+		return helpIsNil(err)
+	}
+	for _, f := range []struct{ name, val string }{{"--cloud", *cloud}, {"--intent", *intent}, {"--version", *version}} {
+		if strings.TrimSpace(f.val) == "" {
+			return errors.New(errors.ErrCodeInvalidRequest, "compat gate: "+f.name+" is required")
+		}
+	}
+	compat, err := load()
+	if err != nil {
+		return err
+	}
+	msg, err := compat.Gate(*cloud, *intent, *version)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(stdout, msg); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "write compat gate result", err)
+	}
+	return nil
+}
+
+// readBounded reads at most limit bytes of path, failing when it is larger.
+func readBounded(path, what string, limit int64) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // operator-supplied path (CLI flag), size-bounded below
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "open "+what+" "+path, err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "read "+what+" "+path, err)
+	}
+	if int64(len(data)) > limit {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, what+" "+path+" exceeds size limit")
+	}
+	return data, nil
+}
+
+// parseLineCSV parses a comma-separated list of positive line numbers.
+func parseLineCSV(csv string) ([]int, error) {
+	parts := splitCSV(csv)
+	if len(parts) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "--ignore-floor-lines is empty after trimming")
+	}
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n <= 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("--ignore-floor-lines: %q is not a positive line number", p))
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+// helpIsNil maps -h (flag.ErrHelp) to success, passing other errors through.
+func helpIsNil(err error) error {
+	if stderrors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	return err
 }
 
 // readTags reads the newline-separated candidate tag list from stdin,
