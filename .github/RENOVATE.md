@@ -20,6 +20,8 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `go.mod` | `gomod` (groups: `kubernetes`, `golang-x`, `opencontainers`) |
 | `.github/workflows/*.yaml`, `.github/actions/*/action.yml` | `github-actions` (**disabled** — Dependabot owns workflow / composite-action bumps; Renovate cannot push `.github/workflows/*` with the auto-issued `GITHUB_TOKEN`) |
 | `validators/*/Dockerfile` | `dockerfile` |
+| `validators/performance/requirements.txt` (aiperf) | `pip_requirements` (`aiperf` group) |
+| `validators/performance/aiperf-bench.Dockerfile` `ARG AIPERF_VERSION` | dedicated `pypi` customManager (`aiperf` group, so it moves with `requirements.txt`) |
 | `infra/**/*.tf` | `terraform` (grouped) |
 | `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations) |
 | `recipes/registry.yaml` (35 chart pins) | custom regex manager (`# renovate:` annotations) — **report-only**, see [Registry drift report](#registry-drift-report) |
@@ -134,5 +136,6 @@ This is guidance for a Renovate-owned branch. `AGENTS.md`'s branch-hygiene rule 
 
 - **AWS EFA device-plugin image** (`recipes/components/aws-efa/values.yaml`) is published only to AWS's authenticated public ECR (`602401143452.dkr.ecr.us-west-2.amazonaws.com/...`); no `public.ecr.aws` mirror. The image is in `ignoreDeps`; bumps must be coordinated manually with EKS add-on releases.
 - **`recipes/components/*/values.yaml`** is partially covered, and cannot be extended in place. `helm-values` only auto-detects the conventional `image: { repository, tag }` shape. No custom manager's `managerFilePatterns` covers this path, so a `# renovate:` annotation added in one of these files rotates nothing and reports nothing — extending coverage means adding a custom manager, as `.settings.yaml` and `recipes/registry.yaml` each do.
+- **aiperf PRs need a manual license refresh and VEX re-audit.** The committed `validators/performance/licenses/python-notices.md` records the sha256 of `requirements.txt`, so an `aiperf` group PR fails `notices-generator` until a maintainer runs `make python-licenses` (network access to PyPI) and pushes the regenerated fragment; no `postUpgradeTasks` entry regenerates it. The same maintainer must re-audit `.openvex.json` against the new closure with the `aicr-managing-openvex` skill: its statements cite the installed aiperf version as evidence, and nothing gates them against `requirements.txt`.
 - **No vulnerability fast-path.** Self-hosted Renovate cannot consume GitHub vulnerability alerts (Mend-hosted feature). The weekday cron is the mitigation.
 - **The Renovate runner image** (`ghcr.io/renovatebot/renovate`) is not yet auto-managed. The digest is pinned in two places — the `RENOVATE_VALIDATOR_IMAGE` variable in `Makefile` and the `renovate-version` input in the workflow — and must be bumped manually in lockstep. The custom regex doesn't yet capture `image:tag@sha256:...` shapes.
