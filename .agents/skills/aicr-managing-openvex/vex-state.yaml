@@ -82,10 +82,27 @@ deferred_verifications:
       references remain. What is unverified is only whether the CI scan step
       accepts the tag-plus-digest matrix value, not whether the override
       works.
+  - id: aiperf-0.13.0-image-scans-clean-in-ci
+    opened: 2026-09-29
+    check: >-
+      The aiperf 0.13.0 bump retired the 10 pillow statements and
+      GHSA-cq5v-8q36-5273 (0.13.0 resolves pillow 12.3.0 and aiohttp 3.14.3,
+      the fixed versions) and rewrote the CVE-2026-82049 evidence for the
+      0.13.0 closure. Read the aiperf-bench scan-result artifact of the first
+      `Weekly Image Vulnerability Scan` run on main after that PR merged.
+    resolves_when: >-
+      that run's aiperf-bench line reports 0 critical, 0 high and exactly
+      1 VEX-suppressed row (CVE-2026-82049 on python 3.13.15)
+    caveat: >-
+      Measured on a local linux/amd64 build of the branch with grype v0.118.0
+      (the version scan-action v7.4.2 pins), `--fail-on high --only-fixed -c
+      .grype.yaml --vex .openvex.json`, against the 2026-09-29 grype DB. A newer DB in CI can add
+      findings this run could not see; triage those as new, not as a
+      regression of the retirement.
 
 known_negatives:
   - id: no-fixed-cpython-3.13-for-cve-2026-82049
-    checked: 2026-09-21
+    checked: 2026-09-29
     finding: >-
       CVE-2026-82049 (tarfile extraction filters) cannot be remediated by any
       bump available to this image. 3.13.15 is the newest CPython 3.13 release
@@ -93,9 +110,8 @@ known_negatives:
       landed after that release, so grype records the sole fixed version as
       `3.14.0b1` -- which is why `--only-fixed` does not withhold it.
       nvcr.io/nvidia/distroless/python publishes a 3.14-v4.1.4 tag, but aiperf
-      0.11.0 declares `Requires-Python: <3.14,>=3.10` and upstream main still
-      declares `>=3.11,<3.14`, so building the venv on 3.14 fails pip resolution
-      instead of producing a fixed image.
+      0.13.0 still declares `Requires-Python: <3.14,>=3.11`, so building the
+      venv on 3.14 fails pip resolution instead of producing a fixed image.
     also: >-
       The finding is on the base image's interpreter (pkg:generic/python@3.13.15
       at /usr/local/bin/python), not a pip package, so no requirements.txt change
@@ -105,29 +121,6 @@ known_negatives:
       a CPython 3.13.16+ release carrying the backport (then bump the distroless
       3.13 pin and delete the statement), or an aiperf release whose
       Requires-Python admits 3.14 (then the 3.14 base becomes reachable, #1910)
-  - id: aiperf-pins-block-pillow-and-aiohttp-fixes
-    checked: 2026-09-03
-    finding: >-
-      Neither surviving suppression can be remediated by a pin bump. aiperf
-      pins pillow~=12.2.0 while the 10 pillow GHSAs are fixed in 12.3.0, and
-      aiohttp~=3.13.3 (>=3.13.3,<3.14) while GHSA-cq5v-8q36-5273 is fixed in
-      3.14.3. Both caps hold at aiperf 0.11.0 (installed) and 0.12.0 (newest
-      upstream at the time of checking), so requiring a fixed version in
-      validators/performance/requirements.txt would fail pip resolution rather
-      than produce a fixed image.
-    also: >-
-      Both packages arrive through the copied virtualenv layer, not the
-      distroless base, so no base-image bump can retire either statement.
-    update_2026_09_21: >-
-      aiperf upstream main has since relaxed the aiohttp cap to
-      `aiohttp>=3.14.3,<4`, which is past the GHSA-cq5v-8q36-5273 fix. Main is
-      not a release, so the finding stands for now, but the next aiperf release
-      carrying that pyproject.toml very likely retires that one statement. The
-      pillow cap on main is still `pillow~=12.2.0`, so all 10 pillow statements
-      are unaffected by this and stay.
-    invalidated_by: >-
-      an aiperf release later than 0.12.0 that relaxes either cap; re-check
-      pyproject.toml before assuming the suppression is still unavoidable
 
 deliberate_exclusions:
   - id: libexpat1-wont-fix-highs
