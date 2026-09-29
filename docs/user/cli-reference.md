@@ -2602,6 +2602,7 @@ If the recipe is pure-Helm (no manifest-only / mixed components), path-based chi
 ```
 bundles/
 ├── README.md                      # Deployment guide with ordered steps
+├── UPGRADING.md                   # Present only when a pinned version needs upgrade guidance
 ├── deploy.sh                      # Generic install loop + name-matched blocks
 ├── recipe.yaml                    # Recipe used to generate bundle
 ├── checksums.txt                  # SHA256 checksums
