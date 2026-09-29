@@ -55,10 +55,10 @@ func healthyNICInfo() string {
 	return nicInfoAnnotation(pairs)
 }
 
-func topologyNode(name, nicInfo string) *corev1.Node {
+func topologyNode(nicInfo string) *corev1.Node {
 	n := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   name,
+			Name:   "gpu-0",
 			Labels: map[string]string{"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb"},
 		},
 	}
@@ -82,19 +82,21 @@ func TestCheckGKEGPUINCTopology(t *testing.T) {
 	t.Parallel()
 
 	t.Run("healthy node passes", func(t *testing.T) {
-		cs := k8sfake.NewClientset(topologyNode("gpu-0", healthyNICInfo()))
+		t.Parallel()
+		cs := k8sfake.NewClientset(topologyNode(healthyNICInfo()))
 		if err := checkGKEGPUINCTopology(topologyContext(cs, true)); err != nil {
 			t.Fatalf("expected pass, got %v", err)
 		}
 	})
 
 	t.Run("gVNIC displacement fails as a 7-of-8 GPU NIC count", func(t *testing.T) {
+		t.Parallel()
 		pairs := map[string]string{"eth0": "0000:00:05.0"}
 		for i := 1; i <= 7; i++ {
 			pairs[fmt.Sprintf("eth%d", i)] = fmt.Sprintf("0000:0%d:00.0", i+6)
 		}
 		pairs["gve0"] = "0000:06:00.0" // gVNIC took the GPU NIC slot
-		cs := k8sfake.NewClientset(topologyNode("gpu-0", nicInfoAnnotation(pairs)))
+		cs := k8sfake.NewClientset(topologyNode(nicInfoAnnotation(pairs)))
 		err := checkGKEGPUINCTopology(topologyContext(cs, true))
 		if err == nil {
 			t.Fatal("expected failure for a displaced GPU NIC")
@@ -107,11 +109,12 @@ func TestCheckGKEGPUINCTopology(t *testing.T) {
 	})
 
 	t.Run("fewer than 8 GPU NIC interfaces fails", func(t *testing.T) {
+		t.Parallel()
 		pairs := map[string]string{"eth0": "0000:00:05.0"}
 		for i := 1; i <= 7; i++ {
 			pairs[fmt.Sprintf("eth%d", i)] = fmt.Sprintf("0000:0%d:00.0", i+5)
 		}
-		cs := k8sfake.NewClientset(topologyNode("gpu-0", nicInfoAnnotation(pairs)))
+		cs := k8sfake.NewClientset(topologyNode(nicInfoAnnotation(pairs)))
 		err := checkGKEGPUINCTopology(topologyContext(cs, true))
 		if err == nil || !strings.Contains(err.Error(), "7 of 8") {
 			t.Fatalf("expected a 7-of-8 failure, got %v", err)
@@ -119,13 +122,15 @@ func TestCheckGKEGPUINCTopology(t *testing.T) {
 	})
 
 	t.Run("undeclared recipe skips", func(t *testing.T) {
-		cs := k8sfake.NewClientset(topologyNode("gpu-0", ""))
+		t.Parallel()
+		cs := k8sfake.NewClientset(topologyNode(""))
 		if err := checkGKEGPUINCTopology(topologyContext(cs, false)); !validators.IsSkip(err) {
 			t.Fatalf("undeclared recipe must skip, got %v", err)
 		}
 	})
 
 	t.Run("no GPU nodes is not a topology failure", func(t *testing.T) {
+		t.Parallel()
 		cs := k8sfake.NewClientset()
 		if err := checkGKEGPUINCTopology(topologyContext(cs, true)); err != nil {
 			t.Fatalf("no GPU nodes should not fail topology, got %v", err)
@@ -133,7 +138,8 @@ func TestCheckGKEGPUINCTopology(t *testing.T) {
 	})
 
 	t.Run("missing annotation is a documented pass, not a failure", func(t *testing.T) {
-		cs := k8sfake.NewClientset(topologyNode("gpu-0", ""))
+		t.Parallel()
+		cs := k8sfake.NewClientset(topologyNode(""))
 		if err := checkGKEGPUINCTopology(topologyContext(cs, true)); err != nil {
 			t.Fatalf("absent nic-info should not fail (documented limitation), got %v", err)
 		}
