@@ -272,6 +272,8 @@ func TestGKECriteriaAcceptOptIn(t *testing.T) {
 			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}, false},
 		// Declines the component because k8s-aibom alongside grove and
 		// dynamo-platform is unqualified. Widening adoption does not qualify it.
+		// Every GKE dynamo accelerator is covered structurally by
+		// TestEveryGKEDynamoRecipeRejectsTheOptIn below.
 		{"dynamo still declines", &recipe.Criteria{
 			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
 			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference,
@@ -349,5 +351,75 @@ func TestGrantedRefCarriesSameHealthCheckAsDeclaring(t *testing.T) {
 	if granted.HealthCheckAsserts != declared.HealthCheckAsserts {
 		t.Errorf("granted healthCheckAsserts != declaring (%d vs %d bytes); deployment validation would skip the granted component",
 			len(granted.HealthCheckAsserts), len(declared.HealthCheckAsserts))
+	}
+}
+
+// The decline is a property of the k8s-aibom + grove + dynamo-platform
+// pairing, not of any one accelerator, so it has to hold on every GKE dynamo
+// recipe. Written as a sweep over accelerators rather than a fixed list
+// because the h100-only version of this test passed while b200 and gb200
+// silently assembled the trio the h100 overlay refuses.
+//
+// Each accelerator is first resolved WITHOUT the opt-in. That is what makes
+// the sweep self-maintaining: an accelerator with no GKE dynamo recipe is
+// skipped rather than asserted about, and a newly added one is picked up with
+// no edit here. Only recipes that actually carry both grove and
+// dynamo-platform are held to the rejection.
+func TestEveryGKEDynamoRecipeRejectsTheOptIn(t *testing.T) {
+	accelerators := []recipe.CriteriaAcceleratorType{
+		recipe.CriteriaAcceleratorH100, recipe.CriteriaAcceleratorH200,
+		recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300,
+		recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorA100,
+		recipe.CriteriaAcceleratorL40, recipe.CriteriaAcceleratorL40S,
+		recipe.CriteriaAcceleratorRTXPro6000, recipe.CriteriaAcceleratorVR200,
+	}
+
+	var covered []string
+	for _, acc := range accelerators {
+		criteria := func() *recipe.Criteria {
+			return &recipe.Criteria{
+				Service: recipe.CriteriaServiceGKE, Accelerator: acc,
+				OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference,
+				Platform: recipe.CriteriaPlatformDynamo,
+			}
+		}
+
+		base, err := recipe.NewBuilder(recipe.WithVersion(stockAdoptionVersion)).
+			BuildFromCriteria(context.Background(), criteria())
+		if err != nil {
+			continue // no GKE dynamo recipe for this accelerator
+		}
+		if base.GetComponentRef("grove") == nil || base.GetComponentRef("dynamo-platform") == nil {
+			continue // not the unqualified pairing
+		}
+		covered = append(covered, string(acc))
+
+		t.Run(string(acc), func(t *testing.T) {
+			result, err := recipe.NewBuilder(recipe.WithVersion(stockAdoptionVersion)).
+				BuildFromCriteria(context.Background(), criteria(),
+					recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryEnabled))
+			if err == nil {
+				// Name the component set, because the failure people need to
+				// see is the trio being assembled, not merely a missing error.
+				var got []string
+				for _, n := range []string{"k8s-aibom", "grove", "dynamo-platform"} {
+					if ref := result.GetComponentRef(n); ref != nil && ref.IsEnabled() {
+						got = append(got, n)
+					}
+				}
+				t.Fatalf("opt-in accepted on a GKE dynamo recipe; enabled components = %v, "+
+					"want rejection (this overlay needs the k8s-aibom install:false decline)", got)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+
+	// Guards the sweep itself: if resolution changes so that nothing matches,
+	// every t.Run above would vanish and the test would pass vacuously.
+	if len(covered) < 3 {
+		t.Errorf("only %d GKE dynamo recipe(s) exercised (%v); expected at least h100, b200 and gb200 "+
+			"-- the sweep is not reaching the recipes it is meant to protect", len(covered), covered)
 	}
 }

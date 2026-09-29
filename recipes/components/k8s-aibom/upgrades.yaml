@@ -100,11 +100,14 @@ transitions:
               v1.3.0 and v1.5.1 CRDs alike, so that clause reads the same on a
               cluster still stranded on the old schema.
             reason: >-
-              A Ready controller does not by itself mean the new config was
-              accepted: readiness.failOnInvalidConfig is off by default, so
-              the controller deliberately stays Ready on last-known-good
-              config and an unaccepted generation shows up only in the CR's
-              conditions.
+              Confirms the controller actually adopted the new generation
+              rather than holding last-known-good. AICR sets
+              readiness.strictConfig: true in the component's values.yaml, so
+              on an AICR install an invalid config does fail the readiness
+              probe -- but the chart default is false, and a recipe that
+              overrides that value back to the default gets a controller that
+              stays Ready while ignoring the config. Read the CR's conditions
+              rather than inferring acceptance from pod health.
       - steps:
           - id: verify-crd-update
             description: >-
@@ -134,11 +137,14 @@ transitions:
               v1.3.0 and v1.5.1 CRDs alike, so that clause reads the same on a
               cluster still stranded on the old schema.
             reason: >-
-              A Ready controller does not by itself mean the new config was
-              accepted: readiness.failOnInvalidConfig is off by default, so
-              the controller deliberately stays Ready on last-known-good
-              config and an unaccepted generation shows up only in the CR's
-              conditions.
+              Confirms the controller actually adopted the new generation
+              rather than holding last-known-good. AICR sets
+              readiness.strictConfig: true in the component's values.yaml, so
+              on an AICR install an invalid config does fail the readiness
+              probe -- but the chart default is false, and a recipe that
+              overrides that value back to the default gets a controller that
+              stays Ready while ignoring the config. Read the CR's conditions
+              rather than inferring acceptance from pod health.
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#k8s-aibom-runtime-inventory
       - https://github.com/GoogleCloudPlatform/k8s-aibom/releases
