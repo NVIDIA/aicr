@@ -265,7 +265,7 @@ version describes the wrapper instead of what it wraps.
 
 So for the `gpu-operator-post` release generated alongside gpu-operator, a
 `helm list` reports chart `gpu-operator-post-0.22.0` — the AICR version — while
-its app version and `aicr.run/component-version` both read `v26.7.0`, the
+its app version and `aicr.run/component-version` both read `v26.7.1`, the
 gpu-operator pin those manifests accompany.
 
 A component with no upstream pin — a manifest-only component, and the injected

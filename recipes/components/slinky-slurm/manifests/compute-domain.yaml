@@ -33,11 +33,11 @@ spec:
   # v26.7.0 ships its own copy of resource.nvidia.com_computedomains.yaml in
   # crds/, and that copy is a stale snapshot: it lists numNodes as REQUIRED
   # and carries no `default: 0`, where the DRA driver chart's copy makes it
-  # optional with a default. Helm installs crds/ only when the CRD is absent
-  # and never upgrades it, and gpu-operator is ordered before
-  # nvidia-dra-driver-gpu, so on a fresh cluster the operator's stricter copy
-  # wins and a CR omitting numNodes is rejected with "spec.numNodes: Required
-  # value". Setting it here is valid under both copies.
+  # optional with a default (v26.7.1 matches the DRA driver). Helm installs
+  # crds/ only when the CRD is absent and never upgrades it, and gpu-operator
+  # is ordered before nvidia-dra-driver-gpu, so a cluster first installed with
+  # v26.7.0 keeps the stricter copy and rejects a CR omitting numNodes with
+  # "spec.numNodes: Required value". Setting it here is valid under both.
   #
   # 0 is the correct value, not merely a placeholder: with
   # IMEXDaemonsWithDNSNames=true (the DRA driver default) each IMEX daemon

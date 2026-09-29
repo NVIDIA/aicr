@@ -230,6 +230,15 @@ type AgentConfig struct {
 	// contract as AKSGPUPoolsPath: projected controller-side and merged
 	// into the snapshot as the oke-addons subtype.
 	OKEAddonsPath string
+
+	// GKEGPUPoolsPath points at an operator-supplied
+	// `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump on the machine running this client. The
+	// snapshotter projects it, controller-side and before any cluster
+	// work, into the snapshot's K8s.gke-gpu-pools.gpu-driver-installation
+	// reading. The file never enters the cluster. Empty disables the
+	// projection.
+	GKEGPUPoolsPath string
 }
 
 // Criteria is the facade-owned, semver-stable shape of a recipe-resolution
@@ -458,10 +467,12 @@ func WithAccountingMode(mode string) RecipeResolveOption {
 }
 
 // WithRuntimeInventoryMode selects whether the runtime AI inventory component
-// is installed by a criteria- or snapshot-based resolve call. It is valid only
-// when the resolved recipe declares that component; an empty or invalid mode is
-// rejected when the resolve call runs. Omit this option to keep the recipe's
-// own declaration.
+// is installed by a criteria- or snapshot-based resolve call. "enabled" confirms
+// the selection when the resolved recipe declares the component and grants it
+// (GKE recipes only, #2962) when the recipe neither declares nor declines it; a
+// recipe that explicitly declines the component rejects the option on any
+// service. An empty or invalid mode is rejected when the resolve call runs.
+// Omit this option to keep the recipe's own declaration.
 //
 // Unlike a bundle-time value override, the selection is recorded in the emitted
 // recipe and removes the component's health check along with the component,

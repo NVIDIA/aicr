@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -25,6 +26,11 @@ import (
 // Named as a constant rather than inlined so the coupling between the recipe
 // configuration and the registry entry is greppable from both ends.
 const runtimeInventoryComponentName = "k8s-aibom"
+
+// runtimeInventoryValuesFile is the values file h100-gke-cos-inference names.
+// A granted ref points at the same file so a recipe that received the
+// component by opt-in and one that declares it hydrate identically.
+const runtimeInventoryValuesFile = "components/k8s-aibom/values.yaml"
 
 // RuntimeInventoryMode is the generation-time selection for the runtime AI
 // inventory component.
@@ -38,10 +44,12 @@ const runtimeInventoryComponentName = "k8s-aibom"
 type RuntimeInventoryMode string
 
 const (
-	// RuntimeInventoryEnabled keeps the component the recipe declares. It
-	// confirms an existing selection rather than granting one: a recipe that
-	// declines the component is rejected instead of re-enabled, so this cannot
-	// be used to opt a recipe into a combination it deliberately excludes.
+	// RuntimeInventoryEnabled keeps or grants the component depending on what
+	// the recipe already resolves: it confirms an existing selection when the
+	// recipe declares the component, grants it (GKE only, #2962) when the
+	// recipe neither declares nor declines it, and is rejected -- not
+	// re-enabled -- when the recipe explicitly declines it, so this cannot be
+	// used to opt a recipe into a combination it deliberately excludes.
 	RuntimeInventoryEnabled RuntimeInventoryMode = "enabled"
 	// RuntimeInventoryDisabled removes it from the resolved recipe.
 	RuntimeInventoryDisabled RuntimeInventoryMode = "disabled"
@@ -93,6 +101,43 @@ func (r *RecipeResult) RuntimeInventoryMode() (RuntimeInventoryMode, bool) {
 	return r.Configuration.RuntimeInventory.Mode, true
 }
 
+// grantRuntimeInventoryComponent adds the component to a recipe that does not
+// declare it, mirroring what h100-gke-cos-inference declares by hand: name,
+// type, and the shared values file, with everything else from the registry.
+//
+// Only reached for GKE recipes that neither declare nor decline the component
+// (#2962). The registry is the single source for chart, repository and
+// version, so a granted recipe and a declaring one render the same artifact.
+func grantRuntimeInventoryComponent(result *RecipeResult) error {
+	registry, err := GetComponentRegistryFor(result.provider)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load the component registry to grant the runtime inventory component")
+	}
+	if registry.Get(runtimeInventoryComponentName) == nil {
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("component %q is not in the registry; cannot grant it",
+				runtimeInventoryComponentName))
+	}
+
+	result.ComponentRefs = append(result.ComponentRefs, ComponentRef{
+		Name:       runtimeInventoryComponentName,
+		Type:       ComponentTypeHelm,
+		ValuesFile: runtimeInventoryValuesFile,
+	})
+
+	// The package-level pass rather than ref.ApplyRegistryDefaults: only this
+	// one hydrates healthCheck.assertFile, and finalizeRecipeResult's
+	// recipe-wide hydration has already run by the time the grant appends. A
+	// ref defaulted the per-ref way carries no asserts, and a component with
+	// no asserts is skipped by the deployment validator rather than failing —
+	// so the gap would surface as a passing check, not a missing one.
+	if err := applyRegistryDefaults(result.provider, result.ComponentRefs[len(result.ComponentRefs)-1:]); err != nil {
+		return err
+	}
+	return nil
+}
+
 // applyRuntimeInventoryMode records the selection and takes the component out
 // of the resolved set when disabled.
 //
@@ -106,16 +151,40 @@ func applyRuntimeInventoryMode(result *RecipeResult, mode RuntimeInventoryMode) 
 		return err
 	}
 
-	// Fail closed on a recipe that never declares the component. Selecting a
-	// mode here is a mistake — wrong criteria, a typo, a recipe that simply
-	// does not carry it — and silently succeeding would record a decision the
-	// recipe cannot honor. Checked before Configuration is written so a
-	// rejected build leaves no partial record.
+	// A GKE recipe that simply does not mention the component can receive it
+	// (#2962). Absence is not a decision -- unlike the decline below, which is.
+	//
+	// Scoped to GKE because that is the footprint qualified for the widened
+	// adoption; every other service keeps the original rejection, so a typo'd
+	// criterion that lands on EKS still fails loudly rather than shipping a
+	// component nothing qualified there.
 	if result.GetComponentRef(runtimeInventoryComponentName) == nil {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("runtime inventory mode %q requires the recipe to declare component %q; "+
+		gke := result.Criteria != nil && result.Criteria.Service == CriteriaServiceGKE
+		if parsed != RuntimeInventoryEnabled || !gke {
+			msg := fmt.Sprintf("runtime inventory mode %q requires the recipe to declare component %q; "+
 				"this recipe does not resolve it",
-				parsed, runtimeInventoryComponentName))
+				parsed, runtimeInventoryComponentName)
+			// Naming the service is what separates "I typo'd --service" from
+			// "this recipe genuinely lacks the component"; without it the
+			// message sends a GKE-expecting user hunting for a declaration.
+			if parsed == RuntimeInventoryEnabled {
+				service := "unset"
+				if result.Criteria != nil && result.Criteria.Service != "" {
+					service = string(result.Criteria.Service)
+				}
+				msg += fmt.Sprintf(", and %q adds it only to a %q recipe (this one is %q)",
+					RuntimeInventoryEnabled, CriteriaServiceGKE, service)
+			}
+			return errors.New(errors.ErrCodeInvalidRequest, msg)
+		}
+		if err := grantRuntimeInventoryComponent(result); err != nil {
+			return err
+		}
+		slog.Info("granted runtime inventory component to a GKE recipe",
+			"component", runtimeInventoryComponentName,
+			"service", string(result.Criteria.Service),
+			"accelerator", string(result.Criteria.Accelerator),
+			"intent", string(result.Criteria.Intent))
 	}
 
 	// Fail closed when the resolved recipe already declined the component and

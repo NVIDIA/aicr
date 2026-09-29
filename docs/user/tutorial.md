@@ -16,6 +16,10 @@ lists, see the [CLI Reference](cli-reference.md).
   local Kind/KWOK cluster for a dry run). `kubectl` configured to reach it.
 - The `helm` binary on your `PATH` (the default `helm` deployer emits Helm
   commands).
+- On EKS, an AWS credential path for the EBS CSI driver. The bundle installs
+  the driver but not its credentials, and without them no volume can be
+  provisioned — see
+  [EBS CSI Driver Credentials](component-catalog.md#ebs-csi-driver-credentials).
 - About 15 minutes. No NVIDIA hardware is required to generate a recipe or a
   bundle — only the deploy and validate stages touch a real cluster.
 
