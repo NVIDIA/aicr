@@ -131,7 +131,7 @@ _No images extracted._
 
 ### dra-node-labeler
 
-- `docker.io/alpine/kubectl:1.37.0@sha256:954b65dea0eb140219b440413ede17c2eca205866df350d3c1fbc84d28af14ae`
+- `docker.io/alpine/kubectl:1.37.1@sha256:7b4cc9a9ce0d064cedeb85550266c11f2b32f010ca299525518646261e4d955e`
 
 ### dranet
 
