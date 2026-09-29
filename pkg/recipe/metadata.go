@@ -309,24 +309,26 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 // Deployers interpolate the namespace into generated install scripts, so a
 // value carrying shell metacharacters would reach a shell the operator runs,
 // and the file set and path select files to read. Every inherited value is
-// therefore checked before it is copied, and one bad value rejects the whole
-// artifact rather than being skipped. A silently ignored pin is the relocation
-// this function exists to prevent.
+// therefore checked before it is copied, and one bad value on a component the
+// current recipe also names rejects the whole artifact rather than being
+// skipped. A silently ignored pin is the relocation this function exists to
+// prevent. A prior component absent from the current recipe is never copied, so
+// it is not validated.
 func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 	if len(prior) == 0 {
 		return nil
 	}
 	pinned := make(map[string]ComponentRef, len(prior))
 	for _, p := range prior {
-		if err := validateInheritedIdentity(p); err != nil {
-			return err
-		}
 		pinned[p.Name] = p
 	}
 	for i := range refs {
 		p, ok := pinned[refs[i].Name]
 		if !ok {
 			continue
+		}
+		if err := validateInheritedIdentity(p); err != nil {
+			return err
 		}
 		if p.Type != "" && refs[i].Type != "" && p.Type != refs[i].Type {
 			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
