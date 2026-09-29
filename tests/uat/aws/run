@@ -20,11 +20,11 @@
 #
 # AWS-specific: the STS session minted by configure-aws-credentials is a fixed
 # ~1h (the role's default MaxSessionDuration) with no refresh token, so the
-# install phase's readiness gate (90m budget on a slow GB200) can outlive the
-# token minted at the install step and every EKS `aws eks get-token` then fails
-# ExpiredToken -> Unauthorized (issue #1861). So this runner wires the shared
-# cloud_refresh_credentials hook to re-mint the session mid-gate, mirroring
-# Azure's federated relogin.
+# readiness phase's gate (READINESS_TIMEOUT_SECONDS, 60m, which a slow GB200
+# can use in full) can outlive the token minted before the step started, and
+# every EKS `aws eks get-token` then fails ExpiredToken -> Unauthorized
+# (issue #1861). So this runner wires the shared cloud_refresh_credentials hook
+# to re-mint the session mid-gate, mirroring Azure's federated relogin.
 #
 # Usage:
 #   AICR_BIN=./aicr RUN_ID=12345 ./run <phase> <test-config.yaml>
@@ -35,11 +35,12 @@ set -euo pipefail
 # shellcheck source=../lib/phases.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/phases.sh"
 
-# How often the readiness gate re-mints the STS session. The token minted at the
-# install step is spent partly by the helmfile apply before the gate even starts,
-# so the interval must land the first re-mint well inside the ~1h session: 20m
-# keeps every cached token comfortably in-lifetime with margin for a slow apply
-# and a slow validate attempt.
+# How often the readiness gate re-mints the STS session. The token the gate
+# starts on may already be partly spent (e.g. by the helmfile apply, when no
+# re-auth separates the install and readiness steps), so the interval must land
+# the first re-mint well inside the ~1h session: 20m keeps every cached token
+# comfortably in-lifetime with margin for a slow apply and a slow validate
+# attempt.
 AWS_STS_REFRESH_INTERVAL_SECONDS="${AWS_STS_REFRESH_INTERVAL_SECONDS:-1200}" # 20 min
 
 # Re-mint the federated STS session in place. The CI session cannot self-refresh
@@ -123,7 +124,7 @@ aws_sts_federated_refresh() {
 
 # Wire the refresh into the shared hook. The readiness gate calls this every
 # CLOUD_REFRESH_INTERVAL_SECONDS. CLOUD_REFRESH_INTERVAL_SECONDS is read by
-# phase_install in the shared lib.
+# phase_readiness in the shared lib.
 # shellcheck disable=SC2034  # used in tests/uat/lib/phases.sh
 CLOUD_REFRESH_INTERVAL_SECONDS="${AWS_STS_REFRESH_INTERVAL_SECONDS}"
 cloud_refresh_credentials() { aws_sts_federated_refresh; }
