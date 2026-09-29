@@ -247,3 +247,43 @@ func TestExternalOverlayContributesProfileValue(t *testing.T) {
 		})
 	}
 }
+
+func TestSourceFollowsTheLatestExternalRead(t *testing.T) {
+	ctx := t.Context()
+	const path = "overlays/gke-cos.yaml"
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(withPatch(t, "gke-cos.yaml", "spec: {profile: {values: {custom: {}}}}"))
+	layered, err := NewLayeredDataProvider(
+		NewEmbeddedDataProvider(GetEmbeddedFS(), "."), LayeredProviderConfig{ExternalDir: dir})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider() error = %v", err)
+	}
+
+	if _, err = layered.ReadFile(ctx, path); err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if got := layered.Source(path); got != CatalogSourceEmbedded {
+		t.Fatalf("Source after a patch read = %q, want %q", got, CatalogSourceEmbedded)
+	}
+
+	write(withPatch(t, "gke-cos.yaml", "spec: {criteria: {service: gke}, profile: {values: {custom: {}}}}"))
+	if _, err = layered.ReadFile(ctx, path); err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if got := layered.Source(path); got != CatalogSourceExternal {
+		t.Fatalf("Source after a replacement read = %q, want %q", got, CatalogSourceExternal)
+	}
+}

@@ -453,18 +453,24 @@ func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte
 		if err != nil {
 			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", path))
 		}
+		patched := false
 		if isOverlay, _ := filepath.Match("overlays/*.yaml", path); isOverlay {
 			if embeddedData, embErr := p.embedded.ReadFile(ctx, path); embErr == nil {
-				merged, patched, patchErr := patchOverlayProfile(path, embeddedData, data)
+				merged, isPatch, patchErr := patchOverlayProfile(path, embeddedData, data)
 				if patchErr != nil {
 					return nil, patchErr
 				}
-				if patched {
-					p.patchedOverlays.Store(path, struct{}{})
+				if isPatch {
+					patched = true
 					slog.Info("external overlay extends the embedded profile", "path", path)
 					data = merged
 				}
 			}
+		}
+		if patched {
+			p.patchedOverlays.Store(path, struct{}{})
+		} else {
+			p.patchedOverlays.Delete(path)
 		}
 		slog.Debug("read from external data directory", "path", path)
 		return data, nil
