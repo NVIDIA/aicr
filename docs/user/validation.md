@@ -399,9 +399,26 @@ What it must honor:
 - **IMEX access uses the validator-managed claim template.** The benchmark runs
   in a per-run namespace that does not exist before the run, so nothing can be
   pre-created there for the runtime. To get an IMEX channel, reference the
-  ResourceClaimTemplate `nccl-all-reduce-imex` from the pod's `resourceClaims`.
-  The validator then creates the ComputeDomain that backs it, on any check
-  variant, and waits for the template before starting the run.
+  ResourceClaimTemplate `nccl-all-reduce-imex` from the pod's `resourceClaims`,
+  and bind that claim in the `node` container's `resources.claims`. Kubernetes
+  exposes a pod-level claim only to containers that bind it, so the pod-level
+  reference alone leaves the worker without the channel. The validator then
+  creates the ComputeDomain that backs it, on any check variant, and waits for
+  the template before starting the run.
+
+  ```yaml
+  # the node replicatedJob's pod spec
+  resourceClaims:
+    - name: imex-channel
+      resourceClaimTemplateName: nccl-all-reduce-imex
+  containers:
+    - name: node
+      resources:
+        claims:
+          - name: imex-channel
+        limits:
+          nvidia.com/gpu: "${GPU_COUNT_PER_NODE}"
+  ```
 - Any other pod-level `resourceClaimTemplateName`, and any
   `resourceClaimName`, is rejected: no such claim could exist in the per-run
   namespace.
