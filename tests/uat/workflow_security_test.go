@@ -68,6 +68,12 @@ const (
 	// carries pull request titles, branch names and commit messages verbatim.
 	eventContextPrefix = "github.event."
 
+	// computedIndexMarker ends a context path that is followed by an index the
+	// scanner cannot read as a literal ['key']. A context path is otherwise made
+	// of identifier characters and dots only, so the marker cannot occur by
+	// accident.
+	computedIndexMarker = "[*]"
+
 	// Inputs for the rendered predicate. Only their distinguishability in the
 	// emitted JSON matters.
 	slsaPredicateRepository   = "NVIDIA/aicr"
@@ -2307,8 +2313,10 @@ func actionsExpressions(text string) []string {
 
 // expressionContexts returns the dotted context paths an Actions expression
 // references. An index segment that follows a path, ['key'], is read as .key,
-// since Actions treats the two alike. Other single-quoted literals are skipped
-// so a format() template does not contribute its own text as an identifier.
+// since Actions treats the two alike. Any other index after a path is computed
+// at evaluation time, so the path is returned with computedIndexMarker instead
+// of a guessed key. Other single-quoted literals are skipped so a format()
+// template does not contribute its own text as an identifier.
 func expressionContexts(expression string) []string {
 	contexts := make([]string, 0)
 	var current strings.Builder
@@ -2332,6 +2340,10 @@ func expressionContexts(expression string) []string {
 				current.WriteString("." + key)
 				index = end
 				continue
+			}
+			if strings.HasPrefix(strings.TrimLeft(expression[index:], " \t\r\n"), "[") {
+				current.WriteString(computedIndexMarker)
+				flush()
 			}
 		}
 		switch {
@@ -2384,9 +2396,13 @@ func expressionIndexSegment(expression string, start int) (string, int, bool) {
 // deliberately absent: GitHub constrains a repository name to [A-Za-z0-9._-]
 // and a sha to hex, so neither can carry a shell metacharacter. envKeys extends
 // the judgement one hop, to a workflow/job/step env entry that is itself defined
-// from such a context, which is the shape a partial revert would take.
+// from such a context, which is the shape a partial revert would take. A path
+// carrying computedIndexMarker counts as attacker-chosen whatever its root: the
+// property it reads is not known until the expression is evaluated.
 func isAttackerChosenContext(context string, envKeys map[string]bool) bool {
-	if slices.Contains(attackerChosenContexts, context) {
+	if slices.Contains(attackerChosenContexts, context) ||
+		strings.HasSuffix(context, computedIndexMarker) {
+
 		return true
 	}
 	if context == strings.TrimSuffix(eventContextPrefix, ".") ||
@@ -2408,9 +2424,9 @@ func attackerChosenEnvKeys(environments ...map[string]string) map[string]bool {
 		for name, value := range environment {
 			for _, expression := range actionsExpressions(value) {
 				for _, context := range expressionContexts(expression) {
-					if slices.Contains(attackerChosenContexts, context) ||
-						strings.HasPrefix(context, eventContextPrefix) {
-
+					// nil: the hop is one level deep, an env entry defined
+					// from another env entry is not followed.
+					if isAttackerChosenContext(context, nil) {
 						keys[name] = true
 					}
 				}
