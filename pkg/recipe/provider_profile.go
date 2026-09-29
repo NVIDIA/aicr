@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"reflect"
 	"slices"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -50,11 +49,12 @@ func patchOverlayProfile(path string, embedded, external []byte) (merged []byte,
 	if !stderrors.Is(decoder.Decode(&trailing), io.EOF) {
 		return external, false, nil
 	}
-	// Zero-valuing the rest of the spec means a field added to it later makes
-	// a file a replacement, never a patch that silently drops the new field.
-	rest := patch.Spec
-	rest.Profile = nil
-	if patch.Spec.Profile == nil || !reflect.ValueOf(rest).IsZero() ||
+	// Classified by the keys the file sets, so an explicit empty value such as
+	// base: "" still makes it a replacement.
+	var shape struct {
+		Spec map[string]any `yaml:"spec"`
+	}
+	if yaml.Unmarshal(external, &shape) != nil || len(shape.Spec) != 1 || patch.Spec.Profile == nil ||
 		patch.Kind != RecipeMetadataKind || !header.IsSupportedProfileAPIVersion(patch.APIVersion) {
 
 		return external, false, nil

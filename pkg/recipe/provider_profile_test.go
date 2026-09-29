@@ -74,6 +74,10 @@ func TestPatchOverlayProfile(t *testing.T) {
 			patch: "spec: {criteria: {service: gke}, profile: {default: z, values: {z: {}}}}",
 		},
 		{
+			name:  "explicitly empty non-profile field is a replacement, not a patch",
+			patch: "spec: {base: '', profile: {values: {z: {}}}}",
+		},
+		{
 			name:     "unparsable external is left for the loader",
 			patch:    addZ,
 			appended: "bogus: [unclosed\n",
