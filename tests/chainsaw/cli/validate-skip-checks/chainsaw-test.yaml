@@ -47,6 +47,8 @@ spec:
               ${AICR_BIN} recipe --service eks --accelerator h100 --intent training \
                 -o "${WORK}/recipe.yaml"
               cat > "${WORK}/snapshot.yaml" << 'SNAP'
+              kind: Snapshot
+              apiVersion: aicr.run/v1
               measurements:
                 - type: K8s
                   subtypes:
