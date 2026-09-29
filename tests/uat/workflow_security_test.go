@@ -853,6 +853,42 @@ func TestAttackerChosenEnvKeysFailClosedOnComputedIndex(t *testing.T) {
 	}
 }
 
+// TestExpressionContextsRejectWholeGithubAndResultIndex pins two shapes that
+// reach head_ref without naming it. toJSON(github) serializes the whole context,
+// head_ref and the event payload included, so the bare github object is as
+// attacker-chosen as the bare github.event one. And an index on a function
+// result, literal or not, reads a property of an object no path describes, so it
+// fails closed like a computed index. The steps row isolates that second rule,
+// because every github row is already rejected by the first. The last two rows
+// must still pass: a function over a safe field, and a ")[" inside a string
+// literal.
+func TestExpressionContextsRejectWholeGithubAndResultIndex(t *testing.T) {
+	tests := []struct {
+		name       string
+		expression string
+		attacker   bool
+	}{
+		{"whole context serialized", " toJSON(github) ", true},
+		{"literal key on the serialized context", " fromJSON(toJSON(github))['head_ref'] ", true},
+		{"whole context formatted", " format('{0}', github) ", true},
+		{"literal key on a function result", " fromJSON(steps.meta.outputs.json)['head_ref'] ", true},
+		{"function over a safe field", " toJSON(github.sha) ", false},
+		{"paren and bracket inside a literal", " format('{0})[', github.sha) ", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contexts := expressionContexts(tt.expression)
+			attacker := slices.ContainsFunc(contexts, func(context string) bool {
+				return isAttackerChosenContext(context, nil)
+			})
+			if attacker != tt.attacker {
+				t.Errorf("expression %q (contexts %q) judged attacker-chosen = %v, want %v",
+					tt.expression, contexts, attacker, tt.attacker)
+			}
+		})
+	}
+}
+
 // TestUATKindSimJobPinsMainRef holds the sim lane to the scope its own header
 // claims ("manual dispatch, main tip"). workflow_dispatch offers a ref picker,
 // so without a ref term the job runs whatever branch the dispatcher selects —
