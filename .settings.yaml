@@ -54,7 +54,7 @@ linting:
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
   oasdiff_sha256_linux_amd64: '7c8939fc49b75ee11fec66a5b83b37a2fca6aee109fed85013b1ba2ac2a1ee7f'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
-  golangci_lint: 'v2.13.2'
+  golangci_lint: 'v2.14.0'
   # renovate: datasource=pypi depName=yamllint depType=linting
   yamllint: '1.38.0'
   # renovate: datasource=github-releases depName=google/addlicense depType=linting
@@ -169,16 +169,16 @@ testing_tools:
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.3.0'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
-  helm_diff: 'v3.15.13'
+  helm_diff: 'v3.15.15'
   # helm_diff_checksums are refreshed automatically by tools/update-helm-diff-checksums
   # via Renovate postUpgradeTasks whenever the helm-diff version above is bumped.
   # The darwin_* keys name GOOS (matching the sibling blocks); upstream labels
   # those release assets "macos".
   helm_diff_checksums:
-    linux_amd64: 'c004219c405e5be665e0b573378cf07f0182f2da7466a4c5a580a3c7162e7ae8'
-    linux_arm64: 'b8a4d992eea22fad9edcadcbc457b894a3c8f441f420bd5433bfd9362ee7c10e'
-    darwin_amd64: '4d57ed1a114214a1e6c488827f823d1be013b0c32d6bee4f330de8227d0d35d8'
-    darwin_arm64: '44ae40d1ca86d589666783c03696c66a2c56af19ffbcc54baf96b1fb3d2658e3'
+    linux_amd64: '504e99410611daa70702362e1b10dc74929df8a912cb3f6b5d21d1ee9d0cb7d9'
+    linux_arm64: 'fc046bf3c3f63a435741fe8c37a9d740dfa17ea7f5f0c2a9da2c0222bb4384e6'
+    darwin_amd64: '214d890745b45679400442552ad4554fb4df622b92d031931536eff85bdb46c2'
+    darwin_arm64: 'af2834052ba32fe8006a44a31db16cad30baf1c46f6b59160b092974578d7798'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
   helmfile: 'v1.8.0'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
@@ -210,7 +210,7 @@ testing_tools:
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.5.16'
+  ministack_image: 'ministackorg/ministack:1.5.17'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault

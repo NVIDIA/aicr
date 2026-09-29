@@ -49,7 +49,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.12 | 1 |
-| k8s-aibom | helm | k8s-aibom | 1.3.0 | 1 |
+| k8s-aibom | helm | k8s-aibom | 1.5.1 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -131,7 +131,7 @@ _No images extracted._
 
 ### dra-node-labeler
 
-- `docker.io/alpine/kubectl:1.37.0@sha256:954b65dea0eb140219b440413ede17c2eca205866df350d3c1fbc84d28af14ae`
+- `docker.io/alpine/kubectl:1.37.1@sha256:7b4cc9a9ce0d064cedeb85550266c11f2b32f010ca299525518646261e4d955e`
 
 ### dranet
 
@@ -197,7 +197,7 @@ _No images extracted._
 
 ### k8s-aibom
 
-- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:f8e48d4edc44e6ee8e40a2ac6c5f60b190aa18d411a75702dc5798a77a039e8d`
+- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:7b02731563a5ec524ed3396a07a524b02e3f51e17c976e02e65fc680b51e8164`
 
 ### k8s-ephemeral-storage-metrics
 

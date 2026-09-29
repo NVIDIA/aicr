@@ -797,11 +797,13 @@ components:
     hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/k8s-aibom/health-check.yaml
+    upgrades:
+      file: components/k8s-aibom/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/googlecloudplatform/charts
       defaultChart: k8s-aibom
       # renovate: datasource=docker depName=ghcr.io/googlecloudplatform/charts/k8s-aibom
-      defaultVersion: "1.3.0"
+      defaultVersion: "1.5.1"
       defaultNamespace: k8s-aibom-system
     nodeScheduling:
       system:
