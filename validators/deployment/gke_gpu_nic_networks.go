@@ -96,6 +96,13 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 			"the cluster has %d of %d", len(gpuNICs), gkenet.RequiredGPUNICNetworks)))
 	}
 
+	// Case 2 (#2265): an existing-but-unready or mis-bound Network must not count
+	// toward the census — the fabric is unusable until every gpu-nic Network is
+	// Ready and its GKENetworkParamSet binding is intact.
+	if err := verifyNetworkReadinessAndBinding(ctx); err != nil {
+		return err
+	}
+
 	return verifyDeliveredRuntimeWiring(ctx, gpuNICs)
 }
 
@@ -142,6 +149,43 @@ func verifyDeliveredRuntimeWiring(ctx *validators.Context, gpuNICs []string) err
 	fmt.Printf("Deployed %s carries the recipe's %d-interface GPU NIC mapping, and every selected network exists on the cluster\n",
 		gkenet.TCPXORuntimeName, len(deployed))
 	return nil
+}
+
+// verifyNetworkReadinessAndBinding is the case-2 arm (#2265): a Network that
+// exists but is not Ready, or whose GKENetworkParamSet binding is broken, means
+// the fabric is unusable even though the census found eight names. Fail closed,
+// naming the network and the remediation. A discovery error blocks (never skips).
+func verifyNetworkReadinessAndBinding(ctx *validators.Context) error {
+	statuses, err := gkenet.DiscoverGPUNICNetworkStatus(ctx.Ctx, ctx.DynamicClient)
+	if err != nil {
+		// The census's list already succeeded, so a read error here is an apiserver
+		// hiccup, not evidence of inapplicability — block, never skip.
+		return errors.Wrap(errors.ErrCodeInternal, "failed to read GKE Network readiness/binding status", err)
+	}
+	for _, st := range statuses {
+		if !st.Ready {
+			return errors.New(errors.ErrCodeNotFound, networkCapabilityMsg(fmt.Sprintf(
+				"Network %q is not Ready (%s)", st.Name, st.Detail)))
+		}
+		if !st.ParamsReady {
+			return errors.New(errors.ErrCodeNotFound, networkCapabilityMsg(fmt.Sprintf(
+				"Network %q binding to GKENetworkParamSet %q is not ready (%s)", st.Name, st.ParamSetName, st.Detail)))
+		}
+	}
+	return nil
+}
+
+// networkCapabilityMsg builds the operator-facing message for an existing-but-
+// unusable Network (case 2). detail names what was observed; the remediation is
+// the constant contract.
+func networkCapabilityMsg(detail string) string {
+	return fmt.Sprintf(
+		"recipe declares %s and the cluster has the GPU NIC networks, but %s — the Network and its "+
+			"GKENetworkParamSet must both exist and be Ready for GPUDirect TCPXO to function. "+
+			"These are provisioned with the cluster, not by AICR. "+
+			"Inspect with: kubectl get network.networking.gke.io <name> -o yaml (status.conditions Ready/ParamsReady) "+
+			"and kubectl get gkenetworkparamset.networking.gke.io (see docs/integrator/gke-tcpxo-networking.md)",
+		tcpxoComponent, detail)
 }
 
 // absentPrerequisiteMsg builds the operator-facing message for a missing GPU NIC

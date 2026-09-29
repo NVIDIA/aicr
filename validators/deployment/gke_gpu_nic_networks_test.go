@@ -37,13 +37,27 @@ import (
 func gkeNetworkObjects(count int) []runtime.Object {
 	objs := make([]runtime.Object, 0, count)
 	for i := range count {
-		objs = append(objs, &unstructured.Unstructured{Object: map[string]any{
-			"apiVersion": "networking.gke.io/v1",
-			"kind":       "Network",
-			"metadata":   map[string]any{"name": fmt.Sprintf("aicr-test-gpu-nic-%d", i)},
-		}})
+		objs = append(objs, healthyNetwork(fmt.Sprintf("aicr-test-gpu-nic-%d", i), fmt.Sprintf("ps-%d", i)))
 	}
 	return objs
+}
+
+// healthyNetwork builds a GPU NIC Network the way a working GKE multi-networking
+// controller reports it: Ready and ParamsReady conditions True, bound to a
+// GKENetworkParamSet. Case 2 (#2265) gates on these.
+func healthyNetwork(name, paramSet string) *unstructured.Unstructured {
+	cond := func(typ string) map[string]any {
+		return map[string]any{"type": typ, "status": "True", "reason": "", "message": ""}
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "networking.gke.io/v1",
+		"kind":       "Network",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{"parametersRef": map[string]any{
+			"group": "networking.gke.io", "kind": "GKENetworkParamSet", "name": paramSet,
+		}},
+		"status": map[string]any{"conditions": []any{cond("Ready"), cond("ParamsReady")}},
+	}}
 }
 
 func gkeNetworkClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
@@ -122,6 +136,76 @@ func TestCheckGKEGPUNICNetworks(t *testing.T) {
 			}
 		})
 	}
+}
+
+// networkWithStatus builds a GPU NIC Network with explicit Ready/ParamsReady
+// condition statuses for the case-2 (#2265) arm.
+func networkWithStatus(name, ready, paramsReady string) *unstructured.Unstructured {
+	cond := func(typ, status string) map[string]any {
+		return map[string]any{"type": typ, "status": status, "reason": "", "message": ""}
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "networking.gke.io/v1", "kind": "Network",
+		"metadata": map[string]any{"name": name},
+		"spec": map[string]any{"parametersRef": map[string]any{
+			"group": "networking.gke.io", "kind": "GKENetworkParamSet", "name": "ps-" + name}},
+		"status": map[string]any{"conditions": []any{cond("Ready", ready), cond("ParamsReady", paramsReady)}},
+	}}
+}
+
+// TestCheckGKEGPUNICNetworksReadinessBinding covers case 2 (#2265): an existing
+// but unready or mis-bound Network must fail the deployment phase, not count
+// toward the census.
+func TestCheckGKEGPUNICNetworksReadinessBinding(t *testing.T) {
+	healthy := func() []runtime.Object {
+		objs := make([]runtime.Object, 0, gkenet.RequiredGPUNICNetworks)
+		for i := 0; i < gkenet.RequiredGPUNICNetworks; i++ {
+			objs = append(objs, healthyNetwork(fmt.Sprintf("c-gpu-nic-%d", i), fmt.Sprintf("ps-%d", i)))
+		}
+		return objs
+	}
+
+	t.Run("all ready and bound passes", func(t *testing.T) {
+		ctx := tcpxoContext(gkeNetworkClient(healthy()...), true)
+		if err := checkGKEGPUNICNetworks(ctx); err != nil {
+			t.Fatalf("expected pass, got %v", err)
+		}
+	})
+
+	t.Run("unready network fails and names it", func(t *testing.T) {
+		objs := healthy()
+		objs[3] = networkWithStatus("c-gpu-nic-3", "False", "True")
+		ctx := tcpxoContext(gkeNetworkClient(objs...), true)
+		err := checkGKEGPUNICNetworks(ctx)
+		if err == nil {
+			t.Fatal("expected failure for an unready Network")
+		}
+		if !strings.Contains(err.Error(), "c-gpu-nic-3") || !strings.Contains(err.Error(), "not Ready") {
+			t.Errorf("error should name the unready network: %v", err)
+		}
+	})
+
+	t.Run("broken GKENetworkParamSet binding fails and names it", func(t *testing.T) {
+		objs := healthy()
+		objs[5] = networkWithStatus("c-gpu-nic-5", "True", "False")
+		ctx := tcpxoContext(gkeNetworkClient(objs...), true)
+		err := checkGKEGPUNICNetworks(ctx)
+		if err == nil {
+			t.Fatal("expected failure for a broken binding")
+		}
+		if !strings.Contains(err.Error(), "c-gpu-nic-5") || !strings.Contains(err.Error(), "GKENetworkParamSet") {
+			t.Errorf("error should name the broken binding: %v", err)
+		}
+	})
+
+	t.Run("undeclared recipe skips the arm", func(t *testing.T) {
+		objs := healthy()
+		objs[0] = networkWithStatus("c-gpu-nic-0", "False", "False")
+		ctx := tcpxoContext(gkeNetworkClient(objs...), false)
+		if err := checkGKEGPUNICNetworks(ctx); !validators.IsSkip(err) {
+			t.Fatalf("undeclared recipe must skip, got %v", err)
+		}
+	})
 }
 
 // TestCheckGKEGPUNICNetworksApplicability asserts the #2122 contract: skip only
@@ -264,9 +348,7 @@ func tcpxoMapping(prefix string) []recipe.NetworkInterfaceMapping {
 func tcpxoNetworkObjects(m []recipe.NetworkInterfaceMapping) []runtime.Object {
 	objs := make([]runtime.Object, 0, len(m))
 	for _, e := range m {
-		objs = append(objs, &unstructured.Unstructured{Object: map[string]any{
-			"apiVersion": "networking.gke.io/v1", "kind": "Network",
-			"metadata": map[string]any{"name": e.Network}}})
+		objs = append(objs, healthyNetwork(e.Network, "ps-"+e.Network))
 	}
 	return objs
 }
