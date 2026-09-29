@@ -155,6 +155,11 @@ func verifyDeliveredRuntimeWiring(ctx *validators.Context, gpuNICs []string) err
 // exists but is not Ready, or whose GKENetworkParamSet binding is broken, means
 // the fabric is unusable even though the census found eight names. Fail closed,
 // naming the network and the remediation. A discovery error blocks (never skips).
+//
+// Enabling assumption: Networks are Ready by the time the deployment phase runs
+// (post-install). A Network still mid-provisioning at validate time fails closed
+// here — intended, but it means a slow-to-bind Network surfaces as a deployment
+// failure rather than a retry.
 func verifyNetworkReadinessAndBinding(ctx *validators.Context) error {
 	statuses, err := gkenet.DiscoverGPUNICNetworkStatus(ctx.Ctx, ctx.DynamicClient)
 	if err != nil {

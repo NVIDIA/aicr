@@ -40,6 +40,10 @@ type NodeNICInfo struct {
 	PCIByInterface map[string]string
 	// GPUNICInterfaces is the count of GPU NIC interfaces (eth1..eth8) present.
 	GPUNICInterfaces int
+	// MissingGPUNICs names the eth1..eth8 interfaces that did NOT map — the GPU NICs
+	// a gVNIC displacement removed. Naming them is the "name the displacement" arm of
+	// #2265 case 1's acceptance criterion.
+	MissingGPUNICs []string
 }
 
 // ParseNICInfo parses the networking.gke.io/nic-info node annotation into the
@@ -63,6 +67,7 @@ func ParseNICInfo(annotation string) (*NodeNICInfo, error) {
 	}
 
 	info := &NodeNICInfo{PCIByInterface: pciByIf}
+	present := map[string]bool{}
 	for ifName := range pciByIf {
 		if !ethNamePattern.MatchString(ifName) || ifName == "eth0" {
 			continue
@@ -71,6 +76,14 @@ func ParseNICInfo(annotation string) (*NodeNICInfo, error) {
 		n := ifName[len("eth"):]
 		if n >= "1" && n <= "8" && len(n) == 1 {
 			info.GPUNICInterfaces++
+			present[ifName] = true
+		}
+	}
+	// Name the GPU NIC slots that did not map — the displacement (#2265 case 1).
+	for i := 1; i <= RequiredGPUNICInterfaces; i++ {
+		name := fmt.Sprintf("eth%d", i)
+		if !present[name] {
+			info.MissingGPUNICs = append(info.MissingGPUNICs, name)
 		}
 	}
 	return info, nil

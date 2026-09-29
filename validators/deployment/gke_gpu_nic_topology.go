@@ -17,6 +17,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -80,10 +81,15 @@ func checkGKEGPUINCTopology(ctx *validators.Context) error {
 		}
 		if info.GPUNICInterfaces < gkenet.RequiredGPUNICInterfaces {
 			return errors.New(errors.ErrCodeNotFound, nicTopologyMsg(fmt.Sprintf(
-				"node %q maps %d of %d GPU NIC interfaces (eth1..eth8)", node.Name, info.GPUNICInterfaces, gkenet.RequiredGPUNICInterfaces)))
+				"node %q maps %d of %d GPU NIC interfaces (missing: %s)", node.Name, info.GPUNICInterfaces,
+				gkenet.RequiredGPUNICInterfaces, strings.Join(info.MissingGPUNICs, ","))))
 		}
 	}
-	fmt.Printf("Verified NIC topology on %d GPU node(s): all map %d GPU NIC interfaces (eth1..eth8), no gVNIC displacement\n",
+	if checked == 0 {
+		fmt.Printf("Could not verify NIC topology: no GPU node carries the %s annotation (documented limitation)\n", gkenet.NICInfoAnnotation)
+		return nil
+	}
+	fmt.Printf("Verified NIC topology on %d GPU node(s): all map %d GPU NIC interfaces (eth1..eth8)\n",
 		checked, gkenet.RequiredGPUNICInterfaces)
 	return nil
 }

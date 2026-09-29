@@ -102,9 +102,12 @@ func TestCheckGKEGPUINCTopology(t *testing.T) {
 			t.Fatal("expected failure for a displaced GPU NIC")
 		}
 		// The displaced node reports only 7 GPU NIC interfaces; the message names
-		// the shortfall and the gVNIC cause.
+		// the shortfall, the missing interface, and the gVNIC cause.
 		if !strings.Contains(err.Error(), "7 of 8") || !strings.Contains(err.Error(), "gVNIC") {
 			t.Errorf("error should report the 7-of-8 shortfall and gVNIC cause: %v", err)
+		}
+		if !strings.Contains(err.Error(), "eth8") {
+			t.Errorf("error should name the missing GPU NIC interface (eth8): %v", err)
 		}
 	})
 
