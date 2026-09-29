@@ -69,8 +69,9 @@ const (
 	eventContextPrefix = "github.event."
 
 	// computedIndexMarker ends a context path that is followed by an index the
-	// scanner cannot read as a literal ['key']. A context path is otherwise made
-	// of identifier characters and dots only, so the marker cannot occur by
+	// scanner cannot read as a literal ['key'], and stands alone for any index on
+	// a function result, which no path describes. A context path is otherwise
+	// made of identifier characters and dots only, so the marker cannot occur by
 	// accident.
 	computedIndexMarker = "[*]"
 
@@ -97,8 +98,10 @@ var refBearingUATWorkflows = []string{
 
 // attackerChosenContexts name the Actions contexts whose CONTENT is chosen by
 // whoever pushes the branch or opens the pull request, and which therefore must
-// never be substituted into a script's text.
+// never be substituted into a script's text. The bare github object is one of
+// them: toJSON(github) serializes every field below it, head_ref included.
 var attackerChosenContexts = []string{
+	"github",
 	"github.ref",
 	"github.ref_name",
 	"github.head_ref",
@@ -2351,8 +2354,10 @@ func actionsExpressions(text string) []string {
 // references. An index segment that follows a path, ['key'], is read as .key,
 // since Actions treats the two alike. Any other index after a path is computed
 // at evaluation time, so the path is returned with computedIndexMarker instead
-// of a guessed key. Other single-quoted literals are skipped so a format()
-// template does not contribute its own text as an identifier.
+// of a guessed key. An index on a function result has no path to carry the
+// marker, so the marker is returned on its own. Other single-quoted literals are
+// skipped so a format() template does not contribute its own text as an
+// identifier.
 func expressionContexts(expression string) []string {
 	contexts := make([]string, 0)
 	var current strings.Builder
@@ -2377,7 +2382,7 @@ func expressionContexts(expression string) []string {
 				index = end
 				continue
 			}
-			if strings.HasPrefix(strings.TrimLeft(expression[index:], " \t\r\n"), "[") {
+			if expressionOpensIndex(expression, index) {
 				current.WriteString(computedIndexMarker)
 				flush()
 			}
@@ -2386,6 +2391,11 @@ func expressionContexts(expression string) []string {
 		case character == '\'':
 			flush()
 			quoted = true
+		case character == ')':
+			flush()
+			if expressionOpensIndex(expression, index+1) {
+				contexts = append(contexts, computedIndexMarker)
+			}
 		case character == '.' || character == '_' || character == '-' ||
 			character >= 'a' && character <= 'z' ||
 			character >= 'A' && character <= 'Z' ||
@@ -2425,6 +2435,12 @@ func expressionIndexSegment(expression string, start int) (string, int, bool) {
 		return "", 0, false
 	}
 	return expression[quote+1 : quote+1+length], closing, true
+}
+
+// expressionOpensIndex reports whether expression[start:], after any blanks,
+// begins with an index bracket.
+func expressionOpensIndex(expression string, start int) bool {
+	return strings.HasPrefix(strings.TrimLeft(expression[start:], " \t\r\n"), "[")
 }
 
 // isAttackerChosenContext reports whether an expression referencing context
