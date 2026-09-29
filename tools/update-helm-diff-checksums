@@ -34,7 +34,17 @@ fi
 # executionMode "update"), so the two always agree there; a hand-run with the
 # wrong argument would otherwise commit checksums that no runner can satisfy,
 # surfacing later as an opaque UAT checksum mismatch.
-PINNED_VERSION="$(yq -r '.testing_tools.helm_diff // ""' "${SETTINGS_FILE}")"
+#
+# grep/sed rather than yq: postUpgradeTasks run inside the Renovate image,
+# which does not ship yq (PRs #2801 and #2982 both failed here with
+# "yq: command not found"). The key is matched exactly so helm_diff_checksums
+# does not also match, and a missing or duplicated key reads as empty and is
+# refused below -- the same parse as version_from in check-settings-checksums.
+PINNED_LINES="$(grep -E "^[[:space:]]+helm_diff:[[:space:]]*'[^']+'[[:space:]]*\$" "${SETTINGS_FILE}" || true)"
+PINNED_VERSION=""
+if [[ -n "${PINNED_LINES}" && "$(printf '%s\n' "${PINNED_LINES}" | wc -l | tr -d ' ')" -eq 1 ]]; then
+  PINNED_VERSION="$(printf '%s\n' "${PINNED_LINES}" | sed -E "s/^[[:space:]]+helm_diff:[[:space:]]*'([^']+)'[[:space:]]*\$/\1/")"
+fi
 if [[ "${PINNED_VERSION#v}" != "${VERSION_NO_V}" ]]; then
   echo "ERROR: ${SETTINGS_FILE} pins helm_diff ${PINNED_VERSION}, refusing to write checksums for ${VERSION_WITH_V}" >&2
   echo "       Bump testing_tools.helm_diff first, then re-run with the matching version." >&2
