@@ -91,7 +91,14 @@ CLUSTER_DEBUG_LOG_TAIL="${CLUSTER_DEBUG_LOG_TAIL:-2000}"
 # NVIDIA/AICR workloads, not third-party tenants; heed the Privacy note above
 # before adding a namespace that runs token-bearing workloads (e.g. a served
 # model), whose logs can carry app-emitted credentials into the public artifact.
-CLUSTER_DEBUG_LOG_NAMESPACES="${CLUSTER_DEBUG_LOG_NAMESPACES:-skyhook gpu-operator nvidia-dra-driver nvidia-network-operator nvsentinel node-feature-discovery kai-scheduler aicr-validation cert-manager monitoring}"
+#
+# nodewright AND skyhook for the same reason the Skyhook-CR capture below scans
+# both: the registry default is nodewright, but a cluster deployed before that
+# move still runs in skyhook and Helm cannot relocate a release. The package
+# apply Jobs live here, so a tuning Init:Error is only explainable from these
+# logs (incl. --previous) — covering one namespace leaves the other's failures
+# status-only (run 36745844287).
+CLUSTER_DEBUG_LOG_NAMESPACES="${CLUSTER_DEBUG_LOG_NAMESPACES:-nodewright skyhook gpu-operator nvidia-dra-driver nvidia-network-operator nvsentinel node-feature-discovery kai-scheduler aicr-validation cert-manager monitoring}"
 
 # Cluster-scoped custom resources most relevant to a deployment-phase failure.
 # Skyhook is first: its status.status is the non-monotonic signal the readiness
