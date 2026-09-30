@@ -96,9 +96,9 @@ section):
 
 | Legacy-plugin reading | Default (`oci-managed`) | `--profile gpuStack=operator-managed` |
 |---|---|---|
-| `none` (absent, unrelated same-name workload, or fully disabled) | not gated | ✅ resolves (add-on constraint permitting) |
+| `none` (absent, or labeled and fully disabled) | not gated | ✅ resolves (add-on constraint permitting) |
 | `active` (legacy DaemonSet targets ≥ 1 node) | not gated — when the add-on is installed it manages the same DaemonSet | ❌ fails closed: disable per pool or migrate to the add-on |
-| `unknown` (snapshot could not consult the API) | not gated | ❌ fails closed |
+| `unknown` (snapshot could not consult the API, or a same-named DaemonSet without the `Reconcile` label) | not gated | ❌ fails closed |
 | no reading (snapshot from an older aicr) | not gated | ❌ fails closed: reading **unavailable** — recapture |
 
 ## Legacy Device Plugin Detection
