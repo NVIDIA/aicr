@@ -276,7 +276,7 @@ see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 
 | Tier | Trigger | Deployers exercised |
 |------|---------|----------------------|
-| Tier 1 — generic overlays | every PR + push | `helm` on every generic overlay, plus each other deployer on one probe overlay (`eks`) |
+| Tier 1 — generic overlays | every PR + push | `helm` on every generic overlay, plus each other deployer on one probe overlay (`eks-training`) |
 | Tier 2 — diff-aware accelerator overlays | PR only, conditional on changed files | `helm` only |
 | Tier 3 — full overlay set | push to `main` + nightly schedule | `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` |
 
@@ -289,9 +289,11 @@ see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 | `flux-oci` | source-controller OCI pull | kustomize-controller apply | all HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `flux-git` | source-controller Git clone (in-cluster Gitea) | kustomize-controller apply | GitRepositories Ready + all HelmReleases `Ready=True` |
 
-Tier 1 crosses the non-`helm` deployers with a single probe overlay because
-the deployer path (bundle push, GitOps wrapper, sync gate) does not depend on
-the recipe. Tier 3 runs the full recipe x deployer cross-product.
+Tier 1 crosses the non-`helm` deployers with a single probe overlay, the
+generic overlay with the most components (`eks-training`), to keep the PR
+matrix small. GitOps templating regressions specific to a component that the
+probe does not include are caught by Tier 3, which runs the full recipe x
+deployer cross-product after merge.
 
 Tier 2 stays `helm`-only because its job is to verify accelerator-specific
 overlays still render correctly when their inputs change. The deployer

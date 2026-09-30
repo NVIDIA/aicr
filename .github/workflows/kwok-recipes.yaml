@@ -401,9 +401,10 @@ jobs:
           tier3="$all"
 
           # Every generic recipe runs on helm. Each other deployer runs on one
-          # probe recipe, since the deployer path (bundle push, GitOps wrapper,
-          # sync gate) does not depend on the recipe.
-          probe="eks"
+          # probe recipe, the generic recipe with the most components, so the
+          # GitOps paths see a realistic bundle. GitOps templating specific to
+          # other recipes is covered by Tier 3.
+          probe="eks-training"
           if ! echo "$tier1" | jq -e --arg p "$probe" 'index($p) != null' >/dev/null; then
             probe=$(echo "$tier1" | jq -r '.[0] // empty')
           fi
