@@ -383,8 +383,8 @@ A Preview coordinate promises that:
 
 - The recipe resolves for the exact coordinate declared as Preview.
 - `aicr bundle` generates deployable artifacts for it.
-- It passes the repository's static, render, and KWOK coverage gates on
-  every merge to `main`.
+- It passes the repository's static and render gates. KWOK coverage runs on
+  every merge to `main` as advisory validation, not a gate.
 - Evidence has been published at [validation.aicr.run](https://validation.aicr.run/); freshness may lag recipe iteration, so consult each coordinate's row in the table below for its evidence status.
 
 A Preview coordinate deliberately does **not** promise broader coverage.
