@@ -1169,6 +1169,7 @@ aicr --debug recipe --service eks --data ./my-data
 
 **Behavior:**
 - Overlays: Same `metadata.name` replaces embedded
+- A file at an embedded overlay's path that carries only `spec.profile` adds values to that overlay's profile
 - Registry: Merged; same-named components replaced
 - Values: External valuesFile references take precedence
 - Criteria values: External overlays' `spec.criteria` values become valid CLI / API inputs at runtime via the criteria registry; `--criteria-strict` (or `AICR_CRITERIA_STRICT=1`) rejects external-only values for OSS CI gates
