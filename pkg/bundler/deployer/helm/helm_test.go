@@ -1478,7 +1478,7 @@ func TestBundleGolden_OwnsCRDsChartOverride(t *testing.T) {
 func TestBundleGolden_ReadinessGate(t *testing.T) {
 	gate, err := gatemanifest.Render("foo", "nvcr.io/nvidia/aicr:v1.0.0",
 		[]byte("apiVersion: chainsaw.kyverno.io/v1alpha1\nkind: Test\n"),
-		config.DeployerHelm)
+		config.DeployerHelm, gatemanifest.Placement{})
 	if err != nil {
 		t.Fatalf("render gate manifest: %v", err)
 	}
