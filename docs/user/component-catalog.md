@@ -36,7 +36,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in one stock recipe, `h100-gke-cos-inference`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, except `h100-gke-cos-inference-dynamo`, which declines it. Decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
-| **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. | [Grove](https://github.com/ai-dynamo/grove) |
+| **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **agentgateway-crds** | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
@@ -210,7 +210,7 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 | `faultRemediation` | decides the remediation action |
 | `janitor` / `janitorProvider` | executes it — reboot or terminate |
 
-Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.22.0`, the version pinned in `recipes/registry.yaml`.
+Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nvcreCertificationMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.25.0`, the version pinned in `recipes/registry.yaml`.
 
 `nicHealthMonitor` is the one entry above that AICR's shipped recipes turn back on, and only on AKS and OKE — see [NIC and fabric fault detection](#nic-and-fabric-fault-detection).
 
@@ -383,15 +383,19 @@ preflight:
       resource: podgroups
     minCountExpr: "podGroup.spec.minMember"
   initContainers:                       # restated from the chart, see below
-    - name: preflight-dcgm-diag         #   (chart defaults)
-    - name: preflight-nccl-loopback     #   (chart defaults)
+    - name: preflight-dcgm-diag         #   one DCGM address, not the chart's list
+    - name: preflight-nccl-loopback     #   adds SKIP_BANDWIDTH_CHECK
     - name: preflight-nccl-allreduce
-      defaultEnabled: false             # the one deviation
+      defaultEnabled: false
 ```
 
-The mixin also restates `preflight.initContainers` in full — all three checks, verbatim from the chart, with one addition: `defaultEnabled: false` on `preflight-nccl-allreduce`. The next section explains why.
+The mixin also restates `preflight.initContainers` in full — all three checks, taken from the chart with three deviations:
 
-Restating means AICR now pins that list's contents (both images, both bandwidth thresholds, and `DCGM_HOSTENGINE_ADDR`), so a chart bump cannot move them silently. `TestNVSentinelPreflightInitContainersMatchChart` renders the mixin's list against the chart's own and fails on any drift beyond the intended `defaultEnabled` line. That test runs weekly, not on every PR, so a chart bump can merge before it fires.
+- `defaultEnabled: false` on `preflight-nccl-allreduce`. The next section explains why.
+- `SKIP_BANDWIDTH_CHECK: "true"` on `preflight-nccl-loopback`.
+- A single `DCGM_HOSTENGINE_ADDR` on `preflight-dcgm-diag`: `nvidia-dcgm.gpu-operator.svc:5555`, the GPU Operator's ClusterPolicy-mode hostengine. From v1.25.0 the chart ships a candidate list that also names the GPUCluster-mode `nvidia-dcgm-dra` Service; the bundle gate verifies one address and rejects a list.
+
+Restating means AICR now pins that list's contents (both images, both bandwidth thresholds, and `DCGM_HOSTENGINE_ADDR`), so a chart bump cannot move them silently. `TestNVSentinelPreflightInitContainersMatchChart` renders the mixin's list against the chart's own and fails on any drift beyond those three deviations. That test runs weekly, not on every PR, so a chart bump can merge before it fires.
 
 **`failurePolicy: Ignore` is deliberate.** The webhook sits in the pod-creation path, so the chart's `Fail` would turn a webhook outage into a pod-creation outage for every labeled namespace. `Ignore` trades a missed check for availability — the right default while this is new, and worth revisiting once it has field time. The cost is that a broken webhook is *silent*: pods are admitted unchecked, with no error anywhere. `recipes/checks/nvsentinel-preflight/health-check.yaml` detects exactly that, including the case where cert-manager has not injected the webhook's CA bundle — but **nothing runs it for you**. It is deliberately not registry-linked (the mixin is opt-in, so `make check-health-all` would run it against recipes that never deploy preflight), which is the same treatment `nvsentinel-observability` gets. Run it yourself after adopting the mixin:
 
@@ -1382,6 +1386,30 @@ Fresh installs are unaffected. To migrate an existing cluster:
 Verified live end-to-end on a real EKS cluster, 2026-09-02: dynamo-operator,
 grove-operator, and kai-scheduler gang-scheduling all confirmed healthy
 together post-migration.
+
+### `grove`: `v0.1.0-alpha.12` to `v0.1.0-alpha.13`
+
+alpha.13 fixes DynamoGraphDeployments that stay `SchedulingGated` forever
+after scaling up from zero
+([ai-dynamo/grove#809](https://github.com/ai-dynamo/grove/issues/809)). The
+fix reads a new `status.lastScheduled` field on the `podcliques.grove.io`
+CRD. The release also renames the `clustertopologybindings.grove.io` short
+name from `ct` to `ctb`.
+
+`helm upgrade` never applies changed `crds/`, and the alpha.12 PodClique
+status schema is structural. A plain chart bump therefore keeps the old CRD,
+and the API server silently drops `lastScheduled` from every status write.
+Apply the new CRDs before upgrading:
+
+1. Apply the alpha.13 CRDs directly from the chart:
+   ```bash
+   helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts --version v0.1.0-alpha.13 \
+     | sed -n '/^---$/,$p' \
+     | kubectl apply --server-side --force-conflicts -f -
+   ```
+2. Resume whichever deployer you use, as in the section above.
+
+No resource migration is needed, and fresh installs are unaffected.
 
 ### `dynamo-platform`: opting back into bundled NATS on a standing cluster
 
