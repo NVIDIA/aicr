@@ -261,8 +261,9 @@ renders but pods stay Pending or land on the wrong nodes. Extend
 simulated reflection of production shape, not a relaxed substitute.
 
 KWOK results are advisory. The `KWOK Test Summary (advisory)` check turns red
-when a tier fails, but it does not block merges. `Merge Gate` is the only
-required check.
+when a tier fails, but it does not block merges. The main branch ruleset
+requires `Merge Gate` and `Check PR Title`. `Merge Gate` is the only required
+qualification aggregate.
 
 For the design rationale and the spike findings that justify the
 chart pin and Repository-secret shape, see

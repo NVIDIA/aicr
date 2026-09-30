@@ -203,8 +203,9 @@ pattern as `tier3_batches`).
 
 ### Required checks
 
-KWOK validation is **advisory**. The only required check in the main branch
-ruleset is `Merge Gate`, and KWOK is not part of it.
+KWOK validation is **advisory**. The main branch ruleset requires `Merge Gate`
+and `Check PR Title`. `Merge Gate` is the only required qualification
+aggregate, and KWOK is not part of it.
 
 - **Advisory aggregate:** `KWOK Test Summary (advisory)` (the `summary` job)
   aggregates every tier into one stable check name. It fails when a tier fails,
