@@ -185,7 +185,6 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 				hardErrs = append(hardErrs, v.Name+"@"+v.Version+": "+w)
 			}
 		}
-		hardErrs = append(hardErrs, noImagesIssues(results, variants, skipHelm)...)
 		if len(hardErrs) > 0 {
 			sort.Strings(hardErrs)
 			for _, e := range hardErrs {
@@ -257,38 +256,14 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	return nil
 }
 
-// noImagesIssues applies noImagesIssue to every surveyed component and
-// variant. Entries that already carry a render warning are skipped, since the
-// warning is the more specific report. With skipHelm no chart was rendered, so
-// zero images carries no signal and nothing is reported.
-func noImagesIssues(results []bom.ComponentResult, variants []bom.VariantResult, skipHelm bool) []string {
-	if skipHelm {
-		return nil
-	}
-	var out []string
-	for _, r := range results {
-		if issue := noImagesIssue(r.Name, r.Type, len(r.Images)); issue != "" && len(r.Warnings) == 0 {
-			out = append(out, r.Name+": "+issue)
-		}
-	}
-	for _, v := range variants {
-		if issue := noImagesIssue(v.Name, kindHelm, len(v.Images)); issue != "" && len(v.Warnings) == 0 {
-			out = append(out, v.Name+"@"+v.Version+": "+issue)
-		}
-	}
-	return out
-}
-
-// noImagesIssue reports a mismatch between a Helm component's image count and
-// its expectedNoImages entry, or "" when they agree.
-func noImagesIssue(name, typ string, images int) string {
+// noImagesIssue reports a mismatch between the number of images a Helm chart
+// rendered and the component's expectedNoImages entry, or "" when they agree.
+func noImagesIssue(name string, chartImages int) string {
 	reason, listed := expectedNoImages[name]
 	switch {
-	case typ != kindHelm:
-		return ""
-	case images == 0 && !listed:
+	case chartImages == 0 && !listed:
 		return "chart rendered no images. Add it to expectedNoImages if that is intended"
-	case images > 0 && listed:
+	case chartImages > 0 && listed:
 		return fmt.Sprintf("chart renders images. Remove it from expectedNoImages (listed as %q)", reason)
 	}
 	return ""
@@ -433,6 +408,13 @@ func surveyComponent(
 			}
 			for _, i := range imgs {
 				images[i] = struct{}{}
+			}
+		}
+		// images holds only chart output here, so manifest images cannot
+		// mask a chart that rendered nothing.
+		if len(res.Warnings) == 0 {
+			if issue := noImagesIssue(c.Name, len(images)); issue != "" {
+				res.Warnings = append(res.Warnings, issue)
 			}
 		}
 	}

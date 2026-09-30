@@ -954,16 +954,28 @@ components:
 		name     string
 		comp     string
 		rendered []byte
+		manifest bool
 		wantErr  bool
 	}{
-		{"unlisted chart with no images fails", "gpu-operator", nil, true},
-		{"listed chart with no images passes", listed, nil, false},
-		{"listed chart with images fails", listed, []byte(renderedYAML), true},
-		{"unlisted chart with images passes", "gpu-operator", []byte(renderedYAML), false},
+		{"unlisted chart with no images fails", "gpu-operator", nil, false, true},
+		{"listed chart with no images passes", listed, nil, false, false},
+		{"listed chart with images fails", listed, []byte(renderedYAML), false, true},
+		{"unlisted chart with images passes", "gpu-operator", []byte(renderedYAML), false, false},
+		{"manifest images do not mask an empty unlisted chart", "gpu-operator", nil, true, true},
+		{"manifest images do not fail a listed empty chart", listed, nil, true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := writeTestRegistry(t, reg(tt.comp))
+			if tt.manifest {
+				dir := filepath.Join(root, "recipes", "components", tt.comp, "manifests")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatalf("mkdir manifests: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "m.yaml"), []byte(renderedYAML), 0o644); err != nil {
+					t.Fatalf("write manifest: %v", err)
+				}
+			}
 			mock := &helmtest.MockRenderer{Rendered: map[string][]byte{tt.comp: tt.rendered}}
 			err := run(root, t.TempDir(), "test-v1", mock, false, true, true, true)
 			if (err != nil) != tt.wantErr {
