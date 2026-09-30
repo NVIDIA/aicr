@@ -24,6 +24,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bom"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 )
 
@@ -887,5 +888,87 @@ func TestSurveyComponent_DRANodeLabelerImageInventoried(t *testing.T) {
 	}
 	if got.Type != kindManifest {
 		t.Errorf("type = %q, want %q", got.Type, kindManifest)
+	}
+}
+
+// Retries must not sleep in unit tests.
+func init() { renderRetryBackoff = 0 }
+
+// flakyRenderer fails the first failures calls with err, then returns yaml.
+type flakyRenderer struct {
+	failures int
+	err      error
+	yaml     []byte
+	calls    int
+}
+
+func (f *flakyRenderer) Render(context.Context, helm.ChartInput) ([]byte, error) {
+	f.calls++
+	if f.calls <= f.failures {
+		return nil, f.err
+	}
+	return f.yaml, nil
+}
+
+func TestRenderWithRetry(t *testing.T) {
+	internal := errors.New(errors.ErrCodeInternal, "pull failed")
+	tests := []struct {
+		name      string
+		failures  int
+		err       error
+		wantCalls int
+		wantErr   bool
+	}{
+		{"transient failure is absorbed", 2, internal, 3, false},
+		{"persistent failure surfaces after all attempts", 99, internal, renderAttempts, true},
+		{"non-internal failure is not retried", 99, errors.New(errors.ErrCodeNotFound, "no helm"), 1, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &flakyRenderer{failures: tt.failures, err: tt.err, yaml: []byte(renderedYAML)}
+			_, err := renderWithRetry(context.Background(), f, helm.ChartInput{Name: "x"})
+			if (err != nil) != tt.wantErr || f.calls != tt.wantCalls {
+				t.Errorf("err = %v, calls = %d; want err %v, calls %d", err, f.calls, tt.wantErr, tt.wantCalls)
+			}
+		})
+	}
+}
+
+// TestRunStrictNoImages guards against an unlisted chart with zero images
+// passing strict, since that is what a silent pull failure looks like.
+func TestRunStrictNoImages(t *testing.T) {
+	reg := func(name string) string {
+		return `apiVersion: v1
+kind: ComponentRegistry
+components:
+  - name: ` + name + `
+    displayName: X
+    helm:
+      defaultRepository: "oci://ghcr.io/nvidia"
+      defaultChart: x
+      defaultVersion: "1.0.0"
+`
+	}
+	const listed = "prometheus-operator-crds"
+	tests := []struct {
+		name     string
+		comp     string
+		rendered []byte
+		wantErr  bool
+	}{
+		{"unlisted chart with no images fails", "gpu-operator", nil, true},
+		{"listed chart with no images passes", listed, nil, false},
+		{"listed chart with images fails", listed, []byte(renderedYAML), true},
+		{"unlisted chart with images passes", "gpu-operator", []byte(renderedYAML), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeTestRegistry(t, reg(tt.comp))
+			mock := &helmtest.MockRenderer{Rendered: map[string][]byte{tt.comp: tt.rendered}}
+			err := run(root, t.TempDir(), "test-v1", mock, false, true, true, true)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("run() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

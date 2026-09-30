@@ -163,8 +163,14 @@ func RenderChart(ctx context.Context, input ChartInput) ([]byte, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return stdoutBuf.Bytes(), errors.WrapWithContext(errors.ErrCodeInternal, "helm template failed", err,
-			map[string]any{"component": input.Name, "stderr": strings.TrimSpace(stderr.String())})
+		detail := strings.TrimSpace(stderr.String())
+		msg := "helm template failed"
+		if _, after, ok := strings.Cut(detail, "Error:"); ok {
+			line, _, _ := strings.Cut(after, "\n")
+			msg += ": " + strings.TrimSpace(line)
+		}
+		return stdoutBuf.Bytes(), errors.WrapWithContext(errors.ErrCodeInternal, msg, err,
+			map[string]any{"component": input.Name, "stderr": detail})
 	}
 
 	return stdoutBuf.Bytes(), nil

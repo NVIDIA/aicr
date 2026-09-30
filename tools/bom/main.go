@@ -26,6 +26,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -42,8 +43,26 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
+const crdsOnly = "CRDs only"
+
+// expectedNoImages names the Helm components whose chart legitimately renders
+// no container images, with the reason. In strict mode a Helm component that
+// renders zero images and is not listed here fails, and a listed component
+// that starts rendering images fails too, so the list cannot go stale.
+var expectedNoImages = map[string]string{
+	"agentgateway-crds":          crdsOnly,
+	"mariadb-operator-crds":      crdsOnly,
+	"prometheus-operator-crds":   crdsOnly,
+	"slinky-slurm-operator-crds": crdsOnly,
+	"slurm-accounting-mariadb":   "custom resources only, the operator supplies the images",
+}
+
+// renderRetryBackoff is a var so tests can drop the delay.
+var renderRetryBackoff = 2 * time.Second
+
 const (
 	defaultHelmTimeout = 90 * time.Second
+	renderAttempts     = 3
 	// Component kinds reference the shared pkg/bom identifiers so the tool and
 	// the BOM renderer cannot drift on the string values.
 	kindHelm      = bom.TypeHelm
@@ -166,6 +185,7 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 				hardErrs = append(hardErrs, v.Name+"@"+v.Version+": "+w)
 			}
 		}
+		hardErrs = append(hardErrs, noImagesIssues(results, variants, skipHelm)...)
 		if len(hardErrs) > 0 {
 			sort.Strings(hardErrs)
 			for _, e := range hardErrs {
@@ -237,6 +257,43 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	return nil
 }
 
+// noImagesIssues applies noImagesIssue to every surveyed component and
+// variant. Entries that already carry a render warning are skipped, since the
+// warning is the more specific report. With skipHelm no chart was rendered, so
+// zero images carries no signal and nothing is reported.
+func noImagesIssues(results []bom.ComponentResult, variants []bom.VariantResult, skipHelm bool) []string {
+	if skipHelm {
+		return nil
+	}
+	var out []string
+	for _, r := range results {
+		if issue := noImagesIssue(r.Name, r.Type, len(r.Images)); issue != "" && len(r.Warnings) == 0 {
+			out = append(out, r.Name+": "+issue)
+		}
+	}
+	for _, v := range variants {
+		if issue := noImagesIssue(v.Name, kindHelm, len(v.Images)); issue != "" && len(v.Warnings) == 0 {
+			out = append(out, v.Name+"@"+v.Version+": "+issue)
+		}
+	}
+	return out
+}
+
+// noImagesIssue reports a mismatch between a Helm component's image count and
+// its expectedNoImages entry, or "" when they agree.
+func noImagesIssue(name, typ string, images int) string {
+	reason, listed := expectedNoImages[name]
+	switch {
+	case typ != kindHelm:
+		return ""
+	case images == 0 && !listed:
+		return "chart rendered no images. Add it to expectedNoImages if that is intended"
+	case images > 0 && listed:
+		return fmt.Sprintf("chart renders images. Remove it from expectedNoImages (listed as %q)", reason)
+	}
+	return ""
+}
+
 func indexComponentsByName(components []component) map[string]component {
 	byName := make(map[string]component, len(components))
 	for _, c := range components {
@@ -268,13 +325,41 @@ func surveyComponents(
 	return results, nil
 }
 
-// renderHelmComponent shells out to `helm template` for c. The timeout
-// context is scoped to this call so its associated timer is canceled before
-// the manifests walk begins, regardless of how many components are surveyed.
-func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
+// renderWithRetry renders in, retrying render failures (chart pulls are
+// network calls that fail transiently) up to renderAttempts times with linear
+// backoff. Each attempt gets its own timeout. A failure that survives every
+// attempt is returned, so a missing chart still surfaces.
+func renderWithRetry(ctx context.Context, r helm.Renderer, in helm.ChartInput) ([]byte, error) {
+	var (
+		out []byte
+		err error
+	)
+	for attempt := 1; attempt <= renderAttempts; attempt++ {
+		out, err = renderOnce(ctx, r, in)
+		// Only ErrCodeInternal (helm exited non-zero) is worth retrying. A
+		// missing helm binary or an unconfigured chart will not fix itself.
+		if err == nil || attempt == renderAttempts ||
+			!stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return out, err
+		case <-time.After(time.Duration(attempt) * renderRetryBackoff):
+		}
+	}
+	return out, err
+}
+
+func renderOnce(ctx context.Context, r helm.Renderer, in helm.ChartInput) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultHelmTimeout)
 	defer cancel()
+	return r.Render(ctx, in)
+}
 
+// renderHelmComponent shells out to `helm template` for c.
+func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
 	var warnings []string
 
 	valuesPath := filepath.Join(repoRoot, "recipes", "components", c.Name, "values.yaml")
@@ -286,7 +371,7 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 			valuesPath = ""
 		}
 	}
-	out, err := r.Render(ctx, helm.ChartInput{
+	out, err := renderWithRetry(ctx, r, helm.ChartInput{
 		Name:       c.Name,
 		Chart:      c.effectiveChart(),
 		Repository: c.Helm.DefaultRepository,
