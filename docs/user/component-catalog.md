@@ -1606,20 +1606,44 @@ CRDs first and the operator second:
    cascade-deletes every `MariaDB`, `User`, `Database` and `Grant` with them.
 3. Upgrade `mariadb-operator` to `26.10.1` (re-run `install.sh`, `helmfile
    apply`, or sync the release).
-4. For each HA MariaDB patched in step 1, wait for the roll to finish before
-   continuing. The operator applies the new init and agent images
-   asynchronously, and reverting the flag mid-update strands that resource on
-   the old data-plane version against a `26.10.1` operator:
+4. For each HA MariaDB patched in step 1, wait until the `26.10.1` data plane
+   is running before continuing. The `Updated` and `Ready` conditions cannot
+   show this: the operator computes both against whatever StatefulSet exists,
+   so they are already `True` before `26.10.1` first reconciles the resource,
+   and a flag reverted at that point leaves `26.10.1` keeping the old init and
+   agent images. The waits below cannot pass on that old state. Substitute the
+   name, namespace and pod names (`<name>-0` up to `<name>-<replicas-1>`), and
+   set `3` to the replica count:
    ```bash
-   kubectl wait mariadb <name> -n <namespace> \
-     --for=condition=Updated=True --timeout=15m
-   kubectl wait mariadb <name> -n <namespace> \
-     --for=condition=Ready=True --timeout=15m
+   IMG=ghcr.io/mariadb-operator/mariadb-operator:26.10.1
+   # The StatefulSet renders the new data plane.
+   kubectl wait sts <name> -n <namespace> --timeout=10m \
+     --for=jsonpath='{.spec.template.spec.initContainers[?(@.name=="init")].image}'=$IMG
+   kubectl wait sts <name> -n <namespace> --timeout=10m \
+     --for=jsonpath='{.spec.template.spec.containers[?(@.name=="agent")].image}'=$IMG
+   # Every pod runs it.
+   kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace> --timeout=15m \
+     --for=jsonpath='{.status.initContainerStatuses[?(@.name=="init")].image}'=$IMG
+   kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace> --timeout=15m \
+     --for=jsonpath='{.status.containerStatuses[?(@.name=="agent")].image}'=$IMG
+   # The roll has finished.
+   kubectl wait sts <name> -n <namespace> --timeout=15m \
+     --for=jsonpath='{.status.updatedReplicas}'=3
+   kubectl wait sts <name> -n <namespace> --timeout=15m \
+     --for=jsonpath='{.status.readyReplicas}'=3
    ```
-   Name each resource rather than passing `--all`. The `Updated` condition is
-   absent until an update is triggered, and `kubectl wait` does not return
-   early on an absent condition, so a blanket wait burns the full timeout on
-   every instance that had no roll to do.
+   The operator writes the new images into the `MariaDB` spec before it
+   renders the StatefulSet, so once the template carries them step 5 can no
+   longer take them back; the pod and replica waits confirm the roll itself.
+   A resource that names its own init or agent image, such as a mirror, keeps
+   that repository and takes only the `26.10.1` tag, so set `IMG` to match.
+   Name the pods rather than selecting them with `-l`: a label selector
+   resolves the pod list once, so a pod being recreated when the command
+   starts is never waited on, while a missing named pod fails the command and
+   you rerun it. The replica counts mean something only after the image waits,
+   because before the new template exists they already equal the replica
+   count for the old revision. Skip non-HA instances: they have no init or
+   agent container, so these waits run to their timeout.
 5. Return the flag to `false` so a later operator bump does not update the data
    plane unattended. If the field is managed in git, set it there.
 
