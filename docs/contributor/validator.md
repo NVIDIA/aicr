@@ -1468,8 +1468,9 @@ checks hardcode facts that upstream charts define, not AICR:
 
 `validators/deployment/testdata/chart_contracts.yaml` records what the pinned
 charts actually render. Under `make test`, `TestChartContractsMatchRenderInputs`
-fails when a pin in `recipes/registry.yaml`, or the values AICR ships for one
-of those charts, changes without the file being re-rendered, and
+fails when a pin in `recipes/registry.yaml`, or the values the base overlay
+resolves for one of those charts, changes without the file being re-rendered
+(leaf-overlay value overrides are not covered), and
 `TestValidatorConstantsMatchChartContracts` fails when a constant disagrees
 with the file. After such a change, regenerate it (needs helm and network):
 

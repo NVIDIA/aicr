@@ -73,9 +73,10 @@ const (
 // chartContracts records the chart-shape facts this validator hardcodes, as
 // rendered from the charts pinned in recipes/registry.yaml (#2629). The file is
 // generated from the live charts by TestChartContractsMatchPinnedCharts. The
-// offline tests bind it to its render inputs (the registry pins and the values
-// AICR ships) and the validator's constants to it, so a pin bump, a values
-// change, or an upstream rename fails `make test` rather than nightly UAT.
+// offline tests bind it to its render inputs (the registry pins and the base
+// overlay's values) and the validator's constants to it, so a pin bump, a
+// values change, or an upstream rename fails `make test` rather than nightly
+// UAT.
 type chartContracts struct {
 	NodewrightOperator nodewrightChartContract `json:"nodewright-operator"`
 	DRADriver          draChartContract        `json:"nvidia-dra-driver-gpu"`
@@ -121,8 +122,8 @@ func gvrString(gvr schema.GroupVersionResource) string {
 	return gvr.Group + "/" + gvr.Version + "/" + gvr.Resource
 }
 
-// bundleValues resolves the values AICR ships for component through the base
-// overlay's componentRef, the same input a bundle renders the chart with.
+// bundleValues resolves component's values through the base overlay's
+// componentRef, the input the snapshot's bundle renders use.
 func bundleValues(ctx context.Context, t *testing.T, store *recipe.MetadataStore, component string) map[string]any {
 	t.Helper()
 
@@ -150,9 +151,10 @@ func valuesDigest(t *testing.T, values map[string]any) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// TestChartContractsMatchRenderInputs fails when a chart pin, or the values
-// AICR ships for the chart, change without the contract being re-rendered, so
-// neither can land on facts rendered from different inputs.
+// TestChartContractsMatchRenderInputs fails when a chart pin, or the base
+// overlay's values for the chart, change without the contract being
+// re-rendered, so neither can land on facts rendered from different inputs.
+// Leaf-overlay value overrides are not bound.
 func TestChartContractsMatchRenderInputs(t *testing.T) {
 	contracts := loadChartContracts(t)
 	ctx, cancel := context.WithTimeout(context.Background(), chartContractsLoadTimeout)
@@ -201,6 +203,9 @@ func TestChartContractsMatchRenderInputs(t *testing.T) {
 func TestValidatorConstantsMatchChartContracts(t *testing.T) {
 	c := loadChartContracts(t)
 	nw := c.NodewrightOperator
+	kubeletPlugins := slices.DeleteFunc(slices.Clone(c.DRADriver.DaemonSets), func(name string) bool {
+		return !strings.HasSuffix(name, draKubeletPluginSuffix)
+	})
 
 	tests := []struct {
 		name   string
@@ -228,11 +233,9 @@ func TestValidatorConstantsMatchChartContracts(t *testing.T) {
 			detail: fmt.Sprintf("nodewrightOperatorDeployment is %q, the chart renders %q with the values AICR ships", nodewrightOperatorDeployment, nw.BundleDeployment),
 		},
 		{
-			name: "draKubeletPluginSuffix names a rendered DaemonSet",
-			ok: slices.ContainsFunc(c.DRADriver.DaemonSets, func(name string) bool {
-				return strings.HasSuffix(name, draKubeletPluginSuffix)
-			}),
-			detail: fmt.Sprintf("no DaemonSet the DRA driver chart renders ends in %q: %v", draKubeletPluginSuffix, c.DRADriver.DaemonSets),
+			name:   "draKubeletPluginSuffix names exactly one rendered DaemonSet",
+			ok:     len(kubeletPlugins) == 1,
+			detail: fmt.Sprintf("the validator needs exactly one DaemonSet ending in %q, the DRA driver chart renders %v", draKubeletPluginSuffix, c.DRADriver.DaemonSets),
 		},
 	}
 	for _, tt := range tests {
@@ -252,7 +255,11 @@ func TestChartContractsMatchPinnedCharts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render test in short mode")
 	}
+	update := os.Getenv("AICR_UPDATE_GOLDEN") == "1"
 	if _, err := exec.LookPath("helm"); err != nil {
+		if update {
+			t.Fatalf("AICR_UPDATE_GOLDEN=1 needs helm on PATH to re-render %s: %v", chartContractsFile, err)
+		}
 		t.Skip("helm not on PATH; skipping live chart-render test")
 	}
 
@@ -314,7 +321,7 @@ func TestChartContractsMatchPinnedCharts(t *testing.T) {
 	}
 	generated := append([]byte(chartContractsHeader), body...)
 
-	if os.Getenv("AICR_UPDATE_GOLDEN") == "1" {
+	if update {
 		if werr := os.WriteFile(chartContractsFile, generated, 0o600); werr != nil {
 			t.Fatalf("write %s: %v", chartContractsFile, werr)
 		}
