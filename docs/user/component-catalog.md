@@ -889,12 +889,20 @@ against the upgraded cluster. See the component's
 [upgrade record](https://github.com/NVIDIA/aicr/blob/main/recipes/components/k8s-aibom/upgrades.yaml)
 for that evidence and the steps it produced.
 
-Two things are deliberately **not** covered by that run. The health check's
+Upstream then measured what that run did not, on a regional GKE cluster
+(`v1.35.8`) at 1,002 tracked workloads, 1,001 of them Deployments scaled to
+zero replicas: API-server cost, rollback, and the resource envelope
+([evidence](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/c08e9ac2fda11a339865abdf2a7339a5a34c59e2/docs/evidence/v1.5.1-gke-upgrade-rollback-apiserver.md)).
+With that idle inventory the controller made about one API-server request per
+minute at steady state, all watch reconnects and no writes, at 48MiB working
+set. A cluster with running pods and pod churn was not measured. A `helm rollback`
+from v1.5.1 to v1.3.0 reached Ready in 17-19s with the CRDs in either state;
+with the v1.5.1 CRDs left in place, every AIBOM kept its input and BOM hashes
+across the round trip.
+
+One thing is deliberately **not** covered. The health check's
 `AIBOMControllerConfig` assertion still targets `v1alpha1` rather than the
-`v1beta1` the chart now renders (see [Health and readiness](#health-and-readiness)),
-and the resource envelope below carries forward a v1.3.0 measurement — v1.5.1
-was spot-checked against it, but the 1,001-workload ceiling has only ever been
-measured on v1.3.0.
+`v1beta1` the chart now renders (see [Health and readiness](#health-and-readiness)).
 
 ### Health and readiness
 

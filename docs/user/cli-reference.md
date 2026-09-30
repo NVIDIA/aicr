@@ -4097,6 +4097,7 @@ my-data/
 | File Type | Behavior |
 |-----------|----------|
 | `registry.yaml` | **Merged** - External components are added to embedded; same-named components are replaced |
+| Profile-only `overlays/*.yaml` | **Extended**. Adds values to the profile of the embedded overlay at the same path |
 | All other files | **Replaced** - External file completely replaces embedded if path matches |
 
 ### Usage Examples

@@ -171,6 +171,8 @@ type workflowRunDefaults struct {
 
 type workflowStep struct {
 	Name  string            `yaml:"name"`
+	ID    string            `yaml:"id"`
+	If    string            `yaml:"if"`
 	Run   string            `yaml:"run"`
 	Shell string            `yaml:"shell"`
 	Env   map[string]string `yaml:"env"`
@@ -508,6 +510,88 @@ func TestCredentialBearingUATStepsDisableXtrace(t *testing.T) {
 				if shellEnablesXtrace(step.Run) || shellEnablesXtrace(step.Shell) || shellEnvironmentEnablesXtrace(step.Env) {
 					t.Errorf("step %q enables xtrace while handling credentials", step.Name)
 				}
+			}
+		})
+	}
+}
+
+// TestUATReadinessGateIsItsOwnStep pins the #2630 split: the readiness gate
+// runs as a step separate from the apply, so a gate that never converges is not
+// reported as an install failure, and it never receives the GITHUB_TOKEN that
+// only the argocd apply needs. Everything that requires a converged, gated
+// stack must key off the readiness step, not the install step.
+func TestUATReadinessGateIsItsOwnStep(t *testing.T) {
+	const readinessStepName = "UAT - readiness gate (validate --phase deployment)"
+	tests := []struct {
+		name  string
+		file  string
+		job   string
+		cloud string
+	}{
+		{"AWS", "uat-aws.yaml", "uat-aws", "aws"},
+		{"Azure", "uat-azure.yaml", "uat-azure", "azure"},
+		{"GCP", "uat-gcp.yaml", "uat-gcp", "gcp"},
+		{"kind", "uat-kind.yaml", "uat-kind", "kind"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workflow := decodeWorkflow(t, tt.file)
+			job, ok := workflow.Jobs[tt.job]
+			if !ok {
+				t.Fatalf("%s: missing job %q", tt.file, tt.job)
+			}
+			installIdx, readinessIdx := -1, -1
+			for i, step := range job.Steps {
+				switch step.ID {
+				case "install":
+					installIdx = i
+				case "readiness":
+					readinessIdx = i
+				}
+			}
+			if installIdx < 0 || readinessIdx < 0 {
+				t.Fatalf("%s: install step index %d, readiness step index %d; want both present", tt.file, installIdx, readinessIdx)
+			}
+			if readinessIdx < installIdx {
+				t.Errorf("%s: readiness step must run after the install step", tt.file)
+			}
+
+			install := job.Steps[installIdx]
+			if strings.Contains(strings.ToLower(install.Name), "readiness") {
+				t.Errorf("%s: install step %q still names the readiness gate", tt.file, install.Name)
+			}
+			wantInstall := fmt.Sprintf(`./tests/uat/%s/run install "${TEST_CONFIG}"`, tt.cloud)
+			if !activeRunInvokesExactCommand(install.Run, wantInstall) {
+				t.Errorf("%s: install step must run %q", tt.file, wantInstall)
+			}
+
+			readiness := uniqueStepNamed(t, job.Steps, readinessStepName)
+			if readiness.ID != "readiness" {
+				t.Errorf("%s: step %q has id %q, want readiness", tt.file, readinessStepName, readiness.ID)
+			}
+			if !strings.Contains(readiness.If, "steps.install.outcome == 'success'") {
+				t.Errorf("%s: readiness step must gate on install success, got if: %q", tt.file, readiness.If)
+			}
+			wantReadiness := fmt.Sprintf(`./tests/uat/%s/run readiness "${TEST_CONFIG}"`, tt.cloud)
+			if !activeRunInvokesExactCommand(readiness.Run, wantReadiness) {
+				t.Errorf("%s: readiness step must run %q", tt.file, wantReadiness)
+			}
+			for _, key := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+				if _, ok := readiness.Env[key]; ok {
+					t.Errorf("%s: readiness step must not receive %s", tt.file, key)
+				}
+			}
+			for _, key := range []string{"AICR_BIN", "RUN_ID"} {
+				if readiness.Env[key] == "" {
+					t.Errorf("%s: readiness step missing %s", tt.file, key)
+				}
+			}
+
+			conformance := uniqueStepWithID(t, job.Steps, "conformance")
+			if !strings.Contains(conformance.If, "steps.readiness.outcome == 'success'") ||
+				strings.Contains(conformance.If, "steps.install.") {
+
+				t.Errorf("%s: conformance step must gate on readiness success, not install; got if: %q", tt.file, conformance.If)
 			}
 		})
 	}
@@ -1288,6 +1372,20 @@ func uniqueStepNamed(t *testing.T, steps []workflowStep, name string) workflowSt
 	}
 	if len(matches) != 1 {
 		t.Fatalf("found %d steps named %q, want exactly one", len(matches), name)
+	}
+	return matches[0]
+}
+
+func uniqueStepWithID(t *testing.T, steps []workflowStep, id string) workflowStep {
+	t.Helper()
+	matches := make([]workflowStep, 0, 1)
+	for _, step := range steps {
+		if step.ID == id {
+			matches = append(matches, step)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("found %d steps with id %q, want exactly one", len(matches), id)
 	}
 	return matches[0]
 }

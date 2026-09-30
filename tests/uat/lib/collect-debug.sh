@@ -64,8 +64,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/platform-crd-map.sh"
 # and train-logs/); the workflow adds `cluster-debug/**` to the upload artifact.
 CLUSTER_DEBUG_DIR="${CLUSTER_DEBUG_DIR:-cluster-debug}"
 
-# Readiness-gate time-series log. phase_install appends each gate attempt's
-# `validate --phase deployment` output (timestamped) here, so the bundle carries
+# Readiness-gate time-series log. phase_readiness appends each gate attempt's
+# `validate --phase deployment` output (timestamped) here -- plus, for a failed
+# attempt, the failing validators' message and stdout (e.g. expected-resources'
+# "Failed resources:" block) from that attempt's CTRF report -- so the bundle carries
 # the actual status.status progression across the tuning-settling window — the
 # complete→in_progress flips AS THEY HAPPEN — rather than only a single snapshot
 # taken minutes later at teardown. This is the highest-value signal for the
@@ -374,7 +376,7 @@ collect_cluster_debug() {
         report.json 2>/dev/null || echo "  (report.json unparseable)"
     fi
     # Point the reader at the two highest-value time-series artifacts if present:
-    # the readiness-gate status.status progression (written during phase_install)
+    # the readiness-gate status.status progression (written during phase_readiness)
     # and any inline skyhook-at-failure snapshot(s).
     [[ -f "${CLUSTER_DEBUG_GATE_LOG}" ]] && echo "readinessGateSeries: $(basename "${CLUSTER_DEBUG_GATE_LOG}")"
     # GPU census is always emitted below; gpu-shortfall.txt appears only when a
