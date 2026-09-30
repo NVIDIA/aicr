@@ -81,10 +81,20 @@ retry_transient() {
     done
 }
 
+# permanent_http_status succeeds for a client error that will not clear on its
+# own (404, 403, ...). 408 and 429 are the retryable 4xx.
+permanent_http_status() {
+    case "$1" in
+        408|429) return 1 ;;
+        4??) return 0 ;;
+    esac
+    return 1
+}
+
 # probe_url HEADs a URL, following redirects, and records curl's HTTP status and
 # exit code in PROBE_HTTP_CODE and PROBE_CURL_EXIT. It returns 0 on HTTP 200,
-# RETRY_PERMANENT for a client error that will not clear on its own (404, 403,
-# ...), and 1 for anything else, including a redirect target that never answers.
+# RETRY_PERMANENT for a permanent client error, and 1 for anything else,
+# including a redirect target that never answers.
 probe_url() {
     PROBE_CURL_EXIT=0
     PROBE_HTTP_CODE=$(curl -f -s -I -L --connect-timeout 10 --max-time 30 \
@@ -93,11 +103,24 @@ probe_url() {
     if [[ $PROBE_CURL_EXIT -eq 0 && "$PROBE_HTTP_CODE" == "200" ]]; then
         return 0
     fi
-    case "$PROBE_HTTP_CODE" in
-        408|429) return 1 ;;
-        4??) return "$RETRY_PERMANENT" ;;
-    esac
+    if permanent_http_status "$PROBE_HTTP_CODE"; then
+        return "$RETRY_PERMANENT"
+    fi
     return 1
+}
+
+# download_file <url> <output-file> fetches a URL into a file, following
+# redirects. It returns 0 on success, RETRY_PERMANENT for a permanent client
+# error, and curl's exit status otherwise. Each attempt overwrites the file, so
+# a retry never inherits a failed attempt's partial output.
+download_file() {
+    local code rc=0
+    code=$(curl -fsSL -w "%{http_code}" -o "$2" "$1") || rc=$?
+    [[ $rc -eq 0 ]] && return 0
+    if permanent_http_status "$code"; then
+        return "$RETRY_PERMANENT"
+    fi
+    return "$rc"
 }
 
 # Verify URL accessibility before downloading. Transient failures are retried.
@@ -276,7 +299,7 @@ install_release_binary() {
         trap 'rm -rf "$tmp"' EXIT
 
         asset="${url##*/}"
-        if ! retry_transient curl -fsSL -o "${tmp}/${asset}" "$url"; then
+        if ! retry_transient download_file "$url" "${tmp}/${asset}"; then
             log_error "Failed to download $description from $url"
             exit 1
         fi
@@ -284,7 +307,7 @@ install_release_binary() {
         algo=sha256
         case "$source" in
             manifest:*)
-                if ! retry_transient curl -fsSL -o "${tmp}/checksums" "${source#manifest:}"; then
+                if ! retry_transient download_file "${source#manifest:}" "${tmp}/checksums"; then
                     log_error "Failed to download the checksums file for $description"
                     exit 1
                 fi
@@ -293,7 +316,11 @@ install_release_binary() {
             sidecar:*)
                 spec=$(release_sidecar_spec "$source") || exit 1
                 algo="${spec%% *}"
-                expected=$(retry_transient curl -fsSL "${url}${spec#* }" | awk '{print $1}') || expected=""
+                if ! retry_transient download_file "${url}${spec#* }" "${tmp}/sidecar"; then
+                    log_error "Failed to download the digest file for $description"
+                    exit 1
+                fi
+                expected=$(awk '{print $1}' "${tmp}/sidecar")
                 ;;
             pinned:*)
                 expected="${source#pinned:}"
@@ -931,7 +958,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             elif [[ "${OS}" == "linux" ]]; then
                 GRYPE_SCRIPT_URL="https://raw.githubusercontent.com/anchore/grype/main/install.sh"
                 GRYPE_TMP=$(mktemp -d)
-                retry_transient curl -fsSL "$GRYPE_SCRIPT_URL" -o "$GRYPE_TMP/install.sh"
+                retry_transient download_file "$GRYPE_SCRIPT_URL" "$GRYPE_TMP/install.sh"
                 verify_sha256 "$GRYPE_TMP/install.sh" "${GRYPE_INSTALL_SHA256}"
                 # The anchore install.sh queries github.com for release metadata,
                 # which intermittently 502s.
@@ -1277,7 +1304,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         if prompt_continue; then
             GOLANGCI_SCRIPT_URL="https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_LINT_VERSION}/install.sh"
             GOLANGCI_TMP=$(mktemp)
-            retry_transient curl -fsSL "$GOLANGCI_SCRIPT_URL" -o "$GOLANGCI_TMP"
+            retry_transient download_file "$GOLANGCI_SCRIPT_URL" "$GOLANGCI_TMP"
             verify_sha256 "$GOLANGCI_TMP" "${GOLANGCI_LINT_INSTALL_SHA256}"
             sh "$GOLANGCI_TMP" -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
             rm -f "$GOLANGCI_TMP"

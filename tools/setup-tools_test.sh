@@ -357,7 +357,11 @@ check_download_retry() {
 n=$(( $(cat "${FAKE_DIR}/count" 2>/dev/null || echo 0) + 1 ))
 echo "${n}" > "${FAKE_DIR}/count"
 line=$(sed -n "${n}p" "${FAKE_DIR}/script"); [[ -n "${line}" ]] || line=$(tail -n1 "${FAKE_DIR}/script")
-read -r code rc <<< "${line}"
+read -r code rc body <<< "${line}"
+while [[ $# -gt 0 ]]; do
+    [[ "$1" == "-o" && "${2:-}" != /dev/null ]] && printf '%s' "${body}" > "$2"
+    shift
+done
 printf '%s' "${code}"
 exit "${rc}"
 FAKE
@@ -380,6 +384,30 @@ FAKE
         run 1 1 "404 fails fast"               "404 22"
         run 1 1 "403 fails fast"               "403 22"
         run 0 2 "503 is retried"               "503 22" "200 0"
+
+        # download_file <want-rc> <want-attempts> <want-body> <label> <script-lines...>
+        fetch() {
+            local want_rc="$1" want_n="$2" want_body="$3" label="$4" rc=0; shift 4
+            printf '%s\n' "$@" > "${scratch}/script"; rm -f "${scratch}/count" "${scratch}/out"
+            retry_transient download_file "https://example.invalid/x" "${scratch}/out" >/dev/null 2>&1 || rc=$?
+            [[ "${rc}" -eq "${want_rc}" ]] || { echo "${label}: exit ${rc}, want ${want_rc}"; exit 1; }
+            got_n=$(cat "${scratch}/count")
+            [[ "${got_n}" -eq "${want_n}" ]] || { echo "${label}: ${got_n} attempts, want ${want_n}"; exit 1; }
+            if [[ -n "${want_body}" ]]; then
+                got_body=$(cat "${scratch}/out")
+                [[ "${got_body}" == "${want_body}" ]] || { echo "${label}: body '${got_body}', want '${want_body}'"; exit 1; }
+            fi
+        }
+
+        fetch 0 1 ""        "download succeeds"                "200 0"
+        fetch 99 1 ""       "download 404 fails fast"          "404 22"
+        fetch 99 1 ""       "download 403 fails fast"          "403 22"
+        fetch 0 2 ""        "download 503 is retried"          "503 22" "200 0"
+        fetch 0 2 ""        "download 429 is retried"          "429 22" "200 0"
+        fetch 0 2 ""        "download 408 is retried"          "408 22" "200 0"
+        fetch 0 2 ""        "download transport failure retried" "000 35" "200 0"
+        fetch 35 3 ""       "download keeps failing"           "000 35"
+        fetch 0 2 "digest"  "partial output is overwritten"    "000 18 partialpartial" "200 0 digest"
     )
 }
 
@@ -387,7 +415,7 @@ if ! reason=$(check_download_retry); then
     echo "FAIL: ${reason}" >&2
     exit 1
 fi
-echo "Download retry: transient failures retried, 404 and 403 fail on the first attempt"
+echo "Download retry: transient failures retried, 404 and 403 fail on the first attempt, a retry never keeps a failed attempt's partial output"
 
 # A combined checksums file comes in two shapes: GNU (`<digest>  <file>`, or
 # `<digest> *<file>` in binary mode) and BSD (`SHA256 (<file>) = <digest>`,
