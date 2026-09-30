@@ -846,15 +846,14 @@ gb200-any           any      gb200        any       any  any       true     pass
 
 **Example JSON output:**
 
-The `criteria` keys are capitalized because the criteria struct carries no
-field tags; the structured output mirrors the Go field names. The `health`
+The `criteria` keys are lowercase. Unset dimensions are omitted. The `health`
 block is present only for leaf overlays — non-leaf overlays omit it.
 
 ```json
 [
   {
     "name": "gb200-any",
-    "criteria": {"Service": "any", "Accelerator": "gb200", "Intent": "", "OS": "", "Platform": "", "Nodes": 0},
+    "criteria": {"service": "any", "accelerator": "gb200"},
     "is_leaf": true,
     "source": "embedded",
     "health": {
