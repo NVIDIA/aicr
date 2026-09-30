@@ -144,6 +144,19 @@
       ],
       depTypeTemplate: "registry-chart",
     },
+    {
+      // aiperf is pinned twice: validators/performance/requirements.txt (read
+      // by the pip_requirements manager) and the AIPERF_VERSION default in
+      // aiperf-bench.Dockerfile, which the image build requires to match it.
+      // No built-in manager reads a bare ARG, so without this the Dockerfile
+      // copy never moves and every aiperf PR fails its own image build (#2956).
+      // The `aiperf` group below keeps both edits in one PR.
+      customType: "regex",
+      managerFilePatterns: ["/^validators/performance/aiperf-bench\\.Dockerfile$/"],
+      matchStrings: ["(?m)^ARG AIPERF_VERSION=(?<currentValue>\\S+)"],
+      datasourceTemplate: "pypi",
+      depNameTemplate: "aiperf",
+    },
   ],
 
   // Kubernetes manager: scan AICR's component manifests for Pod-spec
@@ -248,6 +261,12 @@
       groupName: "opencontainers",
       matchManagers: ["gomod"],
       matchPackageNames: ["github.com/opencontainers/**"],
+    },
+    // Cross-manager: requirements.txt (pip_requirements) and the Dockerfile
+    // ARG (custom.regex) must move together; see the aiperf customManager.
+    {
+      groupName: "aiperf",
+      matchPackageNames: ["aiperf"],
     },
     // Disable the github-actions manager — dependabot owns workflow/action
     // bumps because GitHub's auto-issued GITHUB_TOKEN cannot push changes to
@@ -466,7 +485,7 @@
     // PR #1906 auto-bumped this to 3.14 and broke the UAT validator image
     // build (aiperf's pyzmq/uvloop had no cp314 wheels, and the single-stage
     // image had no toolchain to compile them). Even with the current
-    // multi-stage toolchain, aiperf 0.11.0 declares requires-python <3.14, so
+    // multi-stage toolchain, aiperf 0.13.0 declares requires-python <3.14, so
     // pip refuses to install on 3.14 — the 3.14 move is blocked upstream until
     // aiperf supports it. This cap mirrors that constraint; #1910 tracks
     // lifting it.
