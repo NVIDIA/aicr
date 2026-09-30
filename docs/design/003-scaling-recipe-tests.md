@@ -187,7 +187,7 @@ test-tier3  (push to main + schedule, skip on PR)
   matrix: tier3_batches → uses kwok-test-run.yaml (matrix: pairs)
 
 summary
-  needs: [script-tests, prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
+  needs: [script-tests, discover, prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
 ```
 
 ### Tier 2 deployer coverage
