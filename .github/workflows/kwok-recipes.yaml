@@ -594,7 +594,10 @@ jobs:
           name: kwok-aicr-bin
           path: dist/
           if-no-files-found: error
-          retention-days: 1
+          # Re-running failed jobs later reuses this build, so it must outlive
+          # the run. Overwrite lets "Re-run all jobs" replace it in place.
+          overwrite: true
+          retention-days: 7
 
   # Thin caller of the shared kwok-test-run.yaml reusable workflow (#1172).
   # tier1_pairs is well under 256 entries, so it's passed in a single call —
