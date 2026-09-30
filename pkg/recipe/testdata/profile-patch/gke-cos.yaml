@@ -1,0 +1,9 @@
+# Profile-only external overlay for the embedded gke-cos overlay. It adds no
+# values, so each test merges the values it exercises onto it.
+apiVersion: aicr.run/v1beta2
+kind: RecipeMetadata
+metadata:
+  name: gke-cos
+spec:
+  profile:
+    name: gpuStack

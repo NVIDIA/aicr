@@ -239,7 +239,7 @@ func wrapText(text string, width int) []string {
 	if width <= 0 {
 		return []string{strings.Join(words, " ")}
 	}
-	lines := make([]string, 0, 1+len(text)/width)
+	var lines []string
 	line := words[0]
 	for _, w := range words[1:] {
 		if len(line)+1+len(w) > width {
