@@ -1,0 +1,126 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Written for the v1.22.0 to v1.25.0 pin move. AICR never shipped v1.23.0 or
+# v1.24.0, so this records the one hop AICR makes: from starts at the previous
+# pin rather than reaching lower, because nothing below v1.22.0 was assessed,
+# and the changes v1.23.0 through v1.25.0 introduced are described together at
+# the v1.25.0 boundary.
+#
+# verdict is manual rather than safe: the host-port check below is real work on
+# clusters that already bind 2112, and safe may not carry steps.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: nvsentinel
+transitions:
+  - from: ">=1.22.0 <1.25.0"
+    to: "1.25.0"
+    verdict: manual
+    verifiedBy: >-
+      Kind run with nvml-mock on 2026-09-30, v1.25.0 from an AICR
+      h100-kind-training bundle: the nvsentinel health check passes;
+      metadata-collector binds host port 2112; with 2112 already held on
+      the node it logged "Metrics endpoint stopped; continuing without it
+      ... bind: address already in use", stayed Running with no restarts,
+      and the health check still passed; an injected XID 48 raised
+      SysLogsXIDError with the GPU UUID; gpu-health-monitor tried the new
+      nvidia-dcgm-dra candidate, connected to nvidia-dcgm, and an injected
+      double-bit ECC error raised GpuMemWatch with the GPU UUID.
+    summary: >-
+      From v1.23.0 metadata-collector, which runs with hostNetwork, serves
+      Prometheus metrics on port 2112 of every GPU node. A node process that
+      already holds 2112, such as kube-vip's metrics endpoint, keeps the port:
+      at v1.25.0 the collector logs "Metrics endpoint stopped; continuing
+      without it" and runs on without metrics, so nothing but that log line
+      shows they are gone. v1.24.0 also dropped preflight.qps and
+      preflight.burst; an override of either still renders and is silently
+      ignored.
+    precondition: >-
+      Nothing listens on host port 2112 on the GPU nodes, or the recipe moves
+      the endpoint first.
+    reversible: true
+    reversibleNotes: >-
+      helm rollback to the v1.22.0 revision restores the previous workloads.
+      The v1.25.0 CRDs stay applied; their changes are cosmetic, so v1.22.0
+      runs against them unchanged. This rests on the CRD diff and on AICR
+      running no NVSentinel datastore; the rollback itself was not
+      exercised.
+    stepsByDeployer:
+      - deployers: [helmfile]
+        steps:
+          - id: check-host-port
+            description: >-
+              On a GPU node, check for a listener on port 2112, for example
+              kubectl debug node/<gpu-node> -it --image=busybox:1.38.0 --
+              netstat -ltn. If one exists, set
+              nv-sentinel:metadata-collector.metrics.port to a free port, or
+              nv-sentinel:metadata-collector.metrics.enabled=false, and
+              regenerate the bundle.
+            reason: >-
+              The collector keeps running when the bind fails, so a
+              collision costs its metrics without failing any health check.
+          - id: apply-new-crds
+            description: >-
+              Apply the v1.25.0 CRDs using the CRD-apply command under
+              "Upgrade, uninstall, and troubleshooting" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/nvsentinel and VERSION=v1.25.0.
+            reason: >-
+              helmfile never updates CRDs for ownsCRDs components. The
+              v1.25.0 changes are cosmetic (a description and a vr shortName
+              on ValidationRequest), so skipping this leaves the v1.22.0
+              schema text in place rather than breaking anything.
+          - id: apply
+            description: >-
+              Run helmfile apply from a bundle generated at the new pin.
+            reason: >-
+              Rolls the DaemonSets and Deployments to v1.25.0.
+          - id: verify
+            description: >-
+              kubectl -n nvsentinel rollout status daemonset/metadata-collector,
+              then check its logs for "Metrics endpoint stopped".
+            reason: >-
+              A rolled-out DaemonSet alone does not prove the metrics endpoint
+              bound.
+      - steps:
+          - id: check-host-port
+            description: >-
+              On a GPU node, check for a listener on port 2112, for example
+              kubectl debug node/<gpu-node> -it --image=busybox:1.38.0 --
+              netstat -ltn. If one exists, set
+              nv-sentinel:metadata-collector.metrics.port to a free port, or
+              nv-sentinel:metadata-collector.metrics.enabled=false, and
+              regenerate the bundle.
+            reason: >-
+              The collector keeps running when the bind fails, so a
+              collision costs its metrics without failing any health check.
+          - id: apply
+            description: >-
+              Re-run install.sh (helm), or commit the regenerated bundle and
+              reconcile or sync it (flux, argocd, argocd-helm).
+            reason: >-
+              These deployers apply the chart's CRDs themselves, then roll the
+              DaemonSets and Deployments to v1.25.0.
+          - id: verify
+            description: >-
+              kubectl -n nvsentinel rollout status daemonset/metadata-collector,
+              then check its logs for "Metrics endpoint stopped".
+            reason: >-
+              A rolled-out DaemonSet alone does not prove the metrics endpoint
+              bound.
+    references:
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.23.0
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.24.0
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.25.0
+      - https://github.com/NVIDIA/NVSentinel/blob/v1.25.0/metadata-collector/main.go

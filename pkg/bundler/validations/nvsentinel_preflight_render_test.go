@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -524,9 +525,10 @@ func assertPreflightGangRBAC(t *testing.T, rendered []byte) {
 // stale copy. This renders the chart twice -- once with the mixin's values, once
 // with the mixin's initContainers removed so the chart's own defaults apply --
 // and requires the two lists to be identical apart from the deviations the
-// mixin intends: defaultEnabled on the all-reduce check and
-// SKIP_BANDWIDTH_CHECK on the loopback one. Each is asserted present before
-// being normalized away, so neither can silently disappear.
+// mixin intends: defaultEnabled on the all-reduce check, SKIP_BANDWIDTH_CHECK
+// on the loopback one, and a single DCGM_HOSTENGINE_ADDR taken from the
+// chart's candidate list on the DCGM check. Each is asserted present before
+// being normalized away, so none can silently disappear.
 //
 // It lives in the schedule-only render-check workflow, not the PR gate, so a
 // chart-bump PR can merge before this fires. That is the same posture as
@@ -564,6 +566,8 @@ func TestNVSentinelPreflightInitContainersMatchChart(t *testing.T) {
 		// everything else must match byte for byte. Asserting before deleting
 		// is what stops a deviation silently disappearing.
 		switch name, _ := mixinList[i]["name"].(string); name {
+		case "preflight-dcgm-diag":
+			normalizeDCGMHostengineAddr(t, i, mixinList[i], chartList[i])
 		case "preflight-nccl-allreduce":
 			if mixinList[i]["defaultEnabled"] != false {
 				t.Errorf("initContainers[%d]: mixin must set defaultEnabled: false on the all-reduce check", i)
@@ -600,9 +604,39 @@ func TestNVSentinelPreflightInitContainersMatchChart(t *testing.T) {
 			t.Fatalf("marshalling chart entry %d: %v", i, err)
 		}
 		if string(got) != string(want) {
-			t.Errorf("initContainers[%d] drifted from the chart.\nmixin:\n%s\nchart:\n%s\nUpdate recipes/mixins/nvsentinel-preflight.yaml to match, keeping both intended deviations: defaultEnabled: false on preflight-nccl-allreduce, and SKIP_BANDWIDTH_CHECK: \"true\" on preflight-nccl-loopback.", i, got, want)
+			t.Errorf("initContainers[%d] drifted from the chart.\nmixin:\n%s\nchart:\n%s\nUpdate recipes/mixins/nvsentinel-preflight.yaml to match, keeping the intended deviations: defaultEnabled: false on preflight-nccl-allreduce, SKIP_BANDWIDTH_CHECK: \"true\" on preflight-nccl-loopback, and the single DCGM_HOSTENGINE_ADDR on preflight-dcgm-diag.", i, got, want)
 		}
 	}
+}
+
+// normalizeDCGMHostengineAddr checks that the mixin's DCGM check points at
+// the single ClusterPolicy-mode hostengine and that the chart still lists it
+// as a candidate, then copies the chart's value over so the rest of the entry
+// is compared byte for byte.
+func normalizeDCGMHostengineAddr(t *testing.T, i int, mixin, chart map[string]any) {
+	t.Helper()
+	addrEntry := func(entry map[string]any) map[string]any {
+		env, _ := entry["env"].([]any)
+		for _, e := range env {
+			if m, _ := e.(map[string]any); m["name"] == "DCGM_HOSTENGINE_ADDR" {
+				return m
+			}
+		}
+		return nil
+	}
+	mixinAddr, chartAddr := addrEntry(mixin), addrEntry(chart)
+	if mixinAddr == nil || chartAddr == nil {
+		t.Errorf("initContainers[%d]: DCGM_HOSTENGINE_ADDR missing (mixin %v, chart %v)", i, mixinAddr != nil, chartAddr != nil)
+		return
+	}
+	if mixinAddr["value"] != preflightDCGMHostengine {
+		t.Errorf("initContainers[%d]: mixin DCGM_HOSTENGINE_ADDR = %v, want %q", i, mixinAddr["value"], preflightDCGMHostengine)
+	}
+	candidates, _ := chartAddr["value"].(string)
+	if !slices.Contains(strings.Split(candidates, ","), chartDefaultDCGMHostengineAddr) {
+		t.Errorf("initContainers[%d]: chart DCGM_HOSTENGINE_ADDR %q no longer lists %q", i, candidates, chartDefaultDCGMHostengineAddr)
+	}
+	mixinAddr["value"] = chartAddr["value"]
 }
 
 // preflightInitContainersFromRender pulls the initContainers list out of the
