@@ -255,17 +255,28 @@ image_cache_load() {
 # .github/workflows/kwok-recipes.yaml fills the cache, and a restore step, an
 # env var, and a load call in .github/actions/kwok-test/action.yml drain it. A
 # name present here but missing from either file caches nothing and only warns.
-IMAGE_CACHE_IMAGES=(registry gitea argocd_redis kind_node)
+#
+# Each entry is `<name>=<yq path of its pin in .settings.yaml>`, so the name
+# list and the pin paths are declared together.
+IMAGE_CACHE_PINS=(
+    registry=.testing_tools.registry_image
+    gitea=.testing_tools.gitea_image
+    argocd_redis=.testing_tools.argocd_redis_image
+    kind_node=.testing.kind_node_image
+)
+IMAGE_CACHE_IMAGES=("${IMAGE_CACHE_PINS[@]%%=*}")
 
-# image_cache_pin_path prints the yq path of NAME's pin in .settings.yaml.
-# `kind_node` is pinned at `testing.kind_node_image`. Every other name is a
-# `testing_tools.<name>_image` pin.
+# image_cache_pin_path prints the yq path of NAME's pin, or fails for a name
+# not in IMAGE_CACHE_PINS.
 image_cache_pin_path() {
-    if [[ "$1" == "kind_node" ]]; then
-        printf '.testing.kind_node_image'
-    else
-        printf '.testing_tools.%s_image' "$1"
-    fi
+    local entry
+    for entry in "${IMAGE_CACHE_PINS[@]}"; do
+        if [[ "${entry%%=*}" == "$1" ]]; then
+            printf '%s' "${entry#*=}"
+            return 0
+        fi
+    done
+    return 1
 }
 
 # image_cache_settings reads the pinned image refs out of SETTINGS_FILE and
