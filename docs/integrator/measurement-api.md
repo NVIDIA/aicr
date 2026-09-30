@@ -429,11 +429,12 @@ subtypes:
 The fields are:
 
 - `nvidia-gpu-device-plugin` (`string`) — the collapsed constraint reading:
-  `none` (the DaemonSet is absent, present without the
-  `addonmanager.kubernetes.io/mode: Reconcile` label, or present with
+  `none` (the DaemonSet is absent, or carries the
+  `addonmanager.kubernetes.io/mode: Reconcile` label with
   `desiredNumberScheduled: 0`), `active` (the labeled DaemonSet targets at
-  least one node), or `unknown` (the API could not be consulted — including
-  a snapshot taken without cluster access). Always emitted.
+  least one node), or `unknown` (the API could not be consulted, including
+  a snapshot taken without cluster access, or the DaemonSet is present
+  without the `Reconcile` label). Always emitted.
 - `daemonset` (`string`) — the uncollapsed detail: `absent`, `unlabeled`,
   `disabled`, `active`, or `unknown`. Always emitted.
 
