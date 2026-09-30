@@ -56,7 +56,52 @@ case "${ARCH}" in
     *) echo -e "${RED}❌ Unsupported architecture: ${ARCH}${NC}" && exit 1 ;;
 esac
 
-# Verify URL accessibility before downloading
+# A command run under retry_transient exits with this status to stop retrying
+# at once. The failure is permanent, so more attempts would only delay it.
+RETRY_PERMANENT=99
+
+# retry_transient runs a command up to RETRY_ATTEMPTS times with quadratic
+# backoff (RETRY_BASE_DELAY * attempt^2 seconds), so a brief release-CDN blip
+# does not fail the whole job. It returns the last attempt's status. Warnings go
+# to stderr so the command's stdout stays clean for callers that capture it.
+RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
+RETRY_BASE_DELAY="${RETRY_BASE_DELAY:-2}"
+retry_transient() {
+    local attempt=1 rc delay
+    while true; do
+        "$@" && return 0
+        rc=$?
+        if [[ $rc -eq $RETRY_PERMANENT || $attempt -ge $RETRY_ATTEMPTS ]]; then
+            return "$rc"
+        fi
+        delay=$((attempt * attempt * RETRY_BASE_DELAY))
+        log_warning "$1 attempt ${attempt}/${RETRY_ATTEMPTS} failed (exit ${rc}); retrying in ${delay}s" >&2
+        sleep "$delay"
+        attempt=$((attempt + 1))
+    done
+}
+
+# probe_url HEADs a URL, following redirects, and records curl's HTTP status and
+# exit code in PROBE_HTTP_CODE and PROBE_CURL_EXIT. It returns 0 on HTTP 200,
+# RETRY_PERMANENT for a client error that will not clear on its own (404, 403,
+# ...), and 1 for anything else, including a redirect target that never answers.
+probe_url() {
+    PROBE_CURL_EXIT=0
+    PROBE_HTTP_CODE=$(curl -f -s -I -L --connect-timeout 10 --max-time 30 \
+        -w "%{http_code}" -o /dev/null "$1" 2>/dev/null) || PROBE_CURL_EXIT=$?
+
+    if [[ $PROBE_CURL_EXIT -eq 0 && "$PROBE_HTTP_CODE" == "200" ]]; then
+        return 0
+    fi
+    case "$PROBE_HTTP_CODE" in
+        408|429) return 1 ;;
+        4??) return "$RETRY_PERMANENT" ;;
+    esac
+    return 1
+}
+
+# Verify URL accessibility before downloading. Transient failures are retried.
+# A 404 or other client error fails immediately.
 verify_download_url() {
     local url="$1"
     local description="$2"
@@ -64,19 +109,18 @@ verify_download_url() {
     log_debug "Attempting to verify: $description"
     log_debug "URL: $url"
 
-    local http_code
-    http_code=$(curl -f -s -I -L -w "%{http_code}" -o /dev/null "$url" 2>/dev/null)
-    local curl_exit_code=$?
-
-    if [[ $curl_exit_code -ne 0 || "$http_code" != "200" ]]; then
+    if ! retry_transient probe_url "$url"; then
+        local http_code="$PROBE_HTTP_CODE" curl_exit_code="$PROBE_CURL_EXIT"
         log_error "Failed to access URL for $description"
         log_error "URL: $url"
-        log_error "HTTP status code: ${http_code:-unknown}"
+        log_error "HTTP status code: ${http_code:-unknown} (curl exit ${curl_exit_code})"
 
         if [[ "$http_code" == "404" ]]; then
             log_error "File not found (404). The version or architecture might not be available."
         elif [[ "$http_code" == "403" ]]; then
             log_error "Access forbidden (403). This might be a rate limit issue."
+        elif [[ $curl_exit_code -ne 0 && "$http_code" == 3* ]]; then
+            log_error "The redirect target did not answer (status ${http_code} is the last one received). The release CDN may be unavailable."
         elif [[ $curl_exit_code -eq 6 ]]; then
             log_error "Could not resolve host. Check your internet connection."
         fi
@@ -84,7 +128,7 @@ verify_download_url() {
         return 1
     fi
 
-    log_debug "URL verified successfully for $description (HTTP $http_code)"
+    log_debug "URL verified successfully for $description (HTTP $PROBE_HTTP_CODE)"
     return 0
 }
 
@@ -232,7 +276,7 @@ install_release_binary() {
         trap 'rm -rf "$tmp"' EXIT
 
         asset="${url##*/}"
-        if ! curl -fsSL -o "${tmp}/${asset}" "$url"; then
+        if ! retry_transient curl -fsSL -o "${tmp}/${asset}" "$url"; then
             log_error "Failed to download $description from $url"
             exit 1
         fi
@@ -240,7 +284,7 @@ install_release_binary() {
         algo=sha256
         case "$source" in
             manifest:*)
-                if ! curl -fsSL -o "${tmp}/checksums" "${source#manifest:}"; then
+                if ! retry_transient curl -fsSL -o "${tmp}/checksums" "${source#manifest:}"; then
                     log_error "Failed to download the checksums file for $description"
                     exit 1
                 fi
@@ -249,7 +293,7 @@ install_release_binary() {
             sidecar:*)
                 spec=$(release_sidecar_spec "$source") || exit 1
                 algo="${spec%% *}"
-                expected=$(curl -fsSL "${url}${spec#* }" | awk '{print $1}') || expected=""
+                expected=$(retry_transient curl -fsSL "${url}${spec#* }" | awk '{print $1}') || expected=""
                 ;;
             pinned:*)
                 expected="${source#pinned:}"
@@ -887,24 +931,15 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             elif [[ "${OS}" == "linux" ]]; then
                 GRYPE_SCRIPT_URL="https://raw.githubusercontent.com/anchore/grype/main/install.sh"
                 GRYPE_TMP=$(mktemp -d)
-                curl -fsSL "$GRYPE_SCRIPT_URL" -o "$GRYPE_TMP/install.sh"
+                retry_transient curl -fsSL "$GRYPE_SCRIPT_URL" -o "$GRYPE_TMP/install.sh"
                 verify_sha256 "$GRYPE_TMP/install.sh" "${GRYPE_INSTALL_SHA256}"
                 # The anchore install.sh queries github.com for release metadata,
-                # which intermittently 502s. Retry with quadratic backoff so a brief
-                # CDN blip does not fail the whole CI step.
-                grype_attempt=0
-                grype_max_attempts=3
-                until sh "$GRYPE_TMP/install.sh" -b "$GRYPE_TMP" "${GRYPE_VERSION}"; do
-                    grype_attempt=$((grype_attempt + 1))
-                    if [[ ${grype_attempt} -ge ${grype_max_attempts} ]]; then
-                        log_error "grype install failed after ${grype_max_attempts} attempts"
-                        rm -rf "$GRYPE_TMP"
-                        exit 1
-                    fi
-                    grype_delay=$((grype_attempt * grype_attempt * 5))
-                    log_warning "grype install attempt ${grype_attempt} failed (likely transient github.com 502); retrying in ${grype_delay}s"
-                    sleep "${grype_delay}"
-                done
+                # which intermittently 502s.
+                if ! retry_transient sh "$GRYPE_TMP/install.sh" -b "$GRYPE_TMP" "${GRYPE_VERSION}"; then
+                    log_error "grype install failed after ${RETRY_ATTEMPTS} attempts"
+                    rm -rf "$GRYPE_TMP"
+                    exit 1
+                fi
                 sudo mv "$GRYPE_TMP/grype" /usr/local/bin/grype
                 sudo chmod +x /usr/local/bin/grype
                 rm -rf "$GRYPE_TMP"
@@ -1242,7 +1277,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         if prompt_continue; then
             GOLANGCI_SCRIPT_URL="https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_LINT_VERSION}/install.sh"
             GOLANGCI_TMP=$(mktemp)
-            curl -fsSL "$GOLANGCI_SCRIPT_URL" -o "$GOLANGCI_TMP"
+            retry_transient curl -fsSL "$GOLANGCI_SCRIPT_URL" -o "$GOLANGCI_TMP"
             verify_sha256 "$GOLANGCI_TMP" "${GOLANGCI_LINT_INSTALL_SHA256}"
             sh "$GOLANGCI_TMP" -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
             rm -f "$GOLANGCI_TMP"

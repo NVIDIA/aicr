@@ -341,6 +341,54 @@ if ! reason=$(check_sidecar_specs); then
 fi
 echo "Sidecar sources: default suffix per algorithm, explicit suffix honored, unsupported algorithm rejected"
 
+# verify_download_url must ride out a transient CDN failure yet still fail fast
+# on a bad pin. A fake curl reads its per-attempt behavior from a script file.
+# Each line is "<http_code> <exit>", and the last line repeats once exhausted.
+check_download_retry() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true" RETRY_BASE_DELAY=0
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        scratch=$(mktemp -d)
+        trap 'rm -rf "${scratch}"' EXIT
+        cat > "${scratch}/curl" <<'FAKE'
+#!/usr/bin/env bash
+n=$(( $(cat "${FAKE_DIR}/count" 2>/dev/null || echo 0) + 1 ))
+echo "${n}" > "${FAKE_DIR}/count"
+line=$(sed -n "${n}p" "${FAKE_DIR}/script"); [[ -n "${line}" ]] || line=$(tail -n1 "${FAKE_DIR}/script")
+read -r code rc <<< "${line}"
+printf '%s' "${code}"
+exit "${rc}"
+FAKE
+        chmod +x "${scratch}/curl"
+        export PATH="${scratch}:${PATH}" FAKE_DIR="${scratch}"
+
+        # run <want-rc> <want-attempts> <label> <script-lines...>
+        run() {
+            local want_rc="$1" want_n="$2" label="$3" rc=0; shift 3
+            printf '%s\n' "$@" > "${scratch}/script"; rm -f "${scratch}/count"
+            verify_download_url "https://example.invalid/x" "${label}" >/dev/null 2>&1 || rc=$?
+            [[ "${rc}" -eq "${want_rc}" ]] || { echo "${label}: exit ${rc}, want ${want_rc}"; exit 1; }
+            got_n=$(cat "${scratch}/count")
+            [[ "${got_n}" -eq "${want_n}" ]] || { echo "${label}: ${got_n} attempts, want ${want_n}"; exit 1; }
+        }
+
+        run 0 1 "healthy URL"                  "200 0"
+        run 0 3 "CDN blip clears on attempt 3" "302 35" "302 35" "200 0"
+        run 1 3 "CDN down for every attempt"   "302 35"
+        run 1 1 "404 fails fast"               "404 22"
+        run 1 1 "403 fails fast"               "403 22"
+        run 0 2 "503 is retried"               "503 22" "200 0"
+    )
+}
+
+if ! reason=$(check_download_retry); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Download retry: transient failures retried, 404 and 403 fail on the first attempt"
+
 # A combined checksums file comes in two shapes: GNU (`<digest>  <file>`, or
 # `<digest> *<file>` in binary mode) and BSD (`SHA256 (<file>) = <digest>`,
 # which yq publishes). The lookup matches the asset name exactly, because real
