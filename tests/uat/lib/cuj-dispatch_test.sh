@@ -87,7 +87,7 @@ dispatch_run() {
         cd "${REPO_ROOT}" || exit 9
         AICR_BIN=/bin/true RUN_ID=test bash -c '
             source tests/uat/lib/phases.sh
-            phase_prep(){ :; }; phase_install(){ :; }; phase_conformance(){ :; }
+            phase_prep(){ :; }; phase_install(){ :; }; phase_readiness(){ :; }; phase_conformance(){ :; }
             phase_train(){ echo "TRAIN RAN"; }; phase_serve(){ echo "SERVE RAN"; }
             phase_verify(){ echo "VERIFY RAN"; }
             yq(){ case "$*" in *intent*) echo training ;; *platform*) echo kubeflow ;; esac; }

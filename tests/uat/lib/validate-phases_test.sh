@@ -35,7 +35,7 @@
 #
 # THE PREDICATE IS NOT THE KNOB. Asserting validate_runs_deployment_phase in
 # isolation says nothing about the two places that consult it, and both survive
-# being disconnected: `if true` in phase_install silently restores the readiness
+# being disconnected: `if true` in phase_readiness silently restores the readiness
 # gate, and a hardcoded `--phase all` in phase_conformance silently restores the
 # phase set. Each call site therefore gets a case that drives the phase function
 # itself, with the boundary commands (the deployer, the gate, kubectl, the aicr
@@ -56,7 +56,7 @@ rm -rf "${SCRATCH}"
 mkdir -p "${SCRATCH}"
 trap 'rm -rf "${SCRATCH}"' EXIT
 
-# The one field phase_install reads from the lane config.
+# The lane config handed to the phase functions under test.
 CONFIG="${SCRATCH}/config.yaml"
 cat >"${CONFIG}" <<'YAML'
 spec:
@@ -113,13 +113,13 @@ check "deployment among several keeps the gate on" "deployment,conformance|gate-
 check "conformance alone turns the gate off" "conformance|gate-off" "$(phases_with conformance)"
 check "performance alone turns the gate off" "performance|gate-off" "$(phases_with performance)"
 
-# --- CALL SITE 1: phase_install and the readiness gate ----------------------
+# --- CALL SITE 1: phase_readiness and the readiness gate --------------------
 #
-# Drives phase_install with the deployer bodies, the gate and kubectl replaced,
-# and reports whether the gate ran. The gate is what makes a lane wait out
-# operator convergence, so "did it run" is the behaviour, not "is the predicate
-# true".
-install_gate_with() {
+# Drives phase_readiness, the phase that owns the gate since #2989 split it out
+# of phase_install, with the gate and kubectl replaced, and reports whether the
+# gate ran. The gate is what makes a lane wait out operator convergence, so "did
+# it run" is the behaviour, not "is the predicate true".
+readiness_gate_with() {
     local preset="${1:-}"
     (
         if [[ -n "${preset}" ]]; then
@@ -130,21 +130,19 @@ install_gate_with() {
         # shellcheck source=./phases.sh
         source "${SCRIPT_DIR}/phases.sh" >/dev/null 2>&1
         export config="${CONFIG}"
-        install_helmfile() { :; }
-        install_argocd()   { echo "argocd-install-ran"; }
         install_readiness_gate() { echo "readiness-gate-ran"; }
         kubectl() { :; }
-        phase_install 2>&1
+        phase_readiness 2>&1
     ) | grep -c 'readiness-gate-ran' | tr -d ' '
 }
 
-check "the default runs the readiness gate" "1" "$(install_gate_with)"
-check "an explicit all runs the readiness gate" "1" "$(install_gate_with all)"
-check "naming deployment runs the readiness gate" "1" "$(install_gate_with deployment)"
+check "the default runs the readiness gate" "1" "$(readiness_gate_with)"
+check "an explicit all runs the readiness gate" "1" "$(readiness_gate_with all)"
+check "naming deployment runs the readiness gate" "1" "$(readiness_gate_with deployment)"
 # The discriminating one: this is the lane that cannot pass the phase, and a
 # gate that still runs here polls for a DRA kubelet plugin that is never
 # installed until READINESS_TIMEOUT_SECONDS.
-check "conformance alone does not run the readiness gate" "0" "$(install_gate_with conformance)"
+check "conformance alone does not run the readiness gate" "0" "$(readiness_gate_with conformance)"
 # A skip nobody can see in the log is indistinguishable from a bug in the
 # script, so the skip announces itself and names the cost.
 check "the skipped gate says the lane does not assert deployment readiness" "1" \
@@ -154,10 +152,9 @@ check "the skipped gate says the lane does not assert deployment readiness" "1" 
             # shellcheck source=./phases.sh
             source "${SCRIPT_DIR}/phases.sh" >/dev/null 2>&1
             export config="${CONFIG}"
-            install_helmfile() { :; }
             install_readiness_gate() { :; }
             kubectl() { :; }
-            phase_install 2>&1
+            phase_readiness 2>&1
         ) | grep -c 'DOES NOT ASSERT DEPLOYMENT' | tr -d ' '
     )"
 
