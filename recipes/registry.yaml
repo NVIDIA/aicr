@@ -459,6 +459,8 @@ components:
     # Sole owner of its CRDs and no webhook conversion (audited, #2264).
     ownsCRDs: true
     displayName: nvsentinel
+    upgrades:
+      file: components/nvsentinel/upgrades.yaml
     valueOverrideKeys:
       - nv-sentinel
     # nvsentinel's templates create monitoring.coreos.com/v1 PodMonitor
@@ -473,7 +475,7 @@ components:
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: nvsentinel
       # renovate: datasource=docker depName=ghcr.io/nvidia/nvsentinel
-      defaultVersion: v1.22.0
+      defaultVersion: v1.25.0
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
@@ -856,7 +858,7 @@ components:
       defaultRepository: oci://ghcr.io/ai-dynamo/grove
       defaultChart: grove-charts
       # renovate: datasource=docker depName=ghcr.io/ai-dynamo/grove/grove-charts
-      defaultVersion: "v0.1.0-alpha.12"
+      defaultVersion: "v0.1.0-alpha.13"
       defaultNamespace: dynamo-system
     nodeScheduling:
       system:
