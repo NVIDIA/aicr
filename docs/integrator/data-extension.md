@@ -147,9 +147,9 @@ applies the same check as a `--data` catalog scan, so a `RecipeMetadata`
 with a missing or empty `apiVersion` is rejected on both paths. Through v0.20
 the direct path accepted it and hydrated silently
 ([#2421](https://github.com/NVIDIA/aicr/issues/2421)); if you author overlays
-outside a catalog tree, confirm each one carries a header. The empty-value
-tolerance that remains is for hydrated `RecipeResult` inputs only, and it
-retires in v1.0.0.
+outside a catalog tree, confirm each one carries a header. Hydrated
+`RecipeResult` inputs kept an empty-value tolerance through v0.22; v1.0.0
+rejects an empty header there too.
 
 ## Adding a criteria value
 
