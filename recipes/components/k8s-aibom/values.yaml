@@ -72,17 +72,14 @@ securityContext:
   runAsUser: 65532
   allowPrivilegeEscalation: false
 
-# Envelope measured on GKE with the qualified v1.3.0 image (#2310), at 0, 251,
-# and 1,001 workloads, each a Deployment with replicas set to zero. At 1,001
-# workloads memory reached 67-69MiB and steady-state CPU was 1-2m, both well
-# inside the requests below. Convergence completed within 10s.
-#
-# The figures above are that original v1.3.0 measurement, carried forward
-# rather than re-derived. The v1.5.1 controller was spot-checked against them
-# on live GKE (2026-09-28): 2m CPU and 21MiB at a handful of workloads, well
-# inside the requests below. That confirms v1.5.1 did not regress the floor;
-# it does not re-establish the 1,001-workload ceiling, which has only ever
-# been measured against v1.3.0.
+# Envelope measured on regional GKE with the qualified v1.5.1 image at 1,002
+# workloads, 1,001 of them Deployments with replicas set to zero: 48MiB working
+# set (93MiB RSS) and 1m steady-state CPU, inside the requests below. Steady-state
+# API-server load was about one request per minute, all watch reconnects; each
+# upgrade or rollback re-walks the inventory once, one status write per AIBOM.
+# Measured by upstream for #2962 with chart defaults, which differ from these
+# values only in readiness.strictConfig, a no-op while the configuration is valid:
+# https://github.com/GoogleCloudPlatform/k8s-aibom/blob/c08e9ac2fda11a339865abdf2a7339a5a34c59e2/docs/evidence/v1.5.1-gke-upgrade-rollback-apiserver.md
 resources:
   requests:
     cpu: 50m
