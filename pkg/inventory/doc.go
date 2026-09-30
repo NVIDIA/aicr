@@ -139,10 +139,15 @@
 // reader covers both.)
 //
 // What Argo can be asked is narrower. It keeps no counterpart to a chart's
-// annotations and no revision in Helm's sense, and its status describes sync
-// and health rather than which version is installed, so those fields are left
-// zero rather than approximated. A path-based Application, which is the shape
-// of every generated wrapper and every Kustomize component, reports no
+// annotations and no revision in Helm's sense, so those fields are left zero
+// rather than approximated. A chart's version is read from status, never from
+// spec: targetRevision is the pin Argo has been asked to reach, and a pin
+// changed while its sync is pending or has failed leaves the old chart
+// deployed. A Synced status answers with the revision it last compared;
+// otherwise the newest history entry, which records a completed sync, does;
+// otherwise nothing does, and the component reads as unversioned rather than
+// at a version it may not be running. A path-based Application, which is the
+// shape of every generated wrapper and every Kustomize component, reports no
 // version at all: the only revision it carries is the bundle repository's git
 // branch, and reporting that would claim each such component sits at "main".
 //

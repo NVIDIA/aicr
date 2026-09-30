@@ -48,9 +48,13 @@ import (
 // block and edited in one direction only: every field whose value this reader
 // could plausibly confuse with another is given a value the other does not
 // share. metadata.namespace is never the destination namespace, the git
-// source's targetRevision is never the chart's, and both a status block and
-// metadata annotations are present so a reader that harvested either would be
-// caught by the exact struct comparison.
+// source's targetRevision is never the chart's, the git source's revision in
+// status is a commit, and metadata annotations are present so a reader that
+// harvested them would be caught by the exact struct comparison.
+//
+// The status blocks are the shape Argo CD writes for a synced Application:
+// sync.revision and comparedTo.source for a single source, and revisions
+// paired index for index with comparedTo.sources for several.
 
 // certManagerApp is the multi-source shape: an upstream chart plus a git
 // source carrying the values file by ref.
@@ -80,7 +84,17 @@ spec:
 status:
   sync:
     status: Synced
-    revision: 9f3c1de
+    comparedTo:
+      sources:
+        - repoURL: https://charts.jetstack.io
+          chart: cert-manager
+          targetRevision: 1.20.2
+        - repoURL: 'https://github.com/example/aicr-bundles.git'
+          targetRevision: main
+          ref: values
+    revisions:
+      - 1.20.2
+      - 9f3c1de
   health:
     status: Healthy
 `
@@ -108,6 +122,20 @@ spec:
   destination:
     server: "https://kubernetes.default.svc"
     namespace: "cert-manager"
+status:
+  sync:
+    status: Synced
+    comparedTo:
+      sources:
+        - repoURL: 'https://github.com/example/aicr-bundles.git'
+          targetRevision: main
+          ref: values
+        - repoURL: https://charts.jetstack.io
+          chart: cert-manager
+          targetRevision: 1.20.2
+    revisions:
+      - 9f3c1de
+      - 1.20.2
 `
 
 // gpuOperatorApp is the single-source InlineValues shape: one spec.source
@@ -131,6 +159,15 @@ spec:
   destination:
     server: "https://kubernetes.default.svc"
     namespace: "gpu-operator"
+status:
+  sync:
+    status: Synced
+    comparedTo:
+      source:
+        repoURL: https://helm.ngc.nvidia.com/nvidia
+        chart: gpu-operator
+        targetRevision: v25.10.0
+    revision: v25.10.0
 `
 
 // nodewrightApp is the path-based manifest-only shape. Its targetRevision is
@@ -191,6 +228,44 @@ func argoAppWith(t *testing.T, manifest string, edit func(*unstructured.Unstruct
 	edit(app)
 
 	return app
+}
+
+// syncedTo gives app the status.sync Argo CD writes once the live state matches
+// its spec: comparedTo mirroring the spec's sources, and each source's revision
+// resolved to its targetRevision. It is for inline fixtures whose subject is
+// the spec, so the deployed version they report is the pin they declare.
+func syncedTo(t *testing.T, app *unstructured.Unstructured) *unstructured.Unstructured {
+	t.Helper()
+	revisionOf := func(source any) string {
+		return fmt.Sprint(source.(map[string]any)["targetRevision"])
+	}
+	sync := map[string]any{"status": "Synced"}
+	if source, ok, _ := unstructured.NestedFieldCopy(app.Object, "spec", "source"); ok {
+		sync["comparedTo"] = map[string]any{"source": source}
+		sync["revision"] = revisionOf(source)
+	}
+	if sources, ok, _ := unstructured.NestedFieldCopy(app.Object, "spec", "sources"); ok {
+		list := sources.([]any)
+		revisions := make([]any, 0, len(list))
+		for _, source := range list {
+			revisions = append(revisions, revisionOf(source))
+		}
+		sync["comparedTo"] = map[string]any{"sources": sources}
+		sync["revisions"] = revisions
+	}
+	if err := unstructured.SetNestedField(app.Object, sync, "status", "sync"); err != nil {
+		t.Fatalf("set status.sync: %v", err)
+	}
+
+	return app
+}
+
+// withoutStatus is a fixture cut before its status block, for a case that
+// supplies its own.
+func withoutStatus(manifest string) string {
+	spec, _, _ := strings.Cut(manifest, "status:")
+
+	return spec
 }
 
 // argoClient is a dynamic client holding the given Applications. The list
@@ -299,7 +374,7 @@ func TestArgoApplications(t *testing.T) {
 		},
 		{
 			name: "sources without a chart fall through to the one that has it",
-			objects: []runtime.Object{argoApp(t, `
+			objects: []runtime.Object{syncedTo(t, argoApp(t, `
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -318,7 +393,7 @@ spec:
       targetRevision: v0.9.4
   destination:
     namespace: "kai-scheduler"
-`)},
+`))},
 			want: []installedRelease{{
 				Source:       sourceArgo,
 				Name:         "kai-scheduler",
@@ -333,7 +408,7 @@ spec:
 			// Failing on it would refuse an Application it can answer for, and
 			// the git source is the one Argo does not schema-check as tightly.
 			name: "a source without a chart is not type-checked",
-			objects: []runtime.Object{argoApp(t, `
+			objects: []runtime.Object{syncedTo(t, argoApp(t, `
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -349,7 +424,7 @@ spec:
       targetRevision: 1.20.2
   destination:
     namespace: "cert-manager"
-`)},
+`))},
 			want: []installedRelease{wantCertManager},
 		},
 		{
@@ -713,6 +788,7 @@ spec: {source: {path: 001-alpha}, destination: {namespace: "alpha-ns"}}
 						"spec", "source", "targetRevision"); err != nil {
 						t.Fatalf("set targetRevision: %v", err)
 					}
+					syncedTo(t, app)
 				}),
 				*argoApp(t, gpuOperatorApp),
 			}},
@@ -1023,5 +1099,164 @@ func TestArgoApplicationsEchoesPagingOptions(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("argoApplications() = %+v, want %+v", got, want)
+	}
+}
+
+// TestApplicationFromReportsTheDeployedRevision pins that the version comes
+// from what Argo CD deployed and never from the pin it has been asked to
+// reach. Reading the pin reports an upgrade still pending, or one whose sync
+// failed, as already made, which hides that transition's steps.
+func TestApplicationFromReportsTheDeployedRevision(t *testing.T) {
+	// The fixture ends in its own status block; each case replaces it.
+	specOnly := withoutStatus(gpuOperatorApp)
+	// movedPin is gpu-operator with its pin raised to v25.11.0 and whatever
+	// status the case supplies in place of the fixture's.
+	movedPin := func(status string) *unstructured.Unstructured {
+		app := argoApp(t, specOnly+status)
+		if err := unstructured.SetNestedField(app.Object, "v25.11.0",
+			"spec", "source", "targetRevision"); err != nil {
+			t.Fatalf("set targetRevision: %v", err)
+		}
+
+		return app
+	}
+
+	tests := []struct {
+		name            string
+		app             *unstructured.Unstructured
+		want            string
+		wantErrContains []string
+	}{
+		{
+			name: "pin moved and the sync is pending: the last completed sync answers",
+			app: movedPin(`status:
+  sync:
+    status: OutOfSync
+    comparedTo:
+      source:
+        repoURL: https://helm.ngc.nvidia.com/nvidia
+        chart: gpu-operator
+        targetRevision: v25.11.0
+    revision: v25.11.0
+  history:
+    - id: 3
+      revision: v25.7.0
+      source:
+        repoURL: https://helm.ngc.nvidia.com/nvidia
+        chart: gpu-operator
+        targetRevision: v25.7.0
+    - id: 4
+      revision: v25.10.0
+      source:
+        repoURL: https://helm.ngc.nvidia.com/nvidia
+        chart: gpu-operator
+        targetRevision: v25.10.0
+`),
+			want: "v25.10.0",
+		},
+		{
+			// The spec was edited but the controller has not compared against
+			// it yet, so status still describes the old revision as synced.
+			name: "pin moved before the next refresh: the compared revision answers",
+			app: movedPin(`status:
+  sync:
+    status: Synced
+    comparedTo:
+      source:
+        repoURL: https://helm.ngc.nvidia.com/nvidia
+        chart: gpu-operator
+        targetRevision: v25.10.0
+    revision: v25.10.0
+`),
+			want: "v25.10.0",
+		},
+		{
+			name: "multi-source pending sync reads the chart's revision from history",
+			app: argoApp(t, strings.Replace(withoutStatus(certManagerApp),
+				"targetRevision: 1.20.2", "targetRevision: 1.21.0", 1)+`status:
+  sync:
+    status: OutOfSync
+  history:
+    - id: 7
+      sources:
+        - repoURL: 'https://github.com/example/aicr-bundles.git'
+          targetRevision: main
+          ref: values
+        - repoURL: https://charts.jetstack.io
+          chart: cert-manager
+          targetRevision: 1.20.2
+      revisions:
+        - 9f3c1de
+        - 1.20.2
+`),
+			want: "1.20.2",
+		},
+		{
+			name: "never synced: no version rather than the pin",
+			app:  movedPin(""),
+		},
+		{
+			name: "out of sync with no completed sync: no version",
+			app: movedPin(`status:
+  sync:
+    status: OutOfSync
+`),
+		},
+		{
+			// Evidence about another chart is not evidence about this one.
+			name: "status names a different chart: no version",
+			app: movedPin(`status:
+  sync:
+    status: Synced
+    comparedTo:
+      source:
+        repoURL: https://helm.ngc.nvidia.com/nvidia
+        chart: gpu-operator-legacy
+        targetRevision: v1.0.0
+    revision: v1.0.0
+`),
+		},
+		{
+			name: "revisions that do not pair with the sources are refused",
+			app: argoApp(t, withoutStatus(certManagerApp)+`status:
+  sync:
+    status: Synced
+    comparedTo:
+      sources:
+        - repoURL: 'https://github.com/example/aicr-bundles.git'
+          targetRevision: main
+          ref: values
+        - repoURL: https://charts.jetstack.io
+          chart: cert-manager
+          targetRevision: 1.20.2
+    revisions:
+      - 9f3c1de
+`),
+			wantErrContains: []string{"cert-manager", "status.sync.revisions"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := applicationFrom(tt.app)
+			if len(tt.wantErrContains) > 0 {
+				if err == nil {
+					t.Fatalf("applicationFrom() = %+v, want an error", got)
+				}
+				for _, want := range tt.wantErrContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("applicationFrom() error = %v, want it to contain %q", err, want)
+					}
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("applicationFrom() error = %v", err)
+			}
+			if got.ChartVersion != tt.want {
+				t.Errorf("ChartVersion = %q, want %q", got.ChartVersion, tt.want)
+			}
+		})
 	}
 }

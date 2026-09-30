@@ -35,6 +35,10 @@ import (
 // the form an operator writes it into an RBAC rule.
 const argoApplicationResource = "applications.argoproj.io"
 
+// argoSynced is status.sync.status for an Application whose live state
+// matches the revision it last compared against.
+const argoSynced = "Synced"
+
 // argoApplicationGVR is read directly rather than through a RESTMapper: the
 // group, version and resource are fixed by Argo's API and a mapper would add
 // a discovery round trip to learn them.
@@ -61,9 +65,9 @@ type argoChart struct {
 // at all, and helmReleases returns nothing.
 //
 // What Argo cannot answer is left zero rather than approximated. It keeps no
-// counterpart to a chart's annotations, has no revision in Helm's sense, and
-// its status describes sync and health, which is a different question from
-// which version is installed.
+// counterpart to a chart's annotations and has no revision in Helm's sense.
+// The chart version is read from status, never from spec: see
+// deployedRevision.
 //
 // Only in-scope Applications are read, and scope is decided before an item is
 // validated. A cluster runs Applications belonging to teams that have never
@@ -189,20 +193,151 @@ func applicationFrom(item *unstructured.Unstructured) (installedRelease, error) 
 	if err != nil {
 		return installedRelease{}, err
 	}
+	version := ""
+	if chart.name != "" {
+		if version, err = deployedRevision(item, chart.name); err != nil {
+			return installedRelease{}, err
+		}
+	}
 
 	return installedRelease{
 		Source:       sourceArgo,
 		Name:         item.GetName(),
 		Namespace:    namespace,
 		ChartName:    chart.name,
-		ChartVersion: chart.version,
+		ChartVersion: version,
 	}, nil
 }
 
-// applicationChart finds the source that names a Helm chart, which is the only
-// source whose targetRevision is a component version. The others carry a git
-// revision: the bundle repository's branch or tag, which would read as every
-// component sitting at "main".
+// deployedRevision is the version of the named chart the cluster is running,
+// or empty when status establishes none.
+//
+// spec.source(s).targetRevision is the pin Argo has been asked to reach, not
+// the one it reached: a pin changed while its sync is pending or has failed
+// leaves the old chart deployed. Reporting the pin would read an upgrade not
+// yet made as already made, and hide that transition's steps. So only status
+// is evidence, in this order:
+//
+//  1. status.sync, when Synced: the live state matches the rendering at the
+//     revision last compared, which is what is deployed. That revision is the
+//     comparison's own and not the spec's, so a pin edited since the last
+//     refresh is not read as applied.
+//  2. Otherwise the newest status.history entry, which Argo appends only when
+//     a sync operation completes.
+//
+// Neither is waited for. A Synced Application whose operation never finishes,
+// as a health-gated one does on a cluster that reports no pod readiness,
+// still answers from the first; one with neither answers empty, which reads
+// as unversioned rather than as a version it may not be running.
+//
+// The chart is found by name in the status sources rather than by position,
+// and a status naming a different chart answers empty: that is not evidence
+// about the chart the spec names.
+func deployedRevision(item *unstructured.Unstructured, chartName string) (string, error) {
+	status, _, err := unstructured.NestedString(item.Object, "status", "sync", "status")
+	if err != nil {
+		return "", fieldError(item, err, "status.sync.status", "a string")
+	}
+	if status == argoSynced {
+		revision, syncErr := syncedRevision(item, chartName)
+		if syncErr != nil || revision != "" {
+			return revision, syncErr
+		}
+	}
+
+	history, _, err := unstructured.NestedSlice(item.Object, "status", "history")
+	if err != nil {
+		return "", fieldError(item, err, "status.history", "a list")
+	}
+	if len(history) == 0 {
+		return "", nil
+	}
+	// Argo appends and trims from the front, so the last entry is the newest.
+	field := fmt.Sprintf("status.history[%d]", len(history)-1)
+	entry, ok := history[len(history)-1].(map[string]any)
+	if !ok {
+		return "", fieldError(item, nil, field, "an object")
+	}
+
+	return revisionOf(item, chartName, entry, entry, field)
+}
+
+// syncedRevision is the named chart's revision in a Synced status.sync.
+func syncedRevision(item *unstructured.Unstructured, chartName string) (string, error) {
+	sync, _, err := unstructured.NestedMap(item.Object, "status", "sync")
+	if err != nil {
+		return "", fieldError(item, err, "status.sync", "an object")
+	}
+	compared, _, err := unstructured.NestedMap(sync, "comparedTo")
+	if err != nil {
+		return "", fieldError(item, err, "status.sync.comparedTo", "an object")
+	}
+
+	return revisionOf(item, chartName, compared, sync, "status.sync")
+}
+
+// revisionOf reads the revision paired with the named chart. Argo records a
+// single-source Application as source and revision, and a multi-source one as
+// sources and revisions, index for index; holder carries the sources and
+// revisions the revision fields carry.
+func revisionOf(item *unstructured.Unstructured, chartName string,
+	holder, revisions map[string]any, field string) (string, error) {
+
+	source, _, err := unstructured.NestedMap(holder, "source")
+	if err != nil {
+		return "", fieldError(item, err, field+".source", "an object")
+	}
+	chart, err := chartFrom(item, source, field+".source")
+	if err != nil {
+		return "", err
+	}
+	if chart.name == chartName {
+		var revision string
+		if revision, _, err = unstructured.NestedString(revisions, "revision"); err != nil {
+			return "", fieldError(item, err, field+".revision", "a string")
+		}
+
+		return revision, nil
+	}
+
+	sources, _, err := unstructured.NestedSlice(holder, "sources")
+	if err != nil {
+		return "", fieldError(item, err, field+".sources", "a list")
+	}
+	list, _, err := unstructured.NestedStringSlice(revisions, "revisions")
+	if err != nil {
+		return "", fieldError(item, err, field+".revisions", "a list of strings")
+	}
+	for i, entry := range sources {
+		sourceField := fmt.Sprintf("%s.sources[%d]", field, i)
+		source, ok := entry.(map[string]any)
+		if !ok {
+			return "", fieldError(item, nil, sourceField, "an object")
+		}
+		chart, err := chartFrom(item, source, sourceField)
+		if err != nil {
+			return "", err
+		}
+		if chart.name != chartName {
+			continue
+		}
+		// Argo writes the two lists together, so a revision missing for the
+		// chart's index is a record this cannot pair, not a version of "".
+		if i >= len(list) {
+			return "", fieldError(item, nil, field+".revisions", "a list pairing every source")
+		}
+
+		return list[i], nil
+	}
+
+	return "", nil
+}
+
+// applicationChart finds the source that names a Helm chart, the only source
+// whose revision is a component version. The others carry a git revision: the
+// bundle repository's branch or tag, which would read as every component
+// sitting at "main". Its version is the pin, which deployedRevision does not
+// trust.
 //
 // Selection is by which source carries a chart, never by position. Argo puts
 // no ordering requirement on spec.sources, and the generated multi-source
