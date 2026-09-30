@@ -166,8 +166,8 @@ its selector, so a node that joins later runs both CRs and reboots twice.
    - Flux: suspend the Kustomization that reconciles the bundle
      (`flux suspend kustomization <name>`), then delete the
      `rdma-netns-exclusive` `HelmRelease` from the Flux namespace
-     (`flux-system` by default). Resume the Kustomization once the new bundle
-     is committed.
+     (`flux-system` by default). Leave the Kustomization suspended until
+     step 4.
 3. Delete the CR if it remains, and confirm it is gone. Argo CD leaves it
    behind unless cascade delete is enabled, and under Flux it is still a Helm
    hook, which an uninstall does not remove:
@@ -177,7 +177,12 @@ its selector, so a node that joins later runs both CRs and reboots twice.
    kubectl get nodewright rdma-netns-exclusive      # expect NotFound
    ```
 
-4. Apply the new bundle.
+4. Apply the new bundle. Under Flux, commit and push it, run
+   `flux reconcile source git <repository>` so the source serves the new
+   revision, and only then resume the Kustomization
+   (`flux resume kustomization <name>`). Resuming against the old revision
+   re-creates the `rdma-netns-exclusive` `HelmRelease`, and its hook
+   re-creates the legacy CR.
 
 The package has no uninstall step, so removing the CR leaves the host setting
 in place. The first rollout of the merged CR re-applies the RDMA package on
