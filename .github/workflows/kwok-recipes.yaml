@@ -658,7 +658,7 @@ jobs:
   # ── Summary: aggregate all tiers ──
   summary:
     name: KWOK Test Summary (advisory)
-    needs: [script-tests, prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
+    needs: [script-tests, discover, prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -671,6 +671,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           scripts="${{ needs.script-tests.result }}"
+          discover="${{ needs.discover.result }}"
           prime="${{ needs.prime-images.result }}"
           build="${{ needs.build-aicr.result }}"
           tier1="${{ needs.test-tier1.result }}"
@@ -680,6 +681,7 @@ jobs:
           echo "| Stage | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Script unit tests | ${scripts} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Recipe discovery | ${discover} |" >> $GITHUB_STEP_SUMMARY
           echo "| Image cache priming | ${prime} |" >> $GITHUB_STEP_SUMMARY
           echo "| aicr build | ${build} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 1 (generic) | ${tier1} |" >> $GITHUB_STEP_SUMMARY
@@ -692,6 +694,12 @@ jobs:
           # The script tests gate no tier, so their failure is only visible here.
           if [[ "$scripts" == "failure" || "$scripts" == "cancelled" ]]; then
             echo "Script unit tests failed or were cancelled" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+
+          # A failed discovery skips every tier, and the tier checks below tolerate skipped.
+          if [[ "$discover" == "failure" || "$discover" == "cancelled" ]]; then
+            echo "Recipe discovery failed or was cancelled. No tier ran" >> $GITHUB_STEP_SUMMARY
             failed=true
           fi
 
