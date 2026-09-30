@@ -503,6 +503,10 @@ func TestUpgradeCheckReportsNamespaceChanges(t *testing.T) {
 // bundle-info.yaml that locates each release, and the rendered values.yaml the
 // deployer wrote. Values are supplied as raw YAML so a test can express an
 // absent key, which is the state that matters here.
+//
+// Every release gets a values.yaml, empty where none is given, because every
+// deployer writes one: a release without it is an incomplete bundle, which the
+// reader rejects.
 func syntheticBundle(t *testing.T, dir string, components map[string]string, values map[string]string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -514,16 +518,21 @@ func syntheticBundle(t *testing.T, dir string, components map[string]string, val
 	for i, name := range sortedKeys(components) {
 		path := fmt.Sprintf("%03d-%s", i+1, name)
 		releases = append(releases, bundleinfo.Release{Name: name, Component: name, Path: path})
-		if doc, ok := values[name]; ok {
-			if err := os.MkdirAll(filepath.Join(dir, path), 0o750); err != nil {
-				t.Fatalf("setup: mkdir %s: %v", path, err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, path, "values.yaml"), []byte(doc), 0o600); err != nil {
-				t.Fatalf("setup: write values for %s: %v", name, err)
-			}
+		if err := os.MkdirAll(filepath.Join(dir, path), 0o750); err != nil {
+			t.Fatalf("setup: mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, path, "values.yaml"), []byte(values[name]), 0o600); err != nil {
+			t.Fatalf("setup: write values for %s: %v", name, err)
 		}
 	}
+	writeBundleInfo(t, dir, releases)
+	return dir
+}
 
+// writeBundleInfo writes a valid bundle-info.yaml naming releases, so each
+// fixture goes through the reader's own validation rather than around it.
+func writeBundleInfo(t *testing.T, dir string, releases []bundleinfo.Release) {
+	t.Helper()
 	info := &bundleinfo.BundleInfo{
 		APIVersion: header.StableGroupVersion,
 		Kind:       string(header.KindBundleInfo),
@@ -539,7 +548,18 @@ func syntheticBundle(t *testing.T, dir string, components map[string]string, val
 	if _, err := bundleinfo.Write(t.Context(), dir, info); err != nil {
 		t.Fatalf("setup: write bundle info: %v", err)
 	}
-	return dir
+}
+
+// fluxReleases names one HelmRelease manifest per component, the layout flux
+// records. The manifests themselves are the caller's to write, or to withhold.
+func fluxReleases(components []string) []bundleinfo.Release {
+	releases := make([]bundleinfo.Release, 0, len(components))
+	for _, name := range components {
+		releases = append(releases, bundleinfo.Release{
+			Name: name, Component: name, Path: name, Manifest: name + "/helmrelease.yaml",
+		})
+	}
+	return releases
 }
 
 // A component's object names come from its merged Helm values, which a
@@ -732,6 +752,29 @@ func TestUpgradeCheckSkipsObjectNamesWhenTargetValuesAreUnreadable(t *testing.T)
 
 	report, err := client.UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{From: from, To: to})
 	assertObjectNamesSkipped(t, report, err, "could not be resolved")
+}
+
+// An incomplete source bundle has no baseline for the object-name axis, so the
+// report must withdraw that axis instead of comparing against an empty set and
+// claiming it did. The version comparison is still answerable and still runs.
+func TestUpgradeCheckWithdrawsObjectNamesForAnIncompleteBundle(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	client := upgradeCheckClient(t)
+	components := map[string]string{"synthetic-alpha": "1.2.0"}
+
+	// A flux bundle whose bundle-info.yaml names a HelmRelease the copy lost.
+	from := filepath.Join(dir, "incomplete-flux")
+	if err := os.MkdirAll(from, 0o750); err != nil {
+		t.Fatalf("setup: mkdir: %v", err)
+	}
+	syntheticRecipe(t, filepath.Join(from, "recipe.yaml"), components)
+	writeBundleInfo(t, from, fluxReleases([]string{"synthetic-alpha"}))
+
+	to := syntheticRecipe(t, filepath.Join(dir, "to.yaml"), map[string]string{"synthetic-alpha": "1.3.0"})
+
+	report, err := client.UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{From: from, To: to})
+	assertObjectNamesSkipped(t, report, err, "synthetic-alpha/helmrelease.yaml")
 }
 
 // assertObjectNamesSkipped checks the report withheld the object-name axis for

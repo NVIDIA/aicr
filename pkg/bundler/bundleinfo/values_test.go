@@ -170,14 +170,6 @@ func TestReadReleaseValues(t *testing.T) {
 			want: map[string]map[string]any{"c": {"fullnameOverride": "from-values-file"}},
 		},
 		{
-			name: "a manifest-only component yields no values and is not an error",
-			releases: []bundleinfo.Release{
-				{Name: "rdma", Component: "rdma", Path: "001-rdma"},
-			},
-			files: map[string]string{"001-rdma/manifests/cr.yaml": "kind: NodeWright\n"},
-			want:  map[string]map[string]any{},
-		},
-		{
 			// Present with an empty map, not absent: the manifest exists and
 			// declares no values, which is a statement that the release pinned
 			// none. See TestReadReleaseValuesKeepsAReleaseThatPinnedNothing.
@@ -421,12 +413,6 @@ func TestReadReleaseValuesKeepsAReleaseThatPinnedNothing(t *testing.T) {
 			},
 			wantEntry: true,
 		},
-		{
-			name:      "a manifest-only component with neither states nothing",
-			release:   bundleinfo.Release{Name: "c", Component: "c", Path: "001-c"},
-			files:     map[string]string{"001-c/manifests/cr.yaml": "kind: NodeWright\n"},
-			wantEntry: false,
-		},
 	}
 
 	for _, tt := range tests {
@@ -445,6 +431,59 @@ func TestReadReleaseValuesKeepsAReleaseThatPinnedNothing(t *testing.T) {
 			}
 			if tt.wantEntry && len(values) != 0 {
 				t.Errorf("values = %#v, want an empty map", values)
+			}
+		})
+	}
+}
+
+// An incompletely copied bundle must be rejected, not read as a release that
+// pinned nothing. "Pinned nothing" is a statement inheritance acts on: with a
+// current fullnameOverride and an empty prior, it writes a null that deletes
+// the deployed name and renames every object the release owns.
+func TestReadReleaseValuesRejectsIncompleteBundle(t *testing.T) {
+	tests := []struct {
+		name    string
+		release bundleinfo.Release
+		files   map[string]string
+		wantMsg string
+	}{
+		{
+			name: "a recorded flux manifest that is missing",
+			release: bundleinfo.Release{
+				Name: "c", Component: "c", Path: "c", Manifest: "c/helmrelease.yaml",
+			},
+			files:   nil,
+			wantMsg: "c/helmrelease.yaml",
+		},
+		{
+			// Every local-format folder writes values.yaml unconditionally,
+			// so a release with neither it nor a manifest was truncated.
+			name:    "neither values.yaml nor a manifest",
+			release: bundleinfo.Release{Name: "c", Component: "c", Path: "001-c"},
+			files:   map[string]string{"001-c/install.sh": "#!/bin/sh\n"},
+			wantMsg: "incomplete",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := valuesBundle(t, []bundleinfo.Release{tt.release})
+			for rel, content := range tt.files {
+				plant(t, dir, rel, content)
+			}
+			got, err := bundleinfo.ReadReleaseValues(context.Background(), dir)
+			if err == nil {
+				t.Fatalf("want an incomplete bundle rejected, got values %#v", got)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("want ErrCodeInvalidRequest, got %v", err)
+			}
+			// NotFound is reserved for a bundle predating bundle-info.yaml,
+			// which callers treat as a skippable state rather than a fault.
+			if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+				t.Errorf("an incomplete bundle must not read as a pre-stamping one: %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.wantMsg)
 			}
 		})
 	}

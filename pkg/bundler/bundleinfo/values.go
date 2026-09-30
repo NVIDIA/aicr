@@ -67,9 +67,14 @@ var injectedSuffixes = []string{"-pre", "-post", "-readiness"}
 // cluster-values.yaml layered over it; flux inlines the same values under
 // spec.values in the HelmRelease named by <manifest>.
 //
-// A release with neither is omitted rather than reported: a manifest-only
-// component has no chart values at all, and an injected -pre, -post or
-// -readiness release is not its component's chart.
+// A release with neither is rejected, not omitted. Every deployer writes one
+// or the other for every release — the local-format writers emit values.yaml
+// for both folder kinds unconditionally, and flux records a HelmRelease for
+// each — so its absence means the bundle was copied incompletely. Omitting it
+// would read as "this component was never deployed", which inheritance takes
+// as a first deploy and lets the current default rename the running objects.
+// An injected -pre, -post or -readiness release is skipped before any of
+// this, because it is not its component's chart.
 //
 // Fails closed everywhere Read does, and for the same reason: the bundle
 // arrived from an OCI registry or a GitOps clone. A missing bundle-info.yaml
@@ -153,15 +158,13 @@ func releaseValues(dir string, r *Release, vendored bool) (map[string]any, bool,
 		return values, true, nil
 	}
 	if r.Manifest == "" {
-		return nil, false, nil
+		return nil, false, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"release %q records no manifest and has no %s under %s, but every deployer writes one "+
+				"or the other; the bundle is incomplete", r.Name, valuesFileName, r.Path))
 	}
 	values, err = readManifestValues(dir, r.Manifest)
 	if err != nil {
 		return nil, false, err
-	}
-	if values == nil {
-		// The manifest exists and declares no values, which is a statement.
-		return map[string]any{}, true, nil
 	}
 	return values, true, nil
 }
@@ -244,10 +247,21 @@ func readValuesFile(dir, relDir, name string) (map[string]any, bool, error) {
 // readManifestValues pulls spec.values out of the HelmRelease (flux) the
 // record names. Only that one path is read: the manifest is a deployer
 // resource whose remaining fields this package has no business interpreting.
+//
+// A manifest the record names but the bundle lacks is an error, never an empty
+// result. The two are different facts — an existing HelmRelease with no
+// spec.values states that the release pinned nothing, while a missing one
+// states nothing at all — and collapsing them lets inheritance write a null
+// that deletes a deployed fullnameOverride.
 func readManifestValues(dir, manifest string) (map[string]any, error) {
 	data, found, err := readBounded(dir, manifest)
-	if err != nil || !found {
+	if err != nil {
 		return nil, err
+	}
+	if !found {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s names %s, which is missing from the bundle; the bundle is incomplete",
+			FileName, manifest))
 	}
 	var doc struct {
 		Spec struct {
@@ -257,6 +271,9 @@ func readManifestValues(dir, manifest string) (map[string]any, error) {
 	if unmarshalErr := yaml.Unmarshal(data, &doc); unmarshalErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("failed to parse %s", manifest), unmarshalErr)
+	}
+	if doc.Spec.Values == nil {
+		return map[string]any{}, nil
 	}
 	return doc.Spec.Values, nil
 }

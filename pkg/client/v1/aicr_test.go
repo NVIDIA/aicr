@@ -28,7 +28,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -2816,22 +2815,7 @@ func priorBundle(t *testing.T, dir string, namespaces map[string]string, values 
 			t.Fatalf("setup: write values for %s: %v", name, err)
 		}
 	}
-
-	info := &bundleinfo.BundleInfo{
-		APIVersion: header.StableGroupVersion,
-		Kind:       string(header.KindBundleInfo),
-		Build: bundleinfo.Build{
-			Deployer: "helm",
-			Recipe: bundleinfo.Recipe{
-				Path:   "recipe.yaml",
-				Digest: "sha256:3b1f8c2ad9e7546102bb8f4c7d0e9a1358cc4f6b2e8d70a94f1c5b3e6d820947",
-			},
-		},
-		Layout: bundleinfo.Layout{Entrypoint: "deploy.sh", Releases: releases},
-	}
-	if _, err := bundleinfo.Write(t.Context(), dir, info); err != nil {
-		t.Fatalf("setup: write bundle info: %v", err)
-	}
+	writeBundleInfo(t, dir, releases)
 	return dir
 }
 
@@ -2917,6 +2901,41 @@ func TestResolveRecipe_InheritFromObjectNames(t *testing.T) {
 			t.Errorf("overrides restate an unchanged object name: %#v", ref.Overrides)
 		}
 	})
+}
+
+// TestResolveRecipe_InheritFromIncompleteBundle covers a flux bundle whose
+// bundle-info.yaml names a HelmRelease the copy lost. Read as "this release
+// pinned nothing", inheritance would write a null for any name the current
+// values set, deleting a deployed fullnameOverride and renaming the running
+// objects. It must refuse the artifact instead.
+func TestResolveRecipe_InheritFromIncompleteBundle(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	pinned := baseline.Components[0].Name
+
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		t.Fatalf("setup: mkdir bundle: %v", mkErr)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), map[string]string{pinned: "legacy-install-namespace"})
+	writeBundleInfo(t, dir, fluxReleases([]string{pinned}))
+
+	result, err := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+	if err == nil {
+		ref := result.Resolved().GetComponentRef(pinned)
+		t.Fatalf("want an incomplete bundle refused, got a recipe with overrides %#v", ref.Overrides)
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
+	}
+	if missing := pinned + "/helmrelease.yaml"; !strings.Contains(err.Error(), missing) {
+		t.Errorf("error %q does not name the missing manifest %q", err.Error(), missing)
+	}
 }
 
 func namespacesOf(result *aicr.RecipeResult) map[string]string {
