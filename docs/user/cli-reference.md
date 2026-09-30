@@ -1603,7 +1603,7 @@ For the group and kind pairs the *crossed* transition records name, the scan lis
 
 That test is positive, so an object carrying no marker AICR recognizes is reported by default. The direction is deliberate: the failure being guarded against is an operator's own custom resources being cascade-deleted when a component removes a CRD, and AICR cannot restore what it does not own. Over-warning about an object some fourth tool owns costs a line of output; under-warning costs the object.
 
-Findings **never change the exit code**. A kind the cluster does not serve is reported as not installed rather than raised, since the CRD a record names may simply not be there, and a scan that fails outright (an RBAC gap, an apiserver that went away) fills its own section with the reason and leaves the comparison alone.
+Findings **never change the exit code**. A kind the cluster does not serve is reported as not installed rather than raised, since the CRD a record names may simply not be there, but only once discovery has enumerated that kind's API group; if it could not, the kind cannot be called absent and the scan fails. A scan that fails (an RBAC gap, an apiserver that went away, an API group discovery could not reach) fills its own section with the reason and leaves the comparison alone.
 
 **An empty `AT RISK` section is not an all-clear.** It renders on every run, including one that contacted no cluster, and states which case it is: no cluster access was requested, the scan was explicitly turned off, no crossed record names a resource kind so nothing was examined, or the scan read objects and found every one of them owned. `--format json` and `--format yaml` carry `atRisk` unconditionally for the same reason.
 

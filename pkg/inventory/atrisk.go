@@ -133,17 +133,18 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 	if err != nil {
 		return AtRiskResult{}, err
 	}
-	mapper, err := k8sclient.NewRESTMapperForConfig(restConfig)
+	mapper, groups, err := k8sclient.NewRESTMapperAndDiscovery(restConfig)
 	if err != nil {
 		return AtRiskResult{}, err
 	}
 
-	return scanAtRisk(ctx, dyn, mapper, opts.Kinds)
+	return scanAtRisk(ctx, dyn, mapper, groups, opts.Kinds)
 }
 
-// scanAtRisk is ScanAtRisk with the client and mapper supplied.
+// scanAtRisk is ScanAtRisk with the client, the mapper and the discovery the
+// mapper resolves through supplied.
 func scanAtRisk(ctx context.Context, client dynamic.Interface, mapper meta.RESTMapper,
-	kinds []ResourceKind) (AtRiskResult, error) {
+	groups k8sclient.GroupResourceLister, kinds []ResourceKind) (AtRiskResult, error) {
 
 	if len(kinds) == 0 {
 		return AtRiskResult{}, nil
@@ -164,7 +165,7 @@ func scanAtRisk(ctx context.Context, client dynamic.Interface, mapper meta.RESTM
 			return AtRiskResult{}, err
 		}
 
-		gvr, served, err := resolveKind(mapper, kind)
+		gvr, served, err := resolveKind(ctx, mapper, groups, kind)
 		if err != nil {
 			return AtRiskResult{}, err
 		}
@@ -204,32 +205,49 @@ func validateKinds(kinds []ResourceKind) error {
 // resolveKind maps a kind onto the resource the apiserver serves it as,
 // reporting whether it serves it at all.
 //
-// A no-match is not an error: the CRD a transition record names may simply not
-// be installed, which is the common case for a component an operator does not
-// run. Every other discovery failure is, and the distinction is the point —
-// reporting an unreachable apiserver as "the kind is absent" would turn an
-// outage into an all-clear on exactly the objects this scan exists to warn
-// about.
-func resolveKind(mapper meta.RESTMapper, kind ResourceKind) (schema.GroupVersionResource, bool, error) {
+// A no-match is not an error when it is established: the CRD a transition
+// record names may simply not be installed, which is the common case for a
+// component an operator does not run. Establishing it takes two things, since
+// client-go discards a partial discovery failure whenever other groups
+// answered and reports the kind as a bare no-match: the error must not wrap a
+// group failure, and the kind's own group must have been enumerated in full.
+// Anything short of that, and every other discovery failure, is an error: an
+// unreachable group read as "not installed" is an all-clear on exactly the
+// objects this scan exists to warn about.
+func resolveKind(ctx context.Context, mapper meta.RESTMapper, groups k8sclient.GroupResourceLister,
+	kind ResourceKind) (schema.GroupVersionResource, bool, error) {
+
 	if mapper == nil {
 		return schema.GroupVersionResource{}, false, errors.New(errors.ErrCodeInvalidRequest,
 			"the at-risk scan was given no RESTMapper, so no kind can be resolved to a resource")
 	}
 
+	errCtx := map[string]any{ctxKeyResource: kindDescription(kind)}
 	gk := schema.GroupKind{Group: kind.Group, Kind: kind.Kind}
 	mapping, err := mapper.RESTMapping(gk)
-	if err != nil {
-		if meta.IsNoMatchError(err) {
-			return schema.GroupVersionResource{}, false, nil
-		}
-
+	if err == nil {
+		return mapping.Resource, true, nil
+	}
+	if !k8sclient.IsGenuineNoMatch(err) {
 		return schema.GroupVersionResource{}, false, errors.WrapWithContext(errors.ErrCodeUnavailable,
 			fmt.Sprintf("failed to resolve %s while scanning for resources an upgrade could disturb",
 				kindDescription(kind)),
-			err, map[string]any{ctxKeyResource: kindDescription(kind)})
+			err, errCtx)
+	}
+	if groups == nil {
+		return schema.GroupVersionResource{}, false, errors.NewWithContext(errors.ErrCodeUnavailable,
+			fmt.Sprintf("the cluster reported no %s, but the scan has no discovery to confirm API group %q "+
+				"was enumerated, so it cannot say the kind is absent", kindDescription(kind), kind.Group),
+			errCtx)
+	}
+	if groupErr := k8sclient.GroupDiscoveryFailure(ctx, groups, kind.Group); groupErr != nil {
+		return schema.GroupVersionResource{}, false, errors.WrapWithContext(errors.ErrCodeUnavailable,
+			fmt.Sprintf("the cluster reported no %s, but discovery for API group %q is incomplete, so the "+
+				"kind cannot be said to be absent", kindDescription(kind), kind.Group),
+			groupErr, errCtx)
 	}
 
-	return mapping.Resource, true, nil
+	return schema.GroupVersionResource{}, false, nil
 }
 
 // scanKind lists one kind cluster-wide and returns the objects nothing owns.

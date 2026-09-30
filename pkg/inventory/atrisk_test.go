@@ -30,12 +30,14 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
@@ -91,6 +93,16 @@ type brokenMapper struct {
 
 func (m brokenMapper) RESTMapping(schema.GroupKind, ...string) (*meta.RESTMapping, error) {
 	return nil, m.err
+}
+
+// discovered is the discovery the mapper resolves through. A zero value
+// enumerated every group; err is what ServerGroupsAndResources reports.
+type discovered struct {
+	err error
+}
+
+func (d discovered) ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.APIResourceList, error) {
+	return nil, nil, d.err
 }
 
 // topologyObject is one ClusterTopology carrying exactly the labels and
@@ -199,7 +211,7 @@ func TestScanAtRiskOwnership(t *testing.T) {
 			t.Parallel()
 
 			client := scanClient(topologyObject("tenant-a", "topology-1", tt.objLabels, tt.annotations))
-			got, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind()})
+			got, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 			if err != nil {
 				t.Fatalf("scanAtRisk: %v", err)
 			}
@@ -245,7 +257,7 @@ func TestScanAtRiskSeparatesOwnedFromUnowned(t *testing.T) {
 	// Two owners on the policy kind, so the scan is shown copying the whole
 	// list onto a finding rather than picking one.
 	policyKind := ResourceKind{Group: "grove.io", Kind: "ClusterPolicy", Components: []string{"grove", "kai-scheduler"}}
-	got, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind(), policyKind})
+	got, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind(), policyKind})
 	if err != nil {
 		t.Fatalf("scanAtRisk: %v", err)
 	}
@@ -278,7 +290,7 @@ func TestScanAtRiskSkipsKindsTheClusterDoesNotServe(t *testing.T) {
 	t.Parallel()
 
 	client := scanClient(topologyObject("tenant-a", "topology-1", nil, nil))
-	got, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{
+	got, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{
 		{Group: "absent.io", Kind: "NeverInstalled", Components: []string{"absent-operator"}},
 		// Core group, which a record names with no group at all. It resolves
 		// the same way and is named without a suffix in any message.
@@ -328,7 +340,7 @@ func TestScanAtRiskFailsOnADiscoveryOutage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := scanAtRisk(t.Context(), scanClient(), brokenMapper{err: tt.err}, []ResourceKind{tt.kind})
+			_, err := scanAtRisk(t.Context(), scanClient(), brokenMapper{err: tt.err}, discovered{}, []ResourceKind{tt.kind})
 			if err == nil {
 				t.Fatal("scanAtRisk reported success on a discovery failure")
 			}
@@ -337,6 +349,94 @@ func TestScanAtRiskFailsOnADiscoveryOutage(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), kindDescription(tt.kind)) {
 				t.Errorf("error = %v, want it to name %s", err, kindDescription(tt.kind))
+			}
+		})
+	}
+}
+
+// TestScanAtRiskRefusesAbsenceDiscoveryCannotEstablish keeps the skip above
+// narrow in the other direction. client-go discards a partial discovery
+// failure whenever other groups answered, so a kind in an unreachable group
+// comes back as a bare no-match. Reading that as "not installed" skips its
+// objects and reports a clean scan, so absence stands only once the kind's own
+// group is known to have been enumerated.
+func TestScanAtRiskRefusesAbsenceDiscoveryCannotEstablish(t *testing.T) {
+	t.Parallel()
+
+	skyhook := ResourceKind{Group: "skyhook.nvidia.com", Kind: "Skyhook", Components: []string{"nodewright-operator"}}
+	groupFailed := func(group string) error {
+		return &discovery.ErrGroupDiscoveryFailed{Groups: map[schema.GroupVersion]error{
+			{Group: group, Version: "v1alpha1"}: stderrors.New("the server is currently unable to handle the request"),
+		}}
+	}
+
+	tests := []struct {
+		name        string
+		mapper      meta.RESTMapper
+		groups      k8sclient.GroupResourceLister
+		wantAbsent  bool
+		wantContain []string
+	}{
+		{
+			name:        "the kind's own group failed discovery",
+			mapper:      scanMapper(),
+			groups:      discovered{err: groupFailed("skyhook.nvidia.com")},
+			wantContain: []string{"Skyhook.skyhook.nvidia.com", `API group "skyhook.nvidia.com" is incomplete`},
+		},
+		{
+			// A broken aggregated APIService elsewhere is the steady state on
+			// many clusters, and says nothing about this kind.
+			name:       "only another group failed discovery",
+			mapper:     scanMapper(),
+			groups:     discovered{err: groupFailed("metrics.k8s.io")},
+			wantAbsent: true,
+		},
+		{
+			name:        "discovery failed outright",
+			mapper:      scanMapper(),
+			groups:      discovered{err: stderrors.New("i/o timeout reaching discovery")},
+			wantContain: []string{"Skyhook.skyhook.nvidia.com", "incomplete"},
+		},
+		{
+			name:        "no discovery to confirm against",
+			mapper:      scanMapper(),
+			wantContain: []string{"Skyhook.skyhook.nvidia.com", "no discovery to confirm"},
+		},
+		{
+			// The shape client-go returns when it does keep the wrapper.
+			name: "a no-match that carries the group failure",
+			mapper: brokenMapper{err: fmt.Errorf("%w: %w", groupFailed("skyhook.nvidia.com"),
+				&meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "skyhook.nvidia.com", Kind: "Skyhook"}})},
+			groups:      discovered{},
+			wantContain: []string{"Skyhook.skyhook.nvidia.com"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := scanAtRisk(t.Context(), scanClient(), tt.mapper, tt.groups, []ResourceKind{skyhook})
+			if tt.wantAbsent {
+				if err != nil {
+					t.Fatalf("scanAtRisk() error = %v, want the kind reported absent", err)
+				}
+				want := []ScannedKind{{Group: skyhook.Group, Kind: skyhook.Kind, Components: skyhook.Components}}
+				if !reflect.DeepEqual(got.Kinds, want) {
+					t.Errorf("Kinds = %#v, want %#v", got.Kinds, want)
+				}
+
+				return
+			}
+			if err == nil {
+				t.Fatalf("scanAtRisk() = %#v, want an error rather than the kind reported absent", got)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+				t.Errorf("error = %v, want %s", err, errors.ErrCodeUnavailable)
+			}
+			for _, want := range tt.wantContain {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %v, want it to contain %q", err, want)
+				}
 			}
 		})
 	}
@@ -364,7 +464,7 @@ func TestScanAtRiskSkipsAKindThatVanished(t *testing.T) {
 			client.PrependReactor("list", "clustertopologies",
 				func(k8stesting.Action) (bool, runtime.Object, error) { return true, nil, tt.err })
 
-			got, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind()})
+			got, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 			if err != nil {
 				t.Fatalf("scanAtRisk: %v", err)
 			}
@@ -389,7 +489,7 @@ func TestScanAtRiskFailsOnAListDenial(t *testing.T) {
 				stderrors.New("User cannot list resource at the cluster scope"))
 		})
 
-	_, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind()})
+	_, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 	if err == nil {
 		t.Fatal("scanAtRisk reported success on a forbidden List")
 	}
@@ -416,7 +516,7 @@ func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 		for i := range total {
 			objects = append(objects, topologyObject("tenant-a", "topology-"+strconv.Itoa(i), nil, nil))
 		}
-		got, err := scanAtRisk(t.Context(), scanClient(objects...), scanMapper(), []ResourceKind{topologyKind()})
+		got, err := scanAtRisk(t.Context(), scanClient(objects...), scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 		if err != nil {
 			t.Fatalf("scanAtRisk: %v", err)
 		}
@@ -451,7 +551,7 @@ func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 				return true, page, nil
 			})
 
-		got, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind()})
+		got, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 		if err != nil {
 			t.Fatalf("scanAtRisk: %v", err)
 		}
@@ -484,7 +584,7 @@ func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 				return true, page, nil
 			})
 
-		_, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind()})
+		_, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 		if err == nil {
 			t.Fatal("scanAtRisk followed a repeated continue token without failing")
 		}
@@ -543,7 +643,7 @@ func TestScanAtRiskHonorsCancellation(t *testing.T) {
 			t.Parallel()
 
 			_, err := scanAtRisk(tt.ctx(t), scanClient(topologyObject("tenant-a", "topology-1", nil, nil)),
-				scanMapper(), []ResourceKind{topologyKind()})
+				scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 			if err == nil {
 				t.Fatal("scanAtRisk on an ended context returned no error")
 			}
@@ -586,7 +686,7 @@ func TestScanAtRiskClassifiesAnAbortMidList(t *testing.T) {
 
 			// The context itself is live, so only the returned error can carry
 			// the classification.
-			_, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind()})
+			_, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 			if err == nil {
 				t.Fatal("scanAtRisk reported success on an aborted List")
 			}
@@ -602,7 +702,7 @@ func TestScanAtRiskClassifiesAnAbortMidList(t *testing.T) {
 func TestScanAtRiskRejectsAnEmptyKind(t *testing.T) {
 	t.Parallel()
 
-	_, err := scanAtRisk(t.Context(), scanClient(), scanMapper(), []ResourceKind{{Group: "grove.io"}})
+	_, err := scanAtRisk(t.Context(), scanClient(), scanMapper(), discovered{}, []ResourceKind{{Group: "grove.io"}})
 	if err == nil {
 		t.Fatal("scanAtRisk accepted a kind with no name")
 	}
@@ -651,7 +751,7 @@ func TestScanAtRiskWithNoKindsContactsNothing(t *testing.T) {
 			t.Parallel()
 
 			var noClient dynamic.Interface
-			got, err := scanAtRisk(t.Context(), noClient, nil, tt.kinds)
+			got, err := scanAtRisk(t.Context(), noClient, nil, nil, tt.kinds)
 			if err != nil {
 				t.Fatalf("scanAtRisk: %v", err)
 			}
@@ -694,7 +794,7 @@ func TestScanAtRiskFindingsFollowRequestOrder(t *testing.T) {
 			Namespace: "tenant-b", Name: "b-thing"},
 	}
 	for range 10 {
-		got, err := scanAtRisk(t.Context(), client, scanMapper(),
+		got, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{},
 			[]ResourceKind{{Group: "grove.io", Kind: "ClusterPolicy", Components: []string{"grove"}}, topologyKind()})
 		if err != nil {
 			t.Fatalf("scanAtRisk: %v", err)
@@ -721,7 +821,7 @@ func TestScanAtRiskSkipsAnUnnamedObject(t *testing.T) {
 			return true, page, nil
 		})
 
-	got, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind()})
+	got, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 	if err != nil {
 		t.Fatalf("scanAtRisk: %v", err)
 	}
@@ -747,7 +847,7 @@ func TestScanAtRiskListsEveryNamespace(t *testing.T) {
 		return false, nil, nil
 	})
 
-	if _, err := scanAtRisk(t.Context(), client, scanMapper(), []ResourceKind{topologyKind()}); err != nil {
+	if _, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()}); err != nil {
 		t.Fatalf("scanAtRisk: %v", err)
 	}
 	if !reflect.DeepEqual(seen, []string{metav1.NamespaceAll}) {

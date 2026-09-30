@@ -16,7 +16,6 @@ package chainsaw
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -269,26 +268,7 @@ func (f *clusterFetcher) groupDiscoveryFailure(ctx context.Context, group string
 	if f.discovery == nil {
 		return nil
 	}
-	if err := ctx.Err(); err != nil {
-		return errors.Wrap(errors.ErrCodeUnavailable,
-			"context expired before API group discovery could be verified", err)
-	}
-	_, _, err := f.discovery.ServerGroupsAndResources()
-	if err == nil {
-		return nil
-	}
-	var groupErr *discovery.ErrGroupDiscoveryFailed
-	if !stderrors.As(err, &groupErr) {
-		// Discovery failed outright rather than per-group. The kind cannot
-		// be declared absent on the strength of that.
-		return err
-	}
-	for gv, gvErr := range groupErr.Groups {
-		if gv.Group == group {
-			return errors.Wrap(errors.ErrCodeUnavailable, gv.String(), gvErr)
-		}
-	}
-	return nil
+	return k8sclient.GroupDiscoveryFailure(ctx, f.discovery, group)
 }
 
 // isGenuineNoMatch reports whether err means "this cluster does not serve that
@@ -302,11 +282,7 @@ func (f *clusterFetcher) groupDiscoveryFailure(ctx context.Context, group string
 // meta.IsNoMatchError alone would let an unreachable API group silently
 // satisfy every negative assertion.
 func isGenuineNoMatch(err error) bool {
-	if !meta.IsNoMatchError(err) {
-		return false
-	}
-	var groupErr *discovery.ErrGroupDiscoveryFailed
-	return !stderrors.As(err, &groupErr) && !discovery.IsGroupDiscoveryFailedError(err)
+	return k8sclient.IsGenuineNoMatch(err)
 }
 
 // resetGeneration returns the number of discovery invalidations completed so

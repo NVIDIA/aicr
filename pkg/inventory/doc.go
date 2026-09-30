@@ -197,7 +197,9 @@
 // object. A kind the cluster does not serve is skipped rather than raised: the
 // CRD a record names may simply not be installed, which is the common case for
 // a component the operator does not run. A discovery failure is not skipped,
-// because it has not established that.
+// because it has not established that, and neither is a no-match for a kind
+// whose own API group discovery could not enumerate: client-go reports that
+// partial failure as a bare no-match whenever other groups answered.
 //
 // Nothing it returns reaches the exit code, per ADR-021 Decision 3. AICR
 // blocking an upgrade over resources it does not own is a claim it has not

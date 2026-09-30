@@ -88,9 +88,9 @@ type AtRiskKind struct {
 	Components []string `json:"components,omitempty" yaml:"components,omitempty"`
 
 	// Present reports the cluster serving this kind. False means discovery
-	// found no match, which is ordinary: the CRD a record names may simply not
-	// be installed. Examined is then zero because nothing was listed, not
-	// because nothing exists.
+	// enumerated the kind's API group and found no match, which is ordinary:
+	// the CRD a record names may simply not be installed. Examined is then
+	// zero because nothing was listed, not because nothing exists.
 	Present bool `json:"present" yaml:"present"`
 
 	// Examined is how many objects of this kind the scan read, at risk or not.
