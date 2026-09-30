@@ -892,10 +892,7 @@ func TestCommittedRegistryValid(t *testing.T) {
 		}
 	}
 
-	// Slot 2: opted out of both for now. Nightly still runs on aws-h100, so
-	// landing these rows adds nothing to a schedule; enrolling slot 2 is a
-	// later deliberate edit here, once a green run exists on this capacity for
-	// each intent it would list.
+	// Slot 2: the AWS nightly slot, running both intents; never the daytime one.
 	if slot2, slotErr := reg.Lookup("aws-h100-ct-2"); slotErr == nil {
 		if got := slot2.NightlyIntentsOrDefault(); !slices.Equal(got, []string{IntentTraining, IntentInference}) {
 			t.Errorf("aws-h100-ct-2 nightly-intents = %v, want [training inference]", got)
@@ -957,9 +954,9 @@ func TestCommittedRegistryValid(t *testing.T) {
 		}
 	}
 
-	// The launch nightly intents (#1276, DC3): BOTH training and inference run
-	// nightly on BOTH reservations, serialized through the shared lease. A
-	// future change to the per-reservation intent set changes this deliberately.
+	// Nightly intents per reservation. aws-h100 is opted out; AWS nightly runs
+	// on aws-h100-ct-2 (asserted above). A change to any reservation's intent
+	// set changes this deliberately.
 	wantNightly := map[string][]string{
 		"aws-h100": {},
 		"gcp-h100": {IntentTraining, IntentInference},
