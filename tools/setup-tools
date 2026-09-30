@@ -64,8 +64,12 @@ RETRY_PERMANENT=99
 # backoff (RETRY_BASE_DELAY * attempt^2 seconds), so a brief release-CDN blip
 # does not fail the whole job. It returns the last attempt's status. Warnings go
 # to stderr so the command's stdout stays clean for callers that capture it.
+# Overrides that are not a positive integer (attempts) or a non-negative integer
+# without leading zeros (delay) fall back to the defaults.
 RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
 RETRY_BASE_DELAY="${RETRY_BASE_DELAY:-2}"
+[[ "$RETRY_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || RETRY_ATTEMPTS=3
+[[ "$RETRY_BASE_DELAY" =~ ^(0|[1-9][0-9]*)$ ]] || RETRY_BASE_DELAY=2
 retry_transient() {
     local attempt=1 rc delay
     while true; do

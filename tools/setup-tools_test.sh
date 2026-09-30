@@ -411,6 +411,34 @@ FAKE
     )
 }
 
+# Retry knobs reach shell arithmetic, so a malformed override must fall back to
+# the default rather than abort the install or silently disable retrying.
+check_retry_overrides() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        expect_knobs() {
+            local attempts="$1" delay="$2" want_attempts="$3" want_delay="$4" got
+            got=$(RETRY_ATTEMPTS="${attempts}" RETRY_BASE_DELAY="${delay}" bash -c \
+                'source "$1"; echo "${RETRY_ATTEMPTS} ${RETRY_BASE_DELAY}"' _ "${SETUP_TOOLS}") \
+                || { echo "attempts='${attempts}' delay='${delay}' aborted the script"; exit 1; }
+            [[ "${got}" == "${want_attempts} ${want_delay}" ]] \
+                || { echo "attempts='${attempts}' delay='${delay}' gave '${got}', want '${want_attempts} ${want_delay}'"; exit 1; }
+        }
+        expect_knobs ""    ""    3 2
+        expect_knobs 5     0     5 0
+        expect_knobs abc   1.5   3 2
+        expect_knobs 0     08    3 2
+        expect_knobs -1    09    3 2
+        expect_knobs 007   10    3 10
+    )
+}
+
+if ! reason=$(check_retry_overrides); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Retry overrides: valid values honored, malformed attempts and delays fall back to the defaults"
+
 if ! reason=$(check_download_retry); then
     echo "FAIL: ${reason}" >&2
     exit 1
