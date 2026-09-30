@@ -4304,7 +4304,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   006-dranet/Chart.yaml: afeb8fc7d2d11ad349641c63cb13d55d7528027571c2061f0754bd96fcef0e16
   006-dranet/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-dranet/install.sh: 73c95f06b87cec0844c51cffb5eff5cf4333d51d6bde9750b935fb3089756a4b
-  006-dranet/templates/dranet.yaml: d018b41c1cb580cb0d485b7458d734bd1f069f20d5347e20a47f88dcfbb16cba
+  006-dranet/templates/dranet.yaml: 278b29a7f5dea711e0f7d227dd39b37b767cd6b62eebac2908b5c3e11bd1086f
   006-dranet/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -4321,8 +4321,8 @@ vr200-rke2-ubuntu-inference-dynamo:
   010-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   010-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-customizations/install.sh: 17a57ee11c5b776ba3866f91d1c5233b709e728df358d8e467b2856dc687e80f
-  010-nodewright-customizations/templates/tuning-rke2.yaml: 2f8bbb2816615ac069410deafe9af733ee3ef751a9d6a7477d10f261978e0a83
-  010-nodewright-customizations/values.yaml: 1f04ef1afaaf02402631e1d11110c12197afd8427b01e5022aad81a763aaf0d3
+  010-nodewright-customizations/templates/tuning-rke2.yaml: c4108ebf1c24aa32ec362980ed19ac6815edf936bfb4d9df312003694abcc46c
+  010-nodewright-customizations/values.yaml: dee8ff46c4da7faebf53dd0b38619b565b97e599daa01a3a19c3a3dc6d0d79d6
   011-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
   011-prometheus-operator-crds/upstream.env: 79fc2ce93f1bb62225f9b62cfe618fde8081bce8f7a6d9a56f3a118346da4a4c
@@ -4360,17 +4360,12 @@ vr200-rke2-ubuntu-inference-dynamo:
   019-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  020-rdma-netns-exclusive/Chart.yaml: 69e89838b1100cae78e991f464d9898ba86b3ebd4a5192237df9bb203f4b064b
-  020-rdma-netns-exclusive/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  020-rdma-netns-exclusive/install.sh: b9ef51031b7243a5a2b2e7e276a2e417a1400ff29bf47666f0f7752d8c2fd257
-  020-rdma-netns-exclusive/templates/skyhook.yaml: fdcf5b2179700489b1035740390c495e0f6013c8ee42838571a6071c3fff0ada
-  020-rdma-netns-exclusive/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  README.md: 12e1ad8d449ad94e461f7c513a1a6e27ed301529b03c281c0587936a69d67fa4
+  README.md: b0d4dc1341565474394f7c338e1187f97aaa84f2506642d2c91a212f57ba1669
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
-  bundle-info.yaml: ee5b01bad113d057bbd17bd0fb79b2815952fd283b561e76413c204a914ca759
-  checksums.txt: 288a8f013f15c4530db80b8ca4a900d5d6e77b740f64cb1c1a50443470d2e29d
-  deploy.sh: 7fbd6e917f944b91715182e767d5372b959cdbdbfad5519fc03003b50a554df8
-  recipe.yaml: b01489cfbfccddf260c3cddfa11e7877f53186c77c824893f6c7a99611377149
+  bundle-info.yaml: 3614ecc79f449848f257e036fb15a0b8fb7cf24fcad50d0079468a98cc92fda3
+  checksums.txt: e89cc487af73cecd7dee840f690c6cc66a1c41f27f337eb4eb00506336fd09d5
+  deploy.sh: 62b3ab91044223177c74d3aee7241f4aeae64e6bdb31481f7da642dbf4556e9a
+  recipe.yaml: e3ca2966624bc02a472b86a93d10a8786a869e74fb461420ebf4d8fc0b208f87
 vr200-rke2-ubuntu-training-kubeflow:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -4379,7 +4374,7 @@ vr200-rke2-ubuntu-training-kubeflow:
   002-dranet/Chart.yaml: afeb8fc7d2d11ad349641c63cb13d55d7528027571c2061f0754bd96fcef0e16
   002-dranet/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-dranet/install.sh: 73c95f06b87cec0844c51cffb5eff5cf4333d51d6bde9750b935fb3089756a4b
-  002-dranet/templates/dranet.yaml: d018b41c1cb580cb0d485b7458d734bd1f069f20d5347e20a47f88dcfbb16cba
+  002-dranet/templates/dranet.yaml: 278b29a7f5dea711e0f7d227dd39b37b767cd6b62eebac2908b5c3e11bd1086f
   002-dranet/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
@@ -4392,8 +4387,8 @@ vr200-rke2-ubuntu-training-kubeflow:
   005-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   005-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-customizations/install.sh: 17a57ee11c5b776ba3866f91d1c5233b709e728df358d8e467b2856dc687e80f
-  005-nodewright-customizations/templates/tuning-rke2.yaml: c790dba3a64187639d23834f7d09cc477946d84be301711c639a77dfae9909f6
-  005-nodewright-customizations/values.yaml: 5f40bf32faf80baafdfbf50a7386510aef07ce7a1d697af84bd49c4b96db1a58
+  005-nodewright-customizations/templates/tuning-rke2.yaml: ac517959b4b3d78e0db0c4cecdf2d98c2217a2e8b20725caaca85bc79bb9f0c2
+  005-nodewright-customizations/values.yaml: 393a1b3cc65393331da510cea3c0f89d22e173a62babcd4b7f33c6d9d4c15937
   006-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
   006-prometheus-operator-crds/upstream.env: 79fc2ce93f1bb62225f9b62cfe618fde8081bce8f7a6d9a56f3a118346da4a4c
@@ -4436,14 +4431,9 @@ vr200-rke2-ubuntu-training-kubeflow:
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  016-rdma-netns-exclusive/Chart.yaml: 69e89838b1100cae78e991f464d9898ba86b3ebd4a5192237df9bb203f4b064b
-  016-rdma-netns-exclusive/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  016-rdma-netns-exclusive/install.sh: b9ef51031b7243a5a2b2e7e276a2e417a1400ff29bf47666f0f7752d8c2fd257
-  016-rdma-netns-exclusive/templates/skyhook.yaml: fdcf5b2179700489b1035740390c495e0f6013c8ee42838571a6071c3fff0ada
-  016-rdma-netns-exclusive/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  README.md: d4fa98f33706e40d230a211c485647770123ad654b9c34f67cb9f7024b7fcf76
+  README.md: 80e547edb47741f31f7b21d02cbf9b0fa9a17a99b2a7320cbdff82d856d1cb81
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
-  bundle-info.yaml: 025befde4a74a56487a607753cfdc01952e8e0459bc3f3eaf29ccca850aa7f0d
-  checksums.txt: 1f4d28b6f7965bde07dd1b4987c7ae9902a9981d2f280e1855ad5107184a0daf
-  deploy.sh: 13f4e53fce935d1a1dbcfcd4c026299e7b3352b2ba2f83aed98f5bee64fe7399
-  recipe.yaml: 46f8d6877d28b10532e31b52dfa56e7f8024669298b647caddd2c7c03c5abeb4
+  bundle-info.yaml: 5bfe00acd931aef4736d88e05805e651f6bbb6d1afa830294329f81d2a74c7f5
+  checksums.txt: 5ca2e27c469f913d24310d8fcfeda43dfa41610d63be12718d6c4a105dae9db6
+  deploy.sh: 2b0cd173c38bb27ee4cdb7d6c4d1d94d523b56fed94d6889cacd342b0b5a0dfd
+  recipe.yaml: eae45aaf8edf5ea05bc9e583440d75ffcdf378166ca86e5e469cd3e572b00e07
