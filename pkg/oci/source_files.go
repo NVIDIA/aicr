@@ -66,7 +66,7 @@ func openRootedDirectoryWithClose(
 		return nil, apperrors.Wrap(code, "failed to resolve directory path", err)
 	}
 	abs = filepath.Clean(abs)
-	before, err := os.Lstat(abs)
+	before, err := os.Lstat(abs) //nolint:gosec // caller-selected directory; identity-checked below
 	if err != nil {
 		return nil, apperrors.Wrap(code, "failed to inspect directory", err)
 	}
@@ -100,14 +100,14 @@ func openRootedDirectoryWithClose(
 		}
 	}()
 	descriptorInfo, descriptorErr := root.Stat(".")
-	after, afterErr := os.Lstat(abs)
+	after, afterErr := os.Lstat(abs) //nolint:gosec // caller-selected directory; identity-checked below
 	if descriptorErr != nil || afterErr != nil || after.Mode()&os.ModeSymlink != 0 ||
 		!os.SameFile(before, descriptorInfo) || !os.SameFile(before, after) {
 
 		return nil, apperrors.Wrap(code, "directory identity changed during open",
 			stderrors.Join(descriptorErr, afterErr))
 	}
-	resolvedInfo, resolvedErr := os.Lstat(resolved)
+	resolvedInfo, resolvedErr := os.Lstat(resolved) //nolint:gosec // caller-selected directory; identity-checked below
 	if resolvedErr != nil || resolvedInfo.Mode()&os.ModeSymlink != 0 ||
 		!resolvedInfo.IsDir() || !os.SameFile(descriptorInfo, resolvedInfo) {
 

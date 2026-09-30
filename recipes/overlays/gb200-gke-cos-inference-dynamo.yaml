@@ -57,6 +57,19 @@ spec:
         - gpu-operator
         - kai-scheduler
 
+    # Decline the runtime inventory, matching h100-gke-cos-inference-dynamo.
+    # k8s-aibom alongside grove and dynamo-platform is a combination nothing
+    # has qualified, and that is a property of the pairing rather than of the
+    # accelerator -- so every GKE dynamo recipe declines it, not just the one
+    # that happens to inherit the component from a base.
+    #
+    # Without this ref the widened GKE opt-in (#2962) would grant k8s-aibom
+    # here, assembling on gb200 exactly the trio h100 refuses.
+    - name: k8s-aibom
+      type: Helm
+      overrides:
+        install: false
+
   validation:
     deployment:
       checks:

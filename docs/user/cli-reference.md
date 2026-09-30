@@ -505,7 +505,7 @@ Generate recipes using direct system parameters:
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
-| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` grants the component on a GKE recipe that neither declares nor declines it, confirms it where the recipe already declares it, and is rejected over an explicit recipe decline (any service) or against a non-GKE recipe that does not declare it; `disabled` is unchanged and always requires the recipe to already declare the component. Recorded in the generated recipe |
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--inherit-from` | | string | Prior recipe file, or bundle directory, whose component namespaces the resolved recipe keeps instead of re-deriving them from the registry. Use on an AICR upgrade so a moved registry default does not relocate a component that is already running; see [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). A component the prior artifact does not name keeps the registry default. `cm://` locations are not supported yet |
@@ -648,7 +648,7 @@ target-cluster conflict detection.
 | `--platform` | | string | Explicit platform/framework type, including slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
-| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` grants the component on a GKE recipe that neither declares nor declines it, confirms it where the recipe already declares it, and is rejected over an explicit recipe decline (any service) or against a non-GKE recipe that does not declare it; `disabled` is unchanged and always requires the recipe to already declare the component. Recorded in the generated recipe |
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -2302,7 +2302,7 @@ my-bundle/
     install.sh                     # helm upgrade --install <name> ./<dir> ...
   002-gpu-operator/
     Chart.yaml
-    charts/gpu-operator-v26.7.0.tgz
+    charts/gpu-operator-v26.7.1.tgz
     values.yaml
     cluster-values.yaml
     install.sh
@@ -2325,10 +2325,10 @@ kind: BundleProvenance
 vendoredCharts:
   - name: gpu-operator
     chart: gpu-operator
-    version: v26.7.0
+    version: v26.7.1
     repository: https://helm.ngc.nvidia.com/nvidia
     sha256: abc123...
-    tarballName: gpu-operator-v26.7.0.tgz
+    tarballName: gpu-operator-v26.7.1.tgz
     pullerVersion: helm-cli v3.20.2
 ```
 

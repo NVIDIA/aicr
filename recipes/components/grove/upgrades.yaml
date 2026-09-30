@@ -94,3 +94,56 @@ transitions:
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#grove-v010-alpha8-or-earlier-to-v010-alpha12
       - https://github.com/ai-dynamo/grove
+  - from: ">=0.1.0-alpha.12 <0.1.0-alpha.13"
+    to: "0.1.0-alpha.13"
+    verdict: manual
+    verifiedBy: >-
+      Live upgrade on an EKS GB300 cluster, 2026-09-28, following the helm
+      steps below: the CRDs applied and the operator rolled out, a serving
+      Dynamo DGD kept its pods (same UIDs, no restarts), a PodCliqueSet wedged
+      by a 1 -> 0 -> 1 scale on alpha.12 recovered on its own, and a fresh
+      1 -> 0 -> 1 scale recovered in about 13s. Upstream
+      Test_VUPG1_UpgradeFromLatestGitHubRelease asserts the same pod survival.
+    summary: >-
+      alpha.13 adds status.lastScheduled to the podcliques.grove.io CRD, which
+      its PodGang recovery logic reads, and renames the
+      clustertopologybindings.grove.io short name from ct to ctb. helm upgrade
+      never applies changed crds/, and the alpha.12 PodClique status schema is
+      structural, so a plain chart bump keeps the old CRD and the API server
+      silently prunes lastScheduled from every status write.
+    stepsByDeployer:
+      - deployers: [helm, helmfile]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts
+              --version v0.1.0-alpha.13 | sed -n '/^---$/,$p' |
+              kubectl apply --server-side --force-conflicts -f -
+            reason: >-
+              Installs the alpha.13 CRDs before the operator that writes
+              the new status field starts.
+          - id: rerun-installer
+            description: >-
+              Re-run install.sh (helm) or helmfile apply (helmfile).
+            reason: >-
+              AICR's generated install.sh already passes --force-conflicts on
+              Helm 4.
+      - steps:
+          - id: apply-new-crds
+            description: >-
+              helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts
+              --version v0.1.0-alpha.13 | sed -n '/^---$/,$p' |
+              kubectl apply --server-side --force-conflicts -f -
+            reason: >-
+              Neither Flux nor Argo CD applies a changed crds/ directory on
+              upgrade, so the CRDs are installed out of band here too.
+          - id: reconcile
+            description: >-
+              Reconcile or sync the affected releases as usual.
+            reason: >-
+              The deployer picks the new chart up once the CRDs are
+              Established.
+    references:
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#grove-v010-alpha12-to-v010-alpha13
+      - https://github.com/ai-dynamo/grove/releases/tag/v0.1.0-alpha.13
+      - https://github.com/ai-dynamo/grove/issues/809

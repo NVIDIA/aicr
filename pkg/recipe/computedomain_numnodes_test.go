@@ -114,13 +114,15 @@ func stripYAMLComments(doc string) string {
 //
 // Two charts in the catalog ship a CRD named computedomains.resource.nvidia.com:
 // the standalone nvidia-dra-driver-gpu chart, and — new in gpu-operator
-// v26.7.0 — the GPU Operator chart. The two copies are NOT identical. The
-// operator's is a stale snapshot that lists numNodes as required and supplies
-// no `default: 0`; the DRA driver's makes it optional with a default.
+// v26.7.0 — the GPU Operator chart. The v26.7.0 copy is a stale snapshot that
+// lists numNodes as required and supplies no `default: 0`; the DRA driver's
+// makes it optional with a default. v26.7.1 ships a copy identical to the DRA
+// driver's, but that does not retire this guard.
 //
 // Helm installs crds/ only when the CRD is absent and never upgrades it, and
-// gpu-operator is ordered before nvidia-dra-driver-gpu. So on a FRESH cluster
-// the operator's stricter copy is the one that lands, and any ComputeDomain CR
+// gpu-operator is ordered before nvidia-dra-driver-gpu. So on a cluster FIRST
+// installed with v26.7.0 the operator's stricter copy is the one that lands,
+// and it survives every later upgrade, and any ComputeDomain CR
 // omitting spec.numNodes is rejected by the API server with
 // "spec.numNodes: Required value". Structural defaulting cannot rescue it
 // because that copy carries no default. Neither chart installs a webhook that
@@ -167,7 +169,8 @@ func TestComputeDomainManifestsSetNumNodes(t *testing.T) {
 			t.Errorf("%s: YAML document %d declares kind: ComputeDomain but does not set spec.numNodes.\n"+
 				"  GPU Operator v26.7.0 ships a ComputeDomain CRD copy that marks numNodes\n"+
 				"  REQUIRED with no default, and it is installed before the DRA driver's\n"+
-				"  permissive copy. On a fresh cluster this CR is rejected at admission with\n"+
+				"  permissive copy. Helm never upgrades it, so on a cluster first installed\n"+
+				"  with v26.7.0 this CR is rejected at admission with\n"+
 				"  \"spec.numNodes: Required value\".\n"+
 				"  Set numNodes explicitly (0 is correct under IMEXDaemonsWithDNSNames=true,\n"+
 				"  the DRA driver default, where each IMEX daemon starts without waiting for\n"+

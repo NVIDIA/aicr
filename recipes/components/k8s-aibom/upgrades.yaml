@@ -1,0 +1,151 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# k8s-aibom entered the registry pinned at v1.3.0 (see "k8s-aibom Runtime
+# Inventory" in docs/user/component-catalog.md), and v1.3.0 is the only
+# version AICR has ever shipped through it. from starts there rather than
+# reaching for a wider floor: charts v1.0.0 through v1.2.0 all declared
+# v1alpha1 as the storage version, so a jump from one of them crosses the
+# v1alpha1-to-v1beta1 storage boundary the v1.2.0-to-v1.3.0 move already
+# made, a different mechanism this record has not examined and does not
+# vouch for.
+#
+# verdict is manual rather than safe, and stays there even though a live
+# cluster has now exercised the transition. safe must not carry steps, and
+# this transition has real ones: enabling config.verification across the
+# boundary aborts the release on any deployer that has not already updated
+# the CRDs. Evidence does not retire that, because the failure is a property
+# of the configuration, not of how well the upgrade has been tested.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: k8s-aibom
+transitions:
+  - from: ">=1.3.0 <1.5.1"
+    to: "1.5.1"
+    verdict: manual
+    verifiedBy: >-
+      CRD schema diff (helm show crds
+      oci://ghcr.io/googlecloudplatform/charts/k8s-aibom --version 1.3.0 vs
+      --version 1.5.1): 188 lines added, 0 removed, all confined to the
+      optional verification block. Served/storage version
+      configuration (v1alpha1 served, v1beta1 served and storage) is
+      identical in both charts. Live GKE run on 2026-09-28 against
+      v1.35.6-gke.1250000 executed the boundary end to end: install 1.3.0,
+      then helm upgrade to 1.5.1 with default values against the stale
+      v1.3.0 CRDs, which reported deployed with the controller 1/1 Ready on
+      sha256:7b027315; the same upgrade with config.verification set failed
+      with ".spec.verification: field not declared in schema" after the
+      Deployment had already advanced; applying the v1.5.1 CRDs by hand and
+      rerunning it succeeded with the field stored. The component health
+      check under recipes/checks/k8s-aibom passes against the upgraded
+      cluster.
+    summary: >-
+      The CRD change is additive only, and with the verification block unset
+      (the value AICR ships) a plain chart bump against stale v1.3.0 CRDs
+      upgrades cleanly on every deployer, helmfile included. Setting
+      config.verification is what breaks the upgrade: the field does not
+      exist in the v1.3.0 schema, so helm fails while building the
+      server-side-apply patch for the AIBOMControllerConfig and aborts the
+      release. The value is not silently pruned, but the abort lands after
+      the Deployment has already rolled to the v1.5.1 image, leaving a
+      release marked failed partway through. helmfile is the one deployer
+      with no automated CRD-update path, so there the CRDs have to be
+      applied by hand first. The chart's rendered AIBOMControllerConfig CR
+      also moves from v1alpha1 to v1beta1, but both stay served, so that is
+      a template change rather than an API break.
+    reversible: false
+    affectedResources:
+      - group: aibom.k8saibom.dev
+        kinds:
+          - AIBOMControllerConfig
+    stepsByDeployer:
+      - deployers: [helmfile]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Needed only when this upgrade also sets config.verification;
+              a default-values bump does not require it. Before upgrading
+              the release, apply the v1.5.1 CRDs directly using the
+              CRD-apply command under "Upgrade, uninstall, and
+              troubleshooting" in docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/googlecloudplatform/charts/k8s-aibom and
+              VERSION=1.5.1.
+            reason: >-
+              helmfile has no automated equivalent for ownsCRDs components;
+              it is the one deployer that never updates them for you.
+              Measured on GKE: against stale v1.3.0 CRDs, setting
+              config.verification aborts the release with
+              ".spec.verification: field not declared in schema" once the
+              Deployment has already moved to the v1.5.1 image, so the
+              operator is left mid-rollout on a failed revision. Applying
+              the v1.5.1 CRDs first makes the identical upgrade succeed and
+              store the field.
+          - id: verify-reconcile
+            description: >-
+              kubectl get aibomcontrollerconfig default -o yaml and confirm
+              status.conditions reports Ready=True at the object's current
+              observedGeneration. Do not also check apiVersion here: kubectl
+              resolves the CRD's preferred version, which is v1beta1 on the
+              v1.3.0 and v1.5.1 CRDs alike, so that clause reads the same on a
+              cluster still stranded on the old schema.
+            reason: >-
+              Confirms the controller actually adopted the new generation
+              rather than holding last-known-good. AICR sets
+              readiness.strictConfig: true in the component's values.yaml, so
+              on an AICR install an invalid config does fail the readiness
+              probe -- but the chart default is false, and a recipe that
+              overrides that value back to the default gets a controller that
+              stays Ready while ignoring the config. Read the CR's conditions
+              rather than inferring acceptance from pod health.
+      - steps:
+          - id: verify-crd-update
+            description: >-
+              After the automated CRD update (flux's spec.upgrade.crds
+              CreateReplace, helm's generated apply-crds.sh, or Argo CD
+              applying the chart's crds/ as ordinary manifests each sync),
+              confirm the new schema actually landed by looking for the
+              field the v1.5.1 CRDs add: kubectl get crd
+              aibomcontrollerconfigs.aibom.k8saibom.dev -o
+              jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.verification.type}'
+              and expect "object". An empty result means the v1.3.0 schema
+              is still in place.
+            reason: >-
+              Storage version and health are both useless as signals here.
+              v1beta1 was already the storage version at v1.3.0, and a
+              cluster stranded on the v1.3.0 CRDs after a default-values
+              bump was measured on GKE reporting the release deployed, the
+              controller 1/1 Ready on the v1.5.1 image, and storedVersions
+              v1beta1 on both CRDs -- entirely green with the new schema
+              absent. Only the schema itself distinguishes the two.
+          - id: verify-reconcile
+            description: >-
+              kubectl get aibomcontrollerconfig default -o yaml and confirm
+              status.conditions reports Ready=True at the object's current
+              observedGeneration. Do not also check apiVersion here: kubectl
+              resolves the CRD's preferred version, which is v1beta1 on the
+              v1.3.0 and v1.5.1 CRDs alike, so that clause reads the same on a
+              cluster still stranded on the old schema.
+            reason: >-
+              Confirms the controller actually adopted the new generation
+              rather than holding last-known-good. AICR sets
+              readiness.strictConfig: true in the component's values.yaml, so
+              on an AICR install an invalid config does fail the readiness
+              probe -- but the chart default is false, and a recipe that
+              overrides that value back to the default gets a controller that
+              stays Ready while ignoring the config. Read the CR's conditions
+              rather than inferring acceptance from pod health.
+    references:
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#k8s-aibom-runtime-inventory
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/releases
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/docs/compatibility.md

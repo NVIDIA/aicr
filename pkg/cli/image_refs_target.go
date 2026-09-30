@@ -220,10 +220,15 @@ func prepareImageRefsTargetWithDependencies(
 			"image-reference target aliases the bundle output")
 	}
 
+	// Resolve platform symlinks in the parent (e.g. macOS /var -> /private/var,
+	// /tmp -> /private/tmp) so --image-refs under $TMPDIR is accepted. The
+	// final target component is still lstat-checked below.
+	parentPath = resolvedParent
 	parentAncestor, parentRelative, parentOutputInfo, inspectErr :=
 		inspectPlannedDirectory(ctx, parentPath, deps.lstat)
 	if inspectErr != nil {
-		return nil, inspectErr
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"--image-refs target parent is not a safe directory", inspectErr)
 	}
 	if parentOutputInfo == nil || parentAncestor != parentPath || parentRelative != "." {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,

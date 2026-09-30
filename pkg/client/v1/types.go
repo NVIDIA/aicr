@@ -467,10 +467,12 @@ func WithAccountingMode(mode string) RecipeResolveOption {
 }
 
 // WithRuntimeInventoryMode selects whether the runtime AI inventory component
-// is installed by a criteria- or snapshot-based resolve call. It is valid only
-// when the resolved recipe declares that component; an empty or invalid mode is
-// rejected when the resolve call runs. Omit this option to keep the recipe's
-// own declaration.
+// is installed by a criteria- or snapshot-based resolve call. "enabled" confirms
+// the selection when the resolved recipe declares the component and grants it
+// (GKE recipes only, #2962) when the recipe neither declares nor declines it; a
+// recipe that explicitly declines the component rejects the option on any
+// service. An empty or invalid mode is rejected when the resolve call runs.
+// Omit this option to keep the recipe's own declaration.
 //
 // Unlike a bundle-time value override, the selection is recorded in the emitted
 // recipe and removes the component's health check along with the component,

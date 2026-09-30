@@ -528,7 +528,8 @@ seconds with guidance rather than hanging. Disable the cache instead with
 catalog env knob is **not** read from the shell environment of the process
 running `aicr validate` (only `HF_TOKEN` is). AICR-deployed EKS clusters get a
 default `gp3` StorageClass from the `aws-ebs-csi-driver` component, so the
-cache works there with no knob.
+cache works there with no knob, provided the driver has AWS credentials — see
+[EBS CSI Driver Credentials](component-catalog.md#ebs-csi-driver-credentials).
 
 **Debugging a failed run with `AICR_INFERENCE_PERF_NO_CLEANUP`.** By default the
 validator deletes the per-run namespace (DGD, workers, frontend, AIPerf Job) on
