@@ -160,9 +160,14 @@ func (b *DefaultBundler) collectComponentReadiness(
 
 	provider := recipeResult.DataProvider()
 	image := b.gateImage()
-	sched := gatemanifest.Scheduling{
+	placement, err := gatemanifest.NewPlacement(gatemanifest.Scheduling{
 		NodeSelector: b.Config.SystemNodeSelector(),
 		Tolerations:  b.Config.SystemNodeTolerations(),
+	})
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"invalid system node scheduling for readiness gates (set by --system-node-selector / "+
+				"--system-node-toleration or scheduling.systemNodeSelector / scheduling.systemNodeTolerations)", err)
 	}
 
 	// The RDMA-fabric probe is only run when a network-operator ref is
@@ -212,7 +217,7 @@ func (b *DefaultBundler) collectComponentReadiness(
 			return nil, err
 		}
 
-		manifest, genErr := gatemanifest.Render(ref.Name, image, testYAML, b.Config.Deployer(), sched)
+		manifest, genErr := gatemanifest.Render(ref.Name, image, testYAML, b.Config.Deployer(), placement)
 		if genErr != nil {
 			return nil, genErr
 		}

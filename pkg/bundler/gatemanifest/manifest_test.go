@@ -35,7 +35,7 @@ metadata:
 `
 
 func TestRender(t *testing.T) {
-	manifest, err := Render("gpu-operator", "ghcr.io/nvidia/aicr-gate:v1.2.3", []byte(validReadinessTestYAML), config.DeployerArgoCD, Scheduling{})
+	manifest, err := Render("gpu-operator", "ghcr.io/nvidia/aicr-gate:v1.2.3", []byte(validReadinessTestYAML), config.DeployerArgoCD, Placement{})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestRender(t *testing.T) {
 }
 
 func TestRender_ClusterScopedNamesAreNamespaceQualified(t *testing.T) {
-	got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerArgoCD, Scheduling{})
+	got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerArgoCD, Placement{})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestRender_ClusterScopedNamesAreNamespaceQualified(t *testing.T) {
 }
 
 func TestRender_HelmHooks(t *testing.T) {
-	got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerHelm, Scheduling{})
+	got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerHelm, Placement{})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestRender_ArgoCDSyncOptions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), tt.deployer, Scheduling{})
+			got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), tt.deployer, Placement{})
 			if err != nil {
 				t.Fatalf("Render: %v", err)
 			}
@@ -160,17 +160,22 @@ func TestRender_ArgoCDSyncOptions(t *testing.T) {
 }
 
 func TestRender_EmptyComponentName(t *testing.T) {
-	if _, err := Render("", "img:tag", []byte("x"), config.DeployerHelm, Scheduling{}); err == nil {
+	if _, err := Render("", "img:tag", []byte("x"), config.DeployerHelm, Placement{}); err == nil {
 		t.Fatal("expected error for empty component name")
 	}
 }
 
-// renderedGateJob renders the gate manifest and decodes its Job, substituting
-// the namespace template token so the document parses as YAML.
+// renderedGateJob builds the placement for sched, renders the gate manifest
+// with it, and decodes the Job, substituting the namespace template token so
+// the document parses as YAML.
 func renderedGateJob(t *testing.T, sched Scheduling) (batchv1.Job, string) {
 	t.Helper()
 
-	manifest, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerHelm, sched)
+	placement, err := NewPlacement(sched)
+	if err != nil {
+		t.Fatalf("NewPlacement: %v", err)
+	}
+	manifest, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerHelm, placement)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -189,28 +194,34 @@ func renderedGateJob(t *testing.T, sched Scheduling) (batchv1.Job, string) {
 	return batchv1.Job{}, ""
 }
 
-// TestRender_SystemScheduling pins #2590: the gate Job schedules where the
-// system components it gates do, so it carries the bundle's system node
-// selector and tolerations, and renders neither when none are configured.
-func TestRender_SystemScheduling(t *testing.T) {
+// TestNewPlacement_SystemScheduling pins #2590: the gate Job carries the
+// bundle's system node selector and keyed tolerations. A keyless toleration
+// matches every taint, including not-ready, unreachable and unschedulable,
+// so it is dropped rather than letting the gate bind to an unhealthy node.
+func TestNewPlacement_SystemScheduling(t *testing.T) {
 	seconds := int64(300)
-	tolerations := []corev1.Toleration{
-		{Operator: corev1.TolerationOpExists},
+	keyed := []corev1.Toleration{
 		{Key: "dedicated", Operator: corev1.TolerationOpEqual, Value: "system-workload", Effect: corev1.TaintEffectNoSchedule},
 		{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: &seconds},
-		{Key: "example.com/generation", Operator: corev1.TolerationOpGt, Value: "3", Effect: corev1.TaintEffectNoSchedule},
-		{Key: "example.com/offset", Operator: corev1.TolerationOpLt, Value: "-5", Effect: corev1.TaintEffectNoSchedule},
 	}
+	keyless := []corev1.Toleration{
+		{Operator: corev1.TolerationOpExists},
+		{Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+	}
+	withKeyless := []corev1.Toleration{keyless[0], keyed[0], keyed[1], keyless[1]}
 	selector := map[string]string{"node.dgxc.nvidia.com/dedicated": "system-workload", "kubernetes.io/os": "linux"}
 
 	tests := []struct {
-		name  string
-		sched Scheduling
+		name            string
+		sched           Scheduling
+		wantTolerations []corev1.Toleration
 	}{
-		{"none", Scheduling{}},
-		{"selector only", Scheduling{NodeSelector: selector}},
-		{"tolerations only", Scheduling{Tolerations: tolerations}},
-		{"selector and tolerations", Scheduling{NodeSelector: selector, Tolerations: tolerations}},
+		{"none", Scheduling{}, nil},
+		{"selector only", Scheduling{NodeSelector: selector}, nil},
+		{"keyed tolerations", Scheduling{Tolerations: keyed}, keyed},
+		{"keyless tolerations dropped", Scheduling{Tolerations: withKeyless}, keyed},
+		{"only keyless tolerations", Scheduling{Tolerations: keyless}, nil},
+		{"selector and tolerations", Scheduling{NodeSelector: selector, Tolerations: withKeyless}, keyed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -219,8 +230,8 @@ func TestRender_SystemScheduling(t *testing.T) {
 			if !reflect.DeepEqual(podSpec.NodeSelector, tt.sched.NodeSelector) {
 				t.Errorf("nodeSelector = %v, want %v", podSpec.NodeSelector, tt.sched.NodeSelector)
 			}
-			if !reflect.DeepEqual(podSpec.Tolerations, tt.sched.Tolerations) {
-				t.Errorf("tolerations = %+v, want %+v", podSpec.Tolerations, tt.sched.Tolerations)
+			if !reflect.DeepEqual(podSpec.Tolerations, tt.wantTolerations) {
+				t.Errorf("tolerations = %+v, want %+v", podSpec.Tolerations, tt.wantTolerations)
 			}
 			if podSpec.ServiceAccountName != "gpu-operator-readiness-gate" || len(podSpec.Containers) != 1 {
 				t.Errorf("scheduling fields displaced the pod spec: %+v", podSpec)
@@ -228,19 +239,37 @@ func TestRender_SystemScheduling(t *testing.T) {
 			if len(tt.sched.NodeSelector) == 0 && strings.Contains(raw, "nodeSelector") {
 				t.Errorf("unset selector must not render a nodeSelector key:\n%s", raw)
 			}
-			if len(tt.sched.Tolerations) == 0 && strings.Contains(raw, "tolerations") {
-				t.Errorf("unset tolerations must not render a tolerations key:\n%s", raw)
+			if len(tt.wantTolerations) == 0 && strings.Contains(raw, "tolerations") {
+				t.Errorf("no keyed tolerations must not render a tolerations key:\n%s", raw)
 			}
 		})
 	}
 }
 
-// TestRender_RejectsInvalidScheduling pins that scheduling values are
+// TestRender_ActiveDeadline pins that the gate Job bounds itself: a pod that
+// never schedules or never finishes fails the Job instead of holding a Helm
+// hook or Argo CD sync open. The deadline must fall inside Helm's timeout so
+// the Job, not Helm, reports the failure.
+func TestRender_ActiveDeadline(t *testing.T) {
+	job, _ := renderedGateJob(t, Scheduling{})
+	want := int64((defaults.ReadinessGateMaxWait + defaults.ReadinessGateActiveDeadlineBuffer).Seconds())
+	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != want {
+		t.Errorf("activeDeadlineSeconds = %v, want %d", job.Spec.ActiveDeadlineSeconds, want)
+	}
+	if defaults.ReadinessGateActiveDeadlineBuffer >= defaults.ReadinessGateHelmTimeoutBuffer {
+		t.Errorf("ReadinessGateActiveDeadlineBuffer (%s) must be below ReadinessGateHelmTimeoutBuffer (%s)",
+			defaults.ReadinessGateActiveDeadlineBuffer, defaults.ReadinessGateHelmTimeoutBuffer)
+	}
+}
+
+// TestNewPlacement_RejectsInvalidScheduling pins that scheduling values are
 // validated before being spliced into the manifest, which is later rendered
 // as a Go template: a value carrying template syntax must fail, not execute.
-// It also pins the API server's operator-dependent toleration rules, so a gate
-// the server would reject fails at bundle time instead.
-func TestRender_RejectsInvalidScheduling(t *testing.T) {
+// It also pins the API server's toleration rules, so a gate the server would
+// reject fails at bundle time instead. Lt and Gt are rejected because they
+// need a feature gate the bundle cannot see, and nothing in the CLI, config
+// file or API produces them.
+func TestNewPlacement_RejectsInvalidScheduling(t *testing.T) {
 	seconds := int64(30)
 	tests := []struct {
 		name  string
@@ -256,15 +285,14 @@ func TestRender_RejectsInvalidScheduling(t *testing.T) {
 		{"empty key and operator", Scheduling{Tolerations: []corev1.Toleration{{Effect: corev1.TaintEffectNoSchedule}}}},
 		{"Exists with a value", Scheduling{Tolerations: []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpExists, Value: "system"}}}},
 		{"tolerationSeconds without NoExecute", Scheduling{Tolerations: []corev1.Toleration{{Key: "k", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule, TolerationSeconds: &seconds}}}},
-		{"numeric operator non-integer value", Scheduling{Tolerations: []corev1.Toleration{{Key: "k", Operator: corev1.TolerationOpGt, Value: "high"}}}},
-		{"numeric operator non-canonical value", Scheduling{Tolerations: []corev1.Toleration{{Key: "k", Operator: corev1.TolerationOpLt, Value: "007"}}}},
-		{"numeric operator value overflows int64", Scheduling{Tolerations: []corev1.Toleration{{Key: "k", Operator: corev1.TolerationOpGt, Value: "99999999999999999999"}}}},
+		{"numeric operator Gt", Scheduling{Tolerations: []corev1.Toleration{{Key: "k", Operator: corev1.TolerationOpGt, Value: "3"}}}},
+		{"numeric operator Lt", Scheduling{Tolerations: []corev1.Toleration{{Key: "k", Operator: corev1.TolerationOpLt, Value: "-5"}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerHelm, tt.sched)
+			_, err := NewPlacement(tt.sched)
 			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
-				t.Fatalf("Render error = %v, want ErrCodeInvalidRequest", err)
+				t.Fatalf("NewPlacement error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
 	}
@@ -278,7 +306,7 @@ func TestRender_NetworkOperator(t *testing.T) {
     verbs: ["get", "list", "watch"]`
 	for _, componentName := range []string{"network-operator", "network-operator-ocp"} {
 		t.Run(componentName, func(t *testing.T) {
-			got, err := Render(componentName, "img:tag", []byte(validReadinessTestYAML), config.DeployerArgoCD, Scheduling{})
+			got, err := Render(componentName, "img:tag", []byte(validReadinessTestYAML), config.DeployerArgoCD, Placement{})
 			if err != nil {
 				t.Fatalf("Render: %v", err)
 			}
