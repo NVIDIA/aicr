@@ -1,0 +1,32 @@
+# GPU device list from profiles/h100.yaml in the nvml-mock Helm chart, chart
+# version 0.3.0.
+#
+# This records an EXTERNAL fact: how many GPUs the chart's h100 profile
+# provisions per node. setup-gpu-sim_test.sh checks GPUS_PER_WORKER against
+# this file rather than against itself, so the constant is pinned to what the
+# chart actually does and the suite stays hermetic (no registry pull).
+#
+# The chart_version and chart_digest lines below are asserted equal to
+# NVML_MOCK_CHART_VERSION and NVML_MOCK_CHART_DIGEST, so bumping the chart pin
+# fails the suite until this file is regenerated. The digest matters as much as
+# the version: the 0.3.0 TAG was re-pushed upstream to a different chart layer
+# while still calling itself 0.3.0, so a version line alone would have gone on
+# agreeing across the move.
+#
+#   helm pull oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock@<new-digest> \
+#     --untar --untardir /tmp/nvml-chart
+#   grep -E '^  - index:' /tmp/nvml-chart/nvml-mock/profiles/h100.yaml
+#
+# The device lines below are that grep's verbatim output.
+chart_version: 0.3.0
+chart_digest: sha256:637b4a534b9b91d231cd179cf91374aed7e4bbcda648fbd597ad858e269365c6
+profile: h100
+devices:
+  - index: 0
+  - index: 1
+  - index: 2
+  - index: 3
+  - index: 4
+  - index: 5
+  - index: 6
+  - index: 7
