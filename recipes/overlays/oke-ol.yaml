@@ -258,12 +258,15 @@ spec:
               the addon-manager Reconcile label so its owner cannot be
               confirmed (the daemonset detail reads unlabeled). Deploying
               the GPU Operator's device plugin alongside it would
-              double-advertise nvidia.com/gpu. Disable it on every GPU node
-              pool via the oci.oraclecloud.com/disable-gpu-device-plugin=true
-              node label, or migrate the cluster to the managed
-              NvidiaGpuPlugin add-on (and then use the default --profile
-              gpuStack=oci-managed). Re-run aicr snapshot after the change so
-              the reading reflects the new state.
+              double-advertise nvidia.com/gpu. For the labeled legacy
+              DaemonSet, disable it on every GPU node pool via the
+              oci.oraclecloud.com/disable-gpu-device-plugin=true node label.
+              For an unlabeled DaemonSet, resolve its ownership and remove it
+              if it is the conflicting workload, since the node label does
+              not change the reading. Alternatively, migrate the cluster to
+              the managed NvidiaGpuPlugin add-on (and then use the default
+              --profile gpuStack=oci-managed). Re-run aicr snapshot after the
+              change so the reading reflects the new state.
 
   validation:
     conformance:

@@ -122,12 +122,14 @@ every GPU node pool (`oci.oraclecloud.com/disable-gpu-device-plugin=true`
 node label — for the *legacy* DaemonSet this label is the supported
 mechanism, unlike the add-on route above) or migrating the cluster to the
 managed `NvidiaGpuPlugin` add-on. A same-named DaemonSet without the
-`Reconcile` label reads `unknown` (detail `unlabeled`) and fails closed with
-the same remediation, because the label identifies the owner, not whether the
-DaemonSet advertises `nvidia.com/gpu`. The tripwire deliberately does not gate
-`oci-managed`: when the managed add-on is installed it reconciles the same
-DaemonSet name, so a healthy `oci-managed` cluster legitimately observes an
-active DaemonSet.
+`Reconcile` label reads `unknown` (detail `unlabeled`) and fails closed,
+because the label identifies the owner, not whether the DaemonSet advertises
+`nvidia.com/gpu`. The node label does not change that reading. For an
+unlabeled DaemonSet, resolve its ownership and remove it if it is the
+conflicting workload, or migrate to the managed add-on. The tripwire
+deliberately does not gate `oci-managed`: when the managed add-on is installed
+it reconciles the same DaemonSet name, so a healthy `oci-managed` cluster
+legitimately observes an active DaemonSet.
 
 Qualification is defined for **enhanced** OKE clusters (the default cluster
 type; add-on management does not exist on basic clusters, so
