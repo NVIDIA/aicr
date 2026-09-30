@@ -497,6 +497,9 @@ jobs:
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # A failed kind_node pull must not skip every tier. Lanes that miss the
+    # cache fall back to `kind create cluster` pulling the node image itself.
+    continue-on-error: ${{ matrix.image == 'kind_node' }}
     strategy:
       fail-fast: false
       matrix:
