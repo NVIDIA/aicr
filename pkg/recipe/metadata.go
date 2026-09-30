@@ -1744,25 +1744,32 @@ func (s *RecipeMetadataSpec) TopologicalLevels() ([][]string, error) {
 // Only enabled components are nodes. A dependency edge pointing at a declared-
 // but-disabled component is treated as already satisfied (the dependency is
 // assumed provided externally, e.g. a CSP-managed cert-manager) and excluded
-// from the in-degree count. An edge to an undeclared component is retained so
-// it still surfaces as a cycle/missing-dependency error. See componentSets and
-// edgeSatisfiedExternally.
+// from the in-degree count. An edge from an enabled component to an undeclared
+// component is rejected with ErrCodeInvalidRequest naming every such edge in
+// recipe order, so a traversal that fails to drain is always a genuine cycle.
+// See componentSets and edgeSatisfiedExternally.
 //
 // Returns the per-node in-degree, the reverse adjacency (dependency name → the
 // components that depend on it), and the number of enabled nodes. Callers
-// compare their processed count against enabledCount to detect cycles/missing
-// dependencies (a node whose in-degree never drains to zero is never emitted).
-func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, dependents map[string][]string, enabledCount int) {
+// compare their processed count against enabledCount to detect cycles (a node
+// whose in-degree never drains to zero is never emitted).
+func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, dependents map[string][]string, enabledCount int, err error) {
 	declared, enabled := componentSets(refs)
 
 	inDegree = make(map[string]int, len(enabled))
 	dependents = make(map[string][]string, len(enabled))
+	var missing []string
 	for _, c := range refs {
 		if _, ok := enabled[c.Name]; !ok {
 			continue
 		}
 		degree := 0
 		for _, dep := range c.DependencyRefs {
+			if _, ok := declared[dep]; !ok {
+				missing = append(missing, fmt.Sprintf(
+					"component %q depends on %q, which is not present in this recipe", c.Name, dep))
+				continue
+			}
 			if edgeSatisfiedExternally(dep, declared, enabled) {
 				continue
 			}
@@ -1771,7 +1778,12 @@ func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, depende
 		}
 		inDegree[c.Name] = degree
 	}
-	return inDegree, dependents, len(enabled)
+	if len(missing) > 0 {
+		return nil, nil, 0, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s (a dependency provided outside the recipe must remain declared with enabled: false)",
+			strings.Join(missing, "; ")))
+	}
+	return inDegree, dependents, len(enabled), nil
 }
 
 // ComponentRefsTopologicalLevels is the free-function form of
@@ -1779,7 +1791,10 @@ func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, depende
 // []ComponentRef slice. Callers that have refs but not a full
 // RecipeMetadataSpec (e.g., the bundler post-resolution) use this.
 func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
-	inDegree, dependents, enabledCount := buildDependencyGraph(refs)
+	inDegree, dependents, enabledCount, err := buildDependencyGraph(refs)
+	if err != nil {
+		return nil, err
+	}
 
 	// Seed level 0: components with no incoming edges.
 	current := make([]string, 0, len(inDegree))
@@ -1820,7 +1835,10 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 // Components with no dependencies come first, then components that depend only
 // on already-listed components, etc.
 func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
-	inDegree, dependents, enabledCount := buildDependencyGraph(s.ComponentRefs)
+	inDegree, dependents, enabledCount, err := buildDependencyGraph(s.ComponentRefs)
+	if err != nil {
+		return nil, err
+	}
 
 	// Kahn's algorithm
 	// https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/

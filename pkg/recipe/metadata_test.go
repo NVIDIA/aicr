@@ -157,6 +157,7 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 		spec    RecipeMetadataSpec
 		want    []string
 		wantErr bool
+		errMsg  string
 	}{
 		{
 			name: "no dependencies",
@@ -218,7 +219,7 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 			want: []string{"gpu-operator", "nvsentinel"},
 		},
 		{
-			name: "undeclared dependency still surfaces as cycle error",
+			name: "undeclared dependency surfaces as missing-dependency error",
 			// gpu-operator depends on cert-manager, which is neither declared
 			// nor disabled — it simply does not exist. This must remain an
 			// error: only declared-but-disabled edges are dropped, so the
@@ -229,6 +230,18 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 				},
 			},
 			wantErr: true,
+			errMsg:  `component "gpu-operator" depends on "cert-manager", which is not present in this recipe`,
+		},
+		{
+			name: "cycle reports circular dependencies",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"b"}},
+					{Name: "b", Type: ComponentTypeHelm, DependencyRefs: []string{"a"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "circular dependencies exist",
 		},
 	}
 
@@ -240,6 +253,12 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 				return
 			}
 			if tt.wantErr {
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("TopologicalSort() error = %v, want ErrCodeInvalidRequest", err)
+				}
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("TopologicalSort() error = %v, want contains %q", err, tt.errMsg)
+				}
 				return
 			}
 			if len(got) != len(tt.want) {
@@ -440,17 +459,40 @@ func TestRecipeMetadataSpecTopologicalLevels(t *testing.T) {
 			errMsg:  "circular dependencies exist",
 		},
 		{
-			name: "missing dependency surfaces as cycle error",
-			// Matches TopologicalSort behavior: an undeclared dependency
-			// keeps the dependent's in-degree above zero indefinitely,
-			// indistinguishable from a cycle by this algorithm.
+			name: "missing dependency names the component and dependency",
 			spec: RecipeMetadataSpec{
 				ComponentRefs: []ComponentRef{
 					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"phantom"}},
 				},
 			},
 			wantErr: true,
-			errMsg:  "circular dependencies exist",
+			errMsg:  `component "a" depends on "phantom", which is not present in this recipe`,
+		},
+		{
+			name: "every missing dependency reported in recipe order",
+			// Mirrors a recipe trimmed by hand: the kept components still
+			// declare edges to components that were removed.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "cert-manager", Type: ComponentTypeHelm},
+					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"nfd", "cert-manager", "kube-prometheus-stack"}},
+				},
+			},
+			wantErr: true,
+			errMsg: `component "gpu-operator" depends on "nfd", which is not present in this recipe; ` +
+				`component "gpu-operator" depends on "kube-prometheus-stack", which is not present in this recipe`,
+		},
+		{
+			name: "missing dependency of a disabled component is ignored",
+			// A disabled component is not deployed, so its edges are never
+			// part of the ordering graph.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"phantom"}, Overrides: map[string]any{"enabled": false}},
+					{Name: "b", Type: ComponentTypeHelm},
+				},
+			},
+			want: [][]string{{"b"}},
 		},
 		{
 			name: "nil and empty DependencyRefs are equivalent",
