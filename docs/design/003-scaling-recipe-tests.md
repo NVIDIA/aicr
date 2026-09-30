@@ -166,7 +166,7 @@ cap:
 
 ```text
 script-tests                                         # kwok/scripts/lib unit tests, gates no tier
-build-aicr                                           # make build, uploads dist/ for every cell
+build-aicr                                           # builds the CLI once, uploads dist/ for every cell
 prime-images                                         # registry, gitea, redis, Kind node image cache
 
 discover
