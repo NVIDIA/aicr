@@ -120,8 +120,8 @@ jobs:
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Covers the sum of the sequential step budgets (tools 10 + bootstrap 25 +
-    # binary 20 + images 25 + prep 20 + install 90 + topology 10 +
-    # conformance 45 + verify 5 + debug 8 = 258) plus headroom, and stays under
+    # binary 20 + images 25 + prep 20 + install 90 + readiness 5 + topology 10 +
+    # conformance 45 + verify 5 + debug 8 = 263) plus headroom, and stays under
     # the 360-minute cap GitHub imposes on hosted runners: a job-level value
     # above that cap is silently clamped and the budget written here would be
     # fiction.
@@ -310,6 +310,20 @@ jobs:
         if: always() && steps.install.outcome != 'skipped'
         run: .github/scripts/record-footprint.sh "AICR bundle installed"
 
+      # The readiness phase, called as the cloud lanes call it. run-sim sets
+      # VALIDATE_PHASES=conformance, so on this lane phase_readiness only prints
+      # its "readiness gate SKIPPED" line; the step keeps that skip visible in
+      # the log instead of letting the gate vanish. 5 minutes, not the cloud
+      # lanes' 65: nothing here can run the gate itself.
+      - name: UAT - readiness gate (skipped on this lane, announced)
+        id: readiness
+        if: steps.install.outcome == 'success'
+        timeout-minutes: 5
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run-sim readiness "${TEST_CONFIG}"
+
       # THE TOPOLOGY ACCEPTANCE CHECK (#2358). Recomputes the expected block
       # membership from the live slurmd placement and each node's
       # nvidia.com/gpu.clique label, and compares Topograph's topology.conf
@@ -332,7 +346,7 @@ jobs:
       # topology fails before a signed evidence bundle is emitted for it.
       - name: UAT - verify simulated GPU topology
         id: topology
-        if: steps.install.outcome == 'success'
+        if: steps.readiness.outcome == 'success'
         timeout-minutes: 10
         run: ./tests/uat/kind/verify-topology.sh "${KIND_CLUSTER_NAME}"
 
@@ -436,6 +450,7 @@ jobs:
             echo "| Prep | ${{ steps.prep.outcome }} |"
             echo "| Install | ${{ steps.install.outcome }} |"
             echo "| Footprint - after bundle install | ${{ steps.footprint_install.outcome }} |"
+            echo "| Readiness gate (skipped: VALIDATE_PHASES=conformance) | ${{ steps.readiness.outcome }} |"
             echo "| Topology (#2358 acceptance gate) | ${{ steps.topology.outcome }} |"
             echo "| Validate (phases: conformance) | ${{ steps.conformance.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
