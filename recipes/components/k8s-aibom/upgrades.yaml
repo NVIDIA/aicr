@@ -49,7 +49,11 @@ transitions:
       Deployment had already advanced; applying the v1.5.1 CRDs by hand and
       rerunning it succeeded with the field stored. The component health
       check under recipes/checks/k8s-aibom passes against the upgraded
-      cluster.
+      cluster. Upstream measured the reverse on 2026-09-29 against
+      v1.35.8 regional GKE at 1,002 workloads (evidence in references): helm
+      rollback from 1.5.1 to 1.3.0 reached Ready in 17s on the stale v1.3.0
+      CRDs and 19s on the v1.5.1 CRDs, and in the second case every AIBOM
+      kept its inputHash and bomHash across the round trip.
     summary: >-
       The CRD change is additive only, and with the verification block unset
       (the value AICR ships) a plain chart bump against stale v1.3.0 CRDs
@@ -149,3 +153,4 @@ transitions:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#k8s-aibom-runtime-inventory
       - https://github.com/GoogleCloudPlatform/k8s-aibom/releases
       - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/docs/compatibility.md
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/c08e9ac2fda11a339865abdf2a7339a5a34c59e2/docs/evidence/v1.5.1-gke-upgrade-rollback-apiserver.md

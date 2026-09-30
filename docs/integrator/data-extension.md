@@ -285,6 +285,7 @@ with only pre-manifests is rejected as having no deployable primary.
 | `registry.yaml` | **Merged**: embedded + external component lists. On name collision, external wins. |
 | `validators/catalog.yaml` | **Merged**: embedded + external validator lists, by validator name. A same-named external validator replaces the embedded one; new validators are appended. |
 | Files in `components/`, `mixins/`, `overlays/` | **Replaced**: any external file at the same relative path completely replaces the embedded equivalent. No partial-content merge. |
+| Profile-only file in `overlays/` | **Extended**. An external overlay that carries only a `spec.profile` adds its values to the embedded overlay at the same path and replaces nothing else (see below). |
 
 When in doubt, `aicr --debug recipe ... --data <dir>` logs the resolved source
 (`embedded` / `external` / `merged`) for every loaded file.
@@ -304,10 +305,44 @@ When an external data directory replaces a declaring overlay, or converts a
 family to a profile, the replacement rules above interact with the profile
 mechanics:
 
+- **A profile-only file extends the declaration.** An external overlay at
+  the path of an embedded one that carries only `apiVersion`, `kind`,
+  `metadata.name` and `spec.profile` adds its values to the embedded
+  overlay's profile. Nothing else in the embedded overlay is replaced, so the
+  catalog does not fork the overlay or re-sync it on upgrade. This
+  `overlays/gke-cos.yaml` adds a `custom` value to `gpuStack`:
+
+  ```yaml
+  apiVersion: aicr.run/v1beta2
+  kind: RecipeMetadata
+  metadata:
+    name: gke-cos
+  spec:
+    profile:
+      name: gpuStack
+      values:
+        custom:
+          advertiser: external
+          componentRefs:
+            - name: gcp-driver-installer
+              overrides: {installer: {enabled: false}}
+            - name: gpu-operator
+              overrides: {devicePlugin: {enabled: false}}
+            - name: nvsentinel
+              overrides: {labeler: {assumeDriverInstalled: true}}
+  ```
+
+  A patch can only add values. Catalog load fails when it redeclares an
+  embedded value, sets `default` or `description`, names a different profile,
+  or adds no values. Union totality is checked over the merged values, so
+  each added value must assign exactly the path set the embedded values
+  assign. A value that assigns other paths or leaves some out fails closed.
+  An overlay that also carries `spec.criteria`, `componentRefs` or any other
+  field is not a patch and follows the replacement rule below.
 - **A same-path replacement replaces the declaration too.** An external
-  `overlays/aks.yaml` completely replaces the embedded file — including its
-  `spec.profile` block. Keep the declaration in the replacement — dropping it
-  while keeping profile apiVersion `aicr.run/v1beta2` fails catalog validation
+  `overlays/aks.yaml` that carries more than a profile block completely
+  replaces the embedded file, including its `spec.profile` block. Keep the
+  declaration in the replacement. Dropping it while keeping profile apiVersion `aicr.run/v1beta2` fails catalog validation
   (the version⟺declaration cross-check). That guardrail protects an
   integrator *editing* a profile-track file: de-profiling one requires BOTH
   removing the declaration AND downgrading the overlay to the legacy

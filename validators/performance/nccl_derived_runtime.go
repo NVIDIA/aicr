@@ -78,11 +78,16 @@ func (s ncclRuntimeSource) runsGKETCPXOChecks() bool { return s != runtimeSource
 // ${GPU_COUNT_PER_NODE} stays a number) instead of round-tripping through a
 // serialized carrier that re-parses "16" as an integer.
 type benchmarkRuntimePlan struct {
-	carrier    string
-	source     ncclRuntimeSource
-	shipped    *unstructured.Unstructured // deployed ClusterTrainingRuntime; nil unless delivered
-	provenance *derivedRuntimeProvenance
+	carrier     string
+	source      ncclRuntimeSource
+	shipped     *unstructured.Unstructured // deployed ClusterTrainingRuntime; nil unless delivered
+	provenance  *derivedRuntimeProvenance
+	managedIMEX bool // recipe-supplied runtime references the validator-managed IMEX claim template
 }
+
+// managesIMEX reports whether the validator must provision the IMEX
+// ComputeDomain for a recipe-supplied runtime. Nil-safe, mirroring derived().
+func (p *benchmarkRuntimePlan) managesIMEX() bool { return p != nil && p.managedIMEX }
 
 // derived reports whether the plan re-derives the applied runtime from a
 // shipped object. Nil-safe so test callers that exercise the baked-in path can
@@ -143,7 +148,11 @@ func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string
 					gkenet.TCPXORuntimeName, recipe.GKETCPXOInterfacesOverrideKey))
 		}
 		emitRuntimeSource(runtimeSourceRecipeSupplied)
-		return &benchmarkRuntimePlan{carrier: customRuntime, source: runtimeSourceRecipeSupplied}, nil
+		managedIMEX, imexErr := customRuntimeManagesIMEX(customRuntime)
+		if imexErr != nil {
+			return nil, imexErr
+		}
+		return &benchmarkRuntimePlan{carrier: customRuntime, source: runtimeSourceRecipeSupplied, managedIMEX: managedIMEX}, nil
 	}
 	if !delivered {
 		emitRuntimeSource(runtimeSourceCapability)

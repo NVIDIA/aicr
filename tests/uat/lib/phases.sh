@@ -15,7 +15,7 @@
 # shellcheck shell=bash
 #
 # Shared UAT phase library. Holds the cloud-agnostic phase implementations
-# (prep, install, conformance, train, serve, verify, debug) and the phase
+# (prep, install, readiness, conformance, train, serve, verify, debug) and the phase
 # dispatcher, sourced by the thin per-cloud runners tests/uat/{aws,gcp,azure}/run.
 # The runners were ~identical (aws/gcp differed only in comment wording; azure
 # added a federated-session refresh); this consolidates the shared body here and
@@ -30,7 +30,12 @@
 #
 # Phases:
 #   prep         snapshot + recipe + dry-run validate + bundle
-#   install      helmfile apply (deploys gpu-operator, kubeflow/dynamo, ...)
+#   install      helmfile apply or argocd sync (deploys gpu-operator,
+#                kubeflow/dynamo, ...) -- apply only, no convergence gate
+#   readiness    readiness gate: validate --phase deployment until it passes
+#                READINESS_CONSECUTIVE_PASSES times in a row. Its own phase (and
+#                workflow step) so a gate that never converges is not reported
+#                as an install failure (#2630)
 #   conformance  validate ALL phases (deployment + conformance + performance)
 #                + emit signed evidence bundle
 #   train        submit TrainJob, wait for completion, capture logs
@@ -128,10 +133,11 @@ ARGOCD_ROOT_APP_GRACE_SECONDS="${ARGOCD_ROOT_APP_GRACE_SECONDS:-120}"
 # push) in a distinct namespace so bundle artifacts don't collide with
 # signed evidence. See phase_prep's argocd branch.
 ARGOCD_OCI_PREFIX="${ARGOCD_OCI_PREFIX:-oci://ghcr.io/nvidia/aicr-bundle-scratch}"
-# Budget for the post-install readiness gate (see phase_install), which runs
+# Budget for the post-install readiness gate (see phase_readiness), which runs
 # `aicr validate --phase deployment` until it passes READINESS_CONSECUTIVE_PASSES
-# times in a row. This is the gate window ONLY -- it is entered AFTER helmfile
-# apply returns, so the workflow install step must budget helmfile + this. It
+# times in a row. This is the gate window ONLY -- it runs in the readiness phase,
+# after the install phase's helmfile apply / argocd sync has returned, so the
+# workflow readiness step must budget this plus startup slack. It
 # must span nodewright (skyhook) node tuning -- which REBOOTS the GPU node and
 # re-inits the gpu-operator operands after the operator first reports ready (each
 # validate run now polls internally, up to GPUReadinessTimeout, to ride through a
@@ -186,7 +192,7 @@ READINESS_CONSECUTIVE_PASSES="${READINESS_CONSECUTIVE_PASSES:-2}"
 # the census settle; fails closed if exceeded -- a growing/non-settling census
 # fails the cell EARLY with a self-explanatory message instead of letting validate
 # fail on a legitimately non-converged cluster. Separate from
-# READINESS_TIMEOUT_SECONDS, which budgets the install-phase gate.
+# READINESS_TIMEOUT_SECONDS, which budgets the readiness-phase gate.
 CENSUS_STABILITY_TIMEOUT_SECONDS="${CENSUS_STABILITY_TIMEOUT_SECONDS:-300}" # 5 min
 # kubectl label selector for the authoritative GPU pool (all three clouds label
 # their GPU pool the same way).
@@ -588,10 +594,12 @@ uat_helm_diff_platform() {
 }
 
 phase_install() {
-  # Dispatch to the deployer-specific install body. The readiness gate below
-  # is deployer-agnostic (it validates deployed cluster state, not the
-  # deployment mechanism) so it stays in phase_install; only the "get the
-  # stack onto the cluster" step differs.
+  # Dispatch to the deployer-specific install body: only the "get the stack onto
+  # the cluster" step differs by deployer. Convergence is NOT checked here -- the
+  # deployer-agnostic readiness gate (it validates deployed cluster state, not the
+  # deployment mechanism) is its own phase, phase_readiness, so a gate that never
+  # converges fails the readiness step rather than reading as an install failure
+  # (#2630).
   local deployer
   deployer="$(yq -r '.spec.bundle.deployment.deployer // "helmfile"' "${config}")"
   case "${deployer}" in
@@ -607,7 +615,9 @@ phase_install() {
   kubectl get nodes -o wide
   kubectl get pods -A | grep -Ev '\s+Running\s+|\s+Completed\s+' || true
   echo "::endgroup::"
+}
 
+phase_readiness() {
   install_readiness_gate
 }
 
@@ -776,10 +786,10 @@ install_helmfile() {
   # warmup, throttling, etc.). helmfile is idempotent — re-running on a
   # partial-install state converges on the desired set. The 3 attempts SHARE a
   # single HELMFILE_TIMEOUT_SECONDS wall-clock budget (each attempt is capped at
-  # the remaining budget, like the readiness gate below), not a full budget each:
-  # transient errors fail fast so sharing leaves ample time for retries, while a
-  # genuine hang cannot stretch install to 3x the budget. This bounds worst-case
-  # install (helmfile + gate) within the workflow step's timeout-minutes.
+  # the remaining budget, like the readiness gate in phase_readiness), not a full
+  # budget each: transient errors fail fast so sharing leaves ample time for
+  # retries, while a genuine hang cannot stretch install to 3x the budget. This
+  # bounds worst-case helmfile apply within the install step's timeout-minutes.
   local helmfile_deadline=$(( SECONDS + HELMFILE_TIMEOUT_SECONDS ))
   local success=false helm_remaining
   for attempt in 1 2 3; do
@@ -1013,7 +1023,7 @@ install_argocd() {
   # Healthy (operator mutation — gpu-operator ClusterPolicy, ResourceSlice
   # injection); Synced+Progressing / Synced+Degraded (Argo health-controller
   # divergence post-op — tolerated because the ultimate verdict lives in the
-  # deployment readiness gate that follows).
+  # deployment readiness gate, phase_readiness).
   local root_app_name="${ARGOCD_ROOT_APP:-nvidia-stack}"
   local jq_bad
   jq_bad='
@@ -1071,6 +1081,40 @@ install_argocd() {
   exit 1
 }
 
+# readiness_gate_report_extract: PURE, unit-testable. $1 is the CTRF report one
+# gate attempt wrote. Prints each non-passed test's name, status, message and
+# stdout lines -- the validator Job's own diagnosis (e.g. expected-resources'
+# "Failed resources:" block), which pkg/validator/job fetches before the pod is
+# reaped and would otherwise be lost between attempts (#2630). Returns non-zero
+# (output then unusable) when the report is missing, empty, or not CTRF-shaped.
+readiness_gate_report_extract() {
+  [[ -s "${1}" ]] || return 1
+  jq -er '
+    (.results.tests | if type == "array" then . else error("no results.tests array") end)
+    | map(select(.status != "passed"))
+    | if length == 0 then "(no non-passed tests in report)"
+      else .[] | ("- \(.name // "?") status=\(.status // "?"): \(.message // "no message")"),
+                 ((.stdout // [])[] | "    \(.)")
+      end' "${1}" 2>/dev/null
+}
+
+# readiness_gate_report_failed_names: PURE. Prints the comma-separated names of
+# the tests in CTRF report $1 that failed (neither passed nor skipped). Returns
+# non-zero when there are none or the report is unusable, so callers fall back.
+readiness_gate_report_failed_names() {
+  [[ -s "${1}" ]] || return 1
+  jq -er '[.results.tests[] | select(.status != "passed" and .status != "skipped") | .name // "?"]
+    | if length == 0 then empty else join(", ") end' "${1}" 2>/dev/null
+}
+
+# gha_escape_data escapes a workflow-command message (% CR LF) so a value with a
+# newline cannot truncate or forge an annotation.
+gha_escape_data() {
+  local s="${1//'%'/%25}"
+  s="${s//$'\r'/%0D}"
+  printf '%s' "${s//$'\n'/%0A}"
+}
+
 install_readiness_gate() {
   # Readiness gate: run the deployment validation phase -- the authoritative
   # expected-resources / ClusterPolicy / DRA / nodewright checks the later
@@ -1094,25 +1138,41 @@ install_readiness_gate() {
   # validate attempt. So each passing attempt ALSO folds in gpu_census_verdict --
   # a validate pass whose census is not settled (grown/cordoned) is treated as a
   # regression and resets the streak, riding census growth out on this same
-  # budget. Fail-closed: the install fails if the streak is never reached within
-  # the budget.
+  # budget. Fail-closed: the readiness phase fails if the streak is never reached
+  # within the budget.
   #
   # Run against a copy of the config with spec.validate.evidence stripped so the
   # gate never emits/pushes an evidence bundle -- that is the conformance phase's
   # job (phase_conformance, `--phase all`).
-  local gate_config gate_log
-  gate_config="$(mktemp)"
-  gate_log="$(mktemp)"
-  yq 'del(.spec.validate.evidence)' "${config}" > "${gate_config}"
+  #
+  # All scratch files live in one mktemp dir, removed on every return/exit path
+  # below. gate_report is each attempt's CTRF report (validate always writes CTRF
+  # JSON to --output), from which failing validators' output is extracted.
+  local gate_tmp gate_config gate_log gate_report
+  gate_tmp="$(mktemp -d)"
+  gate_config="${gate_tmp}/config.yaml"
+  gate_log="${gate_tmp}/validate.log"
+  gate_report="${gate_tmp}/report.json"
+  if ! yq 'del(.spec.validate.evidence)' "${config}" > "${gate_config}"; then
+    echo "::error::readiness gate: failed to derive the evidence-stripped gate config from ${config}" >&2
+    rm -rf "${gate_tmp}"
+    exit 1
+  fi
   # Persist each attempt's validate output (timestamped) to the bundle so the
   # status.status progression across the tuning-settling window survives into the
   # failure artifact — capturing the complete→in_progress flips as they happen
-  # (see CLUSTER_DEBUG_GATE_LOG in tests/uat/lib/collect-debug.sh). The mktemp
+  # (see CLUSTER_DEBUG_GATE_LOG in tests/uat/lib/collect-debug.sh). A failed
+  # attempt also appends the failing validators' own output from its CTRF report:
+  # the validator pods are reaped between attempts, so the gate loop is the only
+  # place their "Failed resources:" diagnosis can be captured (#2630). The
   # gate_log is still used for the immediate on-screen failure diagnostic.
-  mkdir -p "${CLUSTER_DEBUG_DIR}"
+  mkdir -p "${CLUSTER_DEBUG_DIR}" || true
   : > "${CLUSTER_DEBUG_GATE_LOG}" || true
   local ready_deadline=$(( SECONDS + READINESS_TIMEOUT_SECONDS ))
   local attempt=1 streak=0 ready=false remaining attempt_result
+  # Diagnosis of the most recent attempt only, so the final failure message never
+  # blames a validator that failed an earlier attempt but not the last one.
+  local attempt_extract="" attempt_names=""
   # Baseline for the periodic cloud-credential refresh (see cloud_refresh_credentials).
   local last_cred_refresh=${SECONDS}
   # GPU-node census fold-in (#2096): each streak-advancing attempt must ALSO see a
@@ -1149,7 +1209,11 @@ install_readiness_gate() {
     # `timeout 0` means "no timeout" (runs forever) -- the exact hang we guard.
     remaining=$(( ready_deadline - SECONDS ))
     (( remaining < 1 )) && remaining=1
-    if timeout "${remaining}" "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null > "${gate_log}" 2>&1; then
+    # Drop the previous attempt's report so a run that dies before writing one
+    # cannot be diagnosed from stale data.
+    rm -f "${gate_report}"
+    attempt_extract="" attempt_names=""
+    if timeout "${remaining}" "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output "${gate_report}" > "${gate_log}" 2>&1; then
       # Validate passed -> the CURRENTLY PRESENT nodes converged. Fold in the
       # GPU-node census (#2096): a late-joining GPU node that Skyhook just
       # cordoned+tuned re-opens convergence WITHOUT failing this attempt (it was
@@ -1163,6 +1227,8 @@ install_readiness_gate() {
         attempt_result="census-regress"
         echo "gpu census not settled (${census_reason}); resetting streak"
         streak=0
+        attempt_names="gpu-node census"
+        attempt_extract="- gpu-node census not settled: ${census_reason}"
       else
         attempt_result=pass
         streak=$(( streak + 1 ))
@@ -1180,6 +1246,14 @@ install_readiness_gate() {
       fi
       streak=0
       echo "deployment phase not ready (attempt ${attempt})"
+      # Extraction is diagnostic only: it runs in `if`/`||` contexts so a jq or
+      # report problem can neither abort the gate under errexit nor change this
+      # attempt's verdict, which is already decided above.
+      if attempt_extract="$(readiness_gate_report_extract "${gate_report}")"; then
+        attempt_names="$(readiness_gate_report_failed_names "${gate_report}")" || attempt_names=""
+      else
+        attempt_extract="(no usable CTRF report from this attempt: missing, empty, or malformed; see validate output above)"
+      fi
     fi
     # Append this attempt (timestamped) to the persistent gate series. This is the
     # status.status time-series that lets a reviewer see the tuning flips directly.
@@ -1187,19 +1261,37 @@ install_readiness_gate() {
       echo "===== attempt ${attempt} @ $(date -u +%Y-%m-%dT%H:%M:%SZ) result=${attempt_result} streak=${streak}/${READINESS_CONSECUTIVE_PASSES} ====="
       cat "${gate_log}"
       echo
+      if [[ "${attempt_result}" == fail ]]; then
+        echo "--- failed validator output (attempt ${attempt}) ---"
+        printf '%s\n' "${attempt_extract}"
+        echo
+      fi
     } >> "${CLUSTER_DEBUG_GATE_LOG}" 2>/dev/null || true
     [[ "${ready}" == true ]] && break
     attempt=$(( attempt + 1 ))
     sleep 15
   done
   if [[ "${ready}" != true ]]; then
-    echo "::error::deployment readiness gate did not reach ${READINESS_CONSECUTIVE_PASSES} consecutive passes within ${READINESS_TIMEOUT_SECONDS}s (last streak ${streak}); last attempt output:" >&2
+    # One titled annotation naming the failing validator(s), so the run summary
+    # alone says "readiness gate" and which check, not a generic install error.
+    local reason="deployment phase did not pass ${READINESS_CONSECUTIVE_PASSES}x consecutively within ${READINESS_TIMEOUT_SECONDS}s (last streak ${streak}, $(( attempt - 1 )) attempt(s))"
+    # A last attempt that passed (streak still short at the deadline) has no
+    # failing validator to name; say so rather than "unknown validator".
+    local failing="${attempt_names:-unknown validator}"
+    [[ "${attempt_result:-}" == pass ]] && failing="none on the last attempt"
+    echo "::error title=UAT readiness gate failed::$(gha_escape_data "${failing}: ${reason}")" >&2
+    echo "last attempt output:" >&2
     cat "${gate_log}" >&2 || true
-    rm -f "${gate_config}" "${gate_log}"
+    if [[ -n "${attempt_extract}" ]]; then
+      echo "--- failed validator output (last attempt) ---" >&2
+      printf '%s\n' "${attempt_extract}" >&2
+    fi
+    echo "full per-attempt series: ${CLUSTER_DEBUG_GATE_LOG}" >&2
+    rm -rf "${gate_tmp}"
     echo "::endgroup::"
     exit 1
   fi
-  rm -f "${gate_config}" "${gate_log}"
+  rm -rf "${gate_tmp}"
   echo "deployment readiness gate passed (${READINESS_CONSECUTIVE_PASSES} consecutive, ${attempt} attempt(s))"
   echo "::endgroup::"
 }
@@ -1255,7 +1347,7 @@ phase_conformance() {
   fi
   echo "::endgroup::"
 
-  # #2096 adjacency close. The install-phase readiness gate can pass with N GPU
+  # #2096 adjacency close. The readiness-phase gate can pass with N GPU
   # nodes present; in the ~84s window before `validate --phase all` launches, a
   # late-joining GPU node can join and Skyhook cordons+tunes it (taint
   # skyhook.nvidia.com=...:NoSchedule + spec.unschedulable), re-opening convergence
@@ -1724,7 +1816,7 @@ uat_main() {
 
   if [[ -z "${phase}" || -z "${config}" ]]; then
     echo "Usage: $0 <phase> <test-config.yaml>" >&2
-    echo "Phases: prep | install | conformance | train | serve | verify | debug | all" >&2
+    echo "Phases: prep | install | readiness | conformance | train | serve | verify | debug | all" >&2
     exit 2
   fi
 
@@ -1739,6 +1831,7 @@ uat_main() {
   case "${phase}" in
     prep)        phase_prep ;;
     install)     phase_install ;;
+    readiness)   phase_readiness ;;
     conformance) phase_conformance ;;
     train)       phase_train ;;
     serve)       phase_serve ;;
@@ -1756,7 +1849,7 @@ uat_main() {
       # The CUJ phase is chosen by the config's recipe intent so `run all`
       # reproduces the right end-to-end flow: serve for inference, train
       # otherwise. Defaults to training if the intent is unset.
-      phase_prep; phase_install; phase_conformance
+      phase_prep; phase_install; phase_readiness; phase_conformance
       intent="$(yq -r '.spec.recipe.criteria.intent // "training"' "${config}")"
       case "${intent}" in
         inference) phase_serve ;;
@@ -1766,7 +1859,7 @@ uat_main() {
       ;;
     *)
       echo "unknown phase: ${phase}" >&2
-      echo "Phases: prep | install | conformance | train | serve | verify | debug | all" >&2
+      echo "Phases: prep | install | readiness | conformance | train | serve | verify | debug | all" >&2
       exit 2
       ;;
   esac

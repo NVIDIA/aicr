@@ -195,6 +195,7 @@ type ReadmeData struct {
 	RecipeVersion  string
 	BundlerVersion string
 	Components     []ApplicationData
+	UpgradeNotice  string
 	// AppName mirrors AppOfAppsData.AppName — the rendered README cites
 	// the parent Application name in its `argocd app get/sync` examples,
 	// so the value must match what app-of-apps.yaml was templated with.
@@ -330,6 +331,10 @@ type Generator struct {
 	// argocdhelm's inner Generator — that path relies on the multi-source
 	// shape to transform it into a Helm template with dynamic merging.
 	InlineUpstreamValues bool
+
+	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
+	// first deployment heading of README.md. Empty adds nothing.
+	UpgradeNotice string
 
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so VendorRecords() can expose it to callers
@@ -699,6 +704,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		BundlerVersion: g.Version,
 		Components:     appDataList,
 		AppName:        appName,
+		UpgradeNotice:  g.UpgradeNotice,
 	}
 	readmePath, readmeSize, err := deployer.GenerateFromTemplate(readmeTemplate, readmeData, outputDir, "README.md")
 	if err != nil {

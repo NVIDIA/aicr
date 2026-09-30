@@ -218,6 +218,46 @@ func TestGenerate_Scenarios(t *testing.T) {
 	}
 }
 
+// TestGenerate_UpgradeNotice covers a non-empty notice; the empty case is
+// pinned byte-for-byte by the README golden.
+func TestGenerate_UpgradeNotice(t *testing.T) {
+	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
+	outputDir := t.TempDir()
+	g := &Generator{
+		RecipeResult:    recipeWith(ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")),
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         testBundlerVersion,
+		UpgradeNotice:   notice,
+	}
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(outputDir, fileReadme))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	assertUpgradeNoticePlacement(t, string(b), notice, "## Components", "## Deployment")
+}
+
+// assertUpgradeNoticePlacement checks that notice sits after afterHeading, has
+// exactly one blank line before it, and is directly followed by beforeHeading.
+func assertUpgradeNoticePlacement(t *testing.T, readme, notice, afterHeading, beforeHeading string) {
+	t.Helper()
+	idx := strings.Index(readme, notice)
+	if idx < 0 {
+		t.Fatalf("README missing upgrade notice:\n%s", readme)
+	}
+	if after := strings.Index(readme, afterHeading); after < 0 || after > idx {
+		t.Errorf("upgrade notice must follow %q:\n%s", afterHeading, readme)
+	}
+	if !strings.HasPrefix(readme[idx+len(notice):], beforeHeading) {
+		t.Errorf("upgrade notice must directly precede %q:\n%s", beforeHeading, readme)
+	}
+	if prefix := readme[:idx]; !strings.HasSuffix(prefix, "\n\n") || strings.HasSuffix(prefix, "\n\n\n") {
+		t.Errorf("want exactly one blank line before the upgrade notice:\n%s", readme)
+	}
+}
+
 // TestGenerate_EmptyRecipe asserts the deployer still emits a parseable
 // helmfile.yaml when a recipe has zero enabled components (helmfile lint
 // would otherwise reject the document; we want a stable artifact).

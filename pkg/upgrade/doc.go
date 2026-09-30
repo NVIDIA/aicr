@@ -133,6 +133,15 @@
 // blocked rows do not make it true, because a deployer would name a scope
 // nothing renders.
 //
+// # Bundle guidance
+//
+// A bundle knows the versions it pins and not the ones a cluster runs, so it
+// cannot use Match. BundleNotes instead selects every manual or blocked
+// transition whose `to` contains a pin, and WriteGuide, WriteNotice and
+// NoteLines render them as guidance conditional on each record's `from`, for
+// the one deployer the bundle was built with. Nothing is selected for a safe
+// transition, so a bundle whose pins cross only safe boundaries carries none.
+//
 // # Read-only contract
 //
 // A Set and everything reachable from it must not be mutated. Consumers share

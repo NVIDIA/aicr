@@ -75,6 +75,17 @@ running one authored for a different origin is the failure `blocked` exists to
 prevent. So write the `blocked` steps as instructions a reader will follow, not
 as a formality to satisfy the gate.
 
+**Your `manual` and `blocked` records also ship in bundles.** When a bundle pins
+a version inside your record's `to` range, `aicr bundle` writes the record into
+`UPGRADING.md` at the bundle root with only the steps for the bundle's
+deployer, lists the component in the README, and prints a warning. This is the
+path for operators who never run `upgrade-check`, so your `precondition`, each
+step's `reason`, and `reversibleNotes` are read at the moment of applying,
+without the report around them. The bundle cannot know the operator's starting
+version, so it renders your `from` range for them to check. A `safe` record
+renders nothing. See [Upgrade guidance in the
+bundle](../user/bundling.md#upgrade-guidance-in-the-bundle).
+
 `unknown` and `unversioned` are **computed**, never authored. `unknown` is a gap
 in the data, closed by writing a record. `unversioned` is a gap in the inputs,
 closed by pinning something comparable. They stay distinct because they call for
