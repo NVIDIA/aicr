@@ -109,6 +109,10 @@ type Generator struct {
 	// --serial; see config.Serial and buildHelmfile.
 	Serial bool
 
+	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
+	// first deployment heading of README.md. Empty adds nothing.
+	UpgradeNotice string
+
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so provenance.yaml can be written after component
 	// generation without re-threading the slice through every helper.
@@ -181,7 +185,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	// README.md
-	readmePath, readmeSize, err := writeReadme(outputDir, g.Version, sortedRefs, len(g.DynamicValues) > 0, g.VendorCharts, stratified)
+	readmePath, readmeSize, err := writeReadme(outputDir, g.Version, sortedRefs, len(g.DynamicValues) > 0, g.VendorCharts, stratified, g.UpgradeNotice)
 	if err != nil {
 		return nil, err
 	}
@@ -520,6 +524,7 @@ type readmeData struct {
 	// Issue #914.
 	HasSubHelmfiles bool
 	Components      []readmeComponent
+	UpgradeNotice   string
 }
 
 type readmeComponent struct {
@@ -529,13 +534,14 @@ type readmeComponent struct {
 }
 
 // writeReadme renders README.md from the embedded template.
-func writeReadme(outputDir, version string, refs []recipe.ComponentRef, hasDynamic, hasVendored, hasSubHelmfiles bool) (string, int64, error) {
+func writeReadme(outputDir, version string, refs []recipe.ComponentRef, hasDynamic, hasVendored, hasSubHelmfiles bool, upgradeNotice string) (string, int64, error) {
 	data := readmeData{
 		BundlerVersion:  deployer.NormalizeVersionWithDefault(version),
 		HasDynamic:      hasDynamic,
 		HasVendored:     hasVendored,
 		HasSubHelmfiles: hasSubHelmfiles,
 		Components:      make([]readmeComponent, 0, len(refs)),
+		UpgradeNotice:   upgradeNotice,
 	}
 	for _, r := range refs {
 		v := r.Version

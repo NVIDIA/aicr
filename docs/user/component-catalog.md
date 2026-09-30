@@ -50,7 +50,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **slinky-slurm-operator-crds** | Custom Resource Definitions for the SchedMD Slinky Slurm operator. Installs the `slinky.slurm.net` CRDs (Controller, NodeSet, LoginSet, Accounting, RestApi, Token). Installed separately to support CRD lifecycle management. | [Slinky Slurm Operator](https://github.com/SlinkyProject/slurm-operator) |
 | **slinky-slurm-operator** | SchedMD Slinky Slurm operator and admission webhook. Manages the lifecycle of Slurm clusters declared via Slinky CRs (Controller, NodeSet, LoginSet, Accounting, RestApi, Token). AICR's system node-selector and toleration bundle flags apply to both deployments; affinity remains available through component values or typed overrides. | [Slinky Slurm Operator](https://github.com/SlinkyProject/slurm-operator) |
 | **slinky-slurm** | Slinky-managed Slurm cluster instance: Controller (slurmctld) + LoginSet (sackd/sshd) + NodeSet (slurmd) + RestApi (slurmrestd), with SlurmDBD derived from the recipe's typed accounting mode. Reconciled by `slinky-slurm-operator`. See [Slurm Accounting](slinky-slurm-accounting.md), [Slurm Enroot Configuration](slinky-slurm-enroot.md), and [Slurm Shared Storage](slinky-slurm-storage.md). | [Slinky Slurm Cluster Chart](https://github.com/SlinkyProject/slurm-operator/tree/main/helm/slurm) |
-| **slinky-topograph** | Slinky/Slurm-scoped instance of Topograph — queries cloud provider topology APIs (GCP, AWS, OCI …) to generate Slurm `topology.conf`, enabling topology-aware placement decisions in the Slinky-managed scheduler. **Not installed by default**; leaf overlays opt in by adding an explicit `componentRef` entry for `slinky-topograph` — the `componentRef` is what schedules the release; `dependencyRefs` alone does not install anything. That `componentRef` declares `slinky-slurm` as a `dependencyRef` to deploy **after** it: `slinky-slurm` renders and owns the `slinky-slurm-config-extra` ConfigMap (from its `configFiles`, mounted into slurmctld via the Controller CR's `configFileRefs`), and Topograph patches only that ConfigMap's `topology.conf` key on each sync, preserving the chart-owned `cgroup.conf`/`gres.conf` keys — Helm has to own the ConfigMap first. `TopologyPlugin: topology/tree` is set per-leaf via `slinky-slurm`'s `controller.extraConfMap`. Includes the `node-observer` component, which watches the topograph API pod and regenerates topology on restarts or selected node/pod changes. Requires cloud provider IAM access (e.g. GCP `roles/compute.viewer` for Workload Identity). | [Topograph](https://github.com/dsx-ai-factory/topograph) |
+| **slinky-topograph** | Slinky/Slurm-scoped instance of Topograph — derives topology from cloud provider APIs (GCP, AWS, OCI …) or, with the `dra` provider, from Kubernetes node labels, and generates Slurm `topology.conf`, enabling topology-aware placement decisions in the Slinky-managed scheduler. **Not installed by default**; leaf overlays opt in by adding an explicit `componentRef` entry for `slinky-topograph` — the `componentRef` is what schedules the release; `dependencyRefs` alone does not install anything. That `componentRef` declares `slinky-slurm` as a `dependencyRef` to deploy **after** it: `slinky-slurm` renders and owns the `slinky-slurm-config-extra` ConfigMap (from its `configFiles`, mounted into slurmctld via the Controller CR's `configFileRefs`), and Topograph patches only that ConfigMap's `topology.conf` key on each sync, preserving the chart-owned `cgroup.conf`/`gres.conf` keys — Helm has to own the ConfigMap first. `TopologyPlugin` is set per-leaf via `slinky-slurm`'s `controller.extraConfMap` and must match the `plugin` that leaf gives Topograph's engine: leaves run `topology/tree` or `topology/block` depending on the shape their provider yields, and slurmctld refuses to start on a `topology.conf` whose body does not match the configured plugin. Includes the `node-observer` component, which watches the topograph API pod and regenerates topology on restarts or selected node/pod changes. A cloud provider requires IAM access (e.g. GCP `roles/compute.viewer` for Workload Identity); the `dra` provider reads Node labels and needs none. | [Topograph](https://github.com/dsx-ai-factory/topograph) |
 | **nfd-ocp-olm** | OLM installer for Node Feature Discovery on OpenShift. Creates the OperatorGroup and Subscription resources that install NFD via the Operator Lifecycle Manager. Paired with `nfd-ocp`. OCP-specific. | [Node Feature Discovery (Certified)](https://catalog.redhat.com/software/container-stacks/detail/5ec53e8c110f56bd24f5f8db) |
 | **nfd-ocp** | Node Feature Discovery CR for OpenShift. Configures NFD's operand (worker, topology updater) via a NodeFeatureDiscovery custom resource. Deployed after `nfd-ocp-olm`. OCP-specific. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
 | **gpu-operator-ocp-olm** | OLM installer for the GPU Operator on OpenShift. Creates the OperatorGroup and Subscription resources that install the certified GPU Operator via the Operator Lifecycle Manager. Paired with `gpu-operator-ocp`. OCP-specific. | [NVIDIA GPU Operator (Certified)](https://catalog.redhat.com/software/container-stacks/detail/5e7b210b8a3c1e00013d636d) |
@@ -210,7 +210,7 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 | `faultRemediation` | decides the remediation action |
 | `janitor` / `janitorProvider` | executes it — reboot or terminate |
 
-Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.22.0`, the version pinned in `recipes/registry.yaml`.
+Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nvcreCertificationMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.25.0`, the version pinned in `recipes/registry.yaml`.
 
 `nicHealthMonitor` is the one entry above that AICR's shipped recipes turn back on, and only on AKS and OKE — see [NIC and fabric fault detection](#nic-and-fabric-fault-detection).
 
@@ -383,15 +383,19 @@ preflight:
       resource: podgroups
     minCountExpr: "podGroup.spec.minMember"
   initContainers:                       # restated from the chart, see below
-    - name: preflight-dcgm-diag         #   (chart defaults)
-    - name: preflight-nccl-loopback     #   (chart defaults)
+    - name: preflight-dcgm-diag         #   one DCGM address, not the chart's list
+    - name: preflight-nccl-loopback     #   adds SKIP_BANDWIDTH_CHECK
     - name: preflight-nccl-allreduce
-      defaultEnabled: false             # the one deviation
+      defaultEnabled: false
 ```
 
-The mixin also restates `preflight.initContainers` in full — all three checks, verbatim from the chart, with one addition: `defaultEnabled: false` on `preflight-nccl-allreduce`. The next section explains why.
+The mixin also restates `preflight.initContainers` in full — all three checks, taken from the chart with three deviations:
 
-Restating means AICR now pins that list's contents (both images, both bandwidth thresholds, and `DCGM_HOSTENGINE_ADDR`), so a chart bump cannot move them silently. `TestNVSentinelPreflightInitContainersMatchChart` renders the mixin's list against the chart's own and fails on any drift beyond the intended `defaultEnabled` line. That test runs weekly, not on every PR, so a chart bump can merge before it fires.
+- `defaultEnabled: false` on `preflight-nccl-allreduce`. The next section explains why.
+- `SKIP_BANDWIDTH_CHECK: "true"` on `preflight-nccl-loopback`.
+- A single `DCGM_HOSTENGINE_ADDR` on `preflight-dcgm-diag`: `nvidia-dcgm.gpu-operator.svc:5555`, the GPU Operator's ClusterPolicy-mode hostengine. From v1.25.0 the chart ships a candidate list that also names the GPUCluster-mode `nvidia-dcgm-dra` Service; the bundle gate verifies one address and rejects a list.
+
+Restating means AICR now pins that list's contents (both images, both bandwidth thresholds, and `DCGM_HOSTENGINE_ADDR`), so a chart bump cannot move them silently. `TestNVSentinelPreflightInitContainersMatchChart` renders the mixin's list against the chart's own and fails on any drift beyond those three deviations. That test runs weekly, not on every PR, so a chart bump can merge before it fires.
 
 **`failurePolicy: Ignore` is deliberate.** The webhook sits in the pod-creation path, so the chart's `Fail` would turn a webhook outage into a pod-creation outage for every labeled namespace. `Ignore` trades a missed check for availability — the right default while this is new, and worth revisiting once it has field time. The cost is that a broken webhook is *silent*: pods are admitted unchecked, with no error anywhere. `recipes/checks/nvsentinel-preflight/health-check.yaml` detects exactly that, including the case where cert-manager has not injected the webhook's CA bundle — but **nothing runs it for you**. It is deliberately not registry-linked (the mixin is opt-in, so `make check-health-all` would run it against recipes that never deploy preflight), which is the same treatment `nvsentinel-observability` gets. Run it yourself after adopting the mixin:
 
@@ -885,12 +889,20 @@ against the upgraded cluster. See the component's
 [upgrade record](https://github.com/NVIDIA/aicr/blob/main/recipes/components/k8s-aibom/upgrades.yaml)
 for that evidence and the steps it produced.
 
-Two things are deliberately **not** covered by that run. The health check's
+Upstream then measured what that run did not, on a regional GKE cluster
+(`v1.35.8`) at 1,002 tracked workloads, 1,001 of them Deployments scaled to
+zero replicas: API-server cost, rollback, and the resource envelope
+([evidence](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/c08e9ac2fda11a339865abdf2a7339a5a34c59e2/docs/evidence/v1.5.1-gke-upgrade-rollback-apiserver.md)).
+With that idle inventory the controller made about one API-server request per
+minute at steady state, all watch reconnects and no writes, at 48MiB working
+set. A cluster with running pods and pod churn was not measured. A `helm rollback`
+from v1.5.1 to v1.3.0 reached Ready in 17-19s with the CRDs in either state;
+with the v1.5.1 CRDs left in place, every AIBOM kept its input and BOM hashes
+across the round trip.
+
+One thing is deliberately **not** covered. The health check's
 `AIBOMControllerConfig` assertion still targets `v1alpha1` rather than the
-`v1beta1` the chart now renders (see [Health and readiness](#health-and-readiness)),
-and the resource envelope below carries forward a v1.3.0 measurement — v1.5.1
-was spot-checked against it, but the 1,001-workload ceiling has only ever been
-measured on v1.3.0.
+`v1beta1` the chart now renders (see [Health and readiness](#health-and-readiness)).
 
 ### Health and readiness
 
