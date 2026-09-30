@@ -84,7 +84,7 @@ jobs:
     if: inputs.lifecycle == 'nightly'
     runs-on: linux-amd64-gpu-h100-latest-1
     # Cover the sum of the sequential step budgets (setup 25 + image build 20 +
-    # tools + prep 20 + install 90 + conformance 45 + train 30 + verify 5) plus
+    # tools + prep 20 + install 25 + readiness 65 + conformance 45 + train 30 + verify 5) plus
     # headroom for the always()-run cleanup, so a job-level timeout never kills
     # teardown and leaks the nvkind cluster on the shared runner. Matches the
     # cloud lanes' 280.
@@ -264,18 +264,31 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/kind/run prep "${TEST_CONFIG}"
 
-      - name: UAT - install (helmfile apply + readiness gate)
+      # Apply and readiness gate are separate steps (#2630) so a gate that never
+      # converges is not reported as an install failure. Budgets from
+      # tests/uat/lib/phases.sh plus headroom for each fail-closed `::error::`:
+      # HELMFILE_TIMEOUT_SECONDS 20m -> 25, READINESS_TIMEOUT_SECONDS 60m -> 65.
+      - name: UAT - install (helmfile apply)
         id: install
         if: inputs.skip_tests != true && steps.prep.outcome == 'success'
-        timeout-minutes: 90
+        timeout-minutes: 25
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/kind/run install "${TEST_CONFIG}"
 
+      - name: UAT - readiness gate (validate --phase deployment)
+        id: readiness
+        if: inputs.skip_tests != true && steps.install.outcome == 'success'
+        timeout-minutes: 65
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run readiness "${TEST_CONFIG}"
+
       - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
-        if: inputs.skip_tests != true && steps.install.outcome == 'success'
+        if: inputs.skip_tests != true && steps.readiness.outcome == 'success'
         timeout-minutes: 45
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -380,6 +393,7 @@ jobs:
             echo "|-------|--------|"
             echo "| Prep | ${{ steps.prep.outcome }} |"
             echo "| Install | ${{ steps.install.outcome }} |"
+            echo "| Readiness gate | ${{ steps.readiness.outcome }} |"
             echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"

@@ -76,7 +76,8 @@ be missing; `cluster-debug/` prefix omitted below):
 | `MANIFEST.yaml` | Always first — runId, config, resolved recipe + criteria, and `failingChecks` lifted from `report.json` |
 | `report.json` | Full validator results; absent if the run died before validate |
 | `train-logs/**`, `serve-logs/**` | A CUJ check failed (NCCL, inference-perf) |
-| `cr-skyhooks.yaml`, `node-reboot-fingerprint.txt`, `readiness-gate.log` | Readiness-gate or tuning-race failure — Skyhook `status.status`, taints, bootID/kernel |
+| `readiness-gate.log` | Readiness-gate failure — one `===== attempt N` section per `validate --phase deployment` try; the last `--- failed validator output (attempt N) ---` block names each non-passed validator with its message and stdout, including the `Failed resources:` list. Runs before #2630 have no such block, only the raw validate output |
+| `cr-skyhooks.yaml`, `node-reboot-fingerprint.txt` | Tuning-race failure — Skyhook `status.status`, taints, bootID/kernel |
 | `pods-notready.txt`, `events.txt` | Scheduling, eviction, OOM |
 | `logs-<namespace>.txt` | The operator owning the failing resource |
 | `nodes*`, other `cr-*.yaml`, `ns-*.txt` | Broader node and operator state |
@@ -104,10 +105,26 @@ priority ranking, so classify every failure:
 
 | Failed step contains | Nature | Product signal? |
 |---|---|---|
+| `UAT - readiness gate` | Deployed stack did not converge: a deployment-phase validator kept failing | YES — the likely owner is the component behind the failing validator(s), which the script prints as `failing validators:` |
 | `UAT - validate`, `UAT - prep`, CUJ/test phase names | Real test failure | YES — but the validate step also emits signed evidence, so confirm against `report.json` (Step 2b) before ranking |
 | `Bringup Infra`, provision/actuator steps | Infra bring-up failure | no |
 | `Buildx`, `Build and push`, image/GHCR steps | CI/image flake | no |
-| `Validate inputs`, `helmfile apply`, install steps | Setup/install issue | maybe — recurring = investigate |
+| `Validate inputs`, `UAT - install` tagged `[apply only: maybe infra]` | helmfile apply or Argo CD sync failed | maybe — recurring = investigate |
+| `UAT - install` tagged `[legacy apply+readiness: ambiguous …]` | Pre-#2630 run: the step ran both the apply and the readiness gate | ambiguous — see below |
+
+The script tags install and readiness failures in brackets. A job that has a
+`UAT - readiness gate` step uses the split layout, so its install step is
+apply-only. A job without one predates the split (#2630), and its
+`UAT - install (...)` step — including kind's `UAT - install (helmfile apply
++ readiness gate)` — covered both halves. For those legacy failures, pull the
+bundle (Step 2b): a `readiness-gate.log` with `result=fail` attempts means the
+gate failed (product signal); no gate log, or an empty one, means the apply
+failed (maybe infra). Without a bundle, keep it ambiguous; do not guess.
+
+For readiness failures the `failing validators:` text comes from the
+`UAT readiness gate failed` annotation the phase emits. When it is absent (the
+annotation failed to post, or the run predates it), read the names from the
+last failed-validator block in `readiness-gate.log`.
 
 A retry that went green the same night (same combo, later timestamp,
 success) downgrades the earlier failure to a flake.
@@ -130,8 +147,11 @@ Bundles land in `<dir>/<service>-<gpu>-<intent>-<run_id>/`, each with a
 printed digest — MANIFEST head, failing checks from `report.json`, and a
 one-line contents summary. Read that summary for *presence*, not file names:
 a missing `evidence/` or `report.json` says the run died before that stage,
-which is often the whole diagnosis. Then open files per the Debug bundles
-table above.
+which is often the whole diagnosis. For a readiness-gate failure the digest
+also echoes the last `--- failed validator output` block from
+`readiness-gate.log`; its `Failed resources:` lines name the resources that
+never became ready, so start with the logs of the operator that owns them.
+Then open files per the Debug bundles table above.
 
 Cite `file_path:line` and the run ID for every finding. Leave the download
 directory in place — the user may want to keep digging.
@@ -149,7 +169,9 @@ failing combo.
 A numbered priority list derived from the table:
 
 1. Combos with **consistent test-phase failures** (0/N or repeated
-   validate-phase failures) — top manual-validation priority.
+   validate-phase or readiness-gate failures) — top manual-validation
+   priority. For readiness failures, name the failing validators and the
+   component that owns them.
 2. Combos whose **most recent** failure is test-phase (even if earlier
    ones were infra) — deserve a close look.
 3. Combos with **infra/CI-only** failures — noisy, not product signal;
@@ -202,6 +224,11 @@ the RC list, not the table.
 - **`cluster-debug/` missing or thin** — the collector is best-effort and
   its cloud credentials can expire on a long failure. Say the bundle is
   incomplete; do not read it as the cluster being healthy.
+- **Readiness gate failed for an infra reason** — the gate talks to the
+  API server on every attempt, so expired cloud credentials or an unreachable
+  control plane also fail it. If the failed-validator block is absent or its
+  messages are connection/auth errors rather than resources that are not
+  ready, reclassify to infra.
 - **Failing step name disagrees with `report.json`** — trust the bundle.
   `UAT - validate (all phases) + emit signed evidence` covers two concerns,
   so N/N passing checks under a failed step means the evidence leg failed,
