@@ -47,7 +47,7 @@ transitions:
       preflight.burst; an override of either still renders and is silently
       ignored.
     precondition: >-
-      Nothing listens on host port 2112 on the GPU nodes, or the recipe moves
+      Nothing listens on host port 2112 on any GPU node, or the recipe moves
       the endpoint first.
     reversible: true
     reversibleNotes: >-
@@ -61,15 +61,29 @@ transitions:
         steps:
           - id: check-host-port
             description: >-
-              On a GPU node, check for a listener on port 2112, for example
-              kubectl debug node/<gpu-node> -it --image=busybox:1.38.0 --
-              netstat -ltn. If one exists, set
-              nv-sentinel:metadata-collector.metrics.port to a free port, or
+              On every GPU node (kubectl get nodes -l
+              nvidia.com/gpu.present=true), check for a listener on port 2112,
+              for example kubectl debug node/<gpu-node> -it
+              --image=busybox:1.38.0 -- netstat -ltn. If any node has one, set
+              nv-sentinel:metadata-collector.metrics.port to a port free on
+              every GPU node, or
               nv-sentinel:metadata-collector.metrics.enabled=false, and
               regenerate the bundle.
             reason: >-
               The collector keeps running when the bind fails, so a
-              collision costs its metrics without failing any health check.
+              collision costs that node's metrics without failing any health
+              check, and a clean node says nothing about the others.
+          - id: drop-preflight-rate-limits
+            description: >-
+              If the recipe or a --set sets preflight.qps or preflight.burst,
+              remove it. v1.24.0 removed client-side rate limiting from the
+              preflight controller with no replacement; to limit its API
+              load, use API Priority and Fairness on the API server.
+            reason: >-
+              The chart no longer reads either value, so an override renders
+              and silently stops throttling. Upstream removed the limit
+              because preflight sits on the pod admission path, where
+              throttling pushed gang admission past the webhook timeout.
           - id: apply-new-crds
             description: >-
               Apply the v1.25.0 CRDs using the CRD-apply command under
@@ -89,22 +103,38 @@ transitions:
           - id: verify
             description: >-
               kubectl -n nvsentinel rollout status daemonset/metadata-collector,
-              then check its logs for "Metrics endpoint stopped".
+              then check every collector pod's logs for "Metrics endpoint
+              stopped": kubectl -n nvsentinel logs -l
+              app.kubernetes.io/name=metadata-collector --prefix --tail=-1.
             reason: >-
               A rolled-out DaemonSet alone does not prove the metrics endpoint
-              bound.
+              bound, and logs of the DaemonSet name show only one pod.
       - steps:
           - id: check-host-port
             description: >-
-              On a GPU node, check for a listener on port 2112, for example
-              kubectl debug node/<gpu-node> -it --image=busybox:1.38.0 --
-              netstat -ltn. If one exists, set
-              nv-sentinel:metadata-collector.metrics.port to a free port, or
+              On every GPU node (kubectl get nodes -l
+              nvidia.com/gpu.present=true), check for a listener on port 2112,
+              for example kubectl debug node/<gpu-node> -it
+              --image=busybox:1.38.0 -- netstat -ltn. If any node has one, set
+              nv-sentinel:metadata-collector.metrics.port to a port free on
+              every GPU node, or
               nv-sentinel:metadata-collector.metrics.enabled=false, and
               regenerate the bundle.
             reason: >-
               The collector keeps running when the bind fails, so a
-              collision costs its metrics without failing any health check.
+              collision costs that node's metrics without failing any health
+              check, and a clean node says nothing about the others.
+          - id: drop-preflight-rate-limits
+            description: >-
+              If the recipe or a --set sets preflight.qps or preflight.burst,
+              remove it. v1.24.0 removed client-side rate limiting from the
+              preflight controller with no replacement; to limit its API
+              load, use API Priority and Fairness on the API server.
+            reason: >-
+              The chart no longer reads either value, so an override renders
+              and silently stops throttling. Upstream removed the limit
+              because preflight sits on the pod admission path, where
+              throttling pushed gang admission past the webhook timeout.
           - id: apply
             description: >-
               Re-run install.sh (helm), or commit the regenerated bundle and
@@ -115,12 +145,15 @@ transitions:
           - id: verify
             description: >-
               kubectl -n nvsentinel rollout status daemonset/metadata-collector,
-              then check its logs for "Metrics endpoint stopped".
+              then check every collector pod's logs for "Metrics endpoint
+              stopped": kubectl -n nvsentinel logs -l
+              app.kubernetes.io/name=metadata-collector --prefix --tail=-1.
             reason: >-
               A rolled-out DaemonSet alone does not prove the metrics endpoint
-              bound.
+              bound, and logs of the DaemonSet name show only one pod.
     references:
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.23.0
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.24.0
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.25.0
       - https://github.com/NVIDIA/NVSentinel/blob/v1.25.0/metadata-collector/main.go
+      - https://github.com/NVIDIA/NVSentinel/pull/1849
