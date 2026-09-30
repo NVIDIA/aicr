@@ -82,6 +82,10 @@ spec:
                 repository: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
                 tag: ""
               env:
+                # One address, not the chart's candidate list: the GPU Operator
+                # runs in ClusterPolicy mode, and
+                # CheckNVSentinelPreflightDCGMReachable parses a single
+                # host:port.
                 - name: DCGM_HOSTENGINE_ADDR
                   value: "nvidia-dcgm.gpu-operator.svc:5555"
                 - name: DCGM_DIAG_LEVEL
