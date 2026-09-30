@@ -1582,7 +1582,7 @@ Omitting `--to` asks *"am I behind, and does catching up hurt?"*, which is usual
 
 **`--from cluster` takes the source side from what is installed.** Instead of a source artifact, the check reads the record each deployer leaves behind: Helm's release records, out of the Kubernetes objects Helm stores them in, and Argo CD's `Application` objects, which are the only evidence for a cluster deployed with `argocd` or `argocd-helm` because those write no Helm release at all. The `--to` side is still an artifact; there is nothing in a cluster to upgrade *to*.
 
-That answers *which version is installed*, authoritatively, including where a cluster has drifted from the recipe in git. It answers nothing else. Both sources are declarations rather than observations: Helm records what it last applied and an `Application` records what it is configured to deploy, so a resource somebody edited by hand leaves both untouched and reading them will not say so. It is not a view of live cluster state.
+That answers *which version is installed*, authoritatively, including where a cluster has drifted from the recipe in git. It answers nothing else. A version counts only once it is established: a Helm release whose newest revision reached `deployed`, and an `Application` revision its sync status or history shows was synced, never the pin it is configured to reach. A Helm upgrade that is pending or failed, or an `Application` that has not finished a sync, reads as `unversioned` rather than at its target, since the old version may still be what runs. Both sources are records of what was applied rather than observations, so a resource somebody edited by hand leaves both untouched and reading them will not say so. It is not a view of live cluster state.
 
 Two flags stop being optional:
 
@@ -1591,7 +1591,7 @@ Two flags stop being optional:
 
 `cluster` is a sentinel value rather than a path. A directory of that name is reached as `./cluster`.
 
-The report gains a `READ FROM CLUSTER` block above the rows, naming the kubeconfig and context that were read and accounting for each reader separately. The two sets of counts are never summed: the Helm side counts storage records, so one release with ten retained revisions contributes ten, while the Argo side counts `Application` objects, of which a component has one. `--format json` and `--format yaml` carry the same thing as `source`.
+The report gains a `READ FROM CLUSTER` block above the rows, naming the kubeconfig that was read and accounting for each reader separately. Its `context` line reads `-`: the current context is not yet reported, so confirm it with `kubectl config current-context` against the same kubeconfig before trusting the rows. The two sets of counts are never summed: the Helm side counts storage records, so one release with ten retained revisions contributes ten, while the Argo side counts `Application` objects, of which a component has one. `--format json` and `--format yaml` carry the same thing as `source`.
 
 A read that recognizes nothing is reported, never failed. Every row then reads "added", and the block says so in as many words, because from the rows alone a cluster with none of these components installed looks identical to the two likelier causes: the wrong cluster, or components installed by a deployer other than the one you named.
 
