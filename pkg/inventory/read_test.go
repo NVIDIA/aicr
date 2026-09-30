@@ -264,6 +264,43 @@ func TestVersionFor(t *testing.T) {
 			want:      "v25.3.3",
 		},
 		{
+			// Helm writes the target of an upgrade before applying anything,
+			// so a pending or failed newest revision names a version the
+			// cluster may not be running. Reading it as installed would
+			// report the upgrade to that version as already made.
+			name:      "a pending upgrade to the target version establishes nothing",
+			record:    helmRec("gpu-operator", "nvidia-gpu-operator", "pending-upgrade", "v25.10.0", nil),
+			component: fixtureGPUOperator,
+			want:      "",
+		},
+		{
+			// A pre-upgrade hook fails before any resource is updated, and a
+			// later failure may have updated some: either way the old chart
+			// may still be what runs.
+			name:      "a failed upgrade establishes nothing",
+			record:    helmRec("gpu-operator", "nvidia-gpu-operator", "failed", "v25.10.0", stamp("v25.10.0")),
+			component: fixtureGPUOperator,
+			want:      "",
+		},
+		{
+			name:      "a pending install establishes nothing",
+			record:    helmRec("gpu-operator", "nvidia-gpu-operator", "pending-install", "v25.10.0", nil),
+			component: fixtureGPUOperator,
+			want:      "",
+		},
+		{
+			name:      "a pending rollback establishes nothing",
+			record:    helmRec("gpu-operator", "nvidia-gpu-operator", "pending-rollback", "v25.3.3", nil),
+			component: fixtureGPUOperator,
+			want:      "",
+		},
+		{
+			name:      "an unrecognized status establishes nothing",
+			record:    helmRec("gpu-operator", "nvidia-gpu-operator", "unknown", "v25.3.3", nil),
+			component: fixtureGPUOperator,
+			want:      "",
+		},
+		{
 			name:      "the stamp answers for a component with no upstream chart",
 			record:    helmRec("dra-node-labeler", "kube-system", "deployed", "0.1.0", stamp("release-1.4")),
 			component: fixtureDRALabeler,
@@ -371,26 +408,28 @@ func TestInstalledVersions(t *testing.T) {
 			want:   map[string]string{"cert-manager": "1.20.2"},
 			counts: mappingCounts{uninstalled: 1},
 		},
+		// A newest revision that is not deployed keeps the component installed,
+		// so it is never read as added, and establishes no version for it.
 		{
-			name: "a failed release is reported, not excluded", deployer: DeployerHelm, comps: comps,
+			name: "a failed release is reported without a version, not excluded", deployer: DeployerHelm, comps: comps,
 			records: []installedRelease{
 				helmRec("gpu-operator", "nvidia-gpu-operator", "failed", "v25.3.3", nil),
 			},
-			want: map[string]string{"gpu-operator": "v25.3.3"},
+			want: map[string]string{"gpu-operator": ""},
 		},
 		{
-			name: "a pending-upgrade release is reported, not excluded", deployer: DeployerHelm, comps: comps,
+			name: "a pending-upgrade release is reported without a version, not excluded", deployer: DeployerHelm, comps: comps,
 			records: []installedRelease{
 				helmRec("gpu-operator", "nvidia-gpu-operator", "pending-upgrade", "v25.3.3", nil),
 			},
-			want: map[string]string{"gpu-operator": "v25.3.3"},
+			want: map[string]string{"gpu-operator": ""},
 		},
 		{
-			name: "an uninstalling release is reported, not excluded", deployer: DeployerHelm, comps: comps,
+			name: "an uninstalling release is reported without a version, not excluded", deployer: DeployerHelm, comps: comps,
 			records: []installedRelease{
 				helmRec("gpu-operator", "nvidia-gpu-operator", "uninstalling", "v25.3.3", nil),
 			},
-			want: map[string]string{"gpu-operator": "v25.3.3"},
+			want: map[string]string{"gpu-operator": ""},
 		},
 		{
 			name: "an injected folder never supplies the version", deployer: DeployerHelm, comps: comps,

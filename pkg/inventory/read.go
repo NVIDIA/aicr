@@ -28,14 +28,24 @@ import (
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 )
 
-// helmStatusUninstalled is the one release status this package treats as not
-// installed. `helm uninstall --keep-history` leaves a complete record behind,
-// and reporting it would put a deliberately-removed component on the `from`
-// side at its last version, manufacturing a verdict for an upgrade nobody is
-// performing. Every other status — failed, uninstalling, the pending-* three —
-// describes resources that really are on the cluster, and a failed release at
-// a known version is exactly when the upgrade question matters most.
-const helmStatusUninstalled = "uninstalled"
+// Release statuses of a Helm storage record's newest revision.
+//
+// Uninstalled is the one this package treats as not installed:
+// `helm uninstall --keep-history` leaves a complete record behind, and
+// reporting it would put a deliberately-removed component on the `from` side
+// at its last version, manufacturing a verdict for an upgrade nobody is
+// performing.
+//
+// Deployed is the only one that establishes a version. Helm writes an
+// upgrade's target revision before it applies anything, so a pending-* or
+// failed newest revision names a version the cluster may not be running: a
+// pre-upgrade hook fails before any resource changes, and a later failure may
+// have changed some. Such a component is still installed, and reads as
+// unversioned rather than at its target or at the revision before it.
+const (
+	helmStatusUninstalled = "uninstalled"
+	helmStatusDeployed    = "deployed"
+)
 
 // Deployer names the deployer that installed the bundle being compared.
 //
@@ -534,6 +544,9 @@ func nameIs(recordName, want string, suffix bool) bool {
 // manifest-only or Kustomize component has no upstream chart, so the chart
 // version of whatever carries it is by construction a wrapper version.
 //
+// A Helm record answers only when its newest revision is deployed; see
+// helmStatusDeployed.
+//
 // The branch is on Source and not on the annotations being absent: an Argo
 // Application carries none at all, which is a different fact from a chart
 // whose metadata declared none, and only the latter licenses the fallback. A
@@ -542,6 +555,9 @@ func nameIs(recordName, want string, suffix bool) bool {
 // replace.
 func versionFor(record installedRelease, c Component) string {
 	if record.Source == sourceHelm {
+		if record.Status != helmStatusDeployed {
+			return ""
+		}
 		if version, ok := record.Annotations[header.AnnotationComponentVersion]; ok {
 			if stampsWrapperVersion(record, c) {
 				return ""

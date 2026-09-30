@@ -115,9 +115,11 @@
 // Two exclusions are deliberate and narrow. A release is excluded only when
 // its status is uninstalled, because `helm uninstall --keep-history` leaves a
 // complete record and reporting it would manufacture a verdict for an upgrade
-// nobody is making; failed, uninstalling and the pending-* statuses all
-// describe resources that are really on the cluster, and a failed release at a
-// known version is when the question matters most. And when several releases
+// nobody is making. Any other status keeps the component installed, but only
+// deployed establishes its version: Helm writes an upgrade's target before it
+// applies anything, so a failed, uninstalling or pending-* newest revision may
+// name a version the cluster is not running, and reads as unversioned rather
+// than at that target. And when several releases
 // map to one component, the component's namespace decides which; failing to
 // decide is an error rather than a pick, because guessing which tenant's
 // install was meant is not this package's decision. A single unambiguous
