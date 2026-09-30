@@ -1399,17 +1399,6 @@ list_bundle_components() {
     list_bundle_entries "$dir" | { grep -v '^deploy\.sh$' || true; }
 }
 
-# flux_reconcile_now triggers the wrapper Kustomization and its source right
-# away, without waiting for the controllers' interval timers. A failure is only
-# logged, because the sync gate that follows owns pass/fail.
-flux_reconcile_now() {
-    log_info "Forcing Flux reconcile of ${FLUX_KUSTOMIZATION_NAME} (with source)..."
-    if ! flux reconcile kustomization "${FLUX_KUSTOMIZATION_NAME}" \
-            -n flux-system --with-source --timeout=90s; then
-        log_warn "flux reconcile did not converge in 90s. The sync gate will keep waiting"
-    fi
-}
-
 # Deploy bundle to cluster.
 #
 # For DEPLOYER=helm: runs the bundle's generated deploy.sh (unchanged
@@ -1600,8 +1589,6 @@ EOF
                 return 1
             fi
 
-            flux_reconcile_now
-
             # Preserve wait_for_flux_sync's exit code (50 == sync timeout)
             # so run-all-recipes.sh can apply the 3-strike rule.
             local sync_rc=0
@@ -1669,8 +1656,6 @@ EOF
                 log_error "kubectl apply Kustomization failed"
                 return 1
             fi
-
-            flux_reconcile_now
 
             # Preserve wait_for_flux_sync's exit code (50 == sync timeout)
             # so run-all-recipes.sh can apply the 3-strike rule.
