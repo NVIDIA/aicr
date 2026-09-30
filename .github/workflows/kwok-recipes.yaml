@@ -575,14 +575,8 @@ jobs:
           restore-keys: |
             kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-
 
-      - name: Setup build tools
-        uses: ./.github/actions/setup-build-tools
-        with:
-          install_goreleaser: 'true'
-          goreleaser_version: '${{ steps.versions.outputs.goreleaser }}'
-
       - name: Build aicr binary
-        run: make build
+        run: bash .github/actions/aicr-build/build-cli.sh
 
       - name: Save Go build cache
         if: >-
