@@ -565,23 +565,16 @@ recipes carrying `metadata.selectedProfile`, typed
 `/v1/bundle`. New clients should preserve the version emitted by recipe
 resolution.
 
-For backward compatibility, the endpoint also accepts:
-
-- Legacy artifacts that omit `apiVersion` or `kind`, or carry them as empty
-  strings after a decode/remarshal round trip.
-- The `kind: Recipe` value this contract published through v0.18.0.
-
-All three shapes reach the bundler identically: the endpoint normalizes `kind`
-on ingest, stamping `kind: RecipeResult` when the request carries an absent,
-empty, or legacy `Recipe` kind. The generated bundle's `recipe.yaml`
-therefore always carries the canonical `kind` and reloads through
+For backward compatibility, the endpoint also accepts an artifact that omits
+`kind` or carries it as an empty string after a decode/remarshal round trip. It
+normalizes `kind` on ingest, stamping `kind: RecipeResult`, so the generated
+bundle's `recipe.yaml` always carries the canonical `kind` and reloads through
 `aicr bundle -r`, `aicr validate -r`, and the tooling that reads a bundle's
-`recipe.yaml` (TestGrid publication, evidence synthesis). Only `kind` is
-rewritten — a request that omits `apiVersion` still produces an artifact with
-an empty `apiVersion`, which every reader accepts as the legacy shape.
+`recipe.yaml` (TestGrid publication, evidence synthesis).
 
-Any other `kind` is rejected with a 400, so the endpoint never emits an artifact
-it would refuse to read back. This matches the `/v1/bundle` decode path, and the
+Any other `kind` is rejected with a 400, including the `kind: Recipe` value this
+contract published through v0.18.0, so the endpoint never emits an artifact it
+would refuse to read back. This matches the `/v1/bundle` decode path, and the
 CLI file loader for the same values — `aicr bundle -r` accepts a
 `RecipeMetadata` file as an *overlay* to hydrate, but as a hydrated
 `RecipeResult` artifact it too accepts only `RecipeResult` or an absent kind.
@@ -592,8 +585,9 @@ The shared artifact gate rejects any `apiVersion` outside `aicr.run/v1` and
 path. An absent or empty `apiVersion` is rejected with them: that tolerance was
 scoped to `RecipeResult`, which predates the field, and v1.0.0 retired it
 (ADR-022 N+2). A `RecipeMetadata` overlay is a catalog document however it
-arrives, so `aicr bundle -r` and `aicr validate -r` have always rejected a
-headerless one exactly as a `--data` catalog scan does. v0.21 and v0.22 read the
+arrives, so since v0.21 `aicr bundle -r` and `aicr validate -r` reject a
+headerless one exactly as a `--data` catalog scan does
+([#2421](https://github.com/NVIDIA/aicr/issues/2421)). v0.21 and v0.22 read the
 alpha values, the target values and the empty header; generated recipes carried
 alpha headers through v0.21 and the target values from v0.22 onward, so no
 artifact produced by a supported binary carries a retired value. v0.22 warned
