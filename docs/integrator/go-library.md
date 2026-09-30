@@ -163,8 +163,10 @@ is ignored for the other two.
 understand. That gate matters more than it looks: snapshot
 deserialization is non-strict, so without it a typo'd path would decode
 into an empty `Snapshot`, derive `criteria(any)`, and silently resolve
-the generic fallback recipe with exit 0. Empty `kind` and `apiVersion`
-are tolerated for snapshots that predate those fields.
+the generic fallback recipe with exit 0. An empty `kind` is tolerated
+for snapshots that predate the field; an empty `apiVersion` is rejected
+from v1.0.0 (see
+[Deprecations](../user/deprecations.md#empty-apiversion-on-artifacts)).
 
 `Snapshot.Raw` is **not** populated by `LoadSnapshot` — only
 `CollectSnapshot` sets it. The source you loaded from is already the
