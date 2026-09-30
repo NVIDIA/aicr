@@ -78,10 +78,23 @@ on:
         type: string
         default: ''
       intent:
-        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml) and recipe criteria.'
+        description: 'Recipe intent: selects the per-intent test config (h100-<intent>[-<platform>]-config.yaml) and recipe criteria.'
         type: choice
         options: [training, inference]
         default: training
+      platform:
+        # Only run-kind forwards this. uat-aws/gcp/azure.yaml declare no
+        # platform input and build TEST_CONFIG from intent alone, so a
+        # non-empty value dispatched at a cloud reservation is INERT: that cell
+        # resolves its usual per-intent config and runs it. Nothing sets this
+        # but a manual dispatch (neither the nightly batch nor the daytime
+        # scheduler passes it), so the exposure is a hand-typed
+        # reservation/platform mismatch. actionlint rejects an empty string in
+        # a choice's options, so this is a free-form string whose allowed
+        # values the kind lane bounds in its own `Validate inputs` step.
+        description: 'Recipe platform: appends a -<platform> segment to the test-config filename. Empty selects the default per-intent config. Only the kind lane supports a non-empty value today.'
+        type: string
+        default: ''
       lifecycle:
         description: 'Cluster lifecycle. nightly: provision→CUJ→teardown. daytime-up: stable-named cluster, holds on success, tears down on failure or cancellation. daytime-down: tear down cluster.'
         type: choice
@@ -127,6 +140,9 @@ on:
       intent:
         type: string
         default: training
+      platform:
+        type: string
+        default: ''
       lifecycle:
         type: string
         default: nightly
@@ -207,6 +223,7 @@ jobs:
           # injection through the dispatch input.
           RESERVATION: ${{ inputs.reservation }}
           SLOT: ${{ inputs.slot }}
+          PLATFORM: ${{ inputs.platform }}
         run: |
           set -euo pipefail
           # Only slot 0 is provisioned today (ADR-017). Reject any other value at
@@ -218,7 +235,58 @@ jobs:
             echo "::error::unsupported slot '${SLOT}' (only slot 0 is enabled today)"; exit 1
           fi
           go build -o ./bin/uat-broker ./tools/uat-broker
-          ./bin/uat-broker reservations --name "$RESERVATION" >> "$GITHUB_OUTPUT"
+          # Hold the row in a variable rather than piping it straight to
+          # GITHUB_OUTPUT: the platform gate below needs the resolved cloud,
+          # which does not exist until the broker has run, and the row must not
+          # be published until the gate has passed (see below).
+          ROW="$(./bin/uat-broker reservations --name "$RESERVATION")"
+
+          # Fail closed on a platform the resolved lane cannot serve. Only
+          # run-kind forwards `platform` to its reusable pipeline; the other
+          # run-<cloud> jobs drop it, and uat-aws/gcp/azure.yaml build
+          # TEST_CONFIG from intent alone, so such a cell would resolve its
+          # usual per-intent config, run it to completion and report SUCCESS
+          # for a recipe nobody asked for. A false green is worse than a
+          # missing file, which at least goes red.
+          #
+          # The gate lives here rather than on each run-<cloud> job so it is
+          # stated once. What stops a lane from starting anyway is the ORDER of
+          # this step, not the fact that the step exits non-zero: a rejected
+          # dispatch never reaches the publish below, so `cloud` is never set,
+          # and every run-<cloud> job's `if` compares
+          # needs.resolve.outputs.cloud against a literal name that the empty
+          # string cannot equal. Three of those jobs carry `always()`, which
+          # runs a job whose `needs` failed, so relying on the failure alone
+          # would rest on what a failed job does with its outputs. Publishing
+          # last removes the question.
+          #
+          # The `case` arms are an ALLOWLIST OF LANES that can serve a
+          # non-empty platform, not a list of rejected platform values, so a
+          # platform added later is refused everywhere except the lanes listed
+          # and a lane that gains a platform input gets an arm. WHICH values a
+          # listed lane accepts stays with that lane (uat-kind.yaml's
+          # `Validate inputs`), so the allowed set is written down once.
+          if [[ -n "${PLATFORM}" ]]; then
+            CLOUD="$(printf '%s\n' "${ROW}" | sed -n 's/^cloud=//p')"
+            case "${CLOUD}" in
+              kind) ;;
+              *)
+                echo "::error::platform='${PLATFORM}' cannot be served by the '${CLOUD:-<unresolved>}' lane (reservation '${RESERVATION}')."
+                echo "::error::Only run-kind forwards a platform to its pipeline. uat-${CLOUD:-<unresolved>}.yaml declares no"
+                echo "::error::platform input and builds TEST_CONFIG from intent alone, so this cell would run its"
+                echo "::error::default per-intent config and report success for a recipe that was not requested."
+                echo "::error::Dispatch a kind reservation, or omit platform to run this lane's default."
+                exit 1
+                ;;
+            esac
+          fi
+
+          # Publish LAST, so no gate above it can be bypassed by a lane reading
+          # an output that was written before the check ran. The broker emits
+          # plain `key=value` lines (tools/uat-broker/main.go), never the
+          # `key<<EOF` multiline form, so re-emitting the captured text
+          # reproduces this step's outputs byte for byte.
+          printf '%s\n' "${ROW}" >> "$GITHUB_OUTPUT"
 
   # One of run-aws / run-gcp / run-azure / run-kind fires based on the resolved
   # cloud (the registry validates cloud membership, so at most one matches; the
@@ -334,6 +402,7 @@ jobs:
       reservation: ${{ inputs.reservation }}
       aicr_version: ${{ inputs.aicr_version }}
       intent: ${{ inputs.intent }}
+      platform: ${{ inputs.platform }}
       lifecycle: ${{ inputs.lifecycle }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}

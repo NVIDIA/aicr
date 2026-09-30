@@ -846,15 +846,14 @@ gb200-any           any      gb200        any       any  any       true     pass
 
 **Example JSON output:**
 
-The `criteria` keys are capitalized because the criteria struct carries no
-field tags; the structured output mirrors the Go field names. The `health`
+The `criteria` keys are lowercase. Unset dimensions are omitted. The `health`
 block is present only for leaf overlays — non-leaf overlays omit it.
 
 ```json
 [
   {
     "name": "gb200-any",
-    "criteria": {"Service": "any", "Accelerator": "gb200", "Intent": "", "OS": "", "Platform": "", "Nodes": 0},
+    "criteria": {"service": "any", "accelerator": "gb200"},
     "is_leaf": true,
     "source": "embedded",
     "health": {
@@ -1074,6 +1073,7 @@ aicr validate [flags]
 | `--snapshot` | `-s` | string | | Path/URI to snapshot file containing measurements (omit to capture live) |
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
+| `--skip-check` | | string[] | | Check to withhold from every phase that runs, one level below `--phase` (repeatable). For a caller that cannot satisfy a check the recipe declares, e.g. a lane deploying a subset of the recipe. Each named check is **reported as skipped**, not dropped, so the CTRF report and the recipe-evidence bundle still account for it. Rejected before any validation resource is created when a name matches no check, when the list would leave a requested phase with nothing to run, or when it is combined with `--evidence-dir` (the CNCF renderer omits skipped checks, so a submission would silently lose the requirement). A `cm://` recipe is read from the cluster first, so that form contacts the API server before the list is judged. Mirrors `spec.validate.execution.skipChecks`. |
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any phase check reports `failed` or `other` (crash/OOM/timeout). Scopes to phase checks only — the readiness pre-flight always fails closed with exit 2 regardless of this flag (see the readiness note under [Validation Phases](#validation-phases)). |
 | `--fail-fast` | | bool | false | Stop after the first phase that fails. By default all phases run and produce results. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`), or stdout |
@@ -1148,6 +1148,8 @@ Validation can be run in different phases to validate different aspects of the d
 > has the release-by-release table.
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
+
+Within a phase, `--skip-check` withholds individual checks. It is for a caller that cannot satisfy a check the recipe declares (a lane that deploys only part of the recipe, or runs on simulated devices), and it narrows the *run*, never the recipe, so every other consumer of that recipe still gets the check. Two guards apply before any cluster work: a name matching no check in the catalog fails the run, and a list that would leave a requested phase with nothing to run fails it too (that phase would otherwise report `passed` while running nothing, because the skipped entries keep its test count above zero). A skipped check appears in the CTRF report as `skipped` with its reason in `message` and as the code `extra.skipReason: named-in-skip-checks`. The default (minimal) recipe-evidence bundle (`--emit-attestation`) carries the report redacted rather than verbatim (every test's `message` and `stdout` is blanked), so it is the `extra` code that carries the reason into the attestation, unless `--full` is passed. The CNCF conformance evidence path does NOT: its renderer drops skipped entries, so a withheld requirement would leave no file and no index entry, and `--skip-check` is therefore refused together with `--evidence-dir` (and so with `--cncf-submission`, which requires it). A check that is *added* to a recipe later is not silenced by an existing list: it runs, which is the direction that forces a decision rather than hiding one.
 
 #### Constraint paths and operators
 
@@ -1309,6 +1311,9 @@ spec:
       requireGpu: true
     execution:
       phases: [deployment, conformance]
+      # skipChecks:                      # --skip-check; withheld and reported as skipped.
+      #   - gpu-operator-health          # Shown commented out because it cannot be combined
+      #                                  # with evidence.cncf.dir below. See the next example.
       failOnError: true                  # default; false = don't fail on phase-check results (readiness pre-flight still exits 2)
       noCluster: false
       noCleanup: false
@@ -1324,6 +1329,37 @@ spec:
         push: ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
         plainHTTP: false
         insecureTLS: false
+```
+
+**Withholding checks (`execution.skipChecks`):**
+
+A lane that deploys only part of a recipe can withhold the checks it cannot
+satisfy. Each named check is still reported, as skipped, so the run accounts for
+it; a name matching no check in the recipe's catalog, or a list that would leave
+a requested phase with nothing to run, is rejected before any validation
+resource is created. The recipe is loaded first, so a `cm://` recipe is read
+from the cluster before the list is judged.
+
+`skipChecks` cannot be combined with `evidence.cncf.dir`. The CNCF evidence
+renderer drops skipped checks entirely, so a withheld requirement would produce
+no file and no index entry and the submission would read as complete. That is
+why the schema above shows the field commented out, and why it gets its own
+config here:
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: partial-lane-validate
+spec:
+  validate:
+    input:
+      recipe: ./recipe.yaml
+      snapshot: ./snapshot.yaml
+    execution:
+      phases: [deployment]
+      skipChecks:
+        - gpu-operator-health
 ```
 
 **Examples:**
@@ -1683,7 +1719,7 @@ aicr bundle [flags]
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate- or contract-owned paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** the eviction contract is opted into with `--dra-eviction-node-label`, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what AICR verified or made consistent; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable). Optional in general, but some components (e.g. `slinky-slurm`, `slurm-accounting-mariadb`) declare `requireNodeSelector` in the registry and fail the bundle if this is omitted and no overlay opts their paths out. `kube-prometheus-stack` declares the conditional `requireNodeSelectorIfStorageClassSet` instead, so it only fails once the component ends up with a non-empty value at a declared `storageClassPaths`/`sharedStorageClassPaths` entry, whether from `--storage-class`, a per-component `--set` override, or an overlay's own `storageClassName` default. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated). |
-| `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
+| `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable). With `--readiness-hooks`, this (keyed tolerations only) and `--system-node-selector` also place the readiness gate Jobs; see [Readiness Gates](#readiness-gates). |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable). Same `requireNodeSelector` caveat as `--system-node-selector` above applies to components that declare it on their accelerated paths. |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
 | `--dra-eviction-node-label` | | string | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`; no default — unset means AICR injects nothing). Applied only when both components are enabled. Also deploys `dra-node-labeler`, which applies the label to every GPU node from GFD's `nvidia.com/gpu.present`; pass `--set dra-node-labeler:enabled=false` to provision the label yourself instead. |
@@ -2361,6 +2397,10 @@ With the flag set, the bundler emits an extra folder, `NNN-<name>-readiness/`, i
 - **`argocd` / `argocd-helm`** — the readiness folder inherits the next sync-wave after its component, and Argo CD blocks that wave on the gate Job via its built-in `batch/Job` health (Progressing → Healthy on success, Degraded on failure). No custom health Lua and no direct `ClusterPolicy` watch — the readiness logic stays encapsulated in the Chainsaw test the Job runs.
 
 `flux` and `helmfile` are not yet supported and `--readiness-hooks` is rejected for them. Components without a `readiness.yaml` are unaffected.
+
+The gate only reads API objects, so it needs a healthy node rather than the gated component's node. Its pod carries the bundle's system node selector (`--system-node-selector`, or `scheduling.systemNodeSelector` in the config file) and its keyed system tolerations (`--system-node-toleration`, or `scheduling.systemNodeTolerations`). Keyless tolerations are not applied to the gate — that includes the tolerate-all default the CLI and API use when no toleration is set, and an explicit `*` — because a toleration with no key also matches the not-ready, unreachable and cordoned taints, which would let the gate bind to an unhealthy node. On a cluster whose every node is tainted, pass a keyed `--system-node-toleration` for the system nodes' taint so the gate can schedule ([#2590](https://github.com/NVIDIA/aicr/issues/2590)). Placement does not follow the gated component's own `--set` or `--dynamic` scheduling values. Go SDK callers get only what they set with `config.WithSystemNodeSelector` / `config.WithSystemNodeTolerations`.
+
+Selector and toleration values are checked against the API server's rules when the bundle is generated, and an invalid one fails the bundle; `Lt` and `Gt` tolerations are rejected. The gate Job also sets `activeDeadlineSeconds` (the gate's maximum wait plus 3 minutes), so a gate pod that cannot schedule or start fails the Job instead of holding the Helm hook or Argo CD sync open.
 
 The gate evaluates the test **in-process**: it reads cluster state through its own ServiceAccount and applies the assertions itself, using the same executor `aicr validate --phase deployment` uses. The image ships no Chainsaw binary.
 

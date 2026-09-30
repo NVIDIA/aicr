@@ -61,6 +61,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
 spec:
   backoffLimit: 6
+  activeDeadlineSeconds: 5580
   template:
     spec:
       restartPolicy: Never

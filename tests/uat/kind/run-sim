@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# UAT runner for the SIMULATED-GPU kind lane (issue #2358). Thin shim over
+# tests/uat/lib/phases.sh, which holds the cloud-agnostic phase
+# implementations, and a sibling of tests/uat/kind/run. Invoked phase-by-phase
+# from .github/workflows/uat-kind-sim.yaml so per-phase failures surface in the
+# GitHub Actions UI.
+#
+# Why this is a separate shim from tests/uat/kind/run rather than a flag on it:
+# the two lanes describe DIFFERENT CLUSTERS, and every difference below is a
+# property of the cluster, not of the invocation.
+#
+#   tests/uat/kind/run   single-node, single real H100, nvkind on a self-hosted
+#                        GPU runner. Census skipped (one node, no pool that can
+#                        grow); TrainJob pinned to one node.
+#   this file            four real kind workers with MOCKED NVML devices
+#                        (tests/uat/kind/bootstrap-cluster.sh) on a
+#                        GitHub-hosted runner. The Slurm block topology needs
+#                        four schedulable nodes, and simulated GPUs need no
+#                        hardware, so the lane takes no reservation.
+#
+# The GPU-node census (#2096) is ENFORCED here rather than skipped. On the
+# nvkind lane it is opt-out because a single fixed node cannot grow and does
+# not carry the cloud lanes' nodeGroup label. Here the count is exactly the
+# lane's premise -- four labelled workers -- so asserting it turns "the GPU
+# simulation only took on three of the four nodes" into a named failure at the
+# readiness gate instead of a wrong topology three phases later.
+#
+# No CUJ phase runs on this lane: cuj_phase_for returns `none` for a slurm
+# platform, because a TrainJob would go to the Kubernetes scheduler and bypass
+# slurmd. The workflow invokes prep, install, conformance and verify only.
+#
+# THE DEPLOYMENT VALIDATION PHASE IS NOT RUN ON THIS LANE, and that is a
+# decision. It also DIVERGES from the cloud lanes (uat-aws/gcp/azure), which run
+# `--phase all` and gate on the deployment phase; do not "restore" it here
+# without reading this.
+#
+# The lane deploys a SUBSET of its recipe: gpu-operator and nvidia-dra-driver-gpu
+# are excluded, because both need a driver stack on the node that a stock
+# kindest/node does not have (the full reasoning is in the header of
+# tests/uat/kind/tests/h100-training-slurm-config.yaml). `aicr validate`
+# validates the RECIPE, not the deployed subset, and offers no component filter,
+# so the deployment phase evaluates checks about both excluded components.
+#
+# It does not merely fail; it cannot finish. `expected-resources` calls
+# verifyGPUReadinessSignals, which sees nvidia-dra-driver-gpu declared and polls
+# verifyDRAKubeletPluginReady for a DaemonSet that will never be created. That
+# poll's zero-match case is deliberately a POLL rather than a fast fail
+# (validators/deployment/expected_resources.go: "the DaemonSet's pods churn to
+# 0/0 across a GPU-node reboot, which the dwell is there to ride through"), and
+# it runs to defaults.GPUReadinessTimeout, 8 minutes, which is exactly the
+# validator Job's own deadline. Measured: `aicr validate --phase deployment`
+# returned 8 after 574s with 4/4 validators failed and expected-resources killed
+# at its deadline, having logged nothing past namespace verification. The
+# readiness gate retries that until READINESS_TIMEOUT_SECONDS, so keeping it
+# would burn 60 minutes to reach the same answer.
+#
+# WHAT THIS COSTS, stated so nobody has to infer it: THIS LANE DOES NOT ASSERT
+# DEPLOYMENT READINESS, and a deployment-readiness regression will not be caught
+# here. That is the second thing the lane does not cover, alongside the GPU
+# stack itself.
+#
+# IT ALSO SKIPS THE LEAF'S OWN INLINE healthCheckAsserts, which is not obvious
+# and matters for #2358. They are dispatched by `expected-resources`
+# (validators/deployment/expected_resources.go, the only consumer of
+# HealthCheckAsserts in the tree), and that is a deployment-phase check. So the
+# topology assertion carried in the recipe does not run here. It is still
+# covered hermetically by TestSlurmTopologyHealthCheckClusterStates, and live by
+# any consumer that runs `aicr validate --phase deployment` against a full
+# deployment of this recipe.
+#
+# WHAT STILL GATES THE LANE: the conformance phase, which carries
+# slinky-slurm-health, and tests/uat/kind/verify-topology.sh as a workflow step
+# with the conformance job gated on it. That step is what holds the #2358
+# acceptance bar here: it derives the expected block membership from the live
+# cluster rather than from the recipe, so it is unaffected by which validator
+# phases run. Without it, scoping the validation would have removed the
+# acceptance gate altogether.
+#
+# The leaf declares no performance phase, so `conformance` is everything this
+# lane can satisfy.
+#
+# WHY A SHELL KNOB AND NOT `spec.validate.execution.phases`, which AICRConfig
+# does have (pkg/config/config.go ValidateExecutionSpec.Phases): that field only
+# reaches the conformance run. install_readiness_gate builds its own invocation
+# with `--phase deployment` on the command line, which overrides the config, so
+# setting the field alone would narrow the conformance run and leave the gate
+# polling. One knob that drives both keeps them from disagreeing; two would
+# invite exactly the half-fix this note exists to prevent.
+#
+# The assignment itself sits with the other exported knobs below.
+#
+# Usage:
+#   AICR_BIN=./aicr RUN_ID=12345 ./run-sim <phase> <test-config.yaml>
+# See tests/uat/lib/phases.sh for the phase list and the working files produced.
+
+set -euo pipefail
+
+SIM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The cluster shape: WORKER_CLIQUE_MAP (via worker_indices) and the mock-node
+# label the device plugin selects on. Sourced rather than restated so a fifth
+# worker is a one-file change; the file touches no cluster when sourced.
+# shellcheck source=./setup-gpu-sim.sh
+source "${SIM_SCRIPT_DIR}/setup-gpu-sim.sh"
+
+# Census contract (see tests/uat/lib/phases.sh, GPU-node census guard). Both
+# halves are derived from the constants the labeller itself used: the selector
+# from the label it applies, the count from the map it iterates. A literal
+# here would go stale the moment the cluster changed shape, and it would go
+# stale SILENTLY -- an expectation of 4 against a 5-worker cluster fails
+# closed, but an expectation of 4 against a cluster that now has 4 GPU nodes
+# for a different reason passes for the wrong one.
+GPU_CENSUS_SELECTOR="${MOKKA_NODE_TYPE_LABEL}=${MOKKA_NODE_TYPE}"
+EXPECTED_GPU_NODES="$(worker_indices | wc -l | tr -d ' ')"
+
+# Narrows `aicr validate` to the phases this lane can satisfy, and with it turns
+# off the post-install readiness gate. The header says why at length, and what it
+# costs. Set here rather than in the workflow so a LOCAL run of this shim behaves
+# exactly like CI: a knob that only CI sets is a knob whose effect nobody
+# reproduces.
+VALIDATE_PHASES="conformance"
+
+export GPU_CENSUS_SELECTOR EXPECTED_GPU_NODES VALIDATE_PHASES
+
+# shellcheck source=../lib/phases.sh
+source "${SIM_SCRIPT_DIR}/../lib/phases.sh"
+
+uat_main "$@"
