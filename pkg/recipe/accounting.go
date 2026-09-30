@@ -478,9 +478,15 @@ func requireAccountingComponentEnabled(
 	return nil
 }
 
+// requireBoolOverride treats an absent component as satisfying expected=false:
+// a bundle's recipe.yaml omits disabled components, and one that is not in the
+// recipe installs nothing.
 func requireBoolOverride(result *RecipeResult, component string, path []string, expected bool) error {
 	ref := result.GetComponentRef(component)
 	if ref == nil {
+		if !expected {
+			return nil
+		}
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("accounting mode requires component %q", component))
 	}

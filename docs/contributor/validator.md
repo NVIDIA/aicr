@@ -939,6 +939,18 @@ Resolution is split across the two-stage design:
   supply a `TrainingRuntime` and nothing else — not an arbitrary resource kind.
   It is mutually exclusive with `nccl-benchmark-profile`.
 
+  The one setup step it can opt into is IMEX. The run namespace is per-run
+  (`ncclRunNamespace`), so an operator cannot pre-create a ComputeDomain or claim
+  for the runtime. `customRuntimeManagesIMEX` inspects the pod-level
+  `resourceClaims` when the plan is resolved, before any cluster mutation:
+
+  - A reference to `ncclIMEXClaimTemplateName` (`nccl-all-reduce-imex`) sets
+    `benchmarkRuntimePlan.managedIMEX`, and `applyNCCLResources` then provisions
+    the ComputeDomain on any variant, as the NVLS path does.
+  - Any other template, or any `resourceClaimName`, fails closed with
+    `ErrCodeInvalidRequest`, since it could never resolve in the per-run
+    namespace (#2569).
+
 #### `inference-perf`: model, concurrency, and weights cache
 
 The `inference-perf` check warms vLLM before measuring, so the one-time

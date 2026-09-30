@@ -2602,6 +2602,7 @@ If the recipe is pure-Helm (no manifest-only / mixed components), path-based chi
 ```
 bundles/
 ├── README.md                      # Deployment guide with ordered steps
+├── UPGRADING.md                   # Present only when a pinned version needs upgrade guidance
 ├── deploy.sh                      # Generic install loop + name-matched blocks
 ├── recipe.yaml                    # Recipe used to generate bundle
 ├── checksums.txt                  # SHA256 checksums
@@ -4060,6 +4061,7 @@ my-data/
 | File Type | Behavior |
 |-----------|----------|
 | `registry.yaml` | **Merged** - External components are added to embedded; same-named components are replaced |
+| Profile-only `overlays/*.yaml` | **Extended**. Adds values to the profile of the embedded overlay at the same path |
 | All other files | **Replaced** - External file completely replaces embedded if path matches |
 
 ### Usage Examples

@@ -53,7 +53,10 @@ import (
 // recipe opted in explicitly); and the service-specific fabric plumbing
 // (EFA/TCPXO/RDMA NIC discovery, the GB200-NVreg / GKE-TCPXO preflights, and
 // NVLS IMEX provisioning) is skipped — the supplied runtime owns its own fabric
-// wiring end to end. The name is shared with the orchestrator via
+// wiring end to end. The one exception is IMEX: a runtime that references the
+// validator-managed ResourceClaimTemplate gets its ComputeDomain provisioned,
+// since nothing else can place one in the per-run namespace (see
+// customRuntimeManagesIMEX). The name is shared with the orchestrator via
 // pkg/validator/v1 so the write side and read side cannot drift. See
 // nccl_all_reduce_bw_constraint.go (validateNcclAllReduceBw / applyNCCLResources)
 // for the custom-path branches, and nccl_benchmark_profile.go for the
@@ -155,4 +158,74 @@ func customRuntimeNodeSelector(content string) (map[string]string, error) {
 		return sel, nil
 	}
 	return nil, nil //nolint:nilnil // no "node" job → nothing to size against
+}
+
+// customRuntimeManagesIMEX reports whether a recipe-supplied runtime asks the
+// validator to provision the IMEX channel: some pod in it references the
+// ResourceClaimTemplate named ncclIMEXClaimTemplateName, the same one the
+// embedded NVLS runtimes use. The benchmark runs in a per-run namespace that
+// does not exist until the run starts (ncclRunNamespace), so no operator can
+// pre-create a claim dependency there. Any other resourceClaimTemplateName,
+// and any resourceClaimName, could never resolve and fails closed here with
+// ErrCodeInvalidRequest instead of as an opaque launcher failure after the
+// TrainJob is spent (#2569). Returns false for an empty runtime.
+func customRuntimeManagesIMEX(content string) (bool, error) {
+	if content == "" {
+		return false, nil
+	}
+	obj := &unstructured.Unstructured{}
+	if err := yaml.Unmarshal([]byte(content), obj); err != nil {
+		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s: not parseable as YAML", perfConstraintNCCLBenchmarkRuntime), err)
+	}
+	jobs, _, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	if err != nil {
+		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s: malformed replicatedJobs", perfConstraintNCCLBenchmarkRuntime), err)
+	}
+	managed := false
+	for _, raw := range jobs {
+		jobMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		jobName, _, _ := unstructured.NestedString(jobMap, "name")
+		claims, _, err := unstructured.NestedSlice(jobMap, "template", "spec", "template", "spec", "resourceClaims")
+		if err != nil {
+			return false, aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid %s: %q replicatedJob has malformed resourceClaims", perfConstraintNCCLBenchmarkRuntime, jobName), err)
+		}
+		for _, rc := range claims {
+			claim, ok := rc.(map[string]any)
+			if !ok {
+				return false, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid %s: %q replicatedJob has a malformed resourceClaims entry", perfConstraintNCCLBenchmarkRuntime, jobName))
+			}
+			name, _, err := unstructured.NestedString(claim, "resourceClaimName")
+			if err != nil {
+				return false, aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid %s: %q replicatedJob has a malformed resourceClaimName", perfConstraintNCCLBenchmarkRuntime, jobName), err)
+			}
+			if name != "" {
+				return false, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("unsupported %s: %q replicatedJob references ResourceClaim %q, which cannot exist in the per-run benchmark namespace; reference the validator-managed ResourceClaimTemplate %q for IMEX access instead",
+						perfConstraintNCCLBenchmarkRuntime, jobName, name, ncclIMEXClaimTemplateName))
+			}
+			tmpl, _, err := unstructured.NestedString(claim, "resourceClaimTemplateName")
+			if err != nil {
+				return false, aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid %s: %q replicatedJob has a malformed resourceClaimTemplateName", perfConstraintNCCLBenchmarkRuntime, jobName), err)
+			}
+			switch tmpl {
+			case "":
+			case ncclIMEXClaimTemplateName:
+				managed = true
+			default:
+				return false, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("unsupported %s: %q replicatedJob references ResourceClaimTemplate %q, which cannot exist in the per-run benchmark namespace; only the validator-managed %q is provisioned there",
+						perfConstraintNCCLBenchmarkRuntime, jobName, tmpl, ncclIMEXClaimTemplateName))
+			}
+		}
+	}
+	return managed, nil
 }
