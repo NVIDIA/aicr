@@ -251,6 +251,75 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 // attestation (--emit-attestation / --push) alongside the offline --no-cluster
 // dry-run is rejected with ErrCodeInvalidRequest, rather than warn-and-ignored.
 // (Config-driven suppression is a separate path — see evidenceConfigForRunMode.)
+// TestValidateFlagCombinations_SkipCheckWithEvidenceDir pins the refusal that
+// keeps a withheld check out of a CNCF conformance submission.
+//
+// pkg/evidence/cncf/renderer.go drops every StatusSkipped entry before
+// grouping, so a requirement whose checks were all skipped produces no markdown
+// file and no index entry, with nothing anywhere recording the omission. That
+// was tolerable while skips were incidental; --skip-check makes them deliberate
+// and plural, and a submission that silently omits a requirement reads as
+// complete when it is not. Until the renderer records a withheld requirement
+// with its reason, the two are refused together.
+//
+// The neighboring cases are what make this a discriminating test rather than a
+// blanket rejection: either flag alone must still be accepted.
+func TestValidateFlagCombinations_SkipCheckWithEvidenceDir(t *testing.T) {
+	tests := []struct {
+		name        string
+		evidenceDir string
+		skipChecks  []string
+		wantErr     bool
+		wantSubstrs []string
+	}{
+		{
+			name:        "skip-check with evidence-dir is refused",
+			evidenceDir: "/tmp/evidence",
+			skipChecks:  []string{"dra-support"},
+			wantErr:     true,
+			wantSubstrs: []string{"--skip-check", "--evidence-dir", "omits skipped checks"},
+		},
+		{
+			name:        "evidence-dir alone is accepted",
+			evidenceDir: "/tmp/evidence",
+		},
+		{
+			name:       "skip-check alone is accepted",
+			skipChecks: []string{"dra-support"},
+		},
+		{
+			name: "neither is accepted",
+		},
+		{
+			// An empty slice is "no skips", not "skips requested": a config that
+			// carries `skipChecks: []` must not lock the caller out of the
+			// evidence path.
+			name:        "an empty skip list does not trip the refusal",
+			evidenceDir: "/tmp/evidence",
+			skipChecks:  []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateFlagCombinations(false, tt.evidenceDir, nil, false, false, tt.skipChecks)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateFlagCombinations() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+			}
+			for _, want := range tt.wantSubstrs {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateCmd_NoClusterEvidenceFlags(t *testing.T) {
 	tests := []struct {
 		name string

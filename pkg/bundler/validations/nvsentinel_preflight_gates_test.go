@@ -499,6 +499,24 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 			wantBlocked: true,
 		},
 		{
+			// The chart's own candidate list, restated. It would otherwise parse
+			// as one external host and skip the gate.
+			name: "comma-separated candidate list -> blocked",
+			recipeResult: result(
+				sentinel(preflightOnWithAddr("", "nvidia-dcgm-dra.gpu-operator.svc:5555,nvidia-dcgm.gpu-operator.svc:5555")),
+				gpuOperatorWith("gpu-operator", dcgmEnabled(false)),
+			),
+			wantBlocked: true,
+		},
+		{
+			name: "comma-separated list with a healthy gpu-operator -> still blocked",
+			recipeResult: result(
+				sentinel(preflightOnWithAddr("", "nvidia-dcgm-dra.gpu-operator.svc:5555,nvidia-dcgm.gpu-operator.svc:5555")),
+				gpuOperator("gpu-operator"),
+			),
+			wantBlocked: true,
+		},
+		{
 			// An external hostengine is a deliberate choice this gate cannot
 			// verify, so it must not guess.
 			name: "external (non-cluster-local) address -> skipped",

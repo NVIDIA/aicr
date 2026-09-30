@@ -138,3 +138,87 @@ func TestLoadConfiguredRecipeRejectsDisabledAccountingComponent(t *testing.T) {
 		}
 	}
 }
+
+// A bundle's recipe.yaml omits every disabled component, so accounting
+// validation must read an absent component as not installed. Requiring its ref
+// to be present made every Slurm bundle's own recipe fail to load.
+func TestLoadConfiguredRecipeAcceptsPrunedDisabledComponents(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		mode    AccountingMode
+		drop    string
+		wantErr string
+	}{
+		{name: "disabled", mode: AccountingModeDisabled},
+		{name: "customer-managed", mode: AccountingModeCustomerManaged},
+		{name: "AICR-provided", mode: AccountingModeAICRProvided},
+		{
+			name:    "AICR-provided still requires what it installs",
+			mode:    AccountingModeAICRProvided,
+			drop:    mariaDBOperatorComponentName,
+			wantErr: mariaDBOperatorComponentName,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := NewBuilder().BuildFromCriteria(t.Context(), &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformSlurm,
+			}, WithAccountingMode(tt.mode))
+			if err != nil {
+				t.Fatalf("BuildFromCriteria() error = %v", err)
+			}
+
+			var kept []ComponentRef
+			keptNames := map[string]bool{}
+			for _, ref := range result.ComponentRefs {
+				if !ref.IsEnabled() || ref.Name == tt.drop {
+					continue
+				}
+				kept = append(kept, ref)
+				keptNames[ref.Name] = true
+			}
+			if tt.mode != AccountingModeAICRProvided && len(kept) == len(result.ComponentRefs) {
+				t.Fatal("fixture pruned nothing; the test would prove nothing")
+			}
+			var order []string
+			for _, name := range result.DeploymentOrder {
+				if keptNames[name] {
+					order = append(order, name)
+				}
+			}
+			result.ComponentRefs = kept
+			result.DeploymentOrder = order
+
+			data, err := serializer.MarshalYAMLDeterministic(result)
+			if err != nil {
+				t.Fatalf("MarshalYAMLDeterministic() error = %v", err)
+			}
+			path := filepath.Join(t.TempDir(), "recipe.yaml")
+			if writeErr := os.WriteFile(path, data, 0600); writeErr != nil {
+				t.Fatalf("write recipe: %v", writeErr)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+			defer cancel()
+			_, err = LoadFromFileWithProvider(ctx, path, "", "test", nil)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("LoadFromFileWithProvider() error = %v, want the pruned recipe to load", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("LoadFromFileWithProvider() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}

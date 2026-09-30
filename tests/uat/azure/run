@@ -38,8 +38,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/phases.sh"
 # Azure-only (no AWS/GCP sibling): how often the readiness gate refreshes the
 # federated az session. A CI federated session cannot self-refresh — the
 # GitHub OIDC assertion azure/login stores is valid ~5 MINUTES and access
-# tokens ~60-75m — so a gate that can run to READINESS_TIMEOUT_SECONDS after
-# a 20m helmfile apply outlives the token minted at the install step's login
+# tokens ~60-75m — so a gate that can run to READINESS_TIMEOUT_SECONDS (on a
+# token possibly already aged by a 20m helmfile apply) outlives its login
 # (AADSTS700024; see az_federated_relogin). 25m keeps every cached token
 # comfortably inside its lifetime with margin for a slow validate attempt.
 AZ_RELOGIN_INTERVAL_SECONDS="${AZ_RELOGIN_INTERVAL_SECONDS:-1500}" # 25 min
@@ -85,7 +85,7 @@ az_federated_relogin() {
 # Wire the federated-session refresh into the shared hook. The readiness gate
 # calls this every CLOUD_REFRESH_INTERVAL_SECONDS (mapped from the Azure knob
 # above) and the debug phase forces it before collecting.
-# CLOUD_REFRESH_INTERVAL_SECONDS is read by phase_install in the shared lib.
+# CLOUD_REFRESH_INTERVAL_SECONDS is read by phase_readiness in the shared lib.
 # shellcheck disable=SC2034  # used in tests/uat/lib/phases.sh
 CLOUD_REFRESH_INTERVAL_SECONDS="${AZ_RELOGIN_INTERVAL_SECONDS}"
 cloud_refresh_credentials() { az_federated_relogin; }

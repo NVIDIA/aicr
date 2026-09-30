@@ -2907,6 +2907,7 @@ metadata:
   name: gpu-operator-readiness
 `),
 		deployer,
+		gatemanifest.Placement{},
 	)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -3079,6 +3080,49 @@ func readBundleFile(t *testing.T, outputDir, rel string) []byte {
 		t.Fatalf("read %s: %v", rel, err)
 	}
 	return data
+}
+
+// TestGenerate_UpgradeNotice covers the notice in the inline README builder,
+// which has no Components table: the notice follows the intro paragraph.
+func TestGenerate_UpgradeNotice(t *testing.T) {
+	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
+	tests := []struct {
+		name   string
+		notice string
+	}{
+		{"empty", ""},
+		{"set", notice},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			g := newTestHelmGenerator(t)
+			g.UpgradeNotice = tt.notice
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			readme := string(readBundleFile(t, outputDir, "README.md"))
+			if tt.notice == "" {
+				if strings.Contains(readme, "Before You Upgrade") {
+					t.Errorf("README rendered an upgrade notice that was not set:\n%s", readme)
+				}
+				if !strings.Contains(readme, "different registry.\n\n## Deploy\n") {
+					t.Errorf("intro paragraph must be followed by one blank line and Deploy:\n%s", readme)
+				}
+				return
+			}
+			idx := strings.Index(readme, tt.notice)
+			if idx < 0 {
+				t.Fatalf("README missing upgrade notice:\n%s", readme)
+			}
+			if !strings.HasSuffix(readme[:idx], "different registry.\n\n") {
+				t.Errorf("upgrade notice must follow the intro paragraph after one blank line:\n%s", readme)
+			}
+			if !strings.HasPrefix(readme[idx+len(tt.notice):], "## Deploy\n") {
+				t.Errorf("upgrade notice must directly precede ## Deploy:\n%s", readme)
+			}
+		})
+	}
 }
 
 func TestGenerate_DeployerValuesInChart(t *testing.T) {

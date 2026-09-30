@@ -63,6 +63,36 @@ authoring error. A check that is *legitimately* not applicable at runtime
 reports its own `skip` sentinel from inside the container — it is still
 declared and still resolves to a catalog entry.
 
+**A caller may withhold a declared check, and is held to the same discipline.**
+`Validator.SkipChecks` (`pkg/validator/skip_checks.go`, reached from
+`--skip-check` / `spec.validate.execution.skipChecks`) narrows a run to the
+checks the CALLER can satisfy, which is a property of the run rather than of
+the recipe: a lane deploying a subset of the recipe, or running against
+simulated devices. `selectEntries` withholds each named check from its phase
+and records it on the phase's CTRF builder as `skipped`, so a withheld check is
+reported rather than dropped and the recipe-evidence bundle still accounts for
+it. It records the reason twice on purpose: as prose in `message`, and as the
+`skipCheckReasonCode` (`named-in-skip-checks`) under the allowlisted
+`extra.skipReason` key. Only the second survives the default bundle, whose
+minimal redaction policy blanks every `message`. A bundle carrying WHICH check
+was withheld but not WHY would be the same "reads as complete" defect the flag's
+guards exist to prevent. The CNCF evidence renderer does
+NOT: `pkg/evidence/cncf/renderer.go` drops every skipped entry before grouping
+(pinned by `TestRenderSkippedExcluded`), so a withheld requirement would leave
+no file and no index entry. `validateFlagCombinations` refuses `--skip-check`
+together with `--evidence-dir` for that reason, rather than emitting a
+submission that reads as complete. `preflightSkipChecks` runs beside `preflightDeclaredChecks`, on the
+same fail-closed terms and at the same point: a name matching no catalog
+validator is rejected, and so is a list that would remove every declared check
+from a requested phase (that phase would report `passed` while running nothing,
+since the skipped entries keep `Summary.Tests` above zero). A known name that no
+requested phase declares is inert rather than wrong, and warns.
+
+It is a skip list and not an allow list on purpose. The two differ only on a
+check nobody has considered yet: under a skip list a newly declared check runs,
+and a caller that cannot satisfy it goes red until someone decides; under an
+allow list it would be excluded in silence.
+
 Top-level `constraints` — and any declared under
 `validation.readiness.constraints` — are evaluated as a **pre-flight
 gate** before phase checks run; other phases' `constraints` are
@@ -415,9 +445,11 @@ fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`,
 `nodesTotal`, `skipReason`, `runtimeSource`) survive, and each surviving value must pass its key's
 validator — a non-negative decimal count for the `nodes*` keys, and for
 `skipReason` a **closed set** of known codes (`ctrfSkipReasons`, currently
-`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`), and for
-`runtimeSource` the closed set `delivered-artifact` | `recipe-supplied-runtime`
-| `cluster-capability` (`ctrfRuntimeSources`). A closed set rather
+`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`, and
+`named-in-skip-checks`, the one code a *caller* rather than a check mints, for
+`--skip-check`), and for `runtimeSource` the closed set `delivered-artifact` |
+`recipe-supplied-runtime` | `cluster-capability` (`ctrfRuntimeSources`). A
+closed set rather
 than a shape regex is deliberate: a kebab-case regex would still pass an
 arbitrary low-cardinality identifier like `customer-prod-cluster`. A value that
 is ill-shaped or unlisted (an IP under `nodesTotal`, a hostname or unminted code
@@ -939,6 +971,18 @@ Resolution is split across the two-stage design:
   supply a `TrainingRuntime` and nothing else — not an arbitrary resource kind.
   It is mutually exclusive with `nccl-benchmark-profile`.
 
+  The one setup step it can opt into is IMEX. The run namespace is per-run
+  (`ncclRunNamespace`), so an operator cannot pre-create a ComputeDomain or claim
+  for the runtime. `customRuntimeManagesIMEX` inspects the pod-level
+  `resourceClaims` when the plan is resolved, before any cluster mutation:
+
+  - A reference to `ncclIMEXClaimTemplateName` (`nccl-all-reduce-imex`) sets
+    `benchmarkRuntimePlan.managedIMEX`, and `applyNCCLResources` then provisions
+    the ComputeDomain on any variant, as the NVLS path does.
+  - Any other template, or any `resourceClaimName`, fails closed with
+    `ErrCodeInvalidRequest`, since it could never resolve in the per-run
+    namespace (#2569).
+
 #### `inference-perf`: model, concurrency, and weights cache
 
 The `inference-perf` check warms vLLM before measuring, so the one-time
@@ -1446,6 +1490,31 @@ into the validator image):
   read shares the same embedded scope). It fails **closed** — an error, never
   a false pass. In practice `nodewright-customizations` ships no values file
   and uses inline `overrides:`, so there is no exposure here today.
+
+**Chart-shape constants are pinned to the charts (#2629).** The Go readiness
+checks hardcode facts that upstream charts define, not AICR:
+- the `NodeWright` CR's group, version, and resource;
+- the chart's default runtime-required taint;
+- the operator Deployment's name with and without AICR's `fullnameOverride`;
+- the DRA driver's `-kubelet-plugin` DaemonSet suffix.
+
+`validators/deployment/testdata/chart_contracts.yaml` records what the pinned
+charts actually render. Under `make test`, `TestChartContractsMatchRenderInputs`
+fails when a pin in `recipes/registry.yaml`, or the values the base overlay
+resolves for one of those charts, changes without the file being re-rendered
+(leaf-overlay value overrides are not covered), and
+`TestValidatorConstantsMatchChartContracts` fails when a constant disagrees
+with the file. After such a change, regenerate it (needs helm and network):
+
+```bash
+AICR_UPDATE_GOLDEN=1 go test ./validators/deployment/ -run '^TestChartContractsMatchPinnedCharts$' -count=1
+```
+
+Then update any constant the second test reports. Without `AICR_UPDATE_GOLDEN`,
+the same test checks the committed file against the live charts; like the
+nvsentinel render tests, it is skipped under `-short`. Operator behavior the
+chart does not render, such as which of two served kinds carries status, is
+outside this check.
 
 **Running:**
 
