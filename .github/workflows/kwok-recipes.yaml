@@ -560,18 +560,19 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
 
-      # setup-go never re-saves its cache on a key hit, so its compiled-object
-      # cache stays cold. Key on the commit and save only outside PRs so main
-      # seeds an incremental build cache without PR runs evicting other caches.
+      # One entry per go.sum, saved only by a push to main. A cache entry is
+      # immutable, so this bounds the space used to one snapshot per
+      # dependency set and cannot evict the image tarballs. The dependency
+      # compile dominates the build, so a snapshot that lags main still pays.
       - name: Restore Go build cache
+        id: gocache
         uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ hashFiles('go.sum') }}-
             kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-
 
       - name: Setup build tools
@@ -584,13 +585,15 @@ jobs:
         run: make build
 
       - name: Save Go build cache
-        if: github.event_name != 'pull_request'
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.gocache.outputs.cache-hit != 'true'
         uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ hashFiles('go.sum') }}
 
       - name: Upload aicr binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
