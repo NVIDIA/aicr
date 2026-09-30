@@ -157,28 +157,37 @@ GitHub's opaque rejection mid-fan-out.
 
 ### Workflow structure
 
-The `kwok-recipes.yaml` workflow splits into a discovery job, three test tiers,
-and a summary. All three tiers call the single shared **`kwok-test-run.yaml`**
-reusable workflow. Tier 3 additionally fans across batches to stay under
-GitHub's 256-configuration cap:
+The `kwok-recipes.yaml` workflow splits into a discovery job, a shared build,
+an image-cache priming job, a script-test job, three test tiers, and a summary.
+The build produces the `aicr` binary once, and every test cell downloads it. All
+three tiers call the single shared **`kwok-test-run.yaml`** reusable workflow.
+Tier 3 additionally fans across batches to stay under GitHub's 256-configuration
+cap:
 
 ```text
+script-tests                                         # kwok/scripts/lib unit tests, gates no tier
+build-aicr                                           # make build, uploads dist/ for every cell
+prime-images                                         # registry, gitea, redis, Kind node image cache
+
 discover
-├── tier1_pairs: [{recipe,deployer}]                 # generic overlays × all deployers
+├── tier1_pairs: [{recipe,deployer}]                 # generic overlays × helm, plus one probe overlay × other deployers
 ├── tier2_pairs: [{recipe, deployer:"helm"}]         # diff-affected overlays, helm-only
 └── tier3_batches: [{id, pairs:[{recipe,deployer}]}] # all overlays × all deployers, chunked ≤256
 
 test-tier1  (PR + push to main)
+  needs: [discover, prime-images, build-aicr]
   uses kwok-test-run.yaml  pairs=tier1_pairs
 
 test-tier2  (PR only, skip if empty)
+  needs: [discover, prime-images, build-aicr]
   uses kwok-test-run.yaml  pairs=tier2_pairs  [helm-only]
 
 test-tier3  (push to main + schedule, skip on PR)
+  needs: [discover, prime-images, build-aicr]
   matrix: tier3_batches → uses kwok-test-run.yaml (matrix: pairs)
 
 summary
-  needs: [test-tier1, test-tier2, test-tier3]
+  needs: [script-tests, prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
 ```
 
 ### Tier 2 deployer coverage
@@ -190,7 +199,7 @@ runs in Tier 3 on every push to `main` and on the nightly schedule.
 
 To add full deployer coverage to Tier 2, change `tier2_pairs` in the `discover`
 classify step to cross the recipe list with the full `DEPLOYERS` array (same
-pattern as `tier1_pairs`).
+pattern as `tier3_batches`).
 
 ### Required checks
 

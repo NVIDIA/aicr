@@ -72,17 +72,36 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Runs beside discover so its wall-clock-bound suites (they assert that a
+  # hanging pull or exhausted budget stays inside its deadline) stay off the
+  # path that gates the tiers.
+  script-tests:
+    name: KWOK Script Tests
+    if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Script unit tests (kwok/scripts/lib)
+        run: |
+          # yq is required by profile-select_test.sh. Fail closed so a runner
+          # image without yq cannot silently skip the assertions.
+          command -v yq >/dev/null || { echo "::error::yq is required for kwok/scripts/lib tests"; exit 1; }
+          bash kwok/scripts/lib/sync-budget_test.sh
+          bash kwok/scripts/lib/profile-select_test.sh
+          bash kwok/scripts/lib/preload-image_test.sh
+          bash kwok/scripts/lib/image-cache_test.sh
+          bash kwok/scripts/run-all-recipes_test.sh
+
   discover:
     name: Discover Recipes
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    # Raised from 5→10 when image-cache_test.sh joined the script unit tests
-    # below. Those suites are deliberately wall-clock bound — they assert that
-    # a hanging pull or an exhausted budget stays inside its deadline, which
-    # costs real seconds — and the block now runs ~90s locally before this job
-    # even starts classifying recipes. A discovery job that times out would be
-    # exactly the kind of self-inflicted red this change exists to remove.
-    timeout-minutes: 10
+    timeout-minutes: 5
     outputs:
       tier1_pairs: ${{ steps.classify.outputs.tier1_pairs }}
       tier2_pairs: ${{ steps.classify.outputs.tier2_pairs }}
@@ -94,18 +113,6 @@ jobs:
           persist-credentials: false
           # Full checkout needed for diff-aware Tier 2 discovery
           fetch-depth: 0
-
-      - name: Script unit tests (kwok/scripts/lib)
-        run: |
-          # yq is required by profile-select_test.sh; fail closed here so a
-          # runner image without yq cannot silently skip the assertions and
-          # let the CI light lie about coverage (#1997).
-          command -v yq >/dev/null || { echo "::error::yq is required for kwok/scripts/lib tests"; exit 1; }
-          bash kwok/scripts/lib/sync-budget_test.sh
-          bash kwok/scripts/lib/profile-select_test.sh
-          bash kwok/scripts/lib/preload-image_test.sh
-          bash kwok/scripts/lib/image-cache_test.sh
-          bash kwok/scripts/run-all-recipes_test.sh
 
       - name: Classify recipes into tiers
         id: classify
@@ -644,7 +651,7 @@ jobs:
   # ── Summary: aggregate all tiers ──
   summary:
     name: KWOK Test Summary (advisory)
-    needs: [prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
+    needs: [script-tests, prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -656,6 +663,7 @@ jobs:
           echo "> Advisory only. This check does not block merges. The required check is Merge Gate." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
+          scripts="${{ needs.script-tests.result }}"
           prime="${{ needs.prime-images.result }}"
           build="${{ needs.build-aicr.result }}"
           tier1="${{ needs.test-tier1.result }}"
@@ -664,6 +672,7 @@ jobs:
 
           echo "| Stage | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Script unit tests | ${scripts} |" >> $GITHUB_STEP_SUMMARY
           echo "| Image cache priming | ${prime} |" >> $GITHUB_STEP_SUMMARY
           echo "| aicr build | ${build} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 1 (generic) | ${tier1} |" >> $GITHUB_STEP_SUMMARY
@@ -672,6 +681,12 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           failed=false
+
+          # The script tests gate no tier, so their failure is only visible here.
+          if [[ "$scripts" == "failure" || "$scripts" == "cancelled" ]]; then
+            echo "Script unit tests failed or were cancelled" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
 
           # Priming gates every tier, so its failure must be checked HERE and
           # not inferred from the tiers. A failed prime leaves them "skipped",
