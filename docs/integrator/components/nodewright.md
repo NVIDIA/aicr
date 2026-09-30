@@ -107,9 +107,10 @@ The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
 applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
 omits the `nvidia-tuned` package while `nvidia-setup` keeps running, and on the
 single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`,
-`tuning-rke2.yaml`, `tuning-gb300.yaml`) it suppresses the whole tuning CR,
-since the tuning package is that CR's only content. No recipe sets it outside
-AKS today, so default renderings are unchanged elsewhere.
+`tuning-gb300.yaml`) it suppresses the whole tuning CR, since the tuning
+package is that CR's only content. On `tuning-rke2.yaml` it does the same
+unless the RDMA package below is enabled. No recipe sets it outside AKS today,
+so default renderings are unchanged elsewhere.
 
 `tuning-rke2.yaml` also carries an optional `rdma-netns-exclusive` package,
 gated by `rdmaNetnsExclusive` (default `false`; only an explicit `true`
@@ -121,12 +122,15 @@ packages' reboots into one per node
 ([#2572](https://github.com/NVIDIA/aicr/issues/2572)). The two gates are
 independent: `tuningEnabled=false` on a VR200 recipe drops `nvidia-tuned` but
 keeps the CR with the RDMA package, and the CR is suppressed only when both
-packages are off. Disable the RDMA mode with
-`--set nodewrightcustomizations:rdmaNetnsExclusive=false`.
+packages are off. `--set nodewrightcustomizations:rdmaNetnsExclusive=false`
+drops the RDMA package from the CR but does not restore shared mode on nodes
+that already have it: the package has no uninstall step, so that takes
+removing `/etc/modprobe.d/dranet-rdma-netns-exclusive.conf` and a reboot.
 
-The tuning CR is a normal release-managed resource (no Helm hooks), so
-flipping `tuningEnabled` from `true` to `false` retracts it on all deployers —
-under Helm/Argo (which already stripped the hooks at bundle time) and under
+The tuning CR is a normal release-managed resource (no Helm hooks), so once
+its gates leave no package to render (`tuningEnabled=false`, plus
+`rdmaNetnsExclusive` off on `tuning-rke2.yaml`) it is retracted on all
+deployers — under Helm/Argo (which already stripped the hooks at bundle time) and under
 Flux (where a hook resource would otherwise have been orphaned on the flip,
 since `before-hook-creation` never fires when the CR leaves the render).
 Ordering after the Skyhook CRD install is handled by component dependency

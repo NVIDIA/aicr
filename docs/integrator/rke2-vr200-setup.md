@@ -144,24 +144,40 @@ CRs ([#2572](https://github.com/NVIDIA/aicr/issues/2572)).
 
 **Upgrading from a bundle with a separate `rdma-netns-exclusive`
 component.** Earlier bundles shipped the RDMA mode as its own component and
-CR, whose `interruptionBudget` is independent of the merged `tuning` CR's. If
-both are rolling at once, each can reboot a different GPU node:
+CR. Remove that CR before applying the new bundle; leaving it in place is not
+safe even once it is `complete`. Its `interruptionBudget` is independent of
+the merged `tuning` CR's, and it keeps enrolling every GPU node that matches
+its selector, so a node that joins later runs both CRs and reboots twice.
 
-1. Before upgrading, wait until the old CR reports `complete`
-   (`kubectl get nodewright rdma-netns-exclusive -o jsonpath='{.status.status}'`);
-   a complete CR issues no further reboots. If it cannot complete, stop it
-   with `kubectl annotate nodewright rdma-netns-exclusive
-   nodewright.nvidia.com/disable=true` and wait until every GPU node is
-   `Ready`.
-2. Apply the new bundle.
-3. Remove the old release. Argo CD's app-of-apps prunes the
-   `rdma-netns-exclusive` `Application` once the new bundle replaces the old
-   one in Git, and Flux prunes its `HelmRelease` when the Kustomization sets
-   `prune: true`. The Helm and helmfile deployers leave the release
-   installed; remove it with `helm uninstall rdma-netns-exclusive -n nodewright`.
-4. The CR was a Helm hook, so it can outlive its release. Delete it if it
-   remains: `kubectl delete nodewright rdma-netns-exclusive` (the resource
-   is cluster-scoped).
+1. Wait until the old CR reports `complete`
+   (`kubectl get nodewright rdma-netns-exclusive -o jsonpath='{.status.status}'`)
+   so that removing it does not cut a node off mid-stage. If it cannot
+   complete, pause it instead (`kubectl annotate nodewright
+   rdma-netns-exclusive nodewright.nvidia.com/pause=true`): pause suspends the
+   running stage, whereas `disable` lets in-flight work finish.
+2. Remove the old component so that nothing recreates the CR:
+   - Helm or helmfile: `helm uninstall rdma-netns-exclusive -n nodewright`.
+     The bundler stripped the CR's Helm hook annotations, so the CR belongs
+     to the release and is deleted with it.
+   - Argo CD (`argocd` or `argocd-helm`): turn off automated sync on the
+     parent Application (`nvidia-stack` or `aicr-stack` by default), then
+     delete the `rdma-netns-exclusive` child Application. Applying the new
+     bundle's parent Application turns automated sync back on.
+   - Flux: suspend the Kustomization that reconciles the bundle
+     (`flux suspend kustomization <name>`), then delete the
+     `rdma-netns-exclusive` `HelmRelease` from the Flux namespace
+     (`flux-system` by default). Resume the Kustomization once the new bundle
+     is committed.
+3. Delete the CR if it remains, and confirm it is gone. Argo CD leaves it
+   behind unless cascade delete is enabled, and under Flux it is still a Helm
+   hook, which an uninstall does not remove:
+
+   ```shell
+   kubectl delete nodewright rdma-netns-exclusive   # cluster-scoped
+   kubectl get nodewright rdma-netns-exclusive      # expect NotFound
+   ```
+
+4. Apply the new bundle.
 
 The package has no uninstall step, so removing the CR leaves the host setting
 in place. The first rollout of the merged CR re-applies the RDMA package on
