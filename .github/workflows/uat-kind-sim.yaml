@@ -296,7 +296,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/kind/run-sim prep "${TEST_CONFIG}"
 
-      - name: UAT - install (helmfile apply + readiness gate)
+      - name: UAT - install (helmfile apply)
         id: install
         if: steps.prep.outcome == 'success'
         timeout-minutes: 90

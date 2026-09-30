@@ -36,6 +36,8 @@
 #                READINESS_CONSECUTIVE_PASSES times in a row. Its own phase (and
 #                workflow step) so a gate that never converges is not reported
 #                as an install failure (#2630)
+#                (skipped, with a log line, when VALIDATE_PHASES leaves out
+#                the deployment phase)
 #   conformance  validate ALL phases (deployment + conformance + performance)
 #                + emit signed evidence bundle
 #   train        submit TrainJob, wait for completion, capture logs
