@@ -184,13 +184,54 @@ readback_assert_none_added() {
     fi
 }
 
-# compare_upgrade_readback <artifact-report> <cluster-report> <installed-file> <out-dir> <deployer>
+# readback_unsettled_argo_components <applications-json> <installed-file> <out-file>
+#
+# Writes the installed components whose Argo CD Application has established
+# no deployed version: not Synced, and no completed sync in status.history.
+# The cluster read reports those as unversioned by design, since the pin
+# they are working toward is not yet what is running. On KWOK that is the
+# steady state for an Application whose sync operation waits on a health
+# state the simulator never produces (kai-scheduler's namespace, observed).
+#
+# <applications-json> is `kubectl get applications.argoproj.io -A -o json`.
+# An Application is matched to a component by exact name, so a prefixed
+# Application matches nothing and excuses nothing: the strict direction.
+# Returns 1 when the dump is missing or unreadable rather than writing an
+# empty list, which would read as "nothing unsettled".
+readback_unsettled_argo_components() {
+    local apps_json="${1:-}" installed_file="${2:-}" out_file="${3:-}"
+    if [[ ! -s "${apps_json}" || ! -f "${installed_file}" || -z "${out_file}" ]]; then
+        echo "[ERROR] readback_unsettled_argo_components: <applications-json> <installed-file> <out-file> are required" >&2
+        return 1
+    fi
+
+    local unsettled
+    if ! unsettled=$(jq -r '
+            if (.items | type) != "array" then error("not an Application list") else . end
+            | .items[]
+            | select((.status.sync.status // "") != "Synced"
+                     and ((.status.history // []) | length) == 0)
+            | .metadata.name' "${apps_json}"); then
+        echo "[ERROR] Could not read Argo CD Applications from ${apps_json}" >&2
+        return 1
+    fi
+    comm -12 "${installed_file}" <(sort -u <<< "${unsettled}" | sed '/^$/d') > "${out_file}"
+}
+
+# compare_upgrade_readback <artifact-report> <cluster-report> <installed-file> <out-dir> <deployer> [<unsettled-file>]
 #
 # Returns 0 when the two reports agree on every component, 1 otherwise,
 # leaving the two projections and a unified diff in <out-dir>.
+#
+# <unsettled-file>, from readback_unsettled_argo_components, names components
+# whose cluster row may read unversioned with no `from`, and only that row
+# shape: a listed component the cluster reads at any version, or at a version
+# that disagrees, still fails. Each excused row is named on stderr and in
+# <out-dir>/excused-unsettled.txt, and the summary counts drop by what was
+# excused so they compare on the rows that remain.
 compare_upgrade_readback() {
     local artifact_json="${1:-}" cluster_json="${2:-}" installed_file="${3:-}"
-    local out_dir="${4:-}" deployer="${5:-unknown}"
+    local out_dir="${4:-}" deployer="${5:-unknown}" unsettled_file="${6:-}"
 
     if [[ -z "${artifact_json}" || -z "${cluster_json}" || -z "${installed_file}" || -z "${out_dir}" ]]; then
         echo "[ERROR] compare_upgrade_readback: <artifact> <cluster> <installed-file> <out-dir> are required" >&2
@@ -201,14 +242,43 @@ compare_upgrade_readback() {
     readback_assert_none_added "${artifact_json}" "${installed_file}" "from-artifact" || return 1
     readback_assert_none_added "${cluster_json}" "${installed_file}" "from-cluster" || return 1
 
+    local cluster_compared="${cluster_json}"
+    if [[ -n "${unsettled_file}" ]]; then
+        if [[ ! -f "${unsettled_file}" ]]; then
+            echo "[ERROR] unsettled-component list ${unsettled_file} does not exist" >&2
+            return 1
+        fi
+        cluster_compared="${out_dir}/from-cluster.settled.json"
+        local excused_file="${out_dir}/excused-unsettled.txt"
+        if ! jq --rawfile unsettled "${unsettled_file}" '
+                ($unsettled | split("\n") | map(select(length > 0))) as $u
+                | (.components // []) as $rows
+                | [$rows[] | select((.component as $c | $u | index($c)) != null
+                                    and ((.from // "") == "")
+                                    and .verdict == "unversioned")] as $excused
+                | .components = [$rows[] | select(. as $r | ($excused | index($r)) == null)]
+                | .summary.components = ((.summary.components // 0) - ($excused | length))
+                | .summary.failing = ((.summary.failing // 0) - ([$excused[] | select(.failsRun)] | length))
+                | .excused = [$excused[].component]' \
+                "${cluster_json}" > "${cluster_compared}"; then
+            echo "[ERROR] Could not apply the unsettled-component list to ${cluster_json}" >&2
+            return 1
+        fi
+        jq -r '.excused[]' "${cluster_compared}" > "${excused_file}" || return 1
+        local excused
+        while IFS= read -r excused; do
+            [[ -n "${excused}" ]] && echo "[INFO] Excused ${excused}: its Argo CD Application has no deployed version yet, so the cluster reads it as unversioned" >&2
+        done < "${excused_file}"
+    fi
+
     local artifact_proj="${out_dir}/from-artifact.projection.json"
     local cluster_proj="${out_dir}/from-cluster.projection.json"
     if ! jq -S "${READBACK_PROJECTION}" "${artifact_json}" > "${artifact_proj}"; then
         echo "[ERROR] Could not project ${artifact_json}" >&2
         return 1
     fi
-    if ! jq -S "${READBACK_PROJECTION}" "${cluster_json}" > "${cluster_proj}"; then
-        echo "[ERROR] Could not project ${cluster_json}" >&2
+    if ! jq -S "${READBACK_PROJECTION}" "${cluster_compared}" > "${cluster_proj}"; then
+        echo "[ERROR] Could not project ${cluster_compared}" >&2
         return 1
     fi
 

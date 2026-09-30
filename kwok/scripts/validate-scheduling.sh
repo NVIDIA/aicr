@@ -2165,6 +2165,23 @@ verify_upgrade_inventory() {
     local cluster_json="${out_dir}/from-cluster.json"
     local artifact_json="${out_dir}/from-artifact.json"
 
+    # Argo CD answers a chart version only once a sync has established it, and
+    # on KWOK some never do (see readback_unsettled_argo_components). Taken
+    # before the cluster read: an Application that settles in between is then
+    # read at a version and excuses nothing, while the reverse cannot happen.
+    local unsettled_file=""
+    case "$deployer_arg" in
+        argocd|argocd-helm)
+            local apps_json="${out_dir}/argo-applications.json"
+            if ! kubectl get applications.argoproj.io -A -o json > "$apps_json"; then
+                log_error "Could not list Argo CD Applications for the read-back"
+                return 1
+            fi
+            unsettled_file="${out_dir}/unsettled-components.txt"
+            readback_unsettled_argo_components "$apps_json" "$installed_file" "$unsettled_file" || return 1
+            ;;
+    esac
+
     log_info "Reading the installed inventory: aicr upgrade-check --from cluster --deployer ${deployer_arg}"
     local rc=0
     "$AICR_BIN" upgrade-check \
@@ -2194,7 +2211,8 @@ verify_upgrade_inventory() {
     fi
 
     compare_upgrade_readback \
-        "$artifact_json" "$cluster_json" "$installed_file" "$out_dir" "$deployer_arg" || return 1
+        "$artifact_json" "$cluster_json" "$installed_file" "$out_dir" "$deployer_arg" \
+        ${unsettled_file:+"$unsettled_file"} || return 1
 
     log_info "Inventory read-back PASSED: the cluster and the bundle agree on every component"
 

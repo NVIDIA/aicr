@@ -216,6 +216,80 @@ summary=$(readback_source_summary "${WORK}/absent.json"); rc=$?
 check_rc "source-summary-missing-report-rc-zero" 0 "${rc}"
 check_eq "source-summary-missing-report-is-silent" "" "${summary}"
 
+# Unsettled Argo CD Applications. The cluster read reports a component
+# whose Application has no deployed version as unversioned with no `from`,
+# while the bundle reads it at its pin and so reports no change at all.
+printf '%s\n' gpu-operator kai-scheduler nfd > "${WORK}/installed-argo.txt"
+UNSETTLED_ROW='{"component": "kai-scheduler", "change": "version", "to": "v0.16.9",
+    "verdict": "unversioned", "reason": "not-comparable", "failsRun": true}'
+# cluster_report <out-file> <extra-row>: AGREED plus one row, with the
+# summary counting it the way the real report does.
+cluster_report() {
+    jq -n --argjson agreed "${AGREED}" --argjson row "$2" --argjson source "${SOURCE_OK}" \
+        '{source: $source, components: ($agreed + [$row]),
+          summary: {components: (($agreed | length) + 1),
+                    failing: ([($agreed + [$row])[] | select(.failsRun)] | length)},
+          atRisk: {scanned: false, reason: "fixture"}}' > "$1"
+}
+report "${WORK}/from-artifact.json" "${AGREED}"
+cluster_report "${WORK}/from-cluster.json" "${UNSETTLED_ROW}"
+
+printf '%s\n' kai-scheduler > "${WORK}/unsettled.txt"
+out=$(compare_upgrade_readback "${WORK}/from-artifact.json" "${WORK}/from-cluster.json" \
+    "${WORK}/installed-argo.txt" "${WORK}" argocd "${WORK}/unsettled.txt" 2>&1); rc=$?
+check_rc "unsettled-unversioned-row-is-excused" 0 "${rc}"
+check_eq "excused-component-is-recorded" "kai-scheduler" "$(cat "${WORK}/excused-unsettled.txt")"
+case "${out}" in
+    *"Excused kai-scheduler"*) echo "PASS: excused-component-is-named" ;;
+    *) echo "FAIL: excused-component-is-named"; fails=$((fails + 1)) ;;
+esac
+
+# The same row with no list, or a list naming something else, is a finding.
+compare_upgrade_readback "${WORK}/from-artifact.json" "${WORK}/from-cluster.json" \
+    "${WORK}/installed-argo.txt" "${WORK}" argocd >/dev/null 2>&1
+check_rc "unversioned-row-without-list-fails" 1 "$?"
+printf '%s\n' nfd > "${WORK}/unsettled-other.txt"
+compare_upgrade_readback "${WORK}/from-artifact.json" "${WORK}/from-cluster.json" \
+    "${WORK}/installed-argo.txt" "${WORK}" argocd "${WORK}/unsettled-other.txt" >/dev/null 2>&1
+check_rc "unversioned-row-for-unlisted-component-fails" 1 "$?"
+
+# A listed component read at a version is not the excused shape: a wrong
+# version stays a finding whatever the Application's state.
+cluster_report "${WORK}/from-cluster.json" "$(jq -c '.from = "v0.1.0" | .verdict = "unknown"' <<< "${UNSETTLED_ROW}")"
+compare_upgrade_readback "${WORK}/from-artifact.json" "${WORK}/from-cluster.json" \
+    "${WORK}/installed-argo.txt" "${WORK}" argocd "${WORK}/unsettled.txt" >/dev/null 2>&1
+check_rc "listed-component-at-a-wrong-version-fails" 1 "$?"
+
+compare_upgrade_readback "${WORK}/from-artifact.json" "${WORK}/from-cluster.json" \
+    "${WORK}/installed-argo.txt" "${WORK}" argocd "${WORK}/no-such-list.txt" >/dev/null 2>&1
+check_rc "missing-unsettled-list-fails" 1 "$?"
+
+# readback_unsettled_argo_components: which Applications count as unsettled.
+cat > "${WORK}/apps.json" <<'JSON'
+{"items": [
+  {"metadata": {"name": "kai-scheduler"},
+   "status": {"sync": {"status": "OutOfSync"}}},
+  {"metadata": {"name": "gpu-operator"},
+   "status": {"sync": {"status": "OutOfSync"}, "history": [{"id": 1}]}},
+  {"metadata": {"name": "nfd"},
+   "status": {"sync": {"status": "Synced"}}},
+  {"metadata": {"name": "someone-elses-app"},
+   "status": {"sync": {"status": "OutOfSync"}}}
+]}
+JSON
+readback_unsettled_argo_components "${WORK}/apps.json" "${WORK}/installed-argo.txt" "${WORK}/found.txt"
+check_rc "unsettled-scan-rc-zero" 0 "$?"
+check_eq "only-installed-apps-with-no-deployed-version-are-unsettled" "kai-scheduler" \
+    "$(cat "${WORK}/found.txt")"
+
+echo '{"kind": "Status"}' > "${WORK}/not-a-list.json"
+readback_unsettled_argo_components "${WORK}/not-a-list.json" "${WORK}/installed-argo.txt" \
+    "${WORK}/found.txt" 2>/dev/null
+check_rc "non-list-dump-fails" 1 "$?"
+readback_unsettled_argo_components "${WORK}/absent.json" "${WORK}/installed-argo.txt" \
+    "${WORK}/found.txt" 2>/dev/null
+check_rc "missing-dump-fails" 1 "$?"
+
 if ((fails > 0)); then
     echo "upgrade-readback_test.sh: ${fails} failure(s)"
     exit 1

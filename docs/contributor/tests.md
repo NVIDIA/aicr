@@ -335,6 +335,16 @@ The `source` block is asserted on separately, since a read that matched
 nothing produces the same table a broken artifact read would and two
 degenerate reads must not agree their way to a pass.
 
+One row is excused, on the Argo CD lanes only. The cluster read takes an
+Argo CD chart version from what a sync established, never from the pin, and
+on KWOK some Applications never establish one: their sync operation waits on
+a health state the simulator does not produce. Such a component reads as
+`unversioned` with no `from`. The lane lists the Applications before the
+read, and a component may take that row shape only when its Application is
+neither `Synced` nor has a completed sync in `status.history`. Every other
+difference for that component still fails, each excused row is logged, and
+the list is kept as `excused-unsettled.txt` beside the reports.
+
 Both invocations pass `--fail-on-error=false`: the question is whether the
 two paths agree, not whether the upgrade is safe, so a verdict-driven
 non-zero exit must not stand in for the comparison. A non-zero exit with
