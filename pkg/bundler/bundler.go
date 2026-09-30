@@ -3728,7 +3728,7 @@ func mergeDRAEvictionNodeSelector(componentName string, values map[string]any, l
 	case map[string]any:
 		nodeSelector = current
 	case map[string]string:
-		nodeSelector = make(map[string]any, len(current)+1)
+		nodeSelector = make(map[string]any, len(current))
 		for key, value := range current {
 			nodeSelector[key] = value
 		}
@@ -3780,7 +3780,7 @@ func upsertGPUOperatorDRAEvictionEnv(componentName string, values map[string]any
 			return invalidDRAEvictionManagedValue(componentName, gpuOperatorDRAEvictionEnvPath, "an array", rawEnv)
 		}
 	}
-	env := make([]any, 0, len(existingEnv)+1)
+	env := make([]any, 0, len(existingEnv))
 	found := false
 	for _, entry := range existingEnv {
 		envMap, ok := entry.(map[string]any)
