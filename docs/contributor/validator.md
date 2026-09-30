@@ -1459,6 +1459,30 @@ into the validator image):
   a false pass. In practice `nodewright-customizations` ships no values file
   and uses inline `overrides:`, so there is no exposure here today.
 
+**Chart-shape constants are pinned to the charts (#2629).** The Go readiness
+checks hardcode facts that upstream charts define, not AICR:
+- the `NodeWright` CR's group, version, and resource;
+- the chart's default runtime-required taint;
+- the operator Deployment's name with and without AICR's `fullnameOverride`;
+- the DRA driver's `-kubelet-plugin` DaemonSet suffix.
+
+`validators/deployment/testdata/chart_contracts.yaml` records what the pinned
+charts actually render. Under `make test`, `TestChartContractsMatchRenderInputs`
+fails when a pin in `recipes/registry.yaml`, or the values AICR ships for one
+of those charts, changes without the file being re-rendered, and
+`TestValidatorConstantsMatchChartContracts` fails when a constant disagrees
+with the file. After such a change, regenerate it (needs helm and network):
+
+```bash
+AICR_UPDATE_GOLDEN=1 go test ./validators/deployment/ -run '^TestChartContractsMatchPinnedCharts$' -count=1
+```
+
+Then update any constant the second test reports. Without `AICR_UPDATE_GOLDEN`,
+the same test checks the committed file against the live charts; like the
+nvsentinel render tests, it is skipped under `-short`. Operator behavior the
+chart does not render, such as which of two served kinds carries status, is
+outside this check.
+
 **Running:**
 
 ```bash
