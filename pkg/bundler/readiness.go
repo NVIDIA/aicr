@@ -160,6 +160,10 @@ func (b *DefaultBundler) collectComponentReadiness(
 
 	provider := recipeResult.DataProvider()
 	image := b.gateImage()
+	sched := gatemanifest.Scheduling{
+		NodeSelector: b.Config.SystemNodeSelector(),
+		Tolerations:  b.Config.SystemNodeTolerations(),
+	}
 
 	// The RDMA-fabric probe is only run when a network-operator ref is
 	// encountered; keep the result cached so multi-component recipes
@@ -208,7 +212,7 @@ func (b *DefaultBundler) collectComponentReadiness(
 			return nil, err
 		}
 
-		manifest, genErr := gatemanifest.Render(ref.Name, image, testYAML, b.Config.Deployer())
+		manifest, genErr := gatemanifest.Render(ref.Name, image, testYAML, b.Config.Deployer(), sched)
 		if genErr != nil {
 			return nil, genErr
 		}

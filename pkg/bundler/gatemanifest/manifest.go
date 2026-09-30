@@ -20,12 +20,115 @@ package gatemanifest
 
 import (
 	"fmt"
+	"maps"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/validate/content"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/yaml"
 )
+
+// Scheduling is the node placement for the gate Job's pod. The gate is itself
+// a system workload, so callers pass the bundle's system-node scheduling —
+// including for components that declare no system scheduling of their own. A
+// zero value renders no placement fields.
+type Scheduling struct {
+	NodeSelector map[string]string
+	Tolerations  []corev1.Toleration
+}
+
+// validate applies the API server's pod nodeSelector and toleration rules
+// (ValidateTolerations in k8s.io/kubernetes pkg/apis/core/validation), except
+// that Lt and Gt are accepted regardless of the TaintTolerationComparisonOperators
+// feature gate, which only the cluster knows. Rendering depends on it: the
+// manifest is later executed as a Go template, and no key or value these rules
+// admit can carry template syntax.
+func (s Scheduling) validate() error {
+	for _, key := range slices.Sorted(maps.Keys(s.NodeSelector)) {
+		if errs := validation.IsQualifiedName(key); len(errs) > 0 {
+			return invalidSchedulingf("invalid node selector key %q: %s", key, strings.Join(errs, "; "))
+		}
+		if errs := validation.IsValidLabelValue(s.NodeSelector[key]); len(errs) > 0 {
+			return invalidSchedulingf("invalid node selector value for %q: %s", key, strings.Join(errs, "; "))
+		}
+	}
+	for _, t := range s.Tolerations {
+		if err := validateToleration(t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateToleration(t corev1.Toleration) error {
+	if t.Key == "" {
+		if t.Operator != corev1.TolerationOpExists {
+			return invalidSchedulingf("toleration with an empty key must use operator Exists, got %q", t.Operator)
+		}
+	} else if errs := validation.IsQualifiedName(t.Key); len(errs) > 0 {
+		return invalidSchedulingf("invalid toleration key %q: %s", t.Key, strings.Join(errs, "; "))
+	}
+	if t.TolerationSeconds != nil && t.Effect != corev1.TaintEffectNoExecute {
+		return invalidSchedulingf("toleration %q sets tolerationSeconds, which requires effect NoExecute, got %q", t.Key, t.Effect)
+	}
+
+	switch t.Operator {
+	case "", corev1.TolerationOpEqual:
+		if errs := validation.IsValidLabelValue(t.Value); len(errs) > 0 {
+			return invalidSchedulingf("invalid toleration value for key %q: %s", t.Key, strings.Join(errs, "; "))
+		}
+	case corev1.TolerationOpExists:
+		if t.Value != "" {
+			return invalidSchedulingf("toleration %q uses operator Exists, which requires an empty value, got %q", t.Key, t.Value)
+		}
+	case corev1.TolerationOpLt, corev1.TolerationOpGt:
+		if errs := content.IsDecimalInteger(t.Value); len(errs) > 0 {
+			return invalidSchedulingf("invalid toleration value for key %q: %s", t.Key, strings.Join(errs, "; "))
+		}
+		if _, err := strconv.ParseInt(t.Value, 10, 64); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("readiness gate: toleration value for key %q is out of int64 range", t.Key), err)
+		}
+	default:
+		return invalidSchedulingf("invalid toleration operator %q for key %q", t.Operator, t.Key)
+	}
+
+	switch t.Effect {
+	case "", corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute:
+	default:
+		return invalidSchedulingf("invalid toleration effect %q for key %q", t.Effect, t.Key)
+	}
+	return nil
+}
+
+func invalidSchedulingf(format string, args ...any) error {
+	return errors.New(errors.ErrCodeInvalidRequest, "readiness gate: "+fmt.Sprintf(format, args...))
+}
+
+// podSchedulingBlock renders s as fields of the gate Job's pod spec, or ""
+// when nothing is set so the unscheduled manifest stays byte-identical.
+func podSchedulingBlock(s Scheduling) (string, error) {
+	if err := s.validate(); err != nil {
+		return "", err
+	}
+	if len(s.NodeSelector) == 0 && len(s.Tolerations) == 0 {
+		return "", nil
+	}
+	out, err := yaml.Marshal(struct {
+		NodeSelector map[string]string   `json:"nodeSelector,omitempty"`
+		Tolerations  []corev1.Toleration `json:"tolerations,omitempty"`
+	}{s.NodeSelector, s.Tolerations})
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "readiness gate: failed to marshal scheduling", err)
+	}
+	return indentBlock(string(out), "      ") + "\n", nil
+}
 
 // Render builds the multi-document gate chart manifest for one component. The
 // namespace is left as a {{ .Release.Namespace }} template token (resolved by
@@ -39,9 +142,16 @@ import (
 // do not overwrite each other's cluster-scoped objects. The namespaced
 // ServiceAccount, ConfigMap, and Job keep the bare component name — identical
 // names in distinct namespaces never collide.
-func Render(componentName, image string, testYAML []byte, deployer config.DeployerType) ([]byte, error) {
+//
+// sched places the gate pod (#2590); an invalid selector or toleration is an
+// ErrCodeInvalidRequest.
+func Render(componentName, image string, testYAML []byte, deployer config.DeployerType, sched Scheduling) ([]byte, error) {
 	if componentName == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "readiness gate: empty component name")
+	}
+	scheduling, err := podSchedulingBlock(sched)
+	if err != nil {
+		return nil, err
 	}
 
 	indented := indentBlock(string(testYAML), "    ")
@@ -115,7 +225,7 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: %[1]s
-      containers:
+%[13]s      containers:
         - name: gate
           image: %[5]s
           imagePullPolicy: IfNotPresent
@@ -141,7 +251,8 @@ spec:
 		defaults.ReadinessGateMaxWait.String(),
 		jobAnnotations,
 		defaults.ReadinessGateBackoffLimit,
-		componentClusterRoleRules(componentName))
+		componentClusterRoleRules(componentName),
+		scheduling)
 
 	return []byte(sb.String()), nil
 }

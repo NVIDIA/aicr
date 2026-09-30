@@ -2907,6 +2907,7 @@ metadata:
   name: gpu-operator-readiness
 `),
 		deployer,
+		gatemanifest.Scheduling{},
 	)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
