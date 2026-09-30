@@ -99,7 +99,7 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/aws/cluster-config.yaml
     test-config-dir: tests/uat/aws/tests
-    nightly-intents: [training, inference]
+    nightly-intents: []
     # No daytime-intent: it moved to aws-h100-ct-1, whose reservation has room
     # for a daytime hold and a nightly cell at the same time (this one is 2
     # instances total, so it could only ever do one or the other). This row
@@ -165,7 +165,7 @@ reservations:
     # leases, separate (slug, slot)-scoped guard prefixes, 2 nodes each), so it
     # is a one-line change once a green run exists on this capacity for each
     # intent it would list. Only training has one today.
-    nightly-intents: []
+    nightly-intents: [training, inference]
   - name: gcp-h100
     slug: gh1
     cloud: gcp

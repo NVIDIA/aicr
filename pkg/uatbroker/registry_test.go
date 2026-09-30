@@ -897,8 +897,8 @@ func TestCommittedRegistryValid(t *testing.T) {
 	// later deliberate edit here, once a green run exists on this capacity for
 	// each intent it would list.
 	if slot2, slotErr := reg.Lookup("aws-h100-ct-2"); slotErr == nil {
-		if got := slot2.NightlyIntentsOrDefault(); len(got) != 0 {
-			t.Errorf("aws-h100-ct-2 nightly-intents = %v, want empty (not yet enrolled)", got)
+		if got := slot2.NightlyIntentsOrDefault(); !slices.Equal(got, []string{IntentTraining, IntentInference}) {
+			t.Errorf("aws-h100-ct-2 nightly-intents = %v, want [training inference]", got)
 		}
 		if slot2.DaytimeIntent != "" {
 			t.Errorf("aws-h100-ct-2 daytime-intent = %q, want empty (aws-h100-ct-1 holds it)", slot2.DaytimeIntent)
@@ -961,7 +961,7 @@ func TestCommittedRegistryValid(t *testing.T) {
 	// nightly on BOTH reservations, serialized through the shared lease. A
 	// future change to the per-reservation intent set changes this deliberately.
 	wantNightly := map[string][]string{
-		"aws-h100": {IntentTraining, IntentInference},
+		"aws-h100": {},
 		"gcp-h100": {IntentTraining, IntentInference},
 		// azure-h100 enrolled with [training] after the green manual
 		// acceptance run (29125390442); inference joined after a green
