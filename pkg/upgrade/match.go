@@ -433,7 +433,9 @@ func identityChanges(from, to Identity) []IdentityChange {
 			})
 		}
 	}
-	paths := make([]string, 0, len(from.ObjectNames)+len(to.ObjectNames))
+	// Sized from one side only, as in recipe.unionPaths: the two lengths come
+	// from a bundle's own files, and their sum is not provably an int.
+	paths := make([]string, 0, len(from.ObjectNames))
 	for path := range from.ObjectNames {
 		paths = append(paths, path)
 	}

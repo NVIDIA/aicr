@@ -167,7 +167,9 @@ func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]ma
 // unionPaths lists every value path either side states, sorted so the pins a
 // run writes do not depend on map order.
 func unionPaths(prior, current map[string]string) []string {
-	paths := make([]string, 0, len(prior)+len(current))
+	// Sized from one side only: summing two lengths drawn from a bundle's own
+	// files is an allocation size CodeQL cannot prove fits in an int.
+	paths := make([]string, 0, len(prior))
 	for path := range prior {
 		paths = append(paths, path)
 	}
