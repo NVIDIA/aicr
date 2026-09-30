@@ -295,24 +295,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, err
 	}
 
-	enabledRefs, filteredOrder, excludedReasons, filterErr := b.filterEnabledComponents(recipeResult)
-	if filterErr != nil {
-		return nil, filterErr
+	recipeResult, err := b.filterAndValidateRecipe(recipeResult)
+	if err != nil {
+		return nil, err
 	}
-
-	// A --set / --set-json / --set-file naming a component that is not in
-	// the generated bundle cannot take effect. Reject it rather than drop
-	// it on the floor. Runs immediately after filtering, so the "present"
-	// set is exactly what will be rendered.
-	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, enabledRefs, excludedReasons); overrideErr != nil {
-		return nil, overrideErr
-	}
-
-	// Work on a shallow copy so the caller's RecipeResult is not mutated
-	filtered := *recipeResult
-	filtered.ComponentRefs = enabledRefs
-	filtered.DeploymentOrder = filteredOrder
-	recipeResult = &filtered
 
 	// Bundle-time override policy for GPU allocation-policy keys (#1327):
 	// reject --dynamic declarations, warn on static overrides. Runs after
@@ -1369,6 +1355,31 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 	return mergeOverridesAcrossKeys(allOverrides, b.componentOverrideKeys(componentName, provider))
 }
 
+func (b *DefaultBundler) filterAndValidateRecipe(recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, error) {
+	enabledRefs, filteredOrder, excludedReasons, filterErr := b.filterEnabledComponents(recipeResult)
+	if filterErr != nil {
+		return nil, filterErr
+	}
+
+	// A --set / --set-json / --set-file naming a component that is not in
+	// the generated bundle cannot take effect. Reject it rather than drop
+	// it on the floor. Runs immediately after filtering, so the "present"
+	// set is exactly what will be rendered.
+	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, enabledRefs, excludedReasons); overrideErr != nil {
+		return nil, overrideErr
+	}
+
+	// Work on a shallow copy so the caller's RecipeResult is not mutated
+	filtered := *recipeResult
+	filtered.ComponentRefs = enabledRefs
+	filtered.DeploymentOrder = filteredOrder
+	spec := recipe.RecipeMetadataSpec{ComponentRefs: filtered.ComponentRefs}
+	if err := spec.ValidateDependencies(); err != nil {
+		return nil, err
+	}
+	return &filtered, nil
+}
+
 // filterEnabledComponents resolves the set of components to bundle by applying
 // recipe-level overrides.enabled, bundle-time --set enabled toggles, and the
 // positive bundlers component-name filter (config.WithBundlers, #1531), then
@@ -1493,8 +1504,8 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 	// removed above. After filtering, such a dependency is no longer present in
 	// the ref slice, so a deployer that recomputes ordering from these refs
 	// (e.g. helmfile via ComponentRefsTopologicalLevels) would otherwise treat
-	// the dangling edge as an undeclared dependency and fail with a false
-	// circular-dependency error. The dependency is assumed satisfied externally
+	// the dangling edge as an undeclared dependency and report it as missing.
+	// The dependency is assumed satisfied externally
 	// (the reason it was disabled). An edge to a genuinely undeclared component
 	// is left intact so topology validation still errors on a malformed recipe.
 	for i := range enabledRefs {

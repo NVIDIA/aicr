@@ -1485,13 +1485,11 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 // TestMake_DisabledDependencyPruned verifies that disabling a component that
 // others depend on bundles successfully: the dangling dependency edge on the
 // dependent is pruned so the helmfile level computation does not see an
-// undeclared dependency and fail with a false circular-dependency error.
+// undeclared dependency and report it as missing.
 func TestMake_DisabledDependencyPruned(t *testing.T) {
 	// Use the helmfile deployer: it recomputes levels via
-	// ComponentRefsTopologicalLevels, the only path that inspects dependency
-	// edges at bundle time. Without the prune loop, the dangling
-	// gpu-operator → cert-manager edge would surface here as a false
-	// circular-dependency error, so this is where the regression is pinned.
+	// ComponentRefsTopologicalLevels. Without the prune loop, the
+	// gpu-operator -> cert-manager edge would be reported as missing.
 	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
 	bundler, err := New(WithConfig(cfg))
 	if err != nil {
@@ -1530,35 +1528,90 @@ func TestMake_DisabledDependencyPruned(t *testing.T) {
 // component that does not exist in the recipe must still fail rather than have
 // the bad edge silently erased.
 func TestMake_UndeclaredDependencyErrors(t *testing.T) {
-	// Use the helmfile deployer: it recomputes levels via
-	// ComponentRefsTopologicalLevels, which is where an undeclared dependency
-	// must surface (the default helm deployer sorts by DeploymentOrder and does
-	// not validate edges at bundle time).
-	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
-	bundler, err := New(WithConfig(cfg))
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	ctx := context.Background()
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1",
-		Kind:       "Recipe",
-		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
-		ComponentRefs: []recipe.ComponentRef{
-			// cert-manager is neither declared nor disabled — it simply does not exist.
-			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+	tests := []struct {
+		name        string
+		refs        []recipe.ComponentRef
+		wantMissing bool
+		wantCycle   bool
+	}{
+		{
+			name:        "missing dependency",
+			refs:        []recipe.ComponentRef{{Name: "a", DependencyRefs: []string{"phantom", "phantom"}}},
+			wantMissing: true,
 		},
-		DeploymentOrder: []string{"gpu-operator"},
+		{
+			name: "cycle and missing dependency",
+			refs: []recipe.ComponentRef{
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+				{Name: "b", DependencyRefs: []string{"c"}},
+				{Name: "c", DependencyRefs: []string{"b"}},
+			},
+			wantMissing: true,
+			wantCycle:   true,
+		},
+		{
+			name: "cycle without missing dependencies",
+			refs: []recipe.ComponentRef{
+				{Name: "a", DependencyRefs: []string{"b"}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+			wantCycle: true,
+		},
 	}
-
-	_, err = bundler.Make(ctx, recipeResult, tmpDir)
-	if err == nil {
-		t.Fatal("Make() with undeclared dependency expected error, got nil")
-	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
-		t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", err)
+	for _, deployerName := range config.GetDeployerTypes() {
+		t.Run(deployerName, func(t *testing.T) {
+			t.Parallel()
+			deployerType, parseErr := config.ParseDeployerType(deployerName)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					cfg := config.NewConfig(config.WithDeployer(deployerType))
+					bundler, err := New(WithConfig(cfg))
+					if err != nil {
+						t.Fatalf("New() error = %v", err)
+					}
+					refs := slices.Clone(tt.refs)
+					for i := range refs {
+						refs[i].Type = recipe.ComponentTypeHelm
+						refs[i].Source = "https://charts.example.com"
+						refs[i].Version = "1.0.0"
+					}
+					recipeResult := &recipe.RecipeResult{
+						APIVersion:      recipe.RecipeResultAPIVersion,
+						Kind:            recipe.RecipeResultKind,
+						ComponentRefs:   refs,
+						DeploymentOrder: []string{"a", "b", "c"},
+					}
+					original := recipeResult.DeepCopy()
+					outputDir := filepath.Join(t.TempDir(), "bundle")
+					_, err = bundler.Make(t.Context(), recipeResult, outputDir)
+					if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+						t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
+					}
+					const missing = `component "a" depends on "phantom", which is not present in this recipe`
+					wantCount := 0
+					if tt.wantMissing {
+						wantCount = 1
+					}
+					if strings.Count(err.Error(), missing) != wantCount {
+						t.Errorf("Make() error = %v, want missing dependency reported %d times", err, wantCount)
+					}
+					if strings.Contains(err.Error(), "circular dependencies exist") != tt.wantCycle {
+						t.Errorf("Make() error = %v, want cycle reported = %v", err, tt.wantCycle)
+					}
+					if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
+						t.Errorf("invalid graph created output or returned unexpected stat error: %v", statErr)
+					}
+					if !reflect.DeepEqual(recipeResult, original) {
+						t.Error("Make() mutated the caller's recipe")
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -1784,8 +1837,8 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 
 // TestMake_BundlersFilterDependencyPruned verifies that a dependency edge
 // pointing at an enabled-but-filtered-out component is pruned exactly like a
-// disabled one: the helmfile deployer (the only path that recomputes ordering
-// from dependency edges) must not fail with a false circular-dependency error
+// disabled one: dependency validation and the helmfile level computation
+// must not report a missing dependency
 // when the depended-upon component is excluded by the bundlers filter. See #1531.
 func TestMake_BundlersFilterDependencyPruned(t *testing.T) {
 	t.Parallel()

@@ -100,7 +100,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "references unknown dependency",
+			errMsg:  `component "gpu-operator" depends on "cert-manager", which is not present in this recipe`,
 		},
 		{
 			name: "self-dependency (cycle)",
@@ -110,7 +110,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "circular dependency",
+			errMsg:  "circular dependencies exist",
 		},
 		{
 			name: "two-node cycle",
@@ -121,7 +121,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "circular dependency",
+			errMsg:  "circular dependencies exist",
 		},
 		{
 			name: "three-node cycle",
@@ -133,7 +133,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "circular dependency",
+			errMsg:  "circular dependencies exist",
 		},
 		{
 			name: "complex valid graph",
@@ -149,6 +149,144 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 			wantErr: false,
 		},
 	})
+}
+
+func TestDependencyValidationConsistency(t *testing.T) {
+	t.Parallel()
+
+	const externalHint = "\n(a dependency provided outside the recipe must remain declared with enabled: false)"
+	const missingA = `component "a" depends on "phantom", which is not present in this recipe`
+	tests := []struct {
+		name string
+		refs []ComponentRef
+		want string
+	}{
+		{name: "empty graph"},
+		{
+			name: "missing dependency without a cycle",
+			refs: []ComponentRef{{Name: "a", DependencyRefs: []string{"phantom"}}},
+			want: missingA + externalHint,
+		},
+		{
+			name: "missing dependencies in recipe order",
+			refs: []ComponentRef{
+				{Name: "z", DependencyRefs: []string{"two", "one"}},
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+			},
+			want: `component "z" depends on "two", which is not present in this recipe` + "\n" +
+				`component "z" depends on "one", which is not present in this recipe` + "\n" + missingA + externalHint,
+		},
+		{
+			name: "duplicate missing edges",
+			refs: []ComponentRef{{Name: "a", DependencyRefs: []string{"phantom", "phantom"}}},
+			want: missingA + externalHint,
+		},
+		{
+			name: "duplicate declarations do not repeat missing edges",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+			},
+			want: missingA + externalHint,
+		},
+		{
+			name: "cycle without missing dependencies",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"b"}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+			want: "circular dependencies exist",
+		},
+		{
+			name: "cycle and missing dependency on separate components",
+			refs: []ComponentRef{
+				{Name: "b", DependencyRefs: []string{"c"}},
+				{Name: "c", DependencyRefs: []string{"b"}},
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+			},
+			want: missingA + externalHint + "\ncircular dependencies exist",
+		},
+		{
+			name: "cycle and missing dependency on the same component",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"b", "phantom"}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+			want: missingA + externalHint + "\ncircular dependencies exist",
+		},
+		{
+			name: "disabled component's missing dependency is ignored",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"phantom"}, Overrides: map[string]any{"enabled": false}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+		},
+		{
+			name: "install gate satisfies external dependency",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"phantom"}, Overrides: map[string]any{"install": false}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+		},
+		{
+			name: "disabled component breaks a cycle",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"b"}, Overrides: map[string]any{"enabled": false}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+		},
+		{
+			name: "all components disabled",
+			refs: []ComponentRef{{Name: "a", DependencyRefs: []string{"phantom"}, Overrides: map[string]any{"enabled": false}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			spec := RecipeMetadataSpec{ComponentRefs: tt.refs}
+			checks := []struct {
+				name string
+				run  func() error
+			}{
+				{name: "ValidateDependencies", run: spec.ValidateDependencies},
+				{name: "TopologicalSort", run: func() error {
+					order, err := spec.TopologicalSort()
+					if err != nil && order != nil {
+						t.Error("invalid graph returned a partial deployment order")
+					}
+					return err
+				}},
+				{name: "TopologicalLevels", run: func() error {
+					levels, err := spec.TopologicalLevels()
+					if err != nil && levels != nil {
+						t.Error("invalid graph returned partial deployment levels")
+					}
+					return err
+				}},
+			}
+			for _, check := range checks {
+				t.Run(check.name, func(t *testing.T) {
+					err := check.run()
+					if tt.want == "" {
+						if err != nil {
+							t.Fatalf("unexpected error: %v", err)
+						}
+						return
+					}
+					if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+						t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
+					}
+					var structured *errors.StructuredError
+					if !stderrors.As(err, &structured) {
+						t.Fatalf("error = %v, want StructuredError", err)
+					}
+					if structured.Message != tt.want {
+						t.Errorf("message = %q, want %q", structured.Message, tt.want)
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
@@ -210,7 +348,7 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 				ComponentRefs: []ComponentRef{
 					// cert-manager disabled (e.g. provided by the CSP); gpu-operator
 					// and nvsentinel still depend on it but must not deadlock or
-					// trigger a false circular-dependency error.
+					// report a missing dependency.
 					{Name: "cert-manager", Type: ComponentTypeHelm, Overrides: map[string]any{"enabled": false}},
 					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager"}},
 					{Name: "nvsentinel", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager", "gpu-operator"}},
@@ -479,7 +617,7 @@ func TestRecipeMetadataSpecTopologicalLevels(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg: `component "gpu-operator" depends on "nfd", which is not present in this recipe; ` +
+			errMsg: `component "gpu-operator" depends on "nfd", which is not present in this recipe` + "\n" +
 				`component "gpu-operator" depends on "kube-prometheus-stack", which is not present in this recipe`,
 		},
 		{

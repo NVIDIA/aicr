@@ -1281,7 +1281,7 @@ func TestGenerate_RejectsCyclicGraph(t *testing.T) {
 // TestGenerate_DisabledDependencyNotACycle guards that graph validation runs on
 // the unfiltered ComponentRefs, not the enabled-filtered set: an enabled
 // component whose declared dependency is disabled (provided externally) must
-// NOT be mistaken for an undeclared dependency and rejected as a false cycle.
+// NOT be mistaken for an undeclared dependency and reported as missing.
 func TestGenerate_DisabledDependencyNotACycle(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{}
 	recipeResult.Metadata.Version = testVersion
