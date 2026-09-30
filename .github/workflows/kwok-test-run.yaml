@@ -17,8 +17,8 @@
 # block; the deployer list itself lives once in the discover job's bash and
 # arrives here already expanded into {recipe, deployer} pairs (#1172).
 #
-# Tier 1 passes a flat pairs list (generic overlays x full deployer set,
-#   well under 256 -- no batching needed).
+# Tier 1 passes a flat pairs list (generic overlays on helm, plus one probe
+#   overlay on each other deployer, well under 256, so no batching needed).
 # Tier 2 passes a flat pairs list (helm-only, by deliberate policy -- see
 #   ADR-003 "Tier 2 deployer coverage").
 # Tier 3 passes one batch at a time from the discover job's tier3_batches

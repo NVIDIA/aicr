@@ -92,8 +92,8 @@ runs:
         # unaccounted job-start drift stays inside the 240s margin's 60s
         # allowance (the other 180s is reserved for post-gate work:
         # chainsaw catch diagnostics, verify_pods, debug-artifact upload).
-        # Anchoring later (at the test step, after setup-go + tool installs
-        # + make build) lets the deadline land past GitHub's job kill and
+        # Anchoring later (at the test step, after the tool installs and the
+        # aicr download) lets the deadline land past GitHub's job kill and
         # silently re-creates the CANCELLED-without-diagnostics failure
         # this mechanism exists to prevent.
         # See kwok/scripts/lib/sync-budget.sh for the consuming side.
