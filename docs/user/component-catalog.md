@@ -210,7 +210,7 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 | `faultRemediation` | decides the remediation action |
 | `janitor` / `janitorProvider` | executes it — reboot or terminate |
 
-Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.22.0`, the version pinned in `recipes/registry.yaml`.
+Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nvcreCertificationMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.25.0`, the version pinned in `recipes/registry.yaml`.
 
 `nicHealthMonitor` is the one entry above that AICR's shipped recipes turn back on, and only on AKS and OKE — see [NIC and fabric fault detection](#nic-and-fabric-fault-detection).
 
@@ -383,15 +383,19 @@ preflight:
       resource: podgroups
     minCountExpr: "podGroup.spec.minMember"
   initContainers:                       # restated from the chart, see below
-    - name: preflight-dcgm-diag         #   (chart defaults)
-    - name: preflight-nccl-loopback     #   (chart defaults)
+    - name: preflight-dcgm-diag         #   one DCGM address, not the chart's list
+    - name: preflight-nccl-loopback     #   adds SKIP_BANDWIDTH_CHECK
     - name: preflight-nccl-allreduce
-      defaultEnabled: false             # the one deviation
+      defaultEnabled: false
 ```
 
-The mixin also restates `preflight.initContainers` in full — all three checks, verbatim from the chart, with one addition: `defaultEnabled: false` on `preflight-nccl-allreduce`. The next section explains why.
+The mixin also restates `preflight.initContainers` in full — all three checks, taken from the chart with three deviations:
 
-Restating means AICR now pins that list's contents (both images, both bandwidth thresholds, and `DCGM_HOSTENGINE_ADDR`), so a chart bump cannot move them silently. `TestNVSentinelPreflightInitContainersMatchChart` renders the mixin's list against the chart's own and fails on any drift beyond the intended `defaultEnabled` line. That test runs weekly, not on every PR, so a chart bump can merge before it fires.
+- `defaultEnabled: false` on `preflight-nccl-allreduce`. The next section explains why.
+- `SKIP_BANDWIDTH_CHECK: "true"` on `preflight-nccl-loopback`.
+- A single `DCGM_HOSTENGINE_ADDR` on `preflight-dcgm-diag`: `nvidia-dcgm.gpu-operator.svc:5555`, the GPU Operator's ClusterPolicy-mode hostengine. From v1.25.0 the chart ships a candidate list that also names the GPUCluster-mode `nvidia-dcgm-dra` Service; the bundle gate verifies one address and rejects a list.
+
+Restating means AICR now pins that list's contents (both images, both bandwidth thresholds, and `DCGM_HOSTENGINE_ADDR`), so a chart bump cannot move them silently. `TestNVSentinelPreflightInitContainersMatchChart` renders the mixin's list against the chart's own and fails on any drift beyond those three deviations. That test runs weekly, not on every PR, so a chart bump can merge before it fires.
 
 **`failurePolicy: Ignore` is deliberate.** The webhook sits in the pod-creation path, so the chart's `Fail` would turn a webhook outage into a pod-creation outage for every labeled namespace. `Ignore` trades a missed check for availability — the right default while this is new, and worth revisiting once it has field time. The cost is that a broken webhook is *silent*: pods are admitted unchecked, with no error anywhere. `recipes/checks/nvsentinel-preflight/health-check.yaml` detects exactly that, including the case where cert-manager has not injected the webhook's CA bundle — but **nothing runs it for you**. It is deliberately not registry-linked (the mixin is opt-in, so `make check-health-all` would run it against recipes that never deploy preflight), which is the same treatment `nvsentinel-observability` gets. Run it yourself after adopting the mixin:
 

@@ -70,18 +70,18 @@ WORK=""
 # checks ~9.9 GiB each, which would exhaust an ubuntu-latest runner's disk and
 # blow the lane's timeout on every recipe PR. Carrying a mixin-gated image
 # through the whole transfer path is what discovery alone does not prove.
-PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.22.0"
+PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.25.0"
 PREFLIGHT_IMAGES=(
-    "ghcr.io/nvidia/nvsentinel/preflight:v1.22.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag:v1.22.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback:v1.22.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce:v1.22.0"
+    "ghcr.io/nvidia/nvsentinel/preflight:v1.25.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag:v1.25.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback:v1.25.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce:v1.25.0"
 )
 
 # The image the nvsentinel-object-monitor mixin pulls in (#2612). Same
 # invisibility to the static BOM, for a different reason: it lives in a
 # mixin-gated subchart rather than a mixin-gated values override.
-OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.22.0"
+OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.25.0"
 
 # The images the nvsentinel-nic-health-monitor mixin pulls in. The subchart
 # image is invisible to the static BOM for the same reason as the object
@@ -92,7 +92,7 @@ OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.22.
 # for main ones, so asserting only the subchart image would let an
 # init-container regression through.
 NIC_HEALTH_MONITOR_IMAGES=(
-    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.22.0"
+    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.25.0"
     "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 )
 
