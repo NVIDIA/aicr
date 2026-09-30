@@ -287,6 +287,10 @@ type Generator struct {
 	// survives the application.yaml -> chart template transform. Off by
 	// default. Wired from --serial. See argocd.Generator.Serial.
 	Serial bool
+
+	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
+	// first deployment heading of README.md. Empty adds nothing.
+	UpgradeNotice string
 }
 
 // Generate creates a Helm chart app-of-apps by:
@@ -1972,6 +1976,7 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	buf.WriteString("the chart deployment as a whole. The bundle's `repoURL` defaults\n")
 	buf.WriteString("to the registry it was pushed to; override with `--set\n")
 	buf.WriteString("repoURL=oci://mirror` when deploying from a different registry.\n\n")
+	buf.WriteString(g.UpgradeNotice)
 
 	buf.WriteString("## Deploy\n\n")
 	buf.WriteString("`<your-registry>/<path>` below is the **parent namespace** you\n")

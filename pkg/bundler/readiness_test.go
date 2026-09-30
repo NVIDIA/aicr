@@ -706,7 +706,7 @@ func TestBuildDeployer_ReadinessHooksUnsupportedDeployer(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}}}
-	_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+	_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 	if err == nil {
 		t.Fatal("expected error for flux + readiness-hooks")
 	}

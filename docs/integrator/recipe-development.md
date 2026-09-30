@@ -237,7 +237,7 @@ aicr bundle --recipe recipe.yaml \
   -o ./bundle
 ```
 
-For `provider.name: dra` (Kubernetes Dynamic Resource Allocation, GA in K8s 1.34), topology is sourced from the DRA API — no cloud provider IAM or ServiceAccount annotations are needed. Use `dra` for clusters actually running DRA drivers with GPU resource claims. Kind-based CI clusters should use the `test` provider with a model fixture instead (as this repo's `h100-kind-training-slurm` overlay does) — a CPU-only Kind cluster has no DRA resources for the `dra` provider to read.
+For `provider.name: dra` (Kubernetes Dynamic Resource Allocation, GA in K8s 1.34), topology is sourced from the DRA API, and no cloud provider IAM or ServiceAccount annotations are needed. Use `dra` for clusters actually running DRA drivers with GPU resource claims. The accelerator domain can come from a node label instead: this repo's `h100-kind-training-slurm` overlay sets `params.accelerator.source: kubernetes-label` with key `nvidia.com/gpu.clique`, and the slinky engine drops nodes without that label from the block domains. A stock Kind cluster carries no such label, so that overlay needs the simulated-GPU cluster its UAT lane builds; the [Slinky Slurm walkthrough](https://github.com/NVIDIA/aicr/blob/main/demos/cuj1-slinky-slurm.md#kind-simulated-gpus) shows how.
 
 ### Inference performance constraints
 
@@ -1150,6 +1150,7 @@ aicr --debug recipe --service eks --data ./my-data
 
 **Behavior:**
 - Overlays: Same `metadata.name` replaces embedded
+- A file at an embedded overlay's path that carries only `spec.profile` adds values to that overlay's profile
 - Registry: Merged; same-named components replaced
 - Values: External valuesFile references take precedence
 - Criteria values: External overlays' `spec.criteria` values become valid CLI / API inputs at runtime via the criteria registry; `--criteria-strict` (or `AICR_CRITERIA_STRICT=1`) rejects external-only values for OSS CI gates
