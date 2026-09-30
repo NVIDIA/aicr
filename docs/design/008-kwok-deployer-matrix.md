@@ -82,8 +82,10 @@ pod-Running verification.
 
 **Rationale for tier scope.** Argo CD / Flux template regressions
 surface on generic overlays (Tier 1) — that is where the issue's bug
-class lives. Tier 1 runs the GitOps deployers on one probe overlay, the
-generic overlay with the most components, to keep the PR matrix small.
+class lives. Tier 1 runs the GitOps deployers on one probe overlay to keep
+the PR matrix small. The probe is `eks-training`, which carries more
+components than the bare `eks` base, and falls back to the first generic
+overlay when it is absent.
 Component-specific GitOps regressions outside the probe, and full
 accelerator-specific GitOps coverage, run nightly and on push to main
 without inflating PR latency. Tier 2 stays

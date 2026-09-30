@@ -289,9 +289,10 @@ see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 | `flux-oci` | source-controller OCI pull | kustomize-controller apply | all HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `flux-git` | source-controller Git clone (in-cluster Gitea) | kustomize-controller apply | GitRepositories Ready + all HelmReleases `Ready=True` |
 
-Tier 1 crosses the non-`helm` deployers with a single probe overlay, the
-generic overlay with the most components (`eks-training`), to keep the PR
-matrix small. GitOps templating regressions specific to a component that the
+Tier 1 crosses the non-`helm` deployers with a single probe overlay to keep
+the PR matrix small. The probe is `eks-training`, which carries more
+components than the bare `eks` base, and falls back to the first generic
+overlay when it is absent. GitOps templating regressions specific to a component that the
 probe does not include are caught by Tier 3, which runs the full recipe x
 deployer cross-product after merge.
 
