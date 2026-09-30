@@ -47,8 +47,13 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 
 	slog.Info("listing GKE networks", "gvr", gkenet.NetworkGVR.String())
 
-	gpuNICs, listErr := gkenet.DiscoverGPUNICNetworks(ctx.Ctx, ctx.DynamicClient)
-
+	// One list for both the census and the readiness arm (#2265): statuses carry the
+	// names and the capability state together, so the two never disagree (#5).
+	statuses, listErr := gkenet.DiscoverGPUNICNetworkStatus(ctx.Ctx, ctx.DynamicClient)
+	gpuNICs := make([]string, 0, len(statuses))
+	for _, st := range statuses {
+		gpuNICs = append(gpuNICs, st.Name)
+	}
 	capability := validators.Capability{
 		Component: tcpxoComponent,
 		Subject:   "GKE Networks (networks.networking.gke.io)",
@@ -96,10 +101,11 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 			"the cluster has %d of %d", len(gpuNICs), gkenet.RequiredGPUNICNetworks)))
 	}
 
-	// Case 2 (#2265): an existing-but-unready or mis-bound Network must not count
-	// toward the census — the fabric is unusable until every gpu-nic Network is
-	// Ready and its GKENetworkParamSet binding is intact.
-	if err := verifyNetworkReadinessAndBinding(ctx); err != nil {
+	// Case 2 (#2265): require the REQUIRED number of Networks to be Ready with an
+	// intact GKENetworkParamSet binding — the fabric is unusable below that. A
+	// leftover Network beyond the ready set (e.g. from a deleted pool) does not fail
+	// a cluster whose in-use Networks are all healthy.
+	if err := verifyNetworkReadinessAndBinding(statuses); err != nil {
 		return err
 	}
 
@@ -151,33 +157,47 @@ func verifyDeliveredRuntimeWiring(ctx *validators.Context, gpuNICs []string) err
 	return nil
 }
 
-// verifyNetworkReadinessAndBinding is the case-2 arm (#2265): a Network that
-// exists but is not Ready, or whose GKENetworkParamSet binding is broken, means
-// the fabric is unusable even though the census found eight names. Fail closed,
-// naming the network and the remediation. A discovery error blocks (never skips).
+// verifyNetworkReadinessAndBinding is the case-2 arm (#2265): at least
+// RequiredGPUNICNetworks of the gpu-nic Networks must be Ready AND have an intact
+// GKENetworkParamSet binding, or the fabric is unusable. A Network beyond the
+// ready set (a leftover from a deleted pool) does not fail a cluster whose in-use
+// Networks are all healthy — only a shortfall does.
 //
 // Enabling assumption: Networks are Ready by the time the deployment phase runs
-// (post-install). A Network still mid-provisioning at validate time fails closed
-// here — intended, but it means a slow-to-bind Network surfaces as a deployment
-// failure rather than a retry.
-func verifyNetworkReadinessAndBinding(ctx *validators.Context) error {
-	statuses, err := gkenet.DiscoverGPUNICNetworkStatus(ctx.Ctx, ctx.DynamicClient)
-	if err != nil {
-		// The census's list already succeeded, so a read error here is an apiserver
-		// hiccup, not evidence of inapplicability — block, never skip.
-		return errors.Wrap(errors.ErrCodeInternal, "failed to read GKE Network readiness/binding status", err)
-	}
+// (post-install). A Network still mid-provisioning at validate time counts toward
+// the shortfall — intended, but it means a slow-to-bind Network surfaces as a
+// deployment failure rather than a retry.
+func verifyNetworkReadinessAndBinding(statuses []gkenet.GPUNICNetworkStatus) error {
+	readyBound := 0
+	var firstBad gkenet.GPUNICNetworkStatus
 	for _, st := range statuses {
-		if !st.Ready {
-			return errors.New(errors.ErrCodeNotFound, networkCapabilityMsg(fmt.Sprintf(
-				"Network %q is not Ready (%s)", st.Name, st.Detail)))
-		}
-		if !st.ParamsReady {
-			return errors.New(errors.ErrCodeNotFound, networkCapabilityMsg(fmt.Sprintf(
-				"Network %q binding to GKENetworkParamSet %q is not ready (%s)", st.Name, st.ParamSetName, st.Detail)))
+		if st.Ready && st.ParamsReady {
+			readyBound++
+		} else if firstBad.Name == "" {
+			firstBad = st
 		}
 	}
-	return nil
+	if readyBound >= gkenet.RequiredGPUNICNetworks {
+		return nil
+	}
+	return errors.New(errors.ErrCodeNotFound, networkCapabilityMsg(unhealthyDetail(firstBad, readyBound)))
+}
+
+// unhealthyDetail describes the readiness shortfall, naming the worst offender.
+func unhealthyDetail(st gkenet.GPUNICNetworkStatus, readyBound int) string {
+	short := fmt.Sprintf("only %d of %d GPU NIC Networks are Ready with an intact GKENetworkParamSet binding",
+		readyBound, gkenet.RequiredGPUNICNetworks)
+	if st.Name == "" {
+		return short
+	}
+	switch {
+	case !st.Ready:
+		return fmt.Sprintf("%s; Network %q is not Ready (%s)", short, st.Name, st.Detail)
+	case st.ParamSetName == "":
+		return fmt.Sprintf("%s; Network %q has no GKENetworkParamSet reference", short, st.Name)
+	default:
+		return fmt.Sprintf("%s; Network %q binding to GKENetworkParamSet %q is not ready (%s)", short, st.Name, st.ParamSetName, st.Detail)
+	}
 }
 
 // networkCapabilityMsg builds the operator-facing message for an existing-but-
@@ -206,8 +226,7 @@ func absentPrerequisiteMsg(detail string) string {
 	return fmt.Sprintf(
 		"recipe declares %s but %s GPU NIC networks — GPUDirect TCPXO requires one Network "+
 			"per GPU NIC, each bound to a GKENetworkParamSet and each with %q in its own "+
-			"metadata.name (this check counts Network names; it does not verify the "+
-			"GKENetworkParamSet binding or readiness). "+
+			"metadata.name. "+
 			"These are provisioned with the cluster, not by AICR, and multi-networking "+
 			"(--enable-multi-networking) cannot be enabled after cluster creation. "+
 			"Verify with: kubectl get network.networking.gke.io "+

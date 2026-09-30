@@ -91,6 +91,31 @@ available for TCPXO. This is distinct from the `--enable-gvnic` node-pool flag,
 which selects the gVNIC driver and **is** required: pass the flag, but do not add
 a ninth `--additional-node-network` entry for it.
 
+### What the deployment checks verify
+
+Beyond the name count above, two deployment-phase checks gate on the fabric
+actually being usable, not just nameable:
+
+- **`gke-gpu-nic-networks`** verifies each `gpu-nic*` Network reports
+  `Ready=True` and `ParamsReady=True` (an intact `GKENetworkParamSet` binding),
+  and requires **at least eight** to be healthy and bound. A leftover Network
+  beyond the ready eight (for example from a deleted pool) does not fail the
+  cluster. Verify a Network's state with:
+
+  ```shell
+  kubectl get network.networking.gke.io <name> -o jsonpath='{.status.conditions}'
+  ```
+
+- **`gke-gpu-nic-topology`** (sibling) reads each a3 GPU node's
+  `networking.gke.io/nic-info` annotation and fails when a gVNIC additional
+  network displaced a GPU NIC PCI slot (fewer than eight GPU NIC interfaces
+  mapped to `eth1`–`eth8`). Verify a node's mapping with:
+
+  ```shell
+  kubectl get node <gpu-node> -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
+  ```
+
+
 ## The shipped `torch-distributed-tcpxo` runtime
 
 On the `h100-gke-cos-training-kubeflow` recipe, AICR ships a pre-wired

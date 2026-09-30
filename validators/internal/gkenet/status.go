@@ -26,11 +26,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// GKENetworkParamSetGVR is the cluster-scoped GKE GKENetworkParamSet CR a
-// Network binds to via spec.parametersRef. A Network whose parametersRef points
-// at a missing or not-ready GKENetworkParamSet cannot give a Pod a usable NIC.
-var GKENetworkParamSetGVR = NetworkGVR.GroupVersion().WithResource("gkenetworkparamsets")
-
 // Network condition types the GKE multi-networking controller reports on a
 // Network's status.conditions. NetworkReady/Ready means the Network is fully
 // configured; ParamsReady means its parametersRef binding resolved to a valid,
@@ -113,12 +108,12 @@ func networkStatus(n *unstructured.Unstructured) GPUNICNetworkStatus {
 		switch condType {
 		case conditionReady:
 			st.Ready = condStatus == conditionTrue
-			if !st.Ready {
+			if !st.Ready && st.Detail == "" {
 				st.Detail = conditionDetail("Ready", reason, message)
 			}
 		case conditionParamsReady:
 			st.ParamsReady = condStatus == conditionTrue
-			if !st.ParamsReady {
+			if !st.ParamsReady && st.Detail == "" {
 				st.Detail = conditionDetail("ParamsReady", reason, message)
 			}
 		}

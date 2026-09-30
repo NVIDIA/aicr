@@ -165,47 +165,57 @@ func TestCheckGKEGPUNICNetworksReadinessBinding(t *testing.T) {
 		return objs
 	}
 
-	t.Run("all ready and bound passes", func(t *testing.T) {
-		ctx := tcpxoContext(gkeNetworkClient(healthy()...), true)
-		if err := checkGKEGPUNICNetworks(ctx); err != nil {
-			t.Fatalf("expected pass, got %v", err)
-		}
-	})
-
-	t.Run("unready network fails and names it", func(t *testing.T) {
-		objs := healthy()
-		objs[3] = networkWithStatus("c-gpu-nic-3", "False", "True")
-		ctx := tcpxoContext(gkeNetworkClient(objs...), true)
-		err := checkGKEGPUNICNetworks(ctx)
-		if err == nil {
-			t.Fatal("expected failure for an unready Network")
-		}
-		if !strings.Contains(err.Error(), "c-gpu-nic-3") || !strings.Contains(err.Error(), "not Ready") {
-			t.Errorf("error should name the unready network: %v", err)
-		}
-	})
-
-	t.Run("broken GKENetworkParamSet binding fails and names it", func(t *testing.T) {
-		objs := healthy()
-		objs[5] = networkWithStatus("c-gpu-nic-5", "True", "False")
-		ctx := tcpxoContext(gkeNetworkClient(objs...), true)
-		err := checkGKEGPUNICNetworks(ctx)
-		if err == nil {
-			t.Fatal("expected failure for a broken binding")
-		}
-		if !strings.Contains(err.Error(), "c-gpu-nic-5") || !strings.Contains(err.Error(), "GKENetworkParamSet") {
-			t.Errorf("error should name the broken binding: %v", err)
-		}
-	})
-
-	t.Run("undeclared recipe skips the arm", func(t *testing.T) {
-		objs := healthy()
-		objs[0] = networkWithStatus("c-gpu-nic-0", "False", "False")
-		ctx := tcpxoContext(gkeNetworkClient(objs...), false)
-		if err := checkGKEGPUNICNetworks(ctx); !validators.IsSkip(err) {
-			t.Fatalf("undeclared recipe must skip, got %v", err)
-		}
-	})
+	tests := []struct {
+		name      string
+		mutate    func(objs []runtime.Object) []runtime.Object
+		declared  bool
+		wantErr   bool
+		wantSkip  bool
+		wantInMsg []string
+	}{
+		{name: "all ready and bound passes", mutate: func(o []runtime.Object) []runtime.Object { return o }, declared: true, wantErr: false},
+		{name: "unready network fails and names it", mutate: func(o []runtime.Object) []runtime.Object {
+			o[3] = networkWithStatus("c-gpu-nic-3", "False", "True")
+			return o
+		}, declared: true, wantErr: true, wantInMsg: []string{"c-gpu-nic-3", "not Ready"}},
+		{name: "broken GKENetworkParamSet binding fails and names it", mutate: func(o []runtime.Object) []runtime.Object {
+			o[5] = networkWithStatus("c-gpu-nic-5", "True", "False")
+			return o
+		}, declared: true, wantErr: true, wantInMsg: []string{"c-gpu-nic-5", "GKENetworkParamSet"}},
+		{name: "leftover unready Network beyond the ready set does not fail", mutate: func(o []runtime.Object) []runtime.Object {
+			return append(o, networkWithStatus("c-gpu-nic-leftover", "False", "False"))
+		}, declared: true, wantErr: false},
+		{name: "undeclared recipe skips the arm", mutate: func(o []runtime.Object) []runtime.Object {
+			o[0] = networkWithStatus("c-gpu-nic-0", "False", "False")
+			return o
+		}, declared: false, wantSkip: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := tcpxoContext(gkeNetworkClient(tt.mutate(healthy())...), tt.declared)
+			err := checkGKEGPUNICNetworks(ctx)
+			if tt.wantSkip {
+				if !validators.IsSkip(err) {
+					t.Fatalf("expected skip, got %v", err)
+				}
+				return
+			}
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("expected pass, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected failure")
+			}
+			for _, want := range tt.wantInMsg {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should contain %q", err.Error(), want)
+				}
+			}
+		})
+	}
 }
 
 // TestCheckGKEGPUNICNetworksApplicability asserts the #2122 contract: skip only

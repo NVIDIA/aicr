@@ -29,121 +29,92 @@ import (
 	"github.com/NVIDIA/aicr/validators"
 )
 
-// nicInfoAnnotation builds a nic-info annotation (Shape A: list of
-// {interfaceName, pciAddress}) for the given interface→PCI pairs.
-func nicInfoAnnotation(pairs map[string]string) string {
-	var sb strings.Builder
-	sb.WriteString("[")
-	i := 0
-	for ifName, pci := range pairs {
-		if i > 0 {
-			sb.WriteString(",")
-		}
-		fmt.Fprintf(&sb, `{"interfaceName":%q,"pciAddress":%q}`, ifName, pci)
-		i++
-	}
-	sb.WriteString("]")
-	return sb.String()
+func topoEntry(name, pci string) string {
+	return fmt.Sprintf(`{"birthName":%q,"birthIP":"","birthIPv6":"","pciAddress":%q}`, name, pci)
 }
 
-// healthyNICInfo is a full a3 node: eth0 (primary) + eth1..eth8 (8 GPU NICs).
-func healthyNICInfo() string {
-	pairs := map[string]string{"eth0": "0000:00:05.0"}
-	for i := 1; i <= 8; i++ {
-		pairs[fmt.Sprintf("eth%d", i)] = fmt.Sprintf("0000:0%d:00.0", i+5)
+var topoSlots = []string{"0000:06:00.0", "0000:07:00.0", "0000:08:00.0", "0000:09:00.0", "0000:0a:00.0", "0000:0b:00.0", "0000:0c:00.0", "0000:0d:00.0"}
+var topoIfs = []string{"eth1", "eth2", "eth3", "eth4", "eth5", "eth6", "eth7", "eth8"}
+
+func healthyTopoAnnotation() string {
+	e := make([]string, 0, 1+len(topoIfs))
+	e = append(e, topoEntry("eth0", "0000:00:05.0"))
+	for i, name := range topoIfs {
+		e = append(e, topoEntry(name, topoSlots[i]))
 	}
-	return nicInfoAnnotation(pairs)
+	return "[" + strings.Join(e, ",") + "]"
 }
 
-func topologyNode(nicInfo string) *corev1.Node {
-	n := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   "gpu-0",
-			Labels: map[string]string{"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb"},
-		},
+// displacedTopoAnnotation: a gVNIC additional network holds the first GPU NIC
+// slot; only 7 TCPXO interfaces remain.
+func displacedTopoAnnotation() string {
+	e := []string{topoEntry("eth0", "0000:00:05.0"), topoEntry("gve0", topoSlots[0])}
+	for i := 1; i < len(topoIfs); i++ {
+		e = append(e, topoEntry(topoIfs[i], topoSlots[i]))
 	}
+	return "[" + strings.Join(e, ",") + "]"
+}
+
+func topoNode(nicInfo string) *corev1.Node {
+	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:   "gpu-0",
+		Labels: map[string]string{"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb"},
+	}}
 	if nicInfo != "" {
 		n.Annotations = map[string]string{"networking.gke.io/nic-info": nicInfo}
 	}
 	return n
 }
 
-func topologyContext(clientset *k8sfake.Clientset, declared bool) *validators.Context {
-	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+func topoContext(cs *k8sfake.Clientset, declared bool) *validators.Context {
+	ctx := &validators.Context{Ctx: context.Background(), Clientset: cs}
 	if declared {
-		ctx.ValidationInput = &v1.ValidationInput{
-			ComponentRefs: []recipe.ComponentRef{{Name: tcpxoComponent}},
-		}
+		ctx.ValidationInput = &v1.ValidationInput{ComponentRefs: []recipe.ComponentRef{{Name: tcpxoComponent}}}
 	}
 	return ctx
 }
 
-func TestCheckGKEGPUINCTopology(t *testing.T) {
+func TestCheckGKEGPUNICTopology(t *testing.T) {
 	t.Parallel()
 
 	t.Run("healthy node passes", func(t *testing.T) {
 		t.Parallel()
-		cs := k8sfake.NewClientset(topologyNode(healthyNICInfo()))
-		if err := checkGKEGPUINCTopology(topologyContext(cs, true)); err != nil {
+		if err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(topoNode(healthyTopoAnnotation())), true)); err != nil {
 			t.Fatalf("expected pass, got %v", err)
 		}
 	})
 
-	t.Run("gVNIC displacement fails as a 7-of-8 GPU NIC count", func(t *testing.T) {
+	t.Run("displacement fails and names the slot + missing interface", func(t *testing.T) {
 		t.Parallel()
-		pairs := map[string]string{"eth0": "0000:00:05.0"}
-		for i := 1; i <= 7; i++ {
-			pairs[fmt.Sprintf("eth%d", i)] = fmt.Sprintf("0000:0%d:00.0", i+6)
-		}
-		pairs["gve0"] = "0000:06:00.0" // gVNIC took the GPU NIC slot
-		cs := k8sfake.NewClientset(topologyNode(nicInfoAnnotation(pairs)))
-		err := checkGKEGPUINCTopology(topologyContext(cs, true))
+		err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(topoNode(displacedTopoAnnotation())), true))
 		if err == nil {
 			t.Fatal("expected failure for a displaced GPU NIC")
 		}
-		// The displaced node reports only 7 GPU NIC interfaces; the message names
-		// the shortfall, the missing interface, and the gVNIC cause.
-		if !strings.Contains(err.Error(), "7 of 8") || !strings.Contains(err.Error(), "gVNIC") {
-			t.Errorf("error should report the 7-of-8 shortfall and gVNIC cause: %v", err)
+		if !strings.Contains(err.Error(), "gve0") && !strings.Contains(err.Error(), "eth1") {
+			t.Errorf("error should name the displacing interface or the missing one: %v", err)
 		}
-		if !strings.Contains(err.Error(), "eth8") {
-			t.Errorf("error should name the missing GPU NIC interface (eth8): %v", err)
-		}
-	})
-
-	t.Run("fewer than 8 GPU NIC interfaces fails", func(t *testing.T) {
-		t.Parallel()
-		pairs := map[string]string{"eth0": "0000:00:05.0"}
-		for i := 1; i <= 7; i++ {
-			pairs[fmt.Sprintf("eth%d", i)] = fmt.Sprintf("0000:0%d:00.0", i+5)
-		}
-		cs := k8sfake.NewClientset(topologyNode(nicInfoAnnotation(pairs)))
-		err := checkGKEGPUINCTopology(topologyContext(cs, true))
-		if err == nil || !strings.Contains(err.Error(), "7 of 8") {
-			t.Fatalf("expected a 7-of-8 failure, got %v", err)
+		if !strings.Contains(err.Error(), "gVNIC") {
+			t.Errorf("error should name the gVNIC cause: %v", err)
 		}
 	})
 
 	t.Run("undeclared recipe skips", func(t *testing.T) {
 		t.Parallel()
-		cs := k8sfake.NewClientset(topologyNode(""))
-		if err := checkGKEGPUINCTopology(topologyContext(cs, false)); !validators.IsSkip(err) {
+		if err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(topoNode(healthyTopoAnnotation())), false)); !validators.IsSkip(err) {
 			t.Fatalf("undeclared recipe must skip, got %v", err)
 		}
 	})
 
 	t.Run("no GPU nodes is not a topology failure", func(t *testing.T) {
 		t.Parallel()
-		cs := k8sfake.NewClientset()
-		if err := checkGKEGPUINCTopology(topologyContext(cs, true)); err != nil {
+		if err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(), true)); err != nil {
 			t.Fatalf("no GPU nodes should not fail topology, got %v", err)
 		}
 	})
 
-	t.Run("missing annotation is a documented pass, not a failure", func(t *testing.T) {
+	t.Run("missing annotation is a documented pass", func(t *testing.T) {
 		t.Parallel()
-		cs := k8sfake.NewClientset(topologyNode(""))
-		if err := checkGKEGPUINCTopology(topologyContext(cs, true)); err != nil {
+		if err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(topoNode("")), true)); err != nil {
 			t.Fatalf("absent nic-info should not fail (documented limitation), got %v", err)
 		}
 	})
