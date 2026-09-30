@@ -127,6 +127,8 @@ runs:
 
     - name: Prep runner for Kind
       uses: ./.github/actions/prep-kind-runner
+      with:
+        free_disk: 'false'
 
     - name: Setup build tools
       uses: ./.github/actions/setup-build-tools

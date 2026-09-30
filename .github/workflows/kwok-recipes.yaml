@@ -556,7 +556,7 @@ jobs:
           goreleaser_version: '${{ steps.versions.outputs.goreleaser }}'
 
       - name: Build aicr binary
-        run: make build
+        run: goreleaser build --id aicr --clean --single-target --snapshot --timeout 10m0s
 
       - name: Upload aicr binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
