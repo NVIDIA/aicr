@@ -235,8 +235,11 @@ runs:
         # point of #2483. Annotate it: a key that drifts from the prime job's
         # would otherwise leave every lane pulling again, green, with the fix
         # silently inert and nothing to notice it by.
+        # A loaded image lives in Docker's store, so its tarball is deleted to
+        # keep the runner's free disk for the Kind cluster.
         load_image() { # <dir> <image>
           if bash kwok/scripts/lib/image-cache.sh load "$1" "$2"; then
+            rm -rf "$1"
             return 0
           fi
           echo "::warning::Image cache miss for $2 — this lane will pull it from the registry"
