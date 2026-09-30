@@ -143,7 +143,7 @@
 // rather than approximated. A chart's version is read from status, never from
 // spec: targetRevision is the pin Argo has been asked to reach, and a pin
 // changed while its sync is pending or has failed leaves the old chart
-// deployed. A Synced status answers with the revision it last compared;
+// deployed. A Synced status answers with the pin it last compared;
 // otherwise the newest history entry, which records a completed sync, does;
 // otherwise nothing does, and the component reads as unversioned rather than
 // at a version it may not be running. A path-based Application, which is the

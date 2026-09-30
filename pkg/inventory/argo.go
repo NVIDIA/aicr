@@ -218,30 +218,34 @@ func applicationFrom(item *unstructured.Unstructured) (installedRelease, error) 
 // yet made as already made, and hide that transition's steps. So only status
 // is evidence, in this order:
 //
-//  1. status.sync, when Synced: the live state matches the rendering at the
-//     revision last compared, which is what is deployed. That revision is the
-//     comparison's own and not the spec's, so a pin edited since the last
-//     refresh is not read as applied.
-//  2. Otherwise the newest status.history entry, which Argo appends only when
-//     a sync operation completes.
+//  1. status.sync, when Synced: the live state matches the rendering of the
+//     sources it last compared, which is what is deployed. Those are the
+//     comparison's own copy and not the spec's, so a pin edited since the
+//     last refresh is not read as applied.
+//  2. Otherwise the newest status.history entry, whose sources Argo records
+//     only when a sync operation completes.
 //
 // Neither is waited for. A Synced Application whose operation never finishes,
 // as a health-gated one does on a cluster that reports no pod readiness,
 // still answers from the first; one with neither answers empty, which reads
 // as unversioned rather than as a version it may not be running.
 //
-// The chart is found by name in the status sources rather than by position,
-// and a status naming a different chart answers empty: that is not evidence
-// about the chart the spec names.
+// The version is the targetRevision of the chart's source in that copy, not
+// the revision Argo recorded beside it: for an OCI chart that revision is the
+// manifest digest, which names the same chart but is not a version.
 func deployedRevision(item *unstructured.Unstructured, chartName string) (string, error) {
 	status, _, err := unstructured.NestedString(item.Object, "status", "sync", "status")
 	if err != nil {
 		return "", fieldError(item, err, "status.sync.status", "a string")
 	}
 	if status == argoSynced {
-		revision, syncErr := syncedRevision(item, chartName)
-		if syncErr != nil || revision != "" {
-			return revision, syncErr
+		compared, _, syncErr := unstructured.NestedMap(item.Object, "status", "sync", "comparedTo")
+		if syncErr != nil {
+			return "", fieldError(item, syncErr, "status.sync.comparedTo", "an object")
+		}
+		version, syncErr := chartVersionIn(item, chartName, compared, "status.sync.comparedTo")
+		if syncErr != nil || version != "" {
+			return version, syncErr
 		}
 	}
 
@@ -259,54 +263,28 @@ func deployedRevision(item *unstructured.Unstructured, chartName string) (string
 		return "", fieldError(item, nil, field, "an object")
 	}
 
-	return revisionOf(item, chartName, entry, entry, field)
+	return chartVersionIn(item, chartName, entry, field)
 }
 
-// syncedRevision is the named chart's revision in a Synced status.sync.
-func syncedRevision(item *unstructured.Unstructured, chartName string) (string, error) {
-	sync, _, err := unstructured.NestedMap(item.Object, "status", "sync")
-	if err != nil {
-		return "", fieldError(item, err, "status.sync", "an object")
-	}
-	compared, _, err := unstructured.NestedMap(sync, "comparedTo")
-	if err != nil {
-		return "", fieldError(item, err, "status.sync.comparedTo", "an object")
-	}
-
-	return revisionOf(item, chartName, compared, sync, "status.sync")
-}
-
-// revisionOf reads the revision paired with the named chart. Argo records a
-// single-source Application as source and revision, and a multi-source one as
-// sources and revisions, index for index; holder carries the sources and
-// revisions the revision fields carry.
-func revisionOf(item *unstructured.Unstructured, chartName string,
-	holder, revisions map[string]any, field string) (string, error) {
+// chartVersionIn is the version of the named chart among the source or
+// sources holder records. The chart is found by name rather than position,
+// and a holder naming only other charts answers empty: that is not evidence
+// about the chart the spec names.
+func chartVersionIn(item *unstructured.Unstructured, chartName string,
+	holder map[string]any, field string) (string, error) {
 
 	source, _, err := unstructured.NestedMap(holder, "source")
 	if err != nil {
 		return "", fieldError(item, err, field+".source", "an object")
 	}
 	chart, err := chartFrom(item, source, field+".source")
-	if err != nil {
-		return "", err
-	}
-	if chart.name == chartName {
-		var revision string
-		if revision, _, err = unstructured.NestedString(revisions, "revision"); err != nil {
-			return "", fieldError(item, err, field+".revision", "a string")
-		}
-
-		return revision, nil
+	if err != nil || chart.name == chartName {
+		return chart.version, err
 	}
 
 	sources, _, err := unstructured.NestedSlice(holder, "sources")
 	if err != nil {
 		return "", fieldError(item, err, field+".sources", "a list")
-	}
-	list, _, err := unstructured.NestedStringSlice(revisions, "revisions")
-	if err != nil {
-		return "", fieldError(item, err, field+".revisions", "a list of strings")
 	}
 	for i, entry := range sources {
 		sourceField := fmt.Sprintf("%s.sources[%d]", field, i)
@@ -315,19 +293,9 @@ func revisionOf(item *unstructured.Unstructured, chartName string,
 			return "", fieldError(item, nil, sourceField, "an object")
 		}
 		chart, err := chartFrom(item, source, sourceField)
-		if err != nil {
-			return "", err
+		if err != nil || chart.name == chartName {
+			return chart.version, err
 		}
-		if chart.name != chartName {
-			continue
-		}
-		// Argo writes the two lists together, so a revision missing for the
-		// chart's index is a record this cannot pair, not a version of "".
-		if i >= len(list) {
-			return "", fieldError(item, nil, field+".revisions", "a list pairing every source")
-		}
-
-		return list[i], nil
 	}
 
 	return "", nil

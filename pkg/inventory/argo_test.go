@@ -1122,10 +1122,9 @@ func TestApplicationFromReportsTheDeployedRevision(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		app             *unstructured.Unstructured
-		want            string
-		wantErrContains []string
+		name string
+		app  *unstructured.Unstructured
+		want string
 	}{
 		{
 			name: "pin moved and the sync is pending: the last completed sync answers",
@@ -1217,40 +1216,61 @@ func TestApplicationFromReportsTheDeployedRevision(t *testing.T) {
 `),
 		},
 		{
-			name: "revisions that do not pair with the sources are refused",
-			app: argoApp(t, withoutStatus(certManagerApp)+`status:
+			// An OCI chart's recorded revision is its manifest digest, taken
+			// from a KWOK run's kai-scheduler Application. The version is the
+			// pin in the status copy of the source beside it.
+			name: "an OCI chart answers with the synced pin, not the digest",
+			app: argoApp(t, `apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kai-scheduler
+  namespace: argocd
+spec:
+  source:
+    repoURL: oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler
+    chart: kai-scheduler
+    targetRevision: v0.16.9
+  destination:
+    namespace: kai-scheduler
+status:
   sync:
     status: Synced
     comparedTo:
-      sources:
-        - repoURL: 'https://github.com/example/aicr-bundles.git'
-          targetRevision: main
-          ref: values
-        - repoURL: https://charts.jetstack.io
-          chart: cert-manager
-          targetRevision: 1.20.2
-    revisions:
-      - 9f3c1de
+      source:
+        repoURL: oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler
+        chart: kai-scheduler
+        targetRevision: v0.16.9
+    revision: sha256:7447f89caa98f1ac60829d2e584f3d84c18029ef634b1cb4db017fce1b80ea66
+  history:
+    - id: 1
+      revision: sha256:7447f89caa98f1ac60829d2e584f3d84c18029ef634b1cb4db017fce1b80ea66
+      source:
+        repoURL: oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler
+        chart: kai-scheduler
+        targetRevision: v0.16.9
 `),
-			wantErrContains: []string{"cert-manager", "status.sync.revisions"},
+			want: "v0.16.9",
+		},
+		{
+			name: "an OCI chart's history answers with its pin, not the digest",
+			app: movedPin(`status:
+  sync:
+    status: OutOfSync
+  history:
+    - id: 2
+      revision: sha256:0e01c4a5a92126ae2b23a77ec4d1d12d708734100735265c081326a4702ac305
+      source:
+        repoURL: oci://registry.example.com/charts/gpu-operator
+        chart: gpu-operator
+        targetRevision: v25.10.0
+`),
+			want: "v25.10.0",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := applicationFrom(tt.app)
-			if len(tt.wantErrContains) > 0 {
-				if err == nil {
-					t.Fatalf("applicationFrom() = %+v, want an error", got)
-				}
-				for _, want := range tt.wantErrContains {
-					if !strings.Contains(err.Error(), want) {
-						t.Errorf("applicationFrom() error = %v, want it to contain %q", err, want)
-					}
-				}
-
-				return
-			}
 			if err != nil {
 				t.Fatalf("applicationFrom() error = %v", err)
 			}
