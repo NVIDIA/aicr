@@ -36,11 +36,11 @@ gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
 
 # On demand: stand up the daytime cluster and hold it (single reservation)
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f lifecycle=daytime-up
+  -f reservation=aws-h100-ct-1 -f lifecycle=daytime-up
 
 # Evening teardown of the held daytime cluster
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f lifecycle=daytime-down
+  -f reservation=aws-h100-ct-1 -f lifecycle=daytime-down
 ```
 
 The nightly batch and the daytime handoff/teardown call this *same* surface, so every run for a reservation contends on one lease.
@@ -79,9 +79,9 @@ The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both inte
 
 | Reservation | Cloud | `nightly-intents` | Nightly CUJs |
 |-------------|-------|-------------------|--------------|
-| `aws-h100` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
-| `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step live, #1644) |
-| `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); inference gated to `>= v0.18.0` via `nightly-intent-min-versions` (see **Cost / tuning** below) |
+| `aws-h100-ct-2` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
+| `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step live, #1644); training gated to `>= v0.22.0` via `nightly-intent-min-versions` |
+| `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); both intents gated to `>= v0.18.0` via `nightly-intent-min-versions` (see **Cost / tuning** below) |
 | `kind-h100` | kind (nvkind) | `[training, inference]` | training → `phase_train`; inference runs **no `phase_serve`** — its evidence comes from the `--phase all` conformance step (vLLM is excluded from UAT, as on the cloud lanes; #1644). Single-GPU; both intents gated to `>= v0.18.0` via `nightly-intent-min-versions` (the lane + os-agnostic coordinate fix #1851 postdate v0.17.0), so only `main` runs nvkind nightly until v0.18.0 ships |
 
 **How it stays contention-free — serialize, don't add a second cron.** The intents are folded into the existing [version matrix](#the-version-matrix) as extra cells rather than a second scheduled job. The controller's drive loop is **version outer / intent inner**: for each version it dispatches one intent's full provision→CUJ→teardown cell (an AWS or Azure inference cell currently runs provision→validate→teardown; its serve CUJ stays commented out pending #1644), waits for it (`gh run watch`), then dispatches the next — all through the *same* per-reservation lease. So the intents serialize naturally, and because `main` runs every intent before any release cell, a time-box drop only ever sheds the oldest *release* cells (never `main`'s inference). This is the deliberate DC3 cadence decision: **never schedule two daily crons against one reservation** — the lease is a single-slot queue (one in-progress + one pending), so a second cron plus an occasional human dispatch on the same reservation is a routine three-contender case whose loser is silently [superseded](#how-queuing-works-the-reservation-lease). One cron dispatching serialized cells sidesteps that entirely.
@@ -166,7 +166,7 @@ Which cloud hosts which flavor is **data, not code**: the `daytime-intent` colum
 
 | Reservation | Cloud | `daytime-intent` | Daytime deployment |
 |-------------|-------|------------------|--------------------|
-| `aws-h100` | AWS | `training` | training stack (Kubeflow `TrainJob`s) |
+| `aws-h100-ct-1` | AWS | `training` | training stack (Kubeflow `TrainJob`s) |
 | `gcp-h100` | GCP | `inference` | inference stack (Dynamo, OpenAI-compatible endpoint) |
 
 Re-splitting (or adding a daytime reservation) is a registry edit — no workflow change. Only **one** reservation per cloud may carry a `daytime-intent` today: a single reservation cannot host both a held daytime cluster and the nightly batch at once, so *both* flavors on one cloud during the day is out of scope until more capacity lands. The `uatbroker` committed-registry test enforces the one-per-cloud invariant and the launch split.
@@ -197,7 +197,7 @@ To stand up (or tear down) a **single reservation** without touching the rest of
 
 ```bash
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f lifecycle=daytime-up      # or -f lifecycle=daytime-down
+  -f reservation=aws-h100-ct-1 -f lifecycle=daytime-up      # or -f lifecycle=daytime-down
 ```
 
 You never *have* to tear a cluster down by hand — the evening safety-net cron will — but doing so frees the reservation (and its GPU capacity) sooner. Different reservations run in parallel (independent hardware); a daytime run that finds its reservation still busy (an overrunning batch) *queues* on the lease rather than racing.
@@ -221,11 +221,11 @@ Access is **out-of-band by design**: nothing here routes a kubeconfig or endpoin
 # and more than one means a leak the pre-batch guard should have caught.
 one() { [ "$(printf '%s' "$1" | grep -c .)" -eq 1 ] || { echo "expected exactly one daytime cluster, got: ${1:-<none>}" >&2; return 1; }; }
 
-# AWS — training cluster: new (slug, slot) prefix aicr-uat-day-ah1-0-, plus the
+# AWS — training cluster: new (slug, slot) prefix aicr-uat-day-ch1-0-, plus the
 # legacy aicr-uat-day-aws-h100- for the life of the ADR-017 migration shim (drop
 # the legacy alternative once no old-named daytime clusters remain).
 name=$(aws eks list-clusters --region us-east-1 --query "clusters[]" --output text \
-  | tr '\t' '\n' | grep -E '^aicr-uat-day-(ah1-0|aws-h100)-')
+  | tr '\t' '\n' | grep -E '^aicr-uat-day-(ch1-0|aws-h100)-')
 one "$name" && aws eks update-kubeconfig --region us-east-1 --name "$name"
 
 # GCP — inference cluster: new prefix aicr-uat-day-gh1-0-, plus legacy
@@ -281,7 +281,7 @@ The nightly batch runs a **cross-version regression** per reservation: `main` (b
 
 **Tunables** — workflow inputs on `uat-nightly-batch.yaml` (these are the scheduled-run defaults):
 
-- `previous_n` — stable releases below `main` to run per reservation (default `2`; `0` = `main` only).
+- `previous_n` — stable releases below `main` to run per reservation (default `1`; `0` = `main` only).
 - `deadline_offset_hours` — hours after batch start to stop dispatching new cells (default `5`). This is a **secondary** cap: the controller also enforces a **budget-aware** cutoff derived from the drive job's own `timeout-minutes`, stopping dispatch once fewer than `max_cell_minutes` remain so the last cell always finishes before GitHub kills the job. The effective cutoff is the earlier of the two, so `deadline_offset_hours` no longer needs hand-tuning against the job timeout to keep the graceful drop-oldest reachable.
 - `max_cell_minutes` — wall-clock a single dispatched cell may need to complete (default `150`). Sets the drive job's dispatch reserve: a new cell is dispatched only if at least this many minutes remain before the job's `timeout-minutes` (a small setup slack is also held back), so an overrun sheds the oldest remaining cell gracefully instead of hard-failing the leg mid-cell. Keep it at or above the realistic worst-case cell duration.
 

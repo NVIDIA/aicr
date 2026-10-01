@@ -82,8 +82,8 @@ aicr snapshot [flags]
 | `--format` | `-t` | string | yaml | Output format: json, yaml, table |
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) that populates `spec.snapshot.*`. CLI flags below always win over the corresponding config field. |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env). Also used when `--output` is a ConfigMap URI so reads and writes target the same cluster. |
-| `--namespace` | `-n` | string | default | Kubernetes namespace for agent deployment |
-| `--image` | | string | matches CLI version | Container image for agent Job. Release builds default to `ghcr.io/nvidia/aicr:v<version>`; dev and `-next` snapshot builds default to `ghcr.io/nvidia/aicr:latest`. |
+| `--namespace` | `-n` | string | default | Kubernetes namespace for agent deployment. Reads `AICR_NAMESPACE` env when unset. |
+| `--image` | | string | matches CLI version | Container image for agent Job. Release builds default to `ghcr.io/nvidia/aicr:v<version>`; dev and `-next` snapshot builds default to `ghcr.io/nvidia/aicr:latest`. Reads `AICR_IMAGE` env when unset. |
 | `--job-name` | | string | aicr | Prefix for the agent Job name; the run ID is always appended (`<prefix>-<run-id>`) |
 | `--service-account-name` | | string | aicr | ServiceAccount the agent pod runs as. **Exact-if-exists:** when a ServiceAccount of exactly this name already exists in `--namespace`, it is used verbatim and the run creates **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding — and deletes none at cleanup. Otherwise the value is a name prefix and the run ID is appended (`<prefix>-<run-id>`). Exact-if-exists mode needs **fewer** caller permissions — the run's pre-flight gate stops demanding `create`/`delete` on the five RBAC kinds — but requires the ServiceAccount to already carry the agent's rules, which the gate verifies with a `SubjectAccessReview`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) and [Pre-flight permission gate](agent-deployment.md#pre-flight-permission-gate) |
 | `--add-roles-to-service-account` | | string | | **Writes manifests and applies nothing.** Renders the `Role`/`RoleBinding` (`aicr-agent-<sa>-rbac`) and `ClusterRole`/`ClusterRoleBinding` (`aicr-agent-<namespace>.<sa>-rbac`) that grant the agent's permissions to the named ServiceAccount into `./snapshot-rbac-<run-id>/`, one object per file with a comment header explaining what it grants, then exits **without taking a snapshot**. **No cluster is contacted** — no kubeconfig or privileges needed, and the ServiceAccount is not checked for existence. Review the files, then apply with `kubectl apply -f <dir>/` and revoke with `kubectl delete -f <dir>/` yourself; no run cleanup ever touches them. Fails with `CONFLICT` if the directory already exists. Combine with `--discover-network` to also render the mutating live-discovery rules |
@@ -93,8 +93,8 @@ aicr snapshot [flags]
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves both the agent's run-scoped `aicr-node-reader-<run-id>` ClusterRole and the identically named ClusterRoleBinding active. By default the ClusterRole grants only read-only access; with `--discover-network` it also carries the mutating rules live network discovery needs (CRD/namespace/daemonset create, pod exec, node patch, NicClusterPolicy). Delete both when you are done — removing only the binding leaves the grant definition behind. |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
-| `--require-gpu` | | bool | false | Require GPU resources on the agent pod (mutually exclusive with `--runtime-class`) |
-| `--runtime-class` | | string | | Runtime class for GPU access without consuming a GPU allocation (e.g., `nvidia`). Mutually exclusive with `--require-gpu`. |
+| `--require-gpu` | | bool | false | In privileged mode (the default), requests an `nvidia.com/gpu` resource for the agent pod, so it schedules only onto GPU nodes. With `--privileged=false` it adds no GPU request, but still disables automatic GPU-node selection, so the agent can land on a CPU node unless you pass `--node-selector` (mutually exclusive with `--runtime-class`). Reads `AICR_REQUIRE_GPU` env when unset. |
+| `--runtime-class` | | string | | Runtime class for GPU access without consuming a GPU allocation (e.g., `nvidia`). Mutually exclusive with `--require-gpu`. Reads `AICR_RUNTIME_CLASS` env when unset. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 | `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
 | `--os` | | string | | Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`). Selects the per-OS pod configuration and in-pod service collector backend. `talos` skips the `/run/systemd` and `/etc/os-release` hostPath mounts and uses the Kubernetes-API service backend. Reads `AICR_OS` env when unset. |
@@ -941,7 +941,7 @@ aicr query --selector <path> [flags]
 
 **Flags:**
 
-All `aicr recipe` flags are supported, including `--profile` and `--inherit-from`, plus:
+All `aicr recipe` flags except `--output` are supported (query always prints to stdout), including `--profile` and `--inherit-from`, plus:
 
 | Flag | Type | Description |
 |------|------|-------------|
@@ -980,9 +980,9 @@ aicr query --service eks --accelerator h100 --intent training \
 # Get a value subtree
 aicr query --service eks --accelerator h100 --intent training \
   --selector components.gpu-operator.values.driver
-# stdout:
-#   version: "<driver-version>"
-#   repository: nvcr.io/nvidia
+# stdout (excerpt):
+#   enabled: true
+#   version: <driver-version>
 
 # Get the full hydrated component
 aicr query --service eks --accelerator h100 --intent training \
@@ -1013,7 +1013,7 @@ aicr query --service eks --accelerator h100 --intent training --selector .
 
 ```shell
 # Cross-cloud comparison: Prometheus storage across providers
-# EKS provisions a 50Gi persistent EBS volume (gp2)
+# EKS provisions a 50Gi persistent EBS volume (gp3, via the cluster-default ebs-csi-default-sc)
 aicr query --service eks --intent training \
   --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
 # GKE also provisions a 50Gi persistent volume, but only under the COS overlay —
@@ -1022,9 +1022,9 @@ aicr query --service gke --os cos --intent training \
   --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
 
 # Compare deployment order across clouds
-# EKS deploys 14 components (includes aws-ebs-csi-driver, aws-efa, nodewright-customizations)
+# EKS deploys 15 components (includes aws-ebs-csi-driver, aws-efa, nodewright-customizations)
 aicr query --service eks --accelerator h100 --intent training --selector deploymentOrder
-# GKE (COS) deploys 14 components (includes gke-nccl-tcpxo and gcp-driver-installer; storage is otherwise platform-managed)
+# GKE (COS) deploys 15 components (includes gke-nccl-tcpxo and gcp-driver-installer; storage is otherwise platform-managed)
 aicr query --service gke --os cos --accelerator h100 --intent training --selector deploymentOrder
 
 # Pin the exact driver version into Terraform/Pulumi variables
@@ -1078,16 +1078,16 @@ aicr validate [flags]
 | `--fail-fast` | | bool | false | Stop after the first phase that fails. By default all phases run and produce results. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`), or stdout |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file selecting the target cluster for **every** Kubernetes operation in the invocation: `cm://` recipe/snapshot/output I/O, snapshot-agent deployment, validation namespace and RBAC, validator Jobs, and cleanup. One invocation targets one cluster. When omitted, default discovery applies (`KUBECONFIG` env, then `~/.kube/config`, then in-cluster). An invalid path fails any run that performs Kubernetes operations; `--no-cluster` dry-runs over local files do not load it. **Changed in v0.18:** validator-engine operations, including validator Jobs, now honor this flag instead of using the default cluster. |
-| `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment |
+| `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment. Reads `AICR_NAMESPACE` when unset. |
 | `--image` | | string | matches CLI version | Container image for the **snapshot-capture agent** Job, not the validator Jobs. Release builds default to `ghcr.io/nvidia/aicr:v<version>`; dev and `-next` builds default to `ghcr.io/nvidia/aicr:latest`. Reads `AICR_VALIDATOR_IMAGE` when unset. Validator catalog images are resolved separately — override them with `AICR_VALIDATOR_IMAGE_TAG` / `AICR_VALIDATOR_IMAGE_REGISTRY`. |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--job-name` | | string | aicr-validate | Prefix for the **live snapshot-capture agent's** Job name; the run ID is always appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied — no agent is deployed. Does not name the validator Jobs (`aicr-<validator>-<hash>`) |
 | `--service-account-name` | | string | aicr | ServiceAccount the **live snapshot-capture agent** runs as. Leaving the flag unset is not the same as passing that default: an unset value is never probed, and the agent's run-scoped names are derived from the `aicr-validate` base instead. **Exact-if-exists:** an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the agent creates no RBAC for the run; otherwise the value is a prefix for the agent's ServiceAccount, Role, and RoleBinding and the run ID is appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied. Does not name the validator Jobs' ServiceAccount (`aicr-validator-<run-id>`), whose RBAC is always run-scoped. Generate that ServiceAccount's RBAC manifests with `aicr snapshot --namespace <validate-namespace> --add-roles-to-service-account <name>` (matching this command's `--namespace`) and apply them yourself — that command applies nothing |
 | `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
 | `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
-| `--timeout` | | duration | 5m | Timeout for validation Job completion |
+| `--timeout` | | duration | 5m | Timeout for the **live snapshot-capture agent** Job to complete (inert when `--snapshot` is supplied). Validator Jobs use their own per-check timeouts |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion |
-| `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
+| `--require-gpu` | | bool | false | Request an `nvidia.com/gpu` resource for the **live snapshot-capture agent** pod. Reads `AICR_REQUIRE_GPU` when unset |
 | `--oke-addons` | | string | | Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem, projected into the `K8s.oke-addons.nvidia-gpu-plugin` reading when validate captures a live snapshot. Ignored when `--snapshot` supplies a pre-captured snapshot — capture that snapshot with the same flag instead. Reads `AICR_OKE_ADDONS_PATH` env when unset. |
 | `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem, projected into the `K8s.aks-gpu-pools.gpu-driver` reading when validate captures a live snapshot (ADR-015 DD3). Ignored when `--snapshot` supplies a pre-captured snapshot — capture that snapshot with the same flag instead. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. |
 | `--gke-gpu-pools` | | string | | Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem, projected into the `K8s.gke-gpu-pools.gpu-driver-installation` reading when validate captures a live snapshot. Ignored when `--snapshot` supplies a pre-captured snapshot. Capture that snapshot with the same flag instead. Reads `AICR_GKE_GPU_POOLS_PATH` env when unset. |
@@ -1602,7 +1602,7 @@ The report still reports a **breaking boundary** (a major bump, a minor bump whi
 
 `blocked` and `unknown` say opposite things. `blocked` means AICR has something to tell you and a version to stop at: read it and act on it. `unknown` means AICR has nothing for you: read the component's own upstream release notes and decide. Neither is a pass.
 
-**Rollout note: expect red today.** Only two registry components ship a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
+**Rollout note: expect red today.** Only five registry components ship a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
 
 Components whose version *and* identity are identical on both sides produce no row. Added components are reported with nothing to do. Removed components are reported and **stay installed**, because AICR does not uninstall them.
 
@@ -1739,7 +1739,7 @@ aicr bundle [flags]
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
 | `--image-refs` | | string | External file to receive the published OCI digest. Valid only with OCI `--output`; local output is rejected. The parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. |
 | `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication, or a KMS key via `--signing-key` for environments without OIDC. See [Bundle Attestation](#bundle-attestation). |
-| `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
+| `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must *begin with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed) and must not use top-level alternation. For testing only. |
 | `--identity-token` | | string | Pre-fetched OIDC identity token for `--attest` keyless signing. Skips ambient/browser/device-code flows. Prefer `COSIGN_IDENTITY_TOKEN` on shared hosts — flag values are visible in `ps` and `/proc/<pid>/cmdline`. |
 | `--oidc-device-flow` | | bool | Use the OAuth 2.0 device authorization grant for `--attest` instead of opening a browser callback. Useful on headless hosts that can still reach Sigstore (`--identity-token` and CI ambient OIDC are alternatives). Also reads `AICR_OIDC_DEVICE_FLOW`. |
 | `--fulcio-url` | | string | Override the Fulcio CA URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Fulcio when omitted. Also reads `AICR_FULCIO_URL`. |
@@ -2009,9 +2009,9 @@ When provided, the value is written to all Helm value paths declared in the comp
 **Example:**
 
 ```bash
-# Use EBS gp3 instead of the overlay default gp2 on EKS
+# Pin an explicit StorageClass on EKS (AICR's gp3-backed class) instead of relying on the cluster default
 aicr bundle --recipe recipe.yaml \
-  --storage-class gp3 \
+  --storage-class ebs-csi-default-sc \
   --output bundle
 
 # Use a custom storage class on an on-prem cluster
@@ -2285,7 +2285,7 @@ aicr bundle -r recipe.yaml --nodes 8 -o ./bundles
 
 # Day 2 options: workload-gate and workload-selector for nodewright
 aicr bundle -r recipe.yaml \
-  --workload-gate skyhook.nvidia.com/runtime-required=true:NoSchedule \
+  --workload-gate nodewright.nvidia.com=runtime-required:NoSchedule \
   --workload-selector workload-type=training \
   -o ./bundles
 
@@ -2645,6 +2645,7 @@ bundles/
 ├── UPGRADING.md                   # Present only when a pinned version needs upgrade guidance
 ├── deploy.sh                      # Generic install loop + name-matched blocks
 ├── recipe.yaml                    # Recipe used to generate bundle
+├── bundle-info.yaml               # Deployer and generation metadata
 ├── checksums.txt                  # SHA256 checksums
 ├── attestation/                   # Present when --attest is used
 │   ├── bundle-attestation.sigstore.json   # SLSA Build Provenance v1
@@ -2723,7 +2724,7 @@ Manifest-only components (e.g., `nodewright-customizations`) and mixed-component
 
 The `--workload-gate` and `--workload-selector` flags are day 2 operational options for cluster scaling operations:
 
-- **`--workload-gate`**: Specifies a taint for nodewright-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the nodewright-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. When the flag is omitted the chart default applies: `nodewright.nvidia.com=runtime-required:NoSchedule` from operator v0.18.0 (previously `skyhook.nvidia.com=runtime-required:NoSchedule`, which the operator still recognizes and removes until v0.20.0). Node pools that pre-taint with the legacy key should pass `--workload-gate skyhook.nvidia.com=runtime-required:NoSchedule` so auto-tainted and pre-tainted nodes carry the same key. `aicr validate --phase deployment` reads the configured taint from the operator Deployment, so whatever value is passed here is what the readiness gate waits to see cleared. For more information about runtime required, see the [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs/runtime_required.md).
+- **`--workload-gate`**: Specifies a taint for nodewright-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the nodewright-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. When the flag is omitted the chart default applies: `nodewright.nvidia.com=runtime-required:NoSchedule` from operator v0.18.0 (previously `skyhook.nvidia.com=runtime-required:NoSchedule`, which the operator still recognizes and removes until v0.20.0). Node pools that pre-taint with the legacy key should pass `--workload-gate skyhook.nvidia.com=runtime-required:NoSchedule` so auto-tainted and pre-tainted nodes carry the same key. `aicr validate --phase deployment` reads the configured taint from the operator Deployment, so whatever value is passed here is what the readiness gate waits to see cleared. For more information about runtime required, see the [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs/user-guide/runtime-required.md).
 
 - **`--workload-selector`**: Specifies a label selector for nodewright-customizations to prevent nodewright from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
 
@@ -2800,7 +2801,7 @@ aicr bundle -r recipe.yaml \
 ```shell
 # Generate bundle with day 2 options for training workloads
 aicr bundle -r recipe.yaml \
-  --workload-gate skyhook.nvidia.com/runtime-required=true:NoSchedule \
+  --workload-gate nodewright.nvidia.com=runtime-required:NoSchedule \
   --workload-selector workload-type=training \
   --workload-selector intent=training \
   --accelerated-node-selector accelerator=nvidia-h100 \
@@ -2815,7 +2816,8 @@ aicr bundle -r recipe.yaml \
 Argo CD Applications use multi-source to:
 1. Pull Helm charts from upstream repositories
 2. Apply values.yaml from your GitOps repository
-3. Deploy additional manifests from component's manifests/ directory (if present)
+
+Raw manifests (manifest-only components and mixed-component `-post` folders) are deployed by separate path-based Applications, as described above.
 
 #### Flux OCI Mode
 
@@ -3299,7 +3301,7 @@ aicr mirror list [flags]
 |------|-------|------|---------|-------------|
 | `--recipe` | `-r` | string | | Path/URI to a previously generated recipe. Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (`cm://namespace/name`). |
 | `--service` | | string | | Cloud service (e.g., `eks`, `gke`, `aks`, `ocp`). Alternative to `--recipe`. |
-| `--accelerator` | | string | | GPU accelerator (e.g., `h100`, `gb200`). Alternative to `--recipe`. |
+| `--accelerator` | `--gpu` | string | | GPU accelerator (e.g., `h100`, `gb200`). Alternative to `--recipe`. |
 | `--intent` | | string | | Workload intent (`training` or `inference`). Alternative to `--recipe`. |
 | `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |
 | `--platform` | | string | | Optional platform specialization (e.g., `kubeflow`). |
@@ -3309,6 +3311,8 @@ aicr mirror list [flags]
 | `--data` | | string | | External data directory to overlay on embedded data. Overlay-provided component values and manifests both feed image discovery (see [External Data](#external-data-directory)). |
 | `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |
 | `--output` | `-o` | string | stdout | Output file path |
+
+The remaining `aicr recipe` resolution flags (`--snapshot`/`-s`, `--config`, `--nodes`, `--slurm-accounting-mode`, `--runtime-inventory`, `--gke-tcpxo-interfaces`, `--criteria-strict`, `--kubeconfig`/`-k`) are also accepted when resolving from criteria; see [`aicr recipe`](#aicr-recipe).
 
 **Examples:**
 
@@ -3352,7 +3356,7 @@ aicr verify <bundle-dir> [flags]
 | `--min-trust-level` | string | `max` | Minimum required trust level. `max` auto-detects the highest achievable level and verifies against it. Explicit levels: `verified`, `attested`, `unverified`, `unknown`. |
 | `--require-creator` | string | | Require a specific creator identity, matched against the bundle attestation signing certificate. |
 | `--cli-version-constraint` | string | | Version constraint for the aicr CLI version in the attestation predicate. Supports `>=`, `>`, `<=`, `<`, `==`, `!=`. A bare version (e.g. `"0.8.0"`) defaults to `>=`. |
-| `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
+| `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must *begin with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed) and must not use top-level alternation. For testing only. |
 | `--key` | string | | Verify a key-signed bundle attestation against a KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`) or a local PEM public-key file. This is the counterpart to `bundle --signing-key`. It coexists with `--certificate-identity-regexp`, which pins the binary attestation; the two verify different attestations. |
 | `--trust-root` | string | | Verify the bundle attestation against a private Sigstore trusted root (a `trusted_root.json` from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with `--key` and `--certificate-identity-regexp`. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`. |
 | `--insecure-ignore-tlog` | bool | `false` | Offline/air-gapped verification: skip the transparency-log (and observer-timestamp) requirement so a bundle signed with `bundle --signing-key ... --tlog-upload=false` verifies against `--key` with no transparency-log network calls. A local PEM `--key` is then fully offline; a KMS `--key` URI still makes a live `GetPublicKey` call to resolve the key (export a PEM with `cosign public-key` for a truly offline verify). Requires `--key`; the air-gapped path is key-based, not keyless. Named "insecure" because, with no transparency log, there is no trusted timestamp proving when the signature was made. Does not affect the binary attestation, which always requires a transparency log. |
@@ -3498,7 +3502,7 @@ aicr evidence digest -r <recipe-or-overlay> [flags]
 |------|-------|------|---------|-------------|
 | `--recipe` | `-r` | string | | Path/URI to a recipe or overlay file (file, HTTP/HTTPS, or `cm://namespace/name`). Required. |
 | `--profile` | | string | | Profile selection in exact `name=value` form for overlay inputs on a profiled family (e.g. `gpuStack=operator-managed` on AKS); omit for the declaration default. Rejected when the input is a hydrated `RecipeResult` — its selection is already baked into `metadata.selectedProfile`. |
-| `--kubeconfig` | | string | | Kubeconfig path; consulted only when the input is a `cm://` URI. |
+| `--kubeconfig` | `-k` | string | | Kubeconfig path; consulted only when the input is a `cm://` URI. |
 
 **Exit codes:**
 
@@ -3940,7 +3944,9 @@ AICR respects standard environment variables:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `KUBECONFIG` | Path to Kubernetes config file | `~/.kube/config` |
-| `AICR_LOG_LEVEL` | Logging level: debug, info, warn, error | info |
+| `AICR_DEBUG` | Same as the global `--debug` flag | unset |
+| `AICR_LOG_JSON` | Same as the global `--log-json` flag | unset |
+| `AICR_LOG_LEVEL` | Logging level for the `aicrd` API server: debug, info, warn, error. The `aicr` CLI does not read it; use `--debug` / `AICR_DEBUG` instead | info |
 | `AICR_LOG_PREFIX` | Override the CLI logger prefix | `cli` |
 | `AICR_REQUESTS` | Default for `aicr snapshot --requests`. Comma-separated `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. | unset |
 | `AICR_LIMITS` | Default for `aicr snapshot --limits`. Comma-separated `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when this list does not already contain that key — explicit `nvidia.com/gpu=N` wins. | unset |
@@ -3967,7 +3973,7 @@ AICR respects standard environment variables:
 ### Quick Recipe Generation
 
 ```shell
-aicr recipe --os ubuntu --accelerator h100 --service eks --intent training | jq '.componentRefs[]'
+aicr recipe --os ubuntu --accelerator h100 --service eks --intent training --format json | jq '.componentRefs[]'
 ```
 
 ### Save All Steps
@@ -4022,13 +4028,11 @@ aicr --debug snapshot
 
 ```shell
 # A partial query can be ambiguous: no single recipe covers h100+ubuntu
-# without also stating service and intent, so this fails with an
+# without also stating a service (and, for some services, an intent), so this fails with an
 # actionable error instead of silently returning a partial recipe:
 aicr recipe --os ubuntu --gpu h100
 # error: os 'ubuntu' requires additional criteria; supported combinations:
-#   (service=aks, intent=inference), (service=aks, intent=training),
-#   (service=bcm, intent=training), (service=eks, intent=inference),
-#   (service=eks, intent=training)
+#   (service=aks), (service=eks), (service=bcm, intent=training)
 
 # Fix by adding one of the combinations the error lists:
 aicr recipe --os ubuntu --gpu h100 --service eks --intent training
@@ -4083,7 +4087,7 @@ The external directory must mirror the embedded data structure:
 my-data/
 ├── registry.yaml          # REQUIRED - merged with embedded registry
 ├── overlays/
-│   └── base.yaml              # Optional - replaces embedded base.yaml
+│   ├── base.yaml              # Optional - replaces embedded base.yaml
 │   └── custom-overlay.yaml    # Optional - adds new overlay
 └── components/
     └── gpu-operator/
@@ -4194,6 +4198,7 @@ The `examples/` directory contains reference files for testing and learning:
 |------|-------------|
 | `kind.yaml` | Recipe for local Kind cluster with fake GPU |
 | `eks-training.yaml` | EKS recipe optimized for training workloads |
+| `aks-training.yaml` | AKS recipe for training workloads |
 | `eks-gb200-ubuntu-training-with-validation.yaml` | GB200 on EKS with Ubuntu and multi-phase validation |
 
 **Usage:**

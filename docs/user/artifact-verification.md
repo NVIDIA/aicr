@@ -369,7 +369,7 @@ signer hashes to.
 > the signature pinned to the claimed signer and cross-checks the certificate
 > before any result is counted — so a pointer that lied about its signer passes
 > the gate but fails ingest. See
-> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007. (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).)
+> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007.
 
 Consumers discover a recipe's evidence by glob —
 `recipes/evidence/<recipe>/*/*.yaml` — and aggregate across sources; nothing is

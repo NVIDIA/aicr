@@ -253,7 +253,7 @@ To hand-author a `TrainingRuntime` — a bundle you did not generate, or a
 shape the shipped runtime does not cover — see
 [Attaching a Training Workload to the Cluster Fabric](../user/fabric-attached-training.md).
 
-See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example. (pinned to the same coupled pair the recipe ships, plugin `v1.0.15` with daemon `v1.0.21`)
+See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example (pinned to the same coupled pair the recipe ships, plugin `v1.0.15` with daemon `v1.0.21`).
 
 ## NCCL Plugin Version Matching
 

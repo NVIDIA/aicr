@@ -368,6 +368,7 @@ and local loops can branch on failure mode without parsing logs.
 | `install-infra.sh` | 21 | Registry not reachable on host port within 60 s |
 | `install-infra.sh` | 30 | Argo CD Helm install failed |
 | `install-infra.sh` | 31 | `applications.argoproj.io` CRD not Established within 120 s |
+| `install-infra.sh` | 32 | Patching `argocd-cm` with the CSIDriver diff customization failed |
 | `install-infra.sh` | 40 | Repository secret apply failed |
 | `install-infra.sh` | 60 | Flux install manifest apply failed |
 | `install-infra.sh` | 61 | Flux controller not Ready within 180 s |
@@ -548,7 +549,7 @@ golangci-lint run -c .golangci.yaml ./pkg/<affected>/...
 golangci-lint run -c .golangci.yaml ./...           # full sweep
 ```
 
-This applies even to PRs labeled `documentation` when they include
+This applies even to PRs labeled `area/docs` when they include
 incidental Go changes. Do not rely on CI to surface lint failures —
 the pre-push gate is local.
 

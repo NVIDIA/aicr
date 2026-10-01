@@ -15,7 +15,7 @@ cp recipes/overlays/h100-eks-ubuntu-training.yaml recipes/overlays/gb200-eks-ubu
 ```yaml
 # recipes/overlays/gb200-eks-ubuntu-training.yaml
 spec:
-  base: eks-training  # Inherit from intermediate recipe
+  base: gb200-eks-training  # Inherit from intermediate recipe
   criteria:
     service: eks
     accelerator: gb200  # Changed from h100
@@ -63,7 +63,7 @@ For query matching and overlay merging internals, see [Data Architecture](../con
 Recipes use `spec.base` to inherit configurations. Chains progress from general (base) to specific (leaf):
 
 ```
-base.yaml → eks.yaml → eks-training.yaml → gb200-eks-ubuntu-training.yaml
+base.yaml → eks.yaml → eks-training.yaml → gb200-eks-training.yaml → gb200-eks-ubuntu-training.yaml
 ```
 
 **Intermediate recipes** (partial criteria) capture shared configs:
@@ -83,7 +83,7 @@ spec:
 ```yaml
 # gb200-eks-ubuntu-training.yaml
 spec:
-  base: eks-training  # Inherits from intermediate
+  base: gb200-eks-training  # Inherits from intermediate
   criteria:
     service: eks
     accelerator: gb200
@@ -974,7 +974,7 @@ kind: RecipeMetadata
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
-  base: eks-training
+  base: gb200-eks-training
   criteria:
     service: eks
     accelerator: gb200

@@ -137,12 +137,13 @@ packages (`pkg/recipe`, `pkg/bundler`, `pkg/snapshotter`,
 | Facade method | Used by |
 |---------------|---------|
 | `NewClient(opts...)` / `Close()` | All commands. Construct with `WithRecipeSource(EmbeddedSource())` or `FilesystemSource(dir)` and `WithVersion(version)`. Each `Client` owns its own `DataProvider`. |
-| `ResolveRecipe(ctx, RecipeRequest)` | `recipe`, `query` (request can hold criteria, file path, or snapshot input) |
+| `ResolveRecipe(ctx, RecipeRequest)` | Go SDK callers (request can hold criteria, file path, or snapshot input) |
 | `ResolveRecipeFromCriteria(ctx, *Criteria)` | criteria-only fast path |
-| `ResolveRecipeFromSnapshot(ctx, *Criteria, *Snapshot)` | `validate`, `recipe --snapshot` |
+| `ResolveRecipeFromCriteriaWithOptions(ctx, *Criteria, opts...)` | `recipe`, `query`, `mirror` (criteria path) |
+| `ResolveRecipeFromSnapshot(ctx, *Criteria, *Snapshot)` | snapshot fast path (no resolve options) |
 | `ResolveRecipeFromSnapshotWithOptions(ctx, *Criteria, *Snapshot, opts...)` | `recipe --snapshot`, `query --snapshot` — with `WithSnapshotCriteriaRelaxation(stated...)` for the derived-criteria retry |
 | `LoadRecipe(ctx, path, kubeconfig)` | `bundle`, `validate`, `diff` (read a previously emitted recipe file) |
-| `BundleComponents(ctx, *RecipeResult)` | `bundle` |
+| `MakeBundle(ctx, *RecipeResult, BundleOptions)` | `bundle` |
 | `LoadSnapshot(ctx, path, kubeconfig)` | `validate`, `query`, `diff` (read a previously captured snapshot; file, URL, or `cm://` ConfigMap) |
 | `CollectSnapshot(ctx, *AgentConfig)` | `snapshot`, `validate` (Job-mode capture only; local `AICR_AGENT_MODE` collection deploys no Job and stays on `snapshotter.NodeSnapshotter`) |
 | `ValidateState(ctx, ...)` | `validate` |
@@ -271,6 +272,7 @@ Handlers return errors. `Execute` in `root.go` calls
 | `ErrCodeUnavailable` | 6 | Dependency unavailable |
 | `ErrCodeRateLimitExceeded` | 7 | Throttled |
 | `ErrCodeInternal` | 8 | Internal |
+| `ErrCodeCanceled` | 9 | Canceled |
 | (unstructured) | 1 | Generic |
 
 Rules:
@@ -301,7 +303,7 @@ For enum flags, declare with `withCompletions`:
 return withCompletions(&cli.StringFlag{
     Name:     "intent",
     Category: catQueryParameters,
-}, recipe.SupportedIntents)
+}, recipe.GetCriteriaIntentTypes)
 ```
 
 `completeWithAllFlags` in `root.go` reads `os.Args` directly (not
@@ -336,7 +338,7 @@ Configured in the root `Before` hook (`root.go`):
 | `--debug` / `AICR_DEBUG` | `slog` text logger at debug level, full metadata |
 | `--log-json` / `AICR_LOG_JSON` | structured JSON logger; wins over `--debug` for output format, debug level still applied |
 | neither | `pkg/logging.SetDefaultCLILogger` — human-readable, TTY-aware |
-| `AICR_LOG_LEVEL` | overrides level for the structured logger (unprefixed `LOG_LEVEL` is not honored) |
+| `AICR_LOG_LEVEL` | not read by the `aicr` CLI (level comes from `--debug`); honored only by `aicrd` (unprefixed `LOG_LEVEL` is not honored) |
 | `NO_COLOR` (de-facto) | suppresses ANSI color |
 | stderr is not a TTY | suppresses ANSI color (`pkg/logging` detects via `golang.org/x/term`) |
 
