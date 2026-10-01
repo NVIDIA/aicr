@@ -86,10 +86,11 @@ retry_transient() {
 # CURL_RETRY makes curl retry timeouts, refused connections, and HTTP 408, 429,
 # and 5xx. It fails a 404 or 403 at once. CURL_RETRY_ALL also retries those, for
 # downloads whose URL the probe has already confirmed. Each retry rewrites the
-# -o file from scratch. Callers add --max-time so a stalled connection fails an
-# attempt instead of hanging the job.
+# -o file from scratch. CURL_RETRY_ALL adds a stall guard that aborts an attempt
+# moving under 1 KiB/s for 30s, so a slow but moving download of a large asset
+# is not capped the way a total --max-time would.
 CURL_RETRY=(--retry $((RETRY_ATTEMPTS - 1)) --retry-connrefused --connect-timeout 10)
-CURL_RETRY_ALL=("${CURL_RETRY[@]}" --retry-all-errors)
+CURL_RETRY_ALL=("${CURL_RETRY[@]}" --speed-limit 1024 --speed-time 30 --retry-all-errors)
 
 # probe_url HEADs a URL, following redirects, and records curl's HTTP status and
 # exit code in PROBE_HTTP_CODE and PROBE_CURL_EXIT. It fails on a 403, which
@@ -284,7 +285,7 @@ install_release_binary() {
         trap 'rm -rf "$tmp"' EXIT
 
         asset="${url##*/}"
-        if ! curl -fsSL "${CURL_RETRY_ALL[@]}" --max-time 120 -o "${tmp}/${asset}" "$url"; then
+        if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "${tmp}/${asset}" "$url"; then
             log_error "Failed to download $description from $url"
             exit 1
         fi
@@ -292,7 +293,7 @@ install_release_binary() {
         algo=sha256
         case "$source" in
             manifest:*)
-                if ! curl -fsSL "${CURL_RETRY_ALL[@]}" --max-time 120 -o "${tmp}/checksums" "${source#manifest:}"; then
+                if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "${tmp}/checksums" "${source#manifest:}"; then
                     log_error "Failed to download the checksums file for $description"
                     exit 1
                 fi
@@ -301,7 +302,7 @@ install_release_binary() {
             sidecar:*)
                 spec=$(release_sidecar_spec "$source") || exit 1
                 algo="${spec%% *}"
-                if ! curl -fsSL "${CURL_RETRY_ALL[@]}" --max-time 120 -o "${tmp}/sidecar" "${url}${spec#* }"; then
+                if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "${tmp}/sidecar" "${url}${spec#* }"; then
                     log_error "Failed to download the digest file for $description"
                     exit 1
                 fi
@@ -943,7 +944,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             elif [[ "${OS}" == "linux" ]]; then
                 GRYPE_SCRIPT_URL="https://raw.githubusercontent.com/anchore/grype/main/install.sh"
                 GRYPE_TMP=$(mktemp -d)
-                if ! curl -fsSL "${CURL_RETRY_ALL[@]}" --max-time 120 -o "$GRYPE_TMP/install.sh" "$GRYPE_SCRIPT_URL"; then
+                if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "$GRYPE_TMP/install.sh" "$GRYPE_SCRIPT_URL"; then
                     log_error "Failed to download the grype install script from $GRYPE_SCRIPT_URL"
                     rm -rf "$GRYPE_TMP"
                     exit 1
@@ -1293,7 +1294,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         if prompt_continue; then
             GOLANGCI_SCRIPT_URL="https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_LINT_VERSION}/install.sh"
             GOLANGCI_TMP=$(mktemp)
-            if ! curl -fsSL "${CURL_RETRY_ALL[@]}" --max-time 120 -o "$GOLANGCI_TMP" "$GOLANGCI_SCRIPT_URL"; then
+            if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "$GOLANGCI_TMP" "$GOLANGCI_SCRIPT_URL"; then
                 log_error "Failed to download the golangci-lint install script from $GOLANGCI_SCRIPT_URL"
                 rm -f "$GOLANGCI_TMP"
                 exit 1
