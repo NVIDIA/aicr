@@ -203,10 +203,9 @@ func TestVerifyNodewrightReady_ListsClusterScoped(t *testing.T) {
 	}
 }
 
-// Issue #607 acceptance: Nodewright check must skip gracefully when the CRD is
-// not registered on the cluster, even when nodewright-customizations is declared
-// in the recipe's componentRefs.
-func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T) {
+// A recipe that declares Nodewright CRs fails when neither CRD group is ever
+// served. The check polls until the readiness budget runs out.
+func TestCheckExpectedResources_FailsNodewrightWhenCRDNeverRegistered(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContextWithUnregistered(t,
@@ -216,9 +215,62 @@ func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T
 		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
-	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil when Nodewright CRD is not registered", err)
-		return
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("checkExpectedResources() error = nil, want a failure when the recipe declares Nodewright CRs and no CRD is served")
+	}
+	if !strings.Contains(err.Error(), "serves its resource yet") {
+		t.Fatalf("error = %v, want the not-yet-served diagnostic", err)
+	}
+}
+
+// A group/version listed in discovery without the nodewrights resource (for
+// example only DeploymentPolicy established) is not served.
+func TestResolveNodewrightGVR_RequiresResourceNotJustGroupVersion(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, nil, nil, nil)
+	fakeDisc := ctx.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+	fakeDisc.Resources = append(fakeDisc.Resources, &metav1.APIResourceList{
+		GroupVersion: nodewrightGVR.GroupVersion().String(),
+		APIResources: []metav1.APIResource{{Name: "deploymentpolicies"}},
+	})
+
+	_, registered, err := resolveNodewrightGVR(ctx)
+	if err != nil {
+		t.Fatalf("resolveNodewrightGVR() error = %v", err)
+	}
+	if registered {
+		t.Fatal("registered = true, want false when the group lists only deploymentpolicies")
+	}
+}
+
+// A group established part-way through the poll is picked up on a later
+// iteration.
+func TestVerifyNodewrightReady_PicksUpCRDEstablishedMidPoll(t *testing.T) {
+	t.Parallel()
+
+	ref := recipe.ComponentRef{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}
+	ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")},
+		[]runtime.Object{nodeWrightWithStatus("tuning", nodewrightCompleteState)}, []recipe.ComponentRef{ref})
+
+	fakeDisc := ctx.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+	established := fakeDisc.Resources
+	fakeDisc.Resources = nil
+	calls := 0
+	ctx.Clientset.(*k8sfake.Clientset).PrependReactor("get", "resource", func(clienttesting.Action) (bool, runtime.Object, error) {
+		calls++
+		if calls == 2 {
+			fakeDisc.Resources = established
+		}
+		return false, nil, nil
+	})
+
+	if err := verifyNodewrightReady(ctx, ref, []corev1.Taint{legacyRuntimeRequiredTaint}); err != nil {
+		t.Fatalf("verifyNodewrightReady() error = %v, want nil once the CRD is established mid-poll", err)
+	}
+	if calls < 2 {
+		t.Fatalf("discovery calls = %d, want the GVR re-resolved across polls", calls)
 	}
 }
 
@@ -1122,9 +1174,8 @@ func TestVerifyGPUReadinessSignalsPreservesOrderConcurrently(t *testing.T) {
 		{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
 		{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
 	}
-	// The Nodewright GroupVersion must be registered (extraRegistered) or the
-	// CRD-not-registered skip (#607) returns nil before the signal ever fails —
-	// this proves both signals report, not just that one CRD is absent.
+	// The Nodewright GroupVersion is registered so the signal reaches its poll
+	// and fails on the canceled budget. Both signals must report.
 	ctx := newDeploymentTestContextWithDiscovery(t, nil, nil, []schema.GroupVersion{nodewrightGVR.GroupVersion()}, nil, refs)
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel() // force every probe's poll loop to exit on its first iteration
@@ -1758,23 +1809,34 @@ func configureFakeDiscovery(
 		unregSet[gvr.GroupVersion()] = true
 	}
 
-	gvSet := make(map[schema.GroupVersion]bool)
+	// gvSet maps each advertised GroupVersion to the resource names it lists.
+	// Nodewright resolution requires the resource name to be listed, so the
+	// Nodewright resources are listed explicitly.
+	gvSet := make(map[schema.GroupVersion][]string)
 	for _, object := range dynamicObjects {
 		u, ok := object.(*unstructured.Unstructured)
 		if !ok {
 			continue
 		}
-		gv := u.GroupVersionKind().GroupVersion()
+		gvk := u.GroupVersionKind()
+		gv := gvk.GroupVersion()
 		if unregSet[gv] {
 			continue
 		}
-		gvSet[gv] = true
+		gvSet[gv] = append(gvSet[gv], gvrForTestObject(gvk).Resource)
 	}
 	for _, gv := range extraRegistered {
 		if unregSet[gv] {
 			continue
 		}
-		gvSet[gv] = true
+		if _, ok := gvSet[gv]; !ok {
+			gvSet[gv] = nil
+		}
+		for _, gvr := range []schema.GroupVersionResource{nodewrightGVR, legacySkyhookGVR} {
+			if gvr.GroupVersion() == gv {
+				gvSet[gv] = append(gvSet[gv], gvr.Resource)
+			}
+		}
 	}
 
 	fakeDisc, ok := clientset.Discovery().(*fakediscovery.FakeDiscovery)
@@ -1782,10 +1844,16 @@ func configureFakeDiscovery(
 		t.Fatalf("expected *fakediscovery.FakeDiscovery, got %T", clientset.Discovery())
 		return
 	}
-	for gv := range gvSet {
-		fakeDisc.Resources = append(fakeDisc.Resources, &metav1.APIResourceList{
-			GroupVersion: gv.String(),
-		})
+	for gv, names := range gvSet {
+		list := &metav1.APIResourceList{GroupVersion: gv.String()}
+		seen := make(map[string]bool, len(names))
+		for _, name := range names {
+			if !seen[name] {
+				seen[name] = true
+				list.APIResources = append(list.APIResources, metav1.APIResource{Name: name})
+			}
+		}
+		fakeDisc.Resources = append(fakeDisc.Resources, list)
 	}
 }
 

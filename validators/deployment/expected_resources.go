@@ -727,17 +727,6 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 		return nil
 	}
 
-	gvr, registered, err := resolveNodewrightGVR(ctx)
-	if err != nil {
-		return err
-	}
-	if !registered {
-		fmt.Printf("  Nodewright: neither %s nor %s registered, skipping\n",
-			nodewrightGVR.GroupVersion(), legacySkyhookGVR.GroupVersion())
-		return nil
-	}
-	fmt.Printf("  Nodewright: polling %s\n", gvr.GroupResource())
-
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
 		return err
@@ -760,9 +749,25 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 	// done on every node. Polling rides through the reboot flaps rather than
 	// failing the deployment phase on a transient in_progress / re-taint. See
 	// pkg/defaults GPUReadiness* for sizing.
+	//
+	// The recipe declares Nodewright CRs here, so CRDs that are not served yet
+	// are a not-ready state to poll through. The GVR is re-resolved on every
+	// iteration so a group established part-way through is picked up.
+	var gvr schema.GroupVersionResource
 	return pollUntilStable(ctx,
 		fmt.Sprintf("%d expected Nodewright(s) + runtime-required taint clearance", len(expectedNames)),
 		func() error {
+			resolved, registered, resolveErr := resolveNodewrightGVR(ctx)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			if !registered {
+				return errors.New(errors.ErrCodeNotFound,
+					fmt.Sprintf("Nodewright: neither %s nor %s serves its resource yet (recipe declared %d CR(s))",
+						nodewrightGVR.GroupVersion(), legacySkyhookGVR.GroupVersion(), len(expectedNames)))
+			}
+			gvr = resolved
+
 			// The CR status Gets and the node-list taint scan are independent
 			// read-only calls, so fan them out (per repo CLAUDE.md "Sequential
 			// calls to N independent read-only K8s APIs → fan-out with
@@ -799,34 +804,40 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 		},
 		func() {
 			for _, name := range expectedNames {
-				fmt.Printf("  Nodewright %s: %s (stable ≥%s)\n", name, nodewrightCompleteState, gpuReadinessStabilityWindow)
+				fmt.Printf("  Nodewright %s (%s): %s (stable ≥%s)\n",
+					name, gvr.GroupResource(), nodewrightCompleteState, gpuReadinessStabilityWindow)
 			}
 			fmt.Printf("  Nodewright runtime-required taint (%s): cleared from all nodes (stable ≥%s)\n",
 				taintStrings(gate), gpuReadinessStabilityWindow)
 		})
 }
 
-// resolveNodewrightGVR discovery-gates the Nodewright CR kinds before any Get
+// resolveNodewrightGVR discovery-gates the Nodewright CR resources before any Get
 // by name, preferring nodewrightGVR. The legacySkyhookGVR fallback is taken
 // only when legacySkyhookAllowed permits it: a recipe that pins the operator at
 // nodewrightRenameVersion or later must serve the new group, so a legacy-only
 // cluster there is a broken install (or stale Skyhooks from a prior operator)
 // and fails closed rather than being read as ready. registered is false when
-// neither group is served (the caller skips per #607). Any discovery error
-// other than NotFound fails closed so a transient failure cannot mask
-// readiness.
+// neither group serves its resource. A group/version appears in discovery as
+// soon as any CRD in it is established, so the candidate's resource name must
+// be listed before it counts as served. Any discovery error other than NotFound
+// fails closed so a transient failure cannot mask readiness.
 func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResource, registered bool, err error) {
 	served := func(candidate schema.GroupVersionResource) (bool, error) {
 		gv := candidate.GroupVersion().String()
 		// Through helper rather than DiscoveryInterface directly: the
 		// interface method issues its request with context.TODO() internally,
 		// so an unresponsive apiserver would outlive both cancellation and the
-		// readiness budget. This runs ahead of pollUntilStable, which is the
-		// window where nothing else would notice.
-		_, discErr := helper.GroupVersionResources(ctx.Ctx, ctx.Clientset, gv)
+		// readiness budget.
+		list, discErr := helper.GroupVersionResources(ctx.Ctx, ctx.Clientset, gv)
 		switch {
 		case discErr == nil:
-			return true, nil
+			for _, r := range list.APIResources {
+				if r.Name == candidate.Resource {
+					return true, nil
+				}
+			}
+			return false, nil
 		case apierrors.IsNotFound(discErr):
 			return false, nil
 		case stderrors.Is(discErr, context.Canceled), stderrors.Is(discErr, context.DeadlineExceeded):

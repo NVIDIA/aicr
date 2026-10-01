@@ -1450,7 +1450,11 @@ cluster passes without a static assert that can never match. A v0.18.0+ pin
 on a cluster that does not serve `nodewright.nvidia.com` fails closed — that
 is a broken operator install, and a stale legacy `Skyhook` must not stand in
 for the missing `NodeWright`. A discovery error also fails closed rather than
-skipping. This skip is scoped to
+skipping. Discovery counts a group as served only once it lists the `nodewrights`
+(or `skyhooks`) resource itself, and `verifyNodewrightReady` re-resolves that
+on every poll. A recipe that renders Nodewright CRs polls through CRD
+establishment and fails on timeout if neither group ever serves them. This
+skip is scoped to
 `nodewright-customizations`; every other component's assert queues
 unconditionally.
 
