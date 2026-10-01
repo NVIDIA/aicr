@@ -32,8 +32,9 @@
 # works under whichever mode `ib_core`'s netns_mode leaves in place, and never
 # mutates it. Which mode a given deployment runs is therefore decided by the
 # recipe, not here: on a host left at the default the subsystem stays shared,
-# while the VR200 leaves pair this component with rdma-netns-exclusive, which
-# sets netns_mode=0 and reboots so each pod netns gets its own RDMA view.
+# while the VR200 leaves pair this component with nodewright-customizations'
+# rdmaNetnsExclusive package, which sets netns_mode=0 and reboots so each pod
+# netns gets its own RDMA view.
 ---
 apiVersion: v1
 kind: ServiceAccount
