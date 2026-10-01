@@ -38,11 +38,12 @@ func upgradeCheckCmd() *cli.Command {
 		Category: functionalCategoryName,
 		Usage:    "Report whether moving between two recipes or bundles is safe to apply",
 		Description: `Compare two artifacts component by component and report a verdict for
-each version that changed, from the transition records this aicr release
-ships. That comparison is the default and it reads no cluster state: the two
-artifacts are all it looks at, and nothing is inspected, deployed or modified.
-A cm:// path is an artifact location like a file path, so reading or writing
-one does contact that cluster's API to fetch or store the ConfigMap.
+each component whose version or identity changed, from the transition records
+this aicr release ships. That comparison is the default and it reads no
+cluster state: the two artifacts are all it looks at, and nothing is
+inspected, deployed or modified. A cm:// path is an artifact location like a
+file path, so reading or writing one does contact that cluster's API to fetch
+or store the ConfigMap.
 
 Either side may be a recipe file or a bundle directory; a bundle is read
 through the recipe.yaml at its root. Omitting --to re-resolves the --from artifact's own
@@ -59,6 +60,12 @@ a view of live state.
 carry no deployer ownership marker. It warns and never changes the exit code.
 --from cluster implies it; pass --scan-cluster=false there to skip it.
 
+Pass the deployed bundle as --from where you have it. Object names
+(fullnameOverride, nameOverride) are compared only from a bundle, because a
+recipe records its values by reference and a cluster read recovers versions
+alone; given either, that comparison is skipped and the report says so above
+the table.
+
 Operator steps are deployer-scoped, so --deployer is required whenever any
 component carries steps. A cluster read is stricter: it requires --deployer
 whatever the records turn out to hold, because a release name encodes the
@@ -72,7 +79,10 @@ The report prints in full either way; pass --fail-on-error=false to report
 without failing.
 
 Examples:
-  # Two recipes, for a GitOps pipeline that already knows its deployer
+  # The deployed bundle against a freshly generated recipe
+  aicr upgrade-check --from ./bundles-v0.16.0 --to new-recipe.yaml --deployer argocd
+
+  # Two recipes, when no bundle was kept (object names are not compared)
   aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer argocd
 
   # Two helm bundles

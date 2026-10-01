@@ -61,13 +61,13 @@
 // kustomize path, deployment type, manifest file set, pre-manifest file set or
 // object name is invisible to a version comparison yet relocates, replaces or
 // renames running objects. Helm cannot move a release between namespaces, and
-// it applies a rename as delete-and-recreate, or refuses it outright where the
-// moved value feeds an immutable spec.selector. So a component that moved on
-// the identity axis alone gets a ChangeIdentity row that a version comparison
-// would not report at all, a component that moved on both gets one row
-// carrying both, and a safe verdict is withdrawn to unknown wherever the
-// identity moved. The record vouched for a version hop and was never asked
-// about the rest.
+// it applies a rename as delete-and-recreate, or refuses it outright where an
+// object keeps its name while its selector labels change, because
+// spec.selector is immutable. So a component that moved on the identity axis
+// alone gets a ChangeIdentity row that a version comparison would not report
+// at all, a component that moved on both gets one row carrying both, and a
+// safe verdict is withdrawn to unknown wherever the identity moved. The record
+// vouched for a version hop and was never asked about the rest.
 //
 // The identity fields do not all read an empty value the same way, which is
 // the one thing to hold onto here. An absent scalar field is a fact the
@@ -158,8 +158,9 @@
 // crossed no boundary at all.
 //
 // The deployer is not inferred. ADR-021 Decision 5 would take it from a `to`
-// bundle, which does record it in bundle-info.yaml, but the check does not read
-// that file, so RequiresDeployer reports when a caller has to supply one. It is true for a
+// bundle, which does record it in bundle-info.yaml, but the check reads that
+// file only to locate release values and does not take the deployer from it
+// yet, so RequiresDeployer reports when a caller has to supply one. It is true for a
 // manual row, and for a blocked row that carries a record; the step-less
 // blocked rows do not make it true, because a deployer would name a scope
 // nothing renders.

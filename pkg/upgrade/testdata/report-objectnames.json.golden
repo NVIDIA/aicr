@@ -19,7 +19,7 @@
       "verdict": "unknown",
       "notes": "0.19.0 unchanged, no record covers a rename",
       "reason": "identity-changed",
-      "explanation": "chi-operator stays at 0.19.0, but its fullnameOverride is no longer set, dropping legacy-operator. Transition records assess version boundaries, so none assesses a change of identity. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key feeds the chart's selector labels, spec.selector is immutable and the upgrade fails outright instead. Make the change deliberately, then re-run this check.",
+      "explanation": "chi-operator stays at 0.19.0, but its fullnameOverride is no longer set, dropping legacy-operator. Transition records assess version boundaries, so none assesses a change of identity. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key changes the selector labels of an object whose name does not change, for example nameOverride moving while fullnameOverride is pinned, spec.selector is immutable and the upgrade fails outright instead. Make the change deliberately, then re-run this check.",
       "breaking": false,
       "downgrade": false,
       "failsRun": true
@@ -69,7 +69,7 @@
       "verdict": "unknown",
       "notes": "2.0.0 unchanged, no record covers a rename",
       "reason": "identity-changed",
-      "explanation": "omega-operator stays at 2.0.0, but its grafana.fullnameOverride moves from grafana to omega-grafana. Transition records assess version boundaries, so none assesses a change of identity. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key feeds the chart's selector labels, spec.selector is immutable and the upgrade fails outright instead. Make the change deliberately, then re-run this check.",
+      "explanation": "omega-operator stays at 2.0.0, but its grafana.fullnameOverride moves from grafana to omega-grafana. Transition records assess version boundaries, so none assesses a change of identity. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key changes the selector labels of an object whose name does not change, for example nameOverride moving while fullnameOverride is pinned, spec.selector is immutable and the upgrade fails outright instead. Make the change deliberately, then re-run this check.",
       "breaking": false,
       "downgrade": false,
       "failsRun": true
@@ -89,7 +89,7 @@
       "verdict": "unknown",
       "notes": "1.0.0 unchanged, no record covers a rename",
       "reason": "identity-changed",
-      "explanation": "psi-operator stays at 1.0.0, but its fullnameOverride is now set to psi. Transition records assess version boundaries, so none assesses a change of identity. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key feeds the chart's selector labels, spec.selector is immutable and the upgrade fails outright instead. Make the change deliberately, then re-run this check.",
+      "explanation": "psi-operator stays at 1.0.0, but its fullnameOverride is now set to psi. Transition records assess version boundaries, so none assesses a change of identity. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key changes the selector labels of an object whose name does not change, for example nameOverride moving while fullnameOverride is pinned, spec.selector is immutable and the upgrade fails outright instead. Make the change deliberately, then re-run this check.",
       "breaking": false,
       "downgrade": false,
       "failsRun": true
@@ -109,7 +109,7 @@
       "verdict": "unknown",
       "notes": "2 patches, nameOverride theta -\u003e theta-new",
       "reason": "identity-changed",
-      "explanation": "the move from 1.4.0 to 1.4.2 is recorded safe, but its nameOverride moves from theta to theta-new, and no record assessed that. Transition records assess version boundaries, so none assesses a change of identity. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key feeds the chart's selector labels, spec.selector is immutable and the upgrade fails outright instead. Make the change deliberately, then re-run this check.",
+      "explanation": "the move from 1.4.0 to 1.4.2 is recorded safe, but its nameOverride moves from theta to theta-new, and no record assessed that. Transition records assess version boundaries, so none assesses a change of identity. Renaming the objects a chart owns is applied as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. Where the moved key changes the selector labels of an object whose name does not change, for example nameOverride moving while fullnameOverride is pinned, spec.selector is immutable and the upgrade fails outright instead. Make the change deliberately, then re-run this check.",
       "jump": "2 patches",
       "covers": "1 minor",
       "breaking": false,

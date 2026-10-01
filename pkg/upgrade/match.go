@@ -465,11 +465,13 @@ func identityChanges(from, to Identity) []IdentityChange {
 // at the moment they decide whether to upgrade, so naming the wrong
 // consequence sends them to the wrong remedy.
 //
-// The selector clause is deliberately conditional. fullnameOverride renames
-// objects without touching the selector in the standard chart scaffold;
-// nameOverride feeds app.kubernetes.io/name, which does sit in spec.selector.
-// Which applies is a property of the chart, so the text says where to look
-// rather than promising a failure that may not happen.
+// The selector clause is deliberately narrow. The immutable-selector failure
+// needs an object that keeps its NAME while its selector labels change — the
+// standard scaffold's nameOverride moving under a pinned fullnameOverride. A
+// key that renames the object too is plain delete-and-recreate with no error,
+// so the text names the one condition rather than promising a failure that
+// may not happen. It ships in the JSON explanation, so it is worth getting
+// exactly right once.
 func identityAdvice(moved []IdentityChange) string {
 	kinds := identityKindsOf(moved)
 	parts := []string{"Transition records assess version boundaries, so none assesses a change of identity."}
@@ -486,8 +488,9 @@ func identityAdvice(moved []IdentityChange) string {
 	if kinds[kindRename] {
 		parts = append(parts, "Renaming the objects a chart owns is applied as delete-and-recreate, "+
 			"so expect a service gap, and an orphan for anything referenced by name or not owned by "+
-			"the release. Where the moved key feeds the chart's selector labels, spec.selector is "+
-			"immutable and the upgrade fails outright instead.")
+			"the release. Where the moved key changes the selector labels of an object whose name "+
+			"does not change, for example nameOverride moving while fullnameOverride is pinned, "+
+			"spec.selector is immutable and the upgrade fails outright instead.")
 	}
 	return strings.Join(append(parts, "Make the change deliberately, then re-run this check."), " ")
 }
