@@ -165,15 +165,38 @@ func RenderChart(ctx context.Context, input ChartInput) ([]byte, error) {
 	if err := cmd.Run(); err != nil {
 		detail := strings.TrimSpace(stderr.String())
 		msg := "helm template failed"
-		if _, after, ok := strings.Cut(detail, "Error:"); ok {
-			line, _, _ := strings.Cut(after, "\n")
-			msg += ": " + strings.TrimSpace(line)
+		if summary := summarizeHelmError(detail); summary != "" {
+			msg += ": " + summary
 		}
 		return stdoutBuf.Bytes(), errors.WrapWithContext(errors.ErrCodeInternal, msg, err,
 			map[string]any{"component": input.Name, "stderr": detail})
 	}
 
 	return stdoutBuf.Bytes(), nil
+}
+
+// summarizeHelmError returns the text of the first stderr line that starts
+// with "Error:", plus any continuation lines up to the next blank line,
+// joined by spaces. Warnings and other lines that merely mention "Error:" are
+// ignored. It returns "" when stderr has no such line.
+func summarizeHelmError(stderr string) string {
+	var parts []string
+	found := false
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case !found:
+			if rest, ok := strings.CutPrefix(line, "Error:"); ok {
+				found = true
+				parts = append(parts, strings.TrimSpace(rest))
+			}
+		case line == "":
+			return strings.Join(parts, " ")
+		default:
+			parts = append(parts, line)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // writeValuesFile marshals values to a temporary YAML file and returns
