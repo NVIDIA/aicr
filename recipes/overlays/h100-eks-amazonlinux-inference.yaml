@@ -105,5 +105,6 @@ spec:
     # entirely keeps nvidia-setup off AL2023 nodes.
     - name: nodewright-customizations
       type: Helm
+      manifestFiles: []
       overrides:
         enabled: false
