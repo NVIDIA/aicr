@@ -252,6 +252,9 @@ spec:
           - name: K8s.oke-legacy-plugin.nvidia-gpu-device-plugin
             value: none
             remediation: >-
+              If the reading is unknown because the snapshot could not reach
+              the cluster API (no cluster access, or RBAC denied the
+              DaemonSet get), fix access and re-run aicr snapshot. Otherwise,
               OKE's legacy addon-manager device plugin (the kube-system
               nvidia-gpu-device-plugin DaemonSet) still targets GPU nodes on
               this cluster, or a DaemonSet with that name exists without
