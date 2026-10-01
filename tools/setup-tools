@@ -89,8 +89,13 @@ retry_transient() {
 # -o file from scratch. CURL_RETRY_ALL adds a stall guard that aborts an attempt
 # moving under 1 KiB/s for 30s, so a slow but moving download of a large asset
 # is not capped the way a total --max-time would.
-CURL_RETRY=(--retry $((RETRY_ATTEMPTS - 1)) --retry-connrefused --connect-timeout 10)
-CURL_RETRY_ALL=("${CURL_RETRY[@]}" --speed-limit 1024 --speed-time 30)
+#
+# --retry-max-time bounds the retries, including a server's Retry-After wait,
+# which curl otherwise honors without limit. curl skips a retry whose wait would
+# pass the limit. Downloads get more room because a large asset can use most of
+# the probe's limit on one attempt.
+CURL_RETRY=(--retry $((RETRY_ATTEMPTS - 1)) --retry-connrefused --connect-timeout 10 --retry-max-time 60)
+CURL_RETRY_ALL=("${CURL_RETRY[@]}" --retry-max-time 600 --speed-limit 1024 --speed-time 30)
 # --retry-all-errors needs curl 7.71 or newer. An older curl rejects it as an
 # unknown option, so it is added only when curl lists it.
 if [[ "$(curl --help all 2>/dev/null)" == *--retry-all-errors* ]]; then

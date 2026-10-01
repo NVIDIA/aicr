@@ -401,6 +401,12 @@ FAKE
             { echo "the probe must pass --retry 2 without --retry-all-errors: $(cat "${scratch}/args")"; exit 1; }
         [[ " ${CURL_RETRY_ALL[*]} " == *" --retry-all-errors "* ]] || { echo "downloads do not retry all errors"; exit 1; }
 
+        # A Retry-After wait is bounded, and the last --retry-max-time wins.
+        grep -q -- '--retry-max-time 60 ' "${scratch}/args" ||
+            { echo "the probe must bound retries with --retry-max-time 60: $(cat "${scratch}/args")"; exit 1; }
+        [[ " ${CURL_RETRY_ALL[*]} " == *" --retry-max-time 600 "* ]] ||
+            { echo "downloads do not bound retries with --retry-max-time 600"; exit 1; }
+
         # retry_transient wraps installer scripts. Check the attempt count, the
         # final status, and that the warning names the label.
         flaky() { local n; n=$(( $(cat "${scratch}/runs" 2>/dev/null || echo 0) + 1 )); echo "${n}" > "${scratch}/runs"; [[ "${n}" -ge "$1" ]]; }
