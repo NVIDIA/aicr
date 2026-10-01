@@ -4,10 +4,10 @@
 
 ## Motivation / Context
 
-<!-- Why is this change needed? Link issues/discussions. -->
+<!-- Why is this change needed? Link the issue assigned to you, one line per issue. -->
 
-Fixes: <!-- #123 or N/A -->
-Related: <!-- #123 or N/A -->
+Fixes: <!-- #123 if this closes the issue, else N/A -->
+Related: <!-- #123 if this is partial work, else N/A; one of the two is required -->
 
 ## Type of Change
 
