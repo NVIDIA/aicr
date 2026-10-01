@@ -1147,6 +1147,10 @@ jobs:
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
             set +x  # keep the storage account key out of the xtrace log
+            # The session from "Re-authenticate to Azure for teardown" cannot
+            # self-refresh, so an attempt that starts after it expires fails
+            # AADSTS700024, and so does every retry. Re-login per attempt.
+            ./tests/uat/azure/relogin.sh || echo "::warning::federated az re-login failed; attempt ${attempt} reuses the existing session"
             break_stale_state_lease
             set -x
             AZ_MOUNT=$(mktemp -d)
