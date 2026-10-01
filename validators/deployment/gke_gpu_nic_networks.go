@@ -50,6 +50,15 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 	// One list for both the census and the readiness arm (#2265): statuses carry the
 	// names and the capability state together, so the two never disagree (#5).
 	statuses, listErr := gkenet.DiscoverGPUNICNetworkStatus(ctx.Ctx, ctx.DynamicClient)
+	// healthyNames carries only Networks that are Ready AND bound — the names a
+	// runtime may select. The census and the runtime arm both use this set so an
+	// unready Network can never be wired into a workload (#2).
+	healthyNames := make([]string, 0, len(statuses))
+	for _, st := range statuses {
+		if st.Ready && st.ParamsReady {
+			healthyNames = append(healthyNames, st.Name)
+		}
+	}
 	gpuNICs := make([]string, 0, len(statuses))
 	for _, st := range statuses {
 		gpuNICs = append(gpuNICs, st.Name)
@@ -109,7 +118,7 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 		return err
 	}
 
-	return verifyDeliveredRuntimeWiring(ctx, gpuNICs)
+	return verifyDeliveredRuntimeWiring(ctx, healthyNames)
 }
 
 // verifyDeliveredRuntimeWiring is the runtime-specific arm of this check
@@ -171,7 +180,9 @@ func verifyNetworkReadinessAndBinding(statuses []gkenet.GPUNICNetworkStatus) err
 	readyBound := 0
 	var firstBad gkenet.GPUNICNetworkStatus
 	for _, st := range statuses {
-		if st.Ready && st.ParamsReady {
+		// Bound requires Ready, ParamsReady, AND a real GKENetworkParamSet reference
+		// — a stale ParamsReady=True with a missing/wrong-kind reference is not bound.
+		if st.Ready && st.ParamsReady && st.ParamSetName != "" {
 			readyBound++
 		} else if firstBad.Name == "" {
 			firstBad = st
@@ -192,11 +203,11 @@ func unhealthyDetail(st gkenet.GPUNICNetworkStatus, readyBound int) string {
 	}
 	switch {
 	case !st.Ready:
-		return fmt.Sprintf("%s; Network %q is not Ready (%s)", short, st.Name, st.Detail)
+		return fmt.Sprintf("%s; Network %q is not Ready (%s)", short, st.Name, st.ReadyDetail)
 	case st.ParamSetName == "":
 		return fmt.Sprintf("%s; Network %q has no GKENetworkParamSet reference", short, st.Name)
 	default:
-		return fmt.Sprintf("%s; Network %q binding to GKENetworkParamSet %q is not ready (%s)", short, st.Name, st.ParamSetName, st.Detail)
+		return fmt.Sprintf("%s; Network %q binding to GKENetworkParamSet %q is not ready (%s)", short, st.Name, st.ParamSetName, st.ParamsReadyDetail)
 	}
 }
 

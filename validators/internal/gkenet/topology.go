@@ -65,6 +65,12 @@ type NodeNICInfo struct {
 	// ExtraAtGPUNICSlot names a non-TCPXO interface occupying a GPU NIC PCI slot
 	// (the gVNIC-displacement failure mode); empty when healthy.
 	ExtraAtGPUNICSlot string
+	// WrongSlotInterfaces names TCPXO interfaces (eth1..eth8) at a PCI address
+	// outside the GPU NIC slot set — a GPU NIC pushed off its slot by a gVNIC.
+	WrongSlotInterfaces []string
+	// ExtraInterfaces names ethN interfaces beyond eth8 (e.g. eth9) — an extra
+	// gVNIC additional network alongside the 8 GPU NICs.
+	ExtraInterfaces []string
 }
 
 // ParseNICInfo parses the networking.gke.io/nic-info node annotation (a JSON
@@ -106,7 +112,11 @@ func ParseNICInfo(annotation string) (*NodeNICInfo, error) {
 		}
 	}
 
-	// Displacement: a non-TCPXO interface holds a GPU NIC PCI slot.
+	// Displacement detection (best-effort until the slot set is live-validated —
+	// see a3GPUNICSlots): (a) a non-TCPXO interface holds a GPU NIC PCI slot;
+	// (b) a TCPXO interface sits at a PCI outside the GPU NIC slot set (a GPU NIC
+	// pushed off its slot); (c) an ethN interface beyond eth8 exists (an extra
+	// gVNIC alongside the 8 GPU NICs).
 	slots := map[string]string{} // pci -> interface
 	for ifName, pci := range info.Interfaces {
 		slots[pci] = ifName
@@ -119,6 +129,27 @@ func ParseNICInfo(annotation string) (*NodeNICInfo, error) {
 		if !present[ifName] {
 			info.ExtraAtGPUNICSlot = ifName + "@" + slot
 			break
+		}
+	}
+	gpuSlot := map[string]bool{}
+	for _, slot := range a3GPUNICSlots {
+		gpuSlot[slot] = true
+	}
+	for _, ifName := range tcpXOInterfaces {
+		pci, ok := info.Interfaces[ifName]
+		if !ok {
+			continue
+		}
+		if !gpuSlot[pci] {
+			info.WrongSlotInterfaces = append(info.WrongSlotInterfaces, ifName+"@"+pci)
+		}
+	}
+	for ifName := range info.Interfaces {
+		if strings.HasPrefix(ifName, "eth") {
+			n := ifName[len("eth"):]
+			if len(n) > 1 || n > "8" {
+				info.ExtraInterfaces = append(info.ExtraInterfaces, ifName)
+			}
 		}
 	}
 	return info, nil

@@ -22,6 +22,7 @@
 //	deployment gpu-operator-version
 //	deployment check-nvidia-smi
 //	deployment gke-gpu-nic-networks
+//	deployment gke-gpu-nic-topology
 package main
 
 import (

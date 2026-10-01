@@ -20,7 +20,6 @@ import (
 	"log/slog"
 	"strings"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -56,36 +55,45 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 	defer cancel()
 	nodes, err := ctx.Clientset.CoreV1().Nodes().List(listCtx, metav1.ListOptions{LabelSelector: gkeAcceleratorLabel})
 	if err != nil {
-		return classifyNodeListError(err)
+		// Mirror the sibling's probe-error classification (RBAC/timeout/transport get
+		// the matching typed code, never masquerading as inapplicable).
+		cap := validators.Capability{Component: tcpxoComponent, Subject: "a3 GPU nodes (nodes)"}
+		return cap.RequireList(err)
 	}
 	if len(nodes.Items) == 0 {
 		// No a3 GPU nodes — nothing to check topology on; the census arm owns the
-		// zero-GPU case. Not a topology failure.
-		slog.Info("no a3-megagpu-8g GPU nodes; nothing to check NIC topology on")
-		return nil
+		// zero-GPU case. Skip rather than a vacuous pass.
+		return validators.Skip("no a3 GPU nodes present — NIC topology is inapplicable here")
 	}
 
 	var problems []string
 	checked := 0
+	unverified := 0
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
-		annotation, ok := node.Annotations[gkenet.NICInfoAnnotation]
-		if !ok || annotation == "" {
-			// Cannot verify this node's topology — a documented limitation, not a
-			// failure: do not false-fail clusters that don't populate nic-info.
-			slog.Warn("GPU node lacks the nic-info annotation; NIC topology unverified",
-				"node", node.Name, "annotation", gkenet.NICInfoAnnotation)
+		annotation := node.Annotations[gkenet.NICInfoAnnotation]
+		if annotation == "" {
+			unverified++
+			slog.Warn("GPU node has no nic-info annotation; NIC topology unverified", "node", node.Name)
+			continue
+		}
+		info, err := gkenet.ParseNICInfo(annotation)
+		if err != nil {
+			// Unparseable annotation (schema drift / empty) — count as unverified, not a
+			// hard failure and never a double-wrapped internal error (#6).
+			unverified++
+			slog.Warn("GPU node nic-info annotation unparseable; NIC topology unverified", "node", node.Name, "error", err)
 			continue
 		}
 		checked++
-		info, err := gkenet.ParseNICInfo(annotation)
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to parse %s on node %q", gkenet.NICInfoAnnotation, node.Name), err)
-		}
 		if info.ExtraAtGPUNICSlot != "" {
 			problems = append(problems, fmt.Sprintf("node %q has a non-TCPXO interface %q occupying a GPU NIC PCI slot", node.Name, info.ExtraAtGPUNICSlot))
-			continue
+		}
+		for _, ws := range info.WrongSlotInterfaces {
+			problems = append(problems, fmt.Sprintf("node %q has GPU NIC interface %q at a PCI outside the GPU NIC slot set (pushed off by a gVNIC)", node.Name, ws))
+		}
+		for _, extra := range info.ExtraInterfaces {
+			problems = append(problems, fmt.Sprintf("node %q has an extra interface %q beyond the 8 GPU NICs (a gVNIC additional network)", node.Name, extra))
 		}
 		if info.GPUNICInterfaces < gkenet.RequiredGPUNICInterfaces {
 			problems = append(problems, fmt.Sprintf("node %q maps %d of %d GPU NIC interfaces (missing: %s)",
@@ -95,30 +103,19 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 
 	// Report every offending node in one pass so the operator fixes the pool once.
 	if len(problems) > 0 {
-		return errors.New(errors.ErrCodeNotFound, nicTopologyMsg(strings.Join(problems, "; ")))
+		return errors.New(errors.ErrCodeUnavailable, nicTopologyMsg(strings.Join(problems, "; ")))
 	}
 	if checked == 0 {
-		fmt.Printf("Could not verify NIC topology: no GPU node carries the %s annotation (documented limitation)\n",
-			gkenet.NICInfoAnnotation)
+		fmt.Printf("Could not verify NIC topology on any of the %d a3 GPU node(s) (%d unverified) — documented limitation\n", len(nodes.Items), unverified)
 		return nil
 	}
-	fmt.Printf("Verified NIC topology on %d GPU node(s): all map %d GPU NIC interfaces (eth1..eth8)\n",
+	if unverified > 0 {
+		fmt.Printf("Verified NIC topology on %d a3 GPU node(s); %d node(s) could not be verified (no/invalid nic-info annotation)\n", checked, unverified)
+		return nil
+	}
+	fmt.Printf("Verified NIC topology on %d a3 GPU node(s): all map %d GPU NIC interfaces (eth1..eth8)\n",
 		checked, gkenet.RequiredGPUNICInterfaces)
 	return nil
-}
-
-// classifyNodeListError turns a node-list failure into the typed error the
-// framework classifies (RBAC / timeout / transport), rather than a blanket
-// internal error — mirrors the sibling check's probe-error classification.
-func classifyNodeListError(err error) error {
-	switch {
-	case apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err):
-		return errors.Wrap(errors.ErrCodeUnauthorized, "forbidden listing GPU nodes for NIC topology", err)
-	case apierrors.IsTimeout(err):
-		return errors.Wrap(errors.ErrCodeTimeout, "timeout listing GPU nodes for NIC topology", err)
-	default:
-		return errors.Wrap(errors.ErrCodeUnavailable, "failed to list GPU nodes for NIC topology", err)
-	}
 }
 
 // nicTopologyMsg builds the operator-facing message for a NIC-topology failure

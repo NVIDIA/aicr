@@ -16,6 +16,7 @@ package gkenet
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,8 +50,13 @@ type GPUNICNetworkStatus struct {
 	ParamsReady bool
 	// ParamSetName is the spec.parametersRef.name the Network binds to ("" if unset).
 	ParamSetName string
-	// Detail carries the failing condition's reason/message for the operator-facing
-	// remediation ("" when healthy).
+	// ReadyDetail is the reason/message of a failing Ready condition ("" when healthy).
+	ReadyDetail string
+	// ParamsReadyDetail is the reason/message of a failing ParamsReady condition
+	// ("" when healthy).
+	ParamsReadyDetail string
+	// Detail carries the first failing condition's reason/message ("" when healthy),
+	// retained for the message that leads with it.
 	Detail string
 }
 
@@ -80,6 +86,7 @@ func DiscoverGPUNICNetworkStatus(ctx context.Context, dynamicClient dynamic.Inte
 		}
 		out = append(out, networkStatus(n))
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 
@@ -108,13 +115,19 @@ func networkStatus(n *unstructured.Unstructured) GPUNICNetworkStatus {
 		switch condType {
 		case conditionReady:
 			st.Ready = condStatus == conditionTrue
-			if !st.Ready && st.Detail == "" {
-				st.Detail = conditionDetail("Ready", reason, message)
+			if !st.Ready {
+				st.ReadyDetail = conditionDetail("Ready", reason, message)
+				if st.Detail == "" {
+					st.Detail = st.ReadyDetail
+				}
 			}
 		case conditionParamsReady:
 			st.ParamsReady = condStatus == conditionTrue
-			if !st.ParamsReady && st.Detail == "" {
-				st.Detail = conditionDetail("ParamsReady", reason, message)
+			if !st.ParamsReady {
+				st.ParamsReadyDetail = conditionDetail("ParamsReady", reason, message)
+				if st.Detail == "" {
+					st.Detail = st.ParamsReadyDetail
+				}
 			}
 		}
 	}

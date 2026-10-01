@@ -568,10 +568,10 @@ operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector`,
 `spec.volumes[*].secret.secretName`; lists are deduplicated, sorted and capped
 at 1024 entries. Adding a variable or key to the shipped runtime that the
 inventory should name means adding it to the corresponding set in the same
-change. No value — network name, node name, env value — ever appears. The deployment check `gke-gpu-nic-networks` runs the same recipe →
+change. No value — network name, node name, env value — ever appears. The deployment checks `gke-gpu-nic-networks` (Network readiness + binding) and `gke-gpu-nic-topology` (node NIC topology) run the same recipe →
 deployed → cluster arms, gated on the same predicate, so a base
-`h100-gke-cos-training` recipe (TCPXO, no runtime) keeps its census-only
-behaviour.
+`h100-gke-cos-training` recipe (TCPXO, no runtime) still runs the census +
+capability checks (readiness/binding; node topology).
 
 **Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/validation/validation.yaml`
 (override via `AICR_SNAPSHOT_PATH`, `AICR_VALIDATION_PATH`).

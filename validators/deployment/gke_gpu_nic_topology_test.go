@@ -98,6 +98,25 @@ func TestCheckGKEGPUNICTopology(t *testing.T) {
 		}
 	})
 
+	t.Run("gVNIC enumerated as eth1 with a GPU NIC pushed to eth9 is caught", func(t *testing.T) {
+		t.Parallel()
+		// The real displaced shape (per UAT): gVNIC takes 06:00.0 as eth1; the 8th
+		// GPU NIC is pushed to eth9 at a virtio slot outside the GPU NIC slot set.
+		e := []string{topoEntry("eth0", "0000:00:05.0"), topoEntry("eth1", topoSlots[0])}
+		for i := 1; i < len(topoIfs); i++ {
+			e = append(e, topoEntry(topoIfs[i], topoSlots[i]))
+		}
+		e = append(e, topoEntry("eth9", "0000:20:00.0"))
+		cs := k8sfake.NewClientset(topoNode("[" + strings.Join(e, ",") + "]"))
+		err := checkGKEGPUNICTopology(topoContext(cs, true))
+		if err == nil {
+			t.Fatal("expected failure for a GPU NIC pushed to eth9 by a gVNIC")
+		}
+		// The pushed GPU NIC (eth9, off the GPU NIC slot set) must be named explicitly.
+		if !strings.Contains(err.Error(), "eth9") {
+			t.Errorf("error should name the extra interface eth9: %v", err)
+		}
+	})
 	t.Run("undeclared recipe skips", func(t *testing.T) {
 		t.Parallel()
 		if err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(topoNode(healthyTopoAnnotation())), false)); !validators.IsSkip(err) {
@@ -105,10 +124,10 @@ func TestCheckGKEGPUNICTopology(t *testing.T) {
 		}
 	})
 
-	t.Run("no GPU nodes is not a topology failure", func(t *testing.T) {
+	t.Run("no GPU nodes skips as inapplicable", func(t *testing.T) {
 		t.Parallel()
-		if err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(), true)); err != nil {
-			t.Fatalf("no GPU nodes should not fail topology, got %v", err)
+		if err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(), true)); !validators.IsSkip(err) {
+			t.Fatalf("zero a3 nodes must skip as inapplicable, got %v", err)
 		}
 	})
 
