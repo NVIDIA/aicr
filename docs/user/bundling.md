@@ -1,9 +1,9 @@
 # Generating Bundles
 
 `aicr bundle` materializes a recipe into deployment-ready artifacts — one
-folder per component, each with Helm values, checksums, and a README. This
-guide covers the common bundling tasks: choosing a deployer, overriding values,
-enabling or disabling components, pinning node scheduling, producing offline
+folder per component with its Helm values, plus a root README, `checksums.txt`,
+and `bundle-info.yaml`. This guide covers the common bundling tasks: choosing a
+deployer, overriding values, enabling or disabling components, pinning node scheduling, producing offline
 bundles, and gating on component readiness.
 
 This is a task-oriented how-to. For the complete flag list and exit codes, see

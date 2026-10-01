@@ -93,7 +93,7 @@ aicr snapshot [flags]
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves both the agent's run-scoped `aicr-node-reader-<run-id>` ClusterRole and the identically named ClusterRoleBinding active. By default the ClusterRole grants only read-only access; with `--discover-network` it also carries the mutating rules live network discovery needs (CRD/namespace/daemonset create, pod exec, node patch, NicClusterPolicy). Delete both when you are done — removing only the binding leaves the grant definition behind. |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
-| `--require-gpu` | | bool | false | Require GPU detection: fails the snapshot if no GPU is found. In agent mode, also requests an `nvidia.com/gpu` resource for the agent pod (mutually exclusive with `--runtime-class`). Reads `AICR_REQUIRE_GPU` env when unset. |
+| `--require-gpu` | | bool | false | Requests an `nvidia.com/gpu` resource for the agent pod, so it schedules only onto GPU nodes (mutually exclusive with `--runtime-class`). Reads `AICR_REQUIRE_GPU` env when unset. |
 | `--runtime-class` | | string | | Runtime class for GPU access without consuming a GPU allocation (e.g., `nvidia`). Mutually exclusive with `--require-gpu`. Reads `AICR_RUNTIME_CLASS` env when unset. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 | `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
@@ -2009,9 +2009,9 @@ When provided, the value is written to all Helm value paths declared in the comp
 **Example:**
 
 ```bash
-# Pin an explicit StorageClass on EKS (e.g. gp3) instead of relying on the cluster default
+# Pin an explicit StorageClass on EKS (AICR's gp3-backed class) instead of relying on the cluster default
 aicr bundle --recipe recipe.yaml \
-  --storage-class gp3 \
+  --storage-class ebs-csi-default-sc \
   --output bundle
 
 # Use a custom storage class on an on-prem cluster

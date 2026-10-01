@@ -338,7 +338,7 @@ Configured in the root `Before` hook (`root.go`):
 | `--debug` / `AICR_DEBUG` | `slog` text logger at debug level, full metadata |
 | `--log-json` / `AICR_LOG_JSON` | structured JSON logger; wins over `--debug` for output format, debug level still applied |
 | neither | `pkg/logging.SetDefaultCLILogger` — human-readable, TTY-aware |
-| `AICR_LOG_LEVEL` | overrides level for the structured logger (unprefixed `LOG_LEVEL` is not honored) |
+| `AICR_LOG_LEVEL` | not read by the `aicr` CLI (level comes from `--debug`); honored only by `aicrd` (unprefixed `LOG_LEVEL` is not honored) |
 | `NO_COLOR` (de-facto) | suppresses ANSI color |
 | stderr is not a TTY | suppresses ANSI color (`pkg/logging` detects via `golang.org/x/term`) |
 

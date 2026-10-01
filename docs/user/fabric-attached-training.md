@@ -328,9 +328,9 @@ prerequisites.
 ## Verifying the fabric is in use
 
 Run a short job with `NCCL_DEBUG=INFO` and check which transport NCCL selected.
-The runtimes AICR ships set `NCCL_DEBUG=WARN` or leave it unset, and at either
-level this line is suppressed — so grepping an ordinary run finds nothing, which is not evidence of
-socket fallback:
+The runtimes AICR ships set `NCCL_DEBUG=WARN` or leave it unset (NCCL then
+defaults to WARN), so this line is suppressed — grepping an ordinary run finds
+nothing, which is not evidence of socket fallback:
 
 ```shell
 # Select workers by label rather than guessing the generated pod name.

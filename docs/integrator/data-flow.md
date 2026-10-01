@@ -455,8 +455,10 @@ RecipeResult
        argocd/argocd-helm/flux/helmfile differ):
          - static values       -> <NNN-component>/values.yaml
          - dynamic/per-cluster -> <NNN-component>/cluster-values.yaml
-         - component manifests -> <NNN+1-component-post>/ (a local chart
-                                   deployed after the upstream chart)
+         - component manifests -> (NNN+1)-<component>-post/ (a local chart
+                                   deployed after the upstream chart), or
+                                   <NNN-component>/ for a manifest-only
+                                   component
          - go:embed templates  -> per-component install.sh, and the root
                                    README.md + deploy.sh
   -> write canonical recipe.yaml (Helm deployer only)
