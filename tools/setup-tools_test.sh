@@ -341,9 +341,11 @@ if ! reason=$(check_sidecar_specs); then
 fi
 echo "Sidecar sources: default suffix per algorithm, explicit suffix honored, unsupported algorithm rejected"
 
-# verify_download_url must ride out a transient CDN failure yet still fail fast
-# on a bad pin. A fake curl reads its per-attempt behavior from a script file.
-# Each line is "<http_code> <exit>", and the last line repeats once exhausted.
+# curl does the transient-failure retrying, so these checks pin what this script
+# controls: the retry count it hands curl, the diagnosis it prints for each
+# failure, and the retry loop around installer scripts. A fake curl reads its
+# behavior from a script file. Each line is "<http_code> <exit>", and the last
+# line repeats once exhausted. Every call's arguments are appended to a log.
 check_download_retry() {
     (
         export SETUP_TOOLS_SOURCE_ONLY="true" RETRY_BASE_DELAY=0
@@ -356,58 +358,52 @@ check_download_retry() {
 #!/usr/bin/env bash
 n=$(( $(cat "${FAKE_DIR}/count" 2>/dev/null || echo 0) + 1 ))
 echo "${n}" > "${FAKE_DIR}/count"
+echo "$*" >> "${FAKE_DIR}/args"
 line=$(sed -n "${n}p" "${FAKE_DIR}/script"); [[ -n "${line}" ]] || line=$(tail -n1 "${FAKE_DIR}/script")
-read -r code rc body <<< "${line}"
-while [[ $# -gt 0 ]]; do
-    [[ "$1" == "-o" && "${2:-}" != /dev/null ]] && printf '%s' "${body}" > "$2"
-    shift
-done
+read -r code rc <<< "${line}"
 printf '%s' "${code}"
 exit "${rc}"
 FAKE
         chmod +x "${scratch}/curl"
         export PATH="${scratch}:${PATH}" FAKE_DIR="${scratch}"
 
-        # run <want-rc> <want-attempts> <label> <script-lines...>
-        run() {
-            local want_rc="$1" want_n="$2" label="$3" rc=0; shift 3
-            printf '%s\n' "$@" > "${scratch}/script"; rm -f "${scratch}/count"
-            verify_download_url "https://example.invalid/x" "${label}" >/dev/null 2>&1 || rc=$?
+        # probe <want-rc> <want-message> <label> <script-line>
+        probe() {
+            local want_rc="$1" want_msg="$2" label="$3" rc=0 out; shift 3
+            printf '%s\n' "$@" > "${scratch}/script"; rm -f "${scratch}/count" "${scratch}/args"
+            out=$(verify_download_url "https://example.invalid/x" "${label}" 2>&1) || rc=$?
             [[ "${rc}" -eq "${want_rc}" ]] || { echo "${label}: exit ${rc}, want ${want_rc}"; exit 1; }
-            got_n=$(cat "${scratch}/count")
-            [[ "${got_n}" -eq "${want_n}" ]] || { echo "${label}: ${got_n} attempts, want ${want_n}"; exit 1; }
+            [[ "${out}" == *"${want_msg}"* ]] || { echo "${label}: output lacks '${want_msg}': ${out}"; exit 1; }
+            [[ "$(wc -l < "${scratch}/args")" -eq 1 ]] || { echo "${label}: curl was called more than once"; exit 1; }
         }
 
-        run 0 1 "healthy URL"                  "200 0"
-        run 0 3 "CDN blip clears on attempt 3" "302 35" "302 35" "200 0"
-        run 1 3 "CDN down for every attempt"   "302 35"
-        run 1 1 "404 fails fast"               "404 22"
-        run 1 1 "403 fails fast"               "403 22"
-        run 0 2 "503 is retried"               "503 22" "200 0"
+        probe 0 ""                        "healthy URL"          "200 0"
+        probe 1 "File not found (404)"    "404"                  "404 22"
+        probe 1 "Access forbidden (403)"  "403"                  "403 22"
+        probe 1 "redirect target did not answer" "dead redirect" "302 35"
+        probe 1 "Could not resolve host"  "no DNS"               "000 6"
 
-        # download_file <want-rc> <want-attempts> <want-body> <label> <script-lines...>
-        fetch() {
-            local want_rc="$1" want_n="$2" want_body="$3" label="$4" rc=0; shift 4
-            printf '%s\n' "$@" > "${scratch}/script"; rm -f "${scratch}/count" "${scratch}/out"
-            retry_transient download_file "https://example.invalid/x" "${scratch}/out" >/dev/null 2>&1 || rc=$?
+        # The retry count curl receives follows RETRY_ATTEMPTS: N attempts is N-1 retries.
+        probe 0 "" "default attempts" "200 0"
+        grep -q -- '--retry 2 --retry-connrefused' "${scratch}/args" ||
+            { echo "default attempts did not pass --retry 2: $(cat "${scratch}/args")"; exit 1; }
+        got=$(RETRY_ATTEMPTS=5 bash -c 'source "$1"; echo "${CURL_RETRY[*]}"' _ "${SETUP_TOOLS}")
+        [[ "${got}" == --retry\ 4\ * ]] || { echo "RETRY_ATTEMPTS=5 gave curl flags '${got}', want --retry 4"; exit 1; }
+
+        # retry_transient is for installer scripts. attempts, final status, and label.
+        flaky() { local n; n=$(( $(cat "${scratch}/runs" 2>/dev/null || echo 0) + 1 )); echo "${n}" > "${scratch}/runs"; [[ "${n}" -ge "$1" ]]; }
+        attempt() {
+            local want_rc="$1" want_n="$2" label="$3" succeed_on="$4" rc=0 out
+            rm -f "${scratch}/runs"
+            out=$(retry_transient "${label}" flaky "${succeed_on}" 2>&1) || rc=$?
             [[ "${rc}" -eq "${want_rc}" ]] || { echo "${label}: exit ${rc}, want ${want_rc}"; exit 1; }
-            got_n=$(cat "${scratch}/count")
-            [[ "${got_n}" -eq "${want_n}" ]] || { echo "${label}: ${got_n} attempts, want ${want_n}"; exit 1; }
-            if [[ -n "${want_body}" ]]; then
-                got_body=$(cat "${scratch}/out")
-                [[ "${got_body}" == "${want_body}" ]] || { echo "${label}: body '${got_body}', want '${want_body}'"; exit 1; }
-            fi
+            [[ "$(cat "${scratch}/runs")" -eq "${want_n}" ]] || { echo "${label}: $(cat "${scratch}/runs") attempts, want ${want_n}"; exit 1; }
+            [[ "${want_rc}" -eq 0 && "${want_n}" -eq 1 ]] || [[ "${out}" == *"${label} attempt 1/3 failed"* ]] ||
+                { echo "${label}: warning does not name the label: ${out}"; exit 1; }
         }
-
-        fetch 0 1 ""        "download succeeds"                "200 0"
-        fetch 99 1 ""       "download 404 fails fast"          "404 22"
-        fetch 99 1 ""       "download 403 fails fast"          "403 22"
-        fetch 0 2 ""        "download 503 is retried"          "503 22" "200 0"
-        fetch 0 2 ""        "download 429 is retried"          "429 22" "200 0"
-        fetch 0 2 ""        "download 408 is retried"          "408 22" "200 0"
-        fetch 0 2 ""        "download transport failure retried" "000 35" "200 0"
-        fetch 35 3 ""       "download keeps failing"           "000 35"
-        fetch 0 2 "digest"  "partial output is overwritten"    "000 18 partialpartial" "200 0 digest"
+        attempt 0 1 "installer clean"       1
+        attempt 0 3 "installer blip"        3
+        attempt 1 3 "installer down"        99
     )
 }
 
@@ -443,7 +439,7 @@ if ! reason=$(check_download_retry); then
     echo "FAIL: ${reason}" >&2
     exit 1
 fi
-echo "Download retry: transient failures retried, 404 and 403 fail on the first attempt, a retry never keeps a failed attempt's partial output"
+echo "Download retry: curl gets RETRY_ATTEMPTS-1 retries, each failure is diagnosed once, installer scripts retry under a labeled loop"
 
 # A combined checksums file comes in two shapes: GNU (`<digest>  <file>`, or
 # `<digest> *<file>` in binary mode) and BSD (`SHA256 (<file>) = <digest>`,
