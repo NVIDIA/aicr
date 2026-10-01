@@ -99,9 +99,11 @@ spec:
     # nvidia-setup-full) with no-op.yaml so no nvidia-setup packages run.
     # nvidia-tuned support for AL2023 is not yet validated; no tuning manifest
     # is applied until OS coverage is confirmed.
+    # nodewright-customizations is disabled on AL2023: nvidia-setup is
+    # Debian/Ubuntu-only and manifestFiles merge additively so no-op.yaml
+    # cannot suppress the inherited tuning.yaml. Disabling the component
+    # entirely keeps nvidia-setup off AL2023 nodes.
     - name: nodewright-customizations
       type: Helm
-      manifestFiles:
-        - components/nodewright-customizations/manifests/no-op.yaml
-      dependencyRefs:
-        - nodewright-operator
+      overrides:
+        enabled: false
