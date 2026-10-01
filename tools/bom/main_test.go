@@ -1071,3 +1071,23 @@ components:
 		}
 	}
 }
+
+// TestExpectedNoImagesNamesRegistryHelmComponents catches a removed, renamed,
+// or misspelled expectedNoImages key, which would otherwise never match.
+func TestExpectedNoImagesNamesRegistryHelmComponents(t *testing.T) {
+	reg, err := loadRegistry(filepath.Join("..", "..", "recipes", "registry.yaml"))
+	if err != nil {
+		t.Fatalf("loadRegistry: %v", err)
+	}
+	helmComponents := map[string]bool{}
+	for _, c := range reg.Components {
+		if c.kind() == kindHelm {
+			helmComponents[c.Name] = true
+		}
+	}
+	for name := range expectedNoImages {
+		if !helmComponents[name] {
+			t.Errorf("expectedNoImages lists %q, which is not a Helm component in recipes/registry.yaml", name)
+		}
+	}
+}
