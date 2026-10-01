@@ -93,17 +93,17 @@ CURL_RETRY=(--retry $((RETRY_ATTEMPTS - 1)) --retry-connrefused --connect-timeou
 CURL_RETRY_ALL=("${CURL_RETRY[@]}" --speed-limit 1024 --speed-time 30 --retry-all-errors)
 
 # probe_url HEADs a URL, following redirects, and records curl's HTTP status and
-# exit code in PROBE_HTTP_CODE and PROBE_CURL_EXIT. It fails on a 403, which
-# GitHub and CDN rate limits return, and on a curl failure after a 3xx, where
-# the redirect target did not answer (for example a TLS error, which curl does
-# not retry). retry_transient retries those and nothing else. curl has already
-# retried the other transient failures.
+# exit code in PROBE_HTTP_CODE and PROBE_CURL_EXIT. It fails, so retry_transient
+# retries, on a 403 (GitHub and CDN rate limits return it) and on any curl exit
+# curl's own retry skips, such as a TLS error, reset, or empty reply from the
+# first hop or a redirect target. It succeeds, ending retries, on a 2xx, on a
+# 404 or other 4xx (exit 22), on a DNS failure (6), and on a connection refusal
+# or timeout (7, 28) that curl has already retried, so attempts never multiply.
 probe_url() {
     PROBE_CURL_EXIT=0
     PROBE_HTTP_CODE=$(curl -fsIL "${CURL_RETRY[@]}" --max-time 30 \
         -w "%{http_code}" -o /dev/null "$1") || PROBE_CURL_EXIT=$?
-    [[ "$PROBE_HTTP_CODE" != "403" ]] &&
-        ! [[ $PROBE_CURL_EXIT -ne 0 && "$PROBE_HTTP_CODE" == 3* ]]
+    [[ "$PROBE_HTTP_CODE" != "403" && "$PROBE_CURL_EXIT" =~ ^(0|6|7|22|28)$ ]]
 }
 
 # Verify URL accessibility before downloading. A 404 fails on the first attempt,

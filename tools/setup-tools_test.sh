@@ -386,6 +386,14 @@ FAKE
         probe 0 3 ""                       "redirect recovers" "302 35" "302 35" "200 0"
         probe 1 1 "Could not resolve host" "no DNS"           "000 6"
 
+        # A first-hop reset, empty reply, or TLS error is not retried by curl, so
+        # the probe retries it. A timeout after a redirect is already retried by
+        # curl, so the probe must not retry it again.
+        probe 0 3 ""                       "first hop reset clears" "000 56" "000 56" "200 0"
+        probe 1 3 "curl exit 52"           "first hop empty reply"  "000 52"
+        probe 1 1 "redirect target did not answer" "redirect timeout is not retried twice" "302 28"
+        probe 1 1 "curl exit 7"            "refused is not retried twice" "000 7"
+
         # N attempts is N-1 curl retries. Only downloads retry a 404, since the
         # probe has already confirmed their URL.
         probe 0 1 "" "flags" "200 0"
