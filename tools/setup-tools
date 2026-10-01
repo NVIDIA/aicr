@@ -1283,7 +1283,12 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
                 exit 1
             fi
             verify_sha256 "$GOLANGCI_TMP" "${GOLANGCI_LINT_INSTALL_SHA256}"
-            sh "$GOLANGCI_TMP" -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
+            # install.sh looks up the release on github.com, which can 502.
+            if ! retry_transient "golangci-lint install" sh "$GOLANGCI_TMP" -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"; then
+                log_error "golangci-lint install failed after ${RETRY_ATTEMPTS} attempts"
+                rm -f "$GOLANGCI_TMP"
+                exit 1
+            fi
             rm -f "$GOLANGCI_TMP"
             log_success "golangci-lint installed"
         fi
