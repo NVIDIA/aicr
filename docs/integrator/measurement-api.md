@@ -441,12 +441,14 @@ The fields are:
 Interpretation is fail-closed: `none` is the only value the `gpuStack`
 `operator-managed` constraint accepts — `active` means Oracle's legacy
 plugin would double-advertise `nvidia.com/gpu` alongside the GPU Operator's,
-and `unknown` means "could not look", which must never read as "not
-present". The `oci-managed` value deliberately carries no constraint on this
-reading: when the managed add-on is installed it reconciles the same
-DaemonSet name. When the subtype is absent entirely (a snapshot from an
-older aicr), constraint evaluation reports the reading unavailable and fails
-closed.
+and `unknown` means the reading cannot be trusted, which must never read as
+"not present". That covers both "could not look" (API failure or a snapshot
+taken without cluster access) and a same-named DaemonSet without the
+`Reconcile` label, whose owner cannot be established. The `oci-managed`
+value deliberately carries no constraint on this reading: when the managed
+add-on is installed it reconciles the same DaemonSet name. When the subtype
+is absent entirely (a snapshot from an older aicr), constraint evaluation
+reports the reading unavailable and fails closed.
 
 The constraint path is `K8s.oke-legacy-plugin.nvidia-gpu-device-plugin`.
 
