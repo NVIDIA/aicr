@@ -76,6 +76,18 @@ func TestParseCompat(t *testing.T) {
 			true,
 		},
 		{"malformed yaml", "floors: [\n", true},
+		{
+			"min-release via merge key has no line",
+			"floors:\n  - &base\n    lane: gcp\n    intents: [training]\n    min-release: v0.22.0\n    reason: r\n" +
+				"  - <<: *base\n    lane: azure\n",
+			true,
+		},
+		{
+			"floor row via alias has no line",
+			"floors:\n  - &row\n    lane: gcp\n    intents: [training]\n    min-release: v0.22.0\n    reason: r\n" +
+				"  - *row\n",
+			true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

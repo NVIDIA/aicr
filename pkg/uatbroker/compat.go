@@ -128,8 +128,9 @@ func LoadCompatFile(path string, reg *Registry) (*Compat, error) {
 	return c, nil
 }
 
-// recordLines fills each Floor.Line from the document's node tree. The strict
-// decode has already succeeded, so the tree shape is known to match.
+// recordLines fills each Floor.Line from the document's node tree and rejects
+// any floor left without one. The strict decode has already succeeded, so the
+// tree shape is known to match.
 func (c *Compat) recordLines(data []byte) error {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
@@ -138,16 +139,23 @@ func (c *Compat) recordLines(data []byte) error {
 	if len(doc.Content) == 0 {
 		return nil
 	}
-	floors := mappingValue(doc.Content[0], "floors")
-	if floors == nil || floors.Kind != yaml.SequenceNode {
-		return nil
-	}
-	for i, item := range floors.Content {
-		if i >= len(c.Floors) {
-			break
+	if floors := mappingValue(doc.Content[0], "floors"); floors != nil && floors.Kind == yaml.SequenceNode {
+		for i, item := range floors.Content {
+			if i >= len(c.Floors) {
+				break
+			}
+			if v := mappingValue(item, "min-release"); v != nil {
+				c.Floors[i].Line = v.Line
+			}
 		}
-		if v := mappingValue(item, "min-release"); v != nil {
-			c.Floors[i].Line = v.Line
+	}
+	// A min-release supplied through a YAML alias or merge key (<<: *base)
+	// decodes but has no line of its own: there is nothing to blame and no
+	// line --ignore-floor-lines can name, so the floor could not be checked.
+	for i := range c.Floors {
+		if c.Floors[i].Line == 0 {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("compat floor[%d] has no min-release line of its own; write the key directly on the row (no YAML aliases or merge keys)", i))
 		}
 	}
 	return nil
