@@ -751,6 +751,9 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     log_info "Development Tools Installation"
     echo "════════════════════════════════════════════════════════"
 
+    # install.sh is fetched from the grype tag in .settings.yaml, so this hash is
+    # version-specific: re-pin it whenever security_tools.grype is bumped.
+    #   curl -fsSL "https://raw.githubusercontent.com/anchore/grype/$(yq '.security_tools.grype' .settings.yaml)/install.sh" | shasum -a 256
     GRYPE_INSTALL_SHA256=${GRYPE_INSTALL_SHA256:-"8646f06a90b10ca64992c1809b4aa00c44e30b4f551f63c309b0b0ab66873556"}
     # install.sh is fetched from the golangci-lint tag in .settings.yaml, so this
     # hash is version-specific: re-pin it whenever linting.golangci_lint is bumped.
@@ -952,7 +955,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install grype
             elif [[ "${OS}" == "linux" ]]; then
-                GRYPE_SCRIPT_URL="https://raw.githubusercontent.com/anchore/grype/main/install.sh"
+                GRYPE_SCRIPT_URL="https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh"
                 GRYPE_TMP=$(mktemp -d)
                 if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "$GRYPE_TMP/install.sh" "$GRYPE_SCRIPT_URL"; then
                     log_error "Failed to download the grype install script from $GRYPE_SCRIPT_URL"
