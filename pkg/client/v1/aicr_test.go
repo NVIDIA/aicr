@@ -2921,7 +2921,7 @@ func TestResolveRecipe_InheritFromRejects(t *testing.T) {
 		// Loads and validates cleanly: nothing on the load path requires a
 		// component list, so this is the one rejected shape that reaches the
 		// inheritance step rather than failing before it.
-		{"recipe with no componentRefs", noComponents, "carries no components to inherit namespaces from"},
+		{"recipe with no componentRefs", noComponents, "carries no components to inherit identity from"},
 		{"leaf overlay is not a resolved recipe", overlay, "it must be a resolved RecipeResult"},
 		{"namespace carrying shell metacharacters", injected, "is not a valid Kubernetes namespace"},
 	}
