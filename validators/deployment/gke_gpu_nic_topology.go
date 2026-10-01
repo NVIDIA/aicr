@@ -42,6 +42,7 @@ const (
 	topoKeyTotal      = "nodesTotal"
 )
 
+// nodeTopology pairs a node name with its parsed NIC topology (for pool-consistency).
 type nodeTopology struct {
 	name string
 	info *gkenet.NodeNICInfo
@@ -53,8 +54,6 @@ type nodeTopology struct {
 // a3 GPU node's networking.gke.io/nic-info annotation and fail closed on the
 // displacement. Reads node annotations; the sibling gke-gpu-nic-networks check
 // reads cluster-scoped Network CRs.
-// nodeTopology pairs a node name with its parsed NIC topology (for pool-consistency).
-
 func checkGKEGPUNICTopology(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes clientset is not available")
@@ -105,9 +104,13 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 
 	var problems []string
 	var verified []nodeTopology
-	// flagged marks nodes already reported for a displacement signature so the pool
-	// consistency check does not blame them a second time.
-	flagged := map[string]bool{}
+	// flaggedMissing marks nodes that do NOT map all 8 GPU NICs — their PCI layout
+	// is unreliable, so they are excluded from the pool-consistency vote. flaggedExtra
+	// marks nodes that map all 8 but carry an extra interface — their layout is still
+	// valid, so they DO vote, but they are already reported and must not be blamed
+	// again by the pool check.
+	flaggedMissing := map[string]bool{}
+	flaggedExtra := map[string]bool{}
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
 		annotation := node.Annotations[gkenet.NICInfoAnnotation]
@@ -126,12 +129,16 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 
 		if len(info.ExtraInterfaces) > 0 {
 			problems = append(problems, fmt.Sprintf("node %q has unexpected interface(s) beyond eth0..eth8: %s (gVNIC displacement signature)", node.Name, strings.Join(info.ExtraInterfaces, ",")))
-			flagged[node.Name] = true
+			flaggedExtra[node.Name] = true
+		}
+		if len(info.DuplicatePCIs) > 0 {
+			problems = append(problems, fmt.Sprintf("node %q has interfaces sharing one PCI address (misconfigured/mirrored NIC): %s", node.Name, strings.Join(info.DuplicatePCIs, "; ")))
+			flaggedExtra[node.Name] = true
 		}
 		if info.GPUNICInterfaces < gkenet.RequiredGPUNICInterfaces {
 			problems = append(problems, fmt.Sprintf("node %q maps %d of %d GPU NIC interfaces (missing: %s)",
 				node.Name, info.GPUNICInterfaces, gkenet.RequiredGPUNICInterfaces, strings.Join(info.SortedMissing(), ",")))
-			flagged[node.Name] = true
+			flaggedMissing[node.Name] = true
 		}
 		if dev := info.ObservedGPUNICSlotDeviation(); len(dev) > 0 {
 			slog.Warn("node GPU NIC PCI layout deviates from the observed a3 norm (informational only)", "node", node.Name, "deviation", dev)
@@ -144,7 +151,7 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 
 	// Pool consistency: a node whose GPU-NIC PCI layout differs from the rest of
 	// its pool is displaced. Only meaningful when >1 node was verified.
-	poolProblems := poolConsistencyProblems(verified, flagged)
+	poolProblems := poolConsistencyProblems(verified, flaggedMissing, flaggedExtra)
 	problems = append(problems, poolProblems...)
 	if len(problems) > 0 {
 		// The remediation is typed by what actually failed, not by scanning problem
@@ -152,7 +159,7 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 		// re-provision without a gVNIC; a pool-layout mismatch means inspect the
 		// listed nodes. Both can apply at once — print every one that applies.
 		var remediation string
-		if len(flagged) > 0 {
+		if len(flaggedMissing)+len(flaggedExtra) > 0 {
 			remediation = remediationDisplacement
 		}
 		if len(poolProblems) > 0 {
@@ -195,18 +202,21 @@ const (
 // poolConsistencyProblems groups verified nodes by their GPU-NIC PCI layout. A
 // node whose layout differs from the rest of its pool is displaced — but only
 // when one layout is a strict majority (else we can't tell which side is wrong
-// and must not blame). Nodes already flagged for missing interfaces are skipped
-// so they are not reported twice. Returns the problem lines ("" when consistent).
-// flagged marks nodes already reported for a displacement signature (extras or
-// missing interfaces); they are excluded from the grouping.
-func poolConsistencyProblems(verified []nodeTopology, flagged map[string]bool) []string {
+// and must not blame). Returns nil when the pool is consistent.
+//
+// excludeFromVote marks nodes whose layout is unreliable (they do not map all 8
+// GPU NICs), so they are left out of the grouping. alreadyReported marks nodes
+// that already produced their own failure line (extras or missing), so when the
+// minority is reported they are skipped — a node is never blamed twice. A node
+// with only an EXTRA interface still maps all 8, so it votes but is not re-blamed.
+func poolConsistencyProblems(verified []nodeTopology, excludeFromVote, alreadyReported map[string]bool) []string {
 	if len(verified) < 2 {
 		return nil
 	}
 	byLayout := map[string][]string{}
 	grouped := 0
 	for _, nt := range verified {
-		if flagged[nt.name] {
+		if excludeFromVote[nt.name] {
 			continue
 		}
 		key := strings.Join(nt.info.GPUNICPCIs, ",")
@@ -216,7 +226,7 @@ func poolConsistencyProblems(verified []nodeTopology, flagged map[string]bool) [
 	if len(byLayout) < 2 {
 		return nil
 	}
-	// Find a strict-majority layout among the GROUPED nodes (flagged ones are not
+	// Find a strict-majority layout among the GROUPED nodes (excluded ones are not
 	// in any group, so the threshold and message must count only grouped nodes).
 	majority := ""
 	for layout, members := range byLayout {
@@ -238,6 +248,9 @@ func poolConsistencyProblems(verified []nodeTopology, flagged map[string]bool) [
 			members := append([]string(nil), byLayout[layout]...)
 			sort.Strings(members)
 			for _, name := range members {
+				if alreadyReported[name] {
+					continue
+				}
 				problems = append(problems, fmt.Sprintf("node %q GPU NIC PCI layout differs from the pool majority (%d of %d grouped nodes)", name, len(byLayout[majority]), grouped))
 			}
 		}

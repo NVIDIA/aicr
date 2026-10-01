@@ -264,6 +264,13 @@ func TestVerifyNetworksExist(t *testing.T) {
 	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
 		t.Fatalf("missing networks must be ErrCodeNotFound, got %v", err)
 	}
+	// Present-but-not-usable: all deployed networks are on the cluster (present),
+	// but only 4 are usable (Ready/bound). The not-usable branch must fire Conflict.
+	usable := []string{"c1-gpu-nic-0", "c1-gpu-nic-1", "c1-gpu-nic-2", "c1-gpu-nic-3"}
+	err = VerifyNetworksExist(deployed, usable, discovered)
+	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+		t.Fatalf("present-but-not-usable networks must be ErrCodeConflict, got %v", err)
+	}
 }
 
 func TestReadDeployedTCPXORuntimeNotFound(t *testing.T) {

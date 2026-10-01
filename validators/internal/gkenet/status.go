@@ -50,10 +50,9 @@ type GPUNICNetworkStatus struct {
 	ParamsReady bool
 	// ParamSetName is the spec.parametersRef.name the Network binds to ("" if unset).
 	ParamSetName string
-	// ReadyDetail is the reason/message of a failing Ready condition ("" when healthy).
+	// ReadyDetail is set when the Ready condition is false or absent.
 	ReadyDetail string
-	// ParamsReadyDetail is the reason/message of a failing ParamsReady condition
-	// ("" when healthy).
+	// ParamsReadyDetail is set when the ParamsReady condition is false or absent.
 	ParamsReadyDetail string
 }
 

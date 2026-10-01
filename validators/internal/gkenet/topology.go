@@ -59,9 +59,13 @@ type NodeNICInfo struct {
 	GPUNICInterfaces int
 	// MissingInterfaces names TCPXO interfaces (eth1..eth8) that did not map.
 	MissingInterfaces []string
-	// ExtraInterfaces names ethN interfaces beyond eth8 (e.g. eth9) — an extra
-	// gVNIC additional network alongside the 8 GPU NICs. Sorted for stable output.
+	// ExtraInterfaces names any interface that is not a canonical eth0..eth8 —
+	// an extra gVNIC (gve1), a non-canonical form (eth08/eth-1), or eth9+. Sorted for
+	// stable output.
 	ExtraInterfaces []string
+	// DuplicatePCIs lists PCI addresses claimed by more than one interface, as
+	// "pci: name1,name2" — a duplicate-address fault, distinct from an extra interface.
+	DuplicatePCIs []string
 	// GPUNICPCIs is the sorted set of PCI addresses the node's eth1..eth8 occupy,
 	// for the pool-consistency check (a node differing from its pool is displaced).
 	GPUNICPCIs []string
@@ -132,17 +136,19 @@ func ParseNICInfo(annotation string) (*NodeNICInfo, error) {
 	}
 	sort.Strings(info.ExtraInterfaces)
 
-	// Two interfaces sharing one PCI address means a misconfigured/mirrored NIC —
-	// flag it as a displacement signature too.
-	byPCI := map[string]string{}
-	for ifName, pci := range info.Interfaces {
-		if prev, dup := byPCI[pci]; dup {
-			info.ExtraInterfaces = append(info.ExtraInterfaces, ifName+"@"+pci+"(shared with "+prev+")")
-		} else {
-			byPCI[pci] = ifName
+	// Two interfaces sharing one PCI address means a misconfigured/mirrored NIC.
+	// Report them deterministically (sorted names grouped by PCI) in their own
+	// field — these are NOT 'extra beyond eth0..eth8', they are a distinct
+	// duplicate-address fault.
+	byPCI := map[string][]string{}
+	for _, ifName := range sortedInterfaceNames(info.Interfaces) {
+		byPCI[info.Interfaces[ifName]] = append(byPCI[info.Interfaces[ifName]], ifName)
+	}
+	for _, pci := range sortedKeys(byPCI) {
+		if names := byPCI[pci]; len(names) > 1 {
+			info.DuplicatePCIs = append(info.DuplicatePCIs, pci+": "+strings.Join(names, ","))
 		}
 	}
-	sort.Strings(info.ExtraInterfaces)
 	return info, nil
 }
 
@@ -174,3 +180,23 @@ func (n *NodeNICInfo) ObservedGPUNICSlotDeviation() []string {
 // tcpXOInterfaces are the kernel names the 8 GPUDirect-TCPXO data NICs bind on
 // an a3-megagpu-8g node (eth1..eth8 — the NCCL_FASTRAK_IFNAME contract).
 var tcpXOInterfaces = []string{"eth1", "eth2", "eth3", "eth4", "eth5", "eth6", "eth7", "eth8"}
+
+// sortedInterfaceNames returns the interface names of m in sorted order.
+func sortedInterfaceNames(m map[string]string) []string {
+	names := make([]string, 0, len(m))
+	for n := range m {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// sortedKeys returns the keys of m in sorted order.
+func sortedKeys(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}

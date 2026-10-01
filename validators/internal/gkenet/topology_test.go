@@ -125,10 +125,6 @@ func TestParseNICInfo(t *testing.T) {
 	}
 }
 
-// TestParseNICInfoRealShape uses the annotation shape captured from a live
-// a3-megagpu-8g node (eth0 at 00:0c.0, GPU NICs at the observed 06/07/0d/0e/86/87/8d/8e
-// slots). It is the regression guard against a parser/detector that misfires on
-// real data — it must parse healthy with no missing, no extra, no deviation.
 // liveA3NICAnnotation is the real networking.gke.io/nic-info annotation captured
 // from a healthy a3-megagpu-8g node on staging: eth0 (gVNIC) at 0000:00:0c.0 and
 // the 8 GPU NICs at the observed slots 06,07,0d,0e,86,87,8d,8e.
@@ -220,5 +216,28 @@ func TestParseNICInfoCanonicalExtras(t *testing.T) {
 				t.Errorf("%q must be flagged extra, got %v", tc.wantExtra, info.ExtraInterfaces)
 			}
 		})
+	}
+}
+
+// Two interfaces sharing one PCI address land in DuplicatePCIs (deterministic,
+// sorted), NOT in ExtraInterfaces.
+func TestParseNICInfoDuplicatePCI(t *testing.T) {
+	t.Parallel()
+	pairs := make([][2]string, 0, 2+len(tcpXOInterfaces))
+	pairs = append(pairs, [2]string{"eth0", "0000:00:0c.0"})
+	for i, name := range tcpXOInterfaces {
+		pairs = append(pairs, [2]string{name, observedA3GPUNICSlots[i]})
+	}
+	pairs = append(pairs, [2]string{"eth9", observedA3GPUNICSlots[0]}) // eth9 shares eth1's PCI
+	info, err := ParseNICInfo(nicAnnotation(pairs))
+	if err != nil {
+		t.Fatalf("ParseNICInfo: %v", err)
+	}
+	if len(info.DuplicatePCIs) != 1 {
+		t.Fatalf("expected 1 duplicate PCI, got %v", info.DuplicatePCIs)
+	}
+	// eth9 is beyond eth8 so it is ALSO an extra; the duplicate must name both names.
+	if !strings.Contains(info.DuplicatePCIs[0], "eth1") || !strings.Contains(info.DuplicatePCIs[0], "eth9") {
+		t.Errorf("duplicate PCI must name both interfaces, got %v", info.DuplicatePCIs)
 	}
 }

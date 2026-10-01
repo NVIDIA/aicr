@@ -25,7 +25,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -159,37 +161,45 @@ func TestPoolConsistencyProblems(t *testing.T) {
 	}
 	a := []string{"0000:06:00.0", "0000:07:00.0"}
 	b := []string{"0000:08:00.0", "0000:09:00.0"}
+	c := []string{"0000:0a:00.0", "0000:0b:00.0"}
 	cases := []struct {
-		name     string
-		verified []nodeTopology
-		flagged  map[string]bool
-		wantName []string // node names that must be blamed (empty = no blame/neutral handled separately)
-		wantNone bool     // expect no problems at all
+		name            string
+		verified        []nodeTopology
+		excludeFromVote map[string]bool // missing interfaces (layout unreliable)
+		alreadyReported map[string]bool // already blamed (extras or missing)
+		wantBlame       []string        // node names that must be named as the minority
+		wantNotBlame    []string        // node names that must NOT be named as the minority
+		wantNone        bool            // expect no problems at all
+		wantTie         bool            // expect the neutral 'distinct layouts' line
 	}{
-		{"consistent pool", []nodeTopology{nt("n1", a...), nt("n2", a...)}, nil, nil, true},
-		{"one node only", []nodeTopology{nt("n1", a...)}, nil, nil, true},
-		{"majority 2v1 blames minority", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...)}, nil, []string{"n3"}, false},
-		{"tie 2v2 is neutral (no node blamed)", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...), nt("n4", b...)}, nil, nil, false},
-		{"flagged node excluded from grouping", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...)}, map[string]bool{"n3": true}, nil, true},
+		{"consistent pool", []nodeTopology{nt("n1", a...), nt("n2", a...)}, nil, nil, nil, nil, true, false},
+		{"one node only", []nodeTopology{nt("n1", a...)}, nil, nil, nil, nil, true, false},
+		{"majority 2v1 blames minority only", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...)}, nil, nil, []string{"n3"}, []string{"n1", "n2"}, false, false},
+		{"tie 2v2 is neutral", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...), nt("n4", b...)}, nil, nil, nil, nil, false, true},
+		{"missing-flagged node excluded from vote", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...)}, map[string]bool{"n3": true}, map[string]bool{"n3": true}, nil, nil, true, false},
+		{"extras-flagged node still votes (#1): odd pair does not steal the majority", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", a...), nt("n4", b...), nt("n5", b...)}, nil, map[string]bool{"n1": true, "n2": true}, []string{"n4", "n5"}, []string{"n3"}, false, false},
+		{"extras-flagged minority not re-blamed", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", a...), nt("n4", b...)}, nil, map[string]bool{"n4": true}, nil, nil, true, false},
+		{"3-way split is neutral", []nodeTopology{nt("n1", a...), nt("n2", b...), nt("n3", c...)}, nil, nil, nil, nil, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := poolConsistencyProblems(tc.verified, tc.flagged)
+			got := poolConsistencyProblems(tc.verified, tc.excludeFromVote, tc.alreadyReported)
 			joined := strings.Join(got, "\n")
 			if tc.wantNone && len(got) != 0 {
 				t.Errorf("expected no problems, got %v", got)
 			}
-			for _, name := range tc.wantName {
+			if tc.wantTie && !strings.Contains(joined, "distinct GPU NIC PCI layouts") {
+				t.Errorf("tie/3-way must print the neutral 'distinct layouts' line, got %v", got)
+			}
+			for _, name := range tc.wantBlame {
 				if !strings.Contains(joined, `"`+name+`"`) {
 					t.Errorf("expected node %q to be blamed, got %v", name, got)
 				}
 			}
-			// No unflagged node outside wantName should be blamed.
-			if !tc.wantNone && len(tc.wantName) == 0 && len(got) > 0 {
-				// neutral tie: must not single out any node with "differs from the pool majority"
-				if strings.Contains(joined, "differs from the pool majority") {
-					t.Errorf("tie must not blame any node, got %v", got)
+			for _, name := range tc.wantNotBlame {
+				if strings.Contains(joined, `"`+name+`" GPU NIC PCI layout differs`) {
+					t.Errorf("node %q must NOT be blamed, got %v", name, got)
 				}
 			}
 		})
@@ -198,34 +208,69 @@ func TestPoolConsistencyProblems(t *testing.T) {
 
 // The coverage emit reflects the actual verified count on every terminal path
 // (regression for verifiedCount never being set).
-func TestTopologyCoverageEmitCounts(t *testing.T) {
-	n2 := topoNode(healthyTopoAnnotation())
-	n2.Name = "gpu-1"
-	cs := k8sfake.NewClientset(topoNode(healthyTopoAnnotation()), n2)
-
+// captureTopologyExtra runs the topology check with os.Stdout swapped for a pipe
+// and returns the emitted coverage Extra (nil if no Extra line was written) and
+// the check's error.
+func captureTopologyExtra(t *testing.T, ctx *validators.Context) (map[string]string, error) {
+	t.Helper()
 	orig := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
 	os.Stdout = w
-	defer func() { os.Stdout = orig }()
-
-	runErr := checkGKEGPUNICTopology(topoContext(cs, true))
+	runErr := checkGKEGPUNICTopology(ctx)
 	_ = w.Close()
 	out, _ := io.ReadAll(r)
 	os.Stdout = orig
-
-	if runErr != nil {
-		t.Fatalf("two healthy nodes must pass, got %v", runErr)
-	}
 	var extra map[string]string
 	for _, line := range strings.Split(string(out), "\n") {
 		if payload, ok := strings.CutPrefix(line, ctrf.ExtraLinePrefix); ok {
 			_ = json.Unmarshal([]byte(payload), &extra)
 		}
 	}
-	if extra["nodesValidated"] != "2" || extra["nodesTotal"] != "2" || extra["nodesUnverified"] != "0" {
-		t.Errorf("coverage counts wrong for 2 healthy nodes, got %v", extra)
+	return extra, runErr
+}
+
+func TestTopologyCoverageEmitCounts(t *testing.T) {
+	healthy2 := func() *k8sfake.Clientset {
+		n2 := topoNode(healthyTopoAnnotation())
+		n2.Name = "gpu-1"
+		return k8sfake.NewClientset(topoNode(healthyTopoAnnotation()), n2)
 	}
+	listErr := func() *k8sfake.Clientset {
+		cs := k8sfake.NewClientset()
+		cs.PrependReactor("list", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, fmt.Errorf("injected list error")
+		})
+		return cs
+	}
+
+	t.Run("pass emits validated=total=2, unverified=0", func(t *testing.T) {
+		extra, runErr := captureTopologyExtra(t, topoContext(healthy2(), true))
+		if runErr != nil {
+			t.Fatalf("two healthy nodes must pass, got %v", runErr)
+		}
+		if extra["nodesValidated"] != "2" || extra["nodesTotal"] != "2" || extra["nodesUnverified"] != "0" {
+			t.Errorf("coverage counts wrong for 2 healthy nodes, got %v", extra)
+		}
+	})
+	t.Run("zero-node emits total=0 (accurate empty pool)", func(t *testing.T) {
+		extra, runErr := captureTopologyExtra(t, topoContext(k8sfake.NewClientset(), true))
+		if runErr == nil {
+			t.Fatal("zero a3 nodes must fail")
+		}
+		if extra["nodesTotal"] != "0" || extra["nodesValidated"] != "0" {
+			t.Errorf("zero-node coverage must report total=0/validated=0, got %v", extra)
+		}
+	})
+	t.Run("list error emits NO coverage (not a misleading total=0)", func(t *testing.T) {
+		extra, runErr := captureTopologyExtra(t, topoContext(listErr(), true))
+		if runErr == nil {
+			t.Fatal("list error must fail")
+		}
+		if extra != nil {
+			t.Errorf("a list error must emit no coverage line, got %v", extra)
+		}
+	})
 }

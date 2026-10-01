@@ -156,12 +156,14 @@ func TestBoundCombinations(t *testing.T) {
 		paramSet    string
 		want        bool
 	}{
-		{"ready+paramsReady+paramSet", true, true, "a3-mega-pool", true},
-		{"ready+paramsReady, no paramSet", true, true, "", false},
-		{"ready, paramsReady=false", true, false, "a3-mega-pool", false},
-		{"ready=false, paramsReady", false, true, "a3-mega-pool", false},
-		{"all false", false, false, "", false},
-		{"paramsReady+paramSet, ready=false", false, true, "a3-mega-pool", false},
+		{"T,T,set = bound", true, true, "a3-mega-pool", true},
+		{"T,T,empty = not bound", true, true, "", false},
+		{"T,F,set = not bound", true, false, "a3-mega-pool", false},
+		{"T,F,empty = not bound", true, false, "", false},
+		{"F,T,set = not bound", false, true, "a3-mega-pool", false},
+		{"F,T,empty = not bound", false, true, "", false},
+		{"F,F,set = not bound", false, false, "a3-mega-pool", false},
+		{"F,F,empty = not bound", false, false, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
