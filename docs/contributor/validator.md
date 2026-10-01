@@ -7,7 +7,7 @@ contributor view for all four.
 
 | Surface | When it runs | Where it lives | Mechanism |
 |---------|-------------|----------------|-----------|
-| [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay `validation:` block | `pkg/constraints` evaluator (in-process) |
+| [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay top-level `constraints:` or a `validation:` phase block | `pkg/constraints` evaluator (in-process) |
 | [**Container-per-validator check**](#container-per-validator-checks) | `aicr validate` against a live cluster | `validators/<phase>/` + `recipes/validators/catalog.yaml` | One K8s Job per check |
 | [**Component validation**](#component-validations-bundle-time) (bundle-time) | `aicr bundle` | `pkg/bundler/validations/checks.go` + `registry.yaml` `validations:` | In-process Go `ValidationFunc` |
 | [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces with distinct runtimes: `make check-health` post-deploy locally (shells out to the `chainsaw` CLI installed on the developer's machine), AND `aicr validate --phase deployment` in-cluster (executes the Test format in-process via `pkg/chainsaw/inprocess.go` — no external binary in the deployment validator image) | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format on both surfaces; raw K8s YAML asserts use the chainsaw Go library inside `assertRawResources`) |
@@ -19,7 +19,8 @@ gate on the resolved recipe → surface 3.
 ## Constraints (declarative)
 
 A **constraint** is a declarative expression — `K8s.server.version >=
-1.32.4` — declared in a recipe overlay's `validation:` block and
+1.32.4` — declared in a recipe overlay's top-level `constraints:` or a
+`validation:` phase block and
 evaluated by `pkg/constraints` against a measurement from a snapshot.
 No code change is needed to add a constraint to an existing recipe;
 only to add a new **operator**.
@@ -29,12 +30,12 @@ only to add a new **operator**.
 ```yaml
 # recipes/overlays/<name>.yaml
 spec:
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+    - name: OS.release.ID
+      value: "ubuntu"
   validation:
-    constraints:
-      - name: K8s.server.version
-        value: ">= 1.32.4"
-      - name: OS.name
-        value: "ubuntu"
     deployment:
       checks: [operator-health, expected-resources]
     performance:
@@ -111,7 +112,7 @@ from `pkg/constraints`):
 | Operator | Use | Notes |
 |----------|-----|-------|
 | `>=`, `<=`, `>`, `<` | Version / numeric comparison | Always treated as a version comparison; parsed via `pkg/version` |
-| `==`, `!=` | Explicit equality / inequality | Version compare if either side parses as version, else string |
+| `==`, `!=` | Explicit equality / inequality | Version compare if the expected value looks like a version and both sides parse; otherwise string compare |
 | *(none)* | `OperatorExact` | Case-sensitive string equality — `value: "ubuntu"` |
 
 The parser is operator-prefix-longest-first so `>=` wins over `>`.
@@ -153,8 +154,8 @@ encodings, unknown service, service with no declared universe label).
 3. Add a `case` arm in `(*ParsedConstraint).Evaluate`. Return an
    `errors.WrapWithContext(ErrCodeInvalidRequest, ...)` for malformed
    inputs; never fall back to string compare silently.
-4. Extend the `TestParseConstraintExpression` / `TestEvaluate` table
-   in `constraint_test.go`. Both happy path and parse-error path.
+4. Extend the `TestParseConstraintExpression` / `TestParsedConstraint_Evaluate` table
+   in `pkg/constraints/expr/expr_test.go`. Both happy path and parse-error path.
 5. If the operator implies a numeric range or tolerance, the
    *interpretation* lives in the validator phase (e.g.
    `validators/performance` evaluates NCCL bandwidth with a 10%
@@ -752,7 +753,7 @@ pod, err := lc.CreatePodFromTemplate(ctx.Ctx, "testdata/probe.yaml.tmpl", subs)
 if err != nil { return errors.Wrap(...) }
 defer func() { _ = lc.CleanupPod(context.Background(), pod) }() // deferred cleanup uses fresh ctx
 
-if err := lc.WaitForPodSuccess(ctx.Ctx, pod, defaults.PodSuccessTimeout); err != nil {
+if err := lc.WaitForPodSuccess(ctx.Ctx, pod, defaults.PodWaitTimeout); err != nil {
     logs, _ := lc.GetPodLogs(context.Background(), pod)
     return errors.WrapWithContext(errors.ErrCodeInternal, "probe failed", err,
         map[string]any{"logs": logs})
@@ -1243,6 +1244,14 @@ unrecognized value, which keeps a typo'd severity non-silent.
 | `CheckGB300HostKernelGranule` | Bare-metal GB300 (`service: generic`, `accelerator: gb300`) applies a tuned profile that sizes hugepages for a 64k-granule ARM64 host kernel. A 4k-granule host still boots — Linux rejects the `hugepagesz=512M` clause and drops its paired `hugepages=` count — so the node just runs without that pool. Advisory only (`severity: info`); skipped when the component is disabled or `tuningEnabled` resolves to false on the final effective values (recipe merge plus scalar `--set` and typed `--set-json`/`--set-file`, under the canonical name and its registry aliases). |
 | `CheckDriverOwnershipCoherence` | GPU driver-ownership coherence on the final effective values (recipe merge + `--set`/`--set-json`/`--set-file` under canonical names and registry aliases): a recipe whose snapshot observed no NVIDIA driver (`metadata.gpuDriverState: absent`) must not bundle with the preinstalled-driver assumption. When GPU Operator manages the driver, `nvidia-dra-driver-gpu.nvidiaDriverRoot` must equal `gpu-operator hostPaths.driverInstallDir`; with a preinstalled driver, the DRA root must avoid the unpopulated operator container root and may intentionally differ from `hostPaths.driverInstallDir` ([#1087](https://github.com/NVIDIA/aicr/issues/1087), [#1757](https://github.com/NVIDIA/aicr/issues/1757)). Wired at `severity: error`. |
 | `CheckMariaDBOperatorOwnershipCoherence` | MariaDB Operator installation safety for AICR-provided Slurm accounting: `metadata.mariaDBOperatorState` values `crs-detected` and `unknown` block bundling, `api-detected` or omitted evidence warns, and `absent` proceeds silently. Wired at `severity: warning` so warning results remain non-blocking while returned errors still fail the bundle. |
+| `CheckNPDNotDuplicatingProviderNPD` | `node-problem-detector` is bundled only on an allowlist of verified platforms — never where the provider already runs its own NPD (GKE, AKS), on OpenShift (no privileged SCC binding), or on Talos (restricted namespace) |
+| `CheckGKETCPXOInterfacesCoherence` | The final resolved kubeflow-trainer `tcpxoInterfaces` value matches the mapping the recipe records in `configuration.gke.tcpxoInterfaces` |
+| `CheckNVSentinelDriverLabelDetectable` | Where the GPU Operator does not own the driver and no driver pod exists (driver ships in the node image), NVSentinel sets `labeler.assumeDriverInstalled`, so its driver-label-gated DaemonSets do not come up half-rolled-out |
+| `CheckNVSentinelRuntimeClassCoherence` | NVSentinel metadata-collector `runtimeClassName` matches the RuntimeClass the GPU Operator creates from `operator.runtimeClass`, so its pods are not rejected at admission |
+| `CheckNVSentinelTracingEndpointRequired` | NVSentinel distributed tracing is not enabled without an OTLP collector endpoint |
+| `CheckNVSentinelNicHealthMonitorRequiresMetadataCollector` | `nic-health-monitor` is not enabled without `metadata-collector` (or a `nicInclusionRegexOverride`), which would otherwise discover zero devices |
+| `CheckNVSentinelPreflightDCGMReachable` | The preflight DCGM check's hostengine address resolves to a served Service (gpu-operator present, not relocated, and `dcgm.enabled`) |
+| `CheckNVSentinelPreflightGangSchedulerRequired` | Preflight gang coordination against KAI PodGroups is not enabled while `kai-scheduler` is disabled or absent |
 
 Registered in `pkg/bundler/validations/checks.go::init()`.
 
@@ -1586,7 +1595,7 @@ constraints, and the readiness pre-flight gate. The evaluation flow:
    value passes `looksLikeVersion` (starts with digit, has a dot,
    optional `v` prefix). Everything else is string.
 3. **Evaluate** against the snapshot measurement. Version compares
-   route through `pkg/version.Compare` (semver-aware). String
+   route through `version.Version.Compare` (semver-aware). String
    compares are case-sensitive equality.
 4. **Errors propagate, not bools.** A value declared as `>= 1.32.4`
    that fails to parse as a version returns

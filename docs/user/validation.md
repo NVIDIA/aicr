@@ -865,7 +865,7 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
 
 Empty `--feature` (the default) collects evidence for every feature.
 
-Valid feature names (from `pkg/evidence/cncf/collector.go`):
+Valid feature names (from `pkg/evidence/cncf/consts.go`):
 
 | Name | What it checks |
 |------|----------------|

@@ -455,7 +455,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              name: kube-system
+              kubernetes.io/metadata.name: kube-system
       ports:
         - protocol: TCP
           port: 443  # Kubernetes API
@@ -609,7 +609,7 @@ as HTTP 429 responses with the `X-RateLimit-*` headers.
 ```shell
 # Update image
 kubectl set image deployment/aicrd \
-  api-server=ghcr.io/nvidia/aicrd:v0.21.1 \
+  api-server=ghcr.io/nvidia/aicrd:v0.22.0 \
   -n aicr
 
 # Watch rollout

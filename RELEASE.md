@@ -330,7 +330,8 @@ but they do not update:
 
 - Homebrew formula (users on `brew upgrade` are unaffected)
 - Container `:latest` tags (only candidate and version aliases are written)
-- Site documentation (GitHub Pages stays on latest stable)
+- Site documentation versions (the Fern docs publish runs, but a pre-release
+  tag registers no new docs version)
 
 Slack notifications fire for both pre-releases and stable releases.
 

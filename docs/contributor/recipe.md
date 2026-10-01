@@ -354,7 +354,7 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
   `preManifestFiles`, `dependencyRefs`. Setting any of `chart`,
   `type`, `source`, `version`, `tag`, `path`, `valuesFile`,
   `patches`, `cleanup`, `expectedResources`,
-  `healthCheckAsserts` is rejected at compose time — those fields
+  `healthCheckAsserts`, or `healthCheckSkip` is rejected at compose time — those fields
   silently override the chain's chosen chart, so the resolver names
   the offending field and refuses to merge (see ADR-005 "Silent
   constraint override" mitigation).

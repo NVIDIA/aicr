@@ -88,7 +88,8 @@ aicr query \
 ## Step 4 — Render deployment bundles
 
 The **bundler** materializes the recipe into deployment-ready artifacts — one
-folder per component, each with Helm values, checksums, and a README:
+folder per component with its Helm values, plus a root README, `checksums.txt`,
+and `bundle-info.yaml`:
 
 ```bash
 aicr bundle --recipe recipe.yaml --output ./bundles

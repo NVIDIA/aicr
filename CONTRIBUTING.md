@@ -68,24 +68,12 @@ Module integrity comes from `go.sum`, which Go verifies on every build; `sum.gol
 
 #### Adding Validation Constraints
 
-AICR uses a validator framework to check cluster state against requirements. To add new validation constraints:
+AICR uses a validator framework to check cluster state against requirements. A declarative constraint needs no code: add it to a recipe overlay's `constraints:` list. To add a check that probes a live cluster:
 
-**Quick Start:**
-```bash
-# Generate all necessary files
-make generate-validator ARGS="--constraint Deployment.my-app.version --phase deployment --description 'Validates my-app version'"
-```
-
-This creates three files with TODOs guiding implementation:
-- Helper functions with validation logic
-- Unit tests with table-driven test cases
-- Integration test with automatic registration
-
-**Next Steps:**
-1. Implement the TODOs in generated files
-2. Add comprehensive test cases
-3. Run `make test` - registration validation ensures completeness
-4. Submit PR - CI enforces all requirements
+1. Implement it in `validators/<phase>/`
+2. Register it in that phase's `main.go`
+3. Add a catalog entry in `recipes/validators/catalog.yaml`
+4. Run `make test` and submit the PR
 
 **See [docs/contributor/validator.md](docs/contributor/validator.md) for complete guide with examples, architecture overview, and troubleshooting.**
 
