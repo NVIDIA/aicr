@@ -593,7 +593,7 @@ it by line number so later diagnostics still cite the true line.
 
 `check-docs-mdx-parse` needs Node 20+. Without it the script prints a warning
 and exits 0 locally, but **hard-fails under CI** — the `docs-mdx` job in
-`merge-gate.yaml` blocks on it, and the merge gate is the only required status
+`merge-gate.yaml` blocks on it, and `Merge Gate` is a required status
 check. This is the one place where a green local `make qualify` does not
 guarantee a green CI: if you have no Node, the MDX gate did not actually run.
 
