@@ -103,6 +103,10 @@ type ReportComponent struct {
 
 // ReportIdentityChange is one move on the identity axis, restated with JSON
 // names.
+//
+// Field is one of namespace, type, chart, source, path, manifestFiles or
+// preManifestFiles. For the two file sets From and To are the whole sorted sets
+// joined by commas.
 type ReportIdentityChange struct {
 	Field string `json:"field" yaml:"field"`
 	From  string `json:"from" yaml:"from"`

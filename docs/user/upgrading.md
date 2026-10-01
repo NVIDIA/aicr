@@ -118,6 +118,8 @@ Structured output carries the move alongside the verdict, on both shapes of row:
 ]
 ```
 
+`field` is one of `namespace`, `type`, `chart`, `source`, `path`, `manifestFiles` or `preManifestFiles`. For the two file sets, `from` and `to` hold the whole sorted sets joined by commas.
+
 Acting on it is its own piece of work, not an upgrade step: move the release deliberately, then re-run the check. Or take the relocation out of the hop entirely, below.
 
 ## Pinning the namespaces you already deployed into
