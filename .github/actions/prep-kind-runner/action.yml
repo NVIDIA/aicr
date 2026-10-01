@@ -15,10 +15,17 @@
 name: 'Prep Kind Runner'
 description: 'Free disk space and configure kernel for Kind clusters'
 
+inputs:
+  free_disk:
+    description: 'Delete preinstalled SDKs and prune Docker to reclaim disk (takes 30s to 5m)'
+    required: false
+    default: 'true'
+
 runs:
   using: 'composite'
   steps:
     - name: Free up disk space
+      if: inputs.free_disk == 'true'
       shell: bash
       run: |
         sudo rm -rf /usr/local/lib/android

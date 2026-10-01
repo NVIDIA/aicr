@@ -1542,6 +1542,8 @@ deploy_bundle() {
             #     Ready condition indefinitely. We assert terminal state via
             #     HelmRelease conditions below instead.
             #   - timeout: 5m — matches KWOK_FLUX_SYNC_TIMEOUT budget.
+            #   - interval/retryInterval: 15s, so a first apply that races
+            #     CRD or source availability retries in seconds.
             log_info "Applying Flux OCIRepository ${FLUX_OCIREPOSITORY_NAME} (ref=${oci_tag})..."
             if ! kubectl apply -f - <<EOF
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -1550,7 +1552,7 @@ metadata:
   name: ${FLUX_OCIREPOSITORY_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   insecure: true
   url: ${OCI_IN_CLUSTER_REF}
   ref:
@@ -1572,9 +1574,10 @@ metadata:
   name: ${FLUX_KUSTOMIZATION_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   prune: true
   wait: false
+  retryInterval: 15s
   timeout: 5m
   sourceRef:
     kind: OCIRepository
@@ -1618,7 +1621,7 @@ metadata:
   name: ${FLUX_GITREPOSITORY_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   url: ${GIT_IN_CLUSTER_URL}
   ref:
     branch: main
@@ -1639,9 +1642,10 @@ metadata:
   name: ${FLUX_KUSTOMIZATION_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   prune: true
   wait: false
+  retryInterval: 15s
   timeout: 5m
   sourceRef:
     kind: GitRepository
