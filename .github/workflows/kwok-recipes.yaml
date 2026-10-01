@@ -666,7 +666,7 @@ jobs:
         run: |
           echo "## KWOK Cluster Validation Summary (advisory)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> Advisory only. This check does not block merges. The required check is Merge Gate." >> $GITHUB_STEP_SUMMARY
+          echo "> Advisory only. This check does not block merges. The required checks are Merge Gate and Check PR Title." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           scripts="${{ needs.script-tests.result }}"
