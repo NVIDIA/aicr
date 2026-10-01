@@ -383,14 +383,15 @@ FAKE
         probe 1 "redirect target did not answer" "dead redirect" "302 35"
         probe 1 "Could not resolve host"  "no DNS"               "000 6"
 
-        # The retry count curl receives follows RETRY_ATTEMPTS: N attempts is N-1 retries.
+        # The retry count curl receives follows RETRY_ATTEMPTS. N attempts is N-1 retries.
         probe 0 "" "default attempts" "200 0"
         grep -q -- '--retry 2 --retry-connrefused' "${scratch}/args" ||
             { echo "default attempts did not pass --retry 2: $(cat "${scratch}/args")"; exit 1; }
         got=$(RETRY_ATTEMPTS=5 bash -c 'source "$1"; echo "${CURL_RETRY[*]}"' _ "${SETUP_TOOLS}")
         [[ "${got}" == --retry\ 4\ * ]] || { echo "RETRY_ATTEMPTS=5 gave curl flags '${got}', want --retry 4"; exit 1; }
 
-        # retry_transient is for installer scripts. attempts, final status, and label.
+        # retry_transient wraps installer scripts. Check the attempt count, the
+        # final status, and that the warning names the label.
         flaky() { local n; n=$(( $(cat "${scratch}/runs" 2>/dev/null || echo 0) + 1 )); echo "${n}" > "${scratch}/runs"; [[ "${n}" -ge "$1" ]]; }
         attempt() {
             local want_rc="$1" want_n="$2" label="$3" succeed_on="$4" rc=0 out
@@ -440,6 +441,53 @@ if ! reason=$(check_download_retry); then
     exit 1
 fi
 echo "Download retry: curl gets RETRY_ATTEMPTS-1 retries, each failure is diagnosed once, installer scripts retry under a labeled loop"
+
+# Runs install_release_binary end to end with a fake curl and sudo. The probe
+# passes, the asset and its sidecar digest come from separate downloads, and the
+# binary lands only when the sidecar digest matches the asset.
+check_sidecar_install() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        scratch=$(mktemp -d)
+        trap 'rm -rf "${scratch}"' EXIT
+        cat > "${scratch}/curl" <<'FAKE'
+#!/usr/bin/env bash
+out=""; url=""
+while [[ $# -gt 0 ]]; do
+    [[ "$1" == "-o" ]] && { out="$2"; shift; }
+    url="$1"; shift
+done
+case "${url}" in
+    *.sha256sum) printf '%s  tool\n' "${FAKE_DIGEST}" > "${out}" ;;
+    *) if [[ "${out}" == /dev/null ]]; then printf '200'; else printf 'aicr' > "${out}"; fi ;;
+esac
+FAKE
+        printf '#!/usr/bin/env bash\n[[ "$1" == install ]] && cp "$4" "${FAKE_DIR}/installed"\n' > "${scratch}/sudo"
+        chmod +x "${scratch}/curl" "${scratch}/sudo"
+        export PATH="${scratch}:${PATH}" FAKE_DIR="${scratch}"
+
+        FAKE_DIGEST="${DIGEST_PAYLOAD_SHA256}" install_release_binary \
+            "https://example.invalid/tool" "sidecar:sha256" tool "tool" >/dev/null 2>&1 ||
+            { echo "a matching sidecar digest did not install"; exit 1; }
+        [[ "$(cat "${scratch}/installed")" == "aicr" ]] || { echo "the verified binary was not installed"; exit 1; }
+
+        rm -f "${scratch}/installed"
+        if ( FAKE_DIGEST="${DIGEST_PAYLOAD_SHA256/3/4}" install_release_binary \
+            "https://example.invalid/tool" "sidecar:sha256" tool "tool" ) >/dev/null 2>&1; then
+            echo "a mismatched sidecar digest installed"; exit 1
+        fi
+        [[ ! -e "${scratch}/installed" ]] || { echo "a binary was installed despite a mismatched sidecar digest"; exit 1; }
+    )
+}
+
+if ! reason=$(check_sidecar_install); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Sidecar install: a matching digest installs the binary, a mismatched one installs nothing"
 
 # A combined checksums file comes in two shapes: GNU (`<digest>  <file>`, or
 # `<digest> *<file>` in binary mode) and BSD (`SHA256 (<file>) = <digest>`,
