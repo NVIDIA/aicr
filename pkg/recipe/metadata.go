@@ -299,8 +299,9 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 // pre-manifest file sets are the exception. Each is restored whole, even when
 // empty, because a resolved recipe that lists none is stating that, and
 // dropping or adding an entry moves the identity that upgrade-check compares.
-// A component whose deployment type differs from the prior one is rejected. No
-// chart, source or path carries across a Helm and Kustomize flip.
+// A component whose deployment type differs from the prior one keeps only the
+// namespace, since no chart, source, path or manifest set carries across a Helm
+// and Kustomize flip. upgrade-check reports the type move.
 //
 // Runs after ApplyRegistryDefaults rather than inside it, because that method is
 // exported and called from four packages.
@@ -333,12 +334,6 @@ func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 		if err := validateInheritedIdentity(p); err != nil {
 			return err
 		}
-		if p.Type != "" && work[i].Type != "" && p.Type != work[i].Type {
-			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-				"component %q was deployed as %s but the registry now declares it as %s, "+
-					"which inherit-from cannot preserve",
-				p.Name, p.Type, work[i].Type))
-		}
 		if p.Namespace != "" && p.Namespace != work[i].Namespace {
 			// Rebind before assigning, so a ref changes both fields or neither.
 			// Assigning first would leave the new namespace beside assertions
@@ -352,6 +347,9 @@ func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 				return err
 			}
 			work[i].Namespace = p.Namespace
+		}
+		if p.Type != "" && work[i].Type != "" && p.Type != work[i].Type {
+			continue
 		}
 		if p.Chart != "" {
 			work[i].Chart = p.Chart

