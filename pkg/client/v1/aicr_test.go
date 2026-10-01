@@ -2848,7 +2848,11 @@ func TestResolveRecipe_InheritFromObjectNames(t *testing.T) {
 		t.Fatalf("resolve current values for %s: %v", pinned, err)
 	}
 	const legacyName = "legacy-object-name"
-	if recipe.ObjectNameValues(currentValues)["fullnameOverride"] == legacyName {
+	currentNames, err := recipe.ObjectNameValues(currentValues)
+	if err != nil {
+		t.Fatalf("project current names for %s: %v", pinned, err)
+	}
+	if currentNames["fullnameOverride"] == legacyName {
 		t.Fatalf("setup: %s already pins %q, so the test would assert nothing", pinned, legacyName)
 	}
 
@@ -2875,7 +2879,11 @@ func TestResolveRecipe_InheritFromObjectNames(t *testing.T) {
 		if valuesErr != nil {
 			t.Fatalf("merged values for %s: %v", pinned, valuesErr)
 		}
-		if got := recipe.ObjectNameValues(merged)["fullnameOverride"]; got != legacyName {
+		mergedNames, nameErr := recipe.ObjectNameValues(merged)
+		if nameErr != nil {
+			t.Fatalf("project merged names for %s: %v", pinned, nameErr)
+		}
+		if got := mergedNames["fullnameOverride"]; got != legacyName {
 			t.Errorf("merged fullnameOverride = %q, want %q", got, legacyName)
 		}
 	})

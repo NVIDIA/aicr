@@ -25,10 +25,13 @@
 package recipe
 
 import (
+	stderrors "errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestObjectNameValues(t *testing.T) {
@@ -118,7 +121,10 @@ func TestObjectNameValues(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ObjectNameValues(tt.values)
+			got, err := ObjectNameValues(tt.values)
+			if err != nil {
+				t.Fatalf("ObjectNameValues() failed: %v", err)
+			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ObjectNameValues() = %v, want %v", got, tt.want)
 			}
@@ -135,7 +141,10 @@ func TestObjectNameValuesStopsOnCycle(t *testing.T) {
 	cyclic["self"] = cyclic
 
 	done := make(chan map[string]string, 1)
-	go func() { done <- ObjectNameValues(cyclic) }()
+	go func() {
+		got, _ := ObjectNameValues(cyclic)
+		done <- got
+	}()
 	select {
 	case got := <-done:
 		if got["fullnameOverride"] != "top" {
@@ -187,9 +196,16 @@ func TestApplyInheritedObjectNames(t *testing.T) {
 			wantOverrides: map[string]any{"grafana": map[string]any{"fullnameOverride": "legacy-grafana"}},
 		},
 		{
-			// Absent from the prior artifact entirely is a FIRST deploy for
-			// this component, not a rename: it takes the current default.
+			// Absent from a prior artifact that DID deploy something is a
+			// FIRST deploy for this component, not a rename: it takes the
+			// current default. The prior is non-empty on purpose — an empty
+			// one returns before the per-component check this exercises.
 			name:    "a component the prior artifact never deployed is left alone",
+			prior:   map[string]map[string]string{"other": {}},
+			current: map[string]map[string]string{"c": {"fullnameOverride": "new"}},
+		},
+		{
+			name:    "an empty prior pins nothing",
 			prior:   map[string]map[string]string{},
 			current: map[string]map[string]string{"c": {"fullnameOverride": "new"}},
 		},
@@ -266,6 +282,80 @@ func TestApplyInheritedObjectNamesRejectsAConflictingOverride(t *testing.T) {
 	}
 	if got := refs[0].Overrides["grafana"]; got != "off" {
 		t.Errorf("the stated override was modified: %#v", got)
+	}
+}
+
+// A name key under a segment that is empty or contains a dot would split back
+// into different segments, so a pin written there lands where no chart reads.
+// Dotted keys anywhere else are ordinary values and must not trip the check.
+func TestObjectNameValuesRejectsAnUnaddressablePath(t *testing.T) {
+	tests := []struct {
+		name    string
+		values  map[string]any
+		want    map[string]string
+		wantErr bool
+	}{
+		{
+			name:    "a name key under a dotted segment",
+			values:  map[string]any{"a.b": map[string]any{"fullnameOverride": "x"}},
+			wantErr: true,
+		},
+		{
+			name:    "a name key under an empty segment",
+			values:  map[string]any{"": map[string]any{"nameOverride": "x"}},
+			wantErr: true,
+		},
+		{
+			name: "dotted keys that hold no name key are ordinary values",
+			values: map[string]any{
+				"fullnameOverride": "kept",
+				"podAnnotations":   map[string]any{"prometheus.io/scrape": "true"},
+				"nodeSelector":     map[string]any{"kubernetes.io/os": map[string]any{"deep": "value"}},
+			},
+			want: map[string]string{"fullnameOverride": "kept"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ObjectNameValues(tt.values)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ObjectNameValues() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("want ErrCodeInvalidRequest, got %v", err)
+				}
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ObjectNameValues() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// A conflict found while WRITING pins — not only a bad name found while
+// collecting them — must leave every ref as it was. Here the first ref's pin
+// is valid and the second ref's collides with a scalar it already overrides.
+func TestApplyInheritedObjectNamesIsAllOrNothing(t *testing.T) {
+	refs := []ComponentRef{
+		{Name: "a", Type: ComponentTypeHelm},
+		{Name: "b", Type: ComponentTypeHelm, Overrides: map[string]any{"grafana": "off"}},
+	}
+	prior := map[string]map[string]string{
+		"a": {"fullnameOverride": "legacy-a"},
+		"b": {"grafana.fullnameOverride": "legacy-grafana"},
+	}
+	current := map[string]map[string]string{"a": {}, "b": {}}
+
+	if err := ApplyInheritedObjectNames(refs, prior, current); err == nil {
+		t.Fatal("want the colliding pin rejected, got nil")
+	}
+	if refs[0].Overrides != nil {
+		t.Errorf("ref a was pinned despite the artifact being rejected: %#v", refs[0].Overrides)
+	}
+	if want := map[string]any{"grafana": "off"}; !reflect.DeepEqual(refs[1].Overrides, want) {
+		t.Errorf("ref b overrides = %#v, want the untouched %#v", refs[1].Overrides, want)
 	}
 }
 

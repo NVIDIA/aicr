@@ -590,7 +590,12 @@ func bundleObjectNames(ctx context.Context, ref string) (map[string]map[string]s
 			"the values recorded by the bundle at %s could not be read (%v), so the object names "+
 				"it installed with are unknown", ref, err)
 	}
-	return projectObjectNames(values), ""
+	names, err := projectObjectNames(values)
+	if err != nil {
+		return nil, fmt.Sprintf("the values recorded by the bundle at %s could not be projected onto "+
+			"object names (%v)", ref, err)
+	}
+	return names, ""
 }
 
 // resolvedObjectNames projects a resolved recipe's merged values, read through
@@ -621,7 +626,11 @@ func internalObjectNames(
 			// The adapter already returns structured errors with the right code.
 			return nil, err
 		}
-		names[component] = recipe.ObjectNameValues(merged)
+		pinned, err := recipe.ObjectNameValues(merged)
+		if err != nil {
+			return nil, err
+		}
+		names[component] = pinned
 	}
 	return names, nil
 }
@@ -634,12 +643,17 @@ func internalObjectNames(
 // says nothing about it. Inheritance turns on exactly that difference — the
 // first is a name the current values must not introduce, the second a first
 // deploy.
-func projectObjectNames(values map[string]map[string]any) map[string]map[string]string {
+func projectObjectNames(values map[string]map[string]any) (map[string]map[string]string, error) {
 	names := make(map[string]map[string]string, len(values))
 	for component, merged := range values {
-		names[component] = recipe.ObjectNameValues(merged)
+		pinned, err := recipe.ObjectNameValues(merged)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("object names of component %q", component), err)
+		}
+		names[component] = pinned
 	}
-	return names
+	return names, nil
 }
 
 // bundleDirectory reports whether ref names a bundle directory, which is the

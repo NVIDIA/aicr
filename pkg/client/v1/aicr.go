@@ -1018,11 +1018,15 @@ func (c *Client) inheritObjectNames(
 		return err
 	}
 
+	prior, err := projectObjectNames(values)
+	if err != nil {
+		return err
+	}
 	current, err := internalObjectNames(ctx, resolved)
 	if err != nil {
 		return err
 	}
-	return recipe.ApplyInheritedObjectNames(resolved.ComponentRefs, projectObjectNames(values), current)
+	return recipe.ApplyInheritedObjectNames(resolved.ComponentRefs, prior, current)
 }
 
 // requireHydratedRecipe rejects an inheritance source that is not already a

@@ -16,24 +16,28 @@ package recipe
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // objectNameKeys are the value keys Helm's chart.fullname and chart.name
-// templates read. They are the only values that RENAME an object rather than
-// reconfigure it, which is why the identity axis projects these two rather
-// than comparing merged values wholesale: a values comparison would report
-// every tuning change as an object having moved.
+// templates read, so they rename objects rather than reconfigure them, which is
+// why the identity axis projects these two rather than comparing merged values
+// wholesale: a values comparison would report every tuning change as an object
+// having moved. A chart can also name an object through a value of its own
+// (serviceAccount.name), which this does not see.
 //
 // The two do not carry the same consequence. fullnameOverride names the
 // objects, so moving it is applied as delete-and-recreate. nameOverride feeds
 // app.kubernetes.io/name, which the standard chart scaffold puts in
-// spec.selector, and that field is immutable.
+// spec.selector; that is immutable, so moving it while the object's name holds
+// fails the upgrade outright.
 var objectNameKeys = map[string]bool{
 	"fullnameOverride": true,
 	"nameOverride":     true,
@@ -54,26 +58,34 @@ const maxObjectNameDepth = 12
 //
 // A non-string or empty value is skipped. Helm treats either as unset, so
 // carrying it would name a value that never reaches an object.
-func ObjectNameValues(values map[string]any) map[string]string {
+//
+// A name key under a segment that is empty or contains a dot is an
+// ErrCodeInvalidRequest. Its dotted path would split back into different
+// segments, so a pin written there lands where no chart reads and fails open.
+// Dotted keys elsewhere — annotations, node selectors — are untouched; only
+// the path to a name key has to round-trip.
+func ObjectNameValues(values map[string]any) (map[string]string, error) {
 	out := make(map[string]string)
-	collectObjectNames(values, "", 0, out)
-	return out
+	if err := collectObjectNames(values, nil, 0, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
-func collectObjectNames(values map[string]any, prefix string, depth int, out map[string]string) {
+func collectObjectNames(values map[string]any, prefix []string, depth int, out map[string]string) error {
 	if depth > maxObjectNameDepth {
-		return
+		return nil
 	}
 	for key, raw := range values {
-		path := key
-		if prefix != "" {
-			path = prefix + "." + key
-		}
+		// Cloned so sibling keys never share a backing array.
+		segments := append(slices.Clone(prefix), key)
 		// Descent is tested before the key name so a map that happens to be
 		// named like an override is walked rather than discarded: the scalar
 		// under it is what a chart would read.
 		if nested, isMap := raw.(map[string]any); isMap {
-			collectObjectNames(nested, path, depth+1, out)
+			if err := collectObjectNames(nested, segments, depth+1, out); err != nil {
+				return err
+			}
 			continue
 		}
 		if !objectNameKeys[key] {
@@ -83,8 +95,16 @@ func collectObjectNames(values map[string]any, prefix string, depth int, out map
 		if !isString || name == "" {
 			continue
 		}
-		out[path] = name
+		for _, segment := range prefix {
+			if segment == "" || strings.Contains(segment, ".") {
+				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"%s sits under the key %q, which cannot be addressed by a dotted value path",
+					key, segment))
+			}
+		}
+		out[strings.Join(segments, ".")] = name
 	}
+	return nil
 }
 
 // ApplyInheritedObjectNames pins each ref's object names back to the ones a
@@ -156,10 +176,25 @@ func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]ma
 		}
 	}
 
+	// Written onto copies and committed only once every pin has landed, so a
+	// conflict found while writing leaves every ref as it was too — not just a
+	// rejected name found while collecting.
+	staged := make(map[int]map[string]any)
 	for _, p := range pins {
-		if err := setOverridePath(&refs[p.ref], p.path, p.value); err != nil {
+		overrides, ok := staged[p.ref]
+		if !ok {
+			overrides = serializer.DeepCopyAnyMap(refs[p.ref].Overrides)
+			if overrides == nil {
+				overrides = make(map[string]any)
+			}
+			staged[p.ref] = overrides
+		}
+		if err := setOverridePath(overrides, refs[p.ref].Name, p.path, p.value); err != nil {
 			return err
 		}
+	}
+	for i, overrides := range staged {
+		refs[i].Overrides = overrides
 	}
 	return nil
 }
@@ -182,25 +217,23 @@ func unionPaths(prior, current map[string]string) []string {
 	return paths
 }
 
-// setOverridePath writes value into ref.Overrides at a dotted path, creating
-// the intermediate maps. It merges into whatever the ref already carries: the
+// setOverridePath writes value into overrides at a dotted path, creating the
+// intermediate maps. It merges into whatever the ref already carries: the
 // enabled and install gates live in the same map, and replacing it would
 // re-enable a component the recipe disabled.
 //
-// Splitting on "." is the inverse of how ObjectNameValues built the path, and
-// is unambiguous for the keys that reach here: the segments are Helm subchart
-// names, which cannot contain a dot.
+// Splitting on "." is the inverse of how ObjectNameValues built the path, which
+// is exact because ObjectNameValues refuses any segment that would split
+// differently.
+//
 // A non-map value already sitting on an intermediate segment is rejected
 // rather than replaced. Replacing it would drop a value the ref states —
 // `grafana: "off"` beneath an inherited `grafana.fullnameOverride` — silently,
 // while this function's whole contract is to merge into what the ref carries.
 // One invalid name already rejects the artifact; losing a stated one is worse.
-func setOverridePath(ref *ComponentRef, path string, value any) error {
-	if ref.Overrides == nil {
-		ref.Overrides = make(map[string]any)
-	}
+func setOverridePath(overrides map[string]any, component, path string, value any) error {
 	segments := strings.Split(path, ".")
-	node := ref.Overrides
+	node := overrides
 	for i, segment := range segments[:len(segments)-1] {
 		existing, stated := node[segment]
 		if !stated {
@@ -214,7 +247,7 @@ func setOverridePath(ref *ComponentRef, path string, value any) error {
 			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 				"component %q already overrides %q with a non-map value, so the inherited object "+
 					"name at %q cannot be written without discarding it",
-				ref.Name, strings.Join(segments[:i+1], "."), path))
+				component, strings.Join(segments[:i+1], "."), path))
 		}
 		node = child
 	}
