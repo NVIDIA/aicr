@@ -419,8 +419,19 @@ azure_reap() { # azure_reap <relogin-rc>; echoes "rc=<n> trace=<calls>"
     rc=$?
     echo "rc=${rc} trace=$(tr '\n' ',' <"${AZ_TRACE}" 2>/dev/null)"
 }
-check "re-logins before state access and destroy" "rc=0 trace=relogin,az storage,docker," "$(azure_reap 0)"
-check "failed re-login fails the reap, no destroy"  "rc=1 trace=relogin,"                  "$(azure_reap 1)"
+# reap() stages its config with GNU `mktemp --suffix`; on a BSD host forward to
+# gmktemp, as for date above.
+if ! mktemp -u --suffix=.yaml >/dev/null 2>&1 && command -v gmktemp >/dev/null 2>&1; then
+    printf '#!/usr/bin/env bash\nexec gmktemp "$@"\n' >"${STUB_DIR}/mktemp"
+    chmod +x "${STUB_DIR}/mktemp"
+    hash -r # mktemp already resolved to the BSD binary when STUB_DIR was created
+fi
+if ! mktemp -u --suffix=.yaml >/dev/null 2>&1; then
+    echo "  SKIP: no GNU mktemp (install coreutils for gmktemp)"
+else
+    check "re-logins before state access and destroy" "rc=0 trace=relogin,az storage,docker," "$(azure_reap 0)"
+    check "failed re-login fails the reap, no destroy"  "rc=1 trace=relogin,"                  "$(azure_reap 1)"
+fi
 
 if [[ "${FAILED}" -eq 0 ]]; then
     echo "PASS: uat-janitor decision logic"
