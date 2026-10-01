@@ -918,7 +918,13 @@ func (c *Client) inheritIdentity(
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"inherit-from %s carries no components to inherit namespaces from", inheritFrom))
 	}
-	return recipe.ApplyInheritedIdentity(resolved.ComponentRefs, priorInternal.ComponentRefs)
+	if applyErr := recipe.ApplyInheritedIdentity(resolved.ComponentRefs, priorInternal.ComponentRefs); applyErr != nil {
+		return applyErr
+	}
+	// The inherited fields land after the resolved recipe was last validated,
+	// and a prior artifact can carry a combination the current registry's
+	// shape rejects, so check again before anything is emitted or bundled.
+	return resolved.ValidateCoherence()
 }
 
 // requireHydratedRecipe rejects an inheritance source that is not already a
