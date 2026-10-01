@@ -2938,6 +2938,57 @@ func TestResolveRecipe_InheritFromIncompleteBundle(t *testing.T) {
 	}
 }
 
+// TestResolveRecipe_InheritFromValuesFromBundle covers a well-formed flux
+// bundle built with --dynamic: its names are partly in a ConfigMap this reader
+// does not follow. Unlike an incomplete bundle that is not refused — the
+// namespace half is still sound — but no object name may be pinned from it,
+// because a name among the unread part would read as unset and be null-pinned.
+func TestResolveRecipe_InheritFromValuesFromBundle(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	pinned := baseline.Components[0].Name
+	const movedNamespace = "legacy-install-namespace"
+
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if mkErr := os.MkdirAll(filepath.Join(dir, pinned), 0o750); mkErr != nil {
+		t.Fatalf("setup: mkdir: %v", mkErr)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), map[string]string{pinned: movedNamespace})
+	writeBundleInfo(t, dir, fluxReleases([]string{pinned}))
+	if wErr := os.WriteFile(filepath.Join(dir, pinned, "helmrelease.yaml"), []byte(
+		"apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nspec:\n"+
+			"  values:\n    other: kept\n"+
+			"  valuesFrom:\n    - kind: ConfigMap\n      name: dynamic\n"), 0o600); wErr != nil {
+		t.Fatalf("setup: write helmrelease: %v", wErr)
+	}
+
+	result, err := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+	if err != nil {
+		t.Fatalf("ResolveRecipe: %v (a well-formed bundle must still pin namespaces)", err)
+	}
+	ref := result.Resolved().GetComponentRef(pinned)
+	if ref == nil {
+		t.Fatalf("%s is missing from the resolved recipe", pinned)
+	}
+	if ref.Namespace != movedNamespace {
+		t.Errorf("namespace = %q, want the inherited %q", ref.Namespace, movedNamespace)
+	}
+	// Relative to the baseline, because an overlay may already set a name key
+	// in Overrides; inheritance must add or change nothing there.
+	base := baseline.Resolved().GetComponentRef(pinned)
+	for _, key := range []string{"fullnameOverride", "nameOverride"} {
+		if got, want := ref.Overrides[key], base.Overrides[key]; !reflect.DeepEqual(got, want) {
+			t.Errorf("overrides[%s] = %#v, want the baseline %#v: no name may be pinned from a bundle "+
+				"whose names are not all readable", key, got, want)
+		}
+	}
+}
+
 func namespacesOf(result *aicr.RecipeResult) map[string]string {
 	out := make(map[string]string, len(result.Components))
 	for _, c := range result.Components {

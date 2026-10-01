@@ -777,6 +777,34 @@ func TestUpgradeCheckWithdrawsObjectNamesForAnIncompleteBundle(t *testing.T) {
 	assertObjectNamesSkipped(t, report, err, "synthetic-alpha/helmrelease.yaml")
 }
 
+// A flux bundle built with --dynamic states part of each release's values
+// through spec.valuesFrom, which this reader does not follow. The axis has no
+// complete baseline there, so it is withdrawn rather than compared.
+func TestUpgradeCheckWithdrawsObjectNamesForValuesFrom(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	client := upgradeCheckClient(t)
+	components := map[string]string{"synthetic-alpha": "1.2.0"}
+
+	from := filepath.Join(dir, "dynamic-flux")
+	if err := os.MkdirAll(filepath.Join(from, "synthetic-alpha"), 0o750); err != nil {
+		t.Fatalf("setup: mkdir: %v", err)
+	}
+	syntheticRecipe(t, filepath.Join(from, "recipe.yaml"), components)
+	writeBundleInfo(t, from, fluxReleases([]string{"synthetic-alpha"}))
+	if err := os.WriteFile(filepath.Join(from, "synthetic-alpha", "helmrelease.yaml"), []byte(
+		"apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nspec:\n"+
+			"  values:\n    fullnameOverride: legacy-alpha\n"+
+			"  valuesFrom:\n    - kind: ConfigMap\n      name: synthetic-alpha-dynamic\n"), 0o600); err != nil {
+		t.Fatalf("setup: write helmrelease: %v", err)
+	}
+
+	to := syntheticRecipe(t, filepath.Join(dir, "to.yaml"), map[string]string{"synthetic-alpha": "1.3.0"})
+
+	report, err := client.UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{From: from, To: to})
+	assertObjectNamesSkipped(t, report, err, "valuesFrom")
+}
+
 // assertObjectNamesSkipped checks the report withheld the object-name axis for
 // the stated reason, still reported the version axis, and attributed no
 // identity change to an axis nothing looked at.

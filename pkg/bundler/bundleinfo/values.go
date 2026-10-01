@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"gopkg.in/yaml.v3"
@@ -77,9 +78,11 @@ var injectedSuffixes = []string{"-pre", "-post", "-readiness"}
 // this, because it is not its component's chart.
 //
 // Fails closed everywhere Read does, and for the same reason: the bundle
-// arrived from an OCI registry or a GitOps clone. A missing bundle-info.yaml
-// propagates Read's ErrCodeNotFound unchanged, so a caller can tell "this
-// bundle predates build-record stamping" from "this bundle pinned no values".
+// arrived from an OCI registry or a GitOps clone. The error code tells a caller
+// which kind of "cannot say" it got: ErrCodeNotFound for a bundle predating
+// bundle-info.yaml, ErrCodeUnavailable for a well-formed one whose values are
+// not all stated where this reads, and ErrCodeInvalidRequest for one that is
+// incomplete or malformed.
 func ReadReleaseValues(ctx context.Context, dir string) (map[string]map[string]any, error) {
 	info, err := Read(ctx, dir)
 	if err != nil {
@@ -95,18 +98,9 @@ func ReadReleaseValues(ctx context.Context, dir string) (map[string]map[string]a
 		if isInjectedRelease(r) {
 			continue
 		}
-		values, found, valErr := releaseValues(dir, r, info.Build.Settings.VendorCharts)
+		values, valErr := releaseValues(dir, r, info.Build.Settings.VendorCharts)
 		if valErr != nil {
 			return nil, valErr
-		}
-		// Keyed on whether the release stated values at all, not on whether
-		// they turned out to be empty. A component whose values file is
-		// comments-only states an empty map, and that is a fact: it deployed
-		// and pinned nothing. Collapsing it into "absent" would tell
-		// inheritance this is a first deploy, so a name the next release adds
-		// would apply instead of being held back.
-		if !found {
-			continue
 		}
 		out[r.Component] = values
 	}
@@ -132,41 +126,39 @@ func isInjectedRelease(r *Release) bool {
 // file is the live document there and the manifest merely points at it.
 // Reading the manifest first would work for flux and silently read a pointer
 // for Argo.
-// The bool reports whether the release stated values at all, which is a
-// different question from whether they were empty; see ReadReleaseValues.
-func releaseValues(dir string, r *Release, vendored bool) (map[string]any, bool, error) {
+//
+// Un-nesting runs after whichever layout supplied the values, not inside one of
+// them: flux nests vendored values under the subchart key inside spec.values
+// exactly as the other deployers do inside values.yaml.
+func releaseValues(dir string, r *Release, vendored bool) (map[string]any, error) {
 	values, found, err := readValuesFile(dir, r.Path, valuesFileName)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if found {
 		cluster, clusterFound, clusterErr := readValuesFile(dir, r.Path, clusterValuesFileName)
 		if clusterErr != nil {
-			return nil, false, clusterErr
+			return nil, clusterErr
 		}
 		if clusterFound {
 			// Merged before un-nesting: both files nest under the same key,
 			// so the two orders agree, and merging first keeps one code path.
 			mergeValues(values, cluster)
 		}
-		if vendored {
-			values, err = unnestVendoredValues(dir, r, values)
-			if err != nil {
-				return nil, false, err
-			}
+	} else {
+		if r.Manifest == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"release %q records no manifest and has no %s under %s, but every deployer writes one "+
+					"or the other; the bundle is incomplete", r.Name, valuesFileName, r.Path))
 		}
-		return values, true, nil
+		if values, err = readManifestValues(dir, r.Manifest); err != nil {
+			return nil, err
+		}
 	}
-	if r.Manifest == "" {
-		return nil, false, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"release %q records no manifest and has no %s under %s, but every deployer writes one "+
-				"or the other; the bundle is incomplete", r.Name, valuesFileName, r.Path))
+	if !vendored {
+		return values, nil
 	}
-	values, err = readManifestValues(dir, r.Manifest)
-	if err != nil {
-		return nil, false, err
-	}
-	return values, true, nil
+	return unnestVendoredValues(dir, r, values)
 }
 
 // unnestVendoredValues strips the subchart key a vendored bundle wraps its
@@ -253,6 +245,13 @@ func readValuesFile(dir, relDir, name string) (map[string]any, bool, error) {
 // spec.values states that the release pinned nothing, while a missing one
 // states nothing at all — and collapsing them lets inheritance write a null
 // that deletes a deployed fullnameOverride.
+//
+// A HelmRelease that also takes values through spec.valuesFrom is
+// ErrCodeUnavailable, a different failure from an incomplete bundle: flux puts
+// --dynamic paths in a ConfigMap referenced there, so spec.values is only part
+// of what the release installed with, and a name key among the missing part
+// would read as unset. The bundle is well-formed; its names just are not all
+// stated where this reads.
 func readManifestValues(dir, manifest string) (map[string]any, error) {
 	data, found, err := readBounded(dir, manifest)
 	if err != nil {
@@ -265,12 +264,18 @@ func readManifestValues(dir, manifest string) (map[string]any, error) {
 	}
 	var doc struct {
 		Spec struct {
-			Values map[string]any `yaml:"values"`
+			Values     map[string]any `yaml:"values"`
+			ValuesFrom []any          `yaml:"valuesFrom"`
 		} `yaml:"spec"`
 	}
 	if unmarshalErr := yaml.Unmarshal(data, &doc); unmarshalErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("failed to parse %s", manifest), unmarshalErr)
+	}
+	if len(doc.Spec.ValuesFrom) > 0 {
+		return nil, errors.New(errors.ErrCodeUnavailable, fmt.Sprintf(
+			"%s takes values through spec.valuesFrom, where flux puts --dynamic paths, so the "+
+				"object names it installed with are not all stated in the bundle", manifest))
 	}
 	if doc.Spec.Values == nil {
 		return map[string]any{}, nil
@@ -279,12 +284,23 @@ func readManifestValues(dir, manifest string) (map[string]any, error) {
 }
 
 // readBounded opens dir/rel under the same guards as Read: lexically joined,
-// never followed through a symlink, regular files only, and size-capped.
+// regular files only, size-capped, and with no component below dir followed
+// through a symlink.
+//
+// SafeJoin is lexical and O_NOFOLLOW guards only the final component, so a
+// release directory that is itself a symlink — which git and OCI both preserve
+// — would otherwise redirect the read outside the bundle. Each directory is
+// therefore checked before the open. That narrows the window rather than
+// closing it: a swap between the check and the open is not defended, which is
+// acceptable for a bundle the caller already chose to read.
 func readBounded(dir, rel string) ([]byte, bool, error) {
 	path, joinErr := deployer.SafeJoin(dir, rel)
 	if joinErr != nil {
 		return nil, false, errors.PropagateOrWrap(joinErr, errors.ErrCodeInvalidRequest,
 			"unsafe bundle values path")
+	}
+	if linkErr := rejectSymlinkedParents(dir, rel); linkErr != nil {
+		return nil, false, linkErr
 	}
 
 	f, err := os.OpenFile( //nolint:gosec // path validated by SafeJoin
@@ -318,6 +334,29 @@ func readBounded(dir, rel string) ([]byte, bool, error) {
 			fmt.Sprintf("%s exceeds the %d-byte limit", rel, defaults.MaxBundleValuesBytes))
 	}
 	return data, true, nil
+}
+
+// rejectSymlinkedParents refuses rel when any directory between dir and its
+// final component is a symlink. dir itself is the caller's choice and is not
+// checked. A directory that does not exist is left for the open to report,
+// so absence keeps meaning absence.
+func rejectSymlinkedParents(dir, rel string) error {
+	segments := strings.Split(filepath.ToSlash(filepath.Clean(rel)), "/")
+	current := dir
+	for _, segment := range segments[:len(segments)-1] {
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return errors.Wrap(errors.ErrCodeInternal, "failed to inspect bundle directory "+current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New(errors.ErrCodeInvalidRequest, "refusing to follow directory symlink "+current)
+		}
+	}
+	return nil
 }
 
 // mergeValues layers src over dst the way Helm coalesces a second -f file:

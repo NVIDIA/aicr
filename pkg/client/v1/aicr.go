@@ -1007,6 +1007,14 @@ func (c *Client) inheritObjectNames(
 				"reason", "it has no "+bundleinfo.FileName+", so it predates build-record stamping")
 			return nil
 		}
+		// A well-formed bundle whose names are not all stated where they can
+		// be read. Like the case above, and unlike an incomplete bundle, the
+		// namespace half still holds, so this warns rather than refusing.
+		if stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+			slog.Warn("inherit-from cannot pin object names from this bundle",
+				"inheritFrom", inheritFrom, "reason", err.Error())
+			return nil
+		}
 		return err
 	}
 
