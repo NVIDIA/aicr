@@ -112,7 +112,7 @@ from `pkg/constraints`):
 | Operator | Use | Notes |
 |----------|-----|-------|
 | `>=`, `<=`, `>`, `<` | Version / numeric comparison | Always treated as a version comparison; parsed via `pkg/version` |
-| `==`, `!=` | Explicit equality / inequality | Version compare if the expected value looks like a version, else string |
+| `==`, `!=` | Explicit equality / inequality | Version compare if the expected value looks like a version and both sides parse; otherwise string compare |
 | *(none)* | `OperatorExact` | Case-sensitive string equality — `value: "ubuntu"` |
 
 The parser is operator-prefix-longest-first so `>=` wins over `>`.
