@@ -59,11 +59,11 @@ const (
 	okeLegacyPluginUnknown = "unknown"
 
 	// Detail states (okeLegacyKeyDaemonSet).
-	okeLegacyDSAbsent    = "absent"
-	okeLegacyDSUnlabeled = "unlabeled"
-	okeLegacyDSDisabled  = "disabled"
-	okeLegacyDSActive    = "active"
-	okeLegacyDSUnknown   = "unknown"
+	okeLegacyDSAbsent       = "absent"
+	okeLegacyDSUnrecognized = "unrecognized"
+	okeLegacyDSDisabled     = "disabled"
+	okeLegacyDSActive       = "active"
+	okeLegacyDSUnknown      = "unknown"
 )
 
 type okeLegacyPluginSummary struct {
@@ -119,7 +119,7 @@ func (k *Collector) collectOKELegacyPlugin(ctx context.Context) measurement.Subt
 	}
 
 	if ds.Labels[okeLegacyAddonManagerLabel] != okeLegacyAddonManagerMode {
-		return okeLegacyPluginSummary{plugin: okeLegacyPluginUnknown, daemonSet: okeLegacyDSUnlabeled}.subtype()
+		return okeLegacyPluginSummary{plugin: okeLegacyPluginUnknown, daemonSet: okeLegacyDSUnrecognized}.subtype()
 	}
 	if ds.Status.DesiredNumberScheduled == 0 {
 		return okeLegacyPluginSummary{plugin: okeLegacyPluginNone, daemonSet: okeLegacyDSDisabled}.subtype()

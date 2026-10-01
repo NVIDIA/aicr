@@ -259,12 +259,12 @@ spec:
               nvidia-gpu-device-plugin DaemonSet) still targets GPU nodes on
               this cluster, or a DaemonSet with that name exists without
               the addon-manager Reconcile label so its owner cannot be
-              confirmed (the daemonset detail reads unlabeled). Deploying
+              confirmed (the daemonset detail reads unrecognized). Deploying
               the GPU Operator's device plugin alongside it would
               double-advertise nvidia.com/gpu. For the labeled legacy
               DaemonSet, disable it on every GPU node pool via the
               oci.oraclecloud.com/disable-gpu-device-plugin=true node label.
-              For an unlabeled DaemonSet, resolve its ownership and remove it
+              For an unrecognized DaemonSet, resolve its ownership and remove it
               if it is the conflicting workload, since the node label does
               not change the reading. Alternatively, migrate the cluster to
               the managed NvidiaGpuPlugin add-on (and then use the default

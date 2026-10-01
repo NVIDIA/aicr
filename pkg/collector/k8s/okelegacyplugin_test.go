@@ -40,7 +40,7 @@ func legacyPluginDS(labels map[string]string, desired int32) *appsv1.DaemonSet {
 // TestCollectOKELegacyPlugin_StateMatrix pins the collapse rules: only
 // Oracle's addon-manager-labeled DaemonSet with a non-zero node target reads
 // "active". Absent or fully disabled reads "none", with the uncollapsed detail
-// preserved. An API failure or an unlabeled DaemonSet reads "unknown", so
+// preserved. An API failure or an unrecognized DaemonSet reads "unknown", so
 // constraints fail closed.
 func TestCollectOKELegacyPlugin_StateMatrix(t *testing.T) {
 	t.Parallel()
@@ -72,22 +72,22 @@ func TestCollectOKELegacyPlugin_StateMatrix(t *testing.T) {
 			wantDaemonSet: okeLegacyDSDisabled,
 		},
 		{
-			name:          "same-named daemonset without the addon-manager label reads unknown/unlabeled",
+			name:          "same-named daemonset without the addon-manager label reads unknown/unrecognized",
 			objects:       []runtime.Object{legacyPluginDS(map[string]string{"app": "custom"}, 3)},
 			wantPlugin:    okeLegacyPluginUnknown,
-			wantDaemonSet: okeLegacyDSUnlabeled,
+			wantDaemonSet: okeLegacyDSUnrecognized,
 		},
 		{
-			name:          "addon-manager label with a non-Reconcile value reads unknown/unlabeled",
+			name:          "addon-manager label with a non-Reconcile value reads unknown/unrecognized",
 			objects:       []runtime.Object{legacyPluginDS(map[string]string{okeLegacyAddonManagerLabel: "EnsureExists"}, 3)},
 			wantPlugin:    okeLegacyPluginUnknown,
-			wantDaemonSet: okeLegacyDSUnlabeled,
+			wantDaemonSet: okeLegacyDSUnrecognized,
 		},
 		{
-			name:          "daemonset with no labels and zero desired reads unknown/unlabeled",
+			name:          "daemonset with no labels and zero desired reads unknown/unrecognized",
 			objects:       []runtime.Object{legacyPluginDS(nil, 0)},
 			wantPlugin:    okeLegacyPluginUnknown,
-			wantDaemonSet: okeLegacyDSUnlabeled,
+			wantDaemonSet: okeLegacyDSUnrecognized,
 		},
 		{
 			name:          "api error reads unknown (fail closed)",

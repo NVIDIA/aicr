@@ -435,7 +435,7 @@ The fields are:
   least one node), or `unknown` (the API could not be consulted, including
   a snapshot taken without cluster access, or the DaemonSet is present
   without the `Reconcile` label). Always emitted.
-- `daemonset` (`string`) — the uncollapsed detail: `absent`, `unlabeled`,
+- `daemonset` (`string`) — the uncollapsed detail: `absent`, `unrecognized`,
   `disabled`, `active`, or `unknown`. Always emitted.
 
 Interpretation is fail-closed: `none` is the only value the `gpuStack`
