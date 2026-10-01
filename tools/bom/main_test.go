@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bom"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -271,6 +272,7 @@ func TestSurveyComponentSkipHelm(t *testing.T) {
 }
 
 func TestSurveyComponentRendererError(t *testing.T) {
+	setRetryBackoff(t, 0)
 	root := writeTestRegistry(t, testRegistryHelm)
 	mock := &helmtest.MockRenderer{
 		Errs: map[string]error{
@@ -485,6 +487,7 @@ func TestRenderHelmComponent(t *testing.T) {
 }
 
 func TestRenderHelmComponentError(t *testing.T) {
+	setRetryBackoff(t, 0)
 	root := writeTestRegistry(t, testRegistryHelm)
 	mock := &helmtest.MockRenderer{
 		Errs: map[string]error{
@@ -674,6 +677,7 @@ func TestRunStrictUnpinnedVersion(t *testing.T) {
 }
 
 func TestRunStrictWithWarnings(t *testing.T) {
+	setRetryBackoff(t, 0)
 	root := writeTestRegistry(t, testRegistryHelm)
 	outDir := t.TempDir()
 
@@ -891,8 +895,13 @@ func TestSurveyComponent_DRANodeLabelerImageInventoried(t *testing.T) {
 	}
 }
 
-// Retries must not sleep in unit tests.
-func init() { renderRetryBackoff = 0 }
+// setRetryBackoff overrides renderRetryBackoff for one test.
+func setRetryBackoff(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := renderRetryBackoff
+	renderRetryBackoff = d
+	t.Cleanup(func() { renderRetryBackoff = old })
+}
 
 // flakyRenderer fails the first failures calls with err, then returns yaml.
 type flakyRenderer struct {
@@ -911,6 +920,7 @@ func (f *flakyRenderer) Render(context.Context, helm.ChartInput) ([]byte, error)
 }
 
 func TestRenderWithRetry(t *testing.T) {
+	setRetryBackoff(t, 0)
 	internal := errors.New(errors.ErrCodeInternal, "pull failed")
 	tests := []struct {
 		name      string
@@ -931,6 +941,31 @@ func TestRenderWithRetry(t *testing.T) {
 				t.Errorf("err = %v, calls = %d; want err %v, calls %d", err, f.calls, tt.wantErr, tt.wantCalls)
 			}
 		})
+	}
+}
+
+// cancelingRenderer cancels the caller's context on its first call, then fails.
+type cancelingRenderer struct {
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (c *cancelingRenderer) Render(context.Context, helm.ChartInput) ([]byte, error) {
+	c.calls++
+	c.cancel()
+	return nil, errors.New(errors.ErrCodeInternal, "pull failed")
+}
+
+func TestRenderWithRetryStopsOnContextCancel(t *testing.T) {
+	setRetryBackoff(t, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := &cancelingRenderer{cancel: cancel}
+	if _, err := renderWithRetry(ctx, r, helm.ChartInput{Name: "x"}); err == nil {
+		t.Fatal("renderWithRetry() error = nil, want the render failure")
+	}
+	if r.calls != 1 {
+		t.Errorf("calls = %d, want 1 (no retry after cancel)", r.calls)
 	}
 }
 
