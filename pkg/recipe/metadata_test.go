@@ -2259,10 +2259,10 @@ func TestApplyInheritedIdentityRegistryFields(t *testing.T) {
 			want:  ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml", "b.yaml"}},
 		},
 		{
-			name:  "an empty prior manifest set replaces a non-empty default",
+			name:  "an empty prior manifest set keeps the default",
 			ref:   ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml"}},
 			prior: ComponentRef{Name: "c"},
-			want:  ComponentRef{Name: "c"},
+			want:  ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml"}},
 		},
 		{
 			name:  "a dropped pre-manifest file is restored and an added one is left out",
@@ -2271,10 +2271,10 @@ func TestApplyInheritedIdentityRegistryFields(t *testing.T) {
 			want:  ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "b.yaml"}},
 		},
 		{
-			name:  "an empty prior pre-manifest set replaces a non-empty default",
+			name:  "an empty prior pre-manifest set keeps the default",
 			ref:   ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml"}},
 			prior: ComponentRef{Name: "c"},
-			want:  ComponentRef{Name: "c"},
+			want:  ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml"}},
 		},
 		{
 			name:  "empty prior chart, source and path do not clobber the defaults",

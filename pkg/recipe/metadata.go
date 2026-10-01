@@ -294,11 +294,10 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 // configuration and stay as resolved. A component the prior recipe does not
 // name keeps its defaults. It is a first deploy as far as that artifact knows.
 //
-// A scalar field the prior recipe leaves empty is not inherited, so an artifact
-// that never carried it does not blank the default. The manifest and
-// pre-manifest file sets are the exception. Each is restored whole, even when
-// empty, because a resolved recipe that lists none is stating that, and
-// dropping or adding an entry moves the identity that upgrade-check compares.
+// A field the prior recipe leaves empty is not inherited, so an artifact that
+// never carried it does not blank the default, and a manifest the current
+// registry adds is not dropped. A non-empty manifest or pre-manifest file set is
+// restored whole, so an entry the registry dropped is kept.
 // A component whose deployment type differs from the prior one keeps only the
 // namespace, since no chart, source, path or manifest set carries across a Helm
 // and Kustomize flip. upgrade-check reports the type move.
@@ -360,8 +359,12 @@ func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 		if p.Path != "" {
 			work[i].Path = p.Path
 		}
-		work[i].ManifestFiles = slices.Clone(p.ManifestFiles)
-		work[i].PreManifestFiles = slices.Clone(p.PreManifestFiles)
+		if len(p.ManifestFiles) > 0 {
+			work[i].ManifestFiles = slices.Clone(p.ManifestFiles)
+		}
+		if len(p.PreManifestFiles) > 0 {
+			work[i].PreManifestFiles = slices.Clone(p.PreManifestFiles)
+		}
 	}
 	copy(refs, work)
 	return nil
