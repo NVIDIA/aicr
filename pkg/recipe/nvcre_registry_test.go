@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"io/fs"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -28,6 +29,11 @@ import (
 // values are not auto-discovered, so a ref that omits it silently renders the
 // chart defaults.
 const nvcreValuesFile = "components/nvcre/values.yaml"
+
+// sha256DigestPattern matches a complete SHA-256 OCI digest. Substring-matching
+// "sha256:" would accept sha256:not-a-digest, which pins nothing and renders an
+// image reference no runtime can resolve.
+var sha256DigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // TestNVCRERegisteredWithoutOverlay keeps the public CRE chart installable
 // from the registry without making it part of any shipped overlay or mixin.
@@ -150,10 +156,17 @@ func TestNVCREValuesPinControllerImageByDigest(t *testing.T) {
 	}
 
 	// The chart renders repository@digest when manager.image.digest is set and
-	// repository:tag otherwise, so either field can carry the pin.
+	// repository:tag otherwise, so either field can carry the pin. A tag carries
+	// it as the tag@digest suffix.
 	digest, _ := image["digest"].(string)
 	tag, _ := image["tag"].(string)
-	if !strings.Contains(digest, "sha256:") && !strings.Contains(tag, "sha256:") {
+	pinned := digest
+	if pinned == "" {
+		if _, suffix, found := strings.Cut(tag, "@"); found {
+			pinned = suffix
+		}
+	}
+	if !sha256DigestPattern.MatchString(pinned) {
 		t.Errorf("%s: controller image is not digest-pinned (manager.image.tag=%q, manager.image.digest=%q); "+
 			"re-resolve with `crane digest ghcr.io/nvidia/cluster-readiness-engine/manager:<version>`",
 			nvcreValuesFile, tag, digest)
@@ -176,7 +189,14 @@ func TestNVCREValuesDisableServiceMonitor(t *testing.T) {
 	if !ok {
 		t.Fatalf("%s: metrics.serviceMonitor block missing", nvcreValuesFile)
 	}
-	if enabled, _ := serviceMonitor["enabled"].(bool); enabled {
+	// Absent is not off: the chart defaults the monitor on, so dropping the key
+	// enables it. Only an explicit false keeps install free of the CRDs.
+	enabled, ok := serviceMonitor["enabled"].(bool)
+	if !ok {
+		t.Fatalf("%s: metrics.serviceMonitor.enabled is absent or not a boolean (%T)", nvcreValuesFile,
+			serviceMonitor["enabled"])
+	}
+	if enabled {
 		t.Errorf("%s: metrics.serviceMonitor.enabled must stay false until a recipe that installs "+
 			"prometheus-operator CRDs opts in", nvcreValuesFile)
 	}
