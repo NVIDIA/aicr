@@ -145,7 +145,7 @@ This is the one upgrade where it bites, because the artifact you are inheriting 
 
 A component the prior artifact does not name keeps the registry default, because as far as that artifact knows it is a first deploy. Two cases land there and are worth telling apart: a component the new AICR release adds, which genuinely is a first deploy, and a component you excluded at bundle time with `--set <component>:enabled=false`, which a bundle's `recipe.yaml` records post-filter and therefore does not carry. Inheriting from a filtered bundle gives the excluded components registry defaults. Inherit from the recipe rather than the bundle if you want them pinned.
 
-The flag fails closed rather than quietly resolving as a first deploy. A path that does not exist, a directory with no `recipe.yaml` in it, and a `cm://` URI (not supported yet) are each rejected with `INVALID_REQUEST`.
+The flag fails closed rather than quietly resolving as a first deploy. A path that does not exist, a directory with no `recipe.yaml` in it, and a `cm://` URI (not supported yet) are each rejected with `INVALID_REQUEST`. So is an artifact resolved for a different service, accelerator, intent or OS than the new recipe, because same-named components differ across them. A dimension either side leaves unset or `any`, and the platform and node count, are not compared.
 
 `aicr query` and `aicr mirror list` carry the same flag, because all three share `aicr recipe`'s resolution flags. The REST API does not: `--inherit-from` names a path on the machine running the CLI, so it is CLI-only for now, as `aicr recipe --snapshot` and `--data` already are.
 

@@ -918,6 +918,9 @@ func (c *Client) inheritIdentity(
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"inherit-from %s carries no components to inherit namespaces from", inheritFrom))
 	}
+	if criteriaErr := checkInheritCriteria(resolved.Criteria, priorInternal.Criteria, inheritFrom); criteriaErr != nil {
+		return criteriaErr
+	}
 	if applyErr := recipe.ApplyInheritedIdentity(resolved.ComponentRefs, priorInternal.ComponentRefs); applyErr != nil {
 		return applyErr
 	}
@@ -925,6 +928,34 @@ func (c *Client) inheritIdentity(
 	// and a prior artifact can carry a combination the current registry's
 	// shape rejects, so check again before anything is emitted or bundled.
 	return resolved.ValidateCoherence()
+}
+
+// checkInheritCriteria rejects a prior artifact resolved for a different
+// service, accelerator, intent or OS. Same-named components differ across
+// those, so inheriting their manifest sets and charts would import another
+// environment's deployment. A dimension either side leaves unset or "any" does
+// not count, and neither do platform and nodes, which grow a deployment rather
+// than relocate it.
+func checkInheritCriteria(resolved, prior *recipe.Criteria, inheritFrom string) error {
+	if resolved == nil || prior == nil {
+		return nil
+	}
+	for _, d := range []struct{ name, now, was string }{
+		{"service", string(resolved.Service), string(prior.Service)},
+		{"accelerator", string(resolved.Accelerator), string(prior.Accelerator)},
+		{"intent", string(resolved.Intent), string(prior.Intent)},
+		{"os", string(resolved.OS), string(prior.OS)},
+	} {
+		unset := func(v string) bool { return v == "" || v == "any" }
+		if unset(d.now) || unset(d.was) || d.now == d.was {
+			continue
+		}
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"inherit-from %s was resolved for %s %q but this recipe resolves for %q, "+
+				"so its component identity does not describe this deployment",
+			inheritFrom, d.name, d.was, d.now))
+	}
+	return nil
 }
 
 // requireHydratedRecipe rejects an inheritance source that is not already a
