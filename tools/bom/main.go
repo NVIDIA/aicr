@@ -30,6 +30,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -322,6 +323,7 @@ func renderWithRetry(ctx context.Context, r helm.Renderer, in helm.ChartInput) (
 
 			break
 		}
+		slog.Warn("chart render failed, retrying", "component", in.Name, "attempt", attempt, "error", err)
 		select {
 		case <-ctx.Done():
 			return out, err
