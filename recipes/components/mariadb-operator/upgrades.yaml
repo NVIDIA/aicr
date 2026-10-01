@@ -157,15 +157,23 @@ transitions:
       - steps:
           - id: enable-dataplane-autoupdate
             description: >-
-              kubectl patch mariadb mariadb -n slurm --type merge -p
-              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
+              In the desired configuration the Argo CD or Flux application
+              syncs, set spec.updateStrategy.autoUpdateDataPlane: true on every
+              HA MariaDB the precondition listed, commit it, and sync that
+              application before the CRD and operator syncs below. Confirm each
+              live resource carries it:
+              `kubectl get mariadb <name> -n <namespace>
+              -o jsonpath='{.spec.updateStrategy.autoUpdateDataPlane}'` prints
+              true.
             reason: >-
-              Same upstream requirement, applied out of band before the sync so
-              it lands ahead of the operator. Repeat for every HA MariaDB the
-              precondition listed; on a non-HA instance the field is accepted
-              and does nothing. A pruning Argo CD or Flux configuration will
-              revert this field on the next sync, so run the sync below
-              promptly after patching.
+              Same upstream requirement, and it has to live in git rather than
+              in a live patch. A pruning or self-healing sync restores whatever
+              git says, and if git still says false when the upgraded operator
+              first reconciles an HA MariaDB, the operator's Galera and
+              replication defaulting keep the old init and agent images: the
+              data-plane upgrade is skipped and the waits below time out. Keep
+              true in git until those waits pass. On a non-HA instance the
+              field is accepted and does nothing.
           - id: sync-crds
             description: >-
               Sync or reconcile the mariadb-operator-crds release to 26.10.1
@@ -232,12 +240,13 @@ transitions:
               template exists they already equal N for the old revision.
           - id: revert-dataplane-autoupdate
             description: >-
-              kubectl patch mariadb mariadb -n slurm --type merge -p
-              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":false}}}'
+              After the waits above pass, set
+              spec.updateStrategy.autoUpdateDataPlane back to false in the
+              same desired configuration, commit it, and sync.
             reason: >-
-              Upstream recommends returning it to false. If the field is
-              managed in git, set it there instead so the next sync does not
-              reintroduce true.
+              Upstream recommends returning it to false so a later operator
+              bump does not update the data plane unattended. Do it in git: a
+              live patch alone is undone by the next sync.
     references:
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.0.md
       - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.0
