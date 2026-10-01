@@ -382,7 +382,8 @@ FAKE
         probe 1 1 "File not found (404)"   "404 fails fast"   "404 22"
         probe 1 3 "Access forbidden (403)" "403 keeps failing" "403 22"
         probe 0 3 ""                       "403 clears"       "403 22" "403 22" "200 0"
-        probe 1 1 "redirect target did not answer" "dead redirect" "302 35"
+        probe 1 3 "redirect target did not answer" "dead redirect" "302 35"
+        probe 0 3 ""                       "redirect recovers" "302 35" "302 35" "200 0"
         probe 1 1 "Could not resolve host" "no DNS"           "000 6"
 
         # N attempts is N-1 curl retries. Only downloads retry a 404, since the
