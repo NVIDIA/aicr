@@ -203,8 +203,6 @@ func TestVerifyNodewrightReady_ListsClusterScoped(t *testing.T) {
 	}
 }
 
-// A recipe that declares Nodewright CRs fails when neither CRD group is ever
-// served. The check polls until the readiness budget runs out.
 func TestCheckExpectedResources_FailsNodewrightWhenCRDNeverRegistered(t *testing.T) {
 	t.Parallel()
 
@@ -224,8 +222,8 @@ func TestCheckExpectedResources_FailsNodewrightWhenCRDNeverRegistered(t *testing
 	}
 }
 
-// A group/version listed in discovery without the nodewrights resource (for
-// example only DeploymentPolicy established) is not served.
+// TestResolveNodewrightGVR_RequiresResourceNotJustGroupVersion simulates
+// deploymentpolicies establishing before nodewrights in the same group/version.
 func TestResolveNodewrightGVR_RequiresResourceNotJustGroupVersion(t *testing.T) {
 	t.Parallel()
 
@@ -245,8 +243,6 @@ func TestResolveNodewrightGVR_RequiresResourceNotJustGroupVersion(t *testing.T) 
 	}
 }
 
-// A group established part-way through the poll is picked up on a later
-// iteration.
 func TestVerifyNodewrightReady_PicksUpCRDEstablishedMidPoll(t *testing.T) {
 	t.Parallel()
 
@@ -1550,12 +1546,54 @@ func TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert(t *testing.T
 			[]runtime.Object{activeNamespace("skyhook")},
 			[]runtime.Object{nodeWrightWithStatus("tuning", nodewrightCompleteState)},
 			[]recipe.ComponentRef{ref})
-		suppressed, _, err := gatedHealthCheckSuppressed(ctx, ref)
+		asserts := []chainsaw.ComponentAssert{{Name: ref.Name, AssertYAML: ref.HealthCheckAsserts}}
+		kept, err := dropDiscoverySuppressedAsserts(ctx, asserts)
 		if err != nil {
-			t.Fatalf("gatedHealthCheckSuppressed() error = %v", err)
+			t.Fatalf("dropDiscoverySuppressedAsserts() error = %v", err)
 		}
-		if suppressed {
+		if len(kept) != 1 {
 			t.Fatal("assert must stay queued when the cluster serves nodewright.nvidia.com")
+		}
+	})
+
+	t.Run("legacy-only cluster drops the assert", func(t *testing.T) {
+		t.Parallel()
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{legacyOperator, ref})
+		asserts := []chainsaw.ComponentAssert{{Name: ref.Name, AssertYAML: ref.HealthCheckAsserts}}
+		kept, err := dropDiscoverySuppressedAsserts(ctx, asserts)
+		if err != nil {
+			t.Fatalf("dropDiscoverySuppressedAsserts() error = %v", err)
+		}
+		if len(kept) != 0 {
+			t.Fatalf("kept = %v, want the assert dropped on a legacy-only cluster", kept)
+		}
+	})
+
+	t.Run("discovery is read after readiness polling", func(t *testing.T) {
+		t.Parallel()
+		// The group is not served when the readiness poll starts and only the
+		// legacy group is established by the time it ends. The assert
+		// selection must reflect the later state.
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{legacyOperator, ref})
+		fakeDisc := ctx.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+		established := fakeDisc.Resources
+		fakeDisc.Resources = nil
+		calls := 0
+		ctx.Clientset.(*k8sfake.Clientset).PrependReactor("get", "resource", func(clienttesting.Action) (bool, runtime.Object, error) {
+			calls++
+			if calls == 3 {
+				fakeDisc.Resources = established
+			}
+			return false, nil, nil
+		})
+		if err := checkExpectedResources(ctx); err != nil {
+			t.Fatalf("checkExpectedResources() error = %v, want nil once the legacy group is served", err)
 		}
 	})
 
@@ -1570,25 +1608,24 @@ func TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert(t *testing.T
 		ctx.Clientset.(*k8sfake.Clientset).PrependReactor("get", "resource", func(clienttesting.Action) (bool, runtime.Object, error) {
 			return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: nodewrightGVR.Group}, "", stderrors.New("forbidden"))
 		})
-		if _, _, err := gatedHealthCheckSuppressed(ctx, ref); err == nil {
-			t.Fatal("gatedHealthCheckSuppressed() error = nil, want the discovery failure (must not skip)")
+		asserts := []chainsaw.ComponentAssert{
+			{Name: ref.Name, AssertYAML: ref.HealthCheckAsserts},
+			{Name: "other-component", AssertYAML: "x"},
+		}
+		kept, err := dropDiscoverySuppressedAsserts(ctx, asserts)
+		if err == nil {
+			t.Fatal("dropDiscoverySuppressedAsserts() error = nil, want the discovery failure (must not skip)")
+		}
+		if len(kept) != 1 || kept[0].Name != "other-component" {
+			t.Fatalf("kept = %v, want only the unaffected assert alongside the error", kept)
 		}
 	})
 }
 
-// TestResolveNodewrightGVR_VersionGate pins the fallback contract: the new
-// group always wins when served; the legacy group is read only when the recipe
-// pins nodewright-operator below the rename, or carries no usable pin at all;
-// a rename-or-later pin on a legacy-only cluster fails closed; neither group
-// served skips (#607).
-// resolveNodewrightGVR runs ahead of pollUntilStable, so a discovery call that
-// ignores the validator context would outlive both cancellation and the
-// readiness budget and hang until the Job is killed. client-go's
-// DiscoveryInterface.ServerResourcesForGroupVersion issues its request with
-// context.TODO() internally, which is why the probe goes through
-// helper.GroupVersionResources instead. The fake clientset exposes no
-// RESTClient, so this exercises that helper's guard rather than a real
-// in-flight cancellation, which is the reachable half here.
+// TestResolveNodewrightGVRHonorsCancellation verifies a canceled context
+// surfaces as ErrCodeTimeout. The fake clientset exposes no RESTClient, so this
+// covers the guard in helper.GroupVersionResources rather than an in-flight
+// cancellation.
 func TestResolveNodewrightGVRHonorsCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -1610,6 +1647,12 @@ func TestResolveNodewrightGVRHonorsCancellation(t *testing.T) {
 	}
 }
 
+// TestResolveNodewrightGVR_VersionGate verifies which group resolves.
+//   - NodeWright wins whenever it is served.
+//   - Skyhook is read only when nodewright-operator is pinned below the rename
+//     or has no usable pin.
+//   - A rename-or-later pin on a legacy-only cluster is an error.
+//   - Neither group served reports not registered.
 func TestResolveNodewrightGVR_VersionGate(t *testing.T) {
 	t.Parallel()
 

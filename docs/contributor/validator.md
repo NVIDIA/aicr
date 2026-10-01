@@ -1454,9 +1454,8 @@ skipping. Discovery counts a group as served only once it lists the `nodewrights
 (or `skyhooks`) resource itself, and `verifyNodewrightReady` re-resolves that
 on every poll. A recipe that renders Nodewright CRs polls through CRD
 establishment and fails on timeout if neither group ever serves them. This
-skip is scoped to
-`nodewright-customizations`; every other component's assert queues
-unconditionally.
+skip is scoped to `nodewright-customizations`. Every other component's assert
+queues unconditionally.
 
 The suppression must be expressed **in the recipe** — an overlay-declared
 component `overrides:` (how `tuningEnabled: false` ships as the AKS default)

@@ -234,17 +234,9 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 // they can still exhaust the budget themselves on a recipe whose enabled refs
 // queued no asserts.
 //
-// gatedHealthCheckSuppressed and buildResourceFetcher still return directly on
-// error — both are hard errors, not budget-exhaustion handling.
-// gatedHealthCheckSuppressed's error has three sources, and that path discards
-// whatever failures were already collected under an ErrCodeInternal wrap
-// rather than the fail-closed ErrCodeTimeout above. Two are rare: a broken
-// Helm render, and cancellation (it threads ctx.Ctx into that render). The
-// third is not — it calls resolveNodewrightGVR, so a transient non-NotFound
-// discovery error, an apiserver 503 while the loop happens to be on
-// nodewright-customizations, collapses the whole expected-resources report
-// into one ErrCodeInternal. Routing it through the failures accumulator is a
-// known gap, deliberately out of scope here.
+// Errors from gatedHealthCheckSuppressed and buildResourceFetcher are returned
+// directly under an ErrCodeInternal wrap, discarding the failures collected so
+// far.
 func checkExpectedResources(ctx *validators.Context) error {
 	if ctx.ValidationInput == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
@@ -368,7 +360,21 @@ func checkExpectedResources(ctx *validators.Context) error {
 
 	if budgetExhausted != "" {
 		failures = markUndispatched(failures, chainsawAsserts, unreachedRefs, gpuProbes, budgetExhausted)
-	} else if len(chainsawAsserts) > 0 {
+	} else {
+		// Selecting by discovery after the readiness probes sees a group that
+		// became served during the window. A discovery error joins failures
+		// and omits the assert it blocks.
+		var dropErr error
+		chainsawAsserts, dropErr = dropDiscoverySuppressedAsserts(ctx, chainsawAsserts)
+		if dropErr != nil {
+			failures = append(failures, dropErr.Error())
+			if firstStructuredErr == nil {
+				firstStructuredErr = dropErr
+			}
+		}
+	}
+
+	if budgetExhausted == "" && len(chainsawAsserts) > 0 {
 		slog.Info("running health check assertions", "components", len(chainsawAsserts))
 		fetcher, fetcherErr := buildResourceFetcher(ctx)
 		if fetcherErr != nil {
@@ -750,9 +756,8 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 	// failing the deployment phase on a transient in_progress / re-taint. See
 	// pkg/defaults GPUReadiness* for sizing.
 	//
-	// The recipe declares Nodewright CRs here, so CRDs that are not served yet
-	// are a not-ready state to poll through. The GVR is re-resolved on every
-	// iteration so a group established part-way through is picked up.
+	// CRDs that are not served yet count as not ready. The GVR is re-resolved
+	// each iteration so a group established mid-poll is picked up.
 	var gvr schema.GroupVersionResource
 	return pollUntilStable(ctx,
 		fmt.Sprintf("%d expected Nodewright(s) + runtime-required taint clearance", len(expectedNames)),
@@ -812,16 +817,11 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 		})
 }
 
-// resolveNodewrightGVR discovery-gates the Nodewright CR resources before any Get
-// by name, preferring nodewrightGVR. The legacySkyhookGVR fallback is taken
-// only when legacySkyhookAllowed permits it: a recipe that pins the operator at
-// nodewrightRenameVersion or later must serve the new group, so a legacy-only
-// cluster there is a broken install (or stale Skyhooks from a prior operator)
-// and fails closed rather than being read as ready. registered is false when
-// neither group serves its resource. A group/version appears in discovery as
-// soon as any CRD in it is established, so the candidate's resource name must
-// be listed before it counts as served. Any discovery error other than NotFound
-// fails closed so a transient failure cannot mask readiness.
+// resolveNodewrightGVR returns the Nodewright CR resource the cluster serves,
+// preferring nodewrightGVR. registered is false when neither group lists its
+// resource. It returns legacySkyhookGVR only when legacySkyhookAllowed permits
+// it, and an error otherwise. A discovery error other than NotFound is also
+// returned, so a transient failure cannot mask readiness.
 func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResource, registered bool, err error) {
 	served := func(candidate schema.GroupVersionResource) (bool, error) {
 		gv := candidate.GroupVersion().String()
@@ -832,6 +832,8 @@ func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResou
 		list, discErr := helper.GroupVersionResources(ctx.Ctx, ctx.Clientset, gv)
 		switch {
 		case discErr == nil:
+			// A group/version is listed once any one of its CRDs is
+			// established, so the resource name has to be listed too.
 			for _, r := range list.APIResources {
 				if r.Name == candidate.Resource {
 					return true, nil
@@ -857,6 +859,9 @@ func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResou
 	if err != nil || !ok {
 		return schema.GroupVersionResource{}, false, err
 	}
+	// A recipe pinned at nodewrightRenameVersion or later must serve the new
+	// group, so a legacy-only cluster is a broken install or holds stale
+	// Skyhooks from a prior operator.
 	if allowed, pin := legacySkyhookAllowed(ctx); !allowed {
 		return schema.GroupVersionResource{}, false, errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("%s is not served but the recipe pins %s %s (>= %s serves it); refusing the legacy %s fallback — check the operator install rather than a stale Skyhook",
@@ -1136,38 +1141,15 @@ func isRuntimeRequiredTaint(t *corev1.Taint, gate []corev1.Taint) bool {
 	return false
 }
 
-// gatedHealthCheckSuppressed dispatches the static-assert suppression for the
-// small set of components whose registry health check targets objects that
-// may legitimately be absent: values-gated renders, and for
-// nodewright-customizations a cluster whose operator predates the NodeWright
-// kind the assert names. Every other component's assert queues
-// unconditionally. Fail-closed throughout: a render, read, or discovery error
-// propagates so a broken template or an unreachable API server is never
-// mistaken for "nothing to assert".
-func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef) (bool, string, error) {
+// gatedHealthCheckSuppressed reports whether the registry health check assert
+// for ref is skipped because ref's effective values gate off the objects it
+// targets. reason says why. A render or read error is returned, so a broken
+// template is never read as nothing to assert.
+func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef) (suppressed bool, reason string, err error) {
 	switch ref.Name {
 	case nodewrightCustomizationsComponent:
-		//nolint:contextcheck // pre-existing ctx-less chain (expectedNodewrightNames); threading ctx through it is tracked separately from this dispatch.
 		suppressed, err := nodewrightHealthCheckSuppressed(ref)
-		if err != nil || suppressed {
-			return suppressed, "effective values suppress the tuning Nodewright CR (see #1844)", err
-		}
-		// The assert names the NodeWright kind (nodewright-operator v0.18.0+).
-		// When resolveNodewrightGVR accepts the legacy fallback (operator
-		// pinned below the rename), the Go readiness check verifies each
-		// declared Skyhook by name, so the static assert has nothing valid to
-		// target. A cluster serving neither group keeps the assert so its own
-		// failure surfaces the missing operator; a v0.18.0 pin on a legacy-only
-		// cluster is the resolver's fail-closed error.
-		gvr, registered, err := resolveNodewrightGVR(ctx)
-		if err != nil {
-			return false, "", err
-		}
-		if registered && gvr == legacySkyhookGVR {
-			return true, fmt.Sprintf("cluster serves only the legacy %s group; the %s readiness check covers the Skyhook CRs by name",
-				legacySkyhookGVR.Group, nodewrightGVR.Group), nil
-		}
-		return false, "", nil
+		return suppressed, "effective values suppress the tuning Nodewright CR", err
 	case gcpDriverInstallerComponent:
 		suppressed, err := emptyRenderHealthCheckSuppressed(ctx.Ctx, ref)
 		return suppressed, "effective values gate the component off (installer.enabled=false); it renders no objects", err
@@ -1187,6 +1169,39 @@ func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef
 	default:
 		return false, "", nil
 	}
+}
+
+// dropDiscoverySuppressedAsserts returns asserts without the
+// nodewright-customizations assert when the cluster serves only the legacy
+// Skyhook group. When the group cannot be resolved it also omits that assert
+// and returns the first resolution error.
+func dropDiscoverySuppressedAsserts(ctx *validators.Context, asserts []chainsaw.ComponentAssert) ([]chainsaw.ComponentAssert, error) {
+	kept := make([]chainsaw.ComponentAssert, 0, len(asserts))
+	var firstErr error
+	for _, a := range asserts {
+		if a.Name != nodewrightCustomizationsComponent {
+			kept = append(kept, a)
+			continue
+		}
+		// The assert names the NodeWright kind (nodewright-operator v0.18.0+).
+		// On a legacy-only cluster the Go readiness check verifies each
+		// Skyhook by name. A cluster serving neither group keeps the assert so
+		// its failure surfaces the missing operator.
+		gvr, registered, err := resolveNodewrightGVR(ctx)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if registered && gvr == legacySkyhookGVR {
+			fmt.Printf("  [chainsaw] %s: skipped, cluster serves only the legacy %s group and the %s readiness check covers the Skyhook CRs by name\n",
+				a.Name, legacySkyhookGVR.Group, nodewrightGVR.Group)
+			continue
+		}
+		kept = append(kept, a)
+	}
+	return kept, firstErr
 }
 
 // emptyRenderHealthCheckSuppressed reports whether the component's manifests
