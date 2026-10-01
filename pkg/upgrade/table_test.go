@@ -531,3 +531,20 @@ func TestWriteTableEscapesDetailBlock(t *testing.T) {
 		}
 	}
 }
+
+func TestRowCellsRenderSetAndScalarFieldsAlike(t *testing.T) {
+	c := ReportComponent{
+		Change: ChangeIdentity,
+		IdentityChanges: []ReportIdentityChange{
+			{Field: "namespace", From: "old-ns", To: "new-ns"},
+			{Field: "manifestFiles", From: "a.yaml,b.yaml", To: "a.yaml"},
+		},
+	}
+	from, to := rowCells(c)
+	if want := "namespace=old-ns, manifestFiles=a.yaml,b.yaml"; from != want {
+		t.Errorf("from cell = %q, want %q", from, want)
+	}
+	if want := "namespace=new-ns, manifestFiles=a.yaml"; to != want {
+		t.Errorf("to cell = %q, want %q", to, want)
+	}
+}

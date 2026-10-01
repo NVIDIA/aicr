@@ -104,8 +104,8 @@ func recipeCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name: flagInheritFrom,
-			Usage: `Path to a prior recipe file, or to a bundle directory, whose resolved namespaces this recipe keeps.
-	Use on an AICR upgrade so a component already running is not relocated by a moved default.`,
+			Usage: `Path to a prior recipe file, or to a bundle directory, whose resolved namespace, chart, source, path, manifest files and pre-manifest files this recipe keeps.
+	Use on an AICR upgrade so a component already running is not relocated or replaced by a moved default.`,
 			Category: catInput,
 		},
 		&cli.StringFlag{

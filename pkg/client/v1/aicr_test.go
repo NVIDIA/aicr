@@ -2921,7 +2921,7 @@ func TestResolveRecipe_InheritFromRejects(t *testing.T) {
 		// Loads and validates cleanly: nothing on the load path requires a
 		// component list, so this is the one rejected shape that reaches the
 		// inheritance step rather than failing before it.
-		{"recipe with no componentRefs", noComponents, "carries no components to inherit namespaces from"},
+		{"recipe with no componentRefs", noComponents, "carries no components to inherit identity from"},
 		{"leaf overlay is not a resolved recipe", overlay, "it must be a resolved RecipeResult"},
 		{"namespace carrying shell metacharacters", injected, "is not a valid Kubernetes namespace"},
 	}
@@ -2941,6 +2941,105 @@ func TestResolveRecipe_InheritFromRejects(t *testing.T) {
 				t.Errorf("error = %v, want it to contain %q", err, tt.wantMsg)
 			}
 		})
+	}
+}
+
+// TestResolveRecipe_InheritFromRejectsCriteriaMismatch proves a prior artifact
+// resolved for another environment is refused, while one that leaves a
+// dimension unset or states the same value is accepted.
+func TestResolveRecipe_InheritFromRejectsCriteriaMismatch(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	name := baseline.Components[0].Name
+
+	tests := []struct {
+		name     string
+		criteria string
+		wantMsg  string
+	}{
+		{"different service", "service: aks\n  accelerator: h100", `service "aks"`},
+		{"different accelerator", "service: eks\n  accelerator: gb200", `accelerator "gb200"`},
+		{"different intent", "service: eks\n  intent: inference", `intent "inference"`},
+		{"same dimensions", "service: eks\n  accelerator: h100\n  intent: training\n  os: ubuntu", ""},
+		{"unset and any dimensions", "service: any", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			prior := filepath.Join(t.TempDir(), "prior.yaml")
+			doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncriteria:\n  " +
+				tt.criteria + "\ncomponentRefs:\n  - name: " + name +
+				"\n    type: Helm\n    source: https://charts.invalid/prior\n    version: 1.0.0\n    namespace: legacy\n"
+			if writeErr := os.WriteFile(prior, []byte(doc), 0o600); writeErr != nil {
+				t.Fatalf("setup: write prior: %v", writeErr)
+			}
+			_, resolveErr := client.ResolveRecipe(t.Context(), inheritTestRequest(prior))
+			if tt.wantMsg == "" {
+				if resolveErr != nil {
+					t.Fatalf("ResolveRecipe: %v", resolveErr)
+				}
+				return
+			}
+			if resolveErr == nil {
+				t.Fatal("ResolveRecipe = nil error, want rejection")
+			}
+			if !errors.Is(resolveErr, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want ErrCodeInvalidRequest", resolveErr)
+			}
+			if !strings.Contains(resolveErr.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want it to contain %q", resolveErr, tt.wantMsg)
+			}
+		})
+	}
+}
+
+// TestResolveRecipe_InheritFromRevalidatesCoherence proves the recipe is
+// validated again after inheritance. A disabled prior component is skipped by
+// the loader's coherence rules, so a kustomize path on a Helm component reaches
+// the assignment, and the result would otherwise deploy as a different type
+// depending on the deployer.
+func TestResolveRecipe_InheritFromRevalidatesCoherence(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	var helm string
+	for _, c := range baseline.Components {
+		if c.Kind == "Helm" {
+			helm = c.Name
+			break
+		}
+	}
+	if helm == "" {
+		t.Fatal("setup: baseline resolved no Helm component")
+	}
+
+	prior := filepath.Join(t.TempDir(), "prior.yaml")
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n" +
+		"  - name: " + helm + "\n    type: Helm\n    source: https://charts.invalid/prior\n" +
+		"    version: 1.0.0\n    path: deploy/prior\n    overrides:\n      enabled: false\n"
+	if writeErr := os.WriteFile(prior, []byte(doc), 0o600); writeErr != nil {
+		t.Fatalf("setup: write prior: %v", writeErr)
+	}
+
+	_, err = client.ResolveRecipe(t.Context(), inheritTestRequest(prior))
+	if err == nil {
+		t.Fatal("ResolveRecipe = nil error, want the incoherent inherited identity rejected")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "carries Kustomize field") {
+		t.Errorf("error = %v, want it to name the Kustomize fields on a Helm component", err)
 	}
 }
 

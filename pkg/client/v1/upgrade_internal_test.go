@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
@@ -43,7 +44,7 @@ func TestComponentIdentities(t *testing.T) {
 				{Name: "synthetic-alpha", Kind: "Helm", Version: "1.2.0", Namespace: "synthetic-ns"},
 			}},
 			want: map[string]upgrade.Identity{
-				"synthetic-alpha": {Version: "1.2.0", Namespace: "synthetic-ns"},
+				"synthetic-alpha": {Version: "1.2.0", Namespace: "synthetic-ns", Type: "Helm"},
 			},
 		},
 		{
@@ -52,7 +53,32 @@ func TestComponentIdentities(t *testing.T) {
 				{Name: "synthetic-kustomize", Kind: "Kustomize", Tag: "v1.0.0", Namespace: "synthetic-ns"},
 			}},
 			want: map[string]upgrade.Identity{
-				"synthetic-kustomize": {Version: "v1.0.0", Namespace: "synthetic-ns"},
+				"synthetic-kustomize": {Version: "v1.0.0", Namespace: "synthetic-ns", Type: "Kustomize"},
+			},
+		},
+		{
+			name: "chart and source are carried",
+			in: &RecipeResult{Components: []ComponentRef{
+				{Name: "synthetic-alpha", Kind: "Helm", Version: "1.2.0", Chart: "alpha", Source: "https://charts.example"},
+			}},
+			want: map[string]upgrade.Identity{
+				"synthetic-alpha": {Version: "1.2.0", Chart: "alpha", Source: "https://charts.example", Type: "Helm"},
+			},
+		},
+		{
+			name: "path and manifest lists come from the resolved recipe",
+			in: &RecipeResult{
+				Components: []ComponentRef{{Name: "synthetic-kustomize", Kind: "Kustomize", Tag: "v1.0.0"}},
+				internal: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{
+					Name: "synthetic-kustomize", Path: "deploy/prod", ManifestFiles: []string{"a.yaml"},
+					PreManifestFiles: []string{"pre.yaml"},
+				}}},
+			},
+			want: map[string]upgrade.Identity{
+				"synthetic-kustomize": {
+					Version: "v1.0.0", Type: "Kustomize", Path: "deploy/prod", ManifestFiles: []string{"a.yaml"},
+					PreManifestFiles: []string{"pre.yaml"},
+				},
 			},
 		},
 		{
@@ -61,7 +87,7 @@ func TestComponentIdentities(t *testing.T) {
 				{Name: "synthetic-unpinned", Kind: "Helm", Namespace: "synthetic-ns"},
 			}},
 			want: map[string]upgrade.Identity{
-				"synthetic-unpinned": {Namespace: "synthetic-ns"},
+				"synthetic-unpinned": {Namespace: "synthetic-ns", Type: "Helm"},
 			},
 		},
 	}

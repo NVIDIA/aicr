@@ -2078,3 +2078,61 @@ func TestRejectUnverifiableCatalogSigning(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveRecipeInheritFromRestoresRegistryIdentity proves chart, source and
+// both manifest sets survive a resolve. The manifest sets are not public
+// ComponentRef fields, so the result is read back through the internal recipe.
+func TestResolveRecipeInheritFromRestoresRegistryIdentity(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	req := RecipeRequest{Service: "eks", Accelerator: "h100", OS: "ubuntu", Intent: "training"}
+
+	baseline, err := client.ResolveRecipe(t.Context(), req)
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	var name string
+	for _, c := range baseline.Components {
+		if c.Kind == "Helm" {
+			name = c.Name
+			break
+		}
+	}
+	if name == "" {
+		t.Fatal("setup: baseline resolved no Helm component")
+	}
+
+	prior := filepath.Join(t.TempDir(), "prior.yaml")
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n" +
+		"  - name: " + name + "\n    type: Helm\n    chart: prior-chart\n    source: https://charts.invalid/prior\n" +
+		"    version: 1.0.0\n    namespace: prior-ns\n    manifestFiles:\n      - components/prior/a.yaml\n" +
+		"    preManifestFiles:\n      - components/prior/pre.yaml\n"
+	if writeErr := os.WriteFile(prior, []byte(doc), 0o600); writeErr != nil {
+		t.Fatalf("setup: write prior: %v", writeErr)
+	}
+	req.InheritFrom = prior
+
+	result, err := client.ResolveRecipe(t.Context(), req)
+	if err != nil {
+		t.Fatalf("ResolveRecipe: %v", err)
+	}
+	ref := result.internal.GetComponentRef(name)
+	if ref == nil {
+		t.Fatalf("resolved recipe has no component %q", name)
+	}
+	if ref.Chart != "prior-chart" || ref.Source != "https://charts.invalid/prior" || ref.Namespace != "prior-ns" {
+		t.Errorf("chart/source/namespace = %q/%q/%q, want the inherited prior-chart/https://charts.invalid/prior/prior-ns",
+			ref.Chart, ref.Source, ref.Namespace)
+	}
+	if !slices.Equal(ref.ManifestFiles, []string{"components/prior/a.yaml"}) {
+		t.Errorf("ManifestFiles = %v, want the inherited set", ref.ManifestFiles)
+	}
+	if !slices.Equal(ref.PreManifestFiles, []string{"components/prior/pre.yaml"}) {
+		t.Errorf("PreManifestFiles = %v, want the inherited set", ref.PreManifestFiles)
+	}
+}

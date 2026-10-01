@@ -378,8 +378,9 @@ type RecipeRequest struct {
 	AccountingMode string
 
 	// InheritFrom is a prior recipe file or bundle directory whose resolved
-	// namespaces this resolution preserves. Empty means resolve from the
-	// registry alone. A cm:// URI is rejected: not supported yet (#2830).
+	// namespace, chart, source, path, manifest files and pre-manifest files this
+	// resolution preserves. Empty means resolve from the registry alone. A cm://
+	// URI is rejected because it is not supported yet.
 	InheritFrom string
 
 	// PinnedName reserves space for future pinned-recipe support.
@@ -438,8 +439,9 @@ func WithProfile(profile string) RecipeResolveOption {
 }
 
 // WithInheritFrom names a prior recipe file or bundle directory whose resolved
-// namespaces this resolve keeps, so a moved registry default does not relocate
-// a component that is already running. A component the prior artifact does not
+// namespace, chart, source, path, manifest files and pre-manifest files this
+// resolve keeps, so a moved registry default does not relocate or replace a
+// component that is already running. A component the prior artifact does not
 // name keeps its registry default. Empty resolves from the registry alone.
 //
 // The reference is read when the resolve runs: a cm:// URI, an unreadable

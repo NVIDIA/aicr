@@ -103,6 +103,10 @@ type ReportComponent struct {
 
 // ReportIdentityChange is one move on the identity axis, restated with JSON
 // names.
+//
+// Field is one of namespace, type, chart, source, path, manifestFiles or
+// preManifestFiles. For the two file sets From and To are the whole sorted sets
+// joined by commas.
 type ReportIdentityChange struct {
 	Field string `json:"field" yaml:"field"`
 	From  string `json:"from" yaml:"from"`
@@ -247,7 +251,7 @@ func reportIdentityChanges(changes []IdentityChange) []ReportIdentityChange {
 	}
 	out := make([]ReportIdentityChange, len(changes))
 	for i, c := range changes {
-		out[i] = ReportIdentityChange(c)
+		out[i] = ReportIdentityChange{Field: c.Field, From: c.From, To: c.To}
 	}
 	return out
 }

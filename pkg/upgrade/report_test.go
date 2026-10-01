@@ -306,6 +306,19 @@ func TestNewReportNotes(t *testing.T) {
 			want: "2 patches, namespace a-system -> nvidia-a-system",
 		},
 		{
+			name: "a manifest set move names what left and what arrived",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.4.0", To: "1.4.2",
+				IdentityChanges: []IdentityChange{{
+					Field: "manifestFiles", From: "x.yaml,y.yaml", To: "x.yaml,z.yaml",
+					Added: []string{"z.yaml"}, Removed: []string{"y.yaml"},
+				}},
+				Verdict: VerdictUnknown, Reason: ReasonIdentityChanged,
+				Jump: Span{Patches: 2}, Span: Span{Minors: 1},
+			},
+			want: "2 patches, manifestFiles x.yaml,y.yaml -> x.yaml,z.yaml",
+		},
+		{
 			name: "a manual hop that also relocated keeps both axes in the cell",
 			result: ComponentResult{
 				Component: "a", Change: ChangeVersion, From: "0.17.2", To: "0.18.1",

@@ -8,7 +8,7 @@ aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer helm
 aicr bundle -r new-recipe.yaml --deployer helm -o ./bundles
 ```
 
-The middle step is the one this page is about. The first step takes one more flag this page also covers, `--inherit-from`, for when a component's namespace moved between the two AICR releases: see [When a component moves namespace](#when-a-component-moves-namespace).
+The middle step is the one this page is about. The first step takes one more flag this page also covers, `--inherit-from`, for when a component's namespace, chart, source, path, manifest files or pre-manifest files moved between the two AICR releases. See [When a component moves namespace](#when-a-component-moves-namespace).
 
 ## Why a check step exists
 
@@ -64,7 +64,7 @@ Those last two cases are stricter than a tool that simply had no record for you,
 
 - **No record at all** (`no-record`). Nobody has assessed this component. Consider [authoring the first record](../contributor/upgrade-records.md) so the next operator does not repeat the work.
 - **A record exists but is silent here** (`no-boundary-crossed`). Somebody has assessed this component, but wrote no boundary in the range you are moving through. Decide whether one belongs there, and widen the record if it does.
-- **The component's namespace moved** (`identity-changed`). Records assess version boundaries, so none of them assesses a relocation. See [When a component moves namespace](#when-a-component-moves-namespace).
+- **The component's identity moved** (`identity-changed`). Its namespace, chart, source, kustomize path, deployment type, manifest files or pre-manifest files changed. Records assess version boundaries, so none of them assesses a relocation. See [When a component moves namespace](#when-a-component-moves-namespace).
 - **You are rolling back** (`downgrade`). See below: this one can never become known.
 
 The difference from `blocked` is worth holding onto. `blocked` means AICR has something to tell you and a version to stop at, so read it and act on it. `unknown` means AICR has nothing, so the investigation is yours. Neither is permission to proceed.
@@ -118,6 +118,8 @@ Structured output carries the move alongside the verdict, on both shapes of row:
 ]
 ```
 
+`field` is one of `namespace`, `type`, `chart`, `source`, `path`, `manifestFiles` or `preManifestFiles`. For the two file sets, `from` and `to` hold the whole sorted sets joined by commas.
+
 Acting on it is its own piece of work, not an upgrade step: move the release deliberately, then re-run the check. Or take the relocation out of the hop entirely, below.
 
 ## Pinning the namespaces you already deployed into
@@ -130,7 +132,9 @@ aicr recipe --service eks --accelerator h100 --intent training \
 aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer helm
 ```
 
-`--inherit-from` takes the recipe you deployed from, or the bundle directory you deployed, which is read through the `recipe.yaml` every deployer writes at the bundle root. The resolved recipe keeps that artifact's namespaces; everything else, chart pins included, comes from the new binary as usual. The relocation rows then disappear from the check, leaving the version axis to be assessed on its own.
+`--inherit-from` takes the recipe you deployed from, or the bundle directory you deployed, which is read through the `recipe.yaml` every deployer writes at the bundle root. The resolved recipe keeps that artifact's namespace, chart name, source, kustomize path, manifest file set and pre-manifest file set. Everything else, version pins and values included, comes from the new binary as usual. A file set the prior artifact lists is restored whole, so a file the registry dropped is kept and a file the registry added is left out. A set the prior artifact leaves empty is not restored, so a file the new release adds is kept. A component whose deployment type changed between Helm and Kustomize keeps only its namespace, since no chart, source, path or manifest set carries across that flip, and `upgrade-check` reports the type move. The relocation rows then disappear from the check, leaving the version axis to be assessed on its own.
+
+**Chart and source are pinned beside the new version.** The chart name and source come from the prior artifact while the version pin comes from the new binary, and nothing checks that the old source serves the new version. If a release moves a chart to a new repository and pins a version published only there, install fails against the inherited source. In that case resolve without `--inherit-from` and let `upgrade-check` report the move.
 
 **Inheriting from a bundle older than v0.22.0 works only for `helm`.** Writing `recipe.yaml` for *every* deployer landed in v0.22.0; before that only the `helm` deployer wrote one. So a bundle built by v0.21.1 or earlier with `helmfile`, `argocd`, `argocd-helm` or `flux` has no `recipe.yaml` at its root, and pointing `--inherit-from` at it is rejected:
 
@@ -143,7 +147,7 @@ This is the one upgrade where it bites, because the artifact you are inheriting 
 
 A component the prior artifact does not name keeps the registry default, because as far as that artifact knows it is a first deploy. Two cases land there and are worth telling apart: a component the new AICR release adds, which genuinely is a first deploy, and a component you excluded at bundle time with `--set <component>:enabled=false`, which a bundle's `recipe.yaml` records post-filter and therefore does not carry. Inheriting from a filtered bundle gives the excluded components registry defaults. Inherit from the recipe rather than the bundle if you want them pinned.
 
-The flag fails closed rather than quietly resolving as a first deploy. A path that does not exist, a directory with no `recipe.yaml` in it, and a `cm://` URI (not supported yet) are each rejected with `INVALID_REQUEST`.
+The flag fails closed rather than quietly resolving as a first deploy. A path that does not exist, a directory with no `recipe.yaml` in it, and a `cm://` URI (not supported yet) are each rejected with `INVALID_REQUEST`. So is an artifact resolved for a different service, accelerator, intent or OS than the new recipe, because same-named components differ across them. A dimension either side leaves unset or `any`, and the platform and node count, are not compared.
 
 `aicr query` and `aicr mirror list` carry the same flag, because all three share `aicr recipe`'s resolution flags. The REST API does not: `--inherit-from` names a path on the machine running the CLI, so it is CLI-only for now, as `aicr recipe --snapshot` and `--data` already are.
 
@@ -186,7 +190,7 @@ So a rollback needs human review before you run it. Read the component's own dow
 - **It does not read your cluster's state.** The comparison is between two artifacts; nothing is inspected, deployed or modified. (A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.) If your cluster has drifted from the recipe you think you deployed, the check compares the artifacts you gave it, not reality. Reading installed Helm release inventory is tracked in [#2531](https://github.com/NVIDIA/aicr/issues/2531).
 - **You still name the deployer.** A bundle records the deployer that built it in [`bundle-info.yaml`](bundling.md), but `upgrade-check` does not read that record yet, so `--deployer` is required whenever a component carries steps, even when reading a bundle.
 - **Coverage starts near zero, so expect red.** Exactly two components ship a record today, so most transitions report `unknown` and the check exits non-zero on most comparisons. Absence of a record is absence of assessment, and the tool says so rather than rounding it up to approval. This is a coverage problem with an owner ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes a record mandatory for every pin bump), and it shrinks as records land. Use `--fail-on-error=false` for the report without the gate in the meantime.
-- **A namespace move is seen only when both artifacts state one.** An empty namespace is read as a fact the artifact did not carry, not as a move to or from the default, so a component that *gains* or *loses* an explicit namespace between the two artifacts produces no relocation row at all. Reading it the other way would report a move nobody performed for every component the moment one of the two artifacts stopped carrying the field. Namespace is also the only identity field compared today: release name, chart repository, and chart name are not.
+- **A namespace move is seen only when both artifacts state one.** An empty namespace is read as a fact the artifact did not carry, not as a move to or from the default, so a component that *gains* or *loses* an explicit namespace between the two artifacts produces no relocation row at all. Reading it the other way would report a move nobody performed for every component the moment one of the two artifacts stopped carrying the field. The same holds for chart, source and path. The manifest and pre-manifest file sets are the exception. Each is compared as a set, so a set that empties is a move. The release name is not compared, because it is derived from the component name.
 - **Records are human assertions.** A `safe` verdict names what verified it, but it is somebody's reading of the migration notes plus a test lane, not a proof.
 
 ## See Also
