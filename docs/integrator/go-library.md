@@ -1509,7 +1509,8 @@ and override individual fields directly — but not every field it carries
 reaches `Client.ValidateState`.
 Ten do, via a matching `WithValidation*` option: namespace, image pull
 secrets, node selector, tolerations, no-cluster, cleanup, phases, skip checks,
-fail-fast, and timeout. Four do not: image, job name, service account name and
+fail-fast, and timeout. Skip checks is newer than the `v0.22.0` module pin
+shown under Installation, so at that pin only nine do. Four do not: image, job name, service account name and
 require-GPU have no `WithValidationImage`, `WithValidationJobName`,
 `WithValidationServiceAccountName` or `WithValidationRequireGPU` for
 `ValidateState` to accept them through. They ride on `ValidateSettings()`
