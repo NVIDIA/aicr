@@ -367,28 +367,30 @@ FAKE
         chmod +x "${scratch}/curl"
         export PATH="${scratch}:${PATH}" FAKE_DIR="${scratch}"
 
-        # probe <want-rc> <want-message> <label> <script-line>
+        # probe <want-rc> <want-calls> <want-message> <label> <script-lines...>
         probe() {
-            local want_rc="$1" want_msg="$2" label="$3" rc=0 out; shift 3
+            local want_rc="$1" want_n="$2" want_msg="$3" label="$4" rc=0 out; shift 4
             printf '%s\n' "$@" > "${scratch}/script"; rm -f "${scratch}/count" "${scratch}/args"
             out=$(verify_download_url "https://example.invalid/x" "${label}" 2>&1) || rc=$?
             [[ "${rc}" -eq "${want_rc}" ]] || { echo "${label}: exit ${rc}, want ${want_rc}"; exit 1; }
             [[ "${out}" == *"${want_msg}"* ]] || { echo "${label}: output lacks '${want_msg}': ${out}"; exit 1; }
-            [[ "$(wc -l < "${scratch}/args")" -eq 1 ]] || { echo "${label}: curl was called more than once"; exit 1; }
+            [[ "$(wc -l < "${scratch}/args")" -eq "${want_n}" ]] ||
+                { echo "${label}: $(wc -l < "${scratch}/args") curl calls, want ${want_n}"; exit 1; }
         }
 
-        probe 0 ""                        "healthy URL"          "200 0"
-        probe 1 "File not found (404)"    "404"                  "404 22"
-        probe 1 "Access forbidden (403)"  "403"                  "403 22"
-        probe 1 "redirect target did not answer" "dead redirect" "302 35"
-        probe 1 "Could not resolve host"  "no DNS"               "000 6"
+        probe 0 1 ""                       "healthy URL"      "200 0"
+        probe 1 1 "File not found (404)"   "404 fails fast"   "404 22"
+        probe 1 3 "Access forbidden (403)" "403 keeps failing" "403 22"
+        probe 0 3 ""                       "403 clears"       "403 22" "403 22" "200 0"
+        probe 1 1 "redirect target did not answer" "dead redirect" "302 35"
+        probe 1 1 "Could not resolve host" "no DNS"           "000 6"
 
-        # The retry count curl receives follows RETRY_ATTEMPTS. N attempts is N-1 retries.
-        probe 0 "" "default attempts" "200 0"
-        grep -q -- '--retry 2 --retry-delay 2 --retry-all-errors' "${scratch}/args" ||
-            { echo "default attempts did not pass --retry 2: $(cat "${scratch}/args")"; exit 1; }
-        got=$(RETRY_ATTEMPTS=5 bash -c 'source "$1"; echo "${CURL_RETRY[*]}"' _ "${SETUP_TOOLS}")
-        [[ "${got}" == --retry\ 4\ * ]] || { echo "RETRY_ATTEMPTS=5 gave curl flags '${got}', want --retry 4"; exit 1; }
+        # N attempts is N-1 curl retries. Only downloads retry a 404, since the
+        # probe has already confirmed their URL.
+        probe 0 1 "" "flags" "200 0"
+        grep -q -- '--retry 2 ' "${scratch}/args" && ! grep -q -- '--retry-all-errors' "${scratch}/args" ||
+            { echo "the probe must pass --retry 2 without --retry-all-errors: $(cat "${scratch}/args")"; exit 1; }
+        [[ " ${CURL_RETRY_ALL[*]} " == *" --retry-all-errors "* ]] || { echo "downloads do not retry all errors"; exit 1; }
 
         # retry_transient wraps installer scripts. Check the attempt count, the
         # final status, and that the warning names the label.
