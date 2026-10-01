@@ -311,32 +311,35 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 // and the file set and path select files to read. Every inherited value is
 // therefore checked before it is copied, and one bad value on a component the
 // current recipe also names rejects the whole artifact rather than being
-// skipped. A silently ignored pin is the relocation this function exists to
-// prevent. A prior component absent from the current recipe is never copied, so
-// it is not validated.
+// skipped, and refs is left unmodified. A silently ignored pin is the
+// relocation this function exists to prevent. A prior component absent from
+// the current recipe is never copied, so it is not validated.
 func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 	if len(prior) == 0 {
 		return nil
 	}
+	// Mutated on a copy and published only on success, so a bad value on a
+	// later component leaves refs exactly as the caller passed them in.
+	work := slices.Clone(refs)
 	pinned := make(map[string]ComponentRef, len(prior))
 	for _, p := range prior {
 		pinned[p.Name] = p
 	}
-	for i := range refs {
-		p, ok := pinned[refs[i].Name]
+	for i := range work {
+		p, ok := pinned[work[i].Name]
 		if !ok {
 			continue
 		}
 		if err := validateInheritedIdentity(p); err != nil {
 			return err
 		}
-		if p.Type != "" && refs[i].Type != "" && p.Type != refs[i].Type {
+		if p.Type != "" && work[i].Type != "" && p.Type != work[i].Type {
 			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 				"component %q was deployed as %s but the registry now declares it as %s, "+
 					"which inherit-from cannot preserve",
-				p.Name, p.Type, refs[i].Type))
+				p.Name, p.Type, work[i].Type))
 		}
-		if p.Namespace != "" && p.Namespace != refs[i].Namespace {
+		if p.Namespace != "" && p.Namespace != work[i].Namespace {
 			// Rebind before assigning, so a ref changes both fields or neither.
 			// Assigning first would leave the new namespace beside assertions
 			// still naming the old one on the error path, and the guard above
@@ -345,23 +348,24 @@ func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 			// assertFile, so its namespaces name wherever the registry currently
 			// puts the component. Leaving them behind would fail validation
 			// against a deployment this function just correctly preserved.
-			if err := rebindHealthCheckNamespace(&refs[i], refs[i].Namespace, p.Namespace); err != nil {
+			if err := rebindHealthCheckNamespace(&work[i], work[i].Namespace, p.Namespace); err != nil {
 				return err
 			}
-			refs[i].Namespace = p.Namespace
+			work[i].Namespace = p.Namespace
 		}
 		if p.Chart != "" {
-			refs[i].Chart = p.Chart
+			work[i].Chart = p.Chart
 		}
 		if p.Source != "" {
-			refs[i].Source = p.Source
+			work[i].Source = p.Source
 		}
 		if p.Path != "" {
-			refs[i].Path = p.Path
+			work[i].Path = p.Path
 		}
-		refs[i].ManifestFiles = slices.Clone(p.ManifestFiles)
-		refs[i].PreManifestFiles = slices.Clone(p.PreManifestFiles)
+		work[i].ManifestFiles = slices.Clone(p.ManifestFiles)
+		work[i].PreManifestFiles = slices.Clone(p.PreManifestFiles)
 	}
+	copy(refs, work)
 	return nil
 }
 

