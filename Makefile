@@ -523,6 +523,14 @@ bom-docs: ## Regenerates the auto-generated section of $(BOM_DOC_PATH) from the 
 	   ! grep -q '<!-- END AICR-BOM -->' $(BOM_DOC_PATH); then \
 	   echo "ERROR: $(BOM_DOC_PATH) is missing AICR-BOM markers." >&2; exit 1; \
 	fi; \
+	if ! command -v yq >/dev/null 2>&1 || ! command -v helm >/dev/null 2>&1; then \
+	   echo "ERROR: yq and helm are required. Run 'make tools-setup'." >&2; exit 1; \
+	fi; \
+	WANT_HELM="$$(yq -r '.testing_tools.helm' .settings.yaml)"; \
+	HAVE_HELM="$$(helm version --template '{{.Version}}')"; \
+	if [ "$$HAVE_HELM" != "$$WANT_HELM" ]; then \
+	   echo "ERROR: helm $$WANT_HELM required (found '$$HAVE_HELM'). Rendered images differ across helm versions. Run 'make tools-setup'." >&2; exit 1; \
+	fi; \
 	TMP="$$(mktemp -d)"; \
 	trap 'rm -rf "$$TMP"' EXIT; \
 	echo "Regenerating auto-generated section of $(BOM_DOC_PATH) (helm rendering, ~30s)..."; \
@@ -531,13 +539,19 @@ bom-docs: ## Regenerates the auto-generated section of $(BOM_DOC_PATH) from the 
 	  -out-dir "$$TMP" \
 	  -aicr-version "main" \
 	  -deterministic \
-	  -no-title; \
+	  -no-title \
+	  -strict; \
 	awk -v body="$$TMP/bom.md" ' \
 	  /<!-- BEGIN AICR-BOM -->/ { print; while ((getline line < body) > 0) print line; close(body); skip = 1; next } \
 	  /<!-- END AICR-BOM -->/   { skip = 0 } \
 	  !skip                     { print } \
 	' $(BOM_DOC_PATH) > "$$TMP/merged.md"; \
 	mv "$$TMP/merged.md" $(BOM_DOC_PATH); \
+	FRESH="TestCommittedBOMVersionsMatchRegistry TestCommittedBOMVariantsMatchRecipePins"; \
+	OUT="$$(GOFLAGS="-mod=readonly" go test -count=1 -v ./tools/bom -run "^($$(echo $$FRESH | tr ' ' '|'))$$" 2>&1)" || { echo "$$OUT" >&2; exit 1; }; \
+	for t in $$FRESH; do \
+	   echo "$$OUT" | grep -q -- "--- PASS: $$t " || { echo "$$OUT" >&2; echo "ERROR: $$t did not run (renamed or removed?)." >&2; exit 1; }; \
+	done; \
 	echo "Updated $(BOM_DOC_PATH) (prose preserved, auto-generated section refreshed)"
 
 .PHONY: bom-check
