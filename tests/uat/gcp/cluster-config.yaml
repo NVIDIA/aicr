@@ -38,6 +38,8 @@ cluster:
           name: nw2
         - cidr: 128.77.49.32/30
           name: nw3
+        - cidr: 35.236.84.119/32
+          name: nvs
 
 network:
   gke:
