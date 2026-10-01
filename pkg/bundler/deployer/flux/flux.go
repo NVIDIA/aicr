@@ -95,6 +95,7 @@ type ReadmeData struct {
 	Namespace      string // Flux install namespace (e.g. "flux-system")
 	BundlerVersion string
 	Components     []ComponentSummary
+	UpgradeNotice  string
 }
 
 // ComponentSummary is used in README rendering.
@@ -193,6 +194,10 @@ type Generator struct {
 	// one at a time. Off by default (native DAG). Operator escape hatch wired
 	// from --serial; see config.Serial and serialDependsOn.
 	Serial bool
+
+	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
+	// first deployment heading of README.md. Empty adds nothing.
+	UpgradeNotice string
 
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so provenance.yaml can be written after component
@@ -410,6 +415,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		Namespace:      ns,
 		BundlerVersion: deployer.NormalizeVersionWithDefault(g.Version),
 		Components:     buildComponentSummaries(sortedRefs, g.ComponentPreManifests, g.ComponentManifests, depsByComponent),
+		UpgradeNotice:  g.UpgradeNotice,
 	}
 	if err := writeTemplate(output, readmeTemplate, readmeData,
 		outputDir, fileReadme, "failed to write README.md"); err != nil {

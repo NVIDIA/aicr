@@ -96,9 +96,9 @@ section):
 
 | Legacy-plugin reading | Default (`oci-managed`) | `--profile gpuStack=operator-managed` |
 |---|---|---|
-| `none` (absent, unrelated same-name workload, or fully disabled) | not gated | ✅ resolves (add-on constraint permitting) |
+| `none` (absent, or labeled and fully disabled) | not gated | ✅ resolves (add-on constraint permitting) |
 | `active` (legacy DaemonSet targets ≥ 1 node) | not gated — when the add-on is installed it manages the same DaemonSet | ❌ fails closed: disable per pool or migrate to the add-on |
-| `unknown` (snapshot could not consult the API) | not gated | ❌ fails closed |
+| `unknown` (snapshot could not consult the API, or a same-named DaemonSet without the `Reconcile` label) | not gated | ❌ fails closed |
 | no reading (snapshot from an older aicr) | not gated | ❌ fails closed: reading **unavailable** — recapture |
 
 ## Legacy Device Plugin Detection
@@ -121,10 +121,15 @@ under `K8s.oke-legacy-plugin.daemonset`. Only `none` qualifies
 every GPU node pool (`oci.oraclecloud.com/disable-gpu-device-plugin=true`
 node label — for the *legacy* DaemonSet this label is the supported
 mechanism, unlike the add-on route above) or migrating the cluster to the
-managed `NvidiaGpuPlugin` add-on. The tripwire deliberately does not gate
-`oci-managed`: when the managed add-on is installed it reconciles the same
-DaemonSet name, so a healthy `oci-managed` cluster legitimately observes an
-active DaemonSet.
+managed `NvidiaGpuPlugin` add-on. A same-named DaemonSet without the
+`Reconcile` label reads `unknown` (detail `unlabeled`) and fails closed,
+because the label identifies the owner, not whether the DaemonSet advertises
+`nvidia.com/gpu`. The node label does not change that reading. For an
+unlabeled DaemonSet, resolve its ownership and remove it if it is the
+conflicting workload, or migrate to the managed add-on. The tripwire
+deliberately does not gate `oci-managed`: when the managed add-on is installed
+it reconciles the same DaemonSet name, so a healthy `oci-managed` cluster
+legitimately observes an active DaemonSet.
 
 Qualification is defined for **enhanced** OKE clusters (the default cluster
 type; add-on management does not exist on basic clusters, so

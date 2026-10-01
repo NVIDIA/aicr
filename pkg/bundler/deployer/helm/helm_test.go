@@ -1166,6 +1166,55 @@ func TestGenerate_DataFiles(t *testing.T) {
 	})
 }
 
+// TestGenerate_UpgradeNotice checks where a non-empty notice lands, with and
+// without a Constraints section. The README goldens pin only the empty-notice,
+// constraint-free rendering.
+func TestGenerate_UpgradeNotice(t *testing.T) {
+	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
+	tests := []struct {
+		name        string
+		constraints []recipe.Constraint
+	}{
+		{"without constraints", nil},
+		{"with constraints", []recipe.Constraint{{Name: "K8s.server.version", Value: ">= 1.32"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := createTestRecipeResult()
+			rr.Constraints = tt.constraints
+			outputDir := t.TempDir()
+			g := &Generator{
+				RecipeResult: rr,
+				ComponentValues: map[string]map[string]any{
+					"cert-manager": {},
+					"gpu-operator": {},
+				},
+				Version:       "v1.0.0",
+				UpgradeNotice: notice,
+			}
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			readme := readFile(t, filepath.Join(outputDir, "README.md"))
+			idx := strings.Index(readme, notice)
+			if idx < 0 {
+				t.Fatalf("README missing upgrade notice:\n%s", readme)
+			}
+			if ci := strings.Index(readme, "## Components"); ci < 0 || ci > idx {
+				t.Errorf("upgrade notice must follow the Components section:\n%s", readme)
+			}
+			if tt.constraints != nil {
+				if ci := strings.Index(readme, "## Constraints"); ci < 0 || ci > idx {
+					t.Errorf("upgrade notice must follow the Constraints section:\n%s", readme)
+				}
+			}
+			if !strings.HasPrefix(readme[idx+len(notice):], "## Quick Start") {
+				t.Errorf("upgrade notice must directly precede ## Quick Start:\n%s", readme)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Golden-file bundle tests
 // ---------------------------------------------------------------------------
@@ -1429,7 +1478,7 @@ func TestBundleGolden_OwnsCRDsChartOverride(t *testing.T) {
 func TestBundleGolden_ReadinessGate(t *testing.T) {
 	gate, err := gatemanifest.Render("foo", "nvcr.io/nvidia/aicr:v1.0.0",
 		[]byte("apiVersion: chainsaw.kyverno.io/v1alpha1\nkind: Test\n"),
-		config.DeployerHelm)
+		config.DeployerHelm, gatemanifest.Placement{})
 	if err != nil {
 		t.Fatalf("render gate manifest: %v", err)
 	}

@@ -213,6 +213,8 @@ jobs:
       id-token: write
       actions: read
     env:
+      AZURE_CLIENT_ID: "047f0427-5dcf-4e7c-97c3-9c71d92c5abb"
+      AZURE_TENANT_ID: "43083d15-7273-40c1-b7db-39efd9ccc17a"
       AZURE_SUBSCRIPTION_ID: "e88faa01-b4fd-49d3-b934-0ad9f9fca307"
       JANITOR_CONFIG: "tests/uat/azure/cluster-config.yaml"
       JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks@sha256:70f049e45cd0025e0d2172503f9d0569baeabff27080919e2fa04f3339b9f9ee"
@@ -224,8 +226,8 @@ jobs:
       - name: Authenticate to Azure
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
-          client-id: "047f0427-5dcf-4e7c-97c3-9c71d92c5abb"
-          tenant-id: "43083d15-7273-40c1-b7db-39efd9ccc17a"
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Reconcile Azure orphans
         env:

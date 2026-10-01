@@ -191,7 +191,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 	t.Run("final inventory includes and binds recipe", func(t *testing.T) {
 		dir := t.TempDir()
 		output, err := newBundler(t).runDeployer(
-			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, time.Now())
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
 		}
@@ -238,7 +238,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		b := &DefaultBundler{Config: cfg, Attester: attester}
 		_, err := b.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
-			closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
+			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
 		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
@@ -257,7 +257,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		b := &DefaultBundler{Config: cfg, Attester: attester}
 		dir := t.TempDir()
 		output, err := b.runDeployer(
-			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, time.Now())
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
 		}
@@ -291,7 +291,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 	t.Run("unmanaged executable is rejected", func(t *testing.T) {
 		_, err := newBundler(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
-			closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
+			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
 		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
@@ -301,7 +301,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		_, err := newBundler(t).runDeployer(
-			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
+			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
 		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
 			t.Errorf("runDeployer() error = %v, want ErrCodeTimeout", err)
 		}
@@ -885,7 +885,7 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			d, err := b.buildDeployer(ctx, sourceSettingsRecipeResult(), nil, nil)
+			d, err := b.buildDeployer(ctx, sourceSettingsRecipeResult(), nil, nil, "")
 			if err != nil {
 				t.Fatalf("buildDeployer: %v", err)
 			}
@@ -5389,7 +5389,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("rejected for helm deployer", func(t *testing.T) {
 		b := mk(t, config.DeployerHelm, map[string]string{"namePrefix": "t-"})
-		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err == nil {
 			t.Fatal("expected error for deployer options with --deployer helm")
 		}
@@ -5404,7 +5404,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("unknown option key rejected", func(t *testing.T) {
 		b := mk(t, config.DeployerArgoCD, map[string]string{"bogusKey": "x"})
-		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err == nil {
 			t.Fatal("expected error for unknown deployer option")
 		}
@@ -5423,7 +5423,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
-		_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err == nil {
 			t.Fatal("expected error for typed deployer overrides")
 		}
@@ -5438,7 +5438,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("argocd generator receives options", func(t *testing.T) {
 		b := mk(t, config.DeployerArgoCD, set)
-		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err != nil {
 			t.Fatalf("buildDeployer: %v", err)
 		}
@@ -5455,7 +5455,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("argocd-helm generator receives options", func(t *testing.T) {
 		b := mk(t, config.DeployerArgoCDHelm, set)
-		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err != nil {
 			t.Fatalf("buildDeployer: %v", err)
 		}
@@ -5472,7 +5472,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("no options leaves zero values", func(t *testing.T) {
 		b := mk(t, config.DeployerArgoCD, nil)
-		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err != nil {
 			t.Fatalf("buildDeployer: %v", err)
 		}
@@ -5496,7 +5496,7 @@ func TestBuildDeployer_BundleChartVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+	d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 	if err != nil {
 		t.Fatalf("buildDeployer() error = %v", err)
 	}

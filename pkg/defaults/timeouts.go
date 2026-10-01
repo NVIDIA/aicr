@@ -582,6 +582,14 @@ const (
 	// hung gate process shortly after its own deadline.
 	ReadinessGateHelmTimeoutBuffer = 5 * time.Minute
 
+	// ReadinessGateActiveDeadlineBuffer is added to ReadinessGateMaxWait to
+	// derive the gate Job's activeDeadlineSeconds, which bounds the Job even
+	// when its pod never schedules or never starts, so the gate's own deadline
+	// never runs. Argo CD has no other bound on the sync. It must stay below
+	// ReadinessGateHelmTimeoutBuffer so the Job, not helm --timeout, reports
+	// the failure under the Helm deployer.
+	ReadinessGateActiveDeadlineBuffer = 3 * time.Minute
+
 	// ReadinessGateBackoffLimit is the Kubernetes Job backoffLimit for the gate
 	// Job. The gate CLI handles its own retry loop internally; this limit
 	// absorbs transient pod disruption (drain, evict, OOM) by allowing the Job

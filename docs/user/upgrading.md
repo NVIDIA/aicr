@@ -14,7 +14,7 @@ The middle step is the one this page is about. The first step takes one more fla
 
 A new AICR release moves chart version pins. Most of those moves are ordinary and a deployer absorbs them. Some are not: a CRD is renamed, a default flips, an API group changes, and the upgrade damages a running cluster in a way no deployer reports as a failure.
 
-Nothing in `aicr recipe` or `aicr bundle` can tell you which kind you are looking at. `bundle` has a recipe and no source version, so it cannot compute a transition at all. A pin says what a **new** deployment gets; it says nothing about moving an **existing** one.
+Nothing in `aicr recipe` or `aicr bundle` can tell you which kind you are looking at. `bundle` has a recipe and no source version, so it cannot compute a transition at all. A pin says what a **new** deployment gets; it says nothing about moving an **existing** one. The most `bundle` can do is carry the guidance for boundaries whose `to` range contains its own pins, conditioned on where you might be starting from; see [Upgrade guidance in the bundle](bundling.md#upgrade-guidance-in-the-bundle). That guidance is not a verdict for your move.
 
 `aicr upgrade-check` compares two artifacts and answers that question per component, from [transition records](../contributor/upgrade-records.md) written by whoever bumped the pin.
 

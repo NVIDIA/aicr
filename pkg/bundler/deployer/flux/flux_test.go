@@ -1495,7 +1495,78 @@ func TestBundleGolden_HelmComponents(t *testing.T) {
 	}
 }
 
+// TestGenerate_UpgradeNotice covers a non-empty notice. The README has no
+// golden, so the empty case asserts the Components table still runs straight
+// into Repository Setup.
+func TestGenerate_UpgradeNotice(t *testing.T) {
+	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
+	tests := []struct {
+		name   string
+		notice string
+	}{
+		{"empty", ""},
+		{"set", notice},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recipeResult := &recipe.RecipeResult{}
+			recipeResult.Metadata.Version = testVersion
+			recipeResult.ComponentRefs = []recipe.ComponentRef{
+				{
+					Name:      "cert-manager",
+					Namespace: "cert-manager",
+					Chart:     "cert-manager",
+					Version:   "v1.17.2",
+					Type:      recipe.ComponentTypeHelm,
+					Source:    "https://charts.jetstack.io",
+				},
+			}
+			recipeResult.DeploymentOrder = []string{"cert-manager"}
+			outputDir := t.TempDir()
+			g := &Generator{
+				RecipeResult:    recipeResult,
+				ComponentValues: map[string]map[string]any{"cert-manager": {}},
+				Version:         "v0.9.0",
+				UpgradeNotice:   tt.notice,
+			}
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			readme := readFile(t, filepath.Join(outputDir, "README.md"))
+			if tt.notice == "" {
+				if strings.Contains(readme, "Before You Upgrade") {
+					t.Errorf("README rendered an upgrade notice that was not set:\n%s", readme)
+				}
+				if !strings.Contains(readme, "|\n\n## Repository Setup") {
+					t.Errorf("Components table must be followed by one blank line and Repository Setup:\n%s", readme)
+				}
+				return
+			}
+			assertUpgradeNoticePlacement(t, readme, tt.notice, "## Components", "## Repository Setup")
+		})
+	}
+}
+
 // ---------- test helpers ----------
+
+// assertUpgradeNoticePlacement checks that notice sits after afterHeading, has
+// exactly one blank line before it, and is directly followed by beforeHeading.
+func assertUpgradeNoticePlacement(t *testing.T, readme, notice, afterHeading, beforeHeading string) {
+	t.Helper()
+	idx := strings.Index(readme, notice)
+	if idx < 0 {
+		t.Fatalf("README missing upgrade notice:\n%s", readme)
+	}
+	if after := strings.Index(readme, afterHeading); after < 0 || after > idx {
+		t.Errorf("upgrade notice must follow %q:\n%s", afterHeading, readme)
+	}
+	if !strings.HasPrefix(readme[idx+len(notice):], beforeHeading) {
+		t.Errorf("upgrade notice must directly precede %q:\n%s", beforeHeading, readme)
+	}
+	if prefix := readme[:idx]; !strings.HasSuffix(prefix, "\n\n") || strings.HasSuffix(prefix, "\n\n\n") {
+		t.Errorf("want exactly one blank line before the upgrade notice:\n%s", readme)
+	}
+}
 
 func readFile(t *testing.T, path string) string {
 	t.Helper()

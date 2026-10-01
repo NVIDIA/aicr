@@ -429,23 +429,26 @@ subtypes:
 The fields are:
 
 - `nvidia-gpu-device-plugin` (`string`) — the collapsed constraint reading:
-  `none` (the DaemonSet is absent, present without the
-  `addonmanager.kubernetes.io/mode: Reconcile` label, or present with
+  `none` (the DaemonSet is absent, or carries the
+  `addonmanager.kubernetes.io/mode: Reconcile` label with
   `desiredNumberScheduled: 0`), `active` (the labeled DaemonSet targets at
-  least one node), or `unknown` (the API could not be consulted — including
-  a snapshot taken without cluster access). Always emitted.
+  least one node), or `unknown` (the API could not be consulted, including
+  a snapshot taken without cluster access, or the DaemonSet is present
+  without the `Reconcile` label). Always emitted.
 - `daemonset` (`string`) — the uncollapsed detail: `absent`, `unlabeled`,
   `disabled`, `active`, or `unknown`. Always emitted.
 
 Interpretation is fail-closed: `none` is the only value the `gpuStack`
 `operator-managed` constraint accepts — `active` means Oracle's legacy
 plugin would double-advertise `nvidia.com/gpu` alongside the GPU Operator's,
-and `unknown` means "could not look", which must never read as "not
-present". The `oci-managed` value deliberately carries no constraint on this
-reading: when the managed add-on is installed it reconciles the same
-DaemonSet name. When the subtype is absent entirely (a snapshot from an
-older aicr), constraint evaluation reports the reading unavailable and fails
-closed.
+and `unknown` means the reading cannot be trusted, which must never read as
+"not present". That covers both "could not look" (API failure or a snapshot
+taken without cluster access) and a same-named DaemonSet without the
+`Reconcile` label, whose owner cannot be established. The `oci-managed`
+value deliberately carries no constraint on this reading: when the managed
+add-on is installed it reconciles the same DaemonSet name. When the subtype
+is absent entirely (a snapshot from an older aicr), constraint evaluation
+reports the reading unavailable and fails closed.
 
 The constraint path is `K8s.oke-legacy-plugin.nvidia-gpu-device-plugin`.
 
