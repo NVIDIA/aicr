@@ -46,6 +46,11 @@
 #                OpenAI-compatible endpoint, assert a completion, capture logs
 #                (intent=inference CUJ — the DC3 counterpart of `train`)
 #   verify       aicr evidence verify against the signed bundle
+#   sxidfault    (#2625, Stage 1 only) write a synthetic XID 79 to a GPU
+#                node's /dev/kmsg and assert NVSentinel's syslog-health-
+#                monitor raises SysLogsXIDError on it. Detection-only; takes
+#                no destructive action. Run AFTER verify (see the function's
+#                own comment for why), never as part of `all`.
 #   debug        snapshot live cluster state into cluster-debug/ (nodes, taints,
 #                events, operator CRs incl. Skyhook status, operator/check-Job
 #                logs) — best-effort, run on failure BEFORE teardown
@@ -1819,6 +1824,215 @@ phase_serve() {
   echo "::endgroup::"
 }
 
+phase_sxid_fault_inject() {
+  # Stage 1 (detection only) of #2625. Adopts NVSentinel upstream's
+  # tests/uat/tests.sh test_xid_monitoring_syslog: write a synthetic XID 79
+  # ("GPU has fallen off the bus") line to a real node's /dev/kmsg and assert
+  # that NVSentinel's syslog-health-monitor turns it into the
+  # SysLogsXIDError node condition. This is the only check in the suite that
+  # connects a real fault to a real signal; recipes/checks/nvsentinel/health-
+  # check.yaml only proves the component is deployed, not that it works.
+  #
+  # Deliberately placed AFTER phase_verify in the workflows (not after
+  # readiness/conformance): no shipped recipe enables fault quarantine or
+  # remediation today (#2609), so this stage only asserts a node CONDITION
+  # and takes no destructive action -- but running it last means that even if
+  # a future remediation-enabled lane's quarantine logic reacted to the
+  # synthetic condition, it could not reach back and disturb the train/serve
+  # CUJ that already completed.
+  #
+  # Stages 2 (quarantine/cordon) and 3 (recovery/reboot) are intentionally
+  # NOT implemented here -- they are gated on #1014 landing and a recipe
+  # opting into remediation, and are tracked as a follow-up on #2625.
+  #
+  # CONFIRM BEFORE ENABLING IN A NIGHTLY LANE: this function was written
+  # against the issue's description of upstream's tests/uat/tests.sh, which
+  # is not vendored in this repo. Before this runs unattended, diff the
+  # circuit-breaker ConfigMap name/namespace/field (FAULT_INJECT_* below) and
+  # the synthetic kmsg line format against the actual upstream script.
+  local node_selector="${FAULT_INJECT_NODE_SELECTOR:-nvidia.com/gpu.present=true}"
+  local nvs_ns="${FAULT_INJECT_NVSENTINEL_NAMESPACE:-nvsentinel}"
+  local condition="${FAULT_INJECT_CONDITION:-SysLogsXIDError}"
+  # TODO(#2625): confirm this ConfigMap name/namespace against upstream's
+  # circuit-breaker precheck before relying on it. Treating "not found" as
+  # "quarantine disabled" (expected on every shipped recipe today) rather
+  # than a pass/fail is deliberate -- see the Success Criteria on #2625.
+  local breaker_cm="${FAULT_INJECT_CIRCUIT_BREAKER_CONFIGMAP:-fault-quarantine-circuit-breaker}"
+  local breaker_field="${FAULT_INJECT_CIRCUIT_BREAKER_FIELD:-state}"
+  local poll_wait_seconds="${FAULT_INJECT_MONITOR_POLL_SECONDS:-60}"
+  local detect_timeout_seconds="${FAULT_INJECT_DETECT_TIMEOUT_SECONDS:-300}"
+  local pod_name="sxid-fault-inject-${RUN_ID}"
+
+  echo "::group::Fault-injection circuit-breaker precheck"
+  local breaker_json="" breaker_rc=0
+  breaker_json="$(kubectl get configmap "${breaker_cm}" -n "${nvs_ns}" -o json 2>/tmp/breaker-err.log)" || breaker_rc=$?
+  if (( breaker_rc != 0 )); then
+    if grep -qi "notfound" /tmp/breaker-err.log; then
+      echo "circuit-breaker ConfigMap ${breaker_cm} not found in ${nvs_ns} -- expected with fault quarantine disabled (no shipped recipe enables it yet); continuing"
+    else
+      # A non-NotFound failure (RBAC, API timeout, ...) must NOT be read as a
+      # clear breaker -- fail closed rather than inject a fault we cannot
+      # safely reason about.
+      cat /tmp/breaker-err.log >&2
+      echo "::error::could not read circuit-breaker ConfigMap ${breaker_cm} in ${nvs_ns} (see above); failing closed rather than assuming the breaker is clear" >&2
+      rm -f /tmp/breaker-err.log
+      exit 1
+    fi
+  else
+    local breaker_state
+    breaker_state="$(jq -r --arg f "${breaker_field}" '.data[$f] // "UNKNOWN"' <<<"${breaker_json}")"
+    echo "circuit-breaker ${breaker_cm}.${breaker_field}=${breaker_state}"
+    if [[ "${breaker_state}" == "TRIPPED" ]]; then
+      echo "::error::fault-quarantine circuit breaker is TRIPPED; refusing to inject another fault" >&2
+      rm -f /tmp/breaker-err.log
+      exit 1
+    fi
+  fi
+  rm -f /tmp/breaker-err.log
+  echo "::endgroup::"
+
+  echo "::group::Select a GPU node"
+  # Candidates: Ready, uncordoned, GPU-labeled nodes. A node already cordoned
+  # or NotReady would make the result meaningless (we could not tell a
+  # missing signal from a node that was already broken).
+  local candidates
+  candidates="$(kubectl get nodes -l "${node_selector}" -o json | jq -r '
+    .items[]
+    | select(.spec.unschedulable != true)
+    | select((.status.conditions[]? | select(.type=="Ready") | .status) == "True")
+    | .metadata.name')"
+  if [[ -z "${candidates}" ]]; then
+    echo "::error::no Ready, uncordoned, GPU-labeled (${node_selector}) node found; cannot run fault injection" >&2
+    exit 1
+  fi
+
+  # Narrow to a node whose syslog-health-monitor pod (DaemonSet
+  # syslog-health-monitor-regular or -kata -- see recipes/checks/nvsentinel/
+  # health-check.yaml) is Ready there. Matched by ownerReferences name prefix
+  # rather than a guessed pod label, since the chart's pod labels are not
+  # vendored in this repo.
+  local node pod_ready=""
+  for node in ${candidates}; do
+    pod_ready="$(kubectl get pods -n "${nvs_ns}" --field-selector "spec.nodeName=${node}" -o json | jq -r '
+      [.items[]
+        | select(.metadata.ownerReferences[]?.name // "" | startswith("syslog-health-monitor"))
+        | (.status.conditions[]? | select(.type=="Ready") | .status) == "True"]
+      | any')"
+    if [[ "${pod_ready}" == "true" ]]; then
+      break
+    fi
+    node=""
+  done
+  if [[ -z "${node}" ]]; then
+    echo "::error::no candidate node has a Ready syslog-health-monitor pod; cannot run fault injection" >&2
+    exit 1
+  fi
+  echo "selected node: ${node}"
+
+  local pre_state
+  pre_state="$(kubectl get node "${node}" -o jsonpath="{.status.conditions[?(@.type==\"${condition}\")].status}")"
+  if [[ "${pre_state}" == "True" ]]; then
+    echo "::error::${node} already carries ${condition}=True before injection; a pre-existing condition cannot produce a trustworthy pass" >&2
+    exit 1
+  fi
+  echo "::endgroup::"
+
+  echo "::group::Wait for syslog-health-monitor's first poll"
+  sleep "${poll_wait_seconds}"
+  echo "::endgroup::"
+
+  # RuntimeClass: upstream hardcodes nvidia; AKS's azure-managed GPU profile
+  # instead ships nvidia-container-runtime (see recipes/components/gpu-
+  # operator/values-aks.yaml). Detected rather than hardcoded per-cloud so
+  # this function stays identical across the AWS/GCP/Azure lanes.
+  local runtime_class="nvidia"
+  if kubectl get runtimeclass nvidia-container-runtime >/dev/null 2>&1; then
+    runtime_class="nvidia-container-runtime"
+  fi
+
+  echo "::group::Inject synthetic XID 79"
+  # trap ensures the privileged pod is removed on every exit path, including
+  # a failure partway through this function (set -e would otherwise abort
+  # before cleanup ran).
+  trap 'kubectl delete pod "'"${pod_name}"'" -n "'"${nvs_ns}"'" --ignore-not-found --wait=false >/dev/null 2>&1 || true' RETURN
+
+  cat <<MANIFEST | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${pod_name}
+  namespace: ${nvs_ns}
+  labels:
+    app.kubernetes.io/name: sxid-fault-inject
+    app.kubernetes.io/part-of: aicr-uat
+spec:
+  nodeName: ${node}
+  runtimeClassName: ${runtime_class}
+  restartPolicy: Never
+  tolerations:
+    - operator: Exists
+  containers:
+    - name: inject
+      image: busybox:1.36
+      securityContext:
+        privileged: true
+      command: ["sleep", "300"]
+      volumeMounts:
+        - name: host-root
+          mountPath: /host
+  volumes:
+    - name: host-root
+      hostPath:
+        path: /
+MANIFEST
+
+  if ! kubectl wait pod "${pod_name}" -n "${nvs_ns}" --for=condition=Ready --timeout=120s; then
+    echo "::error::fault-injection debug pod did not become Ready" >&2
+    kubectl describe pod "${pod_name}" -n "${nvs_ns}" || true
+    exit 1
+  fi
+
+  # Synthetic, not a real fault: nothing on the node changes. Mirrors
+  # upstream's "GPU has fallen off the bus" XID 79 line, written through the
+  # host's /dev/kmsg via chroot (the same mechanism the generic janitor-
+  # provider uses for `chroot /host /sbin/reboot`; see recipes/components/
+  # nvsentinel/values.yaml janitor-provider.csp.provider: generic).
+  local kmsg_line="<3>NVRM: Xid (PCI:0000:00:00): 79, pid=1, Channel ID 00000000 intr 00000000 (GPU has fallen off the bus)."
+  if ! kubectl exec "${pod_name}" -n "${nvs_ns}" -- chroot /host sh -c "echo '${kmsg_line}' > /dev/kmsg"; then
+    echo "::error::failed to write synthetic XID to ${node}'s /dev/kmsg" >&2
+    exit 1
+  fi
+  echo "wrote synthetic XID 79 to ${node}:/dev/kmsg"
+  echo "::endgroup::"
+
+  echo "::group::Wait for ${condition}=True"
+  local waited=0
+  local state="${pre_state}"
+  while (( waited < detect_timeout_seconds )); do
+    state="$(kubectl get node "${node}" -o jsonpath="{.status.conditions[?(@.type==\"${condition}\")].status}")"
+    if [[ "${state}" == "True" ]]; then
+      break
+    fi
+    sleep 10
+    waited=$(( waited + 10 ))
+  done
+  echo "::endgroup::"
+
+  if [[ "${state}" != "True" ]]; then
+    echo "::error::${condition} did not appear on ${node} within ${detect_timeout_seconds}s of injection -- a missing signal is a FAIL, not a pass" >&2
+    kubectl describe node "${node}" || true
+    exit 1
+  fi
+  echo "detection OK: ${node} carries ${condition}=True ${waited}s after injection"
+
+  # Stage 2/3 note (see function header): no shipped recipe enables
+  # remediation, so there is nothing further to assert here today. A future
+  # PR that lands #1014 extends this phase (or adds a sibling one) to assert
+  # cordon (Stage 2) and, with janitor enabled, a changed boot ID (Stage 3),
+  # each gated on the recipe having remediation enabled rather than failing
+  # when it does not.
+}
+
 phase_verify() {
   echo "::group::Bootstrap Sigstore TUF root"
   "${AICR_BIN}" trust update
@@ -1870,7 +2084,7 @@ uat_main() {
 
   if [[ -z "${phase}" || -z "${config}" ]]; then
     echo "Usage: $0 <phase> <test-config.yaml>" >&2
-    echo "Phases: prep | install | readiness | conformance | train | serve | verify | debug | all" >&2
+    echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
     exit 2
   fi
 
@@ -1890,6 +2104,7 @@ uat_main() {
     train)       phase_train ;;
     serve)       phase_serve ;;
     verify)      phase_verify ;;
+    sxidfault)   phase_sxid_fault_inject ;;
     debug)
       # Refresh cloud credentials first (no-op on AWS/GCP; Azure redeems a fresh
       # federated session). A failure that surfaces after a long phase can leave a
@@ -1933,7 +2148,7 @@ uat_main() {
       ;;
     *)
       echo "unknown phase: ${phase}" >&2
-      echo "Phases: prep | install | readiness | conformance | train | serve | verify | debug | all" >&2
+      echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
       exit 2
       ;;
   esac

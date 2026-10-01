@@ -871,6 +871,23 @@ jobs:
           EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-azure\.yaml@refs/heads/.+$'
         run: ./tests/uat/azure/run verify "${TEST_CONFIG}"
 
+      # #2625 Stage 1: prove the NVSentinel health pipeline actually detects a
+      # real fault, rather than just asserting the component is deployed.
+      # Placed AFTER verify (see phase_sxid_fault_inject's comment in
+      # phases.sh for why) so the CUJ phases above are already done before
+      # this writes anything to a node. Detection-only: no shipped recipe
+      # enables fault quarantine/remediation yet (#2609), so this step takes
+      # no destructive action on the node.
+      - name: "UAT - sxid fault injection (NVSentinel detection, #2625)"
+        id: sxidfault
+        if: steps.conformance.outcome == 'success'
+        timeout-minutes: 10
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/azure/run sxidfault "${TEST_CONFIG}"
+
       # Export the digest-pinned bundle ref for the ingest-evidence job.
       # Reads the pointer the conformance step wrote; emits empty (job
       # skips) when no bundle/digest is present.
