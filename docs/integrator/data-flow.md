@@ -487,6 +487,9 @@ Bundlers receive `RecipeResult` with component references and values maps:
 // Get component reference and values from RecipeResult
 component := input.GetComponentRef("gpu-operator")
 values, err := input.GetValuesForComponent("gpu-operator")
+if err != nil {
+    return err // gpu-operator is not in the recipe
+}
 
 // Values map contains nested configuration
 // {

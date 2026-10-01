@@ -401,6 +401,9 @@ for _, obj := range res.Objects {
 	log.Printf("wrote %s %s to %s", obj.Kind, obj.Name, obj.Path)
 }
 // Review the files, then: kubectl apply -f <res.Dir>/
+// The annotated irsa-snapshotter ServiceAccount must already exist in the
+// namespace; pass the same name as AgentConfig.ServiceAccountName to
+// CollectSnapshot so the agent runs as it.
 ```
 
 Adopting one ServiceAccount across runs waives per-run permission isolation:
