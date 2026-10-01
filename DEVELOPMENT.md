@@ -653,7 +653,7 @@ make server
 make cluster-status
 
 # View Tilt logs
-tilt logs -f tilt/Tiltfile
+tilt logs -f
 
 # Reset everything
 make dev-reset
@@ -844,7 +844,7 @@ For detailed information on adding validation checks and constraint validators, 
 
 This comprehensive guide covers:
 - Architecture overview (Job-based validation, test registration framework)
-- Quick start with code generator: `make generate-validator`
+- Quick start for adding a container-per-validator check
 - How-to guides for adding checks and constraint validators
 - Testing patterns (unit tests vs integration tests)
 - Enforcement mechanisms (automated registration validation)

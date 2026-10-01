@@ -42,6 +42,9 @@ Each stage transforms input data into a different format:
   projection of associated NodeSet, LoginSet, RestApi, and Accounting CRs
 - **mariadb-operator**: Official `k8s.mariadb.com/mariadbs` API conflict
   evidence (not database availability or health)
+- **oke-legacy-plugin**: OKE's legacy addon-manager `nvidia-gpu-device-plugin`
+  DaemonSet in `kube-system` (device-plugin conflict evidence: `none`,
+  `active`, or `unknown`)
 - **aks-gpu-pools**: Orchestration-layer projection, not a collector —
   produced from the explicit operator-supplied pool dump passed to
   `aicr snapshot --aks-gpu-pools <file>` (per-pool `gpu-driver` install
@@ -89,10 +92,11 @@ Each stage transforms input data into a different format:
 │   │                                                     │
 │   ├─ K8s                                                │
 │   │   └─ subtypes: [server, image, policy, node,        │
-│   │                 slinky-slurm, mariadb-operator,      │
-│   │                 aks-gpu-pools (with --aks-gpu-pools),│
-│   │                 oke-addons (with --oke-addons),      │
-│   │                 gke-gpu-pools (with --gke-gpu-pools)]│
+│   │                 slinky-slurm, mariadb-operator,     │
+│   │                 oke-legacy-plugin,                  │
+│   │                 aks-gpu-pools (--aks-gpu-pools),    │
+│   │                 oke-addons (--oke-addons),          │
+│   │                 gke-gpu-pools (--gke-gpu-pools)]    │
 │   │       ├─ data: map[string]Reading                   │
 │   │       └─ slinky-slurm.items: []ItemEntry            │
 │   │             (allowlisted resource context + data)   │
@@ -451,8 +455,8 @@ RecipeResult
        argocd/argocd-helm/flux/helmfile differ):
          - static values       -> <NNN-component>/values.yaml
          - dynamic/per-cluster -> <NNN-component>/cluster-values.yaml
-         - component manifests -> <NNN-component>/   (e.g. ClusterPolicy or a
-                                   CR, for components that ship one)
+         - component manifests -> <NNN+1-component-post>/ (a local chart
+                                   deployed after the upstream chart)
          - go:embed templates  -> per-component install.sh, and the root
                                    README.md + deploy.sh
   -> write canonical recipe.yaml (Helm deployer only)
@@ -480,7 +484,7 @@ Bundlers receive `RecipeResult` with component references and values maps:
 ```go
 // Get component reference and values from RecipeResult
 component := input.GetComponentRef("gpu-operator")
-values := input.GetValuesForComponent("gpu-operator")
+values, err := input.GetValuesForComponent("gpu-operator")
 
 // Values map contains nested configuration
 // {
@@ -567,7 +571,7 @@ Ordering follows each component's declared `dependencyRefs`, not its linear posi
 │         ┌────────────────┴────────────────┐             │
 │         ▼                                 ▼             │
 │  ┌────────────┐                    ┌────────────┐       │
-│  │    Helm    │                    │  Argo CD    │       │
+│  │    Helm    │                    │  Argo CD   │       │
 │  │  Deployer  │                    │  Deployer  │       │
 │  │ (default)  │                    │            │       │
 │  └──────┬─────┘                    └──────┬─────┘       │
@@ -623,7 +627,6 @@ bundle-output/
 │   └── application.yaml      # With sync-wave annotation
 ├── 002-gpu-operator/
 │   ├── values.yaml
-│   ├── manifests/
 │   └── application.yaml      # With sync-wave annotation
 ├── 003-network-operator/
 │   ├── values.yaml
@@ -656,10 +659,8 @@ spec:
     - repoURL: <YOUR_GIT_REPO>
       targetRevision: main
       ref: values
-    # Additional manifests (if present)
-    - repoURL: <YOUR_GIT_REPO>
-      targetRevision: main
-      path: 002-gpu-operator/manifests
+  # Raw manifests are not a source here: they ship as a separate
+  # NNN-<component>-post/ Application ordered after this one.
 ```
 
 ### Deployer Data Flow
@@ -685,9 +686,9 @@ spec:
 │                                                              │
 │  4. Run deployer (argocd) → numbered NNN-<name>/ folders     │
 │     (argocd shares localformat with helm; flux does not)     │
-│     ├─ 001-cert-manager/application.yaml (wave: 1)          │
-│     ├─ 002-gpu-operator/application.yaml (wave: 5)          │
-│     └─ 003-network-operator/application.yaml (wave: 9)      │
+│     ├─ 001-cert-manager/application.yaml (wave: 1)           │
+│     ├─ 002-gpu-operator/application.yaml (wave: 5)           │
+│     ├─ 003-network-operator/application.yaml (wave: 9)       │
 │     └─ app-of-apps.yaml (bundle root, uses --repo URL)       │
 │                                                              │
 │  5. Finalize closed-world inventory                          │

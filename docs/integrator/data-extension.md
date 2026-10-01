@@ -16,7 +16,7 @@ catalog content) or overrides (for component files) the embedded equivalent.
 | Need | How `--data` helps |
 |---|---|
 | Add a non-public Kubernetes service (`service=ncp-internal`) | Drop an overlay declaring that criteria value; the criteria registry admits it. |
-| Add a proprietary platform (`platform=runai`, `platform=nvmesh`) | Same — an overlay's `spec.criteria.platform` registers the value. |
+| Add a proprietary platform (`platform=nvmesh`) | Same — an overlay's `spec.criteria.platform` registers the value. |
 | Add a future GPU SKU before AICR's next release | Add `accelerator: <name>` in an overlay; CLI / API admit it on the fly. |
 | Add an internal component (e.g., an in-house operator) | Add a component definition under `components/` and reference it in an overlay or mixin. |
 | Override an embedded chart version / values file | Drop a same-path file under your `--data` dir; external takes precedence. |
@@ -443,8 +443,6 @@ Sample output (truncated):
 ```text
 [cli] initializing external data provider: directory=./my-external-data
 [cli] layered data provider initialized: external_dir=./my-external-data external_files=12
-[cli] data provider set: generation=1
-[cli] external data provider initialized successfully: directory=./my-external-data
 [cli] building recipe from criteria: criteria=criteria(service=eks, accelerator=h100, intent=any, os=any)
 [cli] recipe generation completed: output=stdout components=8 overlays=2
 ```

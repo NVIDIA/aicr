@@ -165,7 +165,7 @@ End-to-end, the smallest viable patch:
    context.WithTimeout(ctx, defaults.CollectorTimeout); defer cancel()`.
    Then read state and build subtypes. Use
    `measurement.NewSubtypeBuilder(name)` and
-   `measurement.NewMeasurement(type).WithSubtypes(...).Build()` from
+   `measurement.NewMeasurement(type).WithSubtype(...).Build()` from
    [`pkg/measurement/builder.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/measurement/builder.go).
 3. **Add a `measurement.Type` if the dimension is new.** Append the
    constant in
@@ -364,8 +364,8 @@ split:
   fail-loud file reader (`readBoundedPoolsFile` in
   `providerpools.go`: Lstat regular-file gate + `os.Open` +
   `io.LimitReader` cap), the orchestration-layer project-then-attach
-  flow in `pkg/snapshotter` (`attachAKSGPUPools` /
-  `mergeAKSGPUPools`), and the up-front projection that keeps
+  flow in `pkg/snapshotter` (`attachProviderProjection` /
+  `mergeProviderProjection`), and the up-front projection that keeps
   explicit operator input out of the snapshotter's degrade-to-warning
   collector policy.
 - **Additive flags.** New providers add sibling flags

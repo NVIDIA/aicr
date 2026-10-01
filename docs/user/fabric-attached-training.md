@@ -66,6 +66,7 @@ not generate with AICR, or shapes the shipped runtime does not cover.
 
 `TrainingRuntime` is an ordinary namespaced resource: author one in your
 namespace and reference it from `runtimeRef`.
+
 **What that runtime must carry.** The annotations and sidecar are specified in
 [Workload Pod Configuration](../integrator/gke-tcpxo-networking.md#workload-pod-configuration-nri-profile);
 the `dshm` volume, worker `IPC_LOCK`, daemon `args` and NCCL settings are not in
@@ -327,8 +328,8 @@ prerequisites.
 ## Verifying the fabric is in use
 
 Run a short job with `NCCL_DEBUG=INFO` and check which transport NCCL selected.
-Every runtime AICR ships sets `NCCL_DEBUG=WARN`, at which this line is
-suppressed — so grepping an ordinary run finds nothing, which is not evidence of
+The runtimes AICR ships set `NCCL_DEBUG=WARN` or leave it unset, and at either
+level this line is suppressed — so grepping an ordinary run finds nothing, which is not evidence of
 socket fallback:
 
 ```shell

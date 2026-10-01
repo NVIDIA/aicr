@@ -88,10 +88,11 @@ a latent one.
 **Surface:** bundle and artifact schemas ·
 **Deprecated in:** v0.22 ·
 **Removed in:** v1.0.0 for `Snapshot`, `RecipeCriteria`, and `RecipeResult`
-inputs; **already removed in v0.21** for `RecipeMetadata` overlays
+inputs — **this removal has happened**; **already removed in v0.21** for
+`RecipeMetadata` overlays
 
-Artifacts predating the `apiVersion` field load today with the field absent or
-empty. That tolerance retires alongside the alpha values — except for
+Artifacts predating the `apiVersion` field loaded with the field absent or
+empty. That tolerance retired alongside the alpha values — except for
 `RecipeMetadata`, which lost it a release early and without a warning window;
 see below.
 
@@ -100,7 +101,7 @@ overlay passed directly (`aicr bundle -r overlay.yaml`,
 `aicr validate -r overlay.yaml`) must carry an `apiVersion`, because the catalog
 scanner already required one and the two paths disagreed on the same bytes
 ([#2421](https://github.com/NVIDIA/aicr/issues/2421)). `Snapshot`,
-`RecipeCriteria`, and hydrated `RecipeResult` inputs keep the tolerance until
+`RecipeCriteria`, and hydrated `RecipeResult` inputs kept the tolerance until
 v1.0.0.
 
 **What to do.** Add an `apiVersion` header to any artifact you author or retain.

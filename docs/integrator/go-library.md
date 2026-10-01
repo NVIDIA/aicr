@@ -73,7 +73,7 @@ go get github.com/NVIDIA/aicr@latest
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v0.21.1
+go get github.com/NVIDIA/aicr@v0.22.0
 ```
 
 ## Quick start
@@ -118,7 +118,7 @@ func main() {
 		OS:          "ubuntu", // REQUIRED to reach the OS-pinned kubeflow overlay; see "Recipe sources" below
 		Intent:      "training",
 		Platform:    "kubeflow",
-		// Profile:  "gpuStack=operator-managed", // only when the composition declares one (embedded adopter: AKS; values azure-managed [default] / operator-managed)
+		// Profile:  "gpuStack=operator-managed", // only when the composition declares one (e.g. AKS; values azure-managed [default] / operator-managed)
 	})
 	if err != nil {
 		log.Fatalf("resolve recipe: %v", err)
@@ -279,7 +279,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	// full run-scoped RBAC set. Leaving it unset, as here, keeps the
 	// run-scoped default and never probes for an existing ServiceAccount.
 	Namespace:       "aicr-snapshot",
-	Image:           "ghcr.io/nvidia/aicr:v0.21.1",
+	Image:           "ghcr.io/nvidia/aicr:v0.22.0",
 	Timeout:         5 * time.Minute,
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
@@ -290,10 +290,9 @@ if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
 }
 
-// NOTE: AgentConfig.AKSGPUPoolsPath and ResolveRecipeFromSnapshotWithProfile
-// require the release containing the AKS gpuStack adoption (PR #1967) —
-// newer than the module pin shown under Installation; update the pin to
-// that release when reproducing this example.
+// NOTE: AgentConfig.GKEGPUPoolsPath is newer than the module pin shown
+// under Installation; update the pin to a release that includes it when
+// reproducing this example.
 // On AKS, resolve FROM the collected snapshot so the profile selection is
 // verified against the recorded pool modes (ResolveRecipeFromSnapshot uses
 // the declaration default, azure-managed, which requires pools reading
@@ -381,25 +380,27 @@ existing ServiceAccount, so a stray ServiceAccount cannot capture a run.
 Use the first form when the ServiceAccount must carry EKS IRSA or GKE Workload
 Identity annotations: both providers pin trust to the ServiceAccount *name*, so
 a run-scoped name can never be trusted by either. Grant it the agent's
-permissions once — the objects it creates are permanent and no run cleanup
-removes them:
+permissions once by writing the RBAC manifests and applying them yourself —
+the applied objects are permanent and no run cleanup removes them:
 
 ```go
-// Admin step, run once. Provisions and returns; it deploys no Job.
-// Returns ErrCodeNotFound when the ServiceAccount does not exist.
-res, err := snapshotter.ProvisionAgentRoles(ctx, &snapshotter.AgentRolesConfig{
-	Kubeconfig:         "/path/to/target-kubeconfig",
+// Admin step, run once. Writes manifests into a new snapshot-rbac-<runID>/
+// directory under the working directory; it contacts no cluster, applies
+// nothing, and does not verify that the ServiceAccount exists.
+res, err := snapshotter.WriteAgentRoleManifests(&snapshotter.AgentRolesConfig{
 	Namespace:          "gpu-operator",
 	ServiceAccountName: "irsa-snapshotter",
-	// DiscoverNetwork also grants the cluster-scoped MUTATING rules live
-	// network discovery needs — permanently, not for one run's lifetime.
+	// DiscoverNetwork also renders the cluster-scoped MUTATING rules live
+	// network discovery needs — permanent once applied, not for one run's lifetime.
 	DiscoverNetwork: false,
 })
 if err != nil {
-	log.Fatalf("provision agent roles: %v", err)
+	log.Fatalf("write agent role manifests: %v", err)
 }
-log.Printf("granted via %s/%s and %s/%s",
-	res.Role, res.RoleBinding, res.ClusterRole, res.ClusterRoleBinding)
+for _, obj := range res.Objects {
+	log.Printf("wrote %s %s to %s", obj.Kind, obj.Name, obj.Path)
+}
+// Review the files, then: kubectl apply -f <res.Dir>/
 ```
 
 Adopting one ServiceAccount across runs waives per-run permission isolation:
@@ -724,7 +725,7 @@ once.
 The returned `*RecipeResult` carries:
 
 - `Name`, `Version`, `TranslatedAt` — stable identity
-- `Components` — `[]ComponentRef` (Name, Kind, Version, Source, Chart, Namespace)
+- `Components` — `[]ComponentRef` (Name, Kind, Version, Tag, Source, Chart, Namespace)
 - `SelectedProfile` — selected name/value and declaration-wide `OwnedPaths`;
   nil for legacy recipes
 - `RelaxedDimensions` — criteria dimensions cleared by
@@ -951,9 +952,9 @@ guarantee.
 
 ### What `BundleOptions()` does and does not carry
 
-`BundleOptions()` returns the 18 bundler settings `spec.bundle.deployment` and
-`spec.bundle.scheduling` configure (plus the two attestation flags the bundler
-itself reads) as plain fields — not a built `Config` — so you read and
+`BundleOptions()` returns 18 bundler settings (those `spec.bundle.deployment`
+and `spec.bundle.scheduling` configure, plus the two attestation flags the
+bundler itself reads) as plain fields — not a built `Config` — so you read and
 override individual settings directly, the same as `ValidateSettings()`. It
 also returns `OIDCResolve` (the four signing settings that reach the attester
 rather than the bundler):
@@ -1503,9 +1504,9 @@ so `ValidateSettings()` carries settings from both `spec.validate.agent` and
 `spec.validate.execution` as a plain value, not an option slice, so you read
 and override individual fields directly — but not every field it carries
 reaches `Client.ValidateState`.
-Nine do, via a matching `WithValidation*` option: namespace, image pull
-secrets, node selector, tolerations, no-cluster, cleanup, phases, fail-fast,
-and timeout. Four do not: image, job name, service account name and
+Ten do, via a matching `WithValidation*` option: namespace, image pull
+secrets, node selector, tolerations, no-cluster, cleanup, phases, skip checks,
+fail-fast, and timeout. Four do not: image, job name, service account name and
 require-GPU have no `WithValidationImage`, `WithValidationJobName`,
 `WithValidationServiceAccountName` or `WithValidationRequireGPU` for
 `ValidateState` to accept them through. They ride on `ValidateSettings()`
@@ -1733,7 +1734,7 @@ the CLI does with `--os`. An unparsed `Talos` would miss the agent's exact
 errors here instead of traveling.
 
 `Kubeconfig`, `Debug`, `ClusterConfigPath`, `AKSGPUPoolsPath`,
-`OKEAddonsPath`, `DiscoverNetwork`, `RunID` and `NameBase` have no config
+`OKEAddonsPath`, `GKEGPUPoolsPath`, `DiscoverNetwork`, `RunID` and `NameBase` have no config
 counterpart and stay
 zero — they are per-invocation or caller-owned.
 

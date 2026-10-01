@@ -237,17 +237,17 @@ layout:
     - component: network-operator
       manifest: 003-network-operator/application.yaml
       name: network-operator
-      namespace: network-operator
+      namespace: nvidia-network-operator
       path: 003-network-operator
     - component: network-operator
       manifest: 004-network-operator-post/application.yaml
       name: network-operator-post
-      namespace: network-operator
+      namespace: nvidia-network-operator
       path: 004-network-operator-post
     - component: network-operator
       manifest: 005-network-operator-readiness/application.yaml
       name: network-operator-readiness
-      namespace: network-operator
+      namespace: nvidia-network-operator
       path: 005-network-operator-readiness
 metadata:
   version: v0.22.0
