@@ -123,6 +123,8 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 		return errors.Wrap(errors.ErrCodeInternal, "load registry", err)
 	}
 
+	enableNoImagesCheck(reg.Components, strict)
+
 	if mkErr := os.MkdirAll(outDir, 0o755); mkErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "mkdir out-dir", mkErr)
 	}
@@ -257,6 +259,13 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	fmt.Printf("bom: wrote %s and %s (%d components, %d variants, %d image refs)\n",
 		jsonPath, mdPath, len(results), len(variants), totalImages)
 	return nil
+}
+
+// enableNoImagesCheck sets the zero-image check on every component.
+func enableNoImagesCheck(components []component, on bool) {
+	for i := range components {
+		components[i].checkNoImages = on
+	}
 }
 
 // noImagesIssue reports a mismatch between the number of images a Helm chart
@@ -421,7 +430,7 @@ func surveyComponent(
 		}
 		// images holds only chart output here, so manifest images cannot
 		// mask a chart that rendered nothing.
-		if len(res.Warnings) == 0 {
+		if c.checkNoImages && len(res.Warnings) == 0 {
 			if issue := noImagesIssue(c.Name, len(images)); issue != "" {
 				res.Warnings = append(res.Warnings, issue)
 			}

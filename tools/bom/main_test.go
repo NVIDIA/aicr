@@ -1042,3 +1042,32 @@ components:
 		})
 	}
 }
+
+// TestRunNonStrictOmitsNoImagesWarning keeps the contributor-facing
+// expectedNoImages hint out of the released BOM artifacts.
+func TestRunNonStrictOmitsNoImagesWarning(t *testing.T) {
+	root := writeTestRegistry(t, `apiVersion: v1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: X
+    helm:
+      defaultRepository: "oci://ghcr.io/nvidia"
+      defaultChart: x
+      defaultVersion: "1.0.0"
+`)
+	out := t.TempDir()
+	mock := &helmtest.MockRenderer{Rendered: map[string][]byte{"gpu-operator": nil}}
+	if err := run(root, out, "test-v1", mock, false, false, true, true); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	for _, f := range []string{"bom.md", "bom.cdx.json"} {
+		data, err := os.ReadFile(filepath.Join(out, f))
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if strings.Contains(string(data), "expectedNoImages") {
+			t.Errorf("%s contains the expectedNoImages hint", f)
+		}
+	}
+}
