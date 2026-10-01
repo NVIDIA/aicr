@@ -404,12 +404,15 @@ constrained:
       return type, not reaching around it -- the same pattern as
       pkg/bundler/result above. The CLI needs it because the exit code and the
       SDK must not disagree about which verdicts stop a run; re-deriving that
-      rule in pkg/cli is the divergence FailsRun exists to prevent. Rendering
-      goes through the facade's WriteUpgradeReportTable, so no renderer is
+      rule in pkg/cli is the divergence FailsRun exists to prevent.
+      UnmatchedStamps is the half of that rule no row carries, read so the
+      error can say why a run with no failing row failed. Rendering goes
+      through the facade's WriteUpgradeReportTable, so no renderer is
       reached directly.
     permanent: true
     symbols:
       Report.FailsRun: behavioral
+      Report.UnmatchedStamps: behavioral
   pkg/validator:
     reason: >-
       CLI-only. ParsePhaseSelection and Phase parse the --phase flag (no

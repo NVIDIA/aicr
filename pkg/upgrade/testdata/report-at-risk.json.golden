@@ -1,0 +1,83 @@
+{
+  "from": "cluster",
+  "to": "./bundles-v0.17.0",
+  "deployer": "argocd",
+  "components": [
+    {
+      "component": "beta-operator",
+      "change": "version",
+      "from": "0.17.2",
+      "to": "0.18.1",
+      "verdict": "manual",
+      "notes": "1 minor, 1 step, manual across 3 minors",
+      "reason": "recorded",
+      "explanation": "recorded manual: the record covering 0.18.0 describes the move from 0.17.2 to 0.18.1. Follow the steps below, then apply",
+      "jump": "1 minor",
+      "covers": "3 minors",
+      "breaking": true,
+      "downgrade": false,
+      "summary": "The legacy API group is renamed. A mirror controller copies existing objects.",
+      "precondition": "No object is mid-rollout and no node is mid-package.",
+      "steps": [
+        {
+          "id": "rename-crs",
+          "description": "In a single commit, remove the legacy manifests and add their replacements.",
+          "reason": "one commit lets the controller prune and adopt in a single sync."
+        }
+      ],
+      "failsRun": true
+    }
+  ],
+  "summary": {
+    "components": 1,
+    "failing": 1
+  },
+  "atRisk": {
+    "scanned": true,
+    "kinds": [
+      {
+        "group": "beta.example.com",
+        "kind": "LegacyPolicy",
+        "components": [
+          "beta-operator"
+        ],
+        "present": true,
+        "examined": 4
+      },
+      {
+        "group": "beta.example.com",
+        "kind": "LegacyBinding",
+        "components": [
+          "beta-operator",
+          "gamma-operator"
+        ],
+        "present": false,
+        "examined": 0
+      }
+    ],
+    "findings": [
+      {
+        "group": "beta.example.com",
+        "kind": "LegacyPolicy",
+        "components": [
+          "beta-operator"
+        ],
+        "namespace": "tenant-a",
+        "name": "nightly-training"
+      },
+      {
+        "group": "beta.example.com",
+        "kind": "LegacyPolicy",
+        "components": [
+          "beta-operator"
+        ],
+        "namespace": "tenant-b",
+        "name": "inference-pool"
+      },
+      {
+        "kind": "PersistentVolume",
+        "name": "beta-store-pv"
+      }
+    ]
+  }
+}

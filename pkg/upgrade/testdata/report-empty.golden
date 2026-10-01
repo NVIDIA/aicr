@@ -3,3 +3,12 @@ UPGRADE CHECK
   to        b.yaml
 
 NO COMPONENT CHANGES
+
+AT RISK (advisory)
+  Objects of the kinds the crossed transition records name that carry neither
+  Helm nor Argo CD ownership. AICR does not manage them and cannot restore
+  them; removing a CRD takes its objects with it. Advisory only: this never
+  changes the exit code.
+
+  not scanned: no cluster access requested
+
