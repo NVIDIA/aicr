@@ -90,7 +90,12 @@ retry_transient() {
 # moving under 1 KiB/s for 30s, so a slow but moving download of a large asset
 # is not capped the way a total --max-time would.
 CURL_RETRY=(--retry $((RETRY_ATTEMPTS - 1)) --retry-connrefused --connect-timeout 10)
-CURL_RETRY_ALL=("${CURL_RETRY[@]}" --speed-limit 1024 --speed-time 30 --retry-all-errors)
+CURL_RETRY_ALL=("${CURL_RETRY[@]}" --speed-limit 1024 --speed-time 30)
+# --retry-all-errors needs curl 7.71 or newer. An older curl rejects it as an
+# unknown option, so it is added only when curl lists it.
+if [[ "$(curl --help all 2>/dev/null)" == *--retry-all-errors* ]]; then
+    CURL_RETRY_ALL+=(--retry-all-errors)
+fi
 
 # probe_url HEADs a URL, following redirects, and records curl's HTTP status and
 # exit code in PROBE_HTTP_CODE and PROBE_CURL_EXIT. It fails, so retry_transient
