@@ -39,8 +39,8 @@
 # from the steps it protects. A transcribed copy would keep passing after
 # someone edited the real one.
 #
-# Hermetic: `tools/uat-broker` is a local Go program that gate A's step builds
-# from source itself, and `infra/uat/reservations.yaml` and the test configs are
+# Hermetic: `tools/uat-broker` is a local Go program that the resolve job's
+# "Build uat-broker" step (also extracted and run here) builds from source, and `infra/uat/reservations.yaml` and the test configs are
 # in-repo. No network, no cluster, no prebuilt binary.
 #
 # It never skips. A missing yq, a missing go, or a step that cannot be extracted
@@ -70,7 +70,7 @@ check() {
 # Hard preconditions. Each aborts the suite rather than skipping a case.
 abort() { echo "FAIL: $*" >&2; exit 1; }
 command -v yq >/dev/null 2>&1 || abort "yq is not on PATH; it is required to extract the steps under test"
-command -v go >/dev/null 2>&1 || abort "go is not on PATH; the extracted resolve step builds tools/uat-broker from source"
+command -v go >/dev/null 2>&1 || abort "go is not on PATH; the extracted build step builds tools/uat-broker from source"
 [[ -f "${RUN_WORKFLOW}" ]] || abort "workflow not found: ${RUN_WORKFLOW}"
 [[ -f "${KIND_WORKFLOW}" ]] || abort "workflow not found: ${KIND_WORKFLOW}"
 
@@ -97,8 +97,11 @@ extract_step() {
     echo "ok: extracted '${name}' from $(basename "${wf}") ($(wc -l < "${dest}" | tr -d ' ') lines)"
 }
 
+BUILD_STEP="${WORK}/build-step.sh"
 RESOLVE_STEP="${WORK}/resolve-step.sh"
 KIND_STEP="${WORK}/kind-validate-step.sh"
+extract_step "${RUN_WORKFLOW}" '.jobs.resolve' 'Build uat-broker' \
+             "${BUILD_STEP}" 'tools/uat-broker'
 extract_step "${RUN_WORKFLOW}" '.jobs.resolve' 'Resolve reservation row' \
              "${RESOLVE_STEP}" 'uat-broker reservations'
 extract_step "${KIND_WORKFLOW}" '.jobs["uat-kind"]' 'Validate inputs' \
@@ -107,6 +110,11 @@ extract_step "${KIND_WORKFLOW}" '.jobs["uat-kind"]' 'Validate inputs' \
 # ---------------------------------------------------------------------------
 # Gate A: uat-run.yaml, can this lane serve a platform at all
 # ---------------------------------------------------------------------------
+
+# The resolve step runs the ./bin/uat-broker an earlier step of the same job
+# builds, so build it once here the same way.
+( cd "${REPO_ROOT}" && bash "${BUILD_STEP}" ) > "${WORK}/build.log" 2>&1 \
+    || abort "the extracted 'Build uat-broker' step failed: $(cat "${WORK}/build.log")"
 
 # run_resolve <reservation> <platform> -> rc, publishing into ${WORK}/row.txt.
 # cwd is the repo root because the step resolves ./tools and ./bin relative to
