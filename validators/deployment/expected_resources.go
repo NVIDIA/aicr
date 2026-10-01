@@ -829,7 +829,11 @@ func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResou
 		// interface method issues its request with context.TODO() internally,
 		// so an unresponsive apiserver would outlive both cancellation and the
 		// readiness budget.
-		list, discErr := helper.GroupVersionResources(ctx.Ctx, ctx.Clientset, gv)
+		// Bounded per request so a stalled apiserver cannot hold the readiness
+		// poll past its deadline.
+		discCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.ResourceVerificationTimeout)
+		defer cancel()
+		list, discErr := helper.GroupVersionResources(discCtx, ctx.Clientset, gv)
 		switch {
 		case discErr == nil:
 			// A group/version is listed once any one of its CRDs is
@@ -844,7 +848,7 @@ func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResou
 			return false, nil
 		case stderrors.Is(discErr, context.Canceled), stderrors.Is(discErr, context.DeadlineExceeded):
 			return false, errors.Wrap(errors.ErrCodeTimeout,
-				fmt.Sprintf("Nodewright discovery of %s did not complete within the validation budget", gv), discErr)
+				fmt.Sprintf("Nodewright discovery of %s did not complete within %s", gv, defaults.ResourceVerificationTimeout), discErr)
 		default:
 			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("Nodewright: failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
