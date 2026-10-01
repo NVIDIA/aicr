@@ -207,6 +207,7 @@ reset() {
 IMG="public.ecr.aws/docker/library/registry:3.1.1"
 GITEA="docker.gitea.com/gitea:1.27.0-rootless"
 REDIS="ecr-public.aws.com/docker/library/redis:8.2.3-alpine"
+KIND_NODE="kindest/node:v1.37.0"
 
 # ── image_cache_key ──────────────────────────────────────────────────────────
 
@@ -477,6 +478,8 @@ testing_tools:
   registry_image: '${IMG}'
   gitea_image: '${GITEA}'
   argocd_redis_image: '${REDIS}'
+testing:
+  kind_node_image: '${KIND_NODE}'
 EOF
 out=$(image_cache_settings "${SETTINGS}" 2>&1); rc=$?
 check_rc "settings-succeeds" 0 "${rc}"
@@ -485,7 +488,9 @@ registry_key=$(image_cache_key "${IMG}")
 gitea_image=${GITEA}
 gitea_key=$(image_cache_key "${GITEA}")
 argocd_redis_image=${REDIS}
-argocd_redis_key=$(image_cache_key "${REDIS}")"
+argocd_redis_key=$(image_cache_key "${REDIS}")
+kind_node_image=${KIND_NODE}
+kind_node_key=$(image_cache_key "${KIND_NODE}")"
 if [[ "${out}" == "${want}" ]]; then
     pass "settings-emits-images-and-matching-keys"
 else
@@ -508,9 +513,21 @@ testing_tools:
   registry_image: ''
   gitea_image: '${GITEA}'
   argocd_redis_image: '${REDIS}'
+testing:
+  kind_node_image: '${KIND_NODE}'
 EOF
 image_cache_settings "${SETTINGS}" >/dev/null 2>&1; rc=$?
 check_rc_nonzero "settings-empty-pin-fails" "${rc}"
+
+# The Kind node pin lives under `testing`, not `testing_tools`.
+cat > "${SETTINGS}" <<EOF
+testing_tools:
+  registry_image: '${IMG}'
+  gitea_image: '${GITEA}'
+  argocd_redis_image: '${REDIS}'
+EOF
+image_cache_settings "${SETTINGS}" >/dev/null 2>&1; rc=$?
+check_rc_nonzero "settings-missing-kind-node-pin-fails" "${rc}"
 
 image_cache_settings "${STUB_DIR}/does-not-exist.yaml" >/dev/null 2>&1; rc=$?
 check_rc_nonzero "settings-missing-file-fails" "${rc}"
@@ -523,6 +540,8 @@ testing_tools:
   registry_image: 'public.ecr.aws/docker/library/registry :3.1.1'
   gitea_image: '${GITEA}'
   argocd_redis_image: '${REDIS}'
+testing:
+  kind_node_image: '${KIND_NODE}'
 EOF
 image_cache_settings "${SETTINGS}" >/dev/null 2>&1; rc=$?
 check_rc_nonzero "settings-whitespace-in-pin-fails" "${rc}"
@@ -541,7 +560,8 @@ if [[ -r "${REAL_SETTINGS}" ]]; then
     # that regressed any of the three would reintroduce a rate-limit failure.
     if [[ "${out}" == *"registry_image=public.ecr.aws/"* &&
           "${out}" == *"gitea_image=docker.gitea.com/"* &&
-          "${out}" == *"argocd_redis_image=ecr-public.aws.com/"* ]]; then
+          "${out}" == *"argocd_redis_image=ecr-public.aws.com/"* &&
+          "${out}" == *"kind_node_image=kindest/node:"* ]]; then
         pass "settings-resolves-the-pinned-registries"
     else
         fail "settings-resolves-the-pinned-registries (got: ${out})"
