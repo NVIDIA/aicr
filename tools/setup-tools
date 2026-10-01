@@ -64,9 +64,9 @@ esac
 # Overrides that are not a positive integer (attempts) or a non-negative integer
 # without leading zeros (delay) fall back to the defaults.
 RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
-RETRY_BASE_DELAY="${RETRY_BASE_DELAY:-2}"
+RETRY_BASE_DELAY="${RETRY_BASE_DELAY:-5}"
 [[ "$RETRY_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || RETRY_ATTEMPTS=3
-[[ "$RETRY_BASE_DELAY" =~ ^(0|[1-9][0-9]*)$ ]] || RETRY_BASE_DELAY=2
+[[ "$RETRY_BASE_DELAY" =~ ^(0|[1-9][0-9]*)$ ]] || RETRY_BASE_DELAY=5
 retry_transient() {
     local label="$1" attempt=1 rc delay
     shift

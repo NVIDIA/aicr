@@ -420,11 +420,11 @@ check_retry_overrides() {
             [[ "${got}" == "${want_attempts} ${want_delay}" ]] \
                 || { echo "attempts='${attempts}' delay='${delay}' gave '${got}', want '${want_attempts} ${want_delay}'"; exit 1; }
         }
-        expect_knobs ""    ""    3 2
+        expect_knobs ""    ""    3 5
         expect_knobs 5     0     5 0
-        expect_knobs abc   1.5   3 2
-        expect_knobs 0     08    3 2
-        expect_knobs -1    09    3 2
+        expect_knobs abc   1.5   3 5
+        expect_knobs 0     08    3 5
+        expect_knobs -1    09    3 5
         expect_knobs 007   10    3 10
     )
 }
