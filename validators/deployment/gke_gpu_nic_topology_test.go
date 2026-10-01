@@ -33,7 +33,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/internal/gkenet"
 )
 
 func topoEntry(name, pci string) string {
@@ -150,59 +149,56 @@ func TestCheckGKEGPUNICTopology(t *testing.T) {
 			t.Fatalf("all-unverified must Skip (not plain pass), got %v", err)
 		}
 	})
+
+	t.Run("present-but-unparseable annotation fails closed (not Skip)", func(t *testing.T) {
+		t.Parallel()
+		// A node carrying a nic-info value we cannot parse must FAIL the check —
+		// the schema-mismatch class of bug must not degrade to a warning + Skip.
+		err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(topoNode("{not valid json")), true))
+		if err == nil || validators.IsSkip(err) {
+			t.Fatalf("unparseable annotation must fail closed, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "unparseable") {
+			t.Errorf("error should name the unparseable annotation, got %v", err)
+		}
+	})
 }
 
-// poolConsistencyProblems blames only strict-minority nodes (never the majority
-// side), stays neutral on a tie, and counts only grouped nodes for the threshold.
-func TestPoolConsistencyProblems(t *testing.T) {
+// Uniform displacement: every node shows eth0..eth8 (no extra interface, no
+// missing name, identical PCI set), so the name/PCI signals are silent — but
+// north-interfaces reveals eth1 sits on the gVNIC network, not a GPU NIC network.
+// This is the in-scope failure (#2265 case 1) the join exists to catch.
+func TestCheckGKEGPUNICTopologyUniformDisplacement(t *testing.T) {
 	t.Parallel()
-	nt := func(name string, pcis ...string) nodeTopology {
-		return nodeTopology{name: name, info: &gkenet.NodeNICInfo{GPUNICPCIs: pcis}}
+
+	// nic-info: all of eth0..eth8 present with distinct IPs/slots (uniform shape).
+	nicE := make([]string, 0, 1+len(topoIfs))
+	nicE = append(nicE, `{"birthName":"eth0","birthIP":"10.0.0.9","pciAddress":"0000:00:0c.0"}`)
+	// north-interfaces: eth1 (10.0.16.3) maps to the gVNIC "default" network;
+	// eth2..eth8 map to the GPU NIC Networks.
+	northE := []string{`{"network":"default","ipAddress":"10.0.16.3"}`}
+	for i, name := range topoIfs { // eth1..eth8
+		ip := fmt.Sprintf("10.0.%d.3", 16*(i+1))
+		nicE = append(nicE, fmt.Sprintf(`{"birthName":%q,"birthIP":%q,"pciAddress":%q}`, name, ip, topoSlots[i]))
+		if name != "eth1" {
+			northE = append(northE, fmt.Sprintf(`{"network":%q,"ipAddress":%q}`, fmt.Sprintf("aicr-test-gpu-nic-%d", i), ip))
+		}
 	}
-	a := []string{"0000:06:00.0", "0000:07:00.0"}
-	b := []string{"0000:08:00.0", "0000:09:00.0"}
-	c := []string{"0000:0a:00.0", "0000:0b:00.0"}
-	cases := []struct {
-		name            string
-		verified        []nodeTopology
-		excludeFromVote map[string]bool // missing interfaces (layout unreliable)
-		alreadyReported map[string]bool // already blamed (extras or missing)
-		wantBlame       []string        // node names that must be named as the minority
-		wantNotBlame    []string        // node names that must NOT be named as the minority
-		wantNone        bool            // expect no problems at all
-		wantTie         bool            // expect the neutral 'distinct layouts' line
-	}{
-		{"consistent pool", []nodeTopology{nt("n1", a...), nt("n2", a...)}, nil, nil, nil, nil, true, false},
-		{"one node only", []nodeTopology{nt("n1", a...)}, nil, nil, nil, nil, true, false},
-		{"majority 2v1 blames minority only", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...)}, nil, nil, []string{"n3"}, []string{"n1", "n2"}, false, false},
-		{"tie 2v2 is neutral", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...), nt("n4", b...)}, nil, nil, nil, nil, false, true},
-		{"missing-flagged node excluded from vote", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...)}, map[string]bool{"n3": true}, map[string]bool{"n3": true}, nil, nil, true, false},
-		{"extras-flagged node still votes (#1): odd pair does not steal the majority", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", a...), nt("n4", b...), nt("n5", b...)}, nil, map[string]bool{"n1": true, "n2": true}, []string{"n4", "n5"}, []string{"n3"}, false, false},
-		{"extras-flagged minority not re-blamed", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", a...), nt("n4", b...)}, nil, map[string]bool{"n4": true}, nil, nil, true, false},
-		{"3-way split is neutral", []nodeTopology{nt("n1", a...), nt("n2", b...), nt("n3", c...)}, nil, nil, nil, nil, false, true},
+	node := topoNode("[" + strings.Join(nicE, ",") + "]")
+	node.Annotations["networking.gke.io/north-interfaces"] = "[" + strings.Join(northE, ",") + "]"
+
+	ctx := topoContext(k8sfake.NewClientset(node), true)
+	ctx.DynamicClient = gkeNetworkClient(gkeNetworkObjects(8)...)
+
+	err := checkGKEGPUNICTopology(ctx)
+	if err == nil {
+		t.Fatal("uniform gVNIC displacement (eth1 on the gVNIC network) must fail")
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := poolConsistencyProblems(tc.verified, tc.excludeFromVote, tc.alreadyReported)
-			joined := strings.Join(got, "\n")
-			if tc.wantNone && len(got) != 0 {
-				t.Errorf("expected no problems, got %v", got)
-			}
-			if tc.wantTie && !strings.Contains(joined, "distinct GPU NIC PCI layouts") {
-				t.Errorf("tie/3-way must print the neutral 'distinct layouts' line, got %v", got)
-			}
-			for _, name := range tc.wantBlame {
-				if !strings.Contains(joined, `"`+name+`"`) {
-					t.Errorf("expected node %q to be blamed, got %v", name, got)
-				}
-			}
-			for _, name := range tc.wantNotBlame {
-				if strings.Contains(joined, `"`+name+`" GPU NIC PCI layout differs`) {
-					t.Errorf("node %q must NOT be blamed, got %v", name, got)
-				}
-			}
-		})
+	if validators.IsSkip(err) {
+		t.Fatalf("displacement must fail, not skip: %v", err)
+	}
+	if !strings.Contains(err.Error(), "eth1") {
+		t.Errorf("error should name the displaced interface eth1: %v", err)
 	}
 }
 
@@ -246,13 +242,16 @@ func TestTopologyCoverageEmitCounts(t *testing.T) {
 		return cs
 	}
 
-	t.Run("pass emits validated=total=2, unverified=0", func(t *testing.T) {
+	t.Run("pass emits validated=total=2", func(t *testing.T) {
 		extra, runErr := captureTopologyExtra(t, topoContext(healthy2(), true))
 		if runErr != nil {
 			t.Fatalf("two healthy nodes must pass, got %v", runErr)
 		}
-		if extra["nodesValidated"] != "2" || extra["nodesTotal"] != "2" || extra["nodesUnverified"] != "0" {
+		if extra["nodesValidated"] != "2" || extra["nodesTotal"] != "2" {
 			t.Errorf("coverage counts wrong for 2 healthy nodes, got %v", extra)
+		}
+		if len(extra) != 2 {
+			t.Errorf("coverage must carry only nodesValidated+nodesTotal, got %v", extra)
 		}
 	})
 	t.Run("zero-node emits total=0 (accurate empty pool)", func(t *testing.T) {

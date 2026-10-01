@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -31,29 +30,28 @@ import (
 )
 
 // gkeAcceleratorLabel selects a3-megagpu-8g GPU nodes on GKE — the nodes that
-// must map all 8 GPU NIC PCI slots for TCPXO.
+// must map all 8 GPU NIC PCI slots for TCPXO. It is a3-megagpu-8g-specific, like
+// gkenet.RequiredGPUNICInterfaces.
 const gkeAcceleratorLabel = "cloud.google.com/gke-accelerator=nvidia-h100-mega-80gb"
 
 // Coverage keys for EmitExtra (constants so the package's literal-occurrence count
 // stays under the goconst threshold).
 const (
-	topoKeyValidated  = "nodesValidated"
-	topoKeyUnverified = "nodesUnverified"
-	topoKeyTotal      = "nodesTotal"
+	topoKeyValidated = "nodesValidated"
+	topoKeyTotal     = "nodesTotal"
 )
-
-// nodeTopology pairs a node name with its parsed NIC topology (for pool-consistency).
-type nodeTopology struct {
-	name string
-	info *gkenet.NodeNICInfo
-}
 
 // checkGKEGPUNICTopology is the case-1 arm of #2265: a GPU node pool provisioned
 // with a gVNIC additional network takes a GPU NIC PCI slot, leaving 7/8 GPUs
 // usable while every Network object exists (the census passes clean). Read each
 // a3 GPU node's networking.gke.io/nic-info annotation and fail closed on the
-// displacement. Reads node annotations; the sibling gke-gpu-nic-networks check
-// reads cluster-scoped Network CRs.
+// displacement signatures that are detectable from it (an interface beyond
+// eth0..eth8, or fewer than 8 of eth1..eth8). Reads node annotations; the sibling
+// gke-gpu-nic-networks check reads cluster-scoped Network CRs.
+//
+// Fail-closed contract: a node whose annotation is PRESENT but unparseable fails
+// the check; a node whose annotation is ABSENT is unverified (a documented
+// limitation, surfaced as a Skip when nothing could be verified).
 func checkGKEGPUNICTopology(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes clientset is not available")
@@ -67,22 +65,18 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 			tcpxoComponent + " not declared in recipe — GPUDirect TCPXO networking is inapplicable")
 	}
 
-	// Coverage is recorded on EVERY exit path (including list-error and zero-node),
-	// so the result states how much was actually verified. Coverage is emitted only
-	// once the node list succeeded — a list error (RBAC/timeout/transport) must not
-	// report nodesTotal: 0, which would misread as an empty cluster.
+	// Coverage is recorded once the node list succeeded (a list error must not
+	// report nodesTotal: 0, which would misread as an empty cluster).
 	totalNodes := 0
 	verifiedCount := 0
-	unverifiedCount := 0
 	listed := false
 	defer func() {
 		if !listed {
 			return
 		}
 		emitExtraOrWarn(map[string]string{
-			topoKeyValidated:  strconv.Itoa(verifiedCount),
-			topoKeyUnverified: strconv.Itoa(unverifiedCount),
-			topoKeyTotal:      strconv.Itoa(totalNodes),
+			topoKeyValidated: strconv.Itoa(verifiedCount),
+			topoKeyTotal:     strconv.Itoa(totalNodes),
 		})
 	}()
 
@@ -102,89 +96,86 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 		return errors.New(errors.ErrCodeNotFound, nicTopologyMsg("the cluster has no a3-megagpu-8g GPU nodes", remediationNoNodes))
 	}
 
+	// The expected GPU NIC Network set for the north-interfaces join (which Network
+	// each ethN must sit on). Reuses the sibling census's discovery. A list error
+	// blocks (fail closed); an empty set means the displacement join cannot run.
+	gpuSet := map[string]bool{}
+	if ctx.DynamicClient != nil {
+		gpuNICList, derr := gkenet.DiscoverGPUNICNetworks(ctx.Ctx, ctx.DynamicClient)
+		if derr != nil {
+			capability := validators.Capability{Component: tcpxoComponent, Subject: "GPU NIC networks (networks)"}
+			return capability.RequireList(derr)
+		}
+		for _, n := range gpuNICList {
+			gpuSet[n] = true
+		}
+	}
+
 	var problems []string
-	var verified []nodeTopology
-	// flaggedMissing marks nodes that do NOT map all 8 GPU NICs — their PCI layout
-	// is unreliable, so they are excluded from the pool-consistency vote. flaggedExtra
-	// marks nodes that map all 8 but carry an extra interface — their layout is still
-	// valid, so they DO vote, but they are already reported and must not be blamed
-	// again by the pool check.
-	flaggedMissing := map[string]bool{}
-	flaggedExtra := map[string]bool{}
+	var unverified []string
+	var displacementUnverified []string
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
 		annotation := node.Annotations[gkenet.NICInfoAnnotation]
 		if annotation == "" {
-			unverifiedCount++
+			unverified = append(unverified, node.Name)
 			slog.Warn("GPU node has no nic-info annotation; NIC topology unverified", "node", node.Name)
 			continue
 		}
 		info, err := gkenet.ParseNICInfo(annotation)
 		if err != nil {
-			unverifiedCount++
-			slog.Warn("GPU node nic-info annotation unparseable; NIC topology unverified", "node", node.Name, "error", err)
+			// A present-but-unparseable annotation fails closed: the node carries a
+			// nic-info value we cannot trust, so we must not skip it into silence.
+			problems = append(problems, fmt.Sprintf("node %q has an unparseable %s annotation: %v", node.Name, gkenet.NICInfoAnnotation, err))
 			continue
 		}
-		verified = append(verified, nodeTopology{name: node.Name, info: info})
+		verifiedCount++
 
 		if len(info.ExtraInterfaces) > 0 {
 			problems = append(problems, fmt.Sprintf("node %q has unexpected interface(s) beyond eth0..eth8: %s (gVNIC displacement signature)", node.Name, strings.Join(info.ExtraInterfaces, ",")))
-			flaggedExtra[node.Name] = true
-		}
-		if len(info.DuplicatePCIs) > 0 {
-			problems = append(problems, fmt.Sprintf("node %q has interfaces sharing one PCI address (misconfigured/mirrored NIC): %s", node.Name, strings.Join(info.DuplicatePCIs, "; ")))
-			flaggedExtra[node.Name] = true
 		}
 		if info.GPUNICInterfaces < gkenet.RequiredGPUNICInterfaces {
 			problems = append(problems, fmt.Sprintf("node %q maps %d of %d GPU NIC interfaces (missing: %s)",
 				node.Name, info.GPUNICInterfaces, gkenet.RequiredGPUNICInterfaces, strings.Join(info.SortedMissing(), ",")))
-			flaggedMissing[node.Name] = true
 		}
-		if dev := info.ObservedGPUNICSlotDeviation(); len(dev) > 0 {
-			slog.Warn("node GPU NIC PCI layout deviates from the observed a3 norm (informational only)", "node", node.Name, "deviation", dev)
-		}
-	}
 
-	// Record how many nodes were actually verified for the coverage emit (the
-	// defer captures verifiedCount, which the loop does not update).
-	verifiedCount = len(verified)
-
-	// Pool consistency: a node whose GPU-NIC PCI layout differs from the rest of
-	// its pool is displaced. Only meaningful when >1 node was verified.
-	poolProblems := poolConsistencyProblems(verified, flaggedMissing, flaggedExtra)
-	problems = append(problems, poolProblems...)
-	if len(problems) > 0 {
-		// The remediation is typed by what actually failed, not by scanning problem
-		// text. A displacement signature (extras or missing interfaces) means
-		// re-provision without a gVNIC; a pool-layout mismatch means inspect the
-		// listed nodes. Both can apply at once — print every one that applies.
-		var remediation string
-		if len(flaggedMissing)+len(flaggedExtra) > 0 {
-			remediation = remediationDisplacement
-		}
-		if len(poolProblems) > 0 {
-			if remediation != "" {
-				remediation += " "
+		// Displacement detection via the north-interfaces join: which Network does
+		// each ethN actually sit on? Catches the uniform gVNIC displacement that
+		// name/PCI alone cannot see.
+		northAnnotation := node.Annotations[gkenet.NorthInterfacesAnnotation]
+		switch northByIP, nerr := gkenet.ParseNorthInterfaces(northAnnotation); {
+		case northAnnotation == "":
+			// Can't run the join without north-interfaces; the nic-info shape checks
+			// above still ran. Note displacement unverified rather than failing.
+			slog.Warn("GPU node has no north-interfaces annotation; NIC displacement unverified", "node", node.Name)
+			displacementUnverified = append(displacementUnverified, node.Name)
+		case nerr != nil:
+			problems = append(problems, fmt.Sprintf("node %q has an unparseable %s annotation: %v", node.Name, gkenet.NorthInterfacesAnnotation, nerr))
+		case len(gpuSet) > 0:
+			if displaced := gkenet.DisplacedGPUNICInterfaces(info, northByIP, gpuSet); len(displaced) > 0 {
+				problems = append(problems, fmt.Sprintf("node %q has GPU NIC interface(s) mapped to a non-GPU network (gVNIC displacement): %s", node.Name, strings.Join(displaced, ",")))
 			}
-			remediation += remediationPoolMismatch
 		}
-		return errors.New(errors.ErrCodeConflict, nicTopologyMsg(strings.Join(problems, "; "), remediation))
 	}
-	if len(verified) == 0 {
-		return validators.Skip(fmt.Sprintf("could not verify NIC topology on any of the %d a3 GPU node(s) (%d unverified)", totalNodes, unverifiedCount))
+
+	if len(problems) > 0 {
+		return errors.New(errors.ErrCodeConflict, nicTopologyMsg(strings.Join(problems, "; "), remediationDisplacement))
 	}
-	if unverifiedCount > 0 {
-		fmt.Printf("Verified NIC topology on %d a3 GPU node(s); %d node(s) could not be verified (no/invalid nic-info annotation)\n", len(verified), unverifiedCount)
+	if verifiedCount == 0 {
+		return validators.Skip(fmt.Sprintf("could not verify NIC topology on any of the %d a3 GPU node(s) (%d without a nic-info annotation)", totalNodes, len(unverified)))
+	}
+	if len(unverified) > 0 || len(displacementUnverified) > 0 {
+		fmt.Printf("Verified NIC topology on %d a3 GPU node(s); %d node(s) have no nic-info annotation (unverified); %d node(s) lack north-interfaces (displacement unverified)\n", verifiedCount, len(unverified), len(displacementUnverified))
 		return nil
 	}
 	fmt.Printf("Verified NIC topology on %d a3 GPU node(s): all map %d GPU NIC interfaces (eth1..eth8)\n",
-		len(verified), gkenet.RequiredGPUNICInterfaces)
+		verifiedCount, gkenet.RequiredGPUNICInterfaces)
 	return nil
 }
 
 // nicTopologyMsg builds the operator-facing message for a NIC-topology failure
-// (case 1). detail names what was observed; remediation is specific to the failure
-// kind (displacement, pool mismatch, or absent nodes) — not a constant blame.
+// (case 1). detail names what was observed; remediation is specific to the
+// failure kind (displacement vs absent nodes).
 func nicTopologyMsg(detail, remediation string) string {
 	return fmt.Sprintf(
 		"recipe declares %s but %s — GPUDirect TCPXO needs all 8 GPU NIC PCI slots mapped to "+
@@ -195,74 +186,5 @@ func nicTopologyMsg(detail, remediation string) string {
 
 const (
 	remediationDisplacement = "Re-provision the GPU node pool WITHOUT a gVNIC additional network (it takes a GPU NIC PCI slot)."
-	remediationPoolMismatch = "Inspect nic-info on the listed nodes; their GPU NIC PCI layout differs from the pool (a displaced or heterogeneous node)."
 	remediationNoNodes      = "No a3-megagpu-8g nodes were found — check the GPU pool exists, is not scaled to zero, and carries cloud.google.com/gke-accelerator=nvidia-h100-mega-80gb."
 )
-
-// poolConsistencyProblems groups verified nodes by their GPU-NIC PCI layout. A
-// node whose layout differs from the rest of its pool is displaced — but only
-// when one layout is a strict majority (else we can't tell which side is wrong
-// and must not blame). Returns nil when the pool is consistent.
-//
-// excludeFromVote marks nodes whose layout is unreliable (they do not map all 8
-// GPU NICs), so they are left out of the grouping. alreadyReported marks nodes
-// that already produced their own failure line (extras or missing), so when the
-// minority is reported they are skipped — a node is never blamed twice. A node
-// with only an EXTRA interface still maps all 8, so it votes but is not re-blamed.
-func poolConsistencyProblems(verified []nodeTopology, excludeFromVote, alreadyReported map[string]bool) []string {
-	if len(verified) < 2 {
-		return nil
-	}
-	byLayout := map[string][]string{}
-	grouped := 0
-	for _, nt := range verified {
-		if excludeFromVote[nt.name] {
-			continue
-		}
-		key := strings.Join(nt.info.GPUNICPCIs, ",")
-		byLayout[key] = append(byLayout[key], nt.name)
-		grouped++
-	}
-	if len(byLayout) < 2 {
-		return nil
-	}
-	// Find a strict-majority layout among the GROUPED nodes (excluded ones are not
-	// in any group, so the threshold and message must count only grouped nodes).
-	majority := ""
-	for layout, members := range byLayout {
-		if len(members) > grouped/2 {
-			majority = layout
-			break
-		}
-	}
-	var problems []string
-	if majority != "" {
-		var layouts []string
-		for layout := range byLayout {
-			if layout != majority {
-				layouts = append(layouts, layout)
-			}
-		}
-		sort.Strings(layouts)
-		for _, layout := range layouts {
-			members := append([]string(nil), byLayout[layout]...)
-			sort.Strings(members)
-			for _, name := range members {
-				if alreadyReported[name] {
-					continue
-				}
-				problems = append(problems, fmt.Sprintf("node %q GPU NIC PCI layout differs from the pool majority (%d of %d grouped nodes)", name, len(byLayout[majority]), grouped))
-			}
-		}
-		return problems
-	}
-	var layouts []string
-	for layout, members := range byLayout {
-		m := append([]string(nil), members...)
-		sort.Strings(m)
-		layouts = append(layouts, fmt.Sprintf("{%s}: nodes %s", layout, strings.Join(m, ",")))
-	}
-	sort.Strings(layouts)
-	problems = append(problems, "pool has "+strconv.Itoa(len(byLayout))+" distinct GPU NIC PCI layouts (no majority to blame): "+strings.Join(layouts, "; "))
-	return problems
-}

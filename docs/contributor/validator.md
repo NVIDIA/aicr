@@ -443,7 +443,7 @@ codes only (`"2"`, `"no-schedulable-gpu-nodes"`) — never node names, IPs, or h
 `pkg/evidence/redact`'s `ctrfExtraAllowlist` enforces this at the **publication
 boundary** (not just at emission, which raw prefixed stdout could bypass) with a
 fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`,
-`nodesUnverified`, `nodesTotal`, `skipReason`, `runtimeSource`) survive, and each surviving value must pass its key's
+`nodesTotal`, `skipReason`, `runtimeSource`) survive, and each surviving value must pass its key's
 validator — a non-negative decimal count for the `nodes*` keys, and for
 `skipReason` a **closed set** of known codes (`ctrfSkipReasons`, currently
 `no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`, and

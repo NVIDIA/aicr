@@ -86,10 +86,7 @@ const (
 	// v4 added the `named-in-skip-checks` skipReason code, so a check the
 	// CALLER withheld (--skip-check) reaches the bundle with its reason and not
 	// only its name; the message that used to carry it is blanked here.
-	// v5 (#2265): the per-test Extra allowlist admits nodesUnverified (count of
-	// candidate nodes a coverage check could NOT verify), emitted by the GKE
-	// NIC-topology check. Counts only; nothing previously published changed.
-	PolicyVersion = "v5"
+	PolicyVersion = "v4"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -241,10 +238,9 @@ func isRuntimeSource(v string) bool { _, ok := ctrfRuntimeSources[v]; return ok 
 // that fails its validator is dropped even under an allowed key. Keep the map
 // keys mirrored in the ctrf godoc and docs/contributor/validator.md.
 var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
-	"nodesValidated":  isCountValue, // count of nodes a coverage check actually verified
-	"nodesUnverified": isCountValue, // count of candidate nodes that could NOT be verified (no/invalid signal)
-	"nodesTotal":      isCountValue, // count of candidate nodes (validated + unverified/skipped)
-	"skipReason":      isSkipReason, // closed-set code for why a check skipped
+	"nodesValidated": isCountValue, // count of nodes a coverage check actually verified
+	"nodesTotal":     isCountValue, // count of candidate nodes (validated + skipped/cordoned)
+	"skipReason":     isSkipReason, // closed-set code for why a check skipped
 	// NCCL benchmark runtime provenance (#2297): which artifact the bandwidth
 	// number describes. The template digests and path diff that back the claim
 	// are stdout (--full) evidence, not Extra — see validators/performance.

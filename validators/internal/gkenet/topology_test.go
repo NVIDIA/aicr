@@ -16,9 +16,17 @@ package gkenet
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+// healthySlots are distinct PCI addresses for the 8 GPU NICs (the observed a3
+// layout); the parser only needs them distinct and well-formed.
+var healthySlots = []string{
+	"0000:06:00.0", "0000:07:00.0", "0000:0d:00.0", "0000:0e:00.0",
+	"0000:86:00.0", "0000:87:00.0", "0000:8d:00.0", "0000:8e:00.0",
+}
 
 // nicEntry builds one real-schema nic-info entry (gke-networking-api shape).
 func nicEntry(name, pci string) string {
@@ -36,9 +44,9 @@ func nicAnnotation(pairs [][2]string) string {
 // healthyPairs: eth0 + eth1..eth8 at the observed a3 slots.
 func healthyPairs() [][2]string {
 	p := make([][2]string, 0, 1+len(tcpXOInterfaces))
-	p = append(p, [2]string{"eth0", "0000:00:05.0"})
+	p = append(p, [2]string{"eth0", "0000:00:0c.0"})
 	for i, name := range tcpXOInterfaces {
-		p = append(p, [2]string{name, observedA3GPUNICSlots[i]})
+		p = append(p, [2]string{name, healthySlots[i]})
 	}
 	return p
 }
@@ -67,11 +75,11 @@ func TestParseNICInfo(t *testing.T) {
 		},
 		{
 			name: "fewer than 8 GPU NICs",
-			annotation: nicAnnotation(append([][2]string{{"eth0", "0000:00:05.0"}},
+			annotation: nicAnnotation(append([][2]string{{"eth0", "0000:00:0c.0"}},
 				func() [][2]string {
 					var p [][2]string
 					for i := 0; i < 7; i++ {
-						p = append(p, [2]string{tcpXOInterfaces[i], observedA3GPUNICSlots[i]})
+						p = append(p, [2]string{tcpXOInterfaces[i], healthySlots[i]})
 					}
 					return p
 				}()...)),
@@ -130,8 +138,8 @@ func TestParseNICInfo(t *testing.T) {
 // the 8 GPU NICs at the observed slots 06,07,0d,0e,86,87,8d,8e.
 const liveA3NICAnnotation = `[{"birthIP":"10.0.0.9","birthName":"eth0","pciAddress":"0000:00:0c.0"},{"birthIP":"10.0.16.3","birthName":"eth1","pciAddress":"0000:06:00.0"},{"birthIP":"10.0.32.3","birthName":"eth2","pciAddress":"0000:07:00.0"},{"birthIP":"10.0.48.3","birthName":"eth3","pciAddress":"0000:0d:00.0"},{"birthIP":"10.0.64.3","birthName":"eth4","pciAddress":"0000:0e:00.0"},{"birthIP":"10.0.80.3","birthName":"eth5","pciAddress":"0000:86:00.0"},{"birthIP":"10.0.96.3","birthName":"eth6","pciAddress":"0000:87:00.0"},{"birthIP":"10.0.112.3","birthName":"eth7","pciAddress":"0000:8d:00.0"},{"birthIP":"10.0.128.3","birthName":"eth8","pciAddress":"0000:8e:00.0"}]`
 
-// Golden: the real captured annotation parses healthy (no missing/extra, no
-// deviation) and maps eth1..eth8 to the observed slots.
+// Golden: the real captured annotation parses healthy (no missing/extra) and
+// maps eth1..eth8 to the observed slots.
 func TestParseNICInfoLiveAnnotation(t *testing.T) {
 	t.Parallel()
 	info, err := ParseNICInfo(liveA3NICAnnotation)
@@ -142,9 +150,6 @@ func TestParseNICInfoLiveAnnotation(t *testing.T) {
 		t.Errorf("live annotation must be healthy, got interfaces=%d missing=%v extra=%v",
 			info.GPUNICInterfaces, info.MissingInterfaces, info.ExtraInterfaces)
 	}
-	if len(info.ObservedGPUNICSlotDeviation()) != 0 {
-		t.Errorf("live annotation must not deviate from the observed layout, got %v", info.ObservedGPUNICSlotDeviation())
-	}
 	want := map[string]string{"eth1": "0000:06:00.0", "eth8": "0000:8e:00.0"}
 	for iface, pci := range want {
 		if info.Interfaces[iface] != pci {
@@ -153,41 +158,10 @@ func TestParseNICInfoLiveAnnotation(t *testing.T) {
 	}
 }
 
-// Observed-slot deviation is informational only and never feeds pass/fail.
-func TestObservedSlotDeviationIsInformational(t *testing.T) {
-	t.Parallel()
-	// A node whose eth1..eth8 are at DIFFERENT (but complete) slots should parse
-	// fine and report a deviation — pass/fail is the caller's, not this field's.
-	pairs := make([][2]string, 0, 1+len(tcpXOInterfaces))
-	pairs = append(pairs, [2]string{"eth0", "0000:00:05.0"})
-	for i, name := range tcpXOInterfaces {
-		pairs = append(pairs, [2]string{name, fmt.Sprintf("0001:0%d:00.0", i)})
-	}
-	info, err := ParseNICInfo(nicAnnotation(pairs))
-	if err != nil {
-		t.Fatalf("ParseNICInfo: %v", err)
-	}
-	if info.GPUNICInterfaces != 8 {
-		t.Errorf("complete-but-different slots must still count 8, got %d", info.GPUNICInterfaces)
-	}
-	if len(info.ObservedGPUNICSlotDeviation()) != 8 {
-		t.Errorf("all 8 should be flagged as deviating from the observed norm, got %v", info.ObservedGPUNICSlotDeviation())
-	}
-}
-
 // Canonical extra-interface detection: anything not a round-trip eth0..eth8 is
-// extra — a non-eth name (gve1), a padded/signed numeric (eth08, eth-1, eth+5),
-// eth9+, or two interfaces sharing one PCI address.
+// extra — a non-eth name (gve1), a padded/signed numeric (eth08, eth-1), or eth9+.
 func TestParseNICInfoCanonicalExtras(t *testing.T) {
 	t.Parallel()
-	base := func() [][2]string { // healthy eth1..eth8 + eth0
-		pairs := make([][2]string, 0, 1+len(tcpXOInterfaces))
-		pairs = append(pairs, [2]string{"eth0", "0000:00:0c.0"})
-		for i, name := range tcpXOInterfaces {
-			pairs = append(pairs, [2]string{name, observedA3GPUNICSlots[i]})
-		}
-		return pairs
-	}
 	cases := []struct {
 		name      string
 		add       [2]string
@@ -201,7 +175,7 @@ func TestParseNICInfoCanonicalExtras(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			pairs := append(base(), tc.add)
+			pairs := append(healthyPairs(), tc.add)
 			info, err := ParseNICInfo(nicAnnotation(pairs))
 			if err != nil {
 				t.Fatalf("ParseNICInfo: %v", err)
@@ -219,25 +193,105 @@ func TestParseNICInfoCanonicalExtras(t *testing.T) {
 	}
 }
 
-// Two interfaces sharing one PCI address land in DuplicatePCIs (deterministic,
-// sorted), NOT in ExtraInterfaces.
-func TestParseNICInfoDuplicatePCI(t *testing.T) {
+// northEntry builds one north-interfaces record (network + underlay IP).
+func northEntry(network, ip string) string {
+	return fmt.Sprintf(`{"network":%q,"ipAddress":%q}`, network, ip)
+}
+
+// ParseNorthInterfaces builds the underlay-IP -> Network map; a present-but-
+// unparseable value errors (fail closed), an absent value errors distinctly.
+func TestParseNorthInterfaces(t *testing.T) {
 	t.Parallel()
-	pairs := make([][2]string, 0, 2+len(tcpXOInterfaces))
-	pairs = append(pairs, [2]string{"eth0", "0000:00:0c.0"})
-	for i, name := range tcpXOInterfaces {
-		pairs = append(pairs, [2]string{name, observedA3GPUNICSlots[i]})
-	}
-	pairs = append(pairs, [2]string{"eth9", observedA3GPUNICSlots[0]}) // eth9 shares eth1's PCI
-	info, err := ParseNICInfo(nicAnnotation(pairs))
+	byIP, err := ParseNorthInterfaces(`[` + northEntry("gpu-nic-0", "10.0.16.3") + `,` + northEntry("gpu-nic-1", "10.0.32.3") + `]`)
 	if err != nil {
-		t.Fatalf("ParseNICInfo: %v", err)
+		t.Fatalf("ParseNorthInterfaces: %v", err)
 	}
-	if len(info.DuplicatePCIs) != 1 {
-		t.Fatalf("expected 1 duplicate PCI, got %v", info.DuplicatePCIs)
+	if byIP["10.0.16.3"] != "gpu-nic-0" || byIP["10.0.32.3"] != "gpu-nic-1" {
+		t.Errorf("wrong IP->network map: %v", byIP)
 	}
-	// eth9 is beyond eth8 so it is ALSO an extra; the duplicate must name both names.
-	if !strings.Contains(info.DuplicatePCIs[0], "eth1") || !strings.Contains(info.DuplicatePCIs[0], "eth9") {
-		t.Errorf("duplicate PCI must name both interfaces, got %v", info.DuplicatePCIs)
+	if _, err := ParseNorthInterfaces("{bad json"); err == nil {
+		t.Error("unparseable north-interfaces must error")
+	}
+	if _, err := ParseNorthInterfaces(""); err == nil {
+		t.Error("empty north-interfaces must error")
+	}
+}
+
+// DisplacedGPUNICInterfaces catches the uniform-misprovisioning case: all of
+// eth1..eth8 present in nic-info, but one (eth1) joins via north-interfaces to a
+// gVNIC network instead of a GPU NIC network. Name/PCI alone cannot see this.
+func TestDisplacedGPUNICInterfaces(t *testing.T) {
+	t.Parallel()
+	gpu := map[string]bool{}
+	for _, n := range []string{"gpu-nic-0", "gpu-nic-1", "gpu-nic-2", "gpu-nic-3", "gpu-nic-4", "gpu-nic-5", "gpu-nic-6", "gpu-nic-7"} {
+		gpu[n] = true
+	}
+	// Build a nic-info where eth1..eth8 are all present with distinct IPs.
+	nicPairs := make([][2]string, 0, 1+len(tcpXOInterfaces))
+	nicPairs = append(nicPairs, [2]string{"eth0", "0000:00:0c.0"})
+	north := make([]string, 0, len(tcpXOInterfaces))
+	for i, name := range tcpXOInterfaces {
+		nicPairs = append(nicPairs, [2]string{name, healthySlots[i]})
+	}
+	// Healthy: every ethN's IP maps to a gpu-nic network. We need nic-info to carry
+	// birthIPs, so build the annotation with IPs.
+	withIPs := func(pairs [][2]string, ipFor func(name string) string) string {
+		parts := make([]string, 0, len(pairs))
+		for _, p := range pairs {
+			parts = append(parts, fmt.Sprintf(`{"birthName":%q,"birthIP":%q,"pciAddress":%q}`, p[0], ipFor(p[0]), p[1]))
+		}
+		return "[" + strings.Join(parts, ",") + "]"
+	}
+	ips := map[string]string{}
+	for i, name := range tcpXOInterfaces {
+		ips[name] = fmt.Sprintf("10.0.%d.3", 16*(i+1))
+	}
+	ips["eth0"] = "10.0.0.9"
+	_ = withIPs // used below
+
+	build := func(networkFor func(name string) string) ([]string, error) {
+		annotation := withIPs(nicPairs, func(name string) string { return ips[name] })
+		info, err := ParseNICInfo(annotation)
+		if err != nil {
+			return nil, err
+		}
+		north = north[:0]
+		for _, name := range tcpXOInterfaces {
+			north = append(north, northEntry(networkFor(name), ips[name]))
+		}
+		byIP, err := ParseNorthInterfaces("[" + strings.Join(north, ",") + "]")
+		if err != nil {
+			return nil, err
+		}
+		return DisplacedGPUNICInterfaces(info, byIP, gpu), nil
+	}
+
+	// gpuNetFor maps ethN -> gpu-nic-(N-1): eth1->gpu-nic-0 ... eth8->gpu-nic-7.
+	gpuNetFor := func(name string) string {
+		n, _ := strconv.Atoi(strings.TrimPrefix(name, "eth"))
+		return fmt.Sprintf("gpu-nic-%d", n-1)
+	}
+
+	// Healthy: all ethN on gpu-nic networks -> no displacement.
+	d, err := build(gpuNetFor)
+	if err != nil {
+		t.Fatalf("healthy build: %v", err)
+	}
+	if len(d) != 0 {
+		t.Errorf("healthy node must have no displaced interfaces, got %v", d)
+	}
+
+	// Uniform displacement: eth1 sits on the gVNIC network, the rest on gpu-nic.
+	d, err = build(func(name string) string {
+		if name == "eth1" {
+			return "default" // gVNIC network displaced onto eth1
+		}
+		return gpuNetFor(name)
+	})
+	if err != nil {
+		t.Fatalf("displaced build: %v", err)
+	}
+	if len(d) != 1 || !strings.Contains(d[0], "eth1") {
+		t.Errorf("expected eth1 flagged as displaced, got %v", d)
 	}
 }

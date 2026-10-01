@@ -25,7 +25,6 @@ import (
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/redact"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -125,7 +124,7 @@ func TestEmit_MinimalByDefault_RedactsSnapshotAndRecordsPolicy(t *testing.T) {
 	if res.Bundle.Predicate.Redaction == nil {
 		t.Fatalf("minimal bundle must record a redaction policy")
 	}
-	if res.Bundle.Predicate.Redaction.Policy != "minimal" || res.Bundle.Predicate.Redaction.Version != redact.PolicyVersion {
+	if res.Bundle.Predicate.Redaction.Policy != "minimal" || res.Bundle.Predicate.Redaction.Version != "v4" {
 		t.Errorf("unexpected redaction provenance: %+v", res.Bundle.Predicate.Redaction)
 	}
 	if len(res.Bundle.Predicate.Redaction.Applied) == 0 {

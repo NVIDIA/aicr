@@ -422,13 +422,6 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			want: map[string]string{"nodesValidated": "1", "nodesTotal": "2"},
 		},
 		{
-			// The GKE NIC-topology coverage emit (#2265) discloses how many
-			// candidate nodes could NOT be verified; the count survives verbatim.
-			name: "nodesUnverified count survives",
-			in:   map[string]string{"nodesValidated": "3", "nodesUnverified": "1", "nodesTotal": "4"},
-			want: map[string]string{"nodesValidated": "3", "nodesUnverified": "1", "nodesTotal": "4"},
-		},
-		{
 			// The RDMA fabric gate (#1952) reuses these same count keys to
 			// disclose a cordoned RDMA node narrowing its cohort (validated < total).
 			// No new key or skipReason is minted, so the allowlist is unchanged and
