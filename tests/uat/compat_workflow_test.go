@@ -210,6 +210,25 @@ func TestNightlyBatchCompatWiring(t *testing.T) {
 			t.Errorf("drive step env %s = %q, want it wired from steps.compat.outputs", key, run.Env[key])
 		}
 	}
+
+	// A cell kept in the schedule by --ignore-floor-lines must also get past
+	// uat-run's own compat gate, or the rejected floor is still honored there.
+	// The override is passed only under that condition.
+	const override = "allow_below_compat_floor=true"
+	lines := strings.Split(run.Run, "\n")
+	overrideAt := -1
+	for i, l := range lines {
+		if strings.Contains(l, override) {
+			overrideAt = i
+			break
+		}
+	}
+	if overrideAt < 1 {
+		t.Fatalf("drive step never passes %s to uat-run for cells under a rejected floor", override)
+	}
+	if guard := lines[overrideAt-1]; !strings.Contains(guard, `-n "$IGNORE_FLOOR_LINES"`) {
+		t.Errorf("%s must be guarded by a non-empty IGNORE_FLOOR_LINES check; preceding line: %q", override, strings.TrimSpace(guard))
+	}
 }
 
 // TestNightlyFullyGatedCellIsNotSilent guards the #2860 regression: a release

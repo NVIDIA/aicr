@@ -457,10 +457,16 @@ jobs:
               title="UAT ${RESERVATION} ${intent} @ ${label} #${dispatch_key}"
               echo "::group::${title} [intent=${intent}]"
 
-              gh workflow run uat-run.yaml --repo "$REPO" --ref "$REF" \
-                -f reservation="$RESERVATION" -f aicr_version="$ver" \
-                -f intent="$intent" \
-                -f dispatch_key="$dispatch_key"
+              dispatch_args=(-f reservation="$RESERVATION" -f aicr_version="$ver"
+                -f intent="$intent" -f dispatch_key="$dispatch_key")
+              # A rejected floor was deliberately not honored, so its cells are
+              # in the schedule; uat-run's own compat gate would still refuse
+              # them. Override it only then, keeping that gate as a backstop
+              # for every run where all floors are honored.
+              if [[ -n "$IGNORE_FLOOR_LINES" ]]; then
+                dispatch_args+=(-f allow_below_compat_floor=true)
+              fi
+              gh workflow run uat-run.yaml --repo "$REPO" --ref "$REF" "${dispatch_args[@]}"
 
               # Resolve the dispatched run by its run-name — this title MUST match
               # uat-run.yaml's `run-name:` (which appends the same dispatch_key).
