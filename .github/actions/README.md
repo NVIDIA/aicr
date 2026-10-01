@@ -290,14 +290,19 @@ array. The action's header comment explains the full subject policy.
 #### `kwok-test/`
 **Purpose**: Test recipes using KWOK simulated nodes in a shared Kind cluster
 **When to use**: KWOK recipe validation in CI or manual workflow dispatch
+**Requires**: An earlier job that uploads the `aicr` binary under `dist/` as the `kwok-aicr-bin` artifact. The action downloads it and does not build `aicr`.
 **Inputs**:
-- `recipe` (optional): Recipe name to test (empty = all testable recipes)
-- `go_version` (required): Go version to install
-- `goreleaser_version` (required): GoReleaser version from `load-versions`
+- `recipe` (required): Recipe name to test
+- `deployer` (optional): `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, or `flux-git` (default: "helm")
 - `kind_version` (optional): Kind version (default: "0.31.0")
 - `helm_version` (optional): Helm version (default: "v4.1.1")
 - `kwok_version` (optional): KWOK version (default: "v0.7.0")
 - `kubectl_version` (optional): kubectl version (default: "v1.35.0")
+- `flux_version` (optional): Flux CLI version, required for the `flux-*` deployers
+- `chainsaw_version` (required): Chainsaw version used by the sync gate
+- `chainsaw_sha256` (required): Chainsaw SHA256 checksum for linux/amd64
+- `kind_node_image` (optional): Kind node image
+- `job_timeout_minutes` (required): The calling job's `timeout-minutes`, used to derive the sync-gate deadline
 
 **Key Design**: Calls `run-all-recipes.sh` — the same script used by `make kwok-test-all` locally. This ensures CI and local testing use identical code paths with a single shared cluster.
 
@@ -305,10 +310,13 @@ array. The action's header comment explains the full subject policy.
 ```yaml
 - uses: ./.github/actions/kwok-test
   with:
-    go_version: ${{ steps.versions.outputs.go }}
-    goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
+    recipe: eks-training
+    deployer: helm
     kind_version: ${{ steps.versions.outputs.kind }}
     helm_version: ${{ steps.versions.outputs.helm }}
+    chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+    chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
+    job_timeout_minutes: '20'
 ```
 
 ## Workflows
@@ -341,8 +349,9 @@ array. The action's header comment explains the full subject policy.
 **Trigger**: Push/PR to main (when `recipes/**` or `kwok/**` change), manual dispatch
 **Purpose**: KWOK simulated cluster validation of recipe scheduling
 **Jobs**:
-1. **Test**: Calls `kwok-test` action which runs `run-all-recipes.sh` (same as `make kwok-test-all`)
-2. **Summary**: Reports pass/fail
+1. **Script Tests, Discover, Prime Images, Build aicr**: Run first. Build uploads the `aicr` binary once for every cell.
+2. **Tier 1, 2 and 3**: Each calls `kwok-test-run.yaml`, whose cells run the `kwok-test` action (`run-all-recipes.sh`, same as `make kwok-test-all`)
+3. **Summary**: Reports pass/fail (advisory, does not block merges)
 
 ## Architecture Principles
 
