@@ -523,6 +523,9 @@ bom-docs: ## Regenerates the auto-generated section of $(BOM_DOC_PATH) from the 
 	   ! grep -q '<!-- END AICR-BOM -->' $(BOM_DOC_PATH); then \
 	   echo "ERROR: $(BOM_DOC_PATH) is missing AICR-BOM markers." >&2; exit 1; \
 	fi; \
+	if ! command -v yq >/dev/null 2>&1 || ! command -v helm >/dev/null 2>&1; then \
+	   echo "ERROR: yq and helm are required. Run 'make tools-setup'." >&2; exit 1; \
+	fi; \
 	WANT_HELM="$$(yq -r '.testing_tools.helm' .settings.yaml)"; \
 	HAVE_HELM="$$(helm version --template '{{.Version}}')"; \
 	if [ "$$HAVE_HELM" != "$$WANT_HELM" ]; then \
