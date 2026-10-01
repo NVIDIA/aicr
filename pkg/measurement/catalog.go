@@ -145,7 +145,7 @@ var catalog = map[Type]typeSpec{
 			// pkg/collector/k8s/okelegacyplugin.go. nvidia-gpu-device-plugin is
 			// the collapsed constraint reading (none/active/unknown; only "none"
 			// qualifies operator-managed); daemonset carries the uncollapsed
-			// detail (absent/unrecognized/disabled/active/unknown).
+			// detail (absent/unlabeled/disabled/active/unknown).
 			"oke-legacy-plugin": {scalar: closedKeys("nvidia-gpu-device-plugin", "daemonset")},
 			// Keys are container image names (pkg/collector/k8s/image.go).
 			"image": {scalar: openKeys()},
