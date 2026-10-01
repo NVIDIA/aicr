@@ -39,9 +39,10 @@ const (
 	okeLegacyPluginDSName    = "nvidia-gpu-device-plugin"
 
 	// okeLegacyAddonManagerLabel/Mode identify a DaemonSet reconciled by the
-	// legacy Kubernetes addon-manager — Oracle's shipping mechanism for the
-	// pre-add-on device plugin. A same-named DaemonSet without this label is
-	// not Oracle's legacy plugin and must not trip the constraint.
+	// legacy Kubernetes addon-manager, Oracle's shipping mechanism for the
+	// pre-add-on device plugin. The label says who owns the DaemonSet, not
+	// whether it advertises nvidia.com/gpu, so a same-named DaemonSet without
+	// it is ambiguous and reads "unknown".
 	okeLegacyAddonManagerLabel = "addonmanager.kubernetes.io/mode"
 	okeLegacyAddonManagerMode  = "Reconcile"
 
@@ -89,15 +90,16 @@ func unknownOKELegacyPluginSubtype() measurement.Subtype {
 // presence evidence only — it never infers device-plugin health.
 //
 // Collapse rules (okeLegacyKeyPlugin):
-//   - "none":   the DaemonSet is absent, is present without the addon-manager
-//     Reconcile label (an unrelated same-named workload), or is present with
+//   - "none":   the DaemonSet is absent, or is labeled and has
 //     desiredNumberScheduled == 0 (every eligible node opted out via the
 //     oci.oraclecloud.com/disable-gpu-device-plugin node-pool label, or no
 //     node matches Oracle's GPU affinity).
-//   - "active": the labeled DaemonSet targets at least one node — deploying a
+//   - "active": the labeled DaemonSet targets at least one node. Deploying a
 //     recipe whose GPU Operator advertises nvidia.com/gpu would
 //     double-advertise (#1327).
-//   - "unknown": the API could not be consulted; fails constraints closed.
+//   - "unknown": the API could not be consulted, or the DaemonSet is present
+//     without the addon-manager Reconcile label so its owner cannot be
+//     established. Fails constraints closed.
 //
 // desiredNumberScheduled is not an omitempty field in appsv1.DaemonSetStatus,
 // so 0 is a trustworthy "targets nothing" observation, not a missing value.
@@ -117,7 +119,7 @@ func (k *Collector) collectOKELegacyPlugin(ctx context.Context) measurement.Subt
 	}
 
 	if ds.Labels[okeLegacyAddonManagerLabel] != okeLegacyAddonManagerMode {
-		return okeLegacyPluginSummary{plugin: okeLegacyPluginNone, daemonSet: okeLegacyDSUnlabeled}.subtype()
+		return okeLegacyPluginSummary{plugin: okeLegacyPluginUnknown, daemonSet: okeLegacyDSUnlabeled}.subtype()
 	}
 	if ds.Status.DesiredNumberScheduled == 0 {
 		return okeLegacyPluginSummary{plugin: okeLegacyPluginNone, daemonSet: okeLegacyDSDisabled}.subtype()

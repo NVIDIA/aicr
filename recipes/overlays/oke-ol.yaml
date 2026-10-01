@@ -242,24 +242,34 @@ spec:
           # Oracle's plugin still advertises nvidia.com/gpu (#1327). The
           # snapshot's in-cluster reading (pkg/collector/k8s/
           # okelegacyplugin.go) collapses to none/active/unknown; only
-          # "none" (absent, unrelated same-name workload, or fully disabled
-          # with desiredNumberScheduled=0) qualifies. This tripwire is
-          # operator-managed-only by design: when the managed add-on IS
-          # installed, it manages the same DaemonSet name, so oci-managed
-          # would observe "active" on every healthy cluster.
+          # "none" (absent, or labeled and fully disabled with
+          # desiredNumberScheduled=0) qualifies. A same-named DaemonSet
+          # without the addon-manager label reads unknown and fails
+          # closed. This tripwire is operator-managed-only by design: when
+          # the managed add-on IS installed, it manages the same DaemonSet
+          # name, so oci-managed would observe "active" on every healthy
+          # cluster.
           - name: K8s.oke-legacy-plugin.nvidia-gpu-device-plugin
             value: none
             remediation: >-
+              If the reading is unknown because the snapshot could not reach
+              the cluster API (no cluster access, or RBAC denied the
+              DaemonSet get), fix access and re-run aicr snapshot. Otherwise,
               OKE's legacy addon-manager device plugin (the kube-system
               nvidia-gpu-device-plugin DaemonSet) still targets GPU nodes on
-              this cluster; deploying the GPU Operator's device plugin
-              alongside it would double-advertise nvidia.com/gpu. Disable it
-              on every GPU node pool via the
-              oci.oraclecloud.com/disable-gpu-device-plugin=true node label,
-              or migrate the cluster to the managed NvidiaGpuPlugin add-on
-              (and then use the default --profile gpuStack=oci-managed).
-              Re-run aicr snapshot after the change so the reading reflects
-              the new state.
+              this cluster, or a DaemonSet with that name exists without
+              the addon-manager Reconcile label so its owner cannot be
+              confirmed (the daemonset detail reads unlabeled). Deploying
+              the GPU Operator's device plugin alongside it would
+              double-advertise nvidia.com/gpu. For the labeled legacy
+              DaemonSet, disable it on every GPU node pool via the
+              oci.oraclecloud.com/disable-gpu-device-plugin=true node label.
+              For an unlabeled DaemonSet, resolve its ownership and remove it
+              if it is the conflicting workload, since the node label does
+              not change the reading. Alternatively, migrate the cluster to
+              the managed NvidiaGpuPlugin add-on (and then use the default
+              --profile gpuStack=oci-managed). Re-run aicr snapshot after the
+              change so the reading reflects the new state.
 
   validation:
     conformance:
