@@ -636,6 +636,7 @@ Before pushing a PR that changes Go source, check coverage on affected packages.
 CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-comment.yaml`); this gate catches regressions before push.
 
 **PR policy:**
+- Link an issue assigned to the PR's human author (`Fixes:` or `Related:`, one line per issue); PRs an agent opens count toward that author's cap of 3 open PRs, drafts included. See `CONTRIBUTING.md` (Start with an issue, Claiming an Issue)
 - Do NOT add `Co-Authored-By` lines (organization policy)
 - Do NOT add "Generated with Claude Code", "Created by Codex", or similar attribution
 - Add a `theme/*` label matching the PR's primary concern: `theme/recipes`, `theme/validation`, `theme/deployer`, `theme/ci-dx`, `theme/community`, `theme/supply-chain`. Use `dependencies` for dependency bumps. (There are no `enhancement`/`bug`/`documentation` repo labels — those names are org-level *issue types*, which apply to issues, not PRs.)
