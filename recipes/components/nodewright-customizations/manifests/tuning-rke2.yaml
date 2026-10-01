@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Nodewright GPU customization that runs ONLY nvidia-tuned with the rke2
-# service profile (no nvidia-setup).
+# Nodewright GPU customization that runs nvidia-tuned with the rke2 service
+# profile (no nvidia-setup), plus the optional rdma-netns-exclusive package
+# described at its declaration below.
 #
 # Used by bare-metal RKE2 leaves whose accelerator profile carries a
 # [bootloader] stanza that has to reach the host kernel command line. Where
@@ -43,18 +44,21 @@
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
 {{- $cust := index .Values "nodewright-customizations" }}
 {{- /* tuningEnabled (default true) disables node tuning uniformly across the */}}
-{{- /* nodewright tuning manifests (cf. tuning.yaml). Here nvidia-tuned is the */}}
-{{- /* CR's only package, so the gate suppresses the whole NodeWright CR. */}}
-{{- /* Sprig-safe: only an explicit false disables (absent/true render); a */}}
-{{- /* "| default true" would swallow an explicit false under --deployer flux. */}}
-{{- if and (ne (toString (index $cust "enabled")) "false") (ne (toString (index $cust "tuningEnabled")) "false") }}
+{{- /* nodewright tuning manifests (cf. tuning.yaml); here it gates only the */}}
+{{- /* nvidia-tuned package. rdmaNetnsExclusive (default false) gates the RDMA */}}
+{{- /* package. The CR renders only when at least one package does. */}}
+{{- /* Sprig-safe: compare toString output so an explicit false still reads as */}}
+{{- /* false under --deployer flux; a "| default true" would swallow it. */}}
+{{- $tuning := ne (toString (index $cust "tuningEnabled")) "false" }}
+{{- $rdma := eq (toString (index $cust "rdmaNetnsExclusive")) "true" }}
+{{- if and (ne (toString (index $cust "enabled")) "false") (or $tuning $rdma) }}
 ---
 apiVersion: nodewright.nvidia.com/v1alpha1
 kind: NodeWright
 metadata:
   annotations:
     # No Helm hooks: this NodeWright CR is release-managed so that disabling
-    # tuning (tuningEnabled=false) actually retracts it. As a hook it would be
+    # both packages actually retracts it. As a hook it would be
     # orphaned under Flux on a true->false flip (before-hook-creation never
     # fires once the CR leaves the render). Ordering after the NodeWright CRD
     # is handled by the component dependency on nodewright-operator, not an
@@ -71,9 +75,10 @@ spec:
   runtimeRequired: true
   # Serialize this CR's reboots to one node at a time. An omitted budget
   # defaults to 100% (createLegacyDefaultCompartment), i.e. every matched
-  # node rebooting together. Unconditional rather than flag-gated, for the
-  # same reason rdma-netns-exclusive sets it: the safe value must not
-  # depend on the caller passing an optional flag.
+  # node rebooting together. Unconditional rather than flag-gated: the safe
+  # value must not depend on the caller passing an optional flag. One CR
+  # carries both rebooting packages so this budget bounds all of them — a
+  # second CR's budget would not compose with this one (#2572).
   #
   # SCALE LIMITATION: count: 1 costs N x (reboot time) to converge, which
   # is fine for the small NVL72 clusters VR200 Preview targets and for
@@ -103,8 +108,8 @@ spec:
   # An ABSENT selector matches every node in nodewright, so omitting the block
   # entirely would let a reboot-carrying CR target control-plane nodes on a
   # stock bundle — generation only warns when the flag is unset, it does not
-  # fail. Fall back to the GPU-node label instead, as rdma-netns-exclusive
-  # does; an explicit --accelerated-node-selector still overrides it.
+  # fail. Fall back to the GPU-node label instead; an explicit
+  # --accelerated-node-selector still overrides it.
   nodeSelectors:
     matchLabels:
       {{- if $cust.acceleratedNodeSelector }}
@@ -118,8 +123,13 @@ spec:
     matchLabels:
       {{- toYaml $cust.workloadSelector | nindent 6 }}
   {{- end }}
-  # Tuning: nvidia-tuned rke2 service profile only (no nvidia-setup).
+  # Neither package dependsOn the other, so both are runnable in the same
+  # operator pass and nodewright coalesces their reboots into one per node.
+  # The coalesced reboot is issued by the first package in name order;
+  # nvidia-tuned must stay first because it is the slower package, and the
+  # reboot fires as soon as no package Job is running on the node.
   packages:
+    {{- if $tuning }}
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
       version: "0.10.0"
@@ -150,4 +160,34 @@ spec:
         {{- if $cust.service }}
         service: {{ $cust.service }}
         {{- end }}
+    {{- end }}
+    {{- if $rdma }}
+    # Host RDMA "exclusive" network-namespace mode, paired with dranet so each
+    # pod sees only its DRA-allocated HCA(s) in /sys/class/infiniband — in the
+    # default shared mode sysfs is not namespaced and NCCL auto-detect trips
+    # on HCAs the pod cannot open. The mode is the ib_core module parameter
+    # netns_mode (0=exclusive, 1=shared default). It cannot change live: the
+    # sysfs param is read-only, `rdma system set netns exclusive` returns
+    # EBUSY while any non-init netns exists, and ib_core cannot be unloaded
+    # under the mlx5 stack. So it is persisted via modprobe.d and applied by
+    # the reboot (ib_core loads post-root on the VR200 reference image, so
+    # modprobe.d rather than initramfs/GRUB is sufficient). Host-wide: every
+    # RDMA user on the node sees the change.
+    rdma-netns-exclusive:
+      image: ghcr.io/nvidia/skyhook-packages/shellscript
+      version: "1.1.1"
+      containerSHA: sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf
+      interrupt:
+        type: reboot
+      configMap:
+        apply.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          # 0 = exclusive (per-netns RDMA isolation), 1 = shared (kernel default)
+          printf 'options ib_core netns_mode=0\n' > /etc/modprobe.d/dranet-rdma-netns-exclusive.conf
+        apply_check.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          grep -qx 'options ib_core netns_mode=0' /etc/modprobe.d/dranet-rdma-netns-exclusive.conf
+    {{- end }}
 {{- end }}

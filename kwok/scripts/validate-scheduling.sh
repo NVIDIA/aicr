@@ -941,10 +941,10 @@ generate_bundle() {
     #   is actually serving, and every admission call to
     #   mutate-skyhook.nvidia.com hits its 10s deadline (failurePolicy: Fail,
     #   and the chart hardcodes timeoutSeconds with no values knob). Any
-    #   recipe that bundles a Skyhook CR alongside the operator — e.g. the
-    #   VR200 leaves' always-on rdma-netns-exclusive, which unlike
-    #   nodewright-customizations is not disabled above — then fails to
-    #   install that CR. `webhook.enable=false` drops the webhook wiring, so
+    #   recipe that bundles a Skyhook CR alongside the operator outside
+    #   nodewright-customizations (disabled above) would then fail to
+    #   install that CR. No recipe does today; the flag keeps a future one
+    #   from hanging on admission. `webhook.enable=false` drops the webhook wiring, so
     #   admission is skipped; harmless under KWOK, where the handler is a
     #   no-op defaulter and no CR is really reconciled. Do NOT carry this to
     #   a real cluster: the chart documents the webhook as required for
