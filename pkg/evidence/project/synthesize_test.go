@@ -27,7 +27,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
-const sampleRecipeYAML = `criteria:
+const sampleRecipeYAML = `apiVersion: aicr.run/v1
+kind: RecipeResult
+criteria:
   service: eks
   accelerator: h100
   os: ubuntu
@@ -176,7 +178,7 @@ func TestSynthesize_ProfiledRecipeSuffixedTab(t *testing.T) {
 	// lowercase profile segment, so runs from two values of one profile
 	// family occupy distinct tabs instead of overwriting each other.
 	in := baseInput(t)
-	in.BundleDir = writeBundle(t, `apiVersion: aicr.run/v1alpha3
+	in.BundleDir = writeBundle(t, `apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 metadata:
   selectedProfile:
@@ -229,7 +231,9 @@ criteria:
 
 func TestSynthesize_PlatformlessTab(t *testing.T) {
 	in := baseInput(t)
-	in.BundleDir = writeBundle(t, `criteria:
+	in.BundleDir = writeBundle(t, `apiVersion: aicr.run/v1
+kind: RecipeResult
+criteria:
   service: gke
   accelerator: h100
   os: cos

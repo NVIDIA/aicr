@@ -48,7 +48,33 @@ import (
 // (no comparable sync resources) and the PostSync hook never fires —
 // the resource is silently never applied. Stripping at bundle time avoids
 // this cross-deployer surprise.
+//
+// The reasoning above is about RECIPE-authored content, whose author cannot
+// know which deployer will consume it. It does not extend to the readiness
+// folder — see normalizeYAMLDocs.
 func stripHelmHooks(rendered []byte) ([]byte, error) {
+	return rewriteYAMLDocs(rendered, stripHooksFromDocument)
+}
+
+// normalizeYAMLDocs runs the same YAML round-trip as stripHelmHooks without
+// touching annotations.
+//
+// It exists because the round-trip is not incidental. Two of its effects are
+// load-bearing for every folder, hooks or not: it re-encodes every document
+// at a consistent indent, which is what keeps the committed goldens stable,
+// and it fails on input that is not parseable YAML — the only place a
+// malformed rendered manifest is caught before it reaches a cluster. A caller
+// that wants to keep a folder's annotations must therefore skip the hook
+// FILTER, not the rewrite.
+func normalizeYAMLDocs(rendered []byte) ([]byte, error) {
+	return rewriteYAMLDocs(rendered, func(*yaml.Node) {})
+}
+
+// rewriteYAMLDocs decodes a multi-doc YAML stream, applies transform to each
+// document, and re-encodes. Separator-only and null documents are dropped so
+// re-encoding does not emit `null` content that would later defeat the
+// hasYAMLObjects check; empty input passes through unchanged.
+func rewriteYAMLDocs(rendered []byte, transform func(*yaml.Node)) ([]byte, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(rendered))
 	var docs []*yaml.Node
 	for {
@@ -61,9 +87,7 @@ func stripHelmHooks(rendered []byte) ([]byte, error) {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				"failed to parse rendered manifest as YAML", decodeErr)
 		}
-		stripHooksFromDocument(&doc)
-		// Skip separator-only / null documents so re-encoding doesn't emit
-		// `null` content that would later defeat the hasYAMLObjects check.
+		transform(&doc)
 		if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
 			continue
 		}
@@ -85,7 +109,7 @@ func stripHelmHooks(rendered []byte) ([]byte, error) {
 	for _, doc := range docs {
 		if err := enc.Encode(doc); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to re-emit YAML after stripping hook annotations", err)
+				"failed to re-emit rendered YAML", err)
 		}
 	}
 	if err := enc.Close(); err != nil {

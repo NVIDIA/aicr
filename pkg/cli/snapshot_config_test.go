@@ -149,7 +149,7 @@ func TestSnapshotCmd_AllConfigSectionsResolve(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -223,7 +223,7 @@ func TestSnapshotCmd_ConfigOnly_NoCLIFlags(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -264,7 +264,7 @@ func TestSnapshotCmd_FlagOverridesEverySection(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -340,7 +340,7 @@ func TestSnapshotCmd_ConfigEmptyTolerationsOptOut(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -371,7 +371,7 @@ func TestSnapshotCmd_InvalidConfig_BadTimeout(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -397,7 +397,7 @@ func TestSnapshotCmd_InvalidConfig_BadFormat(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -423,7 +423,7 @@ func TestSnapshotCmd_InvalidConfig_UnknownField(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     bogusKey: oops
@@ -475,7 +475,7 @@ func TestSnapshotCmd_RequireGPURuntimeClass_StillMutuallyExclusive(t *testing.T)
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -504,7 +504,7 @@ func TestSnapshotCmd_ConfigBadResourcesRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -554,6 +554,7 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		maxNodesPerEntry:   5,
 		clusterConfigPath:  "/l8k/cluster-config.yaml",
 		aksGPUPoolsPath:    "/aks/pools.json",
+		gkeGPUPoolsPath:    "/gke/pools.json",
 		discoverNetwork:    true,
 		requests:           corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
 		limits:             corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")},
@@ -589,6 +590,7 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		{"NodeSelector[k]", ac.NodeSelector["k"], "v"},
 		{"ClusterConfigPath", ac.ClusterConfigPath, "/l8k/cluster-config.yaml"},
 		{"AKSGPUPoolsPath", ac.AKSGPUPoolsPath, "/aks/pools.json"},
+		{"GKEGPUPoolsPath", ac.GKEGPUPoolsPath, "/gke/pools.json"},
 		{"DiscoverNetwork", ac.DiscoverNetwork, true},
 		{"NameBase", ac.NameBase, name},
 	}
@@ -676,7 +678,7 @@ func TestSnapshotCmd_FormatFlagResolves(t *testing.T) {
 func TestSnapshotCmd_ConfigFormatResolves(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -703,7 +705,7 @@ func TestSnapshotCmd_ConfigPrivilegedFalseHonored(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -751,7 +753,7 @@ func TestSnapshotCmd_NoConfigCleanupDefaultsTrue(t *testing.T) {
 // testSnapshotConfig is a canned config used by the HTTP source test;
 // declared at package scope so other tests can reuse it if needed.
 var testSnapshotConfig = `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:

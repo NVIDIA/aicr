@@ -53,7 +53,7 @@ func TestResolveCNCFAllocationPolicy(t *testing.T) {
 			name: "recipe context resolves the hydrated policy",
 			// Auto-hydrates from the embedded catalog; stock recipes default
 			// to device-plugin allocation since the #1327/#1671 flip.
-			recipeYAML: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n",
+			recipeYAML: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n",
 			wantPolicy: v1.GPUAllocationPolicyDevicePluginExtendedResource,
 		},
 		{
@@ -251,6 +251,75 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 // attestation (--emit-attestation / --push) alongside the offline --no-cluster
 // dry-run is rejected with ErrCodeInvalidRequest, rather than warn-and-ignored.
 // (Config-driven suppression is a separate path — see evidenceConfigForRunMode.)
+// TestValidateFlagCombinations_SkipCheckWithEvidenceDir pins the refusal that
+// keeps a withheld check out of a CNCF conformance submission.
+//
+// pkg/evidence/cncf/renderer.go drops every StatusSkipped entry before
+// grouping, so a requirement whose checks were all skipped produces no markdown
+// file and no index entry, with nothing anywhere recording the omission. That
+// was tolerable while skips were incidental; --skip-check makes them deliberate
+// and plural, and a submission that silently omits a requirement reads as
+// complete when it is not. Until the renderer records a withheld requirement
+// with its reason, the two are refused together.
+//
+// The neighboring cases are what make this a discriminating test rather than a
+// blanket rejection: either flag alone must still be accepted.
+func TestValidateFlagCombinations_SkipCheckWithEvidenceDir(t *testing.T) {
+	tests := []struct {
+		name        string
+		evidenceDir string
+		skipChecks  []string
+		wantErr     bool
+		wantSubstrs []string
+	}{
+		{
+			name:        "skip-check with evidence-dir is refused",
+			evidenceDir: "/tmp/evidence",
+			skipChecks:  []string{"dra-support"},
+			wantErr:     true,
+			wantSubstrs: []string{"--skip-check", "--evidence-dir", "omits skipped checks"},
+		},
+		{
+			name:        "evidence-dir alone is accepted",
+			evidenceDir: "/tmp/evidence",
+		},
+		{
+			name:       "skip-check alone is accepted",
+			skipChecks: []string{"dra-support"},
+		},
+		{
+			name: "neither is accepted",
+		},
+		{
+			// An empty slice is "no skips", not "skips requested": a config that
+			// carries `skipChecks: []` must not lock the caller out of the
+			// evidence path.
+			name:        "an empty skip list does not trip the refusal",
+			evidenceDir: "/tmp/evidence",
+			skipChecks:  []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateFlagCombinations(false, tt.evidenceDir, nil, false, false, tt.skipChecks)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateFlagCombinations() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+			}
+			for _, want := range tt.wantSubstrs {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateCmd_NoClusterEvidenceFlags(t *testing.T) {
 	tests := []struct {
 		name string
@@ -311,39 +380,39 @@ func TestValidateCmd_RecipeKindHandling(t *testing.T) {
 	}{
 		{
 			name:        "RecipeMetadata without criteria returns clear error",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  "has no criteria",
 		},
 		{
 			name:        "RecipeMetadata with criteria auto-hydrates",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "has no criteria",
 		},
 		{
 			name:        "RecipeMixin kind is rejected",
-			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  `kind "RecipeMixin"`,
 		},
 		{
 			name:        "unknown kind is rejected",
-			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  `kind "SomethingElse"`,
 		},
 		{
 			name:        "RecipeResult kind passes kind check",
-			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
 		},
 		{
 			name:        "empty kind passes kind check",
-			yamlContent: "apiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "apiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
@@ -408,12 +477,12 @@ func TestValidateCmd_KubeconfigSelectsValidationCluster(t *testing.T) {
 	t.Setenv("KUBECONFIG", filepath.Join(tmp, "env-default.kubeconfig"))
 
 	recipePath := filepath.Join(tmp, "recipe.yaml")
-	recipeYAML := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n  - name: gpu-operator\n    type: Helm\n    source: https://helm.ngc.nvidia.com/nvidia\n    version: v25.10.0\n    overrides:\n      devicePlugin:\n        enabled: true\n"
+	recipeYAML := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n  - name: gpu-operator\n    type: Helm\n    source: https://helm.ngc.nvidia.com/nvidia\n    version: v25.10.0\n    overrides:\n      devicePlugin:\n        enabled: true\n"
 	if err := os.WriteFile(recipePath, []byte(recipeYAML), 0o600); err != nil {
 		t.Fatalf("failed to write test recipe file: %v", err)
 	}
 	snapshotPath := filepath.Join(tmp, "snapshot.yaml")
-	if err := os.WriteFile(snapshotPath, []byte("kind: Snapshot\nmetadata:\n  version: test\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
+	if err := os.WriteFile(snapshotPath, []byte("kind: Snapshot\napiVersion: aicr.run/v1\nmetadata:\n  version: test\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
 		t.Fatalf("failed to write test snapshot file: %v", err)
 	}
 

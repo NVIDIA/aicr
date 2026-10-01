@@ -393,10 +393,12 @@ func TestReadFailsClosed(t *testing.T) {
 		{
 			// BundleInfo shipped at the ADR-022 stable target with no alpha
 			// predecessor, so this names a document that never legitimately
-			// existed — the generic stable-track predicate accepts it, which
-			// is why Read uses the BundleInfo-specific one.
-			name:    "superseded alpha apiVersion",
-			content: "apiVersion: " + header.GroupVersion + "\nkind: BundleInfo\n",
+			// existed. Retired outright at N+2, but keep the case: the
+			// BundleInfo-specific predicate is what has always rejected it,
+			// and collapsing it into the generic one would go unnoticed now
+			// that the two accept the same set.
+			name:    "retired alpha apiVersion",
+			content: "apiVersion: " + header.RetiredGroupVersionV1Alpha2 + "\nkind: BundleInfo\n",
 			code:    errors.ErrCodeInvalidRequest,
 		},
 		{

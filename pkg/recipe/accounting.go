@@ -412,8 +412,8 @@ func (r *RecipeResult) validateAccountingConfiguration() error {
 	}
 	if !header.IsSupportedProfileAPIVersion(r.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("configuration.slurm.accounting requires apiVersion %q or %q (got %q)",
-				header.RecipeResultGroupVersion, header.GroupVersionV1Beta2, r.APIVersion))
+			fmt.Sprintf("configuration.slurm.accounting requires apiVersion %q (got %q%s)",
+				header.GroupVersionV1Beta2, r.APIVersion, header.RetirementNote(r.APIVersion)))
 	}
 	if r.Criteria == nil || r.Criteria.Platform != CriteriaPlatformSlurm {
 		return errors.New(errors.ErrCodeInvalidRequest,
@@ -478,9 +478,15 @@ func requireAccountingComponentEnabled(
 	return nil
 }
 
+// requireBoolOverride treats an absent component as satisfying expected=false:
+// a bundle's recipe.yaml omits disabled components, and one that is not in the
+// recipe installs nothing.
 func requireBoolOverride(result *RecipeResult, component string, path []string, expected bool) error {
 	ref := result.GetComponentRef(component)
 	if ref == nil {
+		if !expected {
+			return nil
+		}
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("accounting mode requires component %q", component))
 	}

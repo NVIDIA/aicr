@@ -130,6 +130,9 @@ DAYTIME_MIN_AGE_HOURS="${DAYTIME_MIN_AGE_HOURS:-24}"
 # regardless of the caller's CWD.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# shellcheck source=../../tests/uat/azure/relogin.sh
+source "${SCRIPT_DIR}/../../tests/uat/azure/relogin.sh"
+
 # Probed once by main(). A path-level 404 (repo renamed, GITHUB_REPOSITORY wrong,
 # token missing actions:read) is indistinguishable from a purged-run 404 when
 # looking at a single candidate — and would classify the ENTIRE fleet as orphaned.
@@ -374,6 +377,14 @@ reap() {
     rm -f "$cfg"; return 0
   fi
 
+  # The job's azure/login session cannot self-refresh, so without a fresh
+  # login every reap that starts after it expires fails AADSTS700024.
+  if [ "$CLOUD" = azure ] && ! az_federated_relogin; then
+    echo "::warning::janitor could not refresh the az session for ${id} (destroy NOT attempted)"
+    rm -f "$cfg"
+    return 1
+  fi
+
   log "reaping: ${id}"
   break_state_lock "$id"
   case "$CLOUD" in
@@ -580,6 +591,13 @@ discover_azure() {
 main() {
   : "${JANITOR_CONFIG:?committed cluster-config path for this cloud}"
   : "${JANITOR_ACTUATOR_IMAGE:?actuator image for this cloud}"
+  # Under GitHub OIDC, az_federated_relogin silently no-ops without these, which
+  # would put back the one-reap-per-run expiry it exists to fix. A local run
+  # (no ACTIONS_ID_TOKEN_REQUEST_URL) uses the caller's self-refreshing az login.
+  if [ "$CLOUD" = azure ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+    : "${AZURE_CLIENT_ID:?federated client id for the per-reap az re-login}"
+    : "${AZURE_TENANT_ID:?tenant id for the per-reap az re-login}"
+  fi
 
   # Arm credential cleanup before anything can stage credentials. Installed here
   # rather than at module scope so that sourcing this file (the unit harness)

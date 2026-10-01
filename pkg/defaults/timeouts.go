@@ -73,6 +73,12 @@ const (
 	// (`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`); the dump is a
 	// short per-cluster add-on list, so 1 MiB is generous.
 	MaxOKEAddonsBytes = int64(1 << 20) // 1 MiB
+
+	// MaxGKEGPUPoolsBytes caps the size of a --gke-gpu-pools JSON file
+	// (the `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump) read into memory via io.LimitReader. A real
+	// pool list is a few KiB.
+	MaxGKEGPUPoolsBytes = int64(1 << 20) // 1 MiB
 )
 
 // Handler timeouts for HTTP request processing.
@@ -575,6 +581,14 @@ const (
 	// helm never preempts the gate, small enough to still surface a genuinely
 	// hung gate process shortly after its own deadline.
 	ReadinessGateHelmTimeoutBuffer = 5 * time.Minute
+
+	// ReadinessGateActiveDeadlineBuffer is added to ReadinessGateMaxWait to
+	// derive the gate Job's activeDeadlineSeconds, which bounds the Job even
+	// when its pod never schedules or never starts, so the gate's own deadline
+	// never runs. Argo CD has no other bound on the sync. It must stay below
+	// ReadinessGateHelmTimeoutBuffer so the Job, not helm --timeout, reports
+	// the failure under the Helm deployer.
+	ReadinessGateActiveDeadlineBuffer = 3 * time.Minute
 
 	// ReadinessGateBackoffLimit is the Kubernetes Job backoffLimit for the gate
 	// Job. The gate CLI handles its own retry loop internally; this limit

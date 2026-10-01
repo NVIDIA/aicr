@@ -102,7 +102,8 @@ aicr snapshot [flags]
 | `--limits` | | string | | Override agent container resource limits as a comma-separated list of `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when `--limits` does not already contain that key — an explicit `--limits nvidia.com/gpu=N` wins. Reads `AICR_LIMITS` env when unset. |
 | `--cluster-config` | | string | | Path to a pre-existing k8s-launch-kit (l8k) `cluster-config.yaml`. Ingests the file's per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) into the snapshot as a `NetworkTopology` Measurement. **Local agent mode only for now** (`AICR_AGENT_MODE=true`) — Job-mode rejects this flag with an `INVALID_REQUEST` error until ConfigMap mounting is implemented. Mutually exclusive with `--discover-network` at the collector level — file path wins when both are set, so callers can default discovery from a flag without inadvertent cluster contact. Reads `AICR_CLUSTER_CONFIG_PATH` env when unset. |
 | `--oke-addons` | | string | | Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. Projects the `NvidiaGpuPlugin` add-on's control-plane state into the `K8s.oke-addons.nvidia-gpu-plugin` snapshot reading (`installed` / `absent`); any other add-on lifecycle state projects a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode; a bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_OKE_ADDONS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json > addons.json && aicr snapshot --oke-addons addons.json -o snapshot.yaml`. |
-| `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem. Projects each NVIDIA GPU agent pool's `gpuProfile.driver` into the `K8s.aks-gpu-pools.gpu-driver` snapshot reading (`Install` / `None`); mixed or AKS-managed pools project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state (ADR-015 DD3). AMD GPU pools (NG family, MI300X-class ND sizes, Radeon NV sizes) are excluded. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode; a bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json && aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml`. GKE needs no equivalent flag: its ownership signal is a node label the standard snapshot's topology readings already capture. |
+| `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem. Projects each NVIDIA GPU agent pool's `gpuProfile.driver` into the `K8s.aks-gpu-pools.gpu-driver` snapshot reading (`Install` / `None`); mixed or AKS-managed pools project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state (ADR-015 DD3). AMD GPU pools (NG family, MI300X-class ND sizes, Radeon NV sizes) are excluded. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode; a bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json && aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml`. |
+| `--gke-gpu-pools` | | string | | Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem. Projects each GPU pool's `gpuDriverInstallationConfig.gpuDriverVersion` into the `K8s.gke-gpu-pools.gpu-driver-installation` snapshot reading (`Installed` / `Disabled`). Mixed or unrecognized driver-version values project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state. Only the GKE `bundle-installer` gpuStack value declares a constraint on this reading. The default `gke-default` value resolves from the opt-out node label alone and needs no pool dump. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode. A bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_GKE_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `gcloud container node-pools list --cluster <cluster> --format=json > pools.json && aicr snapshot --gke-gpu-pools pools.json -o snapshot.yaml`. |
 | `--discover-network` | | bool | false | Opt into live k8s-launch-kit (l8k) discovery: bootstraps an in-cluster nic-configuration daemon, walks the cluster's NICs, and emits a `NetworkTopology` Measurement. **NOT read-only** — writes `nvidia.kubernetes-launch-kit.machine` / `.gpu` labels on matched nodes and patches `NicClusterPolicy` via server-side apply. Job-mode is supported (the snapshot Job's ClusterRole gains discovery-specific RBAC when this flag is set). Reads `AICR_DISCOVER_NETWORK` env when unset. |
 
 **Output Destinations:**
@@ -385,7 +386,10 @@ for default-provisioned clusters with no node label) and `bundle-installer`
 `gke-no-default-nvidia-gpu-device-plugin=true` and, because that label
 forfeits GKE's managed driver install, are created
 `gpu-driver-version=disabled` — the bundle's `gcp-driver-installer`
-component supplies the driver with a recipe-pinned version); because the GKE
+component supplies the driver with a recipe-pinned version, and a snapshot
+carrying the label without a matching `K8s.gke-gpu-pools.gpu-driver-installation`
+reading (`--gke-gpu-pools`) fails the `bundle-installer` selection closed);
+because the GKE
 values govern advertisement, the #1327 allocation-policy paths are
 closure-locked in addition to the declared owned paths — see
 [GKE GPU setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) and
@@ -405,7 +409,8 @@ Selection and verification are independent: `--profile` (or the default)
 always decides the selected value — never the snapshot — and a supplied
 `--snapshot` always verifies the selection against the cluster's recorded
 readings (fail-closed on mismatch or a missing reading; on AKS, the pool
-mode from `--aks-gpu-pools`). Without a snapshot no check can run at
+mode from `--aks-gpu-pools`; on GKE `bundle-installer`, the pool mode from
+`--gke-gpu-pools`). Without a snapshot no check can run at
 generation; the recorded constraint is enforced at `aicr validate`
 readiness instead. See the with/without matrices in
 [AKS GPU setup](../integrator/aks-gpu-setup.md#gpu-driver-setup) and
@@ -493,14 +498,14 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot` |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot`; recipe evidence records the service dimension as `not-inferable` with the observed provider, which does not disqualify the evidence |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
-| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` grants the component on a GKE recipe that neither declares nor declines it, confirms it where the recipe already declares it, and is rejected over an explicit recipe decline (any service) or against a non-GKE recipe that does not declare it; `disabled` is unchanged and always requires the recipe to already declare the component. Recorded in the generated recipe |
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--inherit-from` | | string | Prior recipe file, or bundle directory, whose component namespaces the resolved recipe keeps instead of re-deriving them from the registry. Use on an AICR upgrade so a moved registry default does not relocate a component that is already running; see [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). A component the prior artifact does not name keeps the registry default. `cm://` locations are not supported yet |
@@ -643,7 +648,7 @@ target-cluster conflict detection.
 | `--platform` | | string | Explicit platform/framework type, including slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
-| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` grants the component on a GKE recipe that neither declares nor declines it, confirms it where the recipe already declares it, and is rejected over an explicit recipe decline (any service) or against a non-GKE recipe that does not declare it; `disabled` is unchanged and always requires the recipe to already declare the component. Recorded in the generated recipe |
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -841,15 +846,14 @@ gb200-any           any      gb200        any       any  any       true     pass
 
 **Example JSON output:**
 
-The `criteria` keys are capitalized because the criteria struct carries no
-field tags; the structured output mirrors the Go field names. The `health`
+The `criteria` keys are lowercase. Unset dimensions are omitted. The `health`
 block is present only for leaf overlays — non-leaf overlays omit it.
 
 ```json
 [
   {
     "name": "gb200-any",
-    "criteria": {"Service": "any", "Accelerator": "gb200", "Intent": "", "OS": "", "Platform": "", "Nodes": 0},
+    "criteria": {"service": "any", "accelerator": "gb200"},
     "is_leaf": true,
     "source": "embedded",
     "health": {
@@ -1069,6 +1073,7 @@ aicr validate [flags]
 | `--snapshot` | `-s` | string | | Path/URI to snapshot file containing measurements (omit to capture live) |
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
+| `--skip-check` | | string[] | | Check to withhold from every phase that runs, one level below `--phase` (repeatable). For a caller that cannot satisfy a check the recipe declares, e.g. a lane deploying a subset of the recipe. Each named check is **reported as skipped**, not dropped, so the CTRF report and the recipe-evidence bundle still account for it. Rejected before any validation resource is created when a name matches no check, when the list would leave a requested phase with nothing to run, or when it is combined with `--evidence-dir` (the CNCF renderer omits skipped checks, so a submission would silently lose the requirement). A `cm://` recipe is read from the cluster first, so that form contacts the API server before the list is judged. Mirrors `spec.validate.execution.skipChecks`. |
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any phase check reports `failed` or `other` (crash/OOM/timeout). Scopes to phase checks only — the readiness pre-flight always fails closed with exit 2 regardless of this flag (see the readiness note under [Validation Phases](#validation-phases)). |
 | `--fail-fast` | | bool | false | Stop after the first phase that fails. By default all phases run and produce results. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`), or stdout |
@@ -1085,6 +1090,7 @@ aicr validate [flags]
 | `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
 | `--oke-addons` | | string | | Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem, projected into the `K8s.oke-addons.nvidia-gpu-plugin` reading when validate captures a live snapshot. Ignored when `--snapshot` supplies a pre-captured snapshot — capture that snapshot with the same flag instead. Reads `AICR_OKE_ADDONS_PATH` env when unset. |
 | `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem, projected into the `K8s.aks-gpu-pools.gpu-driver` reading when validate captures a live snapshot (ADR-015 DD3). Ignored when `--snapshot` supplies a pre-captured snapshot — capture that snapshot with the same flag instead. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. |
+| `--gke-gpu-pools` | | string | | Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem, projected into the `K8s.gke-gpu-pools.gpu-driver-installation` reading when validate captures a live snapshot. Ignored when `--snapshot` supplies a pre-captured snapshot. Capture that snapshot with the same flag instead. Reads `AICR_GKE_GPU_POOLS_PATH` env when unset. |
 | `--no-cluster` | | bool | false | Skip cluster access (test mode): skips RBAC and Job deployment, reports checks as skipped. An offline dry-run does not sign or push a recipe-evidence attestation, so `--emit-attestation`/`--push` and `spec.validate.evidence.attestation` are ignored in this mode. Cannot be combined with `--cncf-submission` (that collector requires a live cluster); `--evidence-dir` conformance markdown is still rendered locally |
 | `--evidence-dir` | | string | | Directory to write conformance evidence artifacts |
 | `--cncf-submission` | | bool | false | Generate CNCF conformance submission artifacts |
@@ -1124,26 +1130,26 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** As of v0.22, the ADR-022 emitter switch, AICR emits
-> `aicr.run/v1` for snapshots and default recipes, `aicr.run/v1beta1` for config
-> and ordinary catalog inputs, and `aicr.run/v1beta2` for profile-bearing
-> recipes. Readers additionally still accept the superseded
-> `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, so artifacts produced by v0.21 or
-> earlier keep loading. Unsupported artifact headers
-> fail fast; raw external catalog headers are checked before merge or
-> hydration. Recapture, regenerate, or update the authored header with a
-> version supported by the running AICR release. See
+> **apiVersion gate:** AICR emits `aicr.run/v1` for snapshots and default
+> recipes, `aicr.run/v1beta1` for config and ordinary catalog inputs, and
+> `aicr.run/v1beta2` for profile-bearing recipes, and as of v1.0.0 those are the
+> only values it reads. The superseded `aicr.run/v1alpha2` and
+> `aicr.run/v1alpha3` were retired in v1.0.0 (ADR-022 N+2), along with the empty
+> header the snapshot, recipe and criteria readers had tolerated. v0.22 was the
+> last release that read them, and it warned; v1.0.0 rejects instead, naming the
+> observed value, the expected value and the release that withdrew it.
+> Unsupported artifact headers fail fast; raw external catalog headers are
+> checked before merge or hydration. Recapture, regenerate, or update the
+> authored header with a version supported by the running AICR release. See
 > [ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md)
 > and
-> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md). v1.0.0 stops
-> accepting the alpha values, along with the empty header that the snapshot,
-> recipe, and criteria readers still tolerate. Reading either now logs a
-> deprecation warning naming the file. `AICRConfig` and external catalog headers already reject an
-> empty value, so they have no tolerance to retire.
+> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 > [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 > has the release-by-release table.
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
+
+Within a phase, `--skip-check` withholds individual checks. It is for a caller that cannot satisfy a check the recipe declares (a lane that deploys only part of the recipe, or runs on simulated devices), and it narrows the *run*, never the recipe, so every other consumer of that recipe still gets the check. Two guards apply before any cluster work: a name matching no check in the catalog fails the run, and a list that would leave a requested phase with nothing to run fails it too (that phase would otherwise report `passed` while running nothing, because the skipped entries keep its test count above zero). A skipped check appears in the CTRF report as `skipped` with its reason in `message` and as the code `extra.skipReason: named-in-skip-checks`. The default (minimal) recipe-evidence bundle (`--emit-attestation`) carries the report redacted rather than verbatim (every test's `message` and `stdout` is blanked), so it is the `extra` code that carries the reason into the attestation, unless `--full` is passed. The CNCF conformance evidence path does NOT: its renderer drops skipped entries, so a withheld requirement would leave no file and no index entry, and `--skip-check` is therefore refused together with `--evidence-dir` (and so with `--cncf-submission`, which requires it). A check that is *added* to a recipe later is not silenced by an existing list: it runs, which is the direction that forces a decision rather than hiding one.
 
 #### Constraint paths and operators
 
@@ -1305,6 +1311,9 @@ spec:
       requireGpu: true
     execution:
       phases: [deployment, conformance]
+      # skipChecks:                      # --skip-check; withheld and reported as skipped.
+      #   - gpu-operator-health          # Shown commented out because it cannot be combined
+      #                                  # with evidence.cncf.dir below. See the next example.
       failOnError: true                  # default; false = don't fail on phase-check results (readiness pre-flight still exits 2)
       noCluster: false
       noCleanup: false
@@ -1320,6 +1329,37 @@ spec:
         push: ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
         plainHTTP: false
         insecureTLS: false
+```
+
+**Withholding checks (`execution.skipChecks`):**
+
+A lane that deploys only part of a recipe can withhold the checks it cannot
+satisfy. Each named check is still reported, as skipped, so the run accounts for
+it; a name matching no check in the recipe's catalog, or a list that would leave
+a requested phase with nothing to run, is rejected before any validation
+resource is created. The recipe is loaded first, so a `cm://` recipe is read
+from the cluster before the list is judged.
+
+`skipChecks` cannot be combined with `evidence.cncf.dir`. The CNCF evidence
+renderer drops skipped checks entirely, so a withheld requirement would produce
+no file and no index entry and the submission would read as complete. That is
+why the schema above shows the field commented out, and why it gets its own
+config here:
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: partial-lane-validate
+spec:
+  validate:
+    input:
+      recipe: ./recipe.yaml
+      snapshot: ./snapshot.yaml
+    execution:
+      phases: [deployment]
+      skipChecks:
+        - gpu-operator-health
 ```
 
 **Examples:**
@@ -1679,7 +1719,7 @@ aicr bundle [flags]
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate- or contract-owned paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** the eviction contract is opted into with `--dra-eviction-node-label`, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what AICR verified or made consistent; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable). Optional in general, but some components (e.g. `slinky-slurm`, `slurm-accounting-mariadb`) declare `requireNodeSelector` in the registry and fail the bundle if this is omitted and no overlay opts their paths out. `kube-prometheus-stack` declares the conditional `requireNodeSelectorIfStorageClassSet` instead, so it only fails once the component ends up with a non-empty value at a declared `storageClassPaths`/`sharedStorageClassPaths` entry, whether from `--storage-class`, a per-component `--set` override, or an overlay's own `storageClassName` default. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated). |
-| `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
+| `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable). With `--readiness-hooks`, this (keyed tolerations only) and `--system-node-selector` also place the readiness gate Jobs; see [Readiness Gates](#readiness-gates). |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable). Same `requireNodeSelector` caveat as `--system-node-selector` above applies to components that declare it on their accelerated paths. |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
 | `--dra-eviction-node-label` | | string | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`; no default — unset means AICR injects nothing). Applied only when both components are enabled. Also deploys `dra-node-labeler`, which applies the label to every GPU node from GFD's `nvidia.com/gpu.present`; pass `--set dra-node-labeler:enabled=false` to provision the label yourself instead. |
@@ -2299,7 +2339,7 @@ my-bundle/
     install.sh                     # helm upgrade --install <name> ./<dir> ...
   002-gpu-operator/
     Chart.yaml
-    charts/gpu-operator-v26.7.0.tgz
+    charts/gpu-operator-v26.7.1.tgz
     values.yaml
     cluster-values.yaml
     install.sh
@@ -2322,10 +2362,10 @@ kind: BundleProvenance
 vendoredCharts:
   - name: gpu-operator
     chart: gpu-operator
-    version: v26.7.0
+    version: v26.7.1
     repository: https://helm.ngc.nvidia.com/nvidia
     sha256: abc123...
-    tarballName: gpu-operator-v26.7.0.tgz
+    tarballName: gpu-operator-v26.7.1.tgz
     pullerVersion: helm-cli v3.20.2
 ```
 
@@ -2357,6 +2397,10 @@ With the flag set, the bundler emits an extra folder, `NNN-<name>-readiness/`, i
 - **`argocd` / `argocd-helm`** — the readiness folder inherits the next sync-wave after its component, and Argo CD blocks that wave on the gate Job via its built-in `batch/Job` health (Progressing → Healthy on success, Degraded on failure). No custom health Lua and no direct `ClusterPolicy` watch — the readiness logic stays encapsulated in the Chainsaw test the Job runs.
 
 `flux` and `helmfile` are not yet supported and `--readiness-hooks` is rejected for them. Components without a `readiness.yaml` are unaffected.
+
+The gate only reads API objects, so it needs a healthy node rather than the gated component's node. Its pod carries the bundle's system node selector (`--system-node-selector`, or `scheduling.systemNodeSelector` in the config file) and its keyed system tolerations (`--system-node-toleration`, or `scheduling.systemNodeTolerations`). Keyless tolerations are not applied to the gate — that includes the tolerate-all default the CLI and API use when no toleration is set, and an explicit `*` — because a toleration with no key also matches the not-ready, unreachable and cordoned taints, which would let the gate bind to an unhealthy node. On a cluster whose every node is tainted, pass a keyed `--system-node-toleration` for the system nodes' taint so the gate can schedule ([#2590](https://github.com/NVIDIA/aicr/issues/2590)). Placement does not follow the gated component's own `--set` or `--dynamic` scheduling values. Go SDK callers get only what they set with `config.WithSystemNodeSelector` / `config.WithSystemNodeTolerations`.
+
+Selector and toleration values are checked against the API server's rules when the bundle is generated, and an invalid one fails the bundle; `Lt` and `Gt` tolerations are rejected. The gate Job also sets `activeDeadlineSeconds` (the gate's maximum wait plus 3 minutes), so a gate pod that cannot schedule or start fails the Job instead of holding the Helm hook or Argo CD sync open.
 
 The gate evaluates the test **in-process**: it reads cluster state through its own ServiceAccount and applies the assertions itself, using the same executor `aicr validate --phase deployment` uses. The image ships no Chainsaw binary.
 
@@ -2598,6 +2642,7 @@ If the recipe is pure-Helm (no manifest-only / mixed components), path-based chi
 ```
 bundles/
 ├── README.md                      # Deployment guide with ordered steps
+├── UPGRADING.md                   # Present only when a pinned version needs upgrade guidance
 ├── deploy.sh                      # Generic install loop + name-matched blocks
 ├── recipe.yaml                    # Recipe used to generate bundle
 ├── checksums.txt                  # SHA256 checksums
@@ -3020,6 +3065,36 @@ The deploy script installs components in the order specified by `deploymentOrder
 Unknown flags are rejected with an error to catch typos (e.g., `--bes-effort` or `--retires N`).
 
 > **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Nodewright node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
+
+##### Cluster connection environment
+
+`deploy.sh` and each component's `install.sh` act on whichever cluster the
+environment selects. Both are standalone entry points, so the same variables
+apply whether you run the whole bundle or a single component by hand.
+
+| Variable | Effect |
+|----------|--------|
+| `KUBE_CONTEXT` | Context to act on. Rendered as `--kube-context` for `helm` and `--context` for `kubectl`, and exported to each component's `install.sh`. |
+| `KUBECONFIG` | Path to a kubeconfig. Read natively by both `helm` and `kubectl`, so no flag is derived from it. |
+| `KUBECONFIG_FLAG` | Deprecated. A literal `helm` flag string; only `--kube-context` and `--kubeconfig` are translated, with a warning. |
+
+```bash
+KUBE_CONTEXT=my-cluster ./deploy.sh
+
+# Or a single component, from its own folder:
+cd 001-gpu-operator && KUBE_CONTEXT=my-cluster bash install.sh
+```
+
+Prefer `KUBE_CONTEXT`. Setting it alongside `KUBECONFIG_FLAG=--kube-context` is
+accepted while both name the same context; only a mismatch is rejected. A
+`KUBECONFIG_FLAG` carrying an option that is not translated, or naming a
+different context than `KUBE_CONTEXT`, fails before the first cluster call
+rather than falling back to the ambient context.
+
+When an unsupported or malformed option is rejected, the message names the
+option but not its argument, so a flag carrying a credential does not reach the
+log. The context-mismatch message is the exception: it names both contexts,
+which identify clusters rather than authenticate to them.
 
 **Retry behavior:**
 
@@ -4026,6 +4101,7 @@ my-data/
 | File Type | Behavior |
 |-----------|----------|
 | `registry.yaml` | **Merged** - External components are added to embedded; same-named components are replaced |
+| Profile-only `overlays/*.yaml` | **Extended**. Adds values to the profile of the embedded overlay at the same path |
 | All other files | **Replaced** - External file completely replaces embedded if path matches |
 
 ### Usage Examples

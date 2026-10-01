@@ -73,20 +73,30 @@
 //
 // ADR-022 splits artifacts across three schema tracks. An emitter aliases the
 // constant for its track — StableGroupVersion, AuthoringGroupVersion, or
-// ProfileGroupVersion — never GroupVersion directly. The three carried the
-// same value through the reader-first release, so aliasing by value rather
+// ProfileGroupVersion — never the string it happens to equal. The three carried
+// one shared value before the v0.22 switch (#2416), so aliasing by value rather
 // than by track compiled and passed tests while emitting the wrong version
-// later. The v0.22 switch (#2416) separated them, which turns that mistake
-// into a visible wrong value instead of a latent one.
+// later. That switch separated them, which turns the mistake into a visible
+// wrong value instead of a latent one.
 //
 // Callers should select the gate for the artifact's schema track rather than
 // comparing literals, so the single source of truth in this package stays
-// authoritative. IsSupportedAPIVersion covers the stable artifact track:
+// authoritative. IsSupportedAPIVersion covers the stable artifact track. Since
+// ADR-022 N+2 (#2417) an absent apiVersion is not special-cased: it fails the
+// gate like any other unaccepted value, and RetirementNote supplies the clause
+// that tells its author why an artifact that used to load no longer does:
 //
-//	if h.APIVersion != "" && !header.IsSupportedAPIVersion(h.APIVersion) {
+//	if !header.IsSupportedAPIVersion(h.APIVersion) {
 //	    return errors.New(errors.ErrCodeInvalidRequest,
-//	        fmt.Sprintf("unsupported apiVersion %q", h.APIVersion))
+//	        fmt.Sprintf("unsupported apiVersion %q%s; expected %q",
+//	            h.APIVersion, header.RetirementNote(h.APIVersion),
+//	            header.GroupVersionV1))
 //	}
+//
+// RetirementNote is the right default. Only a reader that itself accepted a
+// headerless artifact until AlphaRemovedIn substitutes RetirementNoteWithAbsent;
+// the tolerance varied by track, so the empty case is opt-in rather than a
+// property of the value.
 //
 // # Kind Field
 //

@@ -478,7 +478,7 @@ func TestValidateRecipeMetadataProfileYAMLScalars(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var metadata RecipeMetadata
-			data := fmt.Sprintf(`apiVersion: aicr.run/v1alpha3
+			data := fmt.Sprintf(`apiVersion: aicr.run/v1beta2
 kind: RecipeMetadata
 metadata:
   name: scalar-test
@@ -1095,7 +1095,7 @@ func TestDecodeRecipeResult_ProfileStrictness(t *testing.T) {
 	// Built from the constant, not a literal. The "legacy version" case below
 	// mutates this fixture with strings.Replace(RecipeProfileAPIVersion, ...),
 	// which silently became a no-op at the N+1 emitter switch when the constant
-	// moved off the hardcoded aicr.run/v1alpha3 and stopped matching.
+	// moved off the hardcoded aicr.run/v1beta2 and stopped matching.
 	valid := []byte(`apiVersion: ` + RecipeProfileAPIVersion + `
 kind: RecipeResult
 metadata:
@@ -1213,7 +1213,7 @@ componentRefs: []
 
 func TestDecodeRecipeResult_ProfileStrictJSONExcludedOverlays(t *testing.T) {
 	const prefix = `{
-  "apiVersion": "aicr.run/v1alpha3",
+  "apiVersion": "aicr.run/v1beta2",
   "kind": "RecipeResult",
   "metadata": {
     "excludedOverlays": [`
@@ -1279,7 +1279,7 @@ func TestDecodeRecipeResult_LegacyExcludedOverlaysCompatibility(t *testing.T) {
 		{
 			name:   "YAML scalar and additive object",
 			format: serializer.FormatYAML,
-			data: []byte(`apiVersion: aicr.run/v1alpha2
+			data: []byte(`apiVersion: aicr.run/v1
 kind: RecipeResult
 metadata:
   excludedOverlays:
@@ -1293,7 +1293,7 @@ componentRefs: []
 			name:   "JSON scalar and additive object",
 			format: serializer.FormatJSON,
 			data: []byte(`{
-  "apiVersion": "aicr.run/v1alpha2",
+  "apiVersion": "aicr.run/v1",
   "kind": "RecipeResult",
   "metadata": {
     "excludedOverlays": [
@@ -1320,7 +1320,7 @@ componentRefs: []
 }
 
 func TestBuildMetadataStore_ProfileVersionMatrix(t *testing.T) {
-	base := []byte(`apiVersion: aicr.run/v1alpha2
+	base := []byte(`apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: base
@@ -1392,7 +1392,7 @@ spec:
 		{
 			name:    "legacy version with declaration",
 			content: overlay(RecipeMetadataAPIVersion, validProfile),
-			wantErr: "expected \"aicr.run/v1alpha3\"",
+			wantErr: "expected \"aicr.run/v1beta2\"",
 		},
 		{
 			name: "profile version rejects unknown root field",

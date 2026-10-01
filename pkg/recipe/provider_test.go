@@ -29,7 +29,7 @@ import (
 )
 
 // testEmptyRegistryContent is a minimal registry.yaml for testing.
-const testEmptyRegistryContent = `apiVersion: aicr.run/v1alpha2
+const testEmptyRegistryContent = `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `
@@ -113,7 +113,7 @@ func TestLayeredDataProvider_MergesRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a registry with a custom component
-	registryContent := `apiVersion: aicr.run/v1alpha2
+	registryContent := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: custom-component
@@ -224,7 +224,7 @@ func TestLayeredDataProvider_OverridesFile(t *testing.T) {
 	}
 
 	// Create a custom base.yaml that will override embedded (now in overlays/)
-	baseContent := `apiVersion: aicr.run/v1alpha2
+	baseContent := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: custom-base
@@ -277,7 +277,7 @@ func TestLayeredDataProvider_AddsNewFile(t *testing.T) {
 		t.Fatalf("failed to create overlays dir: %v", err)
 	}
 
-	overlayContent := `apiVersion: aicr.run/v1alpha2
+	overlayContent := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: custom-overlay
@@ -515,7 +515,7 @@ func TestLayeredDataProvider_IntegrationWithRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a registry with an additional custom component
-	registryContent := `apiVersion: aicr.run/v1alpha2
+	registryContent := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: custom-operator
@@ -644,7 +644,7 @@ func TestLayeredDataProvider_WalkDir(t *testing.T) {
 		t.Fatalf("failed to create overlays dir: %v", err)
 	}
 
-	customOverlay := `apiVersion: aicr.run/v1alpha2
+	customOverlay := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: walk-test-overlay
@@ -735,7 +735,7 @@ func TestLayeredDataProvider_WalkDirWithOverride(t *testing.T) {
 	}
 
 	// Create an overlay file with unique content
-	externalOverlay := `apiVersion: aicr.run/v1alpha2
+	externalOverlay := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: external-only-overlay
@@ -894,7 +894,7 @@ func TestLayeredDataProvider_WalkDirDeduplication(t *testing.T) {
 func TestLayeredDataProvider_CachedRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	registryContent := `apiVersion: aicr.run/v1alpha2
+	registryContent := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: cache-test-component
@@ -980,7 +980,7 @@ func TestLayeredDataProvider_InvalidExternalRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create invalid YAML registry
-	invalidRegistry := `apiVersion: aicr.run/v1alpha2
+	invalidRegistry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: [invalid yaml structure

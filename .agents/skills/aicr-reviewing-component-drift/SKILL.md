@@ -34,9 +34,20 @@ the `make bom-docs` run, and the PR are separate, human-initiated work.
 ## Step 1 — Read the state file
 
 Read `drift-state.yaml` beside this file before anything else. It records what
-was reviewed at which version pair and why anything was held, so a component
-whose verdict has not changed since last week is confirmed, not re-derived.
+was reviewed at which candidate set and why anything was held, so a component
+whose candidates have not changed since last week is confirmed, not re-derived.
 Update it in Step 5.
+
+**Reuse a verdict only after comparing the whole candidate set** — `current`,
+`latest`, and every entry in `alternatives[]` — against what the entry records.
+A verdict keyed on the version pair alone goes stale silently, because a new
+candidate can appear while `current` and `latest` both stay put: `kai-scheduler`
+sat at `v0.16.9 -> v0.20.1` across two runs while a `patch v0.16.10` arrived
+beside it, and v0.16.10 is the one worth taking. If any candidate was added,
+removed, or changed, re-derive.
+
+An entry with no recorded `candidates` predates that field. Treat it as changed
+and re-derive it; do not read the absence as "nothing new".
 
 ## Step 2 — Resolve the input
 
@@ -85,6 +96,16 @@ Report `unresolved[]` to the user before reviewing anything: those pins are
 unknown, not current, and a persistent entry is a broken datasource worth
 fixing ahead of any bump.
 
+**Read `alternatives[]` on every row that has one.** `latest` is the largest
+step Renovate offers, not the only one and not necessarily the one to take. A
+row carrying `alternatives` has a smaller step available — usually the one worth
+recommending, since it crosses fewer upstream changes. Name both in the verdict
+and say which you are recommending; a verdict that discusses only `latest` when
+the row offered a minor beside a major has reviewed the wrong upgrade (#2791).
+
+The field is absent when Renovate offered exactly one candidate, which is the
+common case. It is additive, so `schemaVersion` stays `1`.
+
 ## Step 3 — Gather evidence per component
 
 Ordered by how often each is what actually bites.
@@ -105,6 +126,11 @@ Ordered by how often each is what actually bites.
    - `slinky-slurm-operator-crds`, `slinky-slurm-operator`, `slinky-slurm`
    - `mariadb-operator-crds`, `mariadb-operator`, `slurm-accounting-mariadb`
    - `agentgateway-crds`, `agentgateway`
+   - `prometheus-operator-crds`, `kube-prometheus-stack`, keyed on
+     `appVersion`, not chart version (the two chart sequences are unrelated).
+     A lagging CRDs pin also breaks `nvsentinel` and
+     `k8s-ephemeral-storage-metrics`, which create resources defined by those CRDs.
+     `TestPrometheusOperatorAppVersionLockstep` enforces this.
    - `prometheus-adapter` / `prometheus-adapter-ocp`,
      `nvidia-dra-driver-gpu` / `nvidia-dra-driver-gpu-ocp`, and
      `k8s-nim-operator` / `k8s-nim-operator-ocp` — these three `-ocp` twins
@@ -145,7 +171,9 @@ Write Markdown to a temp file (`"$TMPDIR"/aicr-drift-review-<date>.md`) and
 summarize it in chat. Rank components by (blocking findings, then update type,
 then age of the pin). Per component:
 
-- **Verdict:** take / hold / defer, one line of why
+- **Verdict:** take / hold / defer, one line of why. When the row carries
+  `alternatives`, name which version the verdict is about — a bare "take" is
+  ambiguous once more than one is on offer
 - **Evidence:** the findings from Step 3 that produced the verdict, with the
   specific values path, image, or release note that matters
 - **Cost:** what a bump would require — a values-file edit, a new upgrade
@@ -156,10 +184,17 @@ outward-facing.
 
 ## Step 5 — Update the state file
 
-Record every component reviewed: the version pair, the verdict, the date, and
-for a hold or defer the condition that would change it. Next week's digest
+Record every component reviewed: the version pair, the full candidate set the
+verdict was formed against, which candidate the verdict recommends, the date,
+and for a hold or defer the condition that would change it. Next week's digest
 repeats the same components by design — this file is what keeps the review from
 repeating with it.
+
+`candidates` is what Step 1 compares against, so record it verbatim from the
+report rather than summarizing: an entry that omits a candidate makes next
+week's run confirm a verdict that never considered it. `recommends` is only
+meaningful when the row had alternatives; omit it otherwise, since the single
+candidate is already named by `to`.
 
 ## Gotchas
 

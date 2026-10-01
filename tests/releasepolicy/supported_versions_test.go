@@ -15,6 +15,7 @@
 package releasepolicy
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -29,10 +30,17 @@ import (
 // Duplication nothing checks is duplication that drifts, and the failure is
 // silent: a release bumps one table and leaves the other advertising a minor
 // that stopped receiving patches. This file is that check.
+//
+// The policy supports a window of minors rather than a single one, so the
+// boundary these assertions defend is the window's OLDEST entry: that is the
+// minor the end-of-life threshold has to agree with. A bump that adds the new
+// minor to the top and forgets the threshold at the bottom is the shape of
+// mistake this catches.
 
 const supportedVersionsHeading = "## Supported Versions"
 
-// supportedMinorCell matches the supported row's version cell, e.g. `0.19.x`.
+// supportedMinorCell matches a supported row's version cell, e.g. `0.19.x`.
+// The section carries one such row per supported minor, published newest-first.
 var supportedMinorCell = regexp.MustCompile("`([0-9]+\\.[0-9]+)\\.x`")
 
 // endOfLifeCell matches the end-of-life row's version cell, e.g. `< 0.19`.
@@ -40,18 +48,24 @@ var endOfLifeCell = regexp.MustCompile("`< *([0-9]+\\.[0-9]+)`")
 
 // fixTypePhrase captures what a supported version is promised, e.g.
 // "security fixes" out of "receives security fixes". Both the prose sentence
-// and the table's status cell are phrased around "receives", which is what
+// and the table's status cell are phrased around "receive", which is what
 // makes one pattern enough for both.
-var fixTypePhrase = regexp.MustCompile(`(?i)receives\s+([a-z][a-z ]*?)\s*(?:[.;,|]|$)`)
+//
+// The optional "s" is load-bearing, not tidiness: the prose takes a plural
+// subject ("Both receive ...") while the table cells stay singular
+// ("Receives ..."). Requiring the singular form would silently drop the prose
+// from the comparison, leaving the promise-drift check below asserting only
+// that the table agrees with itself.
+var fixTypePhrase = regexp.MustCompile(`(?i)receives?\s+([a-z][a-z ]*?)\s*(?:[.;,|]|$)`)
 
 func TestSupportedVersionsMatchSecurityPolicy(t *testing.T) {
 	releaseSupported, releaseEndOfLife := supportedVersionPolicy(t, "RELEASE.md")
 	securitySupported, securityEndOfLife := supportedVersionPolicy(t, "SECURITY.md")
 
-	if releaseSupported != securitySupported {
-		t.Errorf("supported minor has drifted: RELEASE.md says %q, SECURITY.md says %q. "+
-			"Both files publish this policy and must name the same minor",
-			releaseSupported+".x", securitySupported+".x")
+	if strings.Join(releaseSupported, ", ") != strings.Join(securitySupported, ", ") {
+		t.Errorf("supported window has drifted: RELEASE.md says %q, SECURITY.md says %q. "+
+			"Both files publish this policy and must name the same minors in the same order",
+			strings.Join(releaseSupported, ", "), strings.Join(securitySupported, ", "))
 	}
 	if releaseEndOfLife != securityEndOfLife {
 		t.Errorf("end-of-life threshold has drifted: RELEASE.md says %q, SECURITY.md says %q. "+
@@ -59,23 +73,26 @@ func TestSupportedVersionsMatchSecurityPolicy(t *testing.T) {
 			"< "+releaseEndOfLife, "< "+securityEndOfLife)
 	}
 
-	// Within one file the two rows describe one boundary: everything below the
-	// supported minor is end-of-life. A half-finished bump moves the supported
-	// row and forgets the threshold, leaving a table that calls the same minor
-	// both supported and end-of-life. Catching that needs no cross-file
-	// comparison, so assert it per file.
+	// Within one file the rows describe one boundary: everything below the
+	// oldest supported minor is end-of-life. A half-finished bump adds the new
+	// minor at the top and forgets the threshold at the bottom, leaving a table
+	// that calls the same minor both supported and end-of-life. Catching that
+	// needs no cross-file comparison, so assert it per file.
 	for _, doc := range []struct {
 		path      string
-		supported string
+		supported []string
 		endOfLife string
 	}{
 		{"RELEASE.md", releaseSupported, releaseEndOfLife},
 		{"SECURITY.md", securitySupported, securityEndOfLife},
 	} {
-		if doc.supported != doc.endOfLife {
-			t.Errorf("%s supported-versions table is self-contradictory: supported minor is "+
-				"%q but the end-of-life threshold is %q, so %s is listed as both",
-				doc.path, doc.supported+".x", "< "+doc.endOfLife, doc.endOfLife+".x")
+		assertWindowDescends(t, doc.path, doc.supported)
+
+		oldest := doc.supported[len(doc.supported)-1]
+		if oldest != doc.endOfLife {
+			t.Errorf("%s supported-versions table is self-contradictory: the oldest supported "+
+				"minor is %q but the end-of-life threshold is %q, so %s is listed as both",
+				doc.path, oldest+".x", "< "+doc.endOfLife, doc.endOfLife+".x")
 		}
 	}
 
@@ -140,15 +157,63 @@ func supportedFixTypes(t *testing.T, path string) []string {
 	return unique
 }
 
-// supportedVersionPolicy returns the supported minor and the end-of-life
-// threshold declared by path's "## Supported Versions" section, as bare
-// `MAJOR.MINOR` strings.
-func supportedVersionPolicy(t *testing.T, path string) (supported, endOfLife string) {
+// supportedVersionPolicy returns every supported minor declared by path's
+// "## Supported Versions" section, in document order, together with the
+// end-of-life threshold, as bare `MAJOR.MINOR` strings.
+func supportedVersionPolicy(t *testing.T, path string) (supported []string, endOfLife string) {
 	t.Helper()
 
 	section := supportedVersionsSection(t, path)
-	return firstSubmatch(t, path, "supported minor", supportedMinorCell, section),
+	return allSubmatches(t, path, "supported minor", supportedMinorCell, section),
 		firstSubmatch(t, path, "end-of-life threshold", endOfLifeCell, section)
+}
+
+// allSubmatches returns pattern's first capture for every match in section, in
+// document order. Order is load-bearing: the window is published newest-first
+// and its last entry is the boundary the end-of-life threshold is checked
+// against, so collapsing these to a set would discard what is being asserted.
+func allSubmatches(t *testing.T, path, what string, pattern *regexp.Regexp, section string) []string {
+	t.Helper()
+
+	matches := pattern.FindAllStringSubmatch(section, -1)
+	if matches == nil {
+		t.Fatalf("%s %s section declares no %s (no %s cell)", path, supportedVersionsHeading, what, pattern)
+	}
+	values := make([]string, 0, len(matches))
+	for _, match := range matches {
+		values = append(values, match[1])
+	}
+	return values
+}
+
+// assertWindowDescends reports a supported window that is not strictly
+// newest-first. Both failure modes it catches move the boundary silently: rows
+// written out of order put the wrong minor last, and a stale row left behind
+// after a bump repeats one.
+func assertWindowDescends(t *testing.T, path string, window []string) {
+	t.Helper()
+
+	for i := 1; i < len(window); i++ {
+		previousMajor, previousMinor := parseMinor(t, path, window[i-1])
+		major, minor := parseMinor(t, path, window[i])
+		if previousMajor < major || (previousMajor == major && previousMinor <= minor) {
+			t.Errorf("%s supported-versions table lists %q after %q; the window is published "+
+				"newest-first with no repeats, and its last entry is what the end-of-life "+
+				"threshold is checked against", path, window[i]+".x", window[i-1]+".x")
+		}
+	}
+}
+
+// parseMinor splits a bare `MAJOR.MINOR` string into its two numbers. The
+// comparison has to be numeric: "1.10" sorts below "1.9" as a string, which
+// would report a correctly ordered window as out of order.
+func parseMinor(t *testing.T, path, version string) (major, minor int) {
+	t.Helper()
+
+	if _, err := fmt.Sscanf(version, "%d.%d", &major, &minor); err != nil {
+		t.Fatalf("%s supported-versions table has an unparseable version %q: %v", path, version, err)
+	}
+	return major, minor
 }
 
 // supportedVersionsSection returns the body of path's supported-versions

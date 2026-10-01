@@ -103,21 +103,36 @@ spec:
       overrides:
         labeler:
           assumeDriverInstalled: true
-        # metadata-collector is disabled here, not patched. Its chart only
-        # gets GPU/NVML access two ways: a runtimeClassName matching a real
-        # containerd runtime handler (none exists on the host-managed-driver
-        # + CDI/NRI path this leaf uses — GPU Operator's CDI+NRI mode never
-        # registers one), or requesting the nvidia.com/gpu resource (works,
-        # but permanently reserves one GPU per node for the DaemonSet's
-        # lifetime — unacceptable on a training cluster). gpu-health-monitor
-        # avoids this entirely via direct hostPath device/driver mounts; the
-        # correct fix is the same mechanism added to metadata-collector's
-        # chart upstream (NVIDIA/nvsentinel#1717). Disabled here until that
-        # lands — assumeDriverInstalled above still fixes the two
-        # syslog-health-monitor DaemonSets, which don't need driver access.
-        global:
-          metadataCollector:
-            enabled: false
+        # metadata-collector runs on this NRI-mode host-managed-driver cluster
+        # via the escape hatch added upstream in NVIDIA/NVSentinel#1742 and
+        # released in v1.22.0. The chart used to require either a
+        # runtimeClassName matching a real containerd runtime handler (none
+        # exists on the GPU-Operator CDI+NRI path) or requesting
+        # nvidia.com/gpu (which permanently reserves a GPU per node —
+        # unacceptable on a training cluster). v1.22.0 makes runtimeClassName
+        # conditional and exposes additionalHostVolumes /
+        # additionalVolumeMounts / extraEnv on metadata-collector — the same
+        # shape gpu-health-monitor already had. The block below clears
+        # runtimeClassName and mounts the host driver userspace directly.
+        #
+        # Path selection: the Vera Rubin reference image is Ubuntu 26.04
+        # arm64 (see this leaf's OS constraints), so the driver libraries
+        # live under /usr/lib/aarch64-linux-gnu — not /usr/lib/x86_64-linux-gnu
+        # or /run/nvidia/driver.
+        metadata-collector:
+          runtimeClassName: ""
+          extraEnv:
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib
+          additionalVolumeMounts:
+            - name: nvidia-driver-libs
+              mountPath: /usr/local/nvidia/lib
+              readOnly: true
+          additionalHostVolumes:
+            - name: nvidia-driver-libs
+              hostPath:
+                path: /usr/lib/aarch64-linux-gnu
+                type: Directory
 
     # GPU-allocation policy is unchanged: resources.gpus stays disabled
     # (the gpu-operator device plugin remains the whole-GPU advertiser per
@@ -146,33 +161,22 @@ spec:
       overrides:
         nvidiaDriverRoot: /
 
-    # VR200 node tuning runs the native vr200/rke2 nvidia-tuned profile —
-    # see the nodewright-customizations componentRef below for the full
-    # rationale, including that it applies its kernel cmdline through a
-    # reboot. interruptionBudget serializes THIS CR to one node at a time,
-    # but it is per-CR and does not compose with rdma-netns-exclusive's own
-    # budget. Under the default sequencing: node, IsNodeReadyForSkyhook
-    # checks per-node completion, so one node may start tuning while
-    # another is still on the RDMA CR — concurrent reboots across the two
-    # are possible on a multi-node cluster. There is also no dependency
-    # edge between the two components, so nothing guarantees the RDMA CR
-    # exists when this one becomes runnable.
-    # Sequence deliberately on a live cluster. This is an explicit Preview
-    # risk acceptance — the reference rollout is manually controlled, and it
-    # must be resolved before VR200/RKE2 is treated as ready for unattended
-    # lifecycle operations. Tracked in NVIDIA/aicr#2572, which carries the
-    # pinned-v0.18 source trace and the candidate fixes (merge both packages
-    # into one Skyhook CR vs. sequencing: "all" plus a dependency edge).
+    # VR200 node tuning and host RDMA exclusive netns-mode both need a
+    # reboot, and both ride the single tuning CR (see the
+    # nodewright-customizations componentRef below). Its interruptionBudget
+    # therefore bounds every VR200 reboot, and nodewright coalesces the two
+    # packages' reboots into one per node. Two separate CRs could reboot
+    # different nodes at once, because interruptionBudget does not compose
+    # across CRs (NVIDIA/aicr#2572).
     #
-    # Node targeting differs between the two rebooting CRs, which matters if
-    # you narrow the GPU node set. nodewright-customizations declares
-    # nodeScheduling.accelerated, so --accelerated-node-selector flows into
-    # the tuning CR; dranet and rdma-netns-exclusive declare no scheduling
-    # block and hardcode nodeSelector nvidia.com/gpu.present in their
-    # manifests, so those flags bypass them. On the NFD-labeled reference
-    # clusters all three agree and nothing changes. Narrow the selector and
-    # the tuning reboot retargets to the subset while the RDMA reboot and
-    # DraNet still fan out to every gpu.present node.
+    # Node targeting matters if you narrow the GPU node set.
+    # nodewright-customizations declares nodeScheduling.accelerated, so
+    # --accelerated-node-selector flows into the tuning CR, RDMA mode
+    # included; dranet declares no scheduling block and hardcodes
+    # nodeSelector nvidia.com/gpu.present. On the NFD-labeled reference
+    # clusters the two agree. Narrow the selector and the tuning CR
+    # retargets to the subset while DraNet still fans out to every
+    # gpu.present node.
     # Health check override: the operator Deployment's name depends on how
     # nodewright got installed, and both paths are real here. The VR
     # reference clusters carry an out-of-band install (hand-written values,
@@ -272,7 +276,7 @@ spec:
     # Native vr200/rke2 node tuning, replacing the bcm-profile stopgap this
     # leaf carried while nodewright-packages had no vr200/rke2 path
     # (nvidia-tuned 0.9.0 added the rke2 service). tuning-rke2.yaml runs
-    # nvidia-tuned alone: unlike service=bcm, service=rke2 ships no profile
+    # nvidia-tuned without nvidia-setup: unlike service=bcm, service=rke2 ships no profile
     # overrides, so vr200 falls through to its own multiNodeTraining profile
     # with the [bootloader] stanza (iommu.passthrough=1, init_on_alloc=0,
     # numa_balancing=disable, hugepages, earlycon) intact, landed on the host
@@ -289,6 +293,12 @@ spec:
     # provisions its own Ubuntu 26.04 arm64 64k-page kernel. The vr200
     # profiles are Ubuntu 26.04 only, which this leaf's OS constraints
     # already pin.
+    #
+    # rdmaNetnsExclusive adds the host RDMA exclusive netns-mode package
+    # (ib_core netns_mode=0) to the same CR. It pairs with dranet so each pod
+    # sees only its allocated HCA in /sys/class/infiniband (clean
+    # NCCL/GPUDirect), and it shares the tuning reboot rather than taking
+    # its own. It is independent of tuningEnabled.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
@@ -297,6 +307,7 @@ spec:
         service: rke2
         accelerator: vr200
         intent: multiNodeTraining
+        rdmaNetnsExclusive: true
       dependencyRefs:
         - nodewright-operator
 
@@ -325,17 +336,6 @@ spec:
       type: Helm
       manifestFiles:
         - components/dranet/manifests/dranet.yaml
-
-    # Host RDMA exclusive netns-mode (ib_core netns_mode=0) via Skyhook —
-    # pairs with dranet so each pod sees only its allocated HCA in
-    # /sys/class/infiniband (clean NCCL/GPUDirect). Reboots GPU workers one
-    # at a time to apply.
-    - name: rdma-netns-exclusive
-      type: Helm
-      manifestFiles:
-        - components/rdma-netns-exclusive/manifests/skyhook.yaml
-      dependencyRefs:
-        - nodewright-operator
 
   # Validation for VR200 on RKE2 training.
   #

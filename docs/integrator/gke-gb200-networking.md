@@ -14,17 +14,12 @@ doesn't silently fall back to a slower network path. It fails outright
 instead.
 
 This fail-closed behavior belongs to the validation workload, not to every
-workload the recipe can run. The `gb200-gke-cos-training-kubeflow` leaf
-ships a generic Kubeflow `torch-distributed` `ClusterTrainingRuntime`
-(`recipes/components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml`)
-that sets none of the RDMA network attachments, gIB host mounts, or NCCL
-environment described in this guide, and requests GPUs per the submitted
-`TrainJob` rather than a fixed whole node. A `TrainJob` needing the same
-RDMA guarantee must add the `networking.gke.io/default-interface` and
-`networking.gke.io/interfaces` pod annotations, mount
-`/home/kubernetes/bin/nvidia` and `/home/kubernetes/bin/gib` from the host,
-set `NCCL_NET=gIB`, and request all 4 GPUs on the node itself. The
-validator's runtime above is a working reference for that configuration.
+workload the recipe can run. For Kubeflow, the
+`gb200-gke-cos-training-kubeflow` leaf also ships that wiring pre-built, as
+[the `torch-distributed-rdma`
+runtime](#the-shipped-torch-distributed-rdma-runtime) below. A workload that
+uses the generic `torch-distributed` runtime instead, or authors its own
+`TrainingRuntime`, carries none of it.
 
 GPUDirect RDMA on `a4x-highgpu-4g` is also incompatible with NCCL Fast
 Socket and the GPUDirect TCPX/TCPXO plugin (see
@@ -141,6 +136,68 @@ You'll also see a `default` network/`GKENetworkParamSet` pair in the same
 output; that one is GKE-managed (created automatically once
 multi-networking is enabled), not part of this prerequisite, and isn't
 checked by name.
+
+## The shipped `torch-distributed-rdma` runtime
+
+On the `gb200-gke-cos-training-kubeflow` recipe, AICR ships a pre-wired
+`ClusterTrainingRuntime` named `torch-distributed-rdma` (a sibling of
+`torch-distributed`, which stays as it is). It carries the
+`networking.gke.io` pod annotations mapping `eth1` to `gvnic-1` and `eth2`
+through `eth5` to `rdma-0` through `rdma-3`, the
+`/home/kubernetes/bin/nvidia` and `/home/kubernetes/bin/gib` host mounts,
+`NCCL_NET=gIB`, `IPC_LOCK`, and the whole-node 4-GPU request, so a TrainJob
+references it by name and supplies no fabric configuration at all:
+
+```yaml
+spec:
+  runtimeRef:
+    name: torch-distributed-rdma
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+  trainer:
+    numNodes: 2                      # the shipped default; override freely
+    image: my-registry/my-trainer:latest
+```
+
+**Do not set `resourcesPerNode`.** On the pinned Kubeflow Trainer v2.2.0 a
+TrainJob value replaces the runtime's resource requirements outright rather
+than merging, so a job that sets it loses the `nvidia.com/gpu: "4"` request
+and with it the whole node. RDMA cannot be shared between Pods on a node, so
+that failure takes the fabric with it. If you must set it, repeat every
+resource in it, including the GPU request.
+
+**No recipe-generation input is required.** `gvnic-1` and `rdma-0` through
+`rdma-3` are fixed object names on every GB200/GKE cluster, so the runtime
+renders unconditionally and has no unset path that could ship it half-wired.
+
+**The runtime does not apply upstream's NCCL tuning profile.** The gIB
+installer lays that profile down on the host at
+`/home/kubernetes/bin/gib/scripts/set_nccl_env.sh`. A `ClusterTrainingRuntime`
+cannot source it, because Kubeflow Trainer owns the container command, so a
+workload that wants it sources the file from its own `spec.trainer.command`.
+AICR's own NVLS performance validator does exactly that (see
+`validators/performance/testdata/gb200/gke/runtime-nvls.yaml`). Skipping it
+costs tuning, not correctness, because `NCCL_NET=gIB` from the runtime is what
+selects the fabric.
+
+Overriding `command` replaces the `torchrun` invocation Trainer injects, so
+the override has to launch it. Pass no rendezvous flags. Trainer sets
+`PET_NNODES`, `PET_NPROC_PER_NODE`, `PET_NODE_RANK`, `PET_MASTER_ADDR` and
+`PET_MASTER_PORT` on the container, and `torchrun` reads each one as the
+default for the matching flag, so a hand-written flag can only contradict the
+job it was launched under.
+
+```yaml
+spec:
+  trainer:
+    command: ["/bin/bash", "-c"]
+    args:
+      - |
+        if [ -f /home/kubernetes/bin/gib/scripts/set_nccl_env.sh ]; then
+          . /home/kubernetes/bin/gib/scripts/set_nccl_env.sh
+        fi
+        exec torchrun train.py
+```
 
 ## Driver Installer
 

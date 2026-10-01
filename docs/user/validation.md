@@ -38,7 +38,7 @@ any phase. If pre-flight fails, no validator Jobs are deployed.
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
 - Cluster service account with RBAC to create Jobs, ConfigMaps, and read cluster state (AICR creates its own `aicr-validation` namespace on first run).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
-- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally). No provider projection flag is needed on GKE — the constraint reads node labels the standard snapshot already carries. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
+- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` additionally re-evaluates `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so the value fails closed. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
 
 ## Training performance validation
 
@@ -371,10 +371,11 @@ aicr validate -r recipe.yaml -s snapshot.yaml \
 The supplied runtime **owns its fabric wiring end to end**: because the recipe
 opted in explicitly, the validator bypasses the compiled applicability gate and
 skips every service-specific *setup* step — EFA/TCPXO/RDMA NIC discovery, the
-GB200-NVreg / GKE-TCPXO preflights, and NVLS/IMEX auto-provisioning. It renders
-the runtime, sizes it (against the runtime's own `nodeSelector` when it pins
-one, so `WorkerCount` matches placement), applies it alongside the shared
-`TrainJob`, and evaluates the bandwidth threshold from the launcher logs.
+GB200-NVreg / GKE-TCPXO preflights, and NVLS/IMEX auto-provisioning (except as
+described for IMEX below). It renders the runtime, sizes it (against the
+runtime's own `nodeSelector` when it pins one, so `WorkerCount` matches
+placement), applies it alongside the shared `TrainJob`, and evaluates the
+bandwidth threshold from the launcher logs.
 Transport verification is **not** skipped: pairing the runtime with the `-net`
 or `-nvls` check still asserts that transport actually carried traffic (the NCCL
 markers are fabric-agnostic), so a named variant can't pass on bandwidth alone.
@@ -395,6 +396,32 @@ What it must honor:
 - The runtime should pin its own worker `nodeSelector`/`tolerations`, or pass
   `--node-selector` to `aicr validate`, so workers land on the intended GPU
   nodes.
+- **IMEX access uses the validator-managed claim template.** The benchmark runs
+  in a per-run namespace that does not exist before the run, so nothing can be
+  pre-created there for the runtime. To get an IMEX channel, reference the
+  ResourceClaimTemplate `nccl-all-reduce-imex` from the pod's `resourceClaims`,
+  and bind that claim in the `node` container's `resources.claims`. Kubernetes
+  exposes a pod-level claim only to containers that bind it, so the pod-level
+  reference alone leaves the worker without the channel. The validator then
+  creates the ComputeDomain that backs it, on any check variant, and waits for
+  the template before starting the run.
+
+  ```yaml
+  # the node replicatedJob's pod spec
+  resourceClaims:
+    - name: imex-channel
+      resourceClaimTemplateName: nccl-all-reduce-imex
+  containers:
+    - name: node
+      resources:
+        claims:
+          - name: imex-channel
+        limits:
+          nvidia.com/gpu: "${GPU_COUNT_PER_NODE}"
+  ```
+- Any other pod-level `resourceClaimTemplateName`, and any
+  `resourceClaimName`, is rejected: no such claim could exist in the per-run
+  namespace.
 
 `nccl-benchmark-runtime-ref` and `nccl-benchmark-profile` are mutually
 exclusive — a recipe supplies its own runtime **or** borrows an embedded one,
@@ -402,7 +429,8 @@ never both. An absent or blank ref falls back to criteria/profile-derived
 applicability. A malformed ref, or a file missing from `--data`, is rejected by
 `aicr validate` **before any validator Job is deployed** (a resolution error on
 stderr). A resolved file that is not a `TrainingRuntime` with a `node`
-replicatedJob **fails the check itself** (in the pod). Either way it fails
+replicatedJob, or that references an unsupported claim, **fails the check
+itself** (in the pod), before any benchmark resources are applied. Either way it fails
 rather than silently skipping.
 
 > **Sizing note.** The worker cohort is sized against the runtime's own
@@ -528,7 +556,8 @@ seconds with guidance rather than hanging. Disable the cache instead with
 catalog env knob is **not** read from the shell environment of the process
 running `aicr validate` (only `HF_TOKEN` is). AICR-deployed EKS clusters get a
 default `gp3` StorageClass from the `aws-ebs-csi-driver` component, so the
-cache works there with no knob.
+cache works there with no knob, provided the driver has AWS credentials — see
+[EBS CSI Driver Credentials](component-catalog.md#ebs-csi-driver-credentials).
 
 **Debugging a failed run with `AICR_INFERENCE_PERF_NO_CLEANUP`.** By default the
 validator deletes the per-run namespace (DGD, workers, frontend, AIPerf Job) on
@@ -758,6 +787,64 @@ Phases run sequentially. By default all phases run and produce results
 regardless of earlier failures. Pass `--fail-fast` to stop after the first
 phase that fails (e.g., to skip a 65-minute inference-perf run when deployment
 already failed).
+
+## Skipping checks a run cannot satisfy
+
+`--phase` selects whole phases. `--skip-check` (or
+`spec.validate.execution.skipChecks` in a config file) works one level down,
+withholding named checks from every phase that runs:
+
+```bash
+aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
+  --phase conformance \
+  --skip-check gpu-operator-health --skip-check dra-support
+```
+
+It is for a caller that cannot satisfy a check the recipe declares, typically a
+CI lane that deploys only part of the recipe or runs against simulated devices.
+It narrows the **run**, not the recipe: every other consumer of that recipe
+still gets the check, which is why this is not expressed as a recipe edit.
+
+Three properties make it a scoping tool rather than a way to hide a failure:
+
+- **A skipped check is reported, not dropped, and its reason reaches the signed
+  bundle.** It appears in the CTRF report as `skipped` with the reason
+  `named in skipChecks`, and as the structured code
+  `extra.skipReason: named-in-skip-checks`. The default (minimal) recipe-evidence
+  bundle (`--emit-attestation`) does not carry the report verbatim: its
+  redaction policy blanks every test's `message` and `stdout`, which is why the
+  reason also rides the allowlisted `extra` channel. So both the withheld check
+  and why it was withheld travel with the attestation; `--full` keeps the prose
+  message too.
+- **The run fails closed on a list that would not do what it says.** A name
+  matching no check in the catalog is rejected before any validation resource
+  is created, and so is a list that would leave a requested phase with nothing
+  to run (that phase would otherwise report `passed` while running nothing,
+  because the skipped entries keep its test count above zero). Stop requesting
+  the phase instead. The recipe is loaded first, so a `cm://` recipe is read
+  from the cluster before the list is judged.
+- **A check added later is not silenced.** A skip list names what to withhold,
+  so a new check in a recipe runs and can fail, which forces a decision rather
+  than hiding one.
+
+The CNCF conformance evidence path is different, and the two flags are refused
+together for that reason. `pkg/evidence/cncf` renders one markdown file per
+*requirement* and drops every skipped entry before grouping, so a requirement
+whose checks were all skipped would produce no file and no index entry, with
+nothing recording the omission. A submission that silently omits a requirement
+reads as complete when it is not, so `--skip-check` with `--evidence-dir` (and
+therefore with `--cncf-submission`, which requires it) is rejected up front:
+
+```
+[INVALID_REQUEST] --skip-check cannot be combined with --evidence-dir: the CNCF
+evidence renderer omits skipped checks entirely, so a withheld requirement would
+leave no file and no index entry and the rendered evidence would read as a
+complete submission
+```
+
+Lifting that restriction means deciding how a withheld requirement should be
+represented in a submission, which is a change to what the submission contains
+rather than a detail of this flag.
 
 ## Scoping CNCF submission evidence to specific features
 
@@ -1058,6 +1145,7 @@ Common reasons and their cause:
 | `nccl-benchmark-runtime … must be a … TrainingRuntime … must declare a "node" replicatedJob` | `stdout` | The referenced file is not a Kubeflow `trainer.kubeflow.org/v1alpha1` `TrainingRuntime`, or lacks the `node` replicatedJob | Fix the runtime file to be a valid `TrainingRuntime` with a `node` replicatedJob |
 | `nccl-benchmark-runtime and nccl-benchmark-profile are mutually exclusive` | `stdout` | The recipe declares both escape hatches at once | Keep only one: borrow an embedded profile **or** supply your own runtime |
 | `skipped - no-cluster mode` | `message` | `--no-cluster` was passed — the runner short-circuits every phase before dispatching any Job | Remove the flag to run behavioral checks |
+| `named in skipChecks` | `message`, and `extra.skipReason` as `named-in-skip-checks` (the channel that survives bundle redaction) | The caller withheld this check with `--skip-check` or `spec.validate.execution.skipChecks` | Drop the name from the skip list to run it again; see [Skipping checks a run cannot satisfy](#skipping-checks-a-run-cannot-satisfy) |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 
 ### `ai-service-metrics` fails with "Prometheus unreachable"

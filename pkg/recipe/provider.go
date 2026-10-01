@@ -215,6 +215,8 @@ func (p *EmbeddedDataProvider) Source(path string) string {
 
 // LayeredDataProvider overlays an external directory on top of embedded data.
 // For registryFileName: merges external components with embedded (external takes precedence).
+// An external overlay replaces the embedded one at the same path, unless it carries
+// only a profile declaration. That patch adds values to the embedded overlay's profile.
 // For all other files: external completely replaces embedded if present.
 type LayeredDataProvider struct {
 	embedded    *EmbeddedDataProvider
@@ -242,6 +244,10 @@ type LayeredDataProvider struct {
 
 	// Track which files came from external (for debugging)
 	externalFiles map[string]bool
+
+	// patchedOverlays holds the overlay paths whose external file was a profile
+	// patch, recorded by ReadFile so Source can report their embedded origin.
+	patchedOverlays sync.Map
 }
 
 // LayeredProviderConfig configures the layered data provider.
@@ -421,7 +427,9 @@ func (p *LayeredDataProvider) ExternalDir() string {
 
 // ReadFile reads a file, checking external directory first.
 // For registryFileName, returns merged content.
-// For other files, external completely replaces embedded.
+// For an overlay that carries only a profile declaration, returns the embedded overlay
+// with those values added to its profile. For other files, external completely
+// replaces embedded.
 func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, fmt.Sprintf("context canceled before reading %q", path), err)
@@ -447,6 +455,31 @@ func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte
 		data, err := readExternalFile(p.externalDir, lookupPath, p.maxFileSize, p.allowSymlinks)
 		if err != nil {
 			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", path))
+		}
+		patched := false
+		if isOverlay, _ := filepath.Match("overlays/*.yaml", lookupPath); isOverlay {
+			if embeddedData, embErr := p.embedded.ReadFile(ctx, lookupPath); embErr == nil {
+				merged, isPatch, patchErr := patchOverlayProfile(lookupPath, embeddedData, data)
+				if patchErr != nil {
+					return nil, patchErr
+				}
+				if isPatch {
+					patched = true
+					slog.Info("external overlay extends the embedded profile", "path", lookupPath)
+					data = merged
+				}
+			}
+		}
+		if patched {
+			p.patchedOverlays.Store(lookupPath, struct{}{})
+			if path != lookupPath {
+				p.patchedOverlays.Store(path, struct{}{})
+			}
+		} else {
+			p.patchedOverlays.Delete(lookupPath)
+			if path != lookupPath {
+				p.patchedOverlays.Delete(path)
+			}
 		}
 		slog.Debug("read from external data directory", "path", path)
 		return data, nil
@@ -519,6 +552,12 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 func (p *LayeredDataProvider) Source(path string) string {
 	normalizedPath := filepath.ToSlash(path)
 	var source string
+	// The catalog loader reads a file before asking for its source, so ReadFile
+	// has already recorded whether the file was a profile patch.
+	_, patched := p.patchedOverlays.Load(normalizedPath)
+	if !patched {
+		_, patched = p.patchedOverlays.Load(path)
+	}
 	switch {
 	case normalizedPath == registryFileName:
 		// Always merged: registry.yaml is required in external dir (enforced by constructor).
@@ -526,7 +565,11 @@ func (p *LayeredDataProvider) Source(path string) string {
 	case normalizedPath == catalogFileName && p.externalFiles[catalogFileName]:
 		// Merged only when external catalog exists (catalog is optional).
 		source = sourceMerged
-	case p.externalFiles[normalizedPath]:
+	case p.externalFiles[normalizedPath] && patched:
+		// A profile patch adds values to an embedded overlay whose criteria
+		// and identity stay embedded.
+		source = sourceEmbedded
+	case p.externalFiles[normalizedPath] && !patched:
 		source = sourceExternal
 	default:
 		source = sourceEmbedded

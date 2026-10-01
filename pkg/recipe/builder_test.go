@@ -408,19 +408,19 @@ func TestConstraintEvalResult(t *testing.T) {
 func buildIsolationProvider(t *testing.T, overlayName string) DataProvider {
 	t.Helper()
 
-	registryYAML := []byte(`apiVersion: aicr.run/v1alpha2
+	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `)
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
   componentRefs: []
 `)
 	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: %[1]s
 spec:

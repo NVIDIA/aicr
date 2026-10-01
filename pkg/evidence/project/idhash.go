@@ -15,8 +15,9 @@
 package project
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
+
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
 // idHashLen is the number of hex characters retained from the signer
@@ -28,28 +29,15 @@ import (
 // both birthday (2^64) and second-preimage work out of reach.
 const idHashLen = 32
 
-// idHashSeparator joins the issuer and identity before hashing. A byte
-// that cannot appear inside a URL-shaped OIDC issuer or SubjectAlternativeName
-// keeps the two fields unambiguously delimited, so ("a", "bc") and
-// ("ab", "c") never collide.
-const idHashSeparator = "\n"
-
-// SignerIDHash derives the stable source-dedup key for a verified
-// signer from its (issuer, identity) pair. It is the contract between
-// this producer (GP2 ingest) and the GP4 corroborate consumer, which
-// counts consensus by distinct idHashes: the same verified signer must
-// hash to the same value across every recipe and every run, and two
-// different signers must not collide.
-//
-// The derivation is the first idHashLen (32) hex characters of
-// sha256(issuer + "\n" + identity). It is intentionally simple and
-// dependency-free so both sides can reproduce it byte-for-byte; do not
-// change the algorithm without coordinating a migration of the GCS
-// tree and the consumer.
-//
-// Inputs must be the *verified* issuer and identity (Fulcio cert SAN +
-// OIDC issuer), never a raw, unverified pointer claim.
+// SignerIDHash returns the first idHashLen hex characters of
+// attestation.HashIdentityPair(issuer, identity), the stable dedup key for
+// a verified signer's (issuer, identity) pair. issuer and identity must be
+// the verified values (Fulcio cert SAN and OIDC issuer), never an
+// unverified pointer claim. Changing the algorithm breaks every
+// already-persisted value derived from it.
 func SignerIDHash(issuer, identity string) string {
-	sum := sha256.Sum256([]byte(issuer + idHashSeparator + identity))
+	// A verified (issuer, identity) pair is never empty, so
+	// HashIdentityPair's only error case cannot occur here.
+	sum, _ := attestation.HashIdentityPair(issuer, identity)
 	return hex.EncodeToString(sum[:])[:idHashLen]
 }

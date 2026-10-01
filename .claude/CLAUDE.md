@@ -634,6 +634,7 @@ Before pushing a PR that changes Go source, check coverage on affected packages.
 CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-comment.yaml`); this gate catches regressions before push.
 
 **PR policy:**
+- Link an issue assigned to the PR's human author (`Fixes:` or `Related:`, one line per issue); PRs an agent opens count toward that author's cap of 3 open PRs, drafts included. See `CONTRIBUTING.md` (Start with an issue, Claiming an Issue)
 - Do NOT add `Co-Authored-By` lines (organization policy)
 - Do NOT add "Generated with Claude Code", "Created by Codex", or similar attribution
 - Add a `theme/*` label matching the PR's primary concern: `theme/recipes`, `theme/validation`, `theme/deployer`, `theme/ci-dx`, `theme/community`, `theme/supply-chain`. Use `dependencies` for dependency bumps. (There are no `enhancement`/`bug`/`documentation` repo labels — those names are org-level *issue types*, which apply to issues, not PRs.)
@@ -711,6 +712,11 @@ aicr snapshot --output snapshot.yaml
 # generation / validate readiness fails closed (gpuStack profile):
 #   oci ce cluster list-addons --cluster-id <ocid> --all --output json > addons.json
 #   aicr snapshot --oke-addons addons.json --output snapshot.yaml
+# GKE bundle-installer only: include the pool projection or snapshot-qualified
+# recipe generation / validate readiness fails closed (gpuStack profile):
+#   gcloud container node-pools list --cluster <cluster> --format=json > pools.json
+#   aicr snapshot --gke-gpu-pools pools.json --output snapshot.yaml
+# The default gke-default value needs no pool dump.
 
 # Generate recipe from snapshot
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml

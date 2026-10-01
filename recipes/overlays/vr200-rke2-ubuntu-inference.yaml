@@ -78,11 +78,24 @@ spec:
       overrides:
         labeler:
           assumeDriverInstalled: true
-        # See vr200-rke2-ubuntu-training for why metadata-collector is
-        # disabled rather than patched (NVIDIA/nvsentinel#1717).
-        global:
-          metadataCollector:
-            enabled: false
+        # See vr200-rke2-ubuntu-training for the metadata-collector NRI-mode
+        # host-mount rationale (NVIDIA/NVSentinel#1742, released in v1.22.0).
+        # Path picks Ubuntu 26.04 arm64 driver libs — same reference image
+        # as the training leaf.
+        metadata-collector:
+          runtimeClassName: ""
+          extraEnv:
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib
+          additionalVolumeMounts:
+            - name: nvidia-driver-libs
+              mountPath: /usr/local/nvidia/lib
+              readOnly: true
+          additionalHostVolumes:
+            - name: nvidia-driver-libs
+              hostPath:
+                path: /usr/lib/aarch64-linux-gnu
+                type: Directory
 
     # See vr200-rke2-ubuntu-training for the host-managed-driver root
     # rationale and the host nvidia-imex/ComputeDomain conflict note.
@@ -177,19 +190,15 @@ spec:
     # profile rather than multiNodeTraining. See vr200-rke2-ubuntu-training
     # for the reboot semantics and the full rationale.
     #
-    # This leaf carries the same two rebooting Skyhook CRs as the training
-    # leaf (this one and rdma-netns-exclusive below), so it inherits the same
-    # limitation: interruptionBudget is per-CR and does not compose across
-    # them, and under the default sequencing: node a node may start tuning
-    # while another is still rebooting for RDMA. Explicit Preview risk
-    # acceptance — sequence deliberately on a live cluster. Tracked in
-    # NVIDIA/aicr#2572.
+    # rdmaNetnsExclusive adds the host RDMA exclusive netns-mode package to
+    # the same CR, as on the training leaf, so both share one reboot per
+    # node under one interruptionBudget (NVIDIA/aicr#2572).
     #
-    # Node targeting also differs between the two: --accelerated-node-selector
-    # reaches the tuning CR but not dranet or rdma-netns-exclusive, which
-    # hardcode nodeSelector nvidia.com/gpu.present. Identical on the
-    # NFD-labeled reference clusters; only diverges if you narrow the GPU node
-    # set. See vr200-rke2-ubuntu-training for the full note.
+    # Node targeting: --accelerated-node-selector reaches the tuning CR, RDMA
+    # mode included, but not dranet, which hardcodes nodeSelector
+    # nvidia.com/gpu.present. Identical on the NFD-labeled reference
+    # clusters; only diverges if you narrow the GPU node set. See
+    # vr200-rke2-ubuntu-training for the full note.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
@@ -198,6 +207,7 @@ spec:
         service: rke2
         accelerator: vr200
         intent: inference
+        rdmaNetnsExclusive: true
       dependencyRefs:
         - nodewright-operator
 
@@ -217,26 +227,19 @@ spec:
             limits:
               memory: 512Mi
 
-    # DraNet + RDMA netns-exclusive tuning — same rationale as the training
-    # leaf, restated here because clean multi-node GPUDirect/RDMA access over
-    # the ConnectX-9 fabric is a property of the NVL72 hardware, not of the
-    # training workload specifically. Any inference deployment that spans
-    # nodes over that fabric (e.g. Dynamo disaggregated prefill/decode with
-    # cross-node KV-cache transfer) needs it the same way training does; a
-    # purely single-node inference deployment doesn't exercise it either way.
-    # See vr200-rke2-ubuntu-training for the full mechanism and reboot
-    # rationale.
+    # DraNet + RDMA netns-exclusive mode (rdmaNetnsExclusive above) — same
+    # rationale as the training leaf, restated here because clean multi-node
+    # GPUDirect/RDMA access over the ConnectX-9 fabric is a property of the
+    # NVL72 hardware, not of the training workload specifically. Any
+    # inference deployment that spans nodes over that fabric (e.g. Dynamo
+    # disaggregated prefill/decode with cross-node KV-cache transfer) needs
+    # it the same way training does; a purely single-node inference
+    # deployment doesn't exercise it either way. See
+    # vr200-rke2-ubuntu-training for the full mechanism and reboot rationale.
     - name: dranet
       type: Helm
       manifestFiles:
         - components/dranet/manifests/dranet.yaml
-
-    - name: rdma-netns-exclusive
-      type: Helm
-      manifestFiles:
-        - components/rdma-netns-exclusive/manifests/skyhook.yaml
-      dependencyRefs:
-        - nodewright-operator
 
   # cluster-autoscaling conformance omitted: bare-metal RKE2 has no cluster
   # autoscaler, so there is nothing to exercise.

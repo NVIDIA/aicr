@@ -162,7 +162,8 @@ func TestApplyCriteriaFromConfigMarksTouched(t *testing.T) {
 // kindSnapshotYAML fingerprints to service=kind (+ os=ubuntu), against a
 // deliberately OS-agnostic overlay subtree: no kind overlay states os, so a
 // stated os is uncoverable and a fingerprint-derived one must be relaxed.
-const kindSnapshotYAML = `kind: Snapshot
+const kindSnapshotYAML = `apiVersion: aicr.run/v1
+kind: Snapshot
 measurements:
   - type: K8s
     subtypes:
@@ -179,7 +180,8 @@ measurements:
           ID: ubuntu
 `
 
-const kindSlurmSnapshotYAML = `kind: Snapshot
+const kindSlurmSnapshotYAML = `apiVersion: aicr.run/v1
+kind: Snapshot
 measurements:
   - type: K8s
     subtypes:
@@ -196,7 +198,8 @@ measurements:
           model: h100
 `
 
-const kindDetectedSlurmSnapshotYAML = `kind: Snapshot
+const kindDetectedSlurmSnapshotYAML = `apiVersion: aicr.run/v1
+kind: Snapshot
 measurements:
   - type: K8s
     subtypes:
@@ -247,7 +250,8 @@ func TestRecipeCmd_Snapshot_StatedDimensionNotRelaxed(t *testing.T) {
 // Kubernetes version below the kind overlay's `K8s.server.version >= 1.32`
 // constraint, so the only overlay covering service=kind is excluded by
 // constraint evaluation rather than absent from the catalog.
-const constraintFailingKindSnapshotYAML = `kind: Snapshot
+const constraintFailingKindSnapshotYAML = `apiVersion: aicr.run/v1
+kind: Snapshot
 measurements:
   - type: K8s
     subtypes:

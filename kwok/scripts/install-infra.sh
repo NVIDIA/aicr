@@ -102,8 +102,9 @@
 #                                         the Kind extraPortMappings hostPort.
 #   KWOK_CLUSTER             (optional, default "aicr-kwok-test") - Kind cluster
 #                                         name used only to side-load the
-#                                         registry and Gitea images before
-#                                         their Deployments are applied. Ignored
+#                                         registry, Gitea and Argo CD Redis
+#                                         images before the workloads that need
+#                                         them are applied. Ignored
 #                                         when KUBECTL_CONTEXT is set, since the
 #                                         cluster is then read from the context
 #                                         ("kind-<cluster>"). Preloading is best
@@ -151,8 +152,10 @@ log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 log_debug() { echo -e "${BLUE}[DEBUG]${NC} $*"; }
 
-# preload_image() — side-loads the registry / Gitea images into the Kind node
-# before their Deployments are applied. Sourced after the log_* helpers it
+# preload_image() — side-loads the registry / Gitea / Argo CD Redis images into
+# the Kind node before the workloads that need them are applied. The Redis one
+# belongs to the Argo CD chart rather than a Deployment this script writes, so
+# it is preloaded before `helm install` instead. Sourced after the log_* helpers it
 # calls. Resolved SCRIPT_DIR-relative so a deployed copy is never picked up.
 # shellcheck source=lib/preload-image.sh
 source "${SCRIPT_DIR}/lib/preload-image.sh"
@@ -169,6 +172,11 @@ ARGOCD_RELEASE="argocd"
 ARGOCD_REPO_NAME="argo"
 ARGOCD_REPO_URL="https://argoproj.github.io/argo-helm"
 ARGOCD_HELM_TIMEOUT="5m"
+# Bound for the post-failure Redis pin check. Short because it re-fetches the
+# same chart the install just failed on, and an unreachable repo is one of the
+# reasons it failed — an unbounded render there would replace `exit 30` with a
+# job cancellation and lose the exit-code taxonomy the lane branches on.
+ARGOCD_PIN_CHECK_TIMEOUT=60
 
 # Gitea configuration (flux-git lane, issue #963). Lives in the registry
 # namespace so the existing system-namespace cleanup allowlist covers it.
@@ -253,6 +261,51 @@ dump_argocd_diagnostics() {
     kc describe deployment -n "${ARGOCD_NAMESPACE}" 2>&1 || true
     log_error "--- argocd events (last 20) ---"
     kc get events -n "${ARGOCD_NAMESPACE}" --sort-by=.lastTimestamp 2>&1 | tail -20 || true
+}
+
+# report_argocd_redis_pin names the one cause a reader would otherwise have to
+# re-derive from an ImagePullBackOff: an argocd_chart bump moves the Redis the
+# chart renders, testing_tools.argocd_redis_image keeps pointing at the old ref,
+# the preload caches an image nothing pulls, and the lane dies on the ECR Public
+# 429 again (#2501). Nothing gates that pairing, so it is reported here.
+#
+# Runs only after a failed install, so the `helm template` costs nothing on the
+# happy path, and reports rather than decides — the install has already failed
+# and the exit code is the caller's.
+report_argocd_redis_pin() {
+    local chart_version="$1" expected_redis="$2" rendered_redis
+
+    log_error "--- preloaded vs rendered Redis ---"
+
+    # `timeout` is required, not optional, for the same reason preload_image
+    # requires it: this re-fetches the chart the install just failed on, and an
+    # unreachable repo is one of the reasons it fails. Without a bound, a stalled
+    # fetch holds the lane until the workflow kills the job, which would replace
+    # the caller's `exit 30` with a cancellation.
+    if ! command -v timeout &>/dev/null; then
+        log_error "timeout unavailable; skipping the Redis pin check"
+        return 0
+    fi
+
+    # `|| true` is load-bearing under `set -euo pipefail`: a failed render, a
+    # timeout, or a grep that matches nothing makes the pipeline non-zero, and a
+    # bare assignment from it would exit the script here — swallowing this report
+    # AND the caller's `exit 30`. The empty-string branch below handles all three.
+    rendered_redis=$(timeout "${ARGOCD_PIN_CHECK_TIMEOUT}" \
+        helm template "${ARGOCD_RELEASE}" "${ARGOCD_REPO_NAME}/argo-cd" \
+        --version "${chart_version}" --namespace "${ARGOCD_NAMESPACE}" 2>/dev/null |
+        grep -oE 'image:[[:space:]]*"?[^"[:space:]]*redis[^"[:space:]]*' |
+        sed -E 's/image:[[:space:]]*"?//' | head -1 || true)
+
+    if [[ -z "${rendered_redis}" ]]; then
+        log_error "could not render chart ${chart_version} to check its Redis ref"
+    elif [[ "${rendered_redis}" != "${expected_redis}" ]]; then
+        log_error "PIN DRIFT: chart ${chart_version} renders ${rendered_redis}"
+        log_error "  .settings.yaml testing_tools.argocd_redis_image is ${expected_redis}"
+        log_error "  the preloaded image is not the one the chart pulls; update the pin (#2501)"
+    else
+        log_error "argocd_redis_image matches the chart (${rendered_redis}); pin drift is not the cause"
+    fi
 }
 
 # Diagnostic dump for Flux controller failures.
@@ -392,8 +445,15 @@ EOF
 # -------------------------------------------------------------------
 install_argocd() {
     local chart_version="$1"
+    local redis_image="$2"
 
     log_info "Installing Argo CD (chart ${chart_version}) in namespace ${ARGOCD_NAMESPACE}..."
+
+    # Before the Helm install, so its 5m --wait is spent on the rollout rather
+    # than on an ECR Public pull that the shared runner egress IP may be
+    # throttled out of (#2501). The chart's quay.io and ghcr.io images are
+    # left to the kubelet — neither has been observed shedding a pull.
+    preload_image "${redis_image}"
 
     if ! helm repo add "${ARGOCD_REPO_NAME}" "${ARGOCD_REPO_URL}" --force-update >/dev/null 2>&1; then
         log_warn "helm repo add returned non-zero; continuing (repo may already exist)"
@@ -421,6 +481,7 @@ install_argocd() {
             --wait --timeout "${ARGOCD_HELM_TIMEOUT}"; then
         log_error "Argo CD Helm install failed"
         dump_argocd_diagnostics
+        report_argocd_redis_pin "${chart_version}" "${redis_image}"
         exit 30
     fi
 
@@ -828,11 +889,13 @@ main() {
     # on the helm lane.
     case "${DEPLOYER}" in
         argocd-oci|argocd-helm-oci)
-            local argocd_chart
+            local argocd_chart argocd_redis_image
             argocd_chart=$(read_setting '.testing_tools.argocd_chart')
+            argocd_redis_image=$(read_setting '.testing_tools.argocd_redis_image')
             log_info "argocd_chart:          ${argocd_chart}"
+            log_info "argocd_redis_image:    ${argocd_redis_image}"
             log_debug "Step 2 (argocd): install Argo CD"
-            install_argocd "${argocd_chart}"
+            install_argocd "${argocd_chart}" "${argocd_redis_image}"
             log_debug "Step 3 (argocd): apply repository secret"
             apply_repo_secret
             ;;
@@ -844,14 +907,16 @@ main() {
             # carries no credentials and Argo CD clones the public repo
             # anonymously) — applied unconditionally to keep this branch a
             # superset of the OCI lane.
-            local argocd_chart gitea_image
+            local argocd_chart argocd_redis_image gitea_image
             argocd_chart=$(read_setting '.testing_tools.argocd_chart')
+            argocd_redis_image=$(read_setting '.testing_tools.argocd_redis_image')
             gitea_image=$(read_setting '.testing_tools.gitea_image')
             log_info "argocd_chart:          ${argocd_chart}"
+            log_info "argocd_redis_image:    ${argocd_redis_image}"
             log_info "gitea_image:           ${gitea_image}"
             log_info "gitea host port:       ${GITEA_HOST_PORT}"
             log_debug "Step 2 (argocd): install Argo CD"
-            install_argocd "${argocd_chart}"
+            install_argocd "${argocd_chart}" "${argocd_redis_image}"
             log_debug "Step 3 (argocd): apply repository secret"
             apply_repo_secret
             log_debug "Step 4 (argocd-git): install Gitea"

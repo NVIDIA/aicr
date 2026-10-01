@@ -79,7 +79,7 @@ func snapshotWithSensitiveData() *snapshotter.Snapshot {
 func emitRecipe() *recipe.RecipeResult {
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
 			Accelerator: recipe.CriteriaAcceleratorH100,
@@ -124,7 +124,7 @@ func TestEmit_MinimalByDefault_RedactsSnapshotAndRecordsPolicy(t *testing.T) {
 	if res.Bundle.Predicate.Redaction == nil {
 		t.Fatalf("minimal bundle must record a redaction policy")
 	}
-	if res.Bundle.Predicate.Redaction.Policy != "minimal" || res.Bundle.Predicate.Redaction.Version != "v3" {
+	if res.Bundle.Predicate.Redaction.Policy != "minimal" || res.Bundle.Predicate.Redaction.Version != "v4" {
 		t.Errorf("unexpected redaction provenance: %+v", res.Bundle.Predicate.Redaction)
 	}
 	if len(res.Bundle.Predicate.Redaction.Applied) == 0 {
@@ -195,7 +195,7 @@ func TestEmit_HappyPathNoPush(t *testing.T) {
 	dir := t.TempDir()
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
 			Accelerator: recipe.CriteriaAcceleratorH100,

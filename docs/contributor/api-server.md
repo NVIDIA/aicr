@@ -291,15 +291,16 @@ contains two contract gates:
   constants. It matches the `allOf` branches by content rather than position,
   since `allOf` is semantically unordered.
 
-  Runtime acceptance of the legacy header shapes is pinned separately by
-  `TestBundleHandler_LegacyRecipeHeaders`, which posts absent, empty, and
-  target-`apiVersion` bodies to the handler, asserts 200, and round-trips the
-  emitted `recipe.yaml` back through the file loader to prove the ingest
-  normalization holds. The spec gate alone would only be checking the spec
-  against itself. The one legacy shape that is *not* accepted, `kind: Recipe`
-  (published through v0.18.0 and removed by the v1 collapse), is pinned by
-  `TestBundleHandler_RejectsLegacyRecipeKind` so the rejection stays a decision
-  rather than becoming an accident of a later refactor.
+  Runtime handling of the legacy header shapes is pinned separately by
+  `TestBundleHandler_LegacyRecipeHeaders`. It asserts 200 for a target
+  `apiVersion` with an absent or empty `kind`, and round-trips the emitted
+  `recipe.yaml` back through the file loader to prove the ingest normalization
+  holds. It asserts 400 for an absent or empty `apiVersion`, which v1.0.0
+  retired. The spec gate alone would only be checking the spec against itself.
+  The legacy `kind: Recipe` (published through v0.18.0 and removed by the v1
+  collapse) is pinned by `TestBundleHandler_RejectsLegacyRecipeKind` so the
+  rejection stays a decision rather than becoming an accident of a later
+  refactor.
 
 Drift is a contract bug: clients conforming to the spec will reject
 inputs the server actually accepts, or generate types that reject

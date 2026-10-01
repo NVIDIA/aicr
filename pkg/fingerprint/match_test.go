@@ -206,6 +206,66 @@ func TestMatch_IntentSpecificIsUnknown(t *testing.T) {
 	}
 }
 
+func TestMatch_OptInOnlyServiceIsNotInferable(t *testing.T) {
+	t.Log("Matching a generic recipe against a metal3 bare-metal fingerprint")
+	fp := &Fingerprint{
+		Service:     Dimension{Value: "metal3", Source: "k8s.node.provider"},
+		Accelerator: Dimension{Value: "gb300", Source: "gpu.hardware.model"},
+		OS:          OSDimension{Value: "ubuntu", Version: "24.04", Source: "os.release"},
+	}
+	got := fp.Match(&recipe.Criteria{
+		Service:     recipe.CriteriaServiceGeneric,
+		Accelerator: recipe.CriteriaAcceleratorGB300,
+		OS:          recipe.CriteriaOSUbuntu,
+	})
+
+	t.Log("Testing that the service dimension is not-inferable and keeps the observed provider")
+	service := requireDim(t, got, DimensionService)
+	if service.Match != DimensionNotInferable {
+		t.Errorf("service.Match = %q, want not-inferable", service.Match)
+	}
+	if service.RecipeRequires != "generic" || service.FingerprintProvides != "metal3" {
+		t.Errorf("service diff = %+v, want recipeRequires=generic fingerprintProvides=metal3", service)
+	}
+
+	t.Log("Testing that not-inferable does not flip the overall outcome")
+	if !got.Matched {
+		t.Errorf("Matched = false, want true; perDimension = %+v", got.PerDimension)
+	}
+	for _, dim := range []DimensionName{DimensionAccelerator, DimensionOS} {
+		if requireDim(t, got, dim).Match != DimensionMatched {
+			t.Errorf("%s.Match = %q, want matched", dim, requireDim(t, got, dim).Match)
+		}
+	}
+}
+
+func TestMatch_OptInOnlyServiceUncapturedStaysUnknown(t *testing.T) {
+	fp := &Fingerprint{Accelerator: Dimension{Value: "gb300"}}
+	got := fp.Match(&recipe.Criteria{Service: recipe.CriteriaServiceGeneric})
+	if requireDim(t, got, DimensionService).Match != DimensionUnknown {
+		t.Errorf("service.Match = %q, want unknown when the fingerprint captured no provider", requireDim(t, got, DimensionService).Match)
+	}
+}
+
+func TestMatch_ConcreteServiceStillMismatches(t *testing.T) {
+	fp := &Fingerprint{Service: Dimension{Value: "metal3"}}
+	got := fp.Match(&recipe.Criteria{Service: recipe.CriteriaServiceEKS})
+	if requireDim(t, got, DimensionService).Match != DimensionMismatched {
+		t.Errorf("service.Match = %q, want mismatched (eks is inferable)", requireDim(t, got, DimensionService).Match)
+	}
+	if got.Matched {
+		t.Error("Matched = true, want false")
+	}
+}
+
+func TestMatchWith_NilRegistryUsesEmbedded(t *testing.T) {
+	fp := &Fingerprint{Service: Dimension{Value: "rke2"}}
+	got := fp.MatchWith(&recipe.Criteria{Service: recipe.CriteriaServiceGeneric}, nil)
+	if requireDim(t, got, DimensionService).Match != DimensionNotInferable {
+		t.Errorf("service.Match = %q, want not-inferable with the embedded registry", requireDim(t, got, DimensionService).Match)
+	}
+}
+
 func TestMatchResult_Find_Missing(t *testing.T) {
 	r := MatchResult{}
 	if _, ok := r.Find(DimensionService); ok {

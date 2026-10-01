@@ -90,6 +90,45 @@ Two kinds of name appear in these trees, and only one is a promise:
   change with the recipe. Discover them by listing the directory rather than
   hardcoding a name.
 
+`UPGRADING.md` is the one root file whose name is fixed but whose presence is
+not: a bundle from any deployer may carry it, and only does when it needs it. Test for it
+rather than assuming it. See [Upgrade guidance in the
+bundle](#upgrade-guidance-in-the-bundle).
+
+### Upgrade guidance in the bundle
+
+A new pin is sometimes one an existing installation cannot simply move to: a
+CRD is renamed, or objects have to be migrated by hand. When a component's
+pinned version falls inside the `to` range of a `manual` or `blocked`
+[transition record](../contributor/upgrade-records.md), the bundle carries that
+record in three places:
+
+- **`UPGRADING.md`** at the bundle root: the summary, the precondition, whether
+  the change can be reversed, the ordered steps, and references. Steps are
+  filtered to the `--deployer` the bundle was built with, so an Argo CD bundle
+  shows the GitOps path and a Helm bundle the imperative one.
+- **A "Before You Upgrade" table** near the top of `README.md`, naming each
+  affected component, its verdict, and the versions it applies to when you
+  upgrade from them.
+- **A warning** at the top of the `Note:` block that `aicr bundle` prints.
+
+The guidance applies only when you apply the bundle over an existing
+installation of an earlier version. A fresh install can skip it. A bundle
+knows the versions it pins but not the ones your cluster runs, so every entry
+names the `from` range it applies to rather than a verdict for your move. For
+that verdict, run [`aicr upgrade-check`](upgrading.md) against the recipe you
+deployed from.
+
+Nothing is written when no pinned version needs it, and a `safe` record never
+produces any of the three.
+
+Bundling never fails because of a transition record. Checking records is the
+job of `aicr upgrade-check` and the project's lint gate, so a version you pin
+yourself with `--data` bundles even when no record covers it. If a record
+cannot be read at all, `aicr bundle` still writes the bundle, leaves the
+guidance out, and says so in its `Note:` block; run `aicr upgrade-check` to see
+the upgrade steps instead.
+
 ### Bundle info
 
 Every bundle carries a `bundle-info.yaml` at its root, written unconditionally
@@ -265,7 +304,7 @@ version describes the wrapper instead of what it wraps.
 
 So for the `gpu-operator-post` release generated alongside gpu-operator, a
 `helm list` reports chart `gpu-operator-post-0.22.0` — the AICR version — while
-its app version and `aicr.run/component-version` both read `v26.7.0`, the
+its app version and `aicr.run/component-version` both read `v26.7.1`, the
 gpu-operator pin those manifests accompany.
 
 A component with no upstream pin — a manifest-only component, and the injected

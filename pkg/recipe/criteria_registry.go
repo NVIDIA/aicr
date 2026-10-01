@@ -137,6 +137,21 @@ func (r *CriteriaRegistry) Register(field CriteriaField, value string, origin Cr
 	bucket[value] = origin
 }
 
+// optInOnlyCriteria lists the criteria values no snapshot measurement can
+// produce, so they are selectable only by an explicit flag. It is a
+// property of the OSS value set rather than of any one registry.
+var optInOnlyCriteria = map[CriteriaField]map[string]struct{}{
+	FieldService: {string(CriteriaServiceGeneric): {}},
+}
+
+// IsOptInOnly reports whether value for field can only be selected
+// explicitly because no snapshot measurement ever yields it. Fingerprint
+// matching records such a value as not-inferable instead of mismatched.
+func (r *CriteriaRegistry) IsOptInOnly(field CriteriaField, value string) bool {
+	_, ok := optInOnlyCriteria[field][normalizeCriteriaValue(value)]
+	return ok
+}
+
 // Has reports whether value is known for field, regardless of origin.
 // Returns false in strict mode unless the value originates from an
 // embedded overlay.
