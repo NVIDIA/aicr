@@ -179,6 +179,14 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 				strings.Join(config.GetDeployerTypes(), ", "))
 	}
 
+	// The sentinel names the source side only. Left to the artifact path, it
+	// would be read as a file named "cluster" and fail as not found.
+	if req.To == FromCluster {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--to must be an artifact (a recipe, a bundle, or a cm:// URI): a cluster carries no target to "+
+				"upgrade to. A directory named cluster is reached as ./cluster")
+	}
+
 	var from *RecipeResult
 	if !fromCluster {
 		fromPath, err := artifactRecipePath(req.From)
@@ -211,15 +219,15 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 	c.mu.RUnlock()
 	defer c.inflight.Done()
 
-	fromTable := componentIdentities(from)
+	fromTable, toTable := componentIdentities(from), componentIdentities(to)
 	var source *upgrade.ReportSource
 	if fromCluster {
 		var versions map[string]string
-		versions, source, err = c.clusterVersions(ctx, dp, req, deployer)
+		versions, source, err = c.clusterVersions(ctx, dp, req, deployer, to)
 		if err != nil {
 			return nil, err
 		}
-		fromTable = clusterIdentities(versions)
+		fromTable = clusterIdentities(versions, toTable)
 	}
 
 	set, comps, err := recipe.LoadUpgradeRecords(ctx, dp)
@@ -230,7 +238,7 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 		return nil, err
 	}
 
-	results := upgrade.MatchIdentities(set, fromTable, componentIdentities(to))
+	results := upgrade.MatchIdentities(set, fromTable, toTable)
 	if deployer == "" && upgrade.RequiresDeployer(results) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"a deployer is required: at least one component needs operator steps, and steps differ per deployer. "+
@@ -278,7 +286,7 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 // thing separating a bare cluster from a mapping that no longer matches what
 // AICR installed.
 func (c *Client) clusterVersions(ctx context.Context, dp recipe.DataProvider, req UpgradeCheckRequest,
-	deployer string) (map[string]string, *upgrade.ReportSource, error) {
+	deployer string, to *RecipeResult) (map[string]string, *upgrade.ReportSource, error) {
 
 	registry, err := recipe.GetComponentRegistryFor(dp)
 	if err != nil {
@@ -287,7 +295,7 @@ func (c *Client) clusterVersions(ctx context.Context, dp recipe.DataProvider, re
 	result, err := c.deps.readInventory(ctx, inventory.Options{
 		Kubeconfig: req.Kubeconfig,
 		Deployer:   inventory.Deployer(deployer),
-		Components: recipe.InventoryComponents(registry),
+		Components: withRecipeNamespaces(recipe.InventoryComponents(registry), to),
 	})
 	if err != nil {
 		return nil, nil, err
@@ -298,27 +306,56 @@ func (c *Client) clusterVersions(ctx context.Context, dp recipe.DataProvider, re
 		nil
 }
 
+// withRecipeNamespaces adds, to each component, the namespace the target
+// recipe resolves it into.
+//
+// The registry default is not always where a component runs. An overlay or
+// mixin can move it (os-talos moves gpu-operator to privileged-gpu-operator),
+// and --inherit-from keeps a running component where it already was, which
+// the target recipe then records. Flux composes the release name from that
+// namespace and Argo CD deploys into it, so without it those installs match
+// nothing and read as newly installed.
+func withRecipeNamespaces(comps []inventory.Component, to *RecipeResult) []inventory.Component {
+	if to == nil {
+		return comps
+	}
+	resolved := make(map[string]string, len(to.Components))
+	for _, ref := range to.Components {
+		resolved[ref.Name] = ref.Namespace
+	}
+	for i := range comps {
+		if ns := resolved[comps[i].Name]; ns != "" && ns != comps[i].Namespace {
+			comps[i].Namespaces = append(comps[i].Namespaces, ns)
+		}
+	}
+
+	return comps
+}
+
 // clusterIdentities is a cluster read restated as the matcher's `from` table.
 //
-// It states a version and no namespace, which is not an omission the read
-// could fill. The read attributes a release to a component by name, and for
-// flux and Argo CD that name is composed from the registry's namespace: a
+// The read recovers a version and no other identity field, which is not an
+// omission it could fill. It attributes a release to a component by name, and
+// for flux and Argo CD that name is composed from candidate namespaces: a
 // namespace is an input to the attribution rather than a fact recovered from
-// it, and a release that moved out of the registry's namespace is not matched
-// at all under those deployers. Only helm and helmfile match on the bare name,
-// so a namespace stated here would come from two deployers of five and be
-// silently absent under the rest, which is a worse report than none.
+// it, and helm and helmfile match on the bare name and recover none at all.
+// Chart, source, path, type and the manifest file sets are likewise in no
+// record the read decodes.
 //
-// upgrade.identityChanges treats an unstated field as a fact the artifact did
-// not carry rather than a move to the default, so this reports no relocation
-// instead of reporting a wrong one.
-func clusterIdentities(versions map[string]string) map[string]upgrade.Identity {
+// So each component takes its identity from the target, toTable, and only its
+// version from the cluster: the read claims no move it cannot see. Leaving the
+// fields empty instead is not neutral, because upgrade.identityChanges reads
+// an empty manifest file set as a stated one, and every manifest-based
+// component would then report its files as added.
+func clusterIdentities(versions map[string]string, toTable map[string]upgrade.Identity) map[string]upgrade.Identity {
 	if versions == nil {
 		return nil
 	}
 	table := make(map[string]upgrade.Identity, len(versions))
 	for name, version := range versions {
-		table[name] = upgrade.Identity{Version: version}
+		id := toTable[name]
+		id.Version = version
+		table[name] = id
 	}
 
 	return table
@@ -343,6 +380,7 @@ func reportSourceFrom(info inventory.SourceInfo, kubeconfig string, matched int)
 		Kubeconfig: kubeconfig,
 		Matched:    matched,
 		Helm: upgrade.ReportSourceHelm{
+			Read:             info.Helm.Read,
 			Records:          info.Helm.Records,
 			Unattributed:     info.Helm.Unattributed,
 			Unreadable:       info.Helm.Unreadable,
@@ -350,9 +388,11 @@ func reportSourceFrom(info inventory.SourceInfo, kubeconfig string, matched int)
 			StampedUnmatched: info.Helm.StampedUnmatched,
 		},
 		Argo: upgrade.ReportSourceArgo{
+			Read:         info.Argo.Read,
 			Applications: info.Argo.Applications,
 			Unattributed: info.Argo.Unattributed,
 			Unreadable:   info.Argo.Unreadable,
+			Remote:       info.Argo.Remote,
 		},
 	}
 }

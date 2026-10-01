@@ -371,6 +371,14 @@ const (
 	// ceiling is derived from the operation it repeats rather than picked.
 	CLIUpgradeCheckTimeout = 3 * RecipeOperationTimeout
 
+	// CLIUpgradeCheckClusterTimeout bounds an `aicr upgrade-check` run that
+	// reads the cluster: CLIUpgradeCheckTimeout's artifact work, plus the
+	// longer of the two inventory readers (one runs per deployer), plus the
+	// at-risk scan. Summing them lets every inner budget be reached before the
+	// run's own expires, so a slow scan times out on its own budget and leaves
+	// a report rather than taking the run down with it.
+	CLIUpgradeCheckClusterTimeout = CLIUpgradeCheckTimeout + HelmInventoryTimeout + AtRiskScanTimeout
+
 	// OIDCAuthTimeout is the maximum time to wait for a user to complete
 	// any interactive OIDC authentication flow — browser callback or
 	// device-code (RFC 8628). Prevents indefinite blocking if the flow is

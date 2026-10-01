@@ -56,6 +56,41 @@ func releasePayload(t *testing.T, release, namespace, status, chart, chartVersio
 		release, status, chart, chartVersion, revision, namespace))
 }
 
+// splitUnproven separates readable releases from the ones read as installed
+// with no version, naming the latter "namespace/name".
+func splitUnproven(got []installedRelease) ([]installedRelease, []string) {
+	var readable []installedRelease
+	var unproven []string
+	for _, r := range got {
+		if r.Unproven {
+			unproven = append(unproven, r.Namespace+"/"+r.Name)
+
+			continue
+		}
+		readable = append(readable, r)
+	}
+
+	return readable, unproven
+}
+
+// targetedAsStored fills each expected readable release's TargetNamespace with
+// its Namespace, which is what releasePayload writes; a case whose payload
+// says otherwise sets the field itself.
+func targetedAsStored(want []installedRelease) []installedRelease {
+	out := make([]installedRelease, len(want))
+	for i, r := range want {
+		if r.TargetNamespace == "" && !r.Unproven {
+			r.TargetNamespace = r.Namespace
+		}
+		out[i] = r
+	}
+	if len(want) == 0 {
+		return want
+	}
+
+	return out
+}
+
 // helmLabels mirrors the label set Helm's storage drivers write. createdAt and
 // modifiedAt are omitted: nothing here reads them.
 func helmLabels(release string, revision int, status string) map[string]string {
@@ -142,10 +177,13 @@ func TestHelmReleases(t *testing.T) {
 		wantRecords      int
 		wantUnattributed int
 		wantUnreadable   int
-		wantErr          bool
-		wantErrCode      errors.ErrorCode
-		wantErrContains  []string
-		wantErrContext   map[string]any
+		// wantUnproven is the releases read as installed with no version, as
+		// "namespace/name": the ones a tolerated record poisoned.
+		wantUnproven    []string
+		wantErr         bool
+		wantErrCode     errors.ErrorCode
+		wantErrContains []string
+		wantErrContext  map[string]any
 	}{
 		{
 			name:        "single release",
@@ -274,7 +312,7 @@ func TestHelmReleases(t *testing.T) {
 			name: "chart annotations reach the result",
 			objects: []runtime.Object{
 				helmSecret("gpu-operator", "gpu-operator", 1, "deployed", encodeReleaseFixture(t,
-					`{"info":{"status":"deployed"},"chart":{"metadata":{"name":"gpu-operator",`+
+					`{"namespace":"gpu-operator","info":{"status":"deployed"},"chart":{"metadata":{"name":"gpu-operator",`+
 						`"version":"v25.3.3","appVersion":"25.3.3",`+
 						`"annotations":{"aicr.run/component-version":"1.4.2","other":"kept"}}}}`)),
 			},
@@ -304,7 +342,14 @@ func TestHelmReleases(t *testing.T) {
 					`{"name":"wrong","namespace":"wrong","version":99,"info":{"status":"deployed"},`+
 						`"chart":{"metadata":{"name":"gpu-operator","version":"v25.3.3","appVersion":"25.3.3"}}}`)),
 			},
-			want:        []installedRelease{wantGPUOperator},
+			// The payload's namespace is kept only as the install-target hint
+			// flux attribution reads; the identity is still the labels'.
+			want: []installedRelease{func() installedRelease {
+				r := wantGPUOperator
+				r.TargetNamespace = "wrong"
+
+				return r
+			}()},
 			wantRecords: 1,
 		},
 		{
@@ -335,26 +380,23 @@ func TestHelmReleases(t *testing.T) {
 			wantRecords: 3,
 		},
 		{
-			// keepNewest keeps the incumbent on a revision tie, and the secret
-			// driver is read first, so its record wins. Both encode the same
-			// release so either answer would be defensible; this pins the one
-			// the comment claims. Without a fixture where one release appears
-			// under both drivers at one revision, the rule is unasserted.
-			name: "a revision tie between the two drivers keeps the secret record",
+			// Each driver numbers its own revisions, so neither driver's newest
+			// is provably the release's. After a HELM_DRIVER switch a leftover
+			// ConfigMap at revision 7 would otherwise beat the live Secret at
+			// revision 1 and report a chart the release has moved off. The
+			// release stays installed, unversioned, whatever its confidence.
+			name: "a release stored by both drivers is installed with no version",
 			objects: []runtime.Object{
-				helmSecret("gpu-operator", "gpu-operator", 7, "deployed",
+				helmSecret("gpu-operator", "gpu-operator", 1, "deployed",
 					releasePayload(t, "gpu-operator", "gpu-operator", "deployed",
-						"gpu-operator", "v-from-secret", 7)),
+						"gpu-operator", "v-from-secret", 1)),
 				helmConfigMap("gpu-operator", "gpu-operator", 7, "deployed",
 					releasePayload(t, "gpu-operator", "gpu-operator", "deployed",
 						"gpu-operator", "v-from-configmap", 7)),
 			},
-			want: []installedRelease{{
-				Source: sourceHelm, Name: "gpu-operator", Namespace: "gpu-operator", Revision: 7,
-				Status: "deployed", ChartName: "gpu-operator", ChartVersion: "v-from-secret",
-				AppVersion: "25.3.3",
-			}},
-			wantRecords: 2,
+			wantUnproven:   []string{"gpu-operator/gpu-operator"},
+			wantRecords:    2,
+			wantUnreadable: 1,
 		},
 		{
 			name:    "no releases",
@@ -504,7 +546,8 @@ func TestHelmReleases(t *testing.T) {
 			// away from: a confident wrong answer where a gap was intended.
 			// Under Flux every release name is "<targetNamespace>-<name>", so
 			// nothing is confident and every release sits in this tier.
-			name: "a tolerated newest revision does not promote a superseded one",
+			name:         "a tolerated newest revision does not promote a superseded one",
+			wantUnproven: []string{"gpu-operator/gpu-operator-gpu-operator"},
 			objects: []runtime.Object{
 				helmSecret("gpu-operator", "gpu-operator-gpu-operator", 1, "superseded",
 					releasePayload(t, "gpu-operator-gpu-operator", "gpu-operator", "superseded",
@@ -524,7 +567,8 @@ func TestHelmReleases(t *testing.T) {
 		{
 			// Order must not matter: the superseded revision may already be in
 			// hand when the unreadable one arrives, or the reverse.
-			name: "a release poisoned before its readable revision arrives stays withheld",
+			name:         "a release poisoned before its readable revision arrives stays withheld",
+			wantUnproven: []string{"gpu-operator/gpu-operator-gpu-operator"},
 			objects: []runtime.Object{
 				func() runtime.Object {
 					s := helmSecret("gpu-operator", "gpu-operator-gpu-operator", 2, "deployed",
@@ -544,7 +588,8 @@ func TestHelmReleases(t *testing.T) {
 		{
 			// A poisoned release is one release however many of its revisions
 			// could not be read, and poisoning one must not withhold another.
-			name: "unreadable revisions of one release count once and do not spread",
+			name:         "unreadable revisions of one release count once and do not spread",
+			wantUnproven: []string{"gpu-operator/gpu-operator-gpu-operator"},
 			objects: []runtime.Object{
 				func() runtime.Object {
 					s := helmSecret("gpu-operator", "gpu-operator-gpu-operator", 3, "deployed", gpuOperator)
@@ -565,7 +610,8 @@ func TestHelmReleases(t *testing.T) {
 		{
 			// The same release name in two namespaces is two releases, so
 			// poisoning one leaves the other readable.
-			name: "poisoning is per release, not per name",
+			name:         "poisoning is per release, not per name",
+			wantUnproven: []string{"tenant-a/gpu-operator-gpu-operator"},
 			objects: []runtime.Object{
 				func() runtime.Object {
 					s := helmSecret("tenant-a", "gpu-operator-gpu-operator", 1, "deployed", gpuOperator)
@@ -587,7 +633,8 @@ func TestHelmReleases(t *testing.T) {
 			// Flux's "<targetNamespace>-<name>" is a possible match, not a
 			// confident one, so an unreadable record in that shape is counted
 			// rather than allowed to fail a run it may not belong to.
-			name: "malformed possible record is skipped and counted",
+			name:         "malformed possible record is skipped and counted",
+			wantUnproven: []string{"gpu-operator/gpu-operator-gpu-operator"},
 			objects: []runtime.Object{
 				func() runtime.Object {
 					s := helmSecret("gpu-operator", "gpu-operator-gpu-operator", 1, "deployed", gpuOperator)
@@ -601,7 +648,8 @@ func TestHelmReleases(t *testing.T) {
 			wantRecords:    2,
 		},
 		{
-			name: "possible record with a malformed revision label is skipped and counted",
+			name:         "possible record with a malformed revision label is skipped and counted",
+			wantUnproven: []string{"gpu-operator/tenant-a-gpu-operator", "gpu-operator/tenantgpu-operator"},
 			objects: []runtime.Object{
 				func() runtime.Object {
 					s := helmSecret("gpu-operator", "tenant-a-gpu-operator", 1, "deployed", gpuOperator)
@@ -620,7 +668,8 @@ func TestHelmReleases(t *testing.T) {
 		},
 		{
 			// Leniency has to reach decode time, not just the label checks.
-			name: "possible record that cannot be decoded is skipped and counted",
+			name:         "possible record that cannot be decoded is skipped and counted",
+			wantUnproven: []string{"gpu-operator/gpu-operator-gpu-operator"},
 			objects: []runtime.Object{
 				helmSecret("gpu-operator", "gpu-operator-gpu-operator", 1, "deployed", undecodablePayload),
 				helmSecret("gpu-operator", "gpu-operator", 1, "deployed", gpuOperator),
@@ -630,7 +679,8 @@ func TestHelmReleases(t *testing.T) {
 			wantRecords:    2,
 		},
 		{
-			name: "possible record with an empty payload is skipped and counted",
+			name:         "possible record with an empty payload is skipped and counted",
+			wantUnproven: []string{"gpu-operator/tenant-a-gpu-operator"},
 			objects: []runtime.Object{
 				helmConfigMap("gpu-operator", "tenant-a-gpu-operator", 1, "deployed", ""),
 			},
@@ -797,7 +847,7 @@ func TestHelmReleases(t *testing.T) {
 			}
 
 			within := tt.within
-			if within == nil {
+			if within.components == nil {
 				within = defaultTestScope()
 			}
 
@@ -819,8 +869,12 @@ func TestHelmReleases(t *testing.T) {
 
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("helmReleases() = %+v, want %+v", got, tt.want)
+			readable, unproven := splitUnproven(got)
+			if want := targetedAsStored(tt.want); !reflect.DeepEqual(readable, want) {
+				t.Errorf("helmReleases() = %+v, want %+v", readable, want)
+			}
+			if !reflect.DeepEqual(unproven, tt.wantUnproven) {
+				t.Errorf("helmReleases() unproven = %q, want %q", unproven, tt.wantUnproven)
 			}
 			if read.Unattributed != tt.wantUnattributed {
 				t.Errorf("helmReleases() counted %d unattributable records, want %d",
@@ -1064,8 +1118,8 @@ func TestHelmReleasesFollowsListPages(t *testing.T) {
 					t.Errorf("page %d listed with selector %q, want %q", i+1, selector, "owner=helm")
 				}
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("helmReleases() = %+v, want %+v", got, tt.want)
+			if want := targetedAsStored(tt.want); !reflect.DeepEqual(got, want) {
+				t.Errorf("helmReleases() = %+v, want %+v", got, want)
 			}
 		})
 	}
@@ -1228,7 +1282,7 @@ func TestHelmReleasesEchoesPagingOptions(t *testing.T) {
 			ChartName: "network-operator", ChartVersion: "v25.1.0", AppVersion: "25.3.3",
 		},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("helmReleases() = %+v, want %+v", got, want)
+	if expected := targetedAsStored(want); !reflect.DeepEqual(got, expected) {
+		t.Errorf("helmReleases() = %+v, want %+v", got, expected)
 	}
 }

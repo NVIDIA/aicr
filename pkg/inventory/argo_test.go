@@ -16,6 +16,7 @@ package inventory
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -272,7 +273,8 @@ func withoutStatus(manifest string) string {
 // kind has to be declared because there is no typed scheme to infer it from.
 func argoClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{argoApplicationGVR: "ApplicationList"}, objects...)
+		map[schema.GroupVersionResource]string{argoApplicationGVR: "ApplicationList", secretGVR: "SecretList"},
+		objects...)
 }
 
 // argoForbidden is the RBAC denial for a cluster-scoped List of the CRD.
@@ -392,6 +394,7 @@ spec:
       chart: kai-scheduler
       targetRevision: v0.9.4
   destination:
+    server: "https://kubernetes.default.svc"
     namespace: "kai-scheduler"
 `))},
 			want: []installedRelease{{
@@ -423,6 +426,7 @@ spec:
       chart: cert-manager
       targetRevision: 1.20.2
   destination:
+    server: "https://kubernetes.default.svc"
     namespace: "cert-manager"
 `))},
 			want: []installedRelease{wantCertManager},
@@ -518,7 +522,10 @@ spec:
 			// that shape that cannot be read is counted rather than fatal. A
 			// foreign workload sharing a token lands in the same tier, and
 			// this reader cannot tell the two apart.
-			name: "malformed possible application is skipped and counted",
+			//
+			// It is kept, as unproven, so a component it does belong to reads
+			// as installed with no version rather than as newly installed.
+			name: "malformed possible application is counted and kept unproven",
 			objects: []runtime.Object{
 				argoAppWith(t, certManagerApp, func(app *unstructured.Unstructured) {
 					app.SetName("tenant-a-cert-manager")
@@ -532,11 +539,11 @@ spec:
 				Namespace:    "gpu-operator",
 				ChartName:    "gpu-operator",
 				ChartVersion: "v25.10.0",
-			}},
+			}, {Source: sourceArgo, Name: "tenant-a-cert-manager", Unproven: true}},
 			wantUnreadable: 1,
 		},
 		{
-			name: "possible application with unreadable sources is skipped and counted",
+			name: "possible application with unreadable sources is counted and kept unproven",
 			objects: []runtime.Object{
 				argoAppWith(t, certManagerApp, func(app *unstructured.Unstructured) {
 					app.SetName("tenantcert-manager")
@@ -546,7 +553,9 @@ spec:
 					}
 				}),
 			},
-			want:           nil,
+			want: []installedRelease{
+				{Source: sourceArgo, Name: "tenantcert-manager", Namespace: "cert-manager", Unproven: true},
+			},
 			wantUnreadable: 1,
 		},
 		{
@@ -744,7 +753,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata: {name: "zeta", namespace: argocd}
-spec: {source: {path: 003-zeta}, destination: {namespace: "zeta-ns"}}
+spec: {source: {path: 003-zeta}, destination: {server: "https://kubernetes.default.svc", namespace: "zeta-ns"}}
 `),
 				*argoAppWith(t, gpuOperatorApp, func(app *unstructured.Unstructured) {
 					app.SetNamespace("argocd-prod")
@@ -757,7 +766,7 @@ spec: {source: {path: 003-zeta}, destination: {namespace: "zeta-ns"}}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata: {name: "alpha", namespace: argocd}
-spec: {source: {path: 001-alpha}, destination: {namespace: "alpha-ns"}}
+spec: {source: {path: 001-alpha}, destination: {server: "https://kubernetes.default.svc", namespace: "alpha-ns"}}
 `),
 				*argoAppWith(t, gpuOperatorApp, func(app *unstructured.Unstructured) {
 					if err := unstructured.SetNestedField(app.Object, "tenant-a",
@@ -831,7 +840,7 @@ spec: {source: {path: 001-alpha}, destination: {namespace: "alpha-ns"}}
 			}
 
 			within := tt.within
-			if within == nil {
+			if within.components == nil {
 				within = argoTestScope()
 			}
 
@@ -1231,6 +1240,7 @@ spec:
     chart: kai-scheduler
     targetRevision: v0.16.9
   destination:
+    server: "https://kubernetes.default.svc"
     namespace: kai-scheduler
 status:
   sync:
@@ -1278,5 +1288,236 @@ status:
 				t.Errorf("ChartVersion = %q, want %q", got.ChartVersion, tt.want)
 			}
 		})
+	}
+}
+
+// clusterSecret is an Argo CD cluster Secret registering server under name.
+func clusterSecret(secretName, name, server string) *unstructured.Unstructured {
+	secret := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"data": map[string]any{
+			"name":   base64.StdEncoding.EncodeToString([]byte(name)),
+			"server": base64.StdEncoding.EncodeToString([]byte(server)),
+			"config": base64.StdEncoding.EncodeToString([]byte(`{"bearerToken":"fake-token-for-tests"}`)),
+		},
+	}}
+	secret.SetName(secretName)
+	secret.SetNamespace("argocd")
+	secret.SetLabels(map[string]string{"argocd.argoproj.io/secret-type": "cluster"})
+
+	return secret
+}
+
+// destinedTo is the cert-manager Application deploying to the given server
+// and destination name, either of which may be empty.
+func destinedTo(t *testing.T, appName, server, name string) *unstructured.Unstructured {
+	t.Helper()
+
+	return argoAppWith(t, certManagerApp, func(app *unstructured.Unstructured) {
+		app.SetName(appName)
+		unstructured.RemoveNestedField(app.Object, "spec", "destination", "server")
+		for field, value := range map[string]string{"server": server, "name": name} {
+			if value == "" {
+				continue
+			}
+			if err := unstructured.SetNestedField(app.Object, value, "spec", "destination", field); err != nil {
+				t.Fatalf("set destination %s: %v", field, err)
+			}
+		}
+	})
+}
+
+// TestArgoApplicationsReadsOnlyThisCluster pins that an Application deploying
+// to another cluster never becomes this cluster's installed baseline. On an
+// Argo CD management cluster a remote Application can carry a component's
+// name and namespace, and one at the --to version would read as the local
+// upgrade already made, dropping its steps.
+func TestArgoApplicationsReadsOnlyThisCluster(t *testing.T) {
+	const remoteServer = "https://prod-east.example.com"
+
+	tests := []struct {
+		name            string
+		objects         []runtime.Object
+		want            []installedRelease
+		wantRemote      int
+		wantUnreadable  int
+		wantErrCode     errors.ErrorCode
+		wantErrContains []string
+	}{
+		{
+			name: "a remote server is excluded and counted",
+			objects: []runtime.Object{
+				destinedTo(t, "cert-manager", remoteServer, ""),
+				argoApp(t, gpuOperatorApp),
+			},
+			want: []installedRelease{{
+				Source: sourceArgo, Name: "gpu-operator", Namespace: "gpu-operator",
+				ChartName: "gpu-operator", ChartVersion: "v25.10.0",
+			}},
+			wantRemote: 1,
+		},
+		{
+			name:    "the built-in in-cluster name is this cluster",
+			objects: []runtime.Object{destinedTo(t, "cert-manager", "", "in-cluster")},
+			want:    []installedRelease{wantCertManager},
+		},
+		{
+			name: "a name a cluster Secret registers as this cluster is local",
+			objects: []runtime.Object{
+				destinedTo(t, "cert-manager", "", "mgmt"),
+				clusterSecret("cluster-mgmt", "mgmt", argoInClusterServer),
+			},
+			want: []installedRelease{wantCertManager},
+		},
+		{
+			name: "a name a cluster Secret registers elsewhere is remote",
+			objects: []runtime.Object{
+				destinedTo(t, "cert-manager", "", "prod-east"),
+				clusterSecret("cluster-prod-east", "prod-east", remoteServer),
+			},
+			wantRemote: 1,
+		},
+		{
+			name:            "an unresolvable name on a confident match fails the run",
+			objects:         []runtime.Object{destinedTo(t, "cert-manager", "", "prod-west")},
+			wantErrCode:     errors.ErrCodeInternal,
+			wantErrContains: []string{"cert-manager", `"prod-west"`, "no Argo CD cluster Secret"},
+		},
+		{
+			name:    "an unresolvable name on a loose match is counted and kept unproven",
+			objects: []runtime.Object{destinedTo(t, "team-cert-manager", "", "prod-west")},
+			want: []installedRelease{
+				{Source: sourceArgo, Name: "team-cert-manager", Namespace: "cert-manager", Unproven: true},
+			},
+			wantUnreadable: 1,
+		},
+		{
+			name: "a name the cluster Secrets disagree on is refused",
+			objects: []runtime.Object{
+				destinedTo(t, "cert-manager", "", "shared"),
+				clusterSecret("cluster-a", "shared", argoInClusterServer),
+				clusterSecret("cluster-b", "shared", remoteServer),
+			},
+			wantErrCode:     errors.ErrCodeConflict,
+			wantErrContains: []string{"cert-manager", `"shared"`, "disagree"},
+		},
+		{
+			name:            "both a server and a name are refused",
+			objects:         []runtime.Object{destinedTo(t, "cert-manager", argoInClusterServer, "in-cluster")},
+			wantErrCode:     errors.ErrCodeInternal,
+			wantErrContains: []string{"cert-manager", "both spec.destination.server and spec.destination.name"},
+		},
+		{
+			// A Secret that does not decode registers nothing, so the name it
+			// would have resolved stays unresolved rather than guessed.
+			name: "a cluster Secret without a name registers nothing",
+			objects: []runtime.Object{
+				destinedTo(t, "cert-manager", "", "mgmt"),
+				clusterSecret("cluster-mgmt", "", argoInClusterServer),
+			},
+			wantErrCode:     errors.ErrCodeInternal,
+			wantErrContains: []string{`"mgmt"`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := argoApplications(t.Context(), argoClient(tt.objects...), newScope("cert-manager", "gpu-operator"))
+			if tt.wantErrCode != "" {
+				if err == nil {
+					t.Fatalf("argoApplications() = %+v, want an error", got)
+				}
+				if !stderrors.Is(err, errors.New(tt.wantErrCode, "")) {
+					t.Errorf("error = %v, want %s", err, tt.wantErrCode)
+				}
+				for _, want := range tt.wantErrContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error = %v, want it to contain %q", err, want)
+					}
+				}
+				if strings.Contains(err.Error(), "fake-token-for-tests") {
+					t.Errorf("error = %v carries a cluster Secret's credentials", err)
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("argoApplications() error = %v", err)
+			}
+			if !reflect.DeepEqual(got.Releases, tt.want) {
+				t.Errorf("Releases = %+v, want %+v", got.Releases, tt.want)
+			}
+			if got.Remote != tt.wantRemote {
+				t.Errorf("Remote = %d, want %d", got.Remote, tt.wantRemote)
+			}
+			if got.Unreadable != tt.wantUnreadable {
+				t.Errorf("Unreadable = %d, want %d", got.Unreadable, tt.wantUnreadable)
+			}
+		})
+	}
+}
+
+// TestArgoApplicationsReadsClusterSecretsOnlyWhenNamed pins that the cluster
+// Secrets, which carry Argo's credentials for every cluster, are listed only
+// when some Application names its destination, and then once.
+func TestArgoApplicationsReadsClusterSecretsOnlyWhenNamed(t *testing.T) {
+	tests := []struct {
+		name      string
+		objects   []runtime.Object
+		wantLists int
+	}{
+		{
+			name:    "addressed destinations read no Secret",
+			objects: []runtime.Object{argoApp(t, certManagerApp), argoApp(t, gpuOperatorApp)},
+		},
+		{
+			name: "named destinations read the Secrets once",
+			objects: []runtime.Object{
+				destinedTo(t, "cert-manager", "", "mgmt"),
+				argoAppWith(t, gpuOperatorApp, func(app *unstructured.Unstructured) {
+					unstructured.RemoveNestedField(app.Object, "spec", "destination", "server")
+					if err := unstructured.SetNestedField(app.Object, "mgmt",
+						"spec", "destination", "name"); err != nil {
+						t.Fatalf("set destination name: %v", err)
+					}
+				}),
+				clusterSecret("cluster-mgmt", "mgmt", argoInClusterServer),
+			},
+			wantLists: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := argoClient(tt.objects...)
+			lists := 0
+			client.PrependReactor("list", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+				lists++
+
+				return false, nil, nil
+			})
+			if _, err := argoApplications(t.Context(), client, newScope("cert-manager", "gpu-operator")); err != nil {
+				t.Fatalf("argoApplications() error = %v", err)
+			}
+			if lists != tt.wantLists {
+				t.Errorf("cluster Secret Lists = %d, want %d", lists, tt.wantLists)
+			}
+		})
+	}
+}
+
+// TestArgoApplicationsClassifiesAClusterSecretDenial pins the permission an
+// operator is told to grant when a named destination cannot be resolved.
+func TestArgoApplicationsClassifiesAClusterSecretDenial(t *testing.T) {
+	client := argoClient(destinedTo(t, "cert-manager", "", "mgmt"))
+	client.PrependReactor("list", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, "", stderrors.New("denied"))
+	})
+	_, err := argoApplications(t.Context(), client, newScope("cert-manager"))
+	if !stderrors.Is(err, errors.New(errors.ErrCodeUnauthorized, "")) {
+		t.Fatalf("error = %v, want %s", err, errors.ErrCodeUnauthorized)
+	}
+	if !strings.Contains(err.Error(), "list secrets") {
+		t.Errorf("error = %v, want it to name the permission to grant", err)
 	}
 }

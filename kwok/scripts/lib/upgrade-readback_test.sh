@@ -219,7 +219,7 @@ check_eq "source-summary-missing-report-is-silent" "" "${summary}"
 # Unsettled Argo CD Applications. The cluster read reports a component
 # whose Application has no deployed version as unversioned with no `from`,
 # while the bundle reads it at its pin and so reports no change at all.
-printf '%s\n' gpu-operator kai-scheduler nfd > "${WORK}/installed-argo.txt"
+printf '%s\n' gpu-operator gpu-operator-2 kai-scheduler nfd > "${WORK}/installed-argo.txt"
 UNSETTLED_ROW='{"component": "kai-scheduler", "change": "version", "to": "v0.16.9",
     "verdict": "unversioned", "reason": "not-comparable", "failsRun": true}'
 # cluster_report <out-file> <extra-row>: AGREED plus one row, with the
@@ -273,13 +273,17 @@ cat > "${WORK}/apps.json" <<'JSON'
    "status": {"sync": {"status": "OutOfSync"}, "history": [{"id": 1}]}},
   {"metadata": {"name": "nfd"},
    "status": {"sync": {"status": "Synced"}}},
+  {"metadata": {"name": "gpu-operator-2"},
+   "status": {"sync": {"status": "OutOfSync"}}},
   {"metadata": {"name": "someone-elses-app"},
    "status": {"sync": {"status": "OutOfSync"}}}
 ]}
 JSON
 readback_unsettled_argo_components "${WORK}/apps.json" "${WORK}/installed-argo.txt" "${WORK}/found.txt"
 check_rc "unsettled-scan-rc-zero" 0 "$?"
-check_eq "only-installed-apps-with-no-deployed-version-are-unsettled" "kai-scheduler" \
+# gpu-operator-2 is installed and unsettled but not allowlisted, so it is
+# left to fail the comparison rather than excused.
+check_eq "only-allowlisted-installed-apps-with-no-deployed-version-are-unsettled" "kai-scheduler" \
     "$(cat "${WORK}/found.txt")"
 
 echo '{"kind": "Status"}' > "${WORK}/not-a-list.json"

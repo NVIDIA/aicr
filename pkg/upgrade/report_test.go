@@ -562,8 +562,10 @@ func TestNewReportSource(t *testing.T) {
 		Kubeconfig: "/home/op/.kube/config",
 		Context:    "prod-east",
 		Matched:    2,
-		Helm:       ReportSourceHelm{Records: 37, Unattributed: 2, Unreadable: 1, Uninstalled: 3, StampedUnmatched: 4},
-		Argo:       ReportSourceArgo{Applications: 5, Unattributed: 6, Unreadable: 7},
+		Helm: ReportSourceHelm{
+			Read: true, Records: 37, Unattributed: 2, Unreadable: 1, Uninstalled: 3, StampedUnmatched: 4,
+		},
+		Argo: ReportSourceArgo{Applications: 5, Unattributed: 6, Unreadable: 7, Remote: 8},
 	}
 	want := *src
 	rep := NewReport(nil, ReportOptions{From: "cluster", Source: src})
@@ -581,5 +583,31 @@ func TestNewReportSource(t *testing.T) {
 	src.Helm.Records = 0
 	if *rep.Source != want {
 		t.Errorf("the report's source changed with the caller's: %+v, want %+v", *rep.Source, want)
+	}
+}
+
+// TestReportFailsRunOnUnmatchedStamps pins that a cluster read showing its own
+// name mapping broken fails a strict run with no failing row to carry it: the
+// component it lost reads as newly installed, which fails nothing.
+func TestReportFailsRunOnUnmatchedStamps(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		source *ReportSource
+		want   bool
+	}{
+		{"an artifact comparison", nil, false},
+		{"a clean cluster read", &ReportSource{Helm: ReportSourceHelm{Read: true}}, false},
+		{"stamped records matched nothing", &ReportSource{Helm: ReportSourceHelm{Read: true, StampedUnmatched: 2}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rep := NewReport(nil, ReportOptions{From: "cluster", Source: tt.source})
+			if got := rep.FailsRun(); got != tt.want {
+				t.Errorf("FailsRun() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

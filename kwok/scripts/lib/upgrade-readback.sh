@@ -184,14 +184,20 @@ readback_assert_none_added() {
     fi
 }
 
+# READBACK_UNSETTLED_ALLOWLIST names the components whose Argo CD sync is
+# known never to finish on KWOK, observed rather than assumed: kai-scheduler's
+# sync operation waits on a namespace health state the simulator does not
+# produce. Only these may be excused. Any other unsettled Application is a
+# finding, which is what keeps a lane whose every Application stalled from
+# passing with nothing compared.
+readonly READBACK_UNSETTLED_ALLOWLIST="kai-scheduler"
+
 # readback_unsettled_argo_components <applications-json> <installed-file> <out-file>
 #
-# Writes the installed components whose Argo CD Application has established
-# no deployed version: not Synced, and no completed sync in status.history.
-# The cluster read reports those as unversioned by design, since the pin
-# they are working toward is not yet what is running. On KWOK that is the
-# steady state for an Application whose sync operation waits on a health
-# state the simulator never produces (kai-scheduler's namespace, observed).
+# Writes the installed, allowlisted components whose Argo CD Application has
+# established no deployed version: not Synced, and no completed sync in
+# status.history. The cluster read reports those as unversioned by design,
+# since the pin they are working toward is not yet what is running.
 #
 # <applications-json> is `kubectl get applications.argoproj.io -A -o json`.
 # An Application is matched to a component by exact name, so a prefixed
@@ -215,7 +221,8 @@ readback_unsettled_argo_components() {
         echo "[ERROR] Could not read Argo CD Applications from ${apps_json}" >&2
         return 1
     fi
-    comm -12 "${installed_file}" <(sort -u <<< "${unsettled}" | sed '/^$/d') > "${out_file}"
+    comm -12 "${installed_file}" <(sort -u <<< "${unsettled}" | sed '/^$/d') \
+        | comm -12 - <(tr ' ' '\n' <<< "${READBACK_UNSETTLED_ALLOWLIST}" | sort -u) > "${out_file}"
 }
 
 # compare_upgrade_readback <artifact-report> <cluster-report> <installed-file> <out-dir> <deployer> [<unsettled-file>]

@@ -145,7 +145,11 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, defaults.CLIUpgradeCheckTimeout)
+	budget := defaults.CLIUpgradeCheckTimeout
+	if cmd.String("from") == aicr.FromCluster || cmd.Bool("scan-cluster") {
+		budget = defaults.CLIUpgradeCheckClusterTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	outFormat, err := parseOutputFormat(cmd)
@@ -190,6 +194,13 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 	// The report is written first: informing and erroring are not
 	// alternatives, and the exit code is orthogonal to the report.
 	if cmd.Bool("fail-on-error") && report.FailsRun() {
+		if stamps := report.UnmatchedStamps(); stamps > 0 {
+			return errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+				"upgrade check failed: %d component change(s) need attention, and %d AICR-stamped release(s) "+
+					"match no component under --deployer %s, so the installed inventory is incomplete; check the "+
+					"deployer, then the READ FROM CLUSTER block", report.Summary.Failing, stamps, report.Deployer))
+		}
+
 		return errors.New(errors.ErrCodeConflict, fmt.Sprintf(
 			"upgrade check failed: %d component change(s) need attention", report.Summary.Failing))
 	}

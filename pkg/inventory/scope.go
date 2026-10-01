@@ -67,21 +67,73 @@ const (
 //
 // The caller supplies the set because only it knows which components are being
 // compared; the readers deliberately do not reach for the registry themselves.
-type scope map[string]struct{}
+//
+// confident holds the exact record names this project would have written for
+// those components under the deployer being read: see deployerScope.
+type scope struct {
+	components map[string]struct{}
+	confident  map[string]struct{}
+}
 
-// newScope builds a scope from component names. An empty name is dropped: it
-// would match on any record whose name contains an empty token, and it can
-// only have arrived by accident.
+// newScope builds a scope from component names, confident in each bare name
+// and its injected folders, which is what the helm and helmfile deployers
+// write. An empty name is dropped: it would match on any record whose name
+// contains an empty token, and it can only have arrived by accident.
 func newScope(components ...string) scope {
-	within := make(scope, len(components))
+	within := scope{
+		components: make(map[string]struct{}, len(components)),
+		confident:  make(map[string]struct{}, len(components)*(len(injectedFolderPhases)+1)),
+	}
 	for _, component := range components {
 		if component == "" {
 			continue
 		}
-		within[component] = struct{}{}
+		within.components[component] = struct{}{}
+		within.addConfident(component)
 	}
 
 	return within
+}
+
+// deployerScope builds the scope a read under d answers for.
+//
+// The confident tier is the names d itself writes, so it follows the
+// deployer: flux stores a component as "<namespace>-<name>" for whichever
+// namespace it was installed into, so those names are confident there and the
+// bare name is not. Argo CD's namePrefix cannot be enumerated, so a prefixed
+// Application stays possible. A record the deployer could not have written is
+// at most possible, which keeps a stray record named like a component from
+// failing a read it cannot belong to.
+func deployerScope(d Deployer, comps []Component) scope {
+	within := scope{
+		components: make(map[string]struct{}, len(comps)),
+		confident:  make(map[string]struct{}),
+	}
+	for i := range comps {
+		c := &comps[i]
+		if c.Name == "" {
+			continue
+		}
+		within.components[c.Name] = struct{}{}
+		if d != DeployerFlux {
+			within.addConfident(c.Name)
+
+			continue
+		}
+		for _, namespace := range c.namespaces() {
+			within.addConfident(fluxReleaseName(c.Name, namespace))
+		}
+	}
+
+	return within
+}
+
+// addConfident marks name and its injected folders confident.
+func (s scope) addConfident(name string) {
+	s.confident[name] = struct{}{}
+	for _, phase := range injectedFolderPhases {
+		s.confident[name+nameSeparator+phase] = struct{}{}
+	}
 }
 
 // validate rejects a scope that answers for nothing.
@@ -92,7 +144,7 @@ func newScope(components ...string) scope {
 // pass its component set would get that verdict with no error to show for it,
 // which is the failure this whole command exists to prevent.
 func (s scope) validate() error {
-	if len(s) == 0 {
+	if len(s.components) == 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"the installed inventory was requested for no components, so it could only report that nothing is "+
 				"installed; pass the names of the components being compared")
@@ -109,11 +161,12 @@ func (s scope) validate() error {
 // helm-controller composes a Flux release as "<targetNamespace>-<name>", so
 // gpu-operator is stored as gpu-operator-gpu-operator, and Argo CD prepends a
 // user-settable namePrefix to every child Application. The bundle writer's own
-// injected folders append a phase. No single rule recognizes all of those, and
-// this package does not know which deployer ran.
+// injected folders append a phase. The confident tier is built for the deployer
+// being read (see deployerScope), but the possible tier cannot be: a namePrefix
+// is the user's, and a namespace may be one the caller did not name.
 //
 // So the match is loose, and the tier says how loose. A name this project
-// itself would have written is confident. A name some deployer's naming could
+// itself would have written under the deployer is confident. A name some deployer's naming could
 // have produced from a component name is possible, under two anchored rules:
 //
 //   - a token run, where the component's hyphen-separated tokens appear
@@ -142,12 +195,12 @@ func (s scope) validate() error {
 // Deciding which component a record actually belongs to is the comparison's
 // job, not this one's. It has the recipe and the deployer; this has neither.
 func (s scope) covers(name string) confidence {
+	if _, ok := s.confident[name]; ok {
+		return confident
+	}
 	tokens := strings.Split(name, nameSeparator)
 	best := outOfScope
-	for component := range s {
-		if name == component || isInjectedFolder(name, component) {
-			return confident
-		}
+	for component := range s.components {
 		tokenRun := containsRun(tokens, strings.Split(component, nameSeparator))
 		if tokenRun || strings.HasSuffix(name, component) || endsWithInjectedFolder(name, component) {
 			best = possible
@@ -155,17 +208,6 @@ func (s scope) covers(name string) confidence {
 	}
 
 	return best
-}
-
-// isInjectedFolder reports whether name is component's auxiliary folder.
-func isInjectedFolder(name, component string) bool {
-	for _, phase := range injectedFolderPhases {
-		if name == component+nameSeparator+phase {
-			return true
-		}
-	}
-
-	return false
 }
 
 // endsWithInjectedFolder reports whether name ends with component's auxiliary

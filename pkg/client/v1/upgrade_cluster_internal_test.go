@@ -110,9 +110,9 @@ func (f *fakeCluster) client(t *testing.T) *Client {
 func distinctSourceInfo() inventory.SourceInfo {
 	return inventory.SourceInfo{
 		Helm: inventory.HelmInfo{
-			Records: 11, Unattributed: 2, Unreadable: 3, Uninstalled: 4, StampedUnmatched: 5,
+			Read: true, Records: 11, Unattributed: 2, Unreadable: 3, Uninstalled: 4, StampedUnmatched: 5,
 		},
-		Argo: inventory.ArgoInfo{Applications: 7, Unattributed: 8, Unreadable: 9},
+		Argo: inventory.ArgoInfo{Applications: 7, Unattributed: 8, Unreadable: 9, Remote: 10},
 	}
 }
 
@@ -217,9 +217,9 @@ func TestUpgradeCheckFromClusterReadsTheInstalledInventory(t *testing.T) {
 		Kubeconfig: kubeconfig,
 		Matched:    3,
 		Helm: upgrade.ReportSourceHelm{
-			Records: 11, Unattributed: 2, Unreadable: 3, Uninstalled: 4, StampedUnmatched: 5,
+			Read: true, Records: 11, Unattributed: 2, Unreadable: 3, Uninstalled: 4, StampedUnmatched: 5,
 		},
-		Argo: upgrade.ReportSourceArgo{Applications: 7, Unattributed: 8, Unreadable: 9},
+		Argo: upgrade.ReportSourceArgo{Applications: 7, Unattributed: 8, Unreadable: 9, Remote: 10},
 	}
 	if !reflect.DeepEqual(*report.Source, wantSource) {
 		t.Errorf("report.Source = %#v, want %#v", *report.Source, wantSource)
@@ -238,9 +238,9 @@ func TestReportSourceFromKeepsTheReadersSeparate(t *testing.T) {
 		Kubeconfig: "/etc/kubeconfig",
 		Matched:    6,
 		Helm: upgrade.ReportSourceHelm{
-			Records: 11, Unattributed: 2, Unreadable: 3, Uninstalled: 4, StampedUnmatched: 5,
+			Read: true, Records: 11, Unattributed: 2, Unreadable: 3, Uninstalled: 4, StampedUnmatched: 5,
 		},
-		Argo: upgrade.ReportSourceArgo{Applications: 7, Unattributed: 8, Unreadable: 9},
+		Argo: upgrade.ReportSourceArgo{Applications: 7, Unattributed: 8, Unreadable: 9, Remote: 10},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("reportSourceFrom = %#v, want %#v", got, want)
@@ -831,5 +831,96 @@ func TestUpgradeCheckScanAbortIsNotAFinding(t *testing.T) {
 				t.Errorf("error = %v, want %v kept in the cause chain", err, tt.abort)
 			}
 		})
+	}
+}
+
+// TestWithRecipeNamespacesAddsWhereTheTargetPutsAComponent pins the namespace
+// candidates a cluster read is given. os-talos moves gpu-operator into
+// privileged-gpu-operator, and flux composes its release name from that
+// namespace while Argo CD deploys into it; given only the registry default,
+// the read matched nothing there and reported the component as new.
+func TestWithRecipeNamespacesAddsWhereTheTargetPutsAComponent(t *testing.T) {
+	t.Parallel()
+
+	registry := func() []inventory.Component {
+		return []inventory.Component{
+			{Name: "cert-manager", Namespace: "cert-manager"},
+			{Name: "gpu-operator", Namespace: "gpu-operator"},
+			{Name: "nfd", Namespace: "nfd"},
+		}
+	}
+	to := &RecipeResult{Components: []ComponentRef{
+		{Name: "gpu-operator", Namespace: "privileged-gpu-operator"},
+		{Name: "cert-manager", Namespace: "cert-manager"},
+	}}
+
+	got := withRecipeNamespaces(registry(), to)
+	want := []inventory.Component{
+		{Name: "cert-manager", Namespace: "cert-manager"},
+		{Name: "gpu-operator", Namespace: "gpu-operator", Namespaces: []string{"privileged-gpu-operator"}},
+		{Name: "nfd", Namespace: "nfd"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("withRecipeNamespaces() = %+v, want %+v", got, want)
+	}
+	if got := withRecipeNamespaces(registry(), nil); !reflect.DeepEqual(got, registry()) {
+		t.Errorf("withRecipeNamespaces(nil target) = %+v, want the registry unchanged", got)
+	}
+}
+
+// TestUpgradeCheckRejectsAClusterTarget pins that the sentinel names the
+// source side only. Reaching the artifact path, "cluster" would be read as a
+// missing file and reported as not found, which says nothing useful.
+func TestUpgradeCheckRejectsAClusterTarget(t *testing.T) {
+	t.Parallel()
+
+	f := &fakeCluster{}
+	client := f.client(t)
+
+	_, err := client.UpgradeCheck(t.Context(), UpgradeCheckRequest{
+		From: FromCluster, To: FromCluster, Deployer: "helm",
+	})
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "--to must be an artifact") {
+		t.Errorf("error = %q, want it to say --to must be an artifact", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("cluster was contacted (%v) before the request was rejected", f.calls)
+	}
+}
+
+// TestClusterIdentitiesClaimNoMoveTheReadCannotSee pins that a cluster read
+// reports versions only. It recovers no namespace, chart, source, path, type
+// or manifest file set, and an empty manifest set is a stated one to the
+// matcher, so leaving the fields empty reported every manifest-based
+// component's files as added.
+func TestClusterIdentitiesClaimNoMoveTheReadCannotSee(t *testing.T) {
+	t.Parallel()
+
+	toTable := map[string]upgrade.Identity{
+		"nodewright-customizations": {
+			Version: "0.19.0", Namespace: "nodewright", Type: "Helm",
+			ManifestFiles: []string{"tuning.yaml", "kernel.yaml"},
+		},
+		"gpu-operator": {Version: "v26.7.0", Namespace: "gpu-operator", Chart: "gpu-operator"},
+	}
+	fromTable := clusterIdentities(map[string]string{
+		"nodewright-customizations": "0.19.0",
+		"gpu-operator":              "v26.3.0",
+		"retired-component":         "1.0.0",
+	}, toTable)
+
+	if got, want := fromTable["retired-component"], (upgrade.Identity{Version: "1.0.0"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("component absent from the target = %+v, want version only", got)
+	}
+	for _, r := range upgrade.MatchIdentities(upgrade.Set{}, fromTable, toTable) {
+		if r.Change == upgrade.ChangeIdentity || len(r.IdentityChanges) > 0 {
+			t.Errorf("%s reports an identity move %+v the cluster read cannot see", r.Component, r.IdentityChanges)
+		}
+	}
+	if got := fromTable["gpu-operator"].Version; got != "v26.3.0" {
+		t.Errorf("gpu-operator version = %q, want the cluster's v26.3.0", got)
 	}
 }

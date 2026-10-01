@@ -341,9 +341,12 @@ on KWOK some Applications never establish one: their sync operation waits on
 a health state the simulator does not produce. Such a component reads as
 `unversioned` with no `from`. The lane lists the Applications before the
 read, and a component may take that row shape only when its Application is
-neither `Synced` nor has a completed sync in `status.history`. Every other
-difference for that component still fails, each excused row is logged, and
-the list is kept as `excused-unsettled.txt` beside the reports.
+neither `Synced` nor has a completed sync in `status.history`, and only when
+it is on `READBACK_UNSETTLED_ALLOWLIST` in `upgrade-readback.sh`: components
+observed to stall on KWOK, kai-scheduler today. Any other unsettled
+Application fails, so a lane cannot pass having compared nothing. Every other
+difference for an allowlisted component still fails, each excused row is
+logged, and the list is kept as `excused-unsettled.txt` beside the reports.
 
 Both invocations pass `--fail-on-error=false`: the question is whether the
 two paths agree, not whether the upgrade is safe, so a verdict-driven

@@ -25,6 +25,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
@@ -197,10 +198,12 @@ func TestAttributeRecord(t *testing.T) {
 			want:   "cert-manager", wantKind: matchPrimary,
 		},
 		{
-			name:     "argocd rejects a suffix match in another namespace",
+			// Too loose to version from and too close to drop: a component
+			// whose namespace moved would otherwise read as newly installed.
+			name:     "argocd marks a suffix match in another namespace unplaced",
 			deployer: DeployerArgoCD, comps: comps,
-			record:   argoRec("tenant-a-gpu-operator", "some-other-tenant", "v25.3.3", nil),
-			wantKind: matchNone,
+			record: argoRec("tenant-a-gpu-operator", "some-other-tenant", "v25.3.3", nil),
+			want:   "gpu-operator", wantKind: matchUnplaced,
 		},
 		{
 			name:     "argocd folds a prefixed injected folder into its parent",
@@ -517,7 +520,7 @@ func TestInstalledVersions(t *testing.T) {
 			// mapping failure that did not happen.
 			name: "an unmatched argo application is never a stamp finding", deployer: DeployerArgoCD, comps: comps,
 			records: []installedRelease{
-				argoRec("prometheus-gpu-operator", "monitoring", "1.0.0", stamp("v9.9.9")),
+				argoRec("grafana-dashboards", "monitoring", "1.0.0", stamp("v9.9.9")),
 			},
 			want: map[string]string{},
 		},
@@ -591,7 +594,7 @@ func TestCombineMergesHelmFirst(t *testing.T) {
 		Versions: map[string]string{"gpu-operator": "v25.3.3", "cert-manager": "1.20.2"},
 		Source: SourceInfo{
 			Helm: HelmInfo{Records: 7, Unattributed: 2, Unreadable: 1},
-			Argo: ArgoInfo{Applications: 4, Unattributed: 3, Unreadable: 2},
+			Argo: ArgoInfo{Read: true, Applications: 4, Unattributed: 3, Unreadable: 2},
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -954,8 +957,194 @@ func TestReadPropagatesReaderFailures(t *testing.T) {
 				stderrors.New("denied"))
 		})
 
-		if _, err := read(context.Background(), fake.NewSimpleClientset(), dyn, opts); err == nil {
+		argoOpts := Options{Deployer: DeployerArgoCD, Components: []Component{fixtureGPUOperator}}
+		if _, err := read(context.Background(), fake.NewSimpleClientset(), dyn, argoOpts); err == nil {
 			t.Fatal("read() = nil, want an error")
 		}
 	})
+}
+
+// TestReadFindsAComponentOutsideItsRegistryNamespace pins the attribution of
+// a component installed somewhere other than the registry default: a recipe
+// overlay or mixin moved it (os-talos moves gpu-operator to
+// privileged-gpu-operator), --inherit-from kept it where it was, or the
+// default itself moved since. Missing it reports the component as newly
+// installed, which drops its transition and steps and exits zero.
+func TestReadFindsAComponentOutsideItsRegistryNamespace(t *testing.T) {
+	moved := Component{Name: "gpu-operator", Namespace: "gpu-operator",
+		Namespaces: []string{"privileged-gpu-operator"}, HasUpstreamChart: true}
+	registryOnly := Component{Name: "gpu-operator", Namespace: "gpu-operator", HasUpstreamChart: true}
+
+	tests := []struct {
+		name     string
+		deployer Deployer
+		comp     Component
+		helm     []runtime.Object
+		argo     []runtime.Object
+		want     map[string]string
+	}{
+		{
+			name:     "flux, in the recipe's namespace",
+			deployer: DeployerFlux, comp: moved,
+			helm: []runtime.Object{helmSecret("flux-system", "privileged-gpu-operator-gpu-operator", 1, "deployed",
+				releasePayload(t, "privileged-gpu-operator-gpu-operator", "privileged-gpu-operator", "deployed",
+					"gpu-operator", "v26.7.0", 1))},
+			want: map[string]string{"gpu-operator": "v26.7.0"},
+		},
+		{
+			// Neither namespace the caller knows: the release's own target,
+			// from its payload, is what helm-controller composed the name from.
+			name:     "flux, in a namespace only the release records",
+			deployer: DeployerFlux, comp: registryOnly,
+			helm: []runtime.Object{helmSecret("flux-system", "custom-ns-gpu-operator", 1, "deployed",
+				releasePayload(t, "custom-ns-gpu-operator", "custom-ns", "deployed", "gpu-operator", "v26.7.0", 1))},
+			want: map[string]string{"gpu-operator": "v26.7.0"},
+		},
+		{
+			// The bundle writes this exact name and nothing else does, so it is
+			// the component's wherever it deploys.
+			name:     "argocd, an exact name in any namespace",
+			deployer: DeployerArgoCD, comp: registryOnly,
+			argo: []runtime.Object{argoAppWith(t, gpuOperatorApp, func(app *unstructured.Unstructured) {
+				if err := unstructured.SetNestedField(app.Object, "custom-ns",
+					"spec", "destination", "namespace"); err != nil {
+					t.Fatalf("set destination namespace: %v", err)
+				}
+			})},
+			want: map[string]string{"gpu-operator": "v25.10.0"},
+		},
+		{
+			name:     "argocd, a prefixed name in the recipe's namespace",
+			deployer: DeployerArgoCD, comp: moved,
+			argo: []runtime.Object{argoAppWith(t, gpuOperatorApp, func(app *unstructured.Unstructured) {
+				app.SetName("team-gpu-operator")
+				if err := unstructured.SetNestedField(app.Object, "privileged-gpu-operator",
+					"spec", "destination", "namespace"); err != nil {
+					t.Fatalf("set destination namespace: %v", err)
+				}
+			})},
+			want: map[string]string{"gpu-operator": "v25.10.0"},
+		},
+		{
+			// Too loose to take a version from, too close to drop.
+			name:     "argocd, a prefixed name in a namespace nobody named",
+			deployer: DeployerArgoCD, comp: registryOnly,
+			argo: []runtime.Object{argoAppWith(t, gpuOperatorApp, func(app *unstructured.Unstructured) {
+				app.SetName("team-gpu-operator")
+				if err := unstructured.SetNestedField(app.Object, "custom-ns",
+					"spec", "destination", "namespace"); err != nil {
+					t.Fatalf("set destination namespace: %v", err)
+				}
+			})},
+			want: map[string]string{"gpu-operator": ""},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := read(t.Context(), fake.NewSimpleClientset(tt.helm...), argoClient(tt.argo...),
+				Options{Deployer: tt.deployer, Components: []Component{tt.comp}})
+			if err != nil {
+				t.Fatalf("read() error = %v", err)
+			}
+			if !reflect.DeepEqual(got.Versions, tt.want) {
+				t.Errorf("read() versions = %v, want %v", got.Versions, tt.want)
+			}
+		})
+	}
+}
+
+// TestReadNeverLetsAnUnreadableReleaseVanish pins that a release the read
+// found and could not read keeps its component in the table. Withholding it
+// reported the component as newly installed: under flux, where no bare name
+// is the deployer's own, an undecodable newest revision turned a manual or
+// blocked transition into "added" and the run exited zero.
+func TestReadNeverLetsAnUnreadableReleaseVanish(t *testing.T) {
+	moved := Component{Name: "gpu-operator", Namespace: "gpu-operator",
+		Namespaces: []string{"privileged-gpu-operator"}, HasUpstreamChart: true}
+
+	t.Run("the deployer's own name fails the run", func(t *testing.T) {
+		client := fake.NewSimpleClientset(
+			helmSecret("flux-system", "gpu-operator-gpu-operator", 2, "deployed", undecodablePayload))
+		_, err := read(t.Context(), client, argoClient(), Options{Deployer: DeployerFlux, Components: []Component{moved}})
+		if err == nil {
+			t.Fatal("read() = nil, want the undecodable record to fail the run")
+		}
+	})
+
+	t.Run("a looser name reads as installed with no version", func(t *testing.T) {
+		// tenant-a is no namespace the caller named, so this is only possible.
+		client := fake.NewSimpleClientset(
+			helmSecret("tenant-a", "tenant-a-gpu-operator", 2, "deployed", undecodablePayload),
+			helmSecret("tenant-a", "tenant-a-gpu-operator", 1, "deployed",
+				releasePayload(t, "tenant-a-gpu-operator", "tenant-a", "deployed", "gpu-operator", "v25.3.3", 1)))
+		got, err := read(t.Context(), client, argoClient(), Options{Deployer: DeployerFlux, Components: []Component{moved}})
+		if err != nil {
+			t.Fatalf("read() error = %v", err)
+		}
+		if want := map[string]string{"gpu-operator": ""}; !reflect.DeepEqual(got.Versions, want) {
+			t.Errorf("read() versions = %v, want %v", got.Versions, want)
+		}
+		if got.Source.Helm.Unreadable != 1 {
+			t.Errorf("read() unreadable = %d, want 1", got.Source.Helm.Unreadable)
+		}
+	})
+}
+
+// TestReadRunsOnlyTheDeployersReader pins that a read touches only the source
+// the deployer writes: a cluster with no Argo CD, or a principal with no
+// grant on its CRD, must not fail a helm read.
+func TestReadRunsOnlyTheDeployersReader(t *testing.T) {
+	deny := func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "denied"}, "", stderrors.New("denied"))
+	}
+	comps := []Component{fixtureGPUOperator}
+
+	for _, d := range []Deployer{DeployerHelm, DeployerHelmfile, DeployerFlux} {
+		t.Run(string(d), func(t *testing.T) {
+			dyn := argoClient()
+			dyn.PrependReactor("list", "applications", deny)
+			got, err := read(t.Context(), fake.NewSimpleClientset(), dyn, Options{Deployer: d, Components: comps})
+			if err != nil {
+				t.Fatalf("read() error = %v, want the Argo CD source untouched", err)
+			}
+			if !got.Source.Helm.Read || got.Source.Argo.Read {
+				t.Errorf("read() source = %+v, want Helm read and Argo CD not", got.Source)
+			}
+		})
+	}
+	for _, d := range []Deployer{DeployerArgoCD, DeployerArgoCDHelm} {
+		t.Run(string(d), func(t *testing.T) {
+			client := fake.NewSimpleClientset()
+			client.PrependReactor("list", "secrets", deny)
+			client.PrependReactor("list", "configmaps", deny)
+			got, err := read(t.Context(), client, argoClient(), Options{Deployer: d, Components: comps})
+			if err != nil {
+				t.Fatalf("read() error = %v, want the Helm source untouched", err)
+			}
+			if got.Source.Helm.Read || !got.Source.Argo.Read {
+				t.Errorf("read() source = %+v, want Argo CD read and Helm not", got.Source)
+			}
+		})
+	}
+}
+
+// TestReadKeepsAnUnreadablePrefixedApplication is the Argo CD half of the
+// rule above: a namePrefix makes every child Application only a possible
+// match, so one that cannot be read is tolerated, and dropping it read the
+// component as newly installed.
+func TestReadKeepsAnUnreadablePrefixedApplication(t *testing.T) {
+	broken := argoAppWith(t, gpuOperatorApp, func(app *unstructured.Unstructured) {
+		app.SetName("tenant-a-gpu-operator")
+		unstructured.RemoveNestedField(app.Object, "spec", "destination", "namespace")
+	})
+	comp := Component{Name: "gpu-operator", Namespace: "gpu-operator", HasUpstreamChart: true}
+
+	got, err := read(t.Context(), fake.NewSimpleClientset(), argoClient(broken),
+		Options{Deployer: DeployerArgoCD, Components: []Component{comp}})
+	if err != nil {
+		t.Fatalf("read() error = %v", err)
+	}
+	if want := map[string]string{"gpu-operator": ""}; !reflect.DeepEqual(got.Versions, want) {
+		t.Errorf("read() versions = %v, want %v", got.Versions, want)
+	}
 }

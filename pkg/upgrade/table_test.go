@@ -330,9 +330,9 @@ func clusterSourceReport(t *testing.T) *Report {
 			Context:    "prod-east",
 			Matched:    2,
 			Helm: ReportSourceHelm{
-				Records: 37, Unattributed: 2, Unreadable: 1, Uninstalled: 3, StampedUnmatched: 0,
+				Read: true, Records: 37, Unattributed: 2, Unreadable: 1, Uninstalled: 3, StampedUnmatched: 0,
 			},
-			Argo: ReportSourceArgo{Applications: 5, Unattributed: 6, Unreadable: 7},
+			Argo: ReportSourceArgo{Read: true, Applications: 5, Unattributed: 6, Unreadable: 7, Remote: 8},
 		},
 		AtRisk: &AtRiskReport{
 			Scanned: true,
@@ -368,7 +368,7 @@ func emptyClusterReport(t *testing.T) *Report {
 			Context:    "staging-west",
 			Matched:    0,
 			Helm: ReportSourceHelm{
-				Records: 12, Unattributed: 1, Unreadable: 2, Uninstalled: 4, StampedUnmatched: 5,
+				Read: true, Records: 12, Unattributed: 1, Unreadable: 2, Uninstalled: 4, StampedUnmatched: 5,
 			},
 			Argo: ReportSourceArgo{},
 		},
@@ -861,8 +861,12 @@ func TestWriteTableZeroMatchBanner(t *testing.T) {
 func TestWriteTableArgoStampIsNotApplicable(t *testing.T) {
 	t.Parallel()
 
+	// Both sources marked read: a source the deployer does not use renders a
+	// "not read" line instead, which says nothing about stamps either way.
+	rep := emptyClusterReport(t)
+	rep.Source.Argo.Read = true
 	var buf bytes.Buffer
-	if err := WriteTable(&buf, emptyClusterReport(t)); err != nil {
+	if err := WriteTable(&buf, rep); err != nil {
 		t.Fatalf("WriteTable: %v", err)
 	}
 	argo := lineWithPrefix(t, buf.String(), "  argo ")
@@ -1018,5 +1022,21 @@ func TestWriteTableEscapesSourceBlock(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("control character not rendered visibly as %q:\n%s", want, got)
 		}
+	}
+}
+
+// TestWriteTableSaysWhichSourceWasNotRead pins that a reader the deployer does
+// not use is named as unread rather than rendered as zeros, which would read
+// as a cluster with nothing installed through it.
+func TestWriteTableSaysWhichSourceWasNotRead(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	if err := WriteTable(&buf, emptyClusterReport(t)); err != nil {
+		t.Fatalf("WriteTable: %v", err)
+	}
+	argo := lineWithPrefix(t, buf.String(), "  argo ")
+	if !strings.Contains(argo, "not read") || strings.Contains(argo, "0 applications") {
+		t.Errorf("the argo line for an unread source = %q, want it named as not read", argo)
 	}
 }

@@ -84,10 +84,10 @@ type Report struct {
 type ReportSource struct {
 	// Kubeconfig is the file the read resolved to and Context the context
 	// within it. Either can be empty: an in-cluster run has no file, a merged
-	// multi-file KUBECONFIG has no single path, and the context is not always
-	// recoverable from the client the read was built on. WriteTable renders
-	// the gap rather than dropping the line, so an unknown reads as unknown
-	// rather than as a line the renderer skipped.
+	// multi-file KUBECONFIG has no single path, and the cluster read does not
+	// yet report the context at all. WriteTable renders the gap rather than
+	// dropping the line, so an unknown reads as unknown rather than as a line
+	// the renderer skipped.
 	Kubeconfig string `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
 	Context    string `json:"context,omitempty" yaml:"context,omitempty"`
 
@@ -104,6 +104,10 @@ type ReportSource struct {
 
 // ReportSourceHelm accounts for the Helm storage records a read examined.
 type ReportSourceHelm struct {
+	// Read reports whether the deployer installs through Helm releases and
+	// the read therefore listed them. The counts are zero when it did not.
+	Read bool `json:"read" yaml:"read"`
+
 	// Records is every storage object examined, including the ones belonging
 	// to no component. It is the denominator the other counts read against.
 	Records int `json:"records" yaml:"records"`
@@ -133,12 +137,20 @@ type ReportSourceHelm struct {
 // the reader never opens — so a zero would report a mapping verified against
 // something nothing looked for.
 type ReportSourceArgo struct {
+	// Read reports whether the deployer installs through Argo CD and the read
+	// therefore listed its Applications. The counts are zero when it did not.
+	Read bool `json:"read" yaml:"read"`
+
 	// Applications is every Application examined, including the ones belonging
 	// to no component.
 	Applications int `json:"applications" yaml:"applications"`
 
 	Unattributed int `json:"unattributed" yaml:"unattributed"`
 	Unreadable   int `json:"unreadable" yaml:"unreadable"`
+
+	// Remote is Applications matching a component that deploy to another
+	// cluster, excluded so a remote install is never this cluster's baseline.
+	Remote int `json:"remote" yaml:"remote"`
 }
 
 // ReportComponent is one row.
@@ -228,9 +240,30 @@ type ReportSummary struct {
 	Failing int `json:"failing" yaml:"failing"`
 }
 
-// FailsRun reports whether any row stops a strict run.
+// FailsRun reports whether the report stops a strict run: a row that does, or
+// a cluster read whose name mapping is shown broken.
+//
+// The second has no row to carry it. A record AICR stamped that matched no
+// component is one this build no longer recognizes as its own, and the
+// component it belongs to has dropped out of the `from` table, where it reads
+// as newly installed and fails nothing. Left to the count alone, a broken
+// mapping exits zero.
 func (r *Report) FailsRun() bool {
-	return r != nil && r.Summary.Failing > 0
+	if r == nil {
+		return false
+	}
+
+	return r.Summary.Failing > 0 || r.UnmatchedStamps() > 0
+}
+
+// UnmatchedStamps is the AICR-stamped records a cluster read matched to no
+// component, zero for an artifact comparison.
+func (r *Report) UnmatchedStamps() int {
+	if r == nil || r.Source == nil {
+		return 0
+	}
+
+	return r.Source.Helm.StampedUnmatched
 }
 
 // RequiresDeployer reports whether rendering these results would print steps,

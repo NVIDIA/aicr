@@ -19,14 +19,19 @@
 // resources that reports what an upgrade might disturb.
 //
 // Read is the entry point for the version table. It builds both clients from
-// one resolved kubeconfig — a second authentication path could land on a
-// different context, and an inventory assembled from two clusters is a
-// confident wrong answer — then reads two sources, each answering for
-// deployers the other cannot see, and both projected onto one shape so the
-// results merge. Helm's release records: one paged List per storage driver,
-// reduced to the newest revision of each release, decoded from the stored
-// payload. And Argo CD's Applications: one paged List of the CRD. The
-// comparison that consumes the table lands with the rest of the command.
+// one resolved kubeconfig, since a second authentication path could land on a
+// different context and an inventory assembled from two clusters is a
+// confident wrong answer, then reads the one source the named deployer
+// writes. Helm's release records for helm, helmfile and flux: one paged List
+// per storage driver, reduced to the newest revision of each release, decoded
+// from the stored payload. Argo CD's Applications for argocd and argocd-helm:
+// one paged List of the CRD. Both project onto one shape.
+//
+// A component the read places but cannot version is kept in the table with
+// no version, never dropped: an absent component reads as newly installed,
+// which drops its transition and fails nothing. That covers a record that
+// cannot be read, a release held by both storage drivers, and a loosely
+// matched Application deploying outside the component's namespaces.
 //
 // ScanAtRisk is the other half, and it answers a different question about the
 // same cluster. See "The at-risk scan" below.
@@ -153,6 +158,14 @@
 // version at all: the only revision it carries is the bundle repository's git
 // branch, and reporting that would claim each such component sits at "main".
 //
+// Only an Application deploying into this cluster is read. On an Argo CD
+// management cluster most deploy elsewhere, and a remote one carrying a
+// component's name and namespace would become this cluster's baseline. A
+// destination server is this cluster only as Argo's in-cluster address; a
+// destination name is resolved through Argo's cluster Secrets, and one that
+// cannot be resolved, or resolves both ways, is refused rather than guessed.
+// Remote Applications are excluded and counted.
+//
 // # Why it reads Kubernetes rather than Helm
 //
 // Helm's CLI and SDK both read release records from the Kubernetes API. This
@@ -209,10 +222,10 @@
 //
 // # What it cannot tell you
 //
-// Helm records what it last applied, and an Argo Application records what it
-// is configured to deploy. Both are declarations rather than observations: a
-// hand-edited Deployment leaves either unchanged, and an Application that has
-// never synced looks no different from one that has. This answers the version
+// A Helm release counts only from a deployed revision, and an Argo Application
+// only from a revision a sync established. Both are records of what was
+// applied rather than observations: a hand-edited Deployment leaves either
+// unchanged. This answers the version
 // question authoritatively and nothing else. Live resource state is the
 // at-risk scan's job, and that scan in turn reports only what carries an
 // ownership marker, not whether an object is in use.

@@ -17,6 +17,7 @@ package inventory
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -91,11 +92,31 @@ type Component struct {
 	// match and two tenants' installs of one chart.
 	Namespace string
 
+	// Namespaces are further namespaces the component may have been installed
+	// into, which the caller knows and the registry does not: the target
+	// recipe's own, where an overlay or mixin moved the component (os-talos
+	// moves gpu-operator to privileged-gpu-operator) or --inherit-from kept
+	// it where it was. Every candidate is matched on equally.
+	Namespaces []string
+
 	// HasUpstreamChart reports helm.defaultVersion being set, which is the
 	// guard on the chart-version fallback: a component with no upstream chart
 	// is carried by an AICR-authored wrapper whose chart version is the
 	// wrapper's own and never the payload's.
 	HasUpstreamChart bool
+}
+
+// namespaces is every namespace c may be installed into, registry default
+// first, without repeats or empties.
+func (c *Component) namespaces() []string {
+	out := make([]string, 0, len(c.Namespaces)+1)
+	for _, ns := range append([]string{c.Namespace}, c.Namespaces...) {
+		if ns != "" && !slices.Contains(out, ns) {
+			out = append(out, ns)
+		}
+	}
+
+	return out
 }
 
 // Options is one inventory read.
@@ -136,6 +157,10 @@ type SourceInfo struct {
 
 // HelmInfo accounts for the Helm storage records.
 type HelmInfo struct {
+	// Read reports whether the deployer installs through Helm releases at
+	// all; see readsHelm. The counts below are zero when it does not.
+	Read bool
+
 	// Records is every storage object the read examined, across both drivers
 	// and including the ones belonging to no component. It is the denominator
 	// the other counts are read against.
@@ -169,6 +194,10 @@ type HelmInfo struct {
 // Chart.yaml the Application points at, which this never reads. The Helm-side
 // mapping detector therefore has no Argo equivalent today.
 type ArgoInfo struct {
+	// Read reports whether the deployer installs through Argo CD at all; see
+	// readsHelm. The counts below are zero when it does not.
+	Read bool
+
 	// Applications is every Application the read examined, including the ones
 	// belonging to no component.
 	Applications int
@@ -178,6 +207,10 @@ type ArgoInfo struct {
 
 	// Unreadable is Applications matched loosely that could not be projected.
 	Unreadable int
+
+	// Remote is Applications matching a component that deploy to another
+	// cluster, which on an Argo CD management cluster is most of them.
+	Remote int
 }
 
 // Read reads the installed inventory from the cluster opts names.
@@ -208,22 +241,33 @@ func read(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface
 		return Result{}, err
 	}
 
-	names := make([]string, 0, len(opts.Components))
-	for _, c := range opts.Components {
-		names = append(names, c.Name)
-	}
-	within := newScope(names...)
+	within := deployerScope(opts.Deployer, opts.Components)
 
-	helmRead, err := helmReleases(ctx, typed, within)
-	if err != nil {
-		return Result{}, err
-	}
-	argoRead, err := argoApplications(ctx, dyn, within)
-	if err != nil {
+	var helmRead, argoRead inventoryRead
+	var err error
+	if readsHelm(opts.Deployer) {
+		if helmRead, err = helmReleases(ctx, typed, within); err != nil {
+			return Result{}, err
+		}
+	} else if argoRead, err = argoApplications(ctx, dyn, within); err != nil {
 		return Result{}, err
 	}
 
 	return combine(opts.Deployer, opts.Components, helmRead, argoRead)
+}
+
+// readsHelm reports whether d installs components as Helm releases, which
+// decides the one reader a read runs.
+//
+// The two are exclusive per deployer. helm, helmfile and flux write a Helm
+// release per component and no Application. argocd and argocd-helm write an
+// Application per component and no per-component release; argocd-helm's one
+// Helm release is the app-of-apps, which is no component. Reading the other
+// source would only let a record the deployer never wrote stand in for the
+// component, and would demand permissions the deployer never needed: a 403 on
+// applications.argoproj.io would fail a cluster that has no Argo CD at all.
+func readsHelm(d Deployer) bool {
+	return d != DeployerArgoCD && d != DeployerArgoCDHelm
 }
 
 // validate refuses a request that cannot be answered, before any cluster is
@@ -281,24 +325,26 @@ func deployerNames() []string {
 //
 // The order is the precedence: a primary record beats an injected one, so a
 // component genuinely named "<x>-post" claims a record of that name rather
-// than ceding it to a non-existent "<x>".
+// than ceding it to a non-existent "<x>". Unplaced is a prefixed Argo CD
+// Application whose destination is none of the component's namespaces: too
+// loose to version from, too close to drop, since a component that drops out
+// reads as newly installed.
 type matchKind int
 
 const (
 	matchNone matchKind = iota
+	matchUnplaced
 	matchInjected
 	matchPrimary
 )
 
-// combine maps both readers' records onto one version table.
+// combine maps the reader's records onto one version table.
 //
-// Helm answers first and Argo fills only what it left unanswered. Under
-// argocd-helm both readers see the same cluster — the app-of-apps is itself a
-// Helm release — but the per-component Applications are the per-component
-// truth, so Argo may only add components rather than restate them. Presence in
-// the table is what counts as an answer, including an empty version: that is
-// the Helm side saying it found the release and could not version it, which is
-// a finding rather than a gap.
+// Only one reader runs per deployer (see readsHelm), so the other's records
+// are empty; the merge is kept so the two shapes fold the same way. Presence
+// in the table is what counts as an answer, including an empty version: that
+// is the reader saying it found the component and could not establish its
+// version, which is a finding rather than a gap.
 func combine(d Deployer, comps []Component, helmRead, argoRead inventoryRead) (Result, error) {
 	versions, helmCounts, err := installedVersions(d, comps, helmRead.Releases)
 	if err != nil {
@@ -318,6 +364,7 @@ func combine(d Deployer, comps []Component, helmRead, argoRead inventoryRead) (R
 		Versions: versions,
 		Source: SourceInfo{
 			Helm: HelmInfo{
+				Read:             readsHelm(d),
 				Records:          helmRead.Records,
 				Unattributed:     helmRead.Unattributed,
 				Unreadable:       helmRead.Unreadable,
@@ -325,9 +372,11 @@ func combine(d Deployer, comps []Component, helmRead, argoRead inventoryRead) (R
 				StampedUnmatched: helmCounts.stampedUnmatched,
 			},
 			Argo: ArgoInfo{
+				Read:         !readsHelm(d),
 				Applications: argoRead.Records,
 				Unattributed: argoRead.Unattributed,
 				Unreadable:   argoRead.Unreadable,
+				Remote:       argoRead.Remote,
 			},
 		},
 	}, nil
@@ -363,6 +412,9 @@ func installedVersions(d Deployer, comps []Component,
 			// version, never the component's payload version.
 		case record.Source == sourceHelm && record.Status == helmStatusUninstalled:
 			counts.uninstalled++
+		case kind == matchUnplaced:
+			record.Unproven = true
+			candidates[index] = append(candidates[index], record)
 		default:
 			candidates[index] = append(candidates[index], record)
 		}
@@ -376,6 +428,13 @@ func installedVersions(d Deployer, comps []Component,
 		if len(found) == 0 {
 			continue
 		}
+		// Present with no version, which fails the run: there is no install
+		// to choose between when none of them establishes one.
+		if allUnproven(found) {
+			versions[comps[i].Name] = ""
+
+			continue
+		}
 		record, err := resolveInstall(comps[i], found)
 		if err != nil {
 			return nil, mappingCounts{}, err
@@ -386,27 +445,39 @@ func installedVersions(d Deployer, comps []Component,
 	return versions, counts, nil
 }
 
+// allUnproven reports records none of which can establish a version.
+func allUnproven(records []installedRelease) bool {
+	for i := range records {
+		if !records[i].Unproven {
+			return false
+		}
+	}
+
+	return true
+}
+
 // resolveInstall picks the one record that is this component's install.
 //
 // A release name is unique within a namespace and not across the cluster, so
 // two tenants can hold the same chart at different versions while the version
-// table holds one entry per component. The component's own namespace is the
-// tiebreak, and failing to break the tie is an error rather than a pick:
+// table holds one entry per component. The component's own namespaces, the
+// registry default and the target recipe's, are the tiebreak, and failing to
+// break the tie is an error rather than a pick:
 // guessing which tenant's install the operator meant is not this tool's
 // decision, and the wrong guess is an upgrade verdict for a cluster nobody is
 // upgrading.
 //
-// A single install answers whatever namespace it is in. The component's
-// namespace is the registry default and a recipe may legitimately deploy
-// elsewhere, so demanding it of an unambiguous install would fail a check that
-// has nothing ambiguous about it.
+// A single install answers whatever namespace it is in. A deployment may
+// legitimately sit in a namespace the caller did not name, so demanding one of
+// an unambiguous install would fail a check that has nothing ambiguous about
+// it.
 //
 // Ambiguity is not always a namespace conflict, which is why the message
 // counts installs and namespaces separately and lists each namespace once. Two
 // Argo CD Applications under different name prefixes point at one destination
 // namespace, so that shape is two installs in one namespace; repeating the
-// namespace per record, as this once did, asserted a conflict that does not
-// exist and hid the names that are the actual discriminator.
+// namespace per record would assert a conflict that does not exist and hide
+// the names that are the actual discriminator.
 func resolveInstall(c Component, records []installedRelease) (installedRelease, error) {
 	if len(records) == 1 {
 		return records[0], nil
@@ -422,7 +493,7 @@ func resolveInstall(c Component, records []installedRelease) (installedRelease, 
 			seen[record.Namespace] = struct{}{}
 			namespaces = append(namespaces, record.Namespace)
 		}
-		if record.Namespace == c.Namespace {
+		if slices.Contains(c.namespaces(), record.installNamespace()) {
 			expected = append(expected, record)
 		}
 	}
@@ -484,13 +555,66 @@ func matchComponent(d Deployer, c *Component, record installedRelease) (matchKin
 	case DeployerHelm, DeployerHelmfile:
 		return matchName(record.Name, c.Name, false)
 	case DeployerFlux:
-		return matchName(record.Name, fluxReleaseName(c), false)
+		return matchFlux(c, record)
 	case DeployerArgoCD, DeployerArgoCDHelm:
-		if record.Namespace != c.Namespace {
-			return matchNone, ""
-		}
+		return matchArgo(c, record)
+	default:
+		return matchNone, ""
+	}
+}
 
-		return matchName(record.Name, c.Name, true)
+// matchFlux reads record as c's under flux, for any namespace c may be in.
+//
+// The release's own target namespace is a candidate too: it is the
+// targetNamespace helm-controller composed the name from. That recovers an install in a
+// namespace the caller did not name, such as one the registry default has
+// since moved away from.
+func matchFlux(c *Component, record installedRelease) (matchKind, string) {
+	namespaces := c.namespaces()
+	if len(namespaces) == 0 {
+		// No target namespace, so helm-controller uses the bare name.
+		namespaces = []string{""}
+	}
+	if ns := record.installNamespace(); ns != "" {
+		namespaces = append(namespaces, ns)
+	}
+	best, matched := matchNone, ""
+	for _, namespace := range namespaces {
+		if kind, want := matchName(record.Name, fluxReleaseName(c.Name, namespace), false); kind > best {
+			best, matched = kind, want
+		}
+	}
+	// A record that could not be read has no target namespace to compose
+	// from, so a name merely ending in the component's places it: the
+	// component then reads as installed with no version, which fails the run,
+	// rather than vanishing, which reads as newly installed and does not.
+	if best == matchNone && record.Unproven && strings.HasSuffix(record.Name, nameSeparator+c.Name) {
+		return matchUnplaced, c.Name
+	}
+
+	return best, matched
+}
+
+// matchArgo reads record as c's under Argo CD.
+//
+// An Application named exactly as the bundle wrote it is c's wherever it
+// deploys, since nothing else writes that name. A prefixed one is matched on
+// a raw suffix, which an unrelated Application can share, so its destination
+// must be one of c's namespaces; one that is not is unplaced rather than
+// dropped, because dropping it would report a component installed under a
+// moved namespace as new.
+func matchArgo(c *Component, record installedRelease) (matchKind, string) {
+	if kind, matched := matchName(record.Name, c.Name, false); kind != matchNone {
+		return kind, matched
+	}
+	kind, matched := matchName(record.Name, c.Name, true)
+	switch {
+	case kind == matchNone:
+		return matchNone, ""
+	case slices.Contains(c.namespaces(), record.Namespace):
+		return kind, matched
+	case kind == matchPrimary:
+		return matchUnplaced, matched
 	default:
 		return matchNone, ""
 	}
@@ -501,12 +625,12 @@ func matchComponent(d Deployer, c *Component, record installedRelease) (matchKin
 // spec.targetNamespace and never spec.releaseName, so this reproduces
 // HelmRelease.GetReleaseName: "<targetNamespace>-<name>", falling back to the
 // bare name when no target namespace is set.
-func fluxReleaseName(c *Component) string {
-	if c.Namespace == "" {
-		return c.Name
+func fluxReleaseName(name, namespace string) string {
+	if namespace == "" {
+		return name
 	}
 
-	return c.Namespace + nameSeparator + c.Name
+	return namespace + nameSeparator + name
 }
 
 // matchName reads a record name as want, or as one of want's injected folders.
@@ -554,6 +678,9 @@ func nameIs(recordName, want string, suffix bool) bool {
 // falling through would report the wrapper version the stamp exists to
 // replace.
 func versionFor(record installedRelease, c Component) string {
+	if record.Unproven {
+		return ""
+	}
 	if record.Source == sourceHelm {
 		if record.Status != helmStatusDeployed {
 			return ""

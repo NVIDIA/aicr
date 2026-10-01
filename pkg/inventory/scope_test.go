@@ -127,7 +127,7 @@ func TestNewScope(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := len(newScope(tt.components...)); got != tt.wantLen {
+			if got := len(newScope(tt.components...).components); got != tt.wantLen {
 				t.Errorf("newScope(%q) has %d entries, want %d", tt.components, got, tt.wantLen)
 			}
 		})
@@ -144,7 +144,7 @@ func TestScopeValidate(t *testing.T) {
 	}{
 		{"a scope naming a component is usable", newScope("gpu-operator"), false},
 		{"an empty scope is refused", newScope(), true},
-		{"a nil scope is refused", nil, true},
+		{"a zero scope is refused", scope{}, true},
 		{"a scope of only empty names is refused", newScope("", ""), true},
 	}
 

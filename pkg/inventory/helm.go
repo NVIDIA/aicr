@@ -68,6 +68,7 @@ type releaseID struct {
 type storedRecord struct {
 	release      string
 	namespace    string
+	driver       string
 	revision     int
 	object       string
 	confidence   confidence
@@ -98,6 +99,7 @@ type helmWalk struct {
 	within       scope
 	newest       map[releaseID]storedRecord
 	poisoned     map[releaseID]struct{}
+	drivers      map[releaseID]string
 	records      int
 	unattributed int
 	unreadable   int
@@ -125,12 +127,35 @@ func (w *helmWalk) tolerate(id releaseID, c confidence) bool {
 	if c == confident {
 		return false
 	}
+	w.poison(id)
+
+	return true
+}
+
+// poison withholds a release's version, counting the release once.
+func (w *helmWalk) poison(id releaseID) {
 	if _, already := w.poisoned[id]; !already {
 		w.poisoned[id] = struct{}{}
 		w.unreadable++
 	}
+}
 
-	return true
+// keep folds record into the walk, poisoning a release whose records come
+// from both storage drivers.
+//
+// Each driver numbers its own revisions, so comparing across them is
+// meaningless: after a HELM_DRIVER switch, a leftover ConfigMap at revision 7
+// would beat the live Secret at revision 1 and report a chart the release has
+// since moved off. Neither driver's newest is provably the release's, so the
+// release is read as installed with no version, whatever its confidence:
+// both records are readable, and the ambiguity is the cluster's, not theirs.
+func (w *helmWalk) keep(record storedRecord) {
+	id := releaseID{namespace: record.namespace, name: record.release}
+	if driver, seen := w.drivers[id]; seen && driver != record.driver {
+		w.poison(id)
+	}
+	w.drivers[id] = record.driver
+	keepNewest(w.newest, record)
 }
 
 // helmReleases reads the newest revision of every in-scope Helm release in the
@@ -161,6 +186,7 @@ func helmReleases(ctx context.Context, client kubernetes.Interface, within scope
 		within:   within,
 		newest:   make(map[releaseID]storedRecord),
 		poisoned: make(map[releaseID]struct{}),
+		drivers:  make(map[releaseID]string),
 	}
 
 	if err := collectSecretRecords(ctx, client, walk); err != nil {
@@ -217,7 +243,7 @@ func collectSecretRecords(ctx context.Context, client kubernetes.Interface, walk
 		}
 		secrets, err := client.CoreV1().Secrets(metav1.NamespaceAll).List(ctx, opts)
 		if err != nil {
-			return listError(err, "secrets")
+			return listError(err, resourceSecrets)
 		}
 
 		for i := range secrets.Items {
@@ -246,14 +272,15 @@ func collectSecretRecords(ctx context.Context, client kubernetes.Interface, walk
 				return err
 			}
 			record.confidence = conf
+			record.driver = resourceSecrets
 			record.payloadBytes = secret.Data[helmReleaseDataKey]
-			keepNewest(walk.newest, record)
+			walk.keep(record)
 		}
 
 		if secrets.Continue == "" {
 			return nil
 		}
-		if err := advance(&opts, secrets.Continue, "secrets"); err != nil {
+		if err := advance(&opts, secrets.Continue, resourceSecrets); err != nil {
 			return err
 		}
 	}
@@ -271,7 +298,7 @@ func collectConfigMapRecords(ctx context.Context, client kubernetes.Interface, w
 		}
 		configMaps, err := client.CoreV1().ConfigMaps(metav1.NamespaceAll).List(ctx, opts)
 		if err != nil {
-			return listError(err, "configmaps")
+			return listError(err, resourceConfigMaps)
 		}
 
 		for i := range configMaps.Items {
@@ -289,14 +316,15 @@ func collectConfigMapRecords(ctx context.Context, client kubernetes.Interface, w
 				return err
 			}
 			record.confidence = conf
+			record.driver = resourceConfigMaps
 			record.payloadText = configMap.Data[helmReleaseDataKey]
-			keepNewest(walk.newest, record)
+			walk.keep(record)
 		}
 
 		if configMaps.Continue == "" {
 			return nil
 		}
-		if err := advance(&opts, configMaps.Continue, "configmaps"); err != nil {
+		if err := advance(&opts, configMaps.Continue, resourceConfigMaps); err != nil {
 			return err
 		}
 	}
@@ -343,9 +371,8 @@ func storedRecordFrom(release, object, namespace string, labels map[string]strin
 	}, nil
 }
 
-// keepNewest retains the highest revision seen for a release. Ties keep the
-// incumbent, which makes the secret driver win over a configmap record of the
-// same revision; the two encode the same release, so either answer is right.
+// keepNewest retains the highest revision seen for a release within one
+// storage driver; keep refuses to compare across two. Ties keep the incumbent.
 func keepNewest(newest map[releaseID]storedRecord, record storedRecord) {
 	id := releaseID{namespace: record.namespace, name: record.release}
 	if existing, ok := newest[id]; ok && existing.revision >= record.revision {
@@ -359,9 +386,14 @@ func keepNewest(newest map[releaseID]storedRecord, record storedRecord) {
 // namespace breaks ties, since one release name can appear in several.
 func decodeNewest(ctx context.Context, walk *helmWalk) ([]installedRelease, error) {
 	newest := walk.newest
-	ids := make([]releaseID, 0, len(newest))
+	ids := make([]releaseID, 0, len(newest)+len(walk.poisoned))
 	for id := range newest {
 		ids = append(ids, id)
+	}
+	for id := range walk.poisoned {
+		if _, kept := newest[id]; !kept {
+			ids = append(ids, id)
+		}
 	}
 	sort.Slice(ids, func(i, j int) bool {
 		return compareInstallOrder(ids[i].name, ids[i].namespace, ids[j].name, ids[j].namespace) < 0
@@ -372,15 +404,20 @@ func decodeNewest(ctx context.Context, walk *helmWalk) ([]installedRelease, erro
 		if err := ctxErr(ctx, helmSubject); err != nil {
 			return nil, err
 		}
-		// A release poisoned while its records were collected is withheld
-		// whatever survived into newest, since what survived is by definition
-		// not its newest revision.
+		// A release poisoned while its records were collected keeps its place
+		// and loses its version, whatever survived into newest, since what
+		// survived is by definition not its newest revision. Withholding it
+		// instead would report the component as newly installed.
 		if _, bad := walk.poisoned[id]; bad {
+			releases = append(releases, unprovenRelease(id))
+
 			continue
 		}
 		record := newest[id]
 		if record.empty() {
 			if walk.tolerate(id, record.confidence) {
+				releases = append(releases, unprovenRelease(id))
+
 				continue
 			}
 			errCtx := storageContext(record.object, record.namespace)
@@ -395,6 +432,8 @@ func decodeNewest(ctx context.Context, walk *helmWalk) ([]installedRelease, erro
 		release, err := decodeRelease(record.release, record.payload())
 		if err != nil {
 			if walk.tolerate(id, record.confidence) {
+				releases = append(releases, unprovenRelease(id))
+
 				continue
 			}
 
@@ -402,19 +441,27 @@ func decodeNewest(ctx context.Context, walk *helmWalk) ([]installedRelease, erro
 		}
 
 		releases = append(releases, installedRelease{
-			Source:       sourceHelm,
-			Name:         record.release,
-			Namespace:    record.namespace,
-			Revision:     record.revision,
-			Status:       release.Info.Status,
-			ChartName:    release.Chart.Metadata.Name,
-			ChartVersion: release.Chart.Metadata.Version,
-			AppVersion:   release.Chart.Metadata.AppVersion,
-			Annotations:  release.Chart.Metadata.Annotations,
+			Source:          sourceHelm,
+			Name:            record.release,
+			Namespace:       record.namespace,
+			TargetNamespace: release.Namespace,
+			Revision:        record.revision,
+			Status:          release.Info.Status,
+			ChartName:       release.Chart.Metadata.Name,
+			ChartVersion:    release.Chart.Metadata.Version,
+			AppVersion:      release.Chart.Metadata.AppVersion,
+			Annotations:     release.Chart.Metadata.Annotations,
 		})
 	}
 
 	return releases, nil
+}
+
+// unprovenRelease is a release the read found and could not version. Its
+// namespace is where the record is stored, since the one it installed into is
+// in the payload that could not be read.
+func unprovenRelease(id releaseID) installedRelease {
+	return installedRelease{Source: sourceHelm, Name: id.name, Namespace: id.namespace, Unproven: true}
 }
 
 // releaseContext builds the structured-error context for a release, which

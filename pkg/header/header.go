@@ -111,20 +111,19 @@ const (
 // emitting sees an unstamped chart, and reports a wrapper's version as the
 // payload's.
 //
+// AnnotationComponentVersion carries the free-form version of the payload the
+// wrapper contains, and AnnotationGeneratedBy the AICR build version that
+// produced the wrapper, mirroring Chart.yaml `version:`.
+//
 // The rule for a reader is one sentence with two branches: use
 // AnnotationComponentVersion when it is present, otherwise use the release's
 // own chart version. Its presence is exactly the signal that the chart version
-// describes the wrapper rather than the payload — an upstream chart installed
+// describes the wrapper rather than the payload: an upstream chart installed
 // directly carries neither annotation, and its release version IS the payload
 // version (ADR-021 Decision 7).
 const (
-	// AnnotationComponentVersion carries the free-form version of the payload
-	// the wrapper contains.
 	AnnotationComponentVersion = Domain + "/component-version"
-
-	// AnnotationGeneratedBy carries the AICR build version that produced the
-	// wrapper. Mirrors Chart.yaml `version:`.
-	AnnotationGeneratedBy = Domain + "/generated-by"
+	AnnotationGeneratedBy      = Domain + "/generated-by"
 )
 
 // AlphaRemovedIn is the release that stopped reading the alpha apiVersion

@@ -68,6 +68,36 @@ type installedRelease struct {
 	ChartVersion string
 	AppVersion   string
 	Annotations  map[string]string
+
+	// TargetNamespace is the namespace a Helm release says it installed into,
+	// from its payload. It differs from Namespace, where the record is stored,
+	// for a Flux release; see installNamespace.
+	TargetNamespace string
+
+	// Unproven marks a record that places the component but cannot establish
+	// its version: one that could not be read, or a loose match outside the
+	// component's namespaces. The component then reads as installed and
+	// unversioned, which fails the run, rather than as absent, which reads as
+	// newly installed and does not.
+	Unproven bool
+}
+
+// The storage resources the readers list, as they appear in a GVR, an RBAC
+// rule and an error.
+const (
+	resourceSecrets    = "secrets"
+	resourceConfigMaps = "configmaps"
+)
+
+// installNamespace is where r's workload runs: the release's own target when
+// the payload states one, else where the record is stored, which for the helm
+// and helmfile deployers and for an Argo CD destination is the same place.
+func (r installedRelease) installNamespace() string {
+	if r.TargetNamespace != "" {
+		return r.TargetNamespace
+	}
+
+	return r.Namespace
 }
 
 // inventoryRead is one reader's answer: what it read, and what it did not.
@@ -98,6 +128,8 @@ type inventoryRead struct {
 	Records      int
 	Unattributed int
 	Unreadable   int
+	// Remote is Argo CD Applications in scope that deploy to another cluster.
+	Remote int
 }
 
 // compareInstallOrder orders two installed things by name, then by namespace.

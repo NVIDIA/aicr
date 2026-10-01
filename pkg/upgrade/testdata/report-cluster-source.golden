@@ -8,7 +8,7 @@ READ FROM CLUSTER
   context     prod-east
   matched     2 components
   helm        37 storage records, 2 unattributed, 1 unreadable, 3 uninstalled, 0 stamped but unmatched
-  argo        5 applications, 6 unattributed, 7 unreadable, no stamp to check
+  argo        5 applications, 6 unattributed, 7 unreadable, 8 remote, no stamp to check
 
 COMPONENT        FROM   TO     VERDICT  NOTES
 ---------        ----   --     -------  -----

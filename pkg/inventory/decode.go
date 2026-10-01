@@ -38,7 +38,13 @@ import (
 // them from, so decoding them here would offer a second, unauthoritative
 // source for an identity that has one.
 type helmRelease struct {
-	Info struct {
+	// Namespace is the namespace the release installed into, which is not
+	// always where its record is stored: helm-controller stores a Flux
+	// release beside its HelmRelease and installs it into targetNamespace.
+	// It is a hint for attribution and never the release's identity, which
+	// the storage labels alone decide.
+	Namespace string `json:"namespace"`
+	Info      struct {
 		Status string `json:"status"`
 	} `json:"info"`
 	Chart struct {

@@ -122,6 +122,7 @@ workspace paths. Use local file paths only when explicitly requested.
 | `pkg/errors` | Structured error handling with codes | Yes |
 | `pkg/manifest` | Shared Helm-compatible manifest rendering | Yes |
 | `pkg/upgrade` | ADR-021 component upgrade transition records: schema, fail-closed loader, well-formedness rules | Yes |
+| `pkg/inventory` | Installed component inventory read from a live cluster (Helm release records, Argo CD Applications) and the advisory at-risk scan, for `upgrade-check --from cluster` | Yes |
 | `pkg/evidence` | Conformance evidence capture and formatting | Yes |
 | `pkg/collector/topology` | Cluster-wide node taint/label topology collection | Yes |
 | `pkg/snapshotter` | System state snapshot orchestration | Yes |

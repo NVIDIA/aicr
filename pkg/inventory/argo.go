@@ -84,7 +84,8 @@ func argoApplications(ctx context.Context, client dynamic.Interface, within scop
 	defer cancel()
 
 	var applications []installedRelease
-	records, unattributed, unreadable := 0, 0, 0
+	records, unattributed, unreadable, remote := 0, 0, 0, 0
+	dests := &argoDestinations{client: client}
 	opts := metav1.ListOptions{Limit: defaults.ArgoApplicationListPageSize}
 	for {
 		// Cancellation is checked per page rather than per item, for the
@@ -122,14 +123,37 @@ func argoApplications(ctx context.Context, client dynamic.Interface, within scop
 				continue
 			}
 
+			// Before the projection, so an Application deploying to another
+			// cluster is counted and never read as this cluster's install.
+			local, err := dests.local(ctx, item)
+			if err != nil {
+				if conf != confident {
+					unreadable++
+					applications = append(applications, unprovenApplication(item))
+
+					continue
+				}
+
+				return inventoryRead{}, err
+			}
+			if !local {
+				remote++
+
+				continue
+			}
+
 			application, err := applicationFrom(item)
 			if err != nil {
 				// A loosely matched Application is as likely to be a foreign
 				// workload sharing a token as a component's own, so it is
 				// counted rather than allowed to fail the run. Only a name
 				// this project itself would have written is worth failing on.
+				// It is kept as unproven rather than dropped: if it does
+				// belong to a component, dropping it reads that component as
+				// newly installed.
 				if conf != confident {
 					unreadable++
+					applications = append(applications, unprovenApplication(item))
 
 					continue
 				}
@@ -166,7 +190,17 @@ func argoApplications(ctx context.Context, client dynamic.Interface, within scop
 		Records:      records,
 		Unattributed: unattributed,
 		Unreadable:   unreadable,
+		Remote:       remote,
 	}, nil
+}
+
+// unprovenApplication is an Application the read could not project. The
+// destination namespace is taken if it reads as a string and left empty if
+// not, since attribution then simply has less to go on.
+func unprovenApplication(item *unstructured.Unstructured) installedRelease {
+	namespace, _, _ := unstructured.NestedString(item.Object, "spec", "destination", "namespace")
+
+	return installedRelease{Source: sourceArgo, Name: item.GetName(), Namespace: namespace, Unproven: true}
 }
 
 // applicationFrom projects one Application onto the inventory's shape.

@@ -8,7 +8,7 @@ READ FROM CLUSTER
   context     staging-west
   matched     0 components
   helm        12 storage records, 1 unattributed, 2 unreadable, 4 uninstalled, 5 stamped but unmatched
-  argo        0 applications, 0 unattributed, 0 unreadable, no stamp to check
+  argo        not read: this deployer installs nothing there
 
   NOTHING INSTALLED WAS RECOGNIZED
   Nothing was compared, and every row below therefore reads "added". A cluster

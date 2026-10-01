@@ -48,6 +48,9 @@ const atRiskIntro = "Objects of the kinds the crossed transition records name th
 	"Argo CD ownership. AICR does not manage them and cannot restore them; removing a CRD takes its objects " +
 	"with it. Advisory only: this never changes the exit code."
 
+// sourceNotRead is a reader line for a source the deployer does not write.
+const sourceNotRead = "not read: this deployer installs nothing there"
+
 // atRiskNothingDeclared is the vacuous scan. Distinct from a clean one, which
 // examined objects and found them owned.
 const atRiskNothingDeclared = "No crossed transition record names a resource kind, so nothing was examined."
@@ -205,21 +208,32 @@ func writeSource(ew *errWriter, s *ReportSource) {
 	ew.printf(sourceLine, "kubeconfig", cell(s.Kubeconfig))
 	ew.printf(sourceLine, "context", cell(s.Context))
 	ew.printf(sourceLine, "matched", plural(s.Matched, "component", "components"))
-	ew.printf(sourceLine, "helm", strings.Join([]string{
-		plural(s.Helm.Records, "storage record", "storage records"),
-		fmt.Sprintf("%d unattributed", s.Helm.Unattributed),
-		fmt.Sprintf("%d unreadable", s.Helm.Unreadable),
-		fmt.Sprintf("%d uninstalled", s.Helm.Uninstalled),
-		fmt.Sprintf("%d stamped but unmatched", s.Helm.StampedUnmatched),
-	}, ", "))
+	// A reader the deployer does not use says so, rather than printing zeros
+	// that read as a cluster with nothing in it.
+	helm := sourceNotRead
+	if s.Helm.Read {
+		helm = strings.Join([]string{
+			plural(s.Helm.Records, "storage record", "storage records"),
+			fmt.Sprintf("%d unattributed", s.Helm.Unattributed),
+			fmt.Sprintf("%d unreadable", s.Helm.Unreadable),
+			fmt.Sprintf("%d uninstalled", s.Helm.Uninstalled),
+			fmt.Sprintf("%d stamped but unmatched", s.Helm.StampedUnmatched),
+		}, ", ")
+	}
+	ew.printf(sourceLine, "helm", helm)
 	// The Argo line ends by saying the stamp check does not apply rather than
 	// reporting it as zero: see ReportSourceArgo.
-	ew.printf(sourceLine, "argo", strings.Join([]string{
-		plural(s.Argo.Applications, "application", "applications"),
-		fmt.Sprintf("%d unattributed", s.Argo.Unattributed),
-		fmt.Sprintf("%d unreadable", s.Argo.Unreadable),
-		"no stamp to check",
-	}, ", "))
+	argo := sourceNotRead
+	if s.Argo.Read {
+		argo = strings.Join([]string{
+			plural(s.Argo.Applications, "application", "applications"),
+			fmt.Sprintf("%d unattributed", s.Argo.Unattributed),
+			fmt.Sprintf("%d unreadable", s.Argo.Unreadable),
+			fmt.Sprintf("%d remote", s.Argo.Remote),
+			"no stamp to check",
+		}, ", ")
+	}
+	ew.printf(sourceLine, "argo", argo)
 
 	if s.Matched == 0 {
 		ew.println("")

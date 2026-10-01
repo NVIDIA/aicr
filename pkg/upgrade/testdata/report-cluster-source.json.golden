@@ -7,6 +7,7 @@
     "context": "prod-east",
     "matched": 2,
     "helm": {
+      "read": true,
       "records": 37,
       "unattributed": 2,
       "unreadable": 1,
@@ -14,9 +15,11 @@
       "stampedUnmatched": 0
     },
     "argo": {
+      "read": true,
       "applications": 5,
       "unattributed": 6,
-      "unreadable": 7
+      "unreadable": 7,
+      "remote": 8
     }
   },
   "components": [
