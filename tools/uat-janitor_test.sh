@@ -385,6 +385,43 @@ EOF
         "$(GCLOUD_LS_TRUNCATED=1 discover_gcp_state 2>&1 >/dev/null | grep -c '^::warning::.*tfstate.*failed')"
 fi
 
+echo "azure reap re-login:"
+# Every Azure reap must re-login before it touches state or runs the actuator:
+# the job's azure/login session expires mid-sweep, and a reap that skipped the
+# refresh would fail AADSTS700024 for every deployment after the first. A failed
+# re-login must count as a failed reap with no destroy attempted. `az` and
+# `docker` are stubbed to append to a trace; az_federated_relogin is overridden.
+AZ_TRACE="${STUB_DIR}/az-trace"
+cat >"${STUB_DIR}/az" <<STUB
+#!/usr/bin/env bash
+echo "az \$1" >>"${AZ_TRACE}"
+exit 1
+STUB
+cat >"${STUB_DIR}/docker" <<STUB
+#!/usr/bin/env bash
+echo "docker" >>"${AZ_TRACE}"
+STUB
+chmod +x "${STUB_DIR}/az" "${STUB_DIR}/docker"
+mkdir -p "${STUB_DIR}/home/.azure"
+AZ_CFG="${STUB_DIR}/azure-config.yaml"
+printf 'deployment:\n  id: aicr-uat\n  location: westus\n  destroy: false\n' >"${AZ_CFG}"
+azure_reap() { # azure_reap <relogin-rc>; echoes "rc=<n> trace=<calls>"
+    rm -f "${AZ_TRACE}"
+    local rc relogin_rc="$1"
+    (
+        export CLOUD=azure DRY_RUN=false HOME="${STUB_DIR}/home"
+        export JANITOR_CONFIG="${AZ_CFG}" JANITOR_ACTUATOR_IMAGE=stub
+        export AZURE_SUBSCRIPTION_ID=sub
+        # shellcheck disable=SC2329  # invoked by the sourced reap()
+        az_federated_relogin() { echo "relogin" >>"${AZ_TRACE}"; return "${relogin_rc}"; }
+        reap aicr-uat-7 >/dev/null 2>&1
+    )
+    rc=$?
+    echo "rc=${rc} trace=$(tr '\n' ',' <"${AZ_TRACE}" 2>/dev/null)"
+}
+check "re-logins before state access and destroy" "rc=0 trace=relogin,az storage,docker," "$(azure_reap 0)"
+check "failed re-login fails the reap, no destroy"  "rc=1 trace=relogin,"                  "$(azure_reap 1)"
+
 if [[ "${FAILED}" -eq 0 ]]; then
     echo "PASS: uat-janitor decision logic"
 else
