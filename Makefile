@@ -547,7 +547,11 @@ bom-docs: ## Regenerates the auto-generated section of $(BOM_DOC_PATH) from the 
 	  !skip                     { print } \
 	' $(BOM_DOC_PATH) > "$$TMP/merged.md"; \
 	mv "$$TMP/merged.md" $(BOM_DOC_PATH); \
-	GOFLAGS="-mod=readonly" go test -count=1 ./tools/bom -run '^TestCommittedBOMVersionsMatchRegistry$$'; \
+	FRESH="TestCommittedBOMVersionsMatchRegistry TestCommittedBOMVariantsMatchRecipePins"; \
+	OUT="$$(GOFLAGS="-mod=readonly" go test -count=1 -v ./tools/bom -run "^($$(echo $$FRESH | tr ' ' '|'))$$" 2>&1)" || { echo "$$OUT" >&2; exit 1; }; \
+	for t in $$FRESH; do \
+	   echo "$$OUT" | grep -q -- "--- PASS: $$t " || { echo "$$OUT" >&2; echo "ERROR: $$t did not run (renamed or removed?)." >&2; exit 1; }; \
+	done; \
 	echo "Updated $(BOM_DOC_PATH) (prose preserved, auto-generated section refreshed)"
 
 .PHONY: bom-check
