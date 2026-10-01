@@ -78,6 +78,12 @@ func TestCollectOKELegacyPlugin_StateMatrix(t *testing.T) {
 			wantDaemonSet: okeLegacyDSUnlabeled,
 		},
 		{
+			name:          "addon-manager label with a non-Reconcile value reads unknown/unlabeled",
+			objects:       []runtime.Object{legacyPluginDS(map[string]string{okeLegacyAddonManagerLabel: "EnsureExists"}, 3)},
+			wantPlugin:    okeLegacyPluginUnknown,
+			wantDaemonSet: okeLegacyDSUnlabeled,
+		},
+		{
 			name:          "daemonset with no labels and zero desired reads unknown/unlabeled",
 			objects:       []runtime.Object{legacyPluginDS(nil, 0)},
 			wantPlugin:    okeLegacyPluginUnknown,
