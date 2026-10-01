@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,6 +32,14 @@ import (
 // gkeAcceleratorLabel selects a3-megagpu-8g GPU nodes on GKE — the nodes that
 // must map all 8 GPU NIC PCI slots for TCPXO.
 const gkeAcceleratorLabel = "cloud.google.com/gke-accelerator=nvidia-h100-mega-80gb"
+
+// Coverage keys for EmitExtra (constants so the package's literal-occurrence count
+// stays under the goconst threshold).
+const (
+	topoKeyValidated  = "nodesValidated"
+	topoKeyUnverified = "nodesUnverified"
+	topoKeyTotal      = "nodesTotal"
+)
 
 // checkGKEGPUNICTopology is the case-1 arm of #2265: a GPU node pool provisioned
 // with a gVNIC additional network takes a GPU NIC PCI slot, leaving 7/8 GPUs
@@ -57,17 +66,22 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 	if err != nil {
 		// Mirror the sibling's probe-error classification (RBAC/timeout/transport get
 		// the matching typed code, never masquerading as inapplicable).
-		cap := validators.Capability{Component: tcpxoComponent, Subject: "a3 GPU nodes (nodes)"}
-		return cap.RequireList(err)
+		capability := validators.Capability{Component: tcpxoComponent, Subject: "a3 GPU nodes (nodes)"}
+		return capability.RequireList(err)
 	}
 	if len(nodes.Items) == 0 {
-		// No a3 GPU nodes — nothing to check topology on; the census arm owns the
-		// zero-GPU case. Skip rather than a vacuous pass.
-		return validators.Skip("no a3 GPU nodes present — NIC topology is inapplicable here")
+		// A recipe declaring gke-nccl-tcpxo expects a3 GPU nodes; an empty result on a
+		// declared capability fails (never a vacuous pass or a skip), matching the
+		// capability contract.
+		return errors.New(errors.ErrCodeNotFound, nicTopologyMsg("the cluster has no a3-megagpu-8g GPU nodes"))
 	}
 
+	type nodeTopology struct {
+		name string
+		info *gkenet.NodeNICInfo
+	}
 	var problems []string
-	checked := 0
+	var verified []nodeTopology
 	unverified := 0
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
@@ -79,42 +93,58 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 		}
 		info, err := gkenet.ParseNICInfo(annotation)
 		if err != nil {
-			// Unparseable annotation (schema drift / empty) — count as unverified, not a
-			// hard failure and never a double-wrapped internal error (#6).
 			unverified++
 			slog.Warn("GPU node nic-info annotation unparseable; NIC topology unverified", "node", node.Name, "error", err)
 			continue
 		}
-		checked++
-		if info.ExtraAtGPUNICSlot != "" {
-			problems = append(problems, fmt.Sprintf("node %q has a non-TCPXO interface %q occupying a GPU NIC PCI slot", node.Name, info.ExtraAtGPUNICSlot))
-		}
-		for _, ws := range info.WrongSlotInterfaces {
-			problems = append(problems, fmt.Sprintf("node %q has GPU NIC interface %q at a PCI outside the GPU NIC slot set (pushed off by a gVNIC)", node.Name, ws))
-		}
+		verified = append(verified, nodeTopology{name: node.Name, info: info})
+
 		for _, extra := range info.ExtraInterfaces {
-			problems = append(problems, fmt.Sprintf("node %q has an extra interface %q beyond the 8 GPU NICs (a gVNIC additional network)", node.Name, extra))
+			problems = append(problems, fmt.Sprintf("node %q has unexpected interface(s) %s beyond eth0..eth8 (gVNIC displacement signature)", node.Name, extra))
 		}
 		if info.GPUNICInterfaces < gkenet.RequiredGPUNICInterfaces {
 			problems = append(problems, fmt.Sprintf("node %q maps %d of %d GPU NIC interfaces (missing: %s)",
 				node.Name, info.GPUNICInterfaces, gkenet.RequiredGPUNICInterfaces, strings.Join(info.SortedMissing(), ",")))
 		}
+		if dev := info.ObservedGPUNICSlotDeviation(); len(dev) > 0 {
+			slog.Warn("node GPU NIC PCI layout deviates from the observed a3 norm (informational only)", "node", node.Name, "deviation", dev)
+		}
 	}
 
-	// Report every offending node in one pass so the operator fixes the pool once.
-	if len(problems) > 0 {
-		return errors.New(errors.ErrCodeUnavailable, nicTopologyMsg(strings.Join(problems, "; ")))
+	// Pool consistency: a node whose GPU-NIC PCI set differs from the rest of its
+	// pool is displaced. Only meaningful when >1 node was verified.
+	if len(verified) > 1 {
+		reference := strings.Join(verified[0].info.GPUNICPCIs, ",")
+		for _, nt := range verified[1:] {
+			if got := strings.Join(nt.info.GPUNICPCIs, ","); got != reference {
+				problems = append(problems, fmt.Sprintf("node %q GPU NIC PCI set (%v) differs from the pool (%v)", nt.name, nt.info.GPUNICPCIs, reference))
+			}
+		}
 	}
-	if checked == 0 {
-		fmt.Printf("Could not verify NIC topology on any of the %d a3 GPU node(s) (%d unverified) — documented limitation\n", len(nodes.Items), unverified)
-		return nil
+
+	// Coverage is recorded on every exit path so the result states how much was
+	// actually verified (validated / unverified / total).
+	total := len(nodes.Items)
+	defer func() {
+		_ = validators.EmitExtra(map[string]string{
+			topoKeyValidated:  strconv.Itoa(len(verified)),
+			topoKeyUnverified: strconv.Itoa(unverified),
+			topoKeyTotal:      strconv.Itoa(total),
+		})
+	}()
+
+	if len(problems) > 0 {
+		return errors.New(errors.ErrCodeConflict, nicTopologyMsg(strings.Join(problems, "; ")))
+	}
+	if len(verified) == 0 {
+		return validators.Skip(fmt.Sprintf("could not verify NIC topology on any of the %d a3 GPU node(s) (%d unverified)", total, unverified))
 	}
 	if unverified > 0 {
-		fmt.Printf("Verified NIC topology on %d a3 GPU node(s); %d node(s) could not be verified (no/invalid nic-info annotation)\n", checked, unverified)
+		fmt.Printf("Verified NIC topology on %d a3 GPU node(s); %d node(s) could not be verified (no/invalid nic-info annotation)\n", len(verified), unverified)
 		return nil
 	}
 	fmt.Printf("Verified NIC topology on %d a3 GPU node(s): all map %d GPU NIC interfaces (eth1..eth8)\n",
-		checked, gkenet.RequiredGPUNICInterfaces)
+		len(verified), gkenet.RequiredGPUNICInterfaces)
 	return nil
 }
 

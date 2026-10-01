@@ -85,8 +85,7 @@ Fewer than eight means the prerequisite is incomplete. AICR's
 letting it surface later as a performance-phase abort with no bandwidth number.
 
 **Important:** The GPU node pool must be provisioned with only the 8 GPU NIC
-networks (`gpu-nic-0` through `gpu-nic-7`). Do **not** include a gVNIC additional
-network — it takes a GPU NIC PCI slot (`0000:06:00.0`), leaving only 7/8 GPUs
+network — it takes one of the GPU NIC PCI slots, leaving only 7/8 GPUs
 available for TCPXO. This is distinct from the `--enable-gvnic` node-pool flag,
 which selects the gVNIC driver and **is** required: pass the flag, but do not add
 a ninth `--additional-node-network` entry for it.
@@ -107,14 +106,17 @@ actually being usable, not just nameable:
   ```
 
 - **`gke-gpu-nic-topology`** (sibling) reads each a3 GPU node's
-  `networking.gke.io/nic-info` annotation and fails when a gVNIC additional
-  network displaced a GPU NIC PCI slot (fewer than eight GPU NIC interfaces
-  mapped to `eth1`–`eth8`). Verify a node's mapping with:
+  `networking.gke.io/nic-info` annotation and fails on gVNIC displacement,
+  detected three ways: an interface beyond `eth0`–`eth8`, fewer than 8 of
+  `eth1`–`eth8` mapped, or a node whose GPU-NIC PCI set differs from the rest
+  of its pool. A node with no/invalid annotation counts as unverified (not a
+  hard failure); when no node can be verified, the check Skips and records
+  coverage counts (nodes validated / unverified / total). Verify a node's
+  mapping with:
 
   ```shell
   kubectl get node <gpu-node> -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
   ```
-
 
 ## The shipped `torch-distributed-tcpxo` runtime
 
@@ -429,7 +431,7 @@ kubectl get node <gpu-node> \
   -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
 ```
 
-All 8 GPU NIC PCI addresses should be mapped to `eth1`–`eth8`. If a gVNIC is present, it typically occupies PCI `0000:06:00.0`, displacing the first GPU NIC.
+All 8 GPU NIC PCI addresses should be mapped to `eth1`–`eth8`. The observed a3-megagpu-8g GPU NIC PCI layout is `0000:06:00.0`, `0000:07:00.0`, `0000:0d:00.0`, `0000:0e:00.0`, `0000:86:00.0`, `0000:87:00.0`, `0000:8d:00.0`, `0000:8e:00.0` (observed on live nodes; not a stable contract). A gVNIC additional network takes one of these GPU NIC slots, so a displaced node shows either an extra interface beyond `eth0`–`eth8`, fewer than 8 of `eth1`–`eth8`, or a node whose GPU-NIC PCI set differs from the rest of its pool.
 
 ### RxDM detects 0/8 GPUs
 

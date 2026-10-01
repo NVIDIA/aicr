@@ -243,7 +243,8 @@ func verifyDeliveredTCPXORuntime(ctx *validators.Context, recorded []recipe.Netw
 		// stalled or canceled read its own code rather than an internal fault.
 		return nil, aicrErrors.Wrap(gkenet.ReadErrorCode(err), "failed to discover GKE GPU NIC networks", err)
 	}
-	if err := gkenet.VerifyNetworksExist(deployed, discovered); err != nil {
+	// usable == present here: the performance phase does not filter by readiness (that is the documented follow-up).
+	if err := gkenet.VerifyNetworksExist(deployed, discovered, discovered); err != nil {
 		return nil, err
 	}
 	return shipped, nil

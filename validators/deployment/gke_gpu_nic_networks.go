@@ -51,11 +51,11 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 	// names and the capability state together, so the two never disagree (#5).
 	statuses, listErr := gkenet.DiscoverGPUNICNetworkStatus(ctx.Ctx, ctx.DynamicClient)
 	// healthyNames carries only Networks that are Ready AND bound — the names a
-	// runtime may select. The census and the runtime arm both use this set so an
-	// unready Network can never be wired into a workload (#2).
+	// runtime may select. The runtime arm uses this set so an unready Network can
+	// never be wired into a workload (#2). The census below uses all discovered names.
 	healthyNames := make([]string, 0, len(statuses))
 	for _, st := range statuses {
-		if st.Ready && st.ParamsReady {
+		if st.Bound() {
 			healthyNames = append(healthyNames, st.Name)
 		}
 	}
@@ -118,7 +118,7 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 		return err
 	}
 
-	return verifyDeliveredRuntimeWiring(ctx, healthyNames)
+	return verifyDeliveredRuntimeWiring(ctx, healthyNames, gpuNICs)
 }
 
 // verifyDeliveredRuntimeWiring is the runtime-specific arm of this check
@@ -135,7 +135,7 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 // extension would false-fail it. The same primitives run in the performance
 // validator before it derives its benchmark, so `--phase performance` does not
 // depend on this phase having run.
-func verifyDeliveredRuntimeWiring(ctx *validators.Context, gpuNICs []string) error {
+func verifyDeliveredRuntimeWiring(ctx *validators.Context, usable []string, present []string) error {
 	var refs []recipe.ComponentRef
 	if ctx.ValidationInput != nil {
 		refs = ctx.ValidationInput.ComponentRefs
@@ -158,7 +158,7 @@ func verifyDeliveredRuntimeWiring(ctx *validators.Context, gpuNICs []string) err
 	if err := gkenet.VerifyMappingMatchesRecipe(recorded, deployed); err != nil {
 		return err
 	}
-	if err := gkenet.VerifyNetworksExist(deployed, gpuNICs); err != nil {
+	if err := gkenet.VerifyNetworksExist(deployed, usable, present); err != nil {
 		return err
 	}
 	fmt.Printf("Deployed %s carries the recipe's %d-interface GPU NIC mapping, and every selected network exists on the cluster\n",
@@ -182,7 +182,7 @@ func verifyNetworkReadinessAndBinding(statuses []gkenet.GPUNICNetworkStatus) err
 	for _, st := range statuses {
 		// Bound requires Ready, ParamsReady, AND a real GKENetworkParamSet reference
 		// — a stale ParamsReady=True with a missing/wrong-kind reference is not bound.
-		if st.Ready && st.ParamsReady && st.ParamSetName != "" {
+		if st.Bound() {
 			readyBound++
 		} else if firstBad.Name == "" {
 			firstBad = st

@@ -60,6 +60,13 @@ type GPUNICNetworkStatus struct {
 	Detail string
 }
 
+// Bound reports whether the Network is Ready, its ParamsReady binding resolved, AND
+// it references a real GKENetworkParamSet — the single definition of "usable by a
+// workload" shared by the readiness arm and the runtime-wiring arm (#2265).
+func (s GPUNICNetworkStatus) Bound() bool {
+	return s.Ready && s.ParamsReady && s.ParamSetName != ""
+}
+
 // DiscoverGPUNICNetworkStatus lists networks.networking.gke.io and returns the
 // capability status of every GPU NIC Network (the same substring filter as
 // DiscoverGPUNICNetworks), for the deployment check's case-2 arm: an existing
@@ -97,10 +104,15 @@ func networkStatus(n *unstructured.Unstructured) GPUNICNetworkStatus {
 	st := GPUNICNetworkStatus{
 		Name:         n.GetName(),
 		ParamSetName: paramSetRefName(n),
+		// Absent conditions read as not-ready with a clear cause, never an empty ().
+		ReadyDetail:       "no Ready condition reported",
+		ParamsReadyDetail: "no ParamsReady condition reported",
 	}
 	conds, found, _ := unstructured.NestedSlice(n.Object, "status", "conditions")
 	if !found {
 		st.Detail = "Network has no status.conditions (never reported ready)"
+		st.ReadyDetail = "no status.conditions reported"
+		st.ParamsReadyDetail = "no status.conditions reported"
 		return st
 	}
 	for _, c := range conds {

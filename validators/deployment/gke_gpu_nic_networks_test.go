@@ -422,7 +422,7 @@ func TestCheckGKEGPUNICNetworksDeliveredRuntimeArms(t *testing.T) {
 			// Base h100-gke-cos-training: TCPXO declared, no runtime/mapping. The
 			// census must still be the whole check — this is the false-fail the
 			// predicate gate exists to prevent.
-			name: "tcpxo without a delivered runtime keeps census-only behaviour",
+			name: "tcpxo without a delivered runtime keeps the base census + readiness behaviour",
 			ctx:  tcpxoContext(gkeNetworkClient(nets...), true),
 		},
 		{

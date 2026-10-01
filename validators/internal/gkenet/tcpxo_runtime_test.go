@@ -257,10 +257,10 @@ func TestVerifyNetworksExist(t *testing.T) {
 	// network the runtime does not use: membership, not position, is the test.
 	discovered := []string{"c1-gpu-nic-7", "c1-gpu-nic-0", "unused-gpu-nic-9", "c1-gpu-nic-3",
 		"c1-gpu-nic-1", "c1-gpu-nic-5", "c1-gpu-nic-2", "c1-gpu-nic-6", "c1-gpu-nic-4"}
-	if err := VerifyNetworksExist(deployed, discovered); err != nil {
+	if err := VerifyNetworksExist(deployed, discovered, discovered); err != nil {
 		t.Fatalf("all present, order-independent: unexpected error %v", err)
 	}
-	err := VerifyNetworksExist(deployed, discovered[:4])
+	err := VerifyNetworksExist(deployed, discovered[:4], discovered[:4])
 	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
 		t.Fatalf("missing networks must be ErrCodeNotFound, got %v", err)
 	}

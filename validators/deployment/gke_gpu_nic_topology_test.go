@@ -124,17 +124,23 @@ func TestCheckGKEGPUNICTopology(t *testing.T) {
 		}
 	})
 
-	t.Run("no GPU nodes skips as inapplicable", func(t *testing.T) {
+	t.Run("no a3 GPU nodes on a TCPXO recipe fails", func(t *testing.T) {
 		t.Parallel()
-		if err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(), true)); !validators.IsSkip(err) {
-			t.Fatalf("zero a3 nodes must skip as inapplicable, got %v", err)
+		// Declared capability with an empty result fails (capability contract) — a
+		// TCPXO recipe with zero a3 GPU nodes is a real prerequisite failure.
+		err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(), true))
+		if err == nil || validators.IsSkip(err) {
+			t.Fatalf("zero a3 nodes on a TCPXO recipe must fail, got %v", err)
 		}
 	})
 
-	t.Run("missing annotation is a documented pass", func(t *testing.T) {
+	t.Run("every node unverified skips with coverage", func(t *testing.T) {
 		t.Parallel()
-		if err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(topoNode("")), true)); err != nil {
-			t.Fatalf("absent nic-info should not fail (documented limitation), got %v", err)
+		// No node carries a usable nic-info annotation → nothing verified → Skip,
+		// with coverage counts recorded via EmitExtra.
+		err := checkGKEGPUNICTopology(topoContext(k8sfake.NewClientset(topoNode("")), true))
+		if !validators.IsSkip(err) {
+			t.Fatalf("all-unverified must Skip (not plain pass), got %v", err)
 		}
 	})
 }

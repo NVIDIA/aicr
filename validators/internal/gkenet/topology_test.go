@@ -22,98 +22,151 @@ import (
 
 // nicEntry builds one real-schema nic-info entry (gke-networking-api shape).
 func nicEntry(name, pci string) string {
-	return fmt.Sprintf(`{"birthName":%q,"birthIP":"10.0.0.1","birthIPv6":"","pciAddress":%q}`, name, pci)
+	return fmt.Sprintf(`{"birthIP":"","birthName":%q,"pciAddress":%q}`, name, pci)
 }
 
-// healthyAnnotation: eth0 (management) + eth1..eth8 at the 8 GPU NIC slots.
-func healthyAnnotation() string {
-	entries := make([]string, 0, 1+len(tcpXOInterfaces))
-	entries = append(entries, nicEntry("eth0", "0000:00:05.0"))
+func nicAnnotation(pairs [][2]string) string {
+	parts := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		parts = append(parts, nicEntry(p[0], p[1]))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+// healthyPairs: eth0 + eth1..eth8 at the observed a3 slots.
+func healthyPairs() [][2]string {
+	p := make([][2]string, 0, 1+len(tcpXOInterfaces))
+	p = append(p, [2]string{"eth0", "0000:00:05.0"})
 	for i, name := range tcpXOInterfaces {
-		entries = append(entries, nicEntry(name, a3GPUNICSlots[i]))
+		p = append(p, [2]string{name, observedA3GPUNICSlots[i]})
 	}
-	return "[" + strings.Join(entries, ",") + "]"
-}
-
-// displacedAnnotation: a gVNIC additional network holds the first GPU NIC slot
-// (0000:06:00.0); only 7 TCPXO interfaces remain.
-func displacedAnnotation() string {
-	entries := make([]string, 0, 1+len(tcpXOInterfaces))
-	entries = append(entries, nicEntry("eth0", "0000:00:05.0"), nicEntry("gve0", a3GPUNICSlots[0]))
-	for i := 1; i < len(tcpXOInterfaces); i++ {
-		entries = append(entries, nicEntry(tcpXOInterfaces[i], a3GPUNICSlots[i]))
-	}
-	return "[" + strings.Join(entries, ",") + "]"
+	return p
 }
 
 func TestParseNICInfo(t *testing.T) {
 	t.Parallel()
-
-	t.Run("healthy node: 8 interfaces, no displacement", func(t *testing.T) {
-		t.Parallel()
-		info, err := ParseNICInfo(healthyAnnotation())
-		if err != nil {
-			t.Fatalf("ParseNICInfo: %v", err)
-		}
-		if info.GPUNICInterfaces != 8 || len(info.MissingInterfaces) != 0 || info.ExtraAtGPUNICSlot != "" {
-			t.Errorf("healthy = %+v, want 8 interfaces, no missing, no extra", info)
-		}
-	})
-
-	t.Run("displaced: gVNIC holds the first GPU NIC slot", func(t *testing.T) {
-		t.Parallel()
-		info, err := ParseNICInfo(displacedAnnotation())
-		if err != nil {
-			t.Fatalf("ParseNICInfo: %v", err)
-		}
-		if info.GPUNICInterfaces != 7 {
-			t.Errorf("displaced GPUNICInterfaces = %d, want 7", info.GPUNICInterfaces)
-		}
-		if len(info.MissingInterfaces) != 1 || info.MissingInterfaces[0] != "eth1" {
-			t.Errorf("displaced missing = %v, want [eth1]", info.MissingInterfaces)
-		}
-		if info.ExtraAtGPUNICSlot == "" {
-			t.Error("displaced: expected ExtraAtGPUNICSlot to name the gVNIC at the slot")
-		}
-	})
-
-	t.Run("empty annotation fails", func(t *testing.T) {
-		t.Parallel()
-		if _, err := ParseNICInfo(""); err == nil {
-			t.Fatal("empty annotation should fail")
-		}
-	})
-
-	t.Run("malformed JSON fails", func(t *testing.T) {
-		t.Parallel()
-		if _, err := ParseNICInfo("{not json"); err == nil {
-			t.Fatal("malformed JSON should fail")
-		}
-	})
-
-	t.Run("empty list fails", func(t *testing.T) {
-		t.Parallel()
-		if _, err := ParseNICInfo("[]"); err == nil {
-			t.Fatal("empty list should fail")
-		}
-	})
-
-	t.Run("non-eth entries are ignored for the TCPXO count", func(t *testing.T) {
-		t.Parallel()
-		ann := "[" + nicEntry("eth0", "0000:00:05.0") + "," + nicEntry("docker0", "0000:0f:00.0") + "," +
-			strings.Join(func() []string {
-				e := make([]string, 0, len(tcpXOInterfaces))
-				for i, name := range tcpXOInterfaces {
-					e = append(e, nicEntry(name, a3GPUNICSlots[i]))
+	tests := []struct {
+		name           string
+		annotation     string
+		wantErr        bool
+		wantInterfaces int
+		wantMissing    []string
+		wantExtra      []string
+	}{
+		{
+			name:           "healthy node",
+			annotation:     nicAnnotation(healthyPairs()),
+			wantInterfaces: 8,
+		},
+		{
+			name: "extra interface beyond eth8",
+			annotation: nicAnnotation(append(healthyPairs(),
+				[2]string{"eth9", "0000:20:00.0"})),
+			wantInterfaces: 8,
+			wantExtra:      []string{"eth9"},
+		},
+		{
+			name: "fewer than 8 GPU NICs",
+			annotation: nicAnnotation(append([][2]string{{"eth0", "0000:00:05.0"}},
+				func() [][2]string {
+					var p [][2]string
+					for i := 0; i < 7; i++ {
+						p = append(p, [2]string{tcpXOInterfaces[i], observedA3GPUNICSlots[i]})
+					}
+					return p
+				}()...)),
+			wantInterfaces: 7,
+			wantMissing:    []string{"eth8"},
+		},
+		{
+			name:       "duplicate interface name fails",
+			annotation: `[` + nicEntry("eth1", "0000:06:00.0") + `,` + nicEntry("eth1", "0000:07:00.0") + `]`,
+			wantErr:    true,
+		},
+		{
+			name:       "empty annotation fails",
+			annotation: "",
+			wantErr:    true,
+		},
+		{
+			name:       "malformed JSON fails",
+			annotation: "{not json",
+			wantErr:    true,
+		},
+		{
+			name:       "empty list fails",
+			annotation: "[]",
+			wantErr:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			info, err := ParseNICInfo(tt.annotation)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("want error, got %+v", info)
 				}
-				return e
-			}(), ",") + "]"
-		info, err := ParseNICInfo(ann)
-		if err != nil {
-			t.Fatalf("ParseNICInfo: %v", err)
-		}
-		if info.GPUNICInterfaces != 8 {
-			t.Errorf("count = %d, want 8 (docker0/eth0 ignored)", info.GPUNICInterfaces)
-		}
-	})
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if info.GPUNICInterfaces != tt.wantInterfaces {
+				t.Errorf("GPUNICInterfaces = %d, want %d", info.GPUNICInterfaces, tt.wantInterfaces)
+			}
+			if got := info.SortedMissing(); strings.Join(got, ",") != strings.Join(tt.wantMissing, ",") {
+				t.Errorf("missing = %v, want %v", got, tt.wantMissing)
+			}
+			if strings.Join(info.ExtraInterfaces, ",") != strings.Join(tt.wantExtra, ",") {
+				t.Errorf("extra = %v, want %v", info.ExtraInterfaces, tt.wantExtra)
+			}
+		})
+	}
+}
+
+// TestParseNICInfoRealShape uses the annotation shape captured from a live
+// a3-megagpu-8g node (eth0 at 00:0c.0, GPU NICs at the observed 06/07/0d/0e/86/87/8d/8e
+// slots). It is the regression guard against a parser/detector that misfires on
+// real data — it must parse healthy with no missing, no extra, no deviation.
+func TestParseNICInfoRealShape(t *testing.T) {
+	t.Parallel()
+	pairs := make([][2]string, 0, 1+len(tcpXOInterfaces))
+	pairs = append(pairs, [2]string{"eth0", "0000:0c:00.0"})
+	for i, name := range tcpXOInterfaces {
+		pairs = append(pairs, [2]string{name, observedA3GPUNICSlots[i]})
+	}
+	info, err := ParseNICInfo(nicAnnotation(pairs))
+	if err != nil {
+		t.Fatalf("ParseNICInfo on the real captured shape: %v", err)
+	}
+	if info.GPUNICInterfaces != 8 || len(info.MissingInterfaces) != 0 || len(info.ExtraInterfaces) != 0 {
+		t.Errorf("real shape must be healthy, got interfaces=%d missing=%v extra=%v",
+			info.GPUNICInterfaces, info.MissingInterfaces, info.ExtraInterfaces)
+	}
+	if len(info.ObservedGPUNICSlotDeviation()) != 0 {
+		t.Errorf("real shape must not deviate from the observed layout, got %v", info.ObservedGPUNICSlotDeviation())
+	}
+}
+
+// Observed-slot deviation is informational only and never feeds pass/fail.
+func TestObservedSlotDeviationIsInformational(t *testing.T) {
+	t.Parallel()
+	// A node whose eth1..eth8 are at DIFFERENT (but complete) slots should parse
+	// fine and report a deviation — pass/fail is the caller's, not this field's.
+	pairs := make([][2]string, 0, 1+len(tcpXOInterfaces))
+	pairs = append(pairs, [2]string{"eth0", "0000:00:05.0"})
+	for i, name := range tcpXOInterfaces {
+		pairs = append(pairs, [2]string{name, fmt.Sprintf("0001:0%d:00.0", i)})
+	}
+	info, err := ParseNICInfo(nicAnnotation(pairs))
+	if err != nil {
+		t.Fatalf("ParseNICInfo: %v", err)
+	}
+	if info.GPUNICInterfaces != 8 {
+		t.Errorf("complete-but-different slots must still count 8, got %d", info.GPUNICInterfaces)
+	}
+	if len(info.ObservedGPUNICSlotDeviation()) != 8 {
+		t.Errorf("all 8 should be flagged as deviating from the observed norm, got %v", info.ObservedGPUNICSlotDeviation())
+	}
 }
