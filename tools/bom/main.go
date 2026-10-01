@@ -57,12 +57,14 @@ var expectedNoImages = map[string]string{
 	"slurm-accounting-mariadb":   "custom resources only, the operator supplies the images",
 }
 
-// renderRetryBackoff is a var so tests can drop the delay.
-var renderRetryBackoff = 2 * time.Second
+// renderTimeout and renderRetryBackoff are vars so tests can shrink them.
+var (
+	renderTimeout      = 90 * time.Second
+	renderRetryBackoff = 2 * time.Second
+)
 
 const (
-	defaultHelmTimeout = 90 * time.Second
-	renderAttempts     = 3
+	renderAttempts = 3
 	// Component kinds reference the shared pkg/bom identifiers so the tool and
 	// the BOM renderer cannot drift on the string values.
 	kindHelm      = bom.TypeHelm
@@ -302,18 +304,20 @@ func surveyComponents(
 
 // renderWithRetry renders in, retrying render failures (chart pulls are
 // network calls that fail transiently) up to renderAttempts times with linear
-// backoff. Each attempt gets its own timeout. A failure that survives every
-// attempt is returned, so a missing chart still surfaces.
+// backoff. Each attempt gets its own timeout, and an attempt that hit it is
+// not retried, so a hung chart costs one timeout rather than three. A failure
+// that survives every attempt is returned, so a missing chart still surfaces.
 func renderWithRetry(ctx context.Context, r helm.Renderer, in helm.ChartInput) ([]byte, error) {
 	var (
 		out []byte
 		err error
 	)
 	for attempt := 1; attempt <= renderAttempts; attempt++ {
-		out, err = renderOnce(ctx, r, in)
+		var timedOut bool
+		out, timedOut, err = renderOnce(ctx, r, in)
 		// Only ErrCodeInternal (helm exited non-zero) is worth retrying. A
 		// missing helm binary or an unconfigured chart will not fix itself.
-		if err == nil || attempt == renderAttempts ||
+		if err == nil || timedOut || attempt == renderAttempts ||
 			!stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
 
 			break
@@ -327,10 +331,13 @@ func renderWithRetry(ctx context.Context, r helm.Renderer, in helm.ChartInput) (
 	return out, err
 }
 
-func renderOnce(ctx context.Context, r helm.Renderer, in helm.ChartInput) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, defaultHelmTimeout)
+// renderOnce runs a single render attempt and reports whether it ran out of
+// time.
+func renderOnce(ctx context.Context, r helm.Renderer, in helm.ChartInput) (out []byte, timedOut bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, renderTimeout)
 	defer cancel()
-	return r.Render(ctx, in)
+	out, err = r.Render(ctx, in)
+	return out, ctx.Err() != nil, err
 }
 
 // renderHelmComponent shells out to `helm template` for c.

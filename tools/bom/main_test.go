@@ -944,6 +944,29 @@ func TestRenderWithRetry(t *testing.T) {
 	}
 }
 
+// hangingRenderer blocks until its context is done, then fails.
+type hangingRenderer struct{ calls int }
+
+func (h *hangingRenderer) Render(ctx context.Context, _ helm.ChartInput) ([]byte, error) {
+	h.calls++
+	<-ctx.Done()
+	return nil, errors.New(errors.ErrCodeInternal, "signal: killed")
+}
+
+func TestRenderWithRetryDoesNotRetryTimeout(t *testing.T) {
+	setRetryBackoff(t, 0)
+	old := renderTimeout
+	renderTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { renderTimeout = old })
+	h := &hangingRenderer{}
+	if _, err := renderWithRetry(context.Background(), h, helm.ChartInput{Name: "x"}); err == nil {
+		t.Fatal("renderWithRetry() error = nil, want the timeout failure")
+	}
+	if h.calls != 1 {
+		t.Errorf("calls = %d, want 1 (timeouts are not retried)", h.calls)
+	}
+}
+
 // cancelingRenderer cancels the caller's context on its first call, then fails.
 type cancelingRenderer struct {
 	cancel context.CancelFunc
