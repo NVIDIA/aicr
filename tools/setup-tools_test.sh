@@ -348,7 +348,7 @@ echo "Sidecar sources: default suffix per algorithm, explicit suffix honored, un
 # line repeats once exhausted. Every call's arguments are appended to a log.
 check_download_retry() {
     (
-        export SETUP_TOOLS_SOURCE_ONLY="true" RETRY_BASE_DELAY=0
+        export SETUP_TOOLS_SOURCE_ONLY="true" RETRY_ATTEMPTS=3 RETRY_BASE_DELAY=0
         # shellcheck source=tools/setup-tools
         source "${SETUP_TOOLS}"
 
