@@ -753,6 +753,16 @@ jobs:
           EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-gcp\.yaml@refs/heads/.+$'
         run: ./tests/uat/gcp/run verify "${TEST_CONFIG}"
 
+      - name: "UAT - sxid fault injection (NVSentinel detection, #2625)"
+        id: sxidfault
+        if: steps.conformance.outcome == 'success'
+        timeout-minutes: 10
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/gcp/run sxidfault "${TEST_CONFIG}"
+
       # Export the digest-pinned bundle ref for the ingest-evidence job.
       # Reads the pointer the conformance step wrote; emits empty (job
       # skips) when no bundle/digest is present.
@@ -878,6 +888,7 @@ jobs:
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Serve | ${{ steps.serve.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
+            echo "| SXID fault injection | ${{ steps.sxidfault.outcome }} |"
             if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""
               echo "**Evidence (OCI):** \`${{ steps.evidence_ref.outputs.ref }}\`"
