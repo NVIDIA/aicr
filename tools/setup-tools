@@ -83,14 +83,14 @@ retry_transient() {
     done
 }
 
-# CURL_RETRY makes curl retry timeouts, refused connections, and HTTP 408, 429,
-# and 5xx with exponential backoff. A 404 or 403 fails at once, and each retry
-# rewrites the -o file from scratch. Callers add --max-time so a stalled
-# connection fails an attempt instead of hanging the job.
-CURL_RETRY=(--retry $((RETRY_ATTEMPTS - 1)) --retry-connrefused --connect-timeout 10)
+# CURL_RETRY makes curl retry every failure, including a 403 from a GitHub or CDN
+# rate limit, and each retry rewrites the -o file from scratch. A bad pin (404)
+# is retried too and still fails after the last attempt. Callers add --max-time
+# so a stalled connection fails an attempt instead of hanging the job.
+CURL_RETRY=(--retry $((RETRY_ATTEMPTS - 1)) --retry-delay 2 --retry-all-errors --connect-timeout 10)
 
-# Verify URL accessibility before downloading. curl retries transient failures,
-# and a 404 or other client error fails immediately.
+# Verify URL accessibility before downloading. curl retries failures, so only a
+# URL that stays unreachable through every attempt fails.
 verify_download_url() {
     local url="$1"
     local description="$2"

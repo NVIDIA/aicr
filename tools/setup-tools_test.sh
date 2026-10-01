@@ -385,7 +385,7 @@ FAKE
 
         # The retry count curl receives follows RETRY_ATTEMPTS. N attempts is N-1 retries.
         probe 0 "" "default attempts" "200 0"
-        grep -q -- '--retry 2 --retry-connrefused' "${scratch}/args" ||
+        grep -q -- '--retry 2 --retry-delay 2 --retry-all-errors' "${scratch}/args" ||
             { echo "default attempts did not pass --retry 2: $(cat "${scratch}/args")"; exit 1; }
         got=$(RETRY_ATTEMPTS=5 bash -c 'source "$1"; echo "${CURL_RETRY[*]}"' _ "${SETUP_TOOLS}")
         [[ "${got}" == --retry\ 4\ * ]] || { echo "RETRY_ATTEMPTS=5 gave curl flags '${got}', want --retry 4"; exit 1; }
