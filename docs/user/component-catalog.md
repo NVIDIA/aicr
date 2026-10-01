@@ -1626,6 +1626,16 @@ CRDs first and the operator second:
    kubectl patch mariadb mariadb -n slurm --type merge \
      -p '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
    ```
+   With Argo CD or Flux, do not patch the live resource. Set
+   `spec.updateStrategy.autoUpdateDataPlane: true` in the desired configuration
+   the application syncs, commit it, and sync it before step 2, then confirm
+   the live value with
+   `kubectl get mariadb <name> -n <namespace> -o jsonpath='{.spec.updateStrategy.autoUpdateDataPlane}'`.
+   A pruning or self-healing sync restores whatever git says, and if git still
+   says `false` when the upgraded operator first reconciles an HA `MariaDB`,
+   the operator's Galera and replication defaulting keep the old init and
+   agent images: the data-plane upgrade is skipped and the waits in step 4
+   time out. Keep `true` in git until step 4 passes.
 2. Upgrade `mariadb-operator-crds` to `26.10.1` **in place**. Confirm which
    namespace the existing release is in first, because Helm scopes a release
    by namespace: without `--namespace` the request lands in whatever namespace
@@ -1682,7 +1692,8 @@ CRDs first and the operator second:
    count for the old revision. Skip non-HA instances: they have no init or
    agent container, so these waits run to their timeout.
 5. Return the flag to `false` so a later operator bump does not update the data
-   plane unattended. If the field is managed in git, set it there.
+   plane unattended. With Argo CD or Flux, set it back to `false` in the
+   desired configuration, commit it, and sync, only after step 4 passes.
 
 `26.10.0` also changes the operator's default server image to
 `mariadb:12.3.3`, and `26.10.1` keeps it. AICR pins `mariadb:11.8.8` in
