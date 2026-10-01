@@ -38,6 +38,47 @@ That re-resolves your artifact's own criteria against the running binary's pins,
 
 `--deployer` is required whenever a component carries steps, because steps differ per deployer and the tool will not guess. Pass the same value you pass to `aicr bundle`.
 
+## What is actually running here?
+
+Both forms above compare artifacts, so they answer for the recipe you *think* you deployed. If somebody applied a chart by hand, or a prior upgrade only half landed, the artifact in git no longer says where the cluster is. Ask the cluster instead:
+
+```shell
+aicr upgrade-check --from cluster --to new-recipe.yaml --deployer helm
+```
+
+That reads the record your deployer leaves behind, and only that one: Helm's release records for `helm`, `helmfile` and `flux`, and Argo CD's `Application` objects for `argocd` and `argocd-helm`, which write no per-component Helm release at all. The `--to` side is still an artifact; there is nothing in a cluster to upgrade *to*.
+
+Two flags stop being optional here. `--to`, because a cluster carries no criteria to re-resolve, so the "am I behind?" form has nothing to work from. And `--deployer`, whether or not any component turns out to carry steps: a release name encodes the deployer that wrote it (flux composes `<targetNamespace>-<name>`, Argo CD prepends a prefix you set), so without one nothing installed maps to a component and the read could only report an empty cluster.
+
+**What the read is, and what it is not.** It answers *which version is installed*, authoritatively, including where that has drifted from git. It answers nothing else. Only an established version counts: a Helm release whose newest revision reached `deployed`, and an Argo CD `Application` revision that a sync completed, never the pin it is configured to reach. A pending or failed Helm upgrade reads as `unversioned`, because the old version may still be running; an Argo CD `Application` still syncing reads at its last completed sync, or as `unversioned` if it has none. A component the read places but cannot version, such as one whose release record cannot be read, also reads as `unversioned` rather than disappearing, so it fails the run instead of reading as newly installed. Both are records of what was applied, not observations. A resource somebody edited by hand leaves both untouched, and reading them will not tell you it happened. Treat the answer as "what was installed here", not "what this cluster looks like".
+
+The report grows a `READ FROM CLUSTER` block above the rows, naming the kubeconfig it read and accounting for each reader. On an Argo CD management cluster, `Application`s deploying to other clusters are left out and counted as `remote`; only what deploys into the cluster you read counts as installed. Its `context` line reads `-` because the current context is not yet reported, so check it yourself with `kubectl config current-context`. Read it before you read the verdicts. A run that recognized nothing is reported rather than failed, and says so explicitly, because every row then reads "added" and three causes look identical from the rows alone: a genuinely bare cluster, the wrong cluster, or components installed by a deployer other than the one you named.
+
+A component installed outside its registry default namespace is still found: the read also tries the namespace your `--to` recipe puts it in (an overlay or mixin can move it, and `--inherit-from` keeps it where it was), and under `flux` the namespace the release itself records. A strict run also fails when the block reports AICR-stamped releases that match no component, since that means the read lost track of something AICR installed.
+
+One axis the cluster read does not cover is the namespace. [When a component moves namespace](#when-a-component-moves-namespace) is an artifact-to-artifact comparison only: the read recovers a version and no namespace, because the namespace is an input to the attribution rather than something the records hand back, and three of the five deployers could not report one at all. A relocation row therefore never appears against `--from cluster`. Keep the artifact comparison for that question.
+
+## Objects the upgrade could destroy
+
+A different question about the same cluster: not what is installed, but what is sitting there that an upgrade might take with it. `--scan-cluster` answers it.
+
+```shell
+aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml \
+  --deployer helm --scan-cluster
+```
+
+The scan is its own axis rather than a mode. It needs a cluster wherever the `--from` side came from, so scanning a live cluster while comparing two artifacts, as above, is a normal thing to do. `--from cluster` turns it on for you, and `--scan-cluster=false` turns it back off if you do not want it there.
+
+For the resource kinds the *crossed* transition records name, it lists each kind cluster-wide and reports every object carrying neither Helm's ownership markers (`app.kubernetes.io/managed-by=Helm` together with a `meta.helm.sh/release-name` annotation) nor Argo CD's `argocd.argoproj.io/tracking-id`. What it is trying to stop is your own custom resources going away with a CRD that a component removes: AICR did not create them and cannot put them back.
+
+Because the test is positive, an object carrying no marker AICR recognizes is reported. Something a fourth tool owns will show up here. That is the intended direction of error: a spurious line of output costs you a moment, a missing one costs the object.
+
+Two cases follow from that test. Any Helm release or Argo CD `Application` counts as an owner, not only AICR's, so your own custom resources managed by your own chart or `Application` are treated as owned and not reported: your deployer can usually re-apply them, but only once the kind exists again. And Argo CD 2.x tracks resources by the `app.kubernetes.io/instance` label by default rather than the annotation, so on such a cluster every Argo-managed object of a scanned kind is reported, including ones your own deployer manages. The scan stays conservative there on purpose, since treating that generic label as ownership would hide real findings.
+
+**Findings never fail the run.** Blocking an upgrade over resources AICR does not own is a claim it has not earned, so the section is advisory and the exit code ignores it entirely. Acting on it is yours: confirm each object is expected to survive this upgrade, or back it up, before you apply.
+
+**An empty section is not an all-clear.** The `AT RISK` section prints on every run, including runs that touched no cluster, and states which case it is: no cluster access was requested, the scan was explicitly turned off, no crossed record names a resource kind, or the scan read objects and found every one of them owned. Check which one you are looking at before reading it as a clean bill of health.
+
 ## Acting on the report
 
 Full flag and verdict reference lives in the [CLI reference](cli-reference.md#aicr-upgrade-check). What to *do*:
@@ -187,8 +228,10 @@ So a rollback needs human review before you run it. Read the component's own dow
 
 ## What this does not cover
 
-- **It does not read your cluster's state.** The comparison is between two artifacts; nothing is inspected, deployed or modified. (A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.) If your cluster has drifted from the recipe you think you deployed, the check compares the artifacts you gave it, not reality. Reading installed Helm release inventory is tracked in [#2531](https://github.com/NVIDIA/aicr/issues/2531).
-- **You still name the deployer.** A bundle records the deployer that built it in [`bundle-info.yaml`](bundling.md), but `upgrade-check` does not read that record yet, so `--deployer` is required whenever a component carries steps, even when reading a bundle.
+- **An artifact comparison reads no cluster state.** Nothing is inspected, deployed or modified. (A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.) If your cluster has drifted from the recipe you think you deployed, the check compares the artifacts you gave it, not reality. [Ask the cluster](#what-is-actually-running-here) when that is the question.
+- **The cluster read is a read of declarations, not of live state.** A Helm release answers only from a newest revision that reached `deployed`, and an Argo CD `Application` only from a revision its sync status or history shows was synced, never from the pin it is configured to reach. An upgrade that is still pending, or failed, therefore never reads as made: under Argo CD it reads at the last synced revision, or as `unversioned` if there is none, and under Helm it reads as `unversioned`. A hand-edited resource changes neither, so the read is authoritative about installed versions and silent about everything else. It also reports no namespace move, having no namespace to compare.
+- **Argo CD bundles built with `--vendor-charts` read as `unversioned`.** Vendoring turns every chart into a path-based `Application`, which carries no payload version anywhere in the cluster, so every component reads `unversioned` and a strict run always fails. Compare the vendored bundle as an artifact instead: `--from <bundle>`.
+- **You still name the deployer.** A bundle records the deployer that built it in [`bundle-info.yaml`](bundling.md), but `upgrade-check` does not read that record yet, so `--deployer` is required whenever a component carries steps, even when reading a bundle, and unconditionally when reading the cluster.
 - **Coverage starts near zero, so expect red.** Only five components ship a record today, so most transitions report `unknown` and the check exits non-zero on most comparisons. Absence of a record is absence of assessment, and the tool says so rather than rounding it up to approval. This is a coverage problem with an owner ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes a record mandatory for every pin bump), and it shrinks as records land. Use `--fail-on-error=false` for the report without the gate in the meantime.
 - **A namespace move is seen only when both artifacts state one.** An empty namespace is read as a fact the artifact did not carry, not as a move to or from the default, so a component that *gains* or *loses* an explicit namespace between the two artifacts produces no relocation row at all. Reading it the other way would report a move nobody performed for every component the moment one of the two artifacts stopped carrying the field. The same holds for chart, source and path. The manifest and pre-manifest file sets are the exception. Each is compared as a set, so a set that empties is a move. The release name is not compared, because it is derived from the component name.
 - **Records are human assertions.** A `safe` verdict names what verified it, but it is somebody's reading of the migration notes plus a test lane, not a proof.
