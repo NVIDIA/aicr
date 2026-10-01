@@ -55,9 +55,7 @@ type GPUNICNetworkStatus struct {
 	// ParamsReadyDetail is the reason/message of a failing ParamsReady condition
 	// ("" when healthy).
 	ParamsReadyDetail string
-	// Detail carries the first failing condition's reason/message ("" when healthy),
 	// retained for the message that leads with it.
-	Detail string
 }
 
 // Bound reports whether the Network is Ready, its ParamsReady binding resolved, AND
@@ -110,7 +108,6 @@ func networkStatus(n *unstructured.Unstructured) GPUNICNetworkStatus {
 	}
 	conds, found, _ := unstructured.NestedSlice(n.Object, "status", "conditions")
 	if !found {
-		st.Detail = "Network has no status.conditions (never reported ready)"
 		st.ReadyDetail = "no status.conditions reported"
 		st.ParamsReadyDetail = "no status.conditions reported"
 		return st
@@ -129,17 +126,11 @@ func networkStatus(n *unstructured.Unstructured) GPUNICNetworkStatus {
 			st.Ready = condStatus == conditionTrue
 			if !st.Ready {
 				st.ReadyDetail = conditionDetail("Ready", reason, message)
-				if st.Detail == "" {
-					st.Detail = st.ReadyDetail
-				}
 			}
 		case conditionParamsReady:
 			st.ParamsReady = condStatus == conditionTrue
 			if !st.ParamsReady {
 				st.ParamsReadyDetail = conditionDetail("ParamsReady", reason, message)
-				if st.Detail == "" {
-					st.Detail = st.ParamsReadyDetail
-				}
 			}
 		}
 	}

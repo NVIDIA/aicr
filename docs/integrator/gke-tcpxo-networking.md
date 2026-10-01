@@ -85,6 +85,7 @@ Fewer than eight means the prerequisite is incomplete. AICR's
 letting it surface later as a performance-phase abort with no bandwidth number.
 
 **Important:** The GPU node pool must be provisioned with only the 8 GPU NIC
+networks (`gpu-nic-0` through `gpu-nic-7`). Do **not** include a gVNIC additional
 network — it takes one of the GPU NIC PCI slots, leaving only 7/8 GPUs
 available for TCPXO. This is distinct from the `--enable-gvnic` node-pool flag,
 which selects the gVNIC driver and **is** required: pass the flag, but do not add

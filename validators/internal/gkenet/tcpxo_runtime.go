@@ -293,7 +293,7 @@ func VerifyNetworksExist(deployed []recipe.NetworkInterfaceMapping, usable []str
 			fmt.Sprintf("deployed %s runtime selects GPU NIC networks that do not exist on this cluster: %s (cluster has: %s)",
 				TCPXORuntimeName, strings.Join(missing, ", "), strings.Join(present, ", ")))
 	case len(notUsable) > 0:
-		return errors.New(errors.ErrCodeUnavailable,
+		return errors.New(errors.ErrCodeConflict,
 			fmt.Sprintf("deployed %s runtime selects GPU NIC networks that exist but are not Ready/bound: %s (usable on cluster: %s)",
 				TCPXORuntimeName, strings.Join(notUsable, ", "), strings.Join(usable, ", ")))
 	}

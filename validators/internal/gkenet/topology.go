@@ -108,7 +108,6 @@ func ParseNICInfo(annotation string) (*NodeNICInfo, error) {
 			NICInfoAnnotation+" annotation has no interface/PCI entries")
 	}
 
-	present := map[string]bool{}
 	for _, ifName := range tcpXOInterfaces {
 		pci, ok := info.Interfaces[ifName]
 		if !ok {
@@ -116,20 +115,31 @@ func ParseNICInfo(annotation string) (*NodeNICInfo, error) {
 			continue
 		}
 		info.GPUNICInterfaces++
-		present[ifName] = true
 		info.GPUNICPCIs = append(info.GPUNICPCIs, pci)
 	}
 	sort.Strings(info.GPUNICPCIs)
 
-	// Extra interfaces: any ethN beyond eth8. Parse the numeric suffix — ethX,
-	// eth08, eth1.100 etc. are all "extra", never silently ignored or miscounted.
+	// Extra interfaces: anything that is not a canonical eth0..eth8 name — a
+	// non-eth name (an extra gVNIC like gve1), a non-numeric suffix (ethX), or a
+	// non-canonical numeric form (eth08, eth-1, eth+5) or eth9+. Canonical means
+	// the name round-trips through Atoi without padding/sign.
 	for ifName := range info.Interfaces {
-		if !strings.HasPrefix(ifName, "eth") {
-			continue
-		}
-		n, err := strconv.Atoi(ifName[len("eth"):])
-		if err != nil || n > RequiredGPUNICInterfaces {
+		n, err := strconv.Atoi(strings.TrimPrefix(ifName, "eth"))
+		canonical := err == nil && n >= 0 && ifName == "eth"+strconv.Itoa(n)
+		if !canonical || n > RequiredGPUNICInterfaces {
 			info.ExtraInterfaces = append(info.ExtraInterfaces, ifName)
+		}
+	}
+	sort.Strings(info.ExtraInterfaces)
+
+	// Two interfaces sharing one PCI address means a misconfigured/mirrored NIC —
+	// flag it as a displacement signature too.
+	byPCI := map[string]string{}
+	for ifName, pci := range info.Interfaces {
+		if prev, dup := byPCI[pci]; dup {
+			info.ExtraInterfaces = append(info.ExtraInterfaces, ifName+"@"+pci+"(shared with "+prev+")")
+		} else {
+			byPCI[pci] = ifName
 		}
 	}
 	sort.Strings(info.ExtraInterfaces)

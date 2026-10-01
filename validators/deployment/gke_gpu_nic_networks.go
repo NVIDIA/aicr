@@ -191,7 +191,7 @@ func verifyNetworkReadinessAndBinding(statuses []gkenet.GPUNICNetworkStatus) err
 	if readyBound >= gkenet.RequiredGPUNICNetworks {
 		return nil
 	}
-	return errors.New(errors.ErrCodeNotFound, networkCapabilityMsg(unhealthyDetail(firstBad, readyBound)))
+	return errors.New(errors.ErrCodeConflict, networkCapabilityMsg(unhealthyDetail(firstBad, readyBound)))
 }
 
 // unhealthyDetail describes the readiness shortfall, naming the worst offender.

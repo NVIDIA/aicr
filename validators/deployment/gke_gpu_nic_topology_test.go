@@ -33,7 +33,7 @@ func topoEntry(name, pci string) string {
 	return fmt.Sprintf(`{"birthName":%q,"birthIP":"","birthIPv6":"","pciAddress":%q}`, name, pci)
 }
 
-var topoSlots = []string{"0000:06:00.0", "0000:07:00.0", "0000:08:00.0", "0000:09:00.0", "0000:0a:00.0", "0000:0b:00.0", "0000:0c:00.0", "0000:0d:00.0"}
+var topoSlots = []string{"0000:06:00.0", "0000:07:00.0", "0000:0d:00.0", "0000:0e:00.0", "0000:86:00.0", "0000:87:00.0", "0000:8d:00.0", "0000:8e:00.0"}
 var topoIfs = []string{"eth1", "eth2", "eth3", "eth4", "eth5", "eth6", "eth7", "eth8"}
 
 func healthyTopoAnnotation() string {
