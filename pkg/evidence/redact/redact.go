@@ -86,7 +86,10 @@ const (
 	// v4 added the `named-in-skip-checks` skipReason code, so a check the
 	// CALLER withheld (--skip-check) reaches the bundle with its reason and not
 	// only its name; the message that used to carry it is blanked here.
-	PolicyVersion = "v4"
+	// v5 (#2265): the per-test Extra allowlist admits nodesUnverified (count of
+	// candidate nodes a coverage check could NOT verify), emitted by the GKE
+	// NIC-topology check. Counts only; nothing previously published changed.
+	PolicyVersion = "v5"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata

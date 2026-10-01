@@ -16,7 +16,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -25,8 +28,10 @@ import (
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/internal/gkenet"
 )
 
 func topoEntry(name, pci string) string {
@@ -90,11 +95,11 @@ func TestCheckGKEGPUNICTopology(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected failure for a displaced GPU NIC")
 		}
-		if !strings.Contains(err.Error(), "gve0") && !strings.Contains(err.Error(), "eth1") {
-			t.Errorf("error should name the displacing interface or the missing one: %v", err)
+		if !strings.Contains(err.Error(), "maps 7 of 8 GPU NIC interfaces (missing: eth1)") {
+			t.Errorf("error should name the missing interface: %v", err)
 		}
-		if !strings.Contains(err.Error(), "gVNIC") {
-			t.Errorf("error should name the gVNIC cause: %v", err)
+		if !strings.Contains(err.Error(), "unexpected interface(s) beyond eth0..eth8: gve0") {
+			t.Errorf("error should name the displacing interface (not just the remediation): %v", err)
 		}
 	})
 
@@ -143,4 +148,84 @@ func TestCheckGKEGPUNICTopology(t *testing.T) {
 			t.Fatalf("all-unverified must Skip (not plain pass), got %v", err)
 		}
 	})
+}
+
+// poolConsistencyProblems blames only strict-minority nodes (never the majority
+// side), stays neutral on a tie, and counts only grouped nodes for the threshold.
+func TestPoolConsistencyProblems(t *testing.T) {
+	t.Parallel()
+	nt := func(name string, pcis ...string) nodeTopology {
+		return nodeTopology{name: name, info: &gkenet.NodeNICInfo{GPUNICPCIs: pcis}}
+	}
+	a := []string{"0000:06:00.0", "0000:07:00.0"}
+	b := []string{"0000:08:00.0", "0000:09:00.0"}
+	cases := []struct {
+		name     string
+		verified []nodeTopology
+		flagged  map[string]bool
+		wantName []string // node names that must be blamed (empty = no blame/neutral handled separately)
+		wantNone bool     // expect no problems at all
+	}{
+		{"consistent pool", []nodeTopology{nt("n1", a...), nt("n2", a...)}, nil, nil, true},
+		{"one node only", []nodeTopology{nt("n1", a...)}, nil, nil, true},
+		{"majority 2v1 blames minority", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...)}, nil, []string{"n3"}, false},
+		{"tie 2v2 is neutral (no node blamed)", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...), nt("n4", b...)}, nil, nil, false},
+		{"flagged node excluded from grouping", []nodeTopology{nt("n1", a...), nt("n2", a...), nt("n3", b...)}, map[string]bool{"n3": true}, nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := poolConsistencyProblems(tc.verified, tc.flagged)
+			joined := strings.Join(got, "\n")
+			if tc.wantNone && len(got) != 0 {
+				t.Errorf("expected no problems, got %v", got)
+			}
+			for _, name := range tc.wantName {
+				if !strings.Contains(joined, `"`+name+`"`) {
+					t.Errorf("expected node %q to be blamed, got %v", name, got)
+				}
+			}
+			// No unflagged node outside wantName should be blamed.
+			if !tc.wantNone && len(tc.wantName) == 0 && len(got) > 0 {
+				// neutral tie: must not single out any node with "differs from the pool majority"
+				if strings.Contains(joined, "differs from the pool majority") {
+					t.Errorf("tie must not blame any node, got %v", got)
+				}
+			}
+		})
+	}
+}
+
+// The coverage emit reflects the actual verified count on every terminal path
+// (regression for verifiedCount never being set).
+func TestTopologyCoverageEmitCounts(t *testing.T) {
+	n2 := topoNode(healthyTopoAnnotation())
+	n2.Name = "gpu-1"
+	cs := k8sfake.NewClientset(topoNode(healthyTopoAnnotation()), n2)
+
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	runErr := checkGKEGPUNICTopology(topoContext(cs, true))
+	_ = w.Close()
+	out, _ := io.ReadAll(r)
+	os.Stdout = orig
+
+	if runErr != nil {
+		t.Fatalf("two healthy nodes must pass, got %v", runErr)
+	}
+	var extra map[string]string
+	for _, line := range strings.Split(string(out), "\n") {
+		if payload, ok := strings.CutPrefix(line, ctrf.ExtraLinePrefix); ok {
+			_ = json.Unmarshal([]byte(payload), &extra)
+		}
+	}
+	if extra["nodesValidated"] != "2" || extra["nodesTotal"] != "2" || extra["nodesUnverified"] != "0" {
+		t.Errorf("coverage counts wrong for 2 healthy nodes, got %v", extra)
+	}
 }

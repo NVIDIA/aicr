@@ -144,3 +144,32 @@ func TestDiscoverGPUNICNetworkStatusRawError(t *testing.T) {
 		t.Fatalf("error is no longer classifiable as Forbidden: %v", err)
 	}
 }
+
+// Bound is the single definition of "usable by a workload" — Ready AND
+// ParamsReady AND a real parametersRef. Cover every combination.
+func TestBoundCombinations(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		ready       bool
+		paramsReady bool
+		paramSet    string
+		want        bool
+	}{
+		{"ready+paramsReady+paramSet", true, true, "a3-mega-pool", true},
+		{"ready+paramsReady, no paramSet", true, true, "", false},
+		{"ready, paramsReady=false", true, false, "a3-mega-pool", false},
+		{"ready=false, paramsReady", false, true, "a3-mega-pool", false},
+		{"all false", false, false, "", false},
+		{"paramsReady+paramSet, ready=false", false, true, "a3-mega-pool", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := GPUNICNetworkStatus{Ready: tc.ready, ParamsReady: tc.paramsReady, ParamSetName: tc.paramSet}
+			if got := s.Bound(); got != tc.want {
+				t.Errorf("Bound()=%v, want %v (ready=%v paramsReady=%v paramSet=%q)", got, tc.want, tc.ready, tc.paramsReady, tc.paramSet)
+			}
+		})
+	}
+}

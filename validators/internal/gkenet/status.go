@@ -55,7 +55,6 @@ type GPUNICNetworkStatus struct {
 	// ParamsReadyDetail is the reason/message of a failing ParamsReady condition
 	// ("" when healthy).
 	ParamsReadyDetail string
-	// retained for the message that leads with it.
 }
 
 // Bound reports whether the Network is Ready, its ParamsReady binding resolved, AND

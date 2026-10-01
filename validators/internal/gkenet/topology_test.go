@@ -129,23 +129,31 @@ func TestParseNICInfo(t *testing.T) {
 // a3-megagpu-8g node (eth0 at 00:0c.0, GPU NICs at the observed 06/07/0d/0e/86/87/8d/8e
 // slots). It is the regression guard against a parser/detector that misfires on
 // real data — it must parse healthy with no missing, no extra, no deviation.
-func TestParseNICInfoRealShape(t *testing.T) {
+// liveA3NICAnnotation is the real networking.gke.io/nic-info annotation captured
+// from a healthy a3-megagpu-8g node on staging: eth0 (gVNIC) at 0000:00:0c.0 and
+// the 8 GPU NICs at the observed slots 06,07,0d,0e,86,87,8d,8e.
+const liveA3NICAnnotation = `[{"birthIP":"10.0.0.9","birthName":"eth0","pciAddress":"0000:00:0c.0"},{"birthIP":"10.0.16.3","birthName":"eth1","pciAddress":"0000:06:00.0"},{"birthIP":"10.0.32.3","birthName":"eth2","pciAddress":"0000:07:00.0"},{"birthIP":"10.0.48.3","birthName":"eth3","pciAddress":"0000:0d:00.0"},{"birthIP":"10.0.64.3","birthName":"eth4","pciAddress":"0000:0e:00.0"},{"birthIP":"10.0.80.3","birthName":"eth5","pciAddress":"0000:86:00.0"},{"birthIP":"10.0.96.3","birthName":"eth6","pciAddress":"0000:87:00.0"},{"birthIP":"10.0.112.3","birthName":"eth7","pciAddress":"0000:8d:00.0"},{"birthIP":"10.0.128.3","birthName":"eth8","pciAddress":"0000:8e:00.0"}]`
+
+// Golden: the real captured annotation parses healthy (no missing/extra, no
+// deviation) and maps eth1..eth8 to the observed slots.
+func TestParseNICInfoLiveAnnotation(t *testing.T) {
 	t.Parallel()
-	pairs := make([][2]string, 0, 1+len(tcpXOInterfaces))
-	pairs = append(pairs, [2]string{"eth0", "0000:0c:00.0"})
-	for i, name := range tcpXOInterfaces {
-		pairs = append(pairs, [2]string{name, observedA3GPUNICSlots[i]})
-	}
-	info, err := ParseNICInfo(nicAnnotation(pairs))
+	info, err := ParseNICInfo(liveA3NICAnnotation)
 	if err != nil {
-		t.Fatalf("ParseNICInfo on the real captured shape: %v", err)
+		t.Fatalf("ParseNICInfo on the live captured annotation: %v", err)
 	}
 	if info.GPUNICInterfaces != 8 || len(info.MissingInterfaces) != 0 || len(info.ExtraInterfaces) != 0 {
-		t.Errorf("real shape must be healthy, got interfaces=%d missing=%v extra=%v",
+		t.Errorf("live annotation must be healthy, got interfaces=%d missing=%v extra=%v",
 			info.GPUNICInterfaces, info.MissingInterfaces, info.ExtraInterfaces)
 	}
 	if len(info.ObservedGPUNICSlotDeviation()) != 0 {
-		t.Errorf("real shape must not deviate from the observed layout, got %v", info.ObservedGPUNICSlotDeviation())
+		t.Errorf("live annotation must not deviate from the observed layout, got %v", info.ObservedGPUNICSlotDeviation())
+	}
+	want := map[string]string{"eth1": "0000:06:00.0", "eth8": "0000:8e:00.0"}
+	for iface, pci := range want {
+		if info.Interfaces[iface] != pci {
+			t.Errorf("%s must map to %s, got %s", iface, pci, info.Interfaces[iface])
+		}
 	}
 }
 
@@ -168,5 +176,49 @@ func TestObservedSlotDeviationIsInformational(t *testing.T) {
 	}
 	if len(info.ObservedGPUNICSlotDeviation()) != 8 {
 		t.Errorf("all 8 should be flagged as deviating from the observed norm, got %v", info.ObservedGPUNICSlotDeviation())
+	}
+}
+
+// Canonical extra-interface detection: anything not a round-trip eth0..eth8 is
+// extra — a non-eth name (gve1), a padded/signed numeric (eth08, eth-1, eth+5),
+// eth9+, or two interfaces sharing one PCI address.
+func TestParseNICInfoCanonicalExtras(t *testing.T) {
+	t.Parallel()
+	base := func() [][2]string { // healthy eth1..eth8 + eth0
+		pairs := make([][2]string, 0, 1+len(tcpXOInterfaces))
+		pairs = append(pairs, [2]string{"eth0", "0000:00:0c.0"})
+		for i, name := range tcpXOInterfaces {
+			pairs = append(pairs, [2]string{name, observedA3GPUNICSlots[i]})
+		}
+		return pairs
+	}
+	cases := []struct {
+		name      string
+		add       [2]string
+		wantExtra string
+	}{
+		{"extra gVNIC gve1", [2]string{"gve1", "0000:0f:00.0"}, "gve1"},
+		{"padded eth08", [2]string{"eth08", "0000:0f:00.0"}, "eth08"},
+		{"negative eth-1", [2]string{"eth-1", "0000:0f:00.0"}, "eth-1"},
+		{"eth9 beyond range", [2]string{"eth9", "0000:0f:00.0"}, "eth9"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			pairs := append(base(), tc.add)
+			info, err := ParseNICInfo(nicAnnotation(pairs))
+			if err != nil {
+				t.Fatalf("ParseNICInfo: %v", err)
+			}
+			found := false
+			for _, e := range info.ExtraInterfaces {
+				if e == tc.wantExtra {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%q must be flagged extra, got %v", tc.wantExtra, info.ExtraInterfaces)
+			}
+		})
 	}
 }
