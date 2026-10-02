@@ -9,23 +9,23 @@ Visual: Vertical stack of 6 stat cards, each with a large bold number and muted 
 
 ```
 ┌─────────────────────────────────────────────┐
-│  48  Registered Components                  │
+│  49  Registered Components                  │
 │  Helm and Kustomize charts in the registry  │
 ├─────────────────────────────────────────────┤
-│ 127  Overlay Files                          │
+│ 134  Overlay Files                          │
 │  Specialization overlays across all         │
 │  criteria combinations                      │
 ├─────────────────────────────────────────────┤
-│  44  values.yaml Files                      │
+│  45  values.yaml Files                      │
 │  Files named exactly values.yaml            │
 │  under recipes/components/                  │
 ├─────────────────────────────────────────────┤
 │  5  Criteria Dimensions                     │
 │  service, accelerator, intent, os, platform │
 ├─────────────────────────────────────────────┤
-│  18  Max Components per Recipe              │
-│  Most specialized inference recipe          │
-│  (H100 + EKS + Ubuntu + Dynamo)             │
+│  23  Max Components per Recipe              │
+│  Largest stock recipe                       │
+│  (OCP + Inference + NIM)                    │
 ├─────────────────────────────────────────────┤
 │  6  Overlay Chain Depth                     │
 │  base > service > intent > accelerator      │
@@ -44,7 +44,7 @@ Visual: Left-to-right horizontal pipeline, boxes connected by labeled arrows
 ┌──────────────┐  +SERVICE=EKS  ┌──────────────┐  +INTENT=TRAINING  ┌──────────────┐
 │   GENERIC    │───────────────▶│   + EKS      │──────────────────▶│  + TRAINING  │
 │   (base+wild)│                │              │                   │              │
-│ 11 components│                │ +2 components│                   │ gpu-operator  │
+│ 12 components│                │ +2 components│                   │ gpu-operator  │
 │              │                │ aws-ebs-csi  │                   │ overrides:    │
 │              │                │ aws-efa      │                   │ CDI           │
 └──────────────┘                │              │                   └──────────────┘
@@ -54,7 +54,7 @@ Visual: Left-to-right horizontal pipeline, boxes connected by labeled arrows
 │   RESOLVED   │◀──────────────│  + UBUNTU    │◀────────────────│  + H100      │
 │   RECIPE     │   KUBEFLOW    │              │   H100           │              │
 │              │                │ OS kernel    │                   │ +nodewright- │
-│ 15 unique    │  +kubeflow-   │ constraint   │                   │ customizations │
+│ 16 unique    │  +kubeflow-   │ constraint   │                   │ customizations │
 │ components   │  trainer      │ >= 6.8       │                   │ behavior     │
 │              │               │              │                   │ mutations    │
 └──────────────┘                └──────────────┘                   └──────────────┘
@@ -77,7 +77,7 @@ Visual: Single input forking into two divergent paths
 ┌───────────────────────┐       ┌───────────────────────┐
 │  TRAINING (Kubeflow)  │       │  INFERENCE (Dynamo)   │
 │                       │       │                       │
-│  15 components        │       │  18 components        │
+│  16 components        │       │  19 components        │
 │                       │       │                       │
 │  Unique:              │       │  Unique:              │
 │    kubeflow-trainer   │       │    grove              │
@@ -104,9 +104,9 @@ Visual: Horizontal bar chart, 3 bars for the same workload across services
 
 | Service  | Components | Service-Specific Additions / Omissions        |
 |----------|------------|-----------------------------------------------|
-| EKS      | 14         | aws-efa, aws-ebs-csi-driver, nodewright-customizations |
-| GKE/COS  | 14         | gke-nccl-tcpxo, nodewright-customizations, COS GPU overrides |
-| Kind     | 12         | network-operator; no cloud CSI/EFA            |
+| EKS      | 15         | aws-efa, aws-ebs-csi-driver, nodewright-customizations |
+| GKE/COS  | 15         | gcp-driver-installer, gke-nccl-tcpxo, nodewright-customizations, COS GPU overrides |
+| Kind     | 13         | network-operator; no cloud CSI/EFA            |
 
 Caption: "Same intent, different service = different component sets and values"
 

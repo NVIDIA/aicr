@@ -10,16 +10,27 @@ out only where commands or flags genuinely differ.
 **EKS**
 
 * User is already authenticated to an EKS cluster with 2+ H100 (p5.48xlarge) nodes.
+* A CPU node group labeled `nodeGroup=cpu-worker` for the Dynamo Frontend
+  (untainted, or tainted `dedicated=worker-workload` like the GPU nodes).
+* An AWS credential path for the EBS CSI driver. The bundle installs the driver
+  but not its credentials, and without them no volume can be provisioned — see
+  [EBS CSI Driver Credentials](../docs/user/component-catalog.md#ebs-csi-driver-credentials).
 * Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`,
   `--system-node-toleration` flags are examples only. Update them to match your cluster.
 
 **GKE**
 
 * User is already authenticated to a GKE cluster with 1+ H100 (a3-megagpu-8g) nodes.
+* A CPU node pool labeled `nodeGroup=cpu-worker` for the Dynamo Frontend.
 * GKE cluster runs Container-Optimized OS (COS) with GPU drivers pre-installed.
 * Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`
   flags are examples only. Update them to match your cluster.
 * System nodes have no custom taints (GKE managed pods don't tolerate them).
+
+The sample workload in [Deploy Inference Workload](#deploy-inference-workload)
+pins its Frontend to `nodeGroup=cpu-worker` and its decode worker to
+`nodeGroup=gpu-worker`. Set the label on the node group or pool so replacement
+nodes keep it; without a matching pool the Frontend stays `Pending`.
 
 ## Snapshot
 
@@ -164,8 +175,9 @@ aicr validate \
 
 ## Deploy Inference Workload
 
-Deploy an inference serving graph using the Dynamo platform (includes KAI queue +
-DynamoGraphDeployment):
+Deploy an inference serving graph using the Dynamo platform (a
+DynamoGraphDeployment submitted to the KAI `dynamo` queue that `dynamo-platform`
+creates):
 
 ```shell
 # GKE: first update tolerations in vllm-agg.yaml to match your cluster taints

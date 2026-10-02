@@ -65,7 +65,9 @@ data:
 
 - Kubernetes cluster with GPU nodes
 - aicr CLI installed
-- GPU Operator installed (or appropriate namespace configured via `--namespace`)
+- No GPU Operator required: capture the snapshot that feeds `aicr recipe`
+  before deploying the GPU Operator (see
+  [GPU Operator Driver Auto-Detect](component-catalog.md#gpu-operator-driver-auto-detect))
 - Permission to create and delete the run's Job and RBAC in the target
   namespace, plus the cluster-scoped `ClusterRole`/`ClusterRoleBinding` the
   agent needs. Every run starts by verifying this and stops before touching
@@ -110,10 +112,12 @@ kubectl get configmap aicr-snapshot -n gpu-operator -o jsonpath='{.data.snapshot
 
 ### 3. Customize Deployment
 
-Target specific nodes and configure scheduling:
+Without `--node-selector`, the agent already targets GPU nodes when the cluster
+has them labeled (see [GPU Node Auto-Targeting](#gpu-node-auto-targeting)).
+Pass a selector to choose the nodes yourself:
 
 ```shell
-# Target GPU nodes with specific label
+# Target GPU nodes with a specific label (overrides auto-targeting)
 aicr snapshot \
   --node-selector accelerator=nvidia-h100
 
@@ -125,7 +129,6 @@ aicr snapshot \
 # Full customization
 aicr snapshot \
   --namespace gpu-operator \
-  --image ghcr.io/nvidia/aicr:v0.19.0 \
   --node-selector accelerator=nvidia-h100 \
   --toleration nvidia.com/gpu:NoSchedule \
   --timeout 10m \
@@ -135,7 +138,7 @@ aicr snapshot \
 **Available flags:**
 - `--kubeconfig`: Custom kubeconfig path (default: `~/.kube/config` or `$KUBECONFIG`)
 - `--namespace`: Deployment namespace (default: `default`)
-- `--image`: Container image (default: matches the CLI version, e.g. `ghcr.io/nvidia/aicr:v0.19.0`; dev and snapshot builds use `:latest`)
+- `--image`: Container image (default: `ghcr.io/nvidia/aicr` tagged with the CLI's own version; dev and snapshot builds use `:latest`)
 - `--image-pull-secret`: Secret name for pulling the agent image from a private registry (repeatable)
 - `--job-name`: Job name prefix (default: `aicr`); the run ID is always appended (`<prefix>-<run-id>`)
 - `--service-account-name`: ServiceAccount the agent pod runs as. **Exact-if-exists** — an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the run creates no RBAC; otherwise it is a name prefix (default: `aicr`) and the run ID is appended (`<prefix>-<run-id>`). See [Using an existing ServiceAccount](#using-an-existing-serviceaccount-irsa-and-workload-identity)
@@ -170,6 +173,30 @@ kubectl logs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/co
 kubectl describe job -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 ```
 
+## GPU Node Auto-Targeting
+
+The agent Job tolerates all taints, so without a selector it can land on a
+non-GPU node and return a snapshot with no GPU data. `aicr snapshot` guards
+against that in two ways:
+
+- **Auto-targeting.** When `--node-selector`, `--require-gpu`, and
+  `--runtime-class` (and their `--config` equivalents) are all unset, and the
+  cluster has a node labeled `nvidia.com/gpu.present=true`, the CLI injects that
+  selector and logs `auto-targeting GPU nodes`. Setting any of the three
+  disables it. The node lookup is presence-only, bounded by a 5-second timeout,
+  and fails open: an API error logs a warning and the Job runs without a
+  selector. If the Job then fails, the error names the injected selector.
+- **Placement-mismatch warning.** If the snapshot has no GPU data but its node
+  topology shows `nvidia.com/gpu.*` labels, the CLI warns `snapshot has no GPU
+  data but cluster topology shows GPU-capable nodes` and lists the fixes:
+  `--node-selector`, `--require-gpu` (needs the device plugin), or
+  `--runtime-class nvidia`.
+
+Both rely on Node Feature Discovery / GPU Feature Discovery labels, which the
+GPU Operator installs. Before it is deployed, GPU nodes usually carry no such
+label, so pass `--node-selector` with a node pool or provider label (see
+[Node Selection](#node-selection)) or `kubernetes.io/hostname` of a GPU node.
+
 ## Customization
 
 ### Node Selection
@@ -203,11 +230,16 @@ By default, the agent Job tolerates **all taints** using the universal toleratio
 
 ### Image Version
 
-Pin to a specific version:
+The default image already matches the CLI version. To pin it explicitly, for
+example when mirroring images, set the tag to the CLI's own release:
 
 ```shell
-aicr snapshot --image ghcr.io/nvidia/aicr:v0.19.0
+AICR_VERSION=vX.Y.Z  # release tag; `aicr --version` prints it without the leading v
+aicr snapshot --image "ghcr.io/nvidia/aicr:${AICR_VERSION}"
 ```
+
+Keep the agent image at the CLI's version: an agent from an older release can
+write a snapshot `apiVersion` that the current CLI no longer accepts.
 
 **Finding versions:**
 - [GitHub Releases](https://github.com/NVIDIA/aicr/releases)
@@ -383,12 +415,15 @@ aicr bundle --recipe recipe.yaml --output ./bundles
 ## Complete Workflow
 
 ```shell
-# Step 1: Capture snapshot to ConfigMap (deployment namespace must match the cm:// namespace)
-aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
+# Step 1: Capture snapshot to ConfigMap before deploying the GPU Operator.
+# Uses the default namespace; the cm:// namespace must match --namespace.
+# GPU Feature Discovery labels don't exist yet, so pin the agent to the GPU
+# node pool yourself (replace nodeGroup=gpu-worker with your pool's label).
+aicr snapshot --node-selector nodeGroup=gpu-worker --output cm://default/aicr-snapshot
 
 # Step 2: Generate recipe from ConfigMap
 aicr recipe \
-  --snapshot cm://gpu-operator/aicr-snapshot \
+  --snapshot cm://default/aicr-snapshot \
   --intent training \
   --platform kubeflow \
   --output recipe.yaml

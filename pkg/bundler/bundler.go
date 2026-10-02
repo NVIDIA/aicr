@@ -239,15 +239,14 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 // For Helm per-component output:
 //   - README.md: Root deployment guide with ordered steps
 //   - deploy.sh: Automation script (0755)
-//   - <component>/values.yaml: Helm values per component
-//   - <component>/README.md: Component install/upgrade/uninstall
-//   - <component>/manifests/: Optional manifest files
+//   - NNN-<component>/values.yaml: Helm values per component
+//   - NNN-<component>/install.sh: Component install/upgrade script
 //   - checksums.txt: SHA256 checksums of generated files
 //
 // For Argo CD output:
 //   - app-of-apps.yaml: Parent Argo CD Application
-//   - <component>/application.yaml: Argo CD Application per component
-//   - <component>/values.yaml: Values for each component
+//   - NNN-<component>/application.yaml: Argo CD Application per component
+//   - NNN-<component>/values.yaml: Values for each component
 //   - README.md: Deployment instructions
 //
 // Returns a result.Output summarizing the generation results.

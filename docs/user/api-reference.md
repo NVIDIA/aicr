@@ -105,7 +105,7 @@ curl "http://localhost:8080/"
 ```json
 {
   "service": "aicrd",
-  "version": "v0.14.0",
+  "version": "vX.Y.Z",
   "routes": [
     "/v1/bundle", "/v1/query", "/v1/recipe"
   ]
@@ -129,6 +129,9 @@ Generate an optimized configuration recipe based on environment parameters.
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `any` |
 | `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `runai`, `slurm`, `any` |
 | `nodes` | integer | 0 | GPU node count hint (0 = unspecified). Advisory metadata — does not select or filter overlays. |
+| `profile` | string | | Configuration profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed`). Omit to take the declaration's default. See [Profile and Slurm-accounting endpoints](#profile-and-slurm-accounting-endpoints). |
+| `slurmAccountingMode` | string | disabled | Slurm accounting database ownership: `disabled`, `customer-managed`, `aicr-provided`. Valid only with `platform=slurm`. |
+| `gkeTcpxoInterfaces` | string | | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships that runtime (`service=gke`, `accelerator=h100`, `platform=kubeflow`). |
 
 > **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
@@ -247,34 +250,21 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 }
 ```
 
-**Response:**
+**Response** (abbreviated: most `componentRefs` entries and fields, and the `validation` section, are omitted):
 
 ```json
 {
   "apiVersion": "aicr.run/v1",
   "kind": "RecipeResult",
   "metadata": {
-    "version": "v0.22.0",
+    "version": "vX.Y.Z",
     "appliedOverlays": [
       "base",
+      "monitoring-hpa",
+      "gb200-any",
       "eks",
       "eks-training",
       "gb200-eks-training"
-    ],
-    "excludedOverlays": [
-      {
-        "name": "h100-eks-ubuntu-training",
-        "reason": "mixin-constraint-failed"
-      }
-    ],
-    "constraintWarnings": [
-      {
-        "overlay": "h100-eks-ubuntu-training",
-        "constraint": "OS.sysctl./proc/sys/kernel/osrelease",
-        "expected": ">= 6.8",
-        "actual": "5.15.0",
-        "reason": "mixin-constraint-failed: expected >= 6.8, got 5.15.0"
-      }
     ]
   },
   "criteria": {
@@ -286,38 +276,36 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
   },
   "constraints": [
     {
-      "name": "GPU.driver.version",
-      "value": "580.82.07"
-    },
-    {
-      "name": "GPU.driver.cudaVersion",
-      "value": "13.1"
+      "name": "K8s.server.version",
+      "value": ">= 1.34"
     }
   ],
   "componentRefs": [
     {
       "name": "gpu-operator",
+      "namespace": "gpu-operator",
       "type": "Helm",
       "chart": "gpu-operator",
       "source": "https://helm.ngc.nvidia.com/nvidia",
-      "version": "v25.3.3"
+      "version": "vXX.Y.Z"
     },
     {
-      "name": "network-operator",
+      "name": "nvidia-dra-driver-gpu",
+      "namespace": "nvidia-dra-driver",
       "type": "Helm",
-      "chart": "network-operator",
-      "source": "https://helm.ngc.nvidia.com/nvidia",
-      "version": "v25.4.0"
+      "chart": "dra-driver-nvidia-gpu",
+      "source": "oci://registry.k8s.io/dra-driver-nvidia/charts",
+      "version": "X.Y.Z"
     }
   ],
   "deploymentOrder": [
     "gpu-operator",
-    "network-operator"
+    "nvidia-dra-driver-gpu"
   ]
 }
 ```
 
-`metadata.excludedOverlays` is optional. When present, each entry includes the overlay `name` and a machine-readable `reason` such as `constraint-failed` or `mixin-constraint-failed`.
+`metadata.excludedOverlays` is optional and appears only for snapshot-driven recipes. When present, each entry includes the overlay `name` and a machine-readable `reason` such as `constraint-failed` or `mixin-constraint-failed`.
 
 `metadata.gpuDriverState` is optional and appears only for snapshot-driven recipes. It records the NVIDIA kernel driver state observed on the sampled GPU node — `preinstalled` or `absent` — and is omitted when no snapshot was provided or the snapshot carried no usable driver-loaded reading. The bundle-time `CheckDriverOwnershipCoherence` validation consumes it: a recipe whose snapshot observed no driver (`absent`) is blocked from bundling with the preinstalled-driver assumption, since that would leave GPU nodes driverless.
 
@@ -731,12 +719,15 @@ curl -X POST "http://localhost:8080/v1/bundle" \
     "kind": "RecipeResult",
     "componentRefs": [
       {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.7.1", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
-      {"name": "network-operator", "type": "Helm", "chart": "network-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "26.1.1", "namespace": "nvidia-network-operator", "valuesFile": "components/network-operator/values.yaml"}
+      {"name": "network-operator", "type": "Helm", "chart": "network-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "26.4.1", "namespace": "nvidia-network-operator", "valuesFile": "components/network-operator/values.yaml"}
     ],
     "deploymentOrder": ["gpu-operator", "network-operator"]
   }' \
   -o bundles.zip
 ```
+
+The chart versions in the literal body are illustrative; take real ones from
+`aicr recipe` output or `recipes/registry.yaml`.
 
 **Response Headers:**
 
@@ -760,6 +751,7 @@ unverified entries are rejected rather than archived. `X-Bundle-Files` and
 bundles.zip
 ├── deploy.sh                    # root automation script (executable)
 ├── README.md                    # root deployment guide
+├── bundle-info.yaml             # deployer and generation metadata
 ├── checksums.txt                # SHA256 for every regular payload file in the archive
 ├── recipe.yaml                  # canonical post-resolution recipe (helm deployer)
 ├── 001-<component>/             # per-component folder (NNN-prefixed)

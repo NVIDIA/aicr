@@ -36,7 +36,7 @@ any phase. If pre-flight fails, no validator Jobs are deployed.
 
 - `aicr` CLI installed (see [installation](installation.md)).
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
-- Cluster service account with RBAC to create Jobs, ConfigMaps, and read cluster state (AICR creates its own `aicr-validation` namespace on first run).
+- Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run.
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
 - **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` additionally re-evaluates `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so the value fails closed. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
 
@@ -961,18 +961,19 @@ locally means the gate will pass:
 aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 ```
 
-**Flag reference:**
+**Flag reference:** the evidence flags (`--emit-attestation`, `--full`,
+`--push`, `--no-sign`, `--bom`, signing and registry options) are documented in
+the [`aicr validate` flag table](cli-reference.md#aicr-validate).
 
-| Flag | What it does |
-|------|--------------|
-| `--emit-attestation <dir>` | Write the bundle to `<dir>`. Required to produce evidence. The bundle is minimized by default — see `--full`. |
-| `--full` | Emit the full (unredacted) bundle. By default the snapshot is reduced to an allowlisted set of fields and per-test CTRF stdout/message are omitted, keeping node names, provider instance IDs, the node label/taint set, OS tuning, and raw container logs out of the published artifact. Minimal bundles record the policy in `predicate.redaction` and self-verify normally. |
-| `--push <oci-ref>` | Sign via cosign keyless OIDC and push to the registry. The digest pins the bundle, so the tag is just a label; omit it and aicr derives a unique per-recipe tag (`<recipe-slug>-<short-fingerprint>`). Pass an explicit tag to override. Without `--push`, the bundle is unsigned (development/self-debug only). |
-| `--bom <path>` | Embed an existing CycloneDX BOM instead of the auto-generated one. Pass `make bom` output for an exhaustive BOM that includes chart-default sub-images. |
-| `--identity-token <token>` | Pre-fetched OIDC identity token, skipping the browser flow. Reads `COSIGN_IDENTITY_TOKEN`. |
-| `--oidc-device-flow` | Use OAuth device-code flow instead of opening a browser. Reads `AICR_OIDC_DEVICE_FLOW`. |
-| `--plain-http` | HTTP instead of HTTPS (local-registry tests only). |
-| `--insecure-tls` | Skip TLS verification (self-signed registries). |
+By default, emission fails closed with `INVALID_REQUEST` when any validator
+image is not immutably pinned (a moving tag such as `:latest`, or a non-AICR
+registry without a digest), because the attestation names validators by tag.
+The usual cause is a stale `AICR_VALIDATOR_IMAGE_TAG`; unset it.
+`--allow-mutable-validator-tags` is the explicit opt-out: it emits anyway, so
+use it only for disposable evidence you will not publish. For the recommended
+producer workflow, which pushes an unsigned bundle from the cluster and signs it
+in CI, see
+[Publishing Recipe Evidence](../contributor/evidence-publishing.md).
 
 **Registry requirements:** the registry must support the OCI 1.1
 Referrers API (or its tag-schema fallback) so the Sigstore Bundle can

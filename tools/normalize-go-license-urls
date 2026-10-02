@@ -27,6 +27,12 @@ fi
 
 readonly INPUT=$1
 readonly CURL_BIN=${CURL_BIN:-curl}
+# Anonymous probes of github.com from shared CI runner IPs get rate-limited
+# (HTTP 429/503) even when every URL is valid, which fails the notices build for
+# reasons unrelated to the licenses. With a token, each github.com blob URL is
+# probed through its raw.githubusercontent.com equivalent, authenticated; the
+# emitted URL is still the github.com one.
+readonly PROBE_TOKEN=${GITHUB_TOKEN:-}
 
 if ! command -v "${CURL_BIN}" >/dev/null 2>&1; then
     echo "ERROR: curl is required to verify license source URLs." >&2
@@ -115,9 +121,22 @@ url_candidates() {
         | awk '!seen[$0]++'
 }
 
-# Status lookup for an already-probed URL. Empty means curl reported nothing.
+# The URL actually requested for a candidate. raw.githubusercontent.com resolves
+# the same <ref>/<path> as a github.com blob URL, including refs that contain
+# slashes, abbreviated SHAs, and HEAD.
+probe_url() {
+    local url=$1
+    if [[ -n "${PROBE_TOKEN}" && "${url}" =~ ^https://github\.com/([^/]+)/([^/]+)/blob/(.+)$ ]]; then
+        printf 'https://raw.githubusercontent.com/%s/%s/%s\n' \
+            "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+        return
+    fi
+    printf '%s\n' "${url}"
+}
+
+# Status lookup for an already-probed candidate. Empty means curl reported nothing.
 url_status() {
-    awk -F '\t' -v url="$1" '$1 == url { print $2; exit }' "${CANDIDATE_STATUS}"
+    awk -F '\t' -v url="$(probe_url "$1")" '$1 == url { print $2; exit }' "${CANDIDATE_STATUS}"
 }
 
 TMP=$(mktemp -d)
@@ -131,20 +150,23 @@ while IFS=, read -r package url license; do
     url_candidates "${url}" >> "${CANDIDATE_URLS}"
 done < "${INPUT}"
 
-check_urls() {
+# Probes every URL in $1 and appends "<url>\t<status>" lines to $2. Extra
+# arguments are passed to curl ahead of the URLs.
+probe() {
     local input=$1
     local output=$2
+    shift 2
     local -a requests=()
     local url
     while IFS= read -r url; do
         requests+=(--output /dev/null "${url}")
-    done < <(LC_ALL=C sort -u "${input}")
+    done < "${input}"
     if (( ${#requests[@]} == 0 )); then
-        : > "${output}"
         return
     fi
 
     if ! "${CURL_BIN}" \
+        "$@" \
         --parallel \
         --parallel-max "${PARALLEL_REQUESTS}" \
         --head \
@@ -155,10 +177,40 @@ check_urls() {
         --retry "${RETRIES}" \
         --retry-connrefused \
         --write-out '%{url}\t%{http_code}\n' \
-        "${requests[@]}" > "${output}"; then
+        "${requests[@]}" >> "${output}"; then
         echo "ERROR: failed to check license source URLs." >&2
         exit 1
     fi
+}
+
+check_urls() {
+    local input=$1
+    local output=$2
+    local raw="${TMP}/probe-raw" other="${TMP}/probe-other" url
+    : > "${output}"
+    : > "${raw}"
+    : > "${other}"
+    while IFS= read -r url; do
+        url=$(probe_url "${url}")
+        if [[ "${url}" == https://raw.githubusercontent.com/* ]]; then
+            printf '%s\n' "${url}" >> "${raw}"
+        else
+            printf '%s\n' "${url}" >> "${other}"
+        fi
+    done < "${input}"
+    LC_ALL=C sort -u -o "${raw}" "${raw}"
+    LC_ALL=C sort -u -o "${other}" "${other}"
+
+    # The token reaches curl through a private config file rather than argv,
+    # and only the raw.githubusercontent.com batch gets it, so no other license
+    # host ever sees it. curl drops the header on a cross-host redirect.
+    if [[ -s "${raw}" ]]; then
+        local auth="${TMP}/curl-auth.conf"
+        (umask 077 && printf 'header = "Authorization: Bearer %s"\n' "${PROBE_TOKEN}" > "${auth}")
+        probe "${raw}" "${output}" --config "${auth}"
+        rm -f "${auth}"
+    fi
+    probe "${other}" "${output}"
 }
 
 check_urls "${CANDIDATE_URLS}" "${CANDIDATE_STATUS}"
@@ -195,6 +247,13 @@ done < "${INPUT}"
 
 if (( unreachable > 0 )); then
     echo "ERROR: ${unreachable} package(s) have no reachable license source URL." >&2
+    throttled=$(awk -F '\t' '$2 == "429" || $2 == "503" { n++ } END { print n + 0 }' "${CANDIDATE_STATUS}")
+    if (( throttled > 0 )); then
+        echo "${throttled} probe(s) were rate-limited (HTTP 429/503), which is not evidence of a dead URL." >&2
+        if [[ -z "${PROBE_TOKEN}" ]]; then
+            echo "Set GITHUB_TOKEN to authenticate the github.com probes, then retry." >&2
+        fi
+    fi
     echo "If a repository moved, add it to MOVED_REPOSITORIES in $0." >&2
     exit 1
 fi

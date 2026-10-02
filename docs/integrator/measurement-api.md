@@ -537,13 +537,13 @@ fall back to `data` only for older snapshots — `topology.LabelReadings` /
 subtype carries. Adding `items` beside `data` is additive-only, so the snapshot
 `apiVersion` is unchanged ([ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md) §2).
 
-`data` cannot be slimmed within `v1alpha2`: binaries predating `items` read it
-directly, and ADR-011 requires its encoding and semantics to stay as published.
-That is why membership is cross-referenced rather than dropped. The next
-snapshot `apiVersion` removes `data`, at which point items become
-self-contained and `node-list-ref` is no longer emitted — the decoder kept
-reading it while `v1alpha2` snapshots were accepted. v1.0.0 retired that input
-(ADR-022 N+2), so the compatibility path can be revisited.
+`data` cannot be slimmed within a published snapshot `apiVersion`: ADR-011
+requires its encoding and semantics to stay as published. That is why
+membership is cross-referenced rather than dropped. The `aicr.run/v1` snapshot
+kept `data` unchanged, so the topology collector still emits both `data` and
+`node-list-ref`, and the decoder still resolves references. Removing `data`
+would take a new snapshot `apiVersion`; items would then be self-contained and
+`node-list-ref` would no longer be needed.
 
 Minimal evidence keeps `NodeTopology.summary` and drops `taint` and `label`;
 redaction never carries `items` across the publication boundary.
