@@ -119,8 +119,15 @@ func TestGenerate_UpstreamChain(t *testing.T) {
 
 		t.Errorf("gpu-operator helm = %+v", h)
 	}
-	if !h.TakeOwnership || !h.DisablePreProcess {
-		t.Errorf("gpu-operator helm takeOwnership/disablePreProcess = %v/%v, want true/true", h.TakeOwnership, h.DisablePreProcess)
+	if !h.DisablePreProcess {
+		t.Errorf("gpu-operator helm disablePreProcess = false, want true")
+	}
+	// No AICR deployer adopts objects owned by other releases; Fleet already
+	// upgrades an existing release of the same name without the flag.
+	if raw, readErr := os.ReadFile(filepath.Join(out, "002-gpu-operator", fileFleetYAML)); readErr != nil {
+		t.Fatalf("read fleet.yaml: %v", readErr)
+	} else if strings.Contains(string(raw), "takeOwnership") {
+		t.Errorf("fleet.yaml sets takeOwnership:\n%s", raw)
 	}
 	for _, vf := range h.ValuesFiles {
 		if _, statErr := os.Stat(filepath.Join(out, "002-gpu-operator", vf)); statErr != nil {
@@ -374,6 +381,11 @@ func TestGenerate_HelmOpMode(t *testing.T) {
 	}
 	if len(aibom.Spec.Targets) != 1 || aibom.Spec.Targets[0].ClusterSelector == nil {
 		t.Errorf("targets = %+v, want label selector", aibom.Spec.Targets)
+	}
+	if raw, readErr := os.ReadFile(filepath.Join(out, fileHelmOps)); readErr != nil {
+		t.Fatalf("read helmops.yaml: %v", readErr)
+	} else if strings.Contains(string(raw), "takeOwnership") {
+		t.Errorf("helmops.yaml sets takeOwnership:\n%s", raw)
 	}
 	if res.Releases[1].Manifest != fileHelmOps {
 		t.Errorf("Releases[1].Manifest = %q", res.Releases[1].Manifest)

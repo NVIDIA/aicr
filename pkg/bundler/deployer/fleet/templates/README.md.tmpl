@@ -67,9 +67,11 @@ bundle and starts only after it is `Ready`.
 kubectl get bundles -n {{ .Namespace }} -l {{ .BundleLabel }}={{ .AppName }}
 ```
 
-Every bundle sets `helm.takeOwnership: true`, so Fleet adopts resources
-from an existing install of the same release (for example a GPU Operator
-installed with `helm install`) instead of failing on ownership conflicts.
+If a release with the same name already exists in the target namespace (for
+example a GPU Operator installed with `helm install gpu-operator`), Fleet
+upgrades it in place. Objects owned by a release with a different name are
+not adopted: the install fails on the ownership conflict instead, so remove
+or rename that release first.
 {{ if .HasDynamic }}
 ### Per-cluster customization
 
