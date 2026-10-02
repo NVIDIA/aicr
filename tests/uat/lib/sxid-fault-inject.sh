@@ -193,7 +193,11 @@ _sxid_fault_inject_impl() {
   fi
 
   local pre_boot_id
-  pre_boot_id="$(kubectl get node "${node}" -o jsonpath='{.status.nodeInfo.bootID}')"
+  if ! pre_boot_id="$(kubectl get node "${node}" -o jsonpath='{.status.nodeInfo.bootID}')" || [[ -z "${pre_boot_id}" ]]; then
+    echo "::error::could not read ${node}'s bootID before injection; refusing to proceed on an unconfirmed baseline" >&2
+    ctrf_add sxidfault-detect failed 0 "could not read pre-injection bootID"
+    return 1
+  fi
   echo "::endgroup::"
 
   echo "::group::Wait for syslog-health-monitor's first poll"
