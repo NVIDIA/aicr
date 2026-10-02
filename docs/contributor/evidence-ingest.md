@@ -10,8 +10,9 @@ consensus view. The tree it writes is rendered and served by
 
 The `GPn` labels name stages of the evidence-corroboration pipeline (epic #1400):
 **GP1** signer-allowlist management (`recipes/evidence/allowlist.yaml`),
-**GP2** ingest/verify (this doc), **GP3** dashboard infrastructure
-(`infra/evidence-dashboard`), **GP4** consensus/corroboration
+**GP2** ingest/verify (this doc), **GP3** dedicated dashboard infrastructure
+(closed as not planned in #1403; the dashboard uses the existing bucket and WIF
+identities), **GP4** consensus/corroboration
 (`pkg/corroborate`), and **GP5** dashboard publish.
 
 Its defining property is **verify-before-count**: a bundle's signature,

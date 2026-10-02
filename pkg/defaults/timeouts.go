@@ -1118,7 +1118,7 @@ const (
 	EnvHelmRepositoryPassword = "HELM_REPOSITORY_PASSWORD"
 )
 
-// Server-side bundle-signing configuration (see docs/plans/2026-07-20-server-bundle-attestation-design.md).
+// Server-side bundle-signing configuration (see "Server-Side Signing" in docs/user/api-reference.md).
 const (
 	// EnvSigningKey selects KMS-backed (Mode A) signing. Value is a cosign
 	// KMS URI (awskms:// | gcpkms:// | azurekms:// | hashivault://).

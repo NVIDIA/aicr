@@ -20,7 +20,7 @@ The phases are independently scheduled (cron edges), not chained: the per-reserv
 All UAT runs go through one entry point, `uat-run.yaml` — the shared dispatch surface that owns the reservation lease. To request a run, dispatch it with a reservation name from the registry:
 
 ```bash
-gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100
+gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100-ct-2
 ```
 
 `uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml`, `uat-gcp.yaml`, `uat-azure.yaml`, or — for the `service: kind` real-silicon lane — `uat-kind.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
@@ -32,7 +32,7 @@ Two further inputs shape the run (both default to the nightly-batch behavior, so
 ```bash
 # Inference intent, nightly provision→validate→teardown (serve CUJ wired, disabled pending #1644)
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f intent=inference
+  -f reservation=aws-h100-ct-2 -f intent=inference
 
 # On demand: stand up the daytime cluster and hold it (single reservation)
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
@@ -82,7 +82,7 @@ The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both inte
 | `aws-h100-ct-2` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
 | `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step live, #1644); training gated to `>= v0.22.0` via `nightly-intent-min-versions` |
 | `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); both intents gated to `>= v0.18.0` via `nightly-intent-min-versions` (see **Cost / tuning** below) |
-| `kind-h100` | kind (nvkind) | `[training, inference]` | training → `phase_train`; inference runs **no `phase_serve`** — its evidence comes from the `--phase all` conformance step (vLLM is excluded from UAT, as on the cloud lanes; #1644). Single-GPU; both intents gated to `>= v0.18.0` via `nightly-intent-min-versions` (the lane + os-agnostic coordinate fix #1851 postdate v0.17.0), so only `main` runs nvkind nightly until v0.18.0 ships |
+| `kind-h100` | kind (nvkind) | `[training, inference]` | training → `phase_train`; inference runs **no `phase_serve`** — its evidence comes from the `--phase all` conformance step (vLLM is excluded from UAT, as on the cloud lanes; #1644). Single-GPU; both intents gated to `>= v0.18.0` via `nightly-intent-min-versions` (the lane + os-agnostic coordinate fix #1851 postdate v0.17.0) |
 
 **How it stays contention-free — serialize, don't add a second cron.** The intents are folded into the existing [version matrix](#the-version-matrix) as extra cells rather than a second scheduled job. The controller's drive loop is **version outer / intent inner**: for each version it dispatches one intent's full provision→CUJ→teardown cell (an AWS or Azure inference cell currently runs provision→validate→teardown; its serve CUJ stays commented out pending #1644), waits for it (`gh run watch`), then dispatches the next — all through the *same* per-reservation lease. So the intents serialize naturally, and because `main` runs every intent before any release cell, a time-box drop only ever sheds the oldest *release* cells (never `main`'s inference). This is the deliberate DC3 cadence decision: **never schedule two daily crons against one reservation** — the lease is a single-slot queue (one in-progress + one pending), so a second cron plus an occasional human dispatch on the same reservation is a routine three-contender case whose loser is silently [superseded](#how-queuing-works-the-reservation-lease). One cron dispatching serialized cells sidesteps that entirely.
 
@@ -101,19 +101,19 @@ Semantics: **`main` is never gated** (it is built from source and carries the ne
 
 ## Selecting the deployer
 
-The `deployer` input picks which deployer variant of the intent's test config the pipeline consumes. Set to `helmfile` (the default), the pipeline resolves `tests/uat/<cloud>/tests/<accelerator>-<intent>-config.yaml` — the config every existing cell has always run against. Any other value (currently only `argocd`) resolves `<accelerator>-<intent>-<deployer>-config.yaml` — for example `deployer=argocd` on `aws-h100` training loads `tests/uat/aws/tests/h100-training-argocd-config.yaml`.
+The `deployer` input picks which deployer variant of the intent's test config the pipeline consumes. Set to `helmfile` (the default), the pipeline resolves `tests/uat/<cloud>/tests/<accelerator>-<intent>-config.yaml` — the config every existing cell has always run against. Any other value (currently only `argocd`) resolves `<accelerator>-<intent>-<deployer>-config.yaml` — for example `deployer=argocd` on `aws-h100-ct-2` training loads `tests/uat/aws/tests/h100-training-argocd-config.yaml`.
 
 ```bash
-# Argo CD variant of the aws-h100 training cell (issue #2194)
+# Argo CD variant of the AWS H100 training cell (issue #2194)
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f intent=training -f deployer=argocd
+  -f reservation=aws-h100-ct-2 -f intent=training -f deployer=argocd
 ```
 
 The AICRConfig field `spec.bundle.deployment.deployer` is the source of truth `phase_prep`/`phase_install` read; the workflow input is only how the correct config file is *selected*. `phases.sh:phase_install` dispatches to `install_helmfile` (helmfile lane, unchanged) or `install_argocd` (Argo CD install + repo-creds Secret from `GITHUB_TOKEN` + `kubectl apply` of the `nvidia-stack` app-of-apps + terminal-pass wait on every `Application`). The [readiness phase](#install-and-readiness-phases) that follows install is deployer-agnostic — it validates deployed cluster state (`aicr validate --phase deployment`), not the deployment mechanism — so a green Argo CD cell means the GitOps deploy path converges on the same operator-managed stack the helmfile lane validates.
 
 **How the bundle reaches Argo CD.** `phase_prep` calls `aicr bundle --output oci://ghcr.io/nvidia/aicr-bundle-scratch/<config-metadata-name>:run-<id> --repo oci://ghcr.io/nvidia/aicr-bundle-scratch/<config-metadata-name>` — the path segment is the AICRConfig's `metadata.name` (yq-read from the test-config in `phase_prep`), not the recipe coordinate. The `--output` flag pushes the rendered bundle to GHCR (the job already has `packages: write`), and `--repo` sets the `source.repoURL` baked into every generated `Application`. `install_argocd` provisions a prefix-matched `argocd.argoproj.io/secret-type: repo-creds` Secret from `GITHUB_TOKEN` so Argo CD's repo-server can pull the pushed artifact. Concurrent runs on the same recipe are isolated by the `:run-<id>` tag.
 
-**Coverage today (issue #2194).** Only `aws-h100` training carries a `-argocd` config file. Dispatching `deployer=argocd` against a non-AWS reservation (`gcp-h100`, `azure-h100`, `kind-h100`) fails closed at the top level: `uat-run.yaml`'s `unsupported-deployer-for-cloud` guard job emits a red workflow, and the per-cloud `run-<cloud>.if:` skips the reusable pipeline so no cluster is provisioned for a request that couldn't have been served. Only `run-aws` forwards the `deployer` input to its reusable pipeline; the other reusable workflows declare no such input. Nightly enrollment is deliberately deferred until a manual dispatch is green on hardware — mirroring the `azure-h100` (#1722) and `kind-h100` (#1843) onboarding pattern. The `argocd-helm` variant, and extension to gcp/azure/kind, are separate follow-ups.
+**Coverage today (issue #2194).** Only AWS H100 training carries a `-argocd` config file (`tests/uat/aws/tests/h100-training-argocd-config.yaml`, shared by every `cloud: aws` reservation). Dispatching `deployer=argocd` against a non-AWS reservation (`gcp-h100`, `azure-h100`, `kind-h100`) fails closed at the top level: `uat-run.yaml`'s `unsupported-deployer-for-cloud` guard job emits a red workflow, and the per-cloud `run-<cloud>.if:` skips the reusable pipeline so no cluster is provisioned for a request that couldn't have been served. Only `run-aws` forwards the `deployer` input to its reusable pipeline; the other reusable workflows declare no such input. Nightly enrollment is deliberately deferred until a manual dispatch is green on hardware — mirroring the `azure-h100` (#1722) and `kind-h100` (#1843) onboarding pattern. The `argocd-helm` variant, and extension to gcp/azure/kind, are separate follow-ups.
 
 ## Selecting the platform
 
@@ -269,7 +269,7 @@ The lease is a GitHub Actions concurrency group keyed by reservation name — `u
 
 This replaces the previous behavior, where a second run hitting a busy AWS reservation hard-failed on the capacity check. Now it queues.
 
-**The one-in-progress-plus-one-pending limit.** GitHub concurrency holds at most one in-progress run plus one pending run per group. If a *third* run is queued for a reservation that already has one in-progress and one pending, GitHub cancels the older pending run and the newest takes its place. At launch this is acceptable: there are three reservations, each contended by at most the nightly cron plus an occasional ad-hoc dispatch. A run cancelled this way is *superseded*, not failed. So that a dropped request is never silent, the `uat-superseded-notice.yaml` observer watches for it: triggered on `workflow_run: completed` for `UAT Run`, it classifies a cancelled run that never started a job as a supersede (versus a genuine mid-run cancel) and emits a job-summary entry plus a `::warning`. (The nightly controller reconciles the same signal synchronously for the cells it dispatches; a DC6 regression guard, #1279, will exercise the observer.) If deeper queuing is ever needed (many requesters per reservation), the escalation path is the *Deferred* standing broker service — a pull-based queue rather than GitHub concurrency — recorded in the epic (#1264).
+**The one-in-progress-plus-one-pending limit.** GitHub concurrency holds at most one in-progress run plus one pending run per group. If a *third* run is queued for a reservation that already has one in-progress and one pending, GitHub cancels the older pending run and the newest takes its place. This is acceptable: each of the six reservations is contended by at most the nightly batch and, on a daytime reservation, the evening teardown (`gcp-h100` carries both, two hours apart), plus an occasional ad-hoc dispatch. A run cancelled this way is *superseded*, not failed. So that a dropped request is never silent, the `uat-superseded-notice.yaml` observer watches for it: triggered on `workflow_run: completed` for `UAT Run`, it classifies a cancelled run that never started a job as a supersede (versus a genuine mid-run cancel) and emits a job-summary entry plus a `::warning`. (The nightly controller reconciles the same signal synchronously for the cells it dispatches; a DC6 regression guard, #1279, will exercise the observer.) If deeper queuing is ever needed (many requesters per reservation), the escalation path is the *Deferred* standing broker service — a pull-based queue rather than GitHub concurrency — recorded in the epic (#1264).
 
 ## The version matrix
 
@@ -285,7 +285,7 @@ The nightly batch runs a **cross-version regression** per reservation: `main` (b
 - `deadline_offset_hours` — hours after batch start to stop dispatching new cells (default `5`). This is a **secondary** cap: the controller also enforces a **budget-aware** cutoff derived from the drive job's own `timeout-minutes`, stopping dispatch once fewer than `max_cell_minutes` remain so the last cell always finishes before GitHub kills the job. The effective cutoff is the earlier of the two, so `deadline_offset_hours` no longer needs hand-tuning against the job timeout to keep the graceful drop-oldest reachable.
 - `max_cell_minutes` — wall-clock a single dispatched cell may need to complete (default `150`). Sets the drive job's dispatch reserve: a new cell is dispatched only if at least this many minutes remain before the job's `timeout-minutes` (a small setup slack is also held back), so an overrun sheds the oldest remaining cell gracefully instead of hard-failing the leg mid-cell. Keep it at or above the realistic worst-case cell duration.
 
-To test a single released version by hand: `gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100 -f aicr_version=v1.2.3`. (`--ref main` dispatches the nightly-path revision of the workflow, not your feature branch's.)
+To test a single released version by hand: `gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100-ct-2 -f aicr_version=v1.2.3`. (`--ref main` dispatches the nightly-path revision of the workflow, not your feature branch's.)
 
 ## Adding a reservation
 

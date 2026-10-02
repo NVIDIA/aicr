@@ -56,27 +56,90 @@ case "${ARCH}" in
     *) echo -e "${RED}❌ Unsupported architecture: ${ARCH}${NC}" && exit 1 ;;
 esac
 
-# Verify URL accessibility before downloading
+# retry_transient <label> <command...> runs a command up to RETRY_ATTEMPTS times
+# with quadratic backoff (RETRY_BASE_DELAY * attempt^2 seconds), so a brief
+# github.com blip does not fail the job. It is for commands curl cannot retry,
+# such as an installer script that makes its own requests. It returns the last
+# attempt's status. Warnings go to stderr so the command's stdout stays clean.
+# Overrides that are not a positive integer (attempts) or a non-negative integer
+# without leading zeros (delay) fall back to the defaults.
+RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
+RETRY_BASE_DELAY="${RETRY_BASE_DELAY:-5}"
+[[ "$RETRY_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || RETRY_ATTEMPTS=3
+[[ "$RETRY_BASE_DELAY" =~ ^(0|[1-9][0-9]*)$ ]] || RETRY_BASE_DELAY=5
+retry_transient() {
+    local label="$1" attempt=1 rc delay
+    shift
+    while true; do
+        "$@" && return 0
+        rc=$?
+        if [[ $attempt -ge $RETRY_ATTEMPTS ]]; then
+            return "$rc"
+        fi
+        delay=$((attempt * attempt * RETRY_BASE_DELAY))
+        log_warning "${label} attempt ${attempt}/${RETRY_ATTEMPTS} failed (exit ${rc}); retrying in ${delay}s" >&2
+        sleep "$delay"
+        attempt=$((attempt + 1))
+    done
+}
+
+# CURL_RETRY makes curl retry timeouts, refused connections, and HTTP 408, 429,
+# and 5xx. It fails a 404 or 403 at once. CURL_RETRY_ALL also retries those, for
+# downloads whose URL the probe has already confirmed. Each retry rewrites the
+# -o file from scratch. CURL_RETRY_ALL adds a stall guard that aborts an attempt
+# moving under 1 KiB/s for 30s, so a slow but moving download of a large asset
+# is not capped the way a total --max-time would.
+#
+# --retry-max-time bounds the retries, including a server's Retry-After wait,
+# which curl otherwise honors without limit. curl skips a retry whose wait would
+# pass the limit. Downloads get more room because a large asset can use most of
+# the probe's limit on one attempt.
+CURL_RETRY=(--retry $((RETRY_ATTEMPTS - 1)) --retry-connrefused --connect-timeout 10 --retry-max-time 60)
+CURL_RETRY_ALL=("${CURL_RETRY[@]}" --retry-max-time 600 --speed-limit 1024 --speed-time 30)
+# --retry-all-errors needs curl 7.71 or newer. An older curl rejects it as an
+# unknown option, so it is added only when curl lists it.
+if [[ "$(curl --help all 2>/dev/null)" == *--retry-all-errors* ]]; then
+    CURL_RETRY_ALL+=(--retry-all-errors)
+fi
+
+# probe_url HEADs a URL, following redirects, and records curl's HTTP status and
+# exit code in PROBE_HTTP_CODE and PROBE_CURL_EXIT. It fails, so retry_transient
+# retries, on a 403 (GitHub and CDN rate limits return it) and on any curl exit
+# curl's own retry skips, such as a TLS error, reset, or empty reply from the
+# first hop or a redirect target. It succeeds, ending retries, on a 2xx, on a
+# 404 or other 4xx (exit 22), on a DNS failure (6), and on a connection refusal
+# or timeout (7, 28) that curl has already retried, so attempts never multiply.
+probe_url() {
+    PROBE_CURL_EXIT=0
+    PROBE_HTTP_CODE=$(curl -fsIL "${CURL_RETRY[@]}" --max-time 30 \
+        -w "%{http_code}" -o /dev/null "$1") || PROBE_CURL_EXIT=$?
+    [[ "$PROBE_HTTP_CODE" != "403" && "$PROBE_CURL_EXIT" =~ ^(0|6|7|22|28)$ ]]
+}
+
+# Verify URL accessibility before downloading. A 404 fails on the first attempt,
+# and a 403 or other transient failure is retried.
 verify_download_url() {
     local url="$1"
     local description="$2"
+    local http_code curl_exit_code
 
     log_debug "Attempting to verify: $description"
     log_debug "URL: $url"
 
-    local http_code
-    http_code=$(curl -f -s -I -L -w "%{http_code}" -o /dev/null "$url" 2>/dev/null)
-    local curl_exit_code=$?
+    retry_transient "URL probe" probe_url "$url" || true
+    http_code="$PROBE_HTTP_CODE" curl_exit_code="$PROBE_CURL_EXIT"
 
     if [[ $curl_exit_code -ne 0 || "$http_code" != "200" ]]; then
         log_error "Failed to access URL for $description"
         log_error "URL: $url"
-        log_error "HTTP status code: ${http_code:-unknown}"
+        log_error "HTTP status code: ${http_code:-unknown} (curl exit ${curl_exit_code})"
 
         if [[ "$http_code" == "404" ]]; then
             log_error "File not found (404). The version or architecture might not be available."
         elif [[ "$http_code" == "403" ]]; then
             log_error "Access forbidden (403). This might be a rate limit issue."
+        elif [[ $curl_exit_code -ne 0 && "$http_code" == 3* ]]; then
+            log_error "The redirect target did not answer (status ${http_code} is the last one received). The release CDN may be unavailable."
         elif [[ $curl_exit_code -eq 6 ]]; then
             log_error "Could not resolve host. Check your internet connection."
         fi
@@ -232,7 +295,7 @@ install_release_binary() {
         trap 'rm -rf "$tmp"' EXIT
 
         asset="${url##*/}"
-        if ! curl -fsSL -o "${tmp}/${asset}" "$url"; then
+        if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "${tmp}/${asset}" "$url"; then
             log_error "Failed to download $description from $url"
             exit 1
         fi
@@ -240,7 +303,7 @@ install_release_binary() {
         algo=sha256
         case "$source" in
             manifest:*)
-                if ! curl -fsSL -o "${tmp}/checksums" "${source#manifest:}"; then
+                if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "${tmp}/checksums" "${source#manifest:}"; then
                     log_error "Failed to download the checksums file for $description"
                     exit 1
                 fi
@@ -249,7 +312,11 @@ install_release_binary() {
             sidecar:*)
                 spec=$(release_sidecar_spec "$source") || exit 1
                 algo="${spec%% *}"
-                expected=$(curl -fsSL "${url}${spec#* }" | awk '{print $1}') || expected=""
+                if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "${tmp}/sidecar" "${url}${spec#* }"; then
+                    log_error "Failed to download the digest file for $description"
+                    exit 1
+                fi
+                expected=$(awk '{print $1}' "${tmp}/sidecar")
                 ;;
             pinned:*)
                 expected="${source#pinned:}"
@@ -890,24 +957,19 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             elif [[ "${OS}" == "linux" ]]; then
                 GRYPE_SCRIPT_URL="https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh"
                 GRYPE_TMP=$(mktemp -d)
-                curl -fsSL "$GRYPE_SCRIPT_URL" -o "$GRYPE_TMP/install.sh"
+                if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "$GRYPE_TMP/install.sh" "$GRYPE_SCRIPT_URL"; then
+                    log_error "Failed to download the grype install script from $GRYPE_SCRIPT_URL"
+                    rm -rf "$GRYPE_TMP"
+                    exit 1
+                fi
                 verify_sha256 "$GRYPE_TMP/install.sh" "${GRYPE_INSTALL_SHA256}"
                 # The anchore install.sh queries github.com for release metadata,
-                # which intermittently 502s. Retry with quadratic backoff so a brief
-                # CDN blip does not fail the whole CI step.
-                grype_attempt=0
-                grype_max_attempts=3
-                until sh "$GRYPE_TMP/install.sh" -b "$GRYPE_TMP" "${GRYPE_VERSION}"; do
-                    grype_attempt=$((grype_attempt + 1))
-                    if [[ ${grype_attempt} -ge ${grype_max_attempts} ]]; then
-                        log_error "grype install failed after ${grype_max_attempts} attempts"
-                        rm -rf "$GRYPE_TMP"
-                        exit 1
-                    fi
-                    grype_delay=$((grype_attempt * grype_attempt * 5))
-                    log_warning "grype install attempt ${grype_attempt} failed (likely transient github.com 502); retrying in ${grype_delay}s"
-                    sleep "${grype_delay}"
-                done
+                # which intermittently 502s.
+                if ! retry_transient "grype install" sh "$GRYPE_TMP/install.sh" -b "$GRYPE_TMP" "${GRYPE_VERSION}"; then
+                    log_error "grype install failed after ${RETRY_ATTEMPTS} attempts"
+                    rm -rf "$GRYPE_TMP"
+                    exit 1
+                fi
                 sudo mv "$GRYPE_TMP/grype" /usr/local/bin/grype
                 sudo chmod +x /usr/local/bin/grype
                 rm -rf "$GRYPE_TMP"
@@ -1245,9 +1307,18 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         if prompt_continue; then
             GOLANGCI_SCRIPT_URL="https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_LINT_VERSION}/install.sh"
             GOLANGCI_TMP=$(mktemp)
-            curl -fsSL "$GOLANGCI_SCRIPT_URL" -o "$GOLANGCI_TMP"
+            if ! curl -fsSL "${CURL_RETRY_ALL[@]}" -o "$GOLANGCI_TMP" "$GOLANGCI_SCRIPT_URL"; then
+                log_error "Failed to download the golangci-lint install script from $GOLANGCI_SCRIPT_URL"
+                rm -f "$GOLANGCI_TMP"
+                exit 1
+            fi
             verify_sha256 "$GOLANGCI_TMP" "${GOLANGCI_LINT_INSTALL_SHA256}"
-            sh "$GOLANGCI_TMP" -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
+            # install.sh looks up the release on github.com, which can 502.
+            if ! retry_transient "golangci-lint install" sh "$GOLANGCI_TMP" -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"; then
+                log_error "golangci-lint install failed after ${RETRY_ATTEMPTS} attempts"
+                rm -f "$GOLANGCI_TMP"
+                exit 1
+            fi
             rm -f "$GOLANGCI_TMP"
             log_success "golangci-lint installed"
         fi

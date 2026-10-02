@@ -154,7 +154,8 @@ docker run -p 8080:8080 ghcr.io/nvidia/aicrd:latest
 
 ## Next Steps
 
-See [CLI Reference](cli-reference.md) for command usage
+- [End-to-End Tutorial](tutorial.md): recipe, bundle, deploy, and validate, start to finish
+- [CLI Reference](cli-reference.md): command usage
 
 ## Troubleshooting
 

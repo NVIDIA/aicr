@@ -168,7 +168,11 @@ Environment variables read at startup:
 | Variable | Default | Source |
 |----------|---------|--------|
 | `PORT` | 8080 | `defaults.EnvServerPort` (in `config.go`) |
+| `AICR_SERVER_ADDRESS` | unset → all interfaces | `defaults.EnvServerAddress` (`parseConfig`, `os.LookupEnv`) |
 | `SHUTDOWN_TIMEOUT_SECONDS` | 30 | `defaults.EnvServerShutdownTimeoutSeconds` |
+| `AICR_ALLOW_VENDOR_CHARTS` | `false` | `allowVendorChartsFromEnv` (`strconv.ParseBool`; unparseable → off with a warning) |
+| `AICR_HELM_REPOSITORY_HOST` | unset → no credentials attached | `attachHelmBasicAuth` in `pkg/bundler/deployer/localformat/vendor.go` (read per vendor-charts request) |
+| `HELM_REPOSITORY_USERNAME` / `HELM_REPOSITORY_PASSWORD` | unset | same; sent only over HTTPS to the host named by `AICR_HELM_REPOSITORY_HOST` |
 | `AICR_ALLOWED_ACCELERATORS` | unset → unrestricted | `aicr.ParseAllowListsFromEnv` |
 | `AICR_ALLOWED_SERVICES` | unset → unrestricted | same |
 | `AICR_ALLOWED_INTENTS` | unset → unrestricted | same |
