@@ -466,7 +466,10 @@ Every release includes:
   `aiperf-bench` image (collected out-of-band by `make python-licenses`,
   which needs network access to PyPI, then committed as a rendered
   fragment). Note that `make notices` is no longer offline either: a cold
-  module cache means it fetches. The Go half
+  module cache means it fetches, and it probes every license URL. With
+  `GITHUB_TOKEN` set (the release and merge-gate jobs set it), the
+  github.com probes are authenticated; anonymous ones from shared CI runner
+  IPs get rate-limited (HTTP 429/503) and fail the run. The Go half
   is the union of the dependency graph across every released OS/arch
   target, generated deterministically so it is byte-identical on macOS and
   Linux. The file is not committed: `make release` depends on `make
