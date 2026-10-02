@@ -558,8 +558,8 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     # unconditionally and takes priority over the DaemonSet lookup for
     # the same reason: the operator applies that label itself, so it
     # is a naming-agnostic signal of who owns the driver.
-    DRIVER_DS_NS=$(kubectl get daemonset -A --no-headers 2>/dev/null | awk '$2 ~ /^nvidia-driver-daemonset(-|$)/ {print $1; exit}')
-    MANAGED_NODES=$(kubectl get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>/dev/null | wc -l | tr -d ' ')
+    DRIVER_DS_NS=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get daemonset -A --no-headers 2>/dev/null | awk '$2 ~ /^nvidia-driver-daemonset(-|$)/ {print $1; exit}')
+    MANAGED_NODES=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>/dev/null | wc -l | tr -d ' ')
     SKIP_RESTART="false"
     if [[ -z "${DRIVER_DS_NS}" && "${MANAGED_NODES}" -eq 0 ]]; then
       {{- if .DriverOperatorManaged }}
@@ -580,7 +580,7 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
       {{- end }}
     elif [[ "${MANAGED_NODES}" -gt 0 ]]; then
       echo "  Waiting for gpu-operator driver migration on ${MANAGED_NODES} managed GPU node(s) to reach upgrade-done (ns=${DRIVER_DS_NS:-<unresolved>})..."
-      if ! kubectl wait --for=jsonpath='{.metadata.labels.nvidia\.com/gpu-driver-upgrade-state}=upgrade-done' \
+      if ! kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} wait --for=jsonpath='{.metadata.labels.nvidia\.com/gpu-driver-upgrade-state}=upgrade-done' \
            nodes -l nvidia.com/gpu.deploy.driver=true --timeout=15m; then
         # Fail closed, same reasoning as the unobservable-gate branch
         # above: a migration wait that times out means some managed node
@@ -605,7 +605,7 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     # registration sockets. Restarting the plugin DS forces fresh socket creation.
     # This does NOT fix cases where kubelet itself has lost registration state —
     # a node reboot is required for that. See docs/user/cli-reference.md.
-    DRA_DS=$(kubectl get daemonset -n {{ .Namespace }} -o name 2>/dev/null | awk '/kubelet-plugin/{print; exit}' || true)
+    DRA_DS=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get daemonset -n {{ .Namespace }} -o name 2>/dev/null | awk '/kubelet-plugin/{print; exit}' || true)
     if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then
       echo "  Restarting DRA kubelet plugin (${DRA_DS##*/}) to ensure registration..."
       if ! kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} rollout restart "${DRA_DS}" -n {{ .Namespace }}; then
@@ -621,6 +621,7 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     else
       echo "  WARNING: no DRA kubelet plugin daemonset found in {{ .Namespace }}"
     fi
+  fi
   {{- end }}
   {{- end }}
 done
