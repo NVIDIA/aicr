@@ -4,7 +4,7 @@ Moving a cluster from one AICR release to a newer one. The short version: regene
 
 ```shell
 aicr recipe --service eks --accelerator h100 --intent training -o new-recipe.yaml
-aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer helm
+aicr upgrade-check --from ./old-bundle --to new-recipe.yaml --deployer helm
 aicr bundle -r new-recipe.yaml --deployer helm -o ./bundles
 ```
 
@@ -20,18 +20,18 @@ Nothing in `aicr recipe` or `aicr bundle` can tell you which kind you are lookin
 
 ## Running it
 
-Keep the recipe you deployed from. `--from` always needs it: it is the only record of where your cluster came from, and without it there is nothing to compare.
+Keep the bundle you deployed, or at least the recipe you deployed from. `--from` always needs one of them: it is the only record of where your cluster came from, and without it there is nothing to compare. Prefer the bundle. Both compare versions and namespaces, but only a bundle records the values it installed with, which is what the [object-name comparison](#when-a-components-objects-are-renamed) reads; given a recipe, that comparison is skipped and the report says so.
 
 If you have already generated the recipe you intend to move to, name both:
 
 ```shell
-aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer helm
+aicr upgrade-check --from ./old-bundle --to new-recipe.yaml --deployer helm
 ```
 
 If you have not, omit `--to` and ask the other useful question:
 
 ```shell
-aicr upgrade-check --from old-recipe.yaml --deployer helm
+aicr upgrade-check --from ./old-bundle --deployer helm
 ```
 
 That re-resolves your artifact's own criteria against the running binary's pins, answering "am I behind, and does catching up hurt?" rather than "is this specific move safe?". It is usually the question you actually have.
@@ -105,7 +105,7 @@ Those last two cases are stricter than a tool that simply had no record for you,
 
 - **No record at all** (`no-record`). Nobody has assessed this component. Consider [authoring the first record](../contributor/upgrade-records.md) so the next operator does not repeat the work.
 - **A record exists but is silent here** (`no-boundary-crossed`). Somebody has assessed this component, but wrote no boundary in the range you are moving through. Decide whether one belongs there, and widen the record if it does.
-- **The component's identity moved** (`identity-changed`). Its namespace, chart, source, kustomize path, deployment type, manifest files or pre-manifest files changed. Records assess version boundaries, so none of them assesses a relocation. See [When a component moves namespace](#when-a-component-moves-namespace).
+- **The component's identity moved** (`identity-changed`). Its namespace, chart, source, kustomize path, deployment type, manifest files, pre-manifest files or object names changed. Records assess version boundaries, so none of them assesses a relocation, a replacement or a rename. See [When a component moves namespace](#when-a-component-moves-namespace) and [When a component's objects are renamed](#when-a-components-objects-are-renamed).
 - **You are rolling back** (`downgrade`). See below: this one can never become known.
 
 The difference from `blocked` is worth holding onto. `blocked` means AICR has something to tell you and a version to stop at, so read it and act on it. `unknown` means AICR has nothing, so the investigation is yours. Neither is permission to proceed.
@@ -116,7 +116,7 @@ A component that appears on only one side is reported too. An added component is
 
 ## When a component moves namespace
 
-The check compares two axes, not one. Beside the version it compares the namespace each artifact resolves for a component.
+The check compares two axes, not one. Beside the version it compares each component's identity: the namespace each artifact resolves for it, its chart, source, path, deployment type and manifest sets, and the values that name the objects its chart owns. This section covers the namespace; [object names](#when-a-components-objects-are-renamed) have their own below.
 
 The reason is at the top of this page. You regenerate the recipe from scratch on every AICR upgrade, and a component's namespace comes from `recipes/registry.yaml` in the binary doing the regenerating. If a default namespace moved between the two AICR releases, the new recipe names the new namespace. Helm cannot move a release between namespaces, so applying the resulting bundle does not relocate anything. What it does instead depends on what the chart owns, and neither outcome is one you want: it either installs a **second copy** of the component beside the one already running with nothing reconciling the two, or it **fails outright** partway through the bundle. Both are covered below. A version-only comparison reports the move as no change at all, which is why the check used to pass it in silence.
 
@@ -163,19 +163,63 @@ Structured output carries the move alongside the verdict, on both shapes of row:
 
 Acting on it is its own piece of work, not an upgrade step: move the release deliberately, then re-run the check. Or take the relocation out of the hop entirely, below.
 
+## When a component's objects are renamed
+
+Half the components in the registry pin the names of the objects their chart creates, with `fullnameOverride` or `nameOverride` in their values file. Those two values are what Helm's `chart.fullname` and `chart.name` templates read, so they *rename* objects rather than reconfigure them: they change what a component's Deployment, ServiceAccount, Service and webhook configurations are called, where every other value changes how it behaves.
+
+**Those two keys are the whole of what is compared, at any depth.** A chart can also name an object it owns through a value of its own — `serviceAccount.name` is the common one — and that produces no row. So a clean report means neither override key moved, not that nothing was renamed. Widening the set is not obviously right either: the paths differ per chart, and a comparison that guessed at them would report ordinary configuration changes as renames.
+
+Edit or remove one and every object the chart owns is renamed at once. Helm applies that as delete-and-recreate, so expect a service gap, and an orphan for anything referenced by name or not owned by the release. It is worse where the moved key changes the selector labels of an object whose name does not change, for example `nameOverride` moving while `fullnameOverride` is pinned: `spec.selector` is immutable, so the upgrade fails outright rather than replacing anything. A key that renames the object as well, such as `nameOverride` with no `fullnameOverride` in the standard scaffold, is plain delete-and-recreate with no error. Which you get is a property of the chart, so check the chart before you assume.
+
+The worked example is `nodewright-operator`. Its values pin `fullnameOverride: skyhook-operator`, and that single line is the only thing holding its objects at stable names across the upstream `skyhook` → `nodewright` chart rename: upstream's `chart.fullname` falls back to `.Chart.Name`, which the rename changes. Dropping the line as a tidy-up renames the lot.
+
+These moves report on the same rows and with the same verdicts as a namespace move, and `field` carries the dotted value path rather than `namespace`:
+
+```json
+"identityChanges": [
+  { "field": "fullnameOverride", "from": "skyhook-operator", "to": "" },
+  { "field": "grafana.fullnameOverride", "from": "grafana", "to": "kps-grafana" }
+]
+```
+
+An empty `from` or `to` means the name appeared or disappeared, which is a rename either way: a chart with no `fullnameOverride` names its objects after itself. This is the opposite of how the namespace axis reads an empty value, and deliberately so — an absent namespace is a fact the artifact did not record, while an absent object name is a fact it did.
+
+**This axis needs a bundle on the `--from` side.** A resolved recipe records `valuesFile` as a *path*, resolved against whichever binary reads it, so comparing two recipe files would read today's values twice and see nothing move. Only a bundle writes the merged result down, in the per-release `values.yaml` four deployers emit and the HelmRelease `spec.values` flux inlines. When the source cannot supply them the report says so once, above the table, rather than reporting that nothing moved:
+
+```
+  Object names were not compared: a recipe file records its values by
+  reference, not by value, so it does not state the object names it deployed
+  with. Compare against the bundle directory instead
+```
+
+`--format json` carries the same fact as `objectNamesCompared` and `objectNamesSkipped`. A bundle built before AICR stamped `bundle-info.yaml` reports its own reason: there is no record locating the values it installed.
+
 ## Pinning the namespaces you already deployed into
 
 Regenerating from scratch is what introduces the move, so the way to avoid it is to tell the new recipe where the old one put things:
 
 ```shell
 aicr recipe --service eks --accelerator h100 --intent training \
-  --inherit-from old-recipe.yaml -o new-recipe.yaml
-aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer helm
+  --inherit-from ./old-bundle -o new-recipe.yaml
+aicr upgrade-check --from ./old-bundle --to new-recipe.yaml --deployer helm
 ```
 
-`--inherit-from` takes the recipe you deployed from, or the bundle directory you deployed, which is read through the `recipe.yaml` every deployer writes at the bundle root. The resolved recipe keeps that artifact's namespace, chart name, source, kustomize path, manifest file set and pre-manifest file set. Everything else, version pins and values included, comes from the new binary as usual. A file set the prior artifact lists is restored whole, so a file the registry dropped is kept and a file the registry added is left out. A set the prior artifact leaves empty is not restored, so a file the new release adds is kept. A component whose deployment type changed between Helm and Kustomize keeps only its namespace, since no chart, source, path or manifest set carries across that flip, and `upgrade-check` reports the type move. The relocation rows then disappear from the check, leaving the version axis to be assessed on its own.
+`--inherit-from` takes the bundle directory you deployed, which is read through the `recipe.yaml` every deployer writes at the bundle root, or failing that the recipe you deployed from. The resolved recipe keeps that artifact's namespace, chart name, source, kustomize path, manifest file set and pre-manifest file set. Everything else, version pins and values included, comes from the new binary as usual. A file set the prior artifact lists is restored whole, so a file the registry dropped is kept and a file the registry added is left out. A set the prior artifact leaves empty is not restored, so a file the new release adds is kept. A component whose deployment type changed between Helm and Kustomize keeps only its namespace, since no chart, source, path or manifest set carries across that flip, and `upgrade-check` reports the type move. The relocation rows then disappear from the check, leaving the version axis to be assessed on its own.
 
 **Chart and source are pinned beside the new version.** The chart name and source come from the prior artifact while the version pin comes from the new binary, and nothing checks that the old source serves the new version. If a release moves a chart to a new repository and pins a version published only there, install fails against the inherited source. In that case resolve without `--inherit-from` and let `upgrade-check` report the move.
+
+**Object names are pinned too, from a bundle.** Given a bundle directory, the flag also carries forward the `fullnameOverride` and `nameOverride` values that bundle installed with, so a values-file edit in the new AICR release does not rename a running release's objects. It writes an override *only where the inherited name differs* from what the new binary resolves, so a steady-state inherit adds nothing to the recipe and an override appears exactly where a rename was prevented:
+
+```yaml
+  - name: nodewright-operator
+    namespace: skyhook
+    overrides:
+      fullnameOverride: skyhook-operator
+```
+
+Only those two keys are carried, never arbitrary values. Inheriting general configuration would freeze a component against registry updates you do want; these are different because they name objects rather than configure them. A name the new values *add* where the prior bundle pinned none is written as an explicit null, because letting it apply would rename the running objects just as surely.
+
+A recipe file cannot supply this half: it records `valuesFile` as a path, so its values are whatever the reading binary ships. Passing one still pins namespaces, and logs a warning that object names were left alone. Pass the bundle directory to get both.
 
 **Inheriting from a bundle older than v0.22.0 works only for `helm`.** Writing `recipe.yaml` for *every* deployer landed in v0.22.0; before that only the `helm` deployer wrote one. So a bundle built by v0.21.1 or earlier with `helmfile`, `argocd`, `argocd-helm` or `flux` has no `recipe.yaml` at its root, and pointing `--inherit-from` at it is rejected:
 
@@ -184,7 +228,9 @@ aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer helm
 neither a recipe nor a bundle
 ```
 
-This is the one upgrade where it bites, because the artifact you are inheriting *from* is by definition built by the older release. Pass the recipe file you generated instead, which every version writes. From a v0.22.0 bundle onward, either works.
+This is the one upgrade where it bites, because the artifact you are inheriting *from* is by definition built by the older release. Pass the recipe file you generated instead, which every version writes. From a v0.22.0 bundle onward, either works. Note that falling back to the recipe costs you the object-name half above, so a component whose `fullnameOverride` moved in the same hop needs the rename performed deliberately.
+
+The same is true of a `helm` bundle built before v0.22.0, which `--inherit-from` *does* accept. It carries no `bundle-info.yaml` (that record first shipped in v0.22.0), so it pins and compares namespaces only, and logs a warning that object names were left alone; perform any object-name change deliberately. This is the hop existing `skyhook`-era installs take.
 
 A component the prior artifact does not name keeps the registry default, because as far as that artifact knows it is a first deploy. Two cases land there and are worth telling apart: a component the new AICR release adds, which genuinely is a first deploy, and a component you excluded at bundle time with `--set <component>:enabled=false`, which a bundle's `recipe.yaml` records post-filter and therefore does not carry. Inheriting from a filtered bundle gives the excluded components registry defaults. Inherit from the recipe rather than the bundle if you want them pinned.
 
@@ -229,11 +275,15 @@ So a rollback needs human review before you run it. Read the component's own dow
 ## What this does not cover
 
 - **An artifact comparison reads no cluster state.** Nothing is inspected, deployed or modified. (A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.) If your cluster has drifted from the recipe you think you deployed, the check compares the artifacts you gave it, not reality. [Ask the cluster](#what-is-actually-running-here) when that is the question.
-- **The cluster read is a read of declarations, not of live state.** A Helm release answers only from a newest revision that reached `deployed`, and an Argo CD `Application` only from a revision its sync status or history shows was synced, never from the pin it is configured to reach. An upgrade that is still pending, or failed, therefore never reads as made: under Argo CD it reads at the last synced revision, or as `unversioned` if there is none, and under Helm it reads as `unversioned`. A hand-edited resource changes neither, so the read is authoritative about installed versions and silent about everything else. It also reports no namespace move, having no namespace to compare.
+- **The cluster read is a read of declarations, not of live state.** A Helm release answers only from a newest revision that reached `deployed`, and an Argo CD `Application` only from a revision its sync status or history shows was synced, never from the pin it is configured to reach. An upgrade that is still pending, or failed, therefore never reads as made: under Argo CD it reads at the last synced revision, or as `unversioned` if there is none, and under Helm it reads as `unversioned`. A hand-edited resource changes neither, so the read is authoritative about installed versions and silent about everything else. It also reports no namespace or object-name move, having neither to compare.
 - **Argo CD bundles built with `--vendor-charts` read as `unversioned`.** Vendoring turns every chart into a path-based `Application`, which carries no payload version anywhere in the cluster, so every component reads `unversioned` and a strict run always fails. Compare the vendored bundle as an artifact instead: `--from <bundle>`.
-- **You still name the deployer.** A bundle records the deployer that built it in [`bundle-info.yaml`](bundling.md), but `upgrade-check` does not read that record yet, so `--deployer` is required whenever a component carries steps, even when reading a bundle, and unconditionally when reading the cluster.
+- **You still name the deployer.** A bundle records the deployer that built it in [`bundle-info.yaml`](bundling.md). `upgrade-check` reads that file only to locate release values and does not take the deployer from it yet, so `--deployer` is required whenever a component carries steps, even when reading a bundle, and unconditionally when reading the cluster.
 - **Coverage starts near zero, so expect red.** Only five components ship a record today, so most transitions report `unknown` and the check exits non-zero on most comparisons. Absence of a record is absence of assessment, and the tool says so rather than rounding it up to approval. This is a coverage problem with an owner ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes a record mandatory for every pin bump), and it shrinks as records land. Use `--fail-on-error=false` for the report without the gate in the meantime.
-- **A namespace move is seen only when both artifacts state one.** An empty namespace is read as a fact the artifact did not carry, not as a move to or from the default, so a component that *gains* or *loses* an explicit namespace between the two artifacts produces no relocation row at all. Reading it the other way would report a move nobody performed for every component the moment one of the two artifacts stopped carrying the field. The same holds for chart, source and path. The manifest and pre-manifest file sets are the exception. Each is compared as a set, so a set that empties is a move. The release name is not compared, because it is derived from the component name.
+- **A namespace move is seen only when both artifacts state one.** An empty namespace is read as a fact the artifact did not carry, not as a move to or from the default, so a component that *gains* or *loses* an explicit namespace between the two artifacts produces no relocation row at all. Reading it the other way would report a move nobody performed for every component the moment one of the two artifacts stopped carrying the field. The same holds for chart, source and path. The manifest and pre-manifest file sets are the exception. Each is compared as a set, so a set that empties is a move. Object names are another, read the opposite way to the scalar fields, and [that section](#when-a-components-objects-are-renamed) says why. The release name is not compared, because it is derived from the component name.
+- **Object names need a bundle on the `--from` side**, for the reason given in [that section](#when-a-components-objects-are-renamed). With a recipe file or `--from cluster` there, the object names are not compared and the report says so; it does not report that nothing moved.
+- **The object-name comparison covers `fullnameOverride` and `nameOverride` only.** A chart that names an object through some other value of its own, such as `serviceAccount.name`, produces no row when that value moves.
+- **A pinned object name is not carried into what is derived from it.** When `--inherit-from` holds a component at an old name, its health check and any other component's hardcoded reference to that name still come from the new release. A namespace pin rebinds the health check; a name pin does not yet ([#3024](https://github.com/NVIDIA/aicr/issues/3024)).
+- **`--dynamic` values are not all visible.** A flux release that takes `--dynamic` values through `spec.valuesFrom` withdraws the object-name axis instead of guessing, and pins no names from that bundle. An `argocd-helm` bundle moves `--dynamic` paths into its root chart values, which nothing in the bundle records, so a dynamic name key there reads as unset ([#3025](https://github.com/NVIDIA/aicr/issues/3025)). Avoid putting a name key under `--dynamic` on `argocd-helm`.
 - **Records are human assertions.** A `safe` verdict names what verified it, but it is somebody's reading of the migration notes plus a test lane, not a proof.
 
 ## See Also

@@ -641,6 +641,21 @@ result, err := client.ResolveRecipe(ctx, aicr.RecipeRequest{
 `recipe.yaml` at its root. A component the prior artifact does not name keeps
 the registry default.
 
+A **bundle directory** carries one thing a recipe file cannot: the merged
+values each release installed with, which is where `fullnameOverride` and
+`nameOverride` live. Given one, the resolve also pins those object names,
+writing a `ComponentRef.Overrides` entry only where the inherited name differs
+from what this binary resolves. Given a recipe file, namespaces are still
+pinned and a warning records that object names were not, because a recipe
+stores `valuesFile` as a path resolved against whichever binary reads it.
+
+The same warning, and namespaces only, applies to two kinds of bundle: one
+built before v0.22.0, which carries no `bundle-info.yaml` to locate its values,
+and a flux bundle whose HelmReleases take `--dynamic` values through
+`spec.valuesFrom`. A bundle that names files it does not contain is refused
+with `ErrCodeInvalidRequest` instead, since it is incomplete rather than merely
+unreadable.
+
 The reference is read when the resolve runs, and it fails closed rather than
 silently resolving as a first deploy: a path that does not exist, a directory
 holding no `recipe.yaml`, and a `cm://` URI (not supported yet) each return

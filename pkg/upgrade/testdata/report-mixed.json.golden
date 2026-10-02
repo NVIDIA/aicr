@@ -2,6 +2,7 @@
   "from": "./bundles-v0.16.0",
   "to": "./bundles-v0.17.0",
   "deployer": "argocd",
+  "objectNamesCompared": false,
   "components": [
     {
       "component": "alpha-operator",
