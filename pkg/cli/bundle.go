@@ -646,6 +646,7 @@ func bundleCmd() *cli.Command {
 		Usage:                     "Generate deployment bundle from a given recipe.",
 		Description: `Generates a deployment bundle from a given recipe.
 Use --deployer argocd to generate Argo CD Applications.
+Use --deployer argocd-helm to generate a Helm chart that renders the Argo CD Applications, with values overridable at install time.
 Use --deployer flux to generate Flux HelmRelease and Kustomization manifests.
 Use --deployer helmfile to generate a helmfile.yaml release graph (apply/diff/destroy with the upstream helmfile CLI).
 
@@ -653,14 +654,23 @@ Helm:
   - README.md: Root deployment guide with ordered steps
   - deploy.sh: Automation script
   - recipe.yaml: Copy of the input recipe for reference
-  - <component>/values.yaml: Helm values per component
-  - <component>/README.md: Component install/upgrade/uninstall
+  - NNN-<component>/values.yaml: Helm values per component
+  - NNN-<component>/install.sh: Component install/upgrade script
   - checksums.txt: SHA256 checksums of generated files
 
 Argo CD:
   - app-of-apps.yaml: Parent Argo CD Application
-  - <component>/application.yaml: Argo CD Application per component
-  - <component>/values.yaml: Values for each component
+  - NNN-<component>/application.yaml: Argo CD Application per component
+  - NNN-<component>/values.yaml: Values for each component
+  - README.md: Deployment instructions
+  - checksums.txt: SHA256 checksums of generated files
+
+Argo CD Helm chart (argocd-helm):
+  - Chart.yaml, values.yaml: Bundle packaged as a Helm chart; values.yaml holds install-time inputs
+  - templates/aicr-stack.yaml: Parent Argo CD Application
+  - templates/<component>.yaml: Argo CD Application template per component
+  - static/<component>.yaml: Static values per component
+  - NNN-<component>/: Per-component values and local chart content for path-based Applications
   - README.md: Deployment instructions
   - checksums.txt: SHA256 checksums of generated files
 
@@ -696,6 +706,9 @@ Generate Helm per-component bundle (default):
 
 Generate Argo CD App of Apps:
   aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer argocd
+
+Generate Argo CD Helm chart:
+  aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer argocd-helm
 
 Generate Flux manifests:
   aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer flux

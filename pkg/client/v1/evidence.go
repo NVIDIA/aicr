@@ -38,7 +38,7 @@ type OIDCResolveOptions = bundleattest.ResolveOptions
 // signing-disclosure prompt, which is a UI concern the caller owns.
 type EvidenceOptions struct {
 	// OutDir is the directory to write the recipe-evidence bundle to
-	// (summary-bundle/, optionally logs-bundle/, and pointer.yaml). Required.
+	// (summary-bundle/ and pointer.yaml). Required.
 	OutDir string
 
 	// BOMPath optionally embeds a CycloneDX BOM; when empty a recipe-bound

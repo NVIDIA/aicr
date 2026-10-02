@@ -172,17 +172,26 @@ End-to-end, the smallest viable patch:
    [`pkg/measurement/types.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/measurement/types.go)
    (`TypeXxx`) and to the `Types` slice. Recipe constraints address
    measurements by type — leave this out and your data is unreachable.
-4. **Extend the factory.** Add a `CreateXxxCollector() Collector`
+4. **Register the paths in the measurement catalog.** Add the subtypes
+   and keys the collector emits to `catalog` in
+   [`pkg/measurement/catalog.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/measurement/catalog.go).
+   A new `Type` needs an entry (`TestCatalogCoversEveryType` fails
+   otherwise), as do a new subtype (unless the Type is open-subtype) and a
+   new key in a closed key space. Recipe loading rejects any constraint
+   path the catalog cannot address; see
+   [recipe.md](recipe.md#common-pitfalls) for the scalar and item key
+   spaces.
+5. **Extend the factory.** Add a `CreateXxxCollector() Collector`
    method on `Factory` and `DefaultFactory` in
    [`pkg/collector/factory.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/factory.go).
-5. **Wire into snapshotter.** Add one
+6. **Wire into snapshotter.** Add one
    `g.Go(collectSafe(gctx, "<kind>", n.Factory.CreateXxxCollector()))` line in
    [`pkg/snapshotter/snapshot.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/snapshotter/snapshot.go).
-6. **Test.** `<kind>_test.go` with table-driven tests. Use
+7. **Test.** `<kind>_test.go` with table-driven tests. Use
    `k8s.io/client-go/kubernetes/fake` for K8s collectors. Cover the
    happy path, the missing-dependency degradation path, and a
    `context.Cancel` case.
-7. **Update docs.** Add the row to
+8. **Update docs.** Add the row to
    [docs/user/cli-reference.md](../user/cli-reference.md) if the
    snapshot output schema gains a new top-level entry, and to this
    page's [Where Collectors Live](#where-collectors-live) table.

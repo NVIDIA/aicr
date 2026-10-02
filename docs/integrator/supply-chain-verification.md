@@ -538,7 +538,7 @@ cosign verify-blob-attestation \
   --bundle aicr_${VERSION}_${OS}_${ARCH}.sbom.json.sigstore.json \
   --type https://slsa.dev/provenance/v1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
+  --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/${TAG}" \
   aicr_${VERSION}_${OS}_${ARCH}.sbom.json
 ```
 
@@ -568,7 +568,7 @@ export DIGEST_API_AMD64=$(crane digest --platform linux/amd64 "${IMAGE_API}@${DI
 sbom=$(cosign verify-attestation \
   --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
+  --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
   ${IMAGE_API}@${DIGEST_API_AMD64} | \
   jq -r '.payload' | base64 -d | jq '.predicate') \
   && printf '%s\n' "${sbom}" > sbom.json
@@ -692,21 +692,21 @@ export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}@${DIGEST}")
 cosign verify-attestation \
   --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
+  --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
   ${IMAGE}@${DIGEST_AMD64}
 
 # Extract and view the SBOM predicate
 cosign verify-attestation \
   --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
+  --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
   ${IMAGE}@${DIGEST_AMD64} | jq -r '.payload' | base64 -d | jq '.predicate'
 
 # Verify the OpenVEX attestation on the same per-platform manifest digest
 openvex=$(cosign verify-attestation \
   --type openvex \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
+  --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
   ${IMAGE}@${DIGEST_AMD64} | jq -r '.payload' | base64 -d | jq '.predicate') \
   && printf '%s\n' "${openvex}" > aicr-openvex.json
 ```
@@ -725,7 +725,7 @@ cosign verify-blob-attestation \
   --bundle aicr-attestation.sigstore.json \
   --type https://slsa.dev/provenance/v1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
+  --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/${TAG}" \
   aicr
 ```
 
@@ -1127,11 +1127,13 @@ Cosign signature with `spec.verify.secretRef` instead of `matchOIDCIdentity`.
 
 ## Offline and Air-Gapped Verification
 
-Container image verification uses GitHub's attestation API
-(`gh attestation verify`) because images are already fetched from a
-registry — an inherently online context. Binary and bundle verification
-uses `sigstore-go` with a local trusted root instead. Verification is a
-read operation that may run frequently — in CI pipelines, in clusters
+Container image verification reads attestations from the registry's OCI
+referrers (`gh attestation verify --bundle-from-oci`,
+`cosign verify-attestation`), with GitHub's attestation API as the fallback
+(see [Unified Metadata Retrieval](#unified-metadata-retrieval)). Images are
+already fetched from a registry, an inherently online context. Binary and
+bundle verification uses `sigstore-go` with a local trusted root instead.
+Verification is a read operation that may run frequently — in CI pipelines, in clusters
 verifying deployed bundles, or by audit tools — and must not be coupled to
 external API availability or rate limits. Cryptographic security is
 identical in both cases; the Rekor inclusion proof is embedded in every
@@ -1142,15 +1144,15 @@ identical in both cases; the Rekor inclusion proof is embedded in every
 Bundle verification uses a Sigstore trusted root (CA certificates and Rekor
 public keys) to validate attestation signatures offline.
 
-**Three layers of trust resolution (in priority order):**
+**Verification reads the trusted root from (in priority order):**
 
-1. **TUF cache** (`~/.sigstore/root/`) — updated by `aicr trust update`
-2. **Embedded TUF root** — compiled into the binary, used to bootstrap
-3. **TUF update** — `aicr trust update` contacts the Sigstore TUF CDN
+1. **TUF cache** (`~/.sigstore/root/`) — written by `aicr trust update`
+2. **Embedded TUF root** — compiled into the binary, used when no cache exists
 
-Verification itself never contacts the network — it uses the cache or the
-embedded root. The install script runs `aicr trust update` automatically
-after installation.
+Verification itself never contacts the network. Only `aicr trust update` does:
+it fetches the latest root from the Sigstore TUF CDN, verifies the update
+chain from the embedded root, and writes the result to the cache. The install
+script runs `aicr trust update` automatically after installation.
 
 ```shell
 aicr trust update

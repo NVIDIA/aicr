@@ -210,14 +210,14 @@ spec:
       failFast: false
       noCluster: false
       noCleanup: false
-      timeout: 40m
+      timeout: 5m                    # aicr validate: live-capture agent Job only; inert here (input.snapshot is set)
     evidence:
       cncf:                          # CNCF AI Conformance markdown
         dir: ./evidence
         cncfSubmission: false        # requires dir
         features: []                 # empty = all features
       attestation:                   # recipe-evidence bundle (ADR-007)
-        out: evidence-result.json    # setting this enables the path
+        out: ./attestation           # directory; setting this enables the path
         bom: ""
         push: ""                     # OCI ref to push the signed bundle
         plainHTTP: false
@@ -318,11 +318,11 @@ Inputs to `aicr validate`.
 | `execution.failFast` | bool (tri-state) | Stop after the first failed phase |
 | `execution.noCluster` | bool | Test mode: no cluster access, constraints evaluated inline |
 | `execution.noCleanup` | bool | Keep validation Jobs after completion |
-| `execution.timeout` | duration string | e.g. `40m` |
+| `execution.timeout` | duration string | `aicr validate`: timeout for the live snapshot-capture agent Job (`--timeout`, default `5m`); inert when `input.snapshot` is set, and validator Jobs keep their per-check timeouts. Go SDK: `Config.ValidateSettings().Timeout` carries the same value for `WithValidationTimeout`, which caps the whole `ValidateState` run (see [Go library](../integrator/go-library.md#what-validatesettings-does-and-does-not-carry)) |
 | `evidence.cncf.dir` | string | CNCF AI Conformance evidence directory (`--evidence-dir`) |
 | `evidence.cncf.cncfSubmission` | bool (tri-state) | Emit submission layout; requires `dir` |
 | `evidence.cncf.features` | []string | Empty = all features; honored only with `cncfSubmission` |
-| `evidence.attestation.out` | string | Recipe-evidence result path (predicateType v3) — setting it **enables** the attestation path |
+| `evidence.attestation.out` | string | Output directory for the recipe-evidence bundle (predicateType v3; same as `--emit-attestation`), which receives `summary-bundle/` and `pointer.yaml` — setting it **enables** the attestation path |
 | `evidence.attestation.bom` / `.push` | string | BOM input; OCI ref for the signed bundle push |
 | `evidence.attestation.plainHTTP` / `.insecureTLS` | bool (tri-state) | Push transport options |
 

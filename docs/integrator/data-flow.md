@@ -275,8 +275,10 @@ When a query matches a leaf recipe with a `spec.base` reference, the builder:
 
 1. **Matches overlays by criteria.** An overlay matches when every field it
    specifies equals the query; omitted fields act as wildcards (e.g. an overlay
-   that omits `os` matches any OS). The `any` sentinel is its own value — a
-   query `any` only matches a recipe `any`.
+   that omits `os` matches any OS). A recipe value of `any` behaves like an
+   omitted field and matches every query. The reverse does not hold: a query
+   of `any` (or an omitted query field) matches only overlays that also leave
+   that field `any` or omit it.
 2. **Resolves the inheritance chain** for each match by following `spec.base`
    to the implicit `base`, producing a root-to-leaf ordering such as
    `base → eks → eks-training → gb200-eks-training → gb200-eks-ubuntu-training`.
@@ -724,14 +726,17 @@ measurements:
     subtypes: [...]
 ```
 
-**Table (Human-readable):**
+**Table (Human-readable):** the typed snapshot flattened into `FIELD` /
+`VALUE` rows, with each subtype's readings as one compact JSON value
+(abridged):
 ```
-TYPE    SUBTYPE      KEY                    VALUE
-K8s     image        gpu-operator           v25.3.3
-K8s     image        driver                 580.82.07
-GPU     hardware     gpu-present            true
-GPU     hardware     gpu-count              8
-GPU     hardware     model                  H100
+FIELD                                  VALUE
+-----                                  -----
+Header.APIVersion                      aicr.run/v1
+Header.Kind                            Snapshot
+Measurements.[1].Subtypes.[0].Data     {"gpu-count":8,"gpu-present":true,"model":"h100"}
+Measurements.[1].Subtypes.[0].Name     hardware
+Measurements.[1].Type                  GPU
 ```
 
 ### Serialization Pipeline

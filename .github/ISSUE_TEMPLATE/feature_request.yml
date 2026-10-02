@@ -15,7 +15,8 @@
 name: Feature Request
 description: Suggest a new feature or enhancement
 title: "[Feature]: "
-labels: ["feature", "needs-triage"]
+labels: ["needs-triage"]
+type: Enhancement
 
 body:
   - type: checkboxes
@@ -79,7 +80,7 @@ body:
         - CLI (aicr)
         - API server (aicrd)
         - Recipe engine / data
-        - Bundlers (gpu-operator, network-operator, etc.)
+        - Bundler and deployers (helm, argocd, flux, etc.)
         - Collectors / snapshotter
         - Validator
         - Core libraries (errors, k8s client)

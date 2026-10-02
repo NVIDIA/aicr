@@ -291,3 +291,39 @@ generate the deployment-specific manifest for a specific deployment.
 > destination registry so the runtime pull resolves there; the validator
 > preserves the `library/alpine:3.23.3` repository and tag. Without a registry
 > override, Slurm workers need Docker Hub egress for this check.
+
+## AICR agent and validator images
+
+`aicr mirror list` covers what the recipe's components deploy. It does not list
+the images AICR itself runs in the cluster, so mirror these separately:
+
+- The snapshot agent, `ghcr.io/nvidia/aicr`, run by `aicr snapshot` and by
+  `aicr validate` when no `--snapshot` is given.
+- The validator images under `ghcr.io/nvidia/aicr-validators/` (`deployment`,
+  `performance`, `conformance`, and `aiperf-bench` for inference performance
+  checks), run by `aicr validate`.
+
+Release builds use each image at the CLI's own version tag. Copy them into your
+registry, then point AICR at the copies:
+
+```shell
+AICR_VERSION=vX.Y.Z  # release tag; `aicr --version` prints it without the leading v
+REGISTRY=my-registry.example.com
+
+# Snapshot agent: --image takes the full reference
+aicr snapshot --image "${REGISTRY}/nvidia/aicr:${AICR_VERSION}"
+
+# Validators: the env var replaces the registry prefix of every validator image
+export AICR_VALIDATOR_IMAGE_REGISTRY="${REGISTRY}"
+aicr validate --recipe recipe.yaml \
+  --image "${REGISTRY}/nvidia/aicr:${AICR_VERSION}"
+```
+
+`AICR_VALIDATOR_IMAGE_REGISTRY` replaces the registry host and the first path
+segment, so `ghcr.io/nvidia/aicr-validators/conformance` resolves to
+`${REGISTRY}/aicr-validators/conformance`. If your mirroring tool keeps the
+source path (`${REGISTRY}/nvidia/aicr-validators/...`), set the variable to
+`${REGISTRY}/nvidia` instead. Add `--image-pull-secret` when the registry needs
+credentials. Some benchmark checks pin workload images the variable does not
+rewrite, such as the NCCL runtime image (override it with
+`AICR_NCCL_RUNTIME_IMAGE`); see [Validation](validation.md).

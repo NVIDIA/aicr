@@ -7,8 +7,9 @@ KWOK (Kubernetes WithOut Kubelet) tests AICR bundles against simulated GPU clust
 Versions are pinned in `.settings.yaml`. **Docker Desktop must be running** — Kind uses it to create the local cluster.
 
 ```bash
-# Kind, lifecycle, bundle deployment, build
-brew install kind tilt-dev/tap/ctlptl helm yq goreleaser
+# Kind, ctlptl, helm, yq, goreleaser, and the rest of the toolchain
+# (then run make tools-check to confirm the .settings.yaml pins)
+make tools-setup
 ```
 
 The `kwok`/`kwokctl` binaries are not required — `make kwok-cluster` installs the KWOK controller into the cluster via `kubectl apply`.
@@ -188,7 +189,7 @@ lanes).
 A recipe is auto-discovered for KWOK testing if it has `spec.criteria.service` defined. Create `recipes/overlays/your-recipe.yaml`:
 
 ```yaml
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
   name: your-recipe-name

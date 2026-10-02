@@ -20,12 +20,7 @@ make e2e-tilt
 | Test | Description |
 |------|-------------|
 | `build/aicr` | Binary builds successfully |
-| `cli/help` | CLI help and version commands |
 | `api/health`, `api/ready`, `api/metrics` | Server endpoints |
-| `cli/recipe/*` | Recipe generation (query params, criteria file, overrides) |
-| `cli/bundle/*` | Bundle generation (helm, argocd, node selectors) |
-| `cli/external-data/*` | External data directory (`--data` flag) |
-| `cli/format/*` | Output format variations (`--format json/table`) |
 | `api/recipe/*`, `api/bundle/*` | REST endpoints |
 | `snapshot/*` | Snapshot with deploy-agent (requires fake GPU) |
 | `recipe/from-snapshot` | Recipe from ConfigMap snapshot (`cm://...`) |
@@ -33,6 +28,10 @@ make e2e-tilt
 | `validate/deployment-constraints` | Deployment phase constraints (GPU operator version) |
 | `validate/job-*` | Validation Job deployment, RBAC, namespace, cleanup |
 | `bundle/oci-push` | Bundle as OCI image to local registry |
+
+CLI checks that need no cluster (recipe, bundle, help, output formats, external
+data) live in the Chainsaw CLI suites; see
+[tests/chainsaw/README.md](../chainsaw/README.md#cli-tests).
 
 ## Fake GPU Testing
 
@@ -57,9 +56,9 @@ FAKE_GPU_ENABLED=true AICR_IMAGE=localhost:5001/aicr:local ./tests/e2e/run.sh
 ## Prerequisites
 
 ```bash
-brew install kind tilt-dev/tap/tilt tilt-dev/tap/ctlptl ko
+make tools-setup  # kind, tilt, ctlptl, ko, kubectl; make tools-check confirms the .settings.yaml pins
 ```
-Plus: Docker, kubectl.
+Plus: Docker.
 
 ## Environment Variables
 
@@ -80,7 +79,7 @@ Plus: Docker, kubectl.
 
 ## CI/CD
 
-The `e2e` job runs in `.github/workflows/on-push.yaml` after unit tests and lint pass, on push to `main` and PRs targeting `main`.
+The `e2e` job is part of `.github/workflows/qualification.yaml`. Pull requests reach it through `merge-gate.yaml`; pushes to `main` reach it through `on-push.yaml`.
 
 ## Cleanup
 

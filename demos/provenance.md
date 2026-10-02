@@ -114,15 +114,16 @@ verify, the two see different artifacts. Always pass `@sha256:...`.
 ## 3. Verify the CycloneDX SBOM and the OpenVEX document
 
 Different predicates, same trust model. `cosign verify-attestation` enforces an
-explicit signer policy (issuer + identity regex) and writes the verified DSSE
-envelope to disk. Both subjects are the *platform* manifest; asking the index
-for either type returns nothing:
+explicit signer policy (issuer + the release workflow's exact identity at
+`${TAG}`; a `refs/tags/.+` regexp would accept any AICR release's signature) and
+writes the verified DSSE envelope to disk. Both subjects are the *platform*
+manifest; asking the index for either type returns nothing:
 
 ```shell
 cosign verify-attestation \
   --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
+  --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
   "${IMAGE_PLATFORM}" \
   --output-file predicate.json
 ```
@@ -144,7 +145,7 @@ SBOM in a listing without downloading both.
 cosign verify-attestation \
   --type openvex \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
+  --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
   "${IMAGE_PLATFORM}" \
   --output-file vex-predicate.json
 
@@ -170,9 +171,11 @@ SBOM retrieved above:
 
 ```shell
 VERSION=${TAG#v}                                 # strip the 'v' prefix
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 gh release download "$TAG" \
   --repo NVIDIA/aicr \
-  --pattern "aicr_${VERSION}_linux_arm64.sbom.json" \
+  --pattern "aicr_${VERSION}_${OS}_${ARCH}.sbom.json" \
   --clobber \
   --output sbom-binary.spdx.json
 ```
@@ -278,7 +281,8 @@ wrong. Verify with `cosign verify-attestation` instead, or confirm the digest wi
 `crane digest`.
 
 **`cosign verify-attestation` returns "no matching attestations"** — the identity
-regex is too strict, or the attestation lives on a different artifact (the
+does not match (check that `${TAG}` is the release the digest was resolved
+from), or the attestation lives on a different artifact (the
 attestation is anchored to the OCI manifest digest, and multi-arch images have a
 manifest list above the per-arch manifest). The SBOM and the VEX are on
 `${IMAGE_PLATFORM}`, not on `${IMAGE_DIGEST}`. Try
