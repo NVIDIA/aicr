@@ -848,7 +848,7 @@ func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResou
 			return false, nil
 		case stderrors.Is(discErr, context.Canceled), stderrors.Is(discErr, context.DeadlineExceeded):
 			return false, errors.Wrap(errors.ErrCodeTimeout,
-				fmt.Sprintf("Nodewright discovery of %s did not complete within %s", gv, defaults.ResourceVerificationTimeout), discErr)
+				fmt.Sprintf("Nodewright discovery of %s was canceled or exceeded the %s per-request limit", gv, defaults.ResourceVerificationTimeout), discErr)
 		default:
 			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("Nodewright: failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
