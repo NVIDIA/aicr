@@ -169,9 +169,9 @@ check "the skipped gate says the lane does not assert deployment readiness" "1" 
 # banner printed two lines above it, is the point: the banner interpolates
 # VALIDATE_PHASES directly, so it keeps telling the truth even when the
 # invocation below it does not.
-conformance_phase_arg() {
-    local preset="${1:-}"
-    local work="${SCRATCH}/conf-${preset:-default}"
+conformance_arg() {
+    local flag="$1" preset="${2:-}"
+    local work="${SCRATCH}/conf-${flag#--}-${preset:-default}"
     rm -rf "${work}"
     mkdir -p "${work}"
     (
@@ -200,8 +200,9 @@ conformance_phase_arg() {
         echo "<aicr never invoked>"
         return
     fi
-    sed -n 's/.*--phase \([^ ]*\).*/\1/p' "${work}/aicr-args"
+    sed -n "s/.*${flag} \([^ ]*\).*/\1/p" "${work}/aicr-args"
 }
+conformance_phase_arg() { conformance_arg --phase "$@"; }
 
 check "the default validates all phases" "all" "$(conformance_phase_arg)"
 check "an explicit all validates all phases" "all" "$(conformance_phase_arg all)"
@@ -212,6 +213,14 @@ check "conformance alone validates only conformance" "conformance" \
     "$(conformance_phase_arg conformance)"
 check "a multi-phase value is passed through verbatim" "deployment,conformance" \
     "$(conformance_phase_arg deployment,conformance)"
+
+# --- CALL SITE 2b: phase_conformance and the --recipe argument --------------
+#
+# The deployed set lives in bundle/recipe.yaml (#2848): components the bundler
+# dropped are absent from it and bundle-time derivations (the dra-node-labeler
+# opt-in) are persisted, so the authoritative run reads it, not the config's
+# input recipe. The flag overrides spec.validate.input.recipe.
+check "conformance validates the bundle's recipe.yaml" "bundle/recipe.yaml" "$(conformance_arg --recipe)"
 
 # --- the simulated lane sets it, and the cloud lanes do not -----------------
 #

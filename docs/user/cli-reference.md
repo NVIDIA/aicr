@@ -1222,9 +1222,10 @@ aicr validate \
   --snapshot cm://gpu-operator/aicr-snapshot \
   --output validation-results.json
 
-# Validate deployment phase after components are installed
+# Validate deployment phase after components are installed; the bundle's
+# recipe.yaml records the component set it deployed
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe ./bundles/recipe.yaml \
   --snapshot snapshot.yaml \
   --phase deployment
 

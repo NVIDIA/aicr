@@ -1162,17 +1162,17 @@ func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef
 		return suppressed, "effective values gate the component off (installer.enabled=false); it renders no objects", err
 	case draNodeLabelerComponent:
 		// dra-node-labeler is opt-in: base.yaml declares it on every recipe so the
-		// dependency graph is authored once, but the bundler renders it only when
+		// dependency graph is authored once, but the bundler keeps it only when
 		// the DRA eviction contract is opted into (--dra-eviction-node-label /
-		// scheduling.draEvictionNodeLabel), flipping the manifest's default-off
-		// enabled gate. The validator resolves the recipe's effective values
-		// WITHOUT that bundle-time flag, so on the default path (which no UAT
-		// config opts into) the manifest renders no objects and asserting its
-		// DaemonSet would fail NOT_FOUND against a bundle that never deployed it
-		// (issue #2846). Suppress exactly when the render is empty — same
-		// render-aware, fail-closed shape as gcp-driver-installer.
+		// scheduling.draEvictionNodeLabel). On that path it persists
+		// enabled=true onto the labeler's ref, so the recipe.yaml written into
+		// the bundle renders the labeler and this check runs (#2848). The
+		// original recipe carries the default-off gate, so validating it on
+		// the default path renders no objects; suppress exactly then instead of
+		// failing NOT_FOUND on a DaemonSet the bundle never carried (#2846) —
+		// same render-aware, fail-closed shape as gcp-driver-installer.
 		suppressed, err := emptyRenderHealthCheckSuppressed(ctx.Ctx, ref)
-		return suppressed, "DRA eviction is not opted in, so the labeler renders no objects (enabled=false); the bundler did not deploy it", err
+		return suppressed, "effective values gate the labeler off (enabled=false): this recipe does not carry the DRA eviction opt-in, so it renders no objects; validate the bundle's recipe.yaml to check the deployed set", err
 	default:
 		return false, "", nil
 	}

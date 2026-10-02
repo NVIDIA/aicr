@@ -17,12 +17,15 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/bundler"
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -2380,20 +2383,10 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 			},
 			wantSuppressed: true,
 		},
-		{
-			// The bundler flips enabled=true in the --dra-eviction-node-label
-			// opt-in path that keeps the component in the bundle; then the
-			// labeler renders objects and its health check must run.
-			name: "dra-node-labeler opted in (enabled=true) keeps the assert",
-			ref: recipe.ComponentRef{
-				Name:          "dra-node-labeler",
-				Type:          recipe.ComponentTypeHelm,
-				ValuesFile:    "components/dra-node-labeler/values.yaml",
-				ManifestFiles: []string{"components/dra-node-labeler/manifests/dra-node-labeler.yaml"},
-				Overrides:     map[string]any{"enabled": true},
-			},
-			wantSuppressed: false,
-		},
+		// The opted-in shape is covered by
+		// TestGatedHealthCheckSuppressed_DRANodeLabelerBundleRecipe, which reads
+		// the ref back from a recipe.yaml the bundler actually wrote rather than
+		// hand-writing the override.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2721,4 +2714,89 @@ func TestMarkUndispatched(t *testing.T) {
 			t.Errorf("failures %q names a component that carries no unevaluated work", got)
 		}
 	}
+}
+
+// TestGatedHealthCheckSuppressed_DRANodeLabelerBundleRecipe exercises the real
+// bundle-to-validation path for the labeler (#2848): the recipe.yaml the
+// bundler writes at the bundle root is what post-deployment validation reads.
+// Opted in (--dra-eviction-node-label), the bundler persists enabled: true on
+// the labeler ref, so the manifest renders and the health check stays queued.
+// Not opted in, the bundler drops the ref, so there is nothing to suppress.
+func TestGatedHealthCheckSuppressed_DRANodeLabelerBundleRecipe(t *testing.T) {
+	t.Parallel()
+
+	recipeInput := func() *recipe.RecipeResult {
+		return &recipe.RecipeResult{
+			APIVersion: recipe.RecipeResultAPIVersion,
+			Kind:       recipe.RecipeResultKind,
+			Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Version: "v26.4.0", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia"},
+				{
+					Name:           draNodeLabelerComponent,
+					Type:           recipe.ComponentTypeHelm,
+					ValuesFile:     "components/dra-node-labeler/values.yaml",
+					ManifestFiles:  []string{"components/dra-node-labeler/manifests/dra-node-labeler.yaml"},
+					DependencyRefs: []string{"gpu-operator"},
+				},
+				{
+					Name: draDriverComponent, Version: "25.12.0", Type: recipe.ComponentTypeHelm,
+					Source:         "https://helm.ngc.nvidia.com/nvidia",
+					Overrides:      map[string]any{"nvidiaDriverRoot": "/run/nvidia/driver"},
+					DependencyRefs: []string{"gpu-operator", draNodeLabelerComponent},
+				},
+			},
+			DeploymentOrder: []string{"gpu-operator", draNodeLabelerComponent, draDriverComponent},
+		}
+	}
+	bundleRecipeRefs := func(t *testing.T, opts ...bundlercfg.Option) []recipe.ComponentRef {
+		t.Helper()
+		b, err := bundler.New(bundler.WithConfig(bundlercfg.NewConfig(opts...)))
+		if err != nil {
+			t.Fatalf("bundler.New() error = %v", err)
+		}
+		dir := t.TempDir()
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		if _, makeErr := b.Make(ctx, recipeInput(), dir); makeErr != nil {
+			t.Fatalf("Make() error = %v", makeErr)
+		}
+		loaded, err := recipe.LoadFromFileWithProvider(ctx, filepath.Join(dir, bundler.RecipeFileName), "", "test", nil)
+		if err != nil {
+			t.Fatalf("load bundle %s: %v", bundler.RecipeFileName, err)
+		}
+		return loaded.ComponentRefs
+	}
+	findLabeler := func(refs []recipe.ComponentRef) *recipe.ComponentRef {
+		for i := range refs {
+			if refs[i].Name == draNodeLabelerComponent {
+				return &refs[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("opted-in bundle recipe keeps the assert", func(t *testing.T) {
+		t.Parallel()
+		refs := bundleRecipeRefs(t, bundlercfg.WithDRAEvictionNodeLabel(bundlercfg.DefaultDRAEvictionNodeLabel()))
+		ref := findLabeler(refs)
+		if ref == nil {
+			t.Fatalf("opted-in bundle recipe lacks %s", draNodeLabelerComponent)
+		}
+		suppressed, reason, err := gatedHealthCheckSuppressed(
+			&validators.Context{Ctx: t.Context(), Clientset: k8sfake.NewClientset()}, *ref)
+		if err != nil {
+			t.Fatalf("gatedHealthCheckSuppressed() error = %v", err)
+		}
+		if suppressed {
+			t.Fatalf("deployed labeler's health check suppressed: %s", reason)
+		}
+	})
+
+	t.Run("default-path bundle recipe carries no labeler", func(t *testing.T) {
+		t.Parallel()
+		if ref := findLabeler(bundleRecipeRefs(t)); ref != nil {
+			t.Fatalf("bundle recipe carries %s without the eviction opt-in: %+v", draNodeLabelerComponent, ref)
+		}
+	})
 }
