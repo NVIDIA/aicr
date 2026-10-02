@@ -35,10 +35,11 @@ any phase. If pre-flight fails, no validator Jobs are deployed.
 ## Which recipe to validate
 
 Every bundle writes the recipe it was generated from to `recipe.yaml` at the
-bundle root — after dropping the components it did not render and recording the
-values it derived at bundle time (for example the `dra-node-labeler` opt-in).
-That file is the effective inventory of what was deployed, so validation of a
-deployed cluster reads it:
+bundle root, after dropping the components it did not render. Bundle-time
+`--set` values are not written back to it; the one bundle-time decision that is
+persisted is the `dra-node-labeler` enablement under `--dra-eviction-node-label`.
+That file is the effective component inventory of what was deployed, so
+validation of a deployed cluster reads it:
 
 ```bash
 aicr validate --recipe ./bundle/recipe.yaml --phase deployment
