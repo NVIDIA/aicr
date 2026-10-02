@@ -17,7 +17,7 @@ This section is for integrators who:
 | [Public API Surface](public-api.md) | Stability tiers for every exported Go package; facade type ownership |
 | [Measurement Schema](measurement-api.md) | Cross-repo Measurement contract: Type cardinality, Subtype layout, NetworkTopology shape, constraint paths |
 | [Go Library Integration](go-library.md) | Using `github.com/NVIDIA/aicr/pkg/client/v1` as a Go library |
-| [Automation](automation.md) | CI/CD integration patterns for GitHub Actions, GitLab CI, Jenkins, and Terraform |
+| [Automation](automation.md) | CI/CD integration patterns for GitHub Actions, with a stage mapping for GitLab CI, CircleCI, and Terraform |
 | [Data Flow](data-flow.md) | Understanding snapshots, recipes, validation, and bundles data transformations |
 | [Kubernetes Deployment](kubernetes-deployment.md) | Self-hosted API server deployment with Kubernetes manifests |
 | [EKS Dynamo Networking](eks-dynamo-networking.md) | Security group prerequisites for Dynamo overlays on EKS |

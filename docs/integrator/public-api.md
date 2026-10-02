@@ -30,10 +30,10 @@ in the [Go library integration guide](./go-library.md).
 | `pkg/constraints` | Internal | Constraint type definitions. |
 | `pkg/bom` | Internal | Bill-of-materials / image inventory generation. |
 | `pkg/config` | Internal | Config-file loading and flag/spec resolution. |
-| `pkg/corroborate` | Internal | Cross-source corroboration of observed state. |
+| `pkg/corroborate` | Internal | Recipe corroboration consensus model and the interim-evidence dashboard. |
 | `pkg/diff` | Internal | Structural snapshot comparison implementation. External consumers use `Client.DiffSnapshots` and `aicr.WriteSnapshotDiffTable`. |
 | `pkg/fingerprint` | Internal | Cluster/provider fingerprint detection. |
-| `pkg/health` | Internal | Health-check orchestration. |
+| `pkg/health` | Internal | Per-recipe structural health scoring (ADR-009). External consumers use `Client.ComputeHealth`. |
 | `pkg/helm` | Internal | Helm chart rendering helpers. |
 | `pkg/mirror` | Internal | Chart/image mirroring to air-gapped registries. |
 | `pkg/netutil` | Internal | Networking utilities. |
@@ -45,9 +45,20 @@ in the [Go library integration guide](./go-library.md).
 | `pkg/k8s` | Internal | Kubernetes client utilities. |
 | `pkg/oci` | Internal | OCI registry helpers. |
 | `pkg/logging` | Internal | Logging setup. |
-| `pkg/header` | Internal | HTTP header helpers. |
+| `pkg/header` | Internal | Common artifact `Header` (`apiVersion`, `kind`, metadata) for recipes, snapshots, and other AICR documents. |
 | `pkg/server` | Internal | aicrd HTTP server: middleware chain and REST handlers (thin adapters over `pkg/client/v1`). Consumers use the HTTP API, not the Go types. |
 | `pkg/cli` | Internal | CLI command implementations. |
+| `pkg/allocpolicy` | Internal | GPU allocation-policy descriptor and advertiser vocabulary shared by the recipe, bundler, and validator (ADR-015). |
+| `pkg/chainsaw` | Internal | In-process Chainsaw assertion executor and read-only operation allowlist used by health checks. |
+| `pkg/chainsawgate` | Internal | Chainsaw-test evaluation and readiness state machine for the standalone `gate` CLI. |
+| `pkg/deprecation` | Internal | Runtime deprecation warnings for the CLI, artifact loaders, and REST handlers. Active deprecations are listed in [Deprecations](../user/deprecations.md). |
+| `pkg/inventory` | Internal | Installed component inventory read from a live cluster, and the at-risk scan. External consumers use `Client.UpgradeCheck` with `aicr.FromCluster`. |
+| `pkg/runid` | Internal | Run identifiers shared by the validator and the snapshot agent. |
+| `pkg/schema` | Internal | JSON Schema generation from artifact Go types. The committed schemas under `api/aicr/v1/schemas/` are the contract, not this package. |
+| `pkg/testgrid` | Internal | Recipe-to-evidence-dashboard coordinate mapping and dashboard presence. |
+| `pkg/tuning` | Internal | Nodewright tuning-status matrix behind the generated docs table. |
+| `pkg/uatbroker` | Internal | UAT reservation registry and nightly schedule expansion for CI. |
+| `pkg/upgrade` | Internal | ADR-021 upgrade transition records: loading, well-formedness rules, matching, and the report. The report type reaches the facade as the transparent alias `aicr.UpgradeReport`; use `Client.UpgradeCheck`. |
 
 ## Facade type ownership
 
@@ -83,6 +94,7 @@ unrelated exports in their evolving packages remain free to change.
 | `aicr.CriteriaRegistry` | `pkg/recipe.CriteriaRegistry` | Documented transparent alias. Kept as an alias intentionally because the registry is behavior-rich (`ParseService`, `SetStrict`, `Values`, ...) and carries mutable per-`DataProvider` state — wrapping would either break the per-Client identity coupling (copy) or add no isolation win over the alias (pointer). |
 | `aicr.BundleVerifyReport` | `pkg/bundler/verifier.VerifyResult` | Deliberate transparent alias. Callers receive the verifier's complete report (`TrustLevel`, `TrustReason`, `Errors`, per-stage booleans) rather than a projection that would have to grow with every new check. |
 | `aicr.EvidenceVerification` | `pkg/evidence/verifier.VerifyResult` | Deliberate transparent alias, for the same reason, and so `aicr.RenderEvidenceJSON` / `RenderEvidenceMarkdown` render the identical document `aicr evidence verify` emits. |
+| `aicr.UpgradeReport` | `pkg/upgrade.Report` | Deliberate transparent alias. The report is already a projection built for consumers, so `Client.UpgradeCheck` returns it unchanged and `aicr.WriteUpgradeReportTable` renders the same table `aicr upgrade-check` prints. |
 | `aicr.Config` | `pkg/config.AICRConfig` | **Facade-owned wrapper**, not an alias: Go cannot attach methods to another package's type through an alias, and the config document's ~30 nested types would otherwise freeze under the API-diff gate. Obtain one from `aicr.LoadConfig` (file or HTTP(S) URL) or `aicr.WrapConfig`. Its methods DERIVE options (`BundleVerifyOptions`, `RecipeSource`, `RecipeCriteria`, `RecipeResolveOptions`, ...) rather than applying them, so caller overrides stay explicit; `Unwrap()` reaches the raw document for fields the facade does not project. |
 | `aicr.CriteriaDimension`, `aicr.DimensionService` / `DimensionAccelerator` / `DimensionIntent` / `DimensionOS` / `DimensionPlatform` | string consts | **Facade-owned.** The criteria dimensions subject to the coverage post-condition, and the values `WithSnapshotCriteriaRelaxation` accepts. Values match `pkg/recipe.CoverageDimensionNames` exactly, which a test asserts. `nodes` is absent: no overlay gates on it. |
 

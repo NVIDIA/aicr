@@ -556,7 +556,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.BoolFlag{
 			Name:     "no-cleanup",
-			Usage:    "Skip removal of Job and RBAC resources on completion (leaves cluster-admin binding active)",
+			Usage:    "Skip removal of Job and RBAC resources on completion (leaves the run-scoped aicr-node-reader-<run-id> ClusterRole and ClusterRoleBinding active)",
 			Category: catAgentDeployment,
 		},
 		&cli.BoolFlag{

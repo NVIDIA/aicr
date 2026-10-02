@@ -153,7 +153,7 @@ slug that does not match.
 > (`evidence-ingest.yaml`), which verifies the signature pinned to the claimed
 > signer and cross-checks the certificate before any result is counted — so a
 > lying pointer passes the gate but fails ingest. See
-> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007. (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).)
+> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007.
 
 ### Add the signer to the allowlist
 
@@ -245,10 +245,24 @@ exit `5` when `failureCause.class` is `transient` and OS exit `9` when it
 is `canceled`, so a gate can tell an incomplete verification from a bad
 bundle without parsing JSON. Shell scripts that want
 to branch on the informational case should consume `--format json`
-and read `.exit` via `jq`:
+and read `.exit` via `jq`. Write the JSON to a file rather than piping into
+`jq`: under `set -o pipefail` the verifier's non-zero exit would abort the
+script before the `case` runs, and `|| true` keeps it from tripping `set -e`:
 
 ```shell
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json | jq '.exit'
+rm -f result.json
+aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-9f8e7d6c5b4a3210fedcba9876543210abcdef0123456789fedcba9876543210.yaml \
+  --format json -o result.json || true
+if [ ! -s result.json ]; then
+  echo "verifier wrote no result — treat as a failure"; exit 1
+fi
+case "$(jq '.exit' result.json)" in
+  0) echo "evidence valid" ;;
+  1) echo "validator phases failed"; exit 1 ;;
+  2) echo "bundle invalid"; exit 1 ;;
+  3) echo "no verdict reached (infrastructure fault or aborted) — retry, do not reject"; exit 3 ;;
+  *) echo "unrecognized verdict — treat as a failure"; exit 1 ;;
+esac
 ```
 
 Pin the expected signer when only one identity should be accepted:

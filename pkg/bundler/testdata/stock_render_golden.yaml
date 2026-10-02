@@ -2762,7 +2762,7 @@ h100-gke-cos-training-kubeflow:
   010-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   010-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: a04f4cb601173796a6907d6b094469aff6bca74c3328ebc1dbe8ec9dd91e6c15
+  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 45f8286e557afc185534f3e190388fa314807433c3d4639ab6658801e93ad739
   010-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   010-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2798,10 +2798,10 @@ h100-gke-cos-training-kubeflow:
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 720cf3194fa2d25b9f7c4f751a09225a836b8b3fbaba9129a12636043eae6db6
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
-  bundle-info.yaml: e5d30a9b0c04b614ebc00788765f4f7504e9a6312656da531624db7c89e81cce
-  checksums.txt: 7f8d8a293550482758f1a54b1e95da500613ce6fd0fe1ee324ba43fe3d244f1c
+  bundle-info.yaml: 0eccb5f38da442d462ab76de778688a955067a424fe503b3d308e9fc4e7edfac
+  checksums.txt: a4f6e22a575b985300c0eea7d2036209c823ca38edc865f44794a3c3488fe545
   deploy.sh: 8df08918a910fc955381f5760c696fe4dfdb4cb6d9f43fdf881e4cbf77f8d068
-  recipe.yaml: 00c3652a4b3ac832d31a2eba90101a452e15e5fa5d76fb03df81c3097c8d2a69
+  recipe.yaml: 778f4f38cf2bda39db6c70b3f77bc9cef2a3459980789175b7a25dbce77657ce
 h100-gke-cos-training-slurm:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -2844,7 +2844,7 @@ h100-gke-cos-training-slurm:
   010-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   010-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: a04f4cb601173796a6907d6b094469aff6bca74c3328ebc1dbe8ec9dd91e6c15
+  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 45f8286e557afc185534f3e190388fa314807433c3d4639ab6658801e93ad739
   010-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   010-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2891,10 +2891,10 @@ h100-gke-cos-training-slurm:
   020-slinky-topograph/values.yaml: 433c88d6355bfefd023c111e008a39e7c07c913401708a2641717ca5a796a1dd
   README.md: 9ffec06121fc2e14304bef09888c1c94eba7c70d3b696eb31013fb412cde9ff1
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
-  bundle-info.yaml: 190a095cad5a8cfe43281912e3fce8c35f85097ae4044e773786f0fd06b49be2
-  checksums.txt: 4252e0c6c21b93f0158b8852eb307c8cb2cc9b4ea84de8871fc7cd16d8f7993c
+  bundle-info.yaml: 5f04c03c47b0a86fede255c77ef02c137cb9bc4240fb53f3848ec1ac8a718f15
+  checksums.txt: aa67895eeffc9aa23cc03c9700b586b531c635ea7b55f2dfea7253dac3c1e834
   deploy.sh: 6b08ec07da9372b6f3925beab299b9f45603d0309a369d97b3a2394a19c24ba2
-  recipe.yaml: 31cac72b5e159b01f9bb6a69e53189e9a3c743c6ed55b168884cc7637eb8d3ff
+  recipe.yaml: 5337077a0192ff123d1987616ce4d8963679cf2b8328b12f291ffe4488ccee1d
 h100-kind-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

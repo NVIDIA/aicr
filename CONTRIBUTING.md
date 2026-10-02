@@ -283,17 +283,18 @@ assigning users with triage/write access or prior activity in the repository;
 the bot comments if it cannot assign a requested user.
 
 Limits apply to every author except bot accounts; a pull request an agent opens
-for you counts as yours:
+for you counts as yours. These limits are policy; automated enforcement is
+pending ([#3014](https://github.com/NVIDIA/aicr/issues/3014)):
 
 - **Claims:** at most 3 issues assigned to you, however assigned.
-- **Pull requests:** at most 3 open, drafts included. A fourth is closed
-  automatically; open it again when a slot frees up.
-- **Expiry:** an issue is unassigned after 7 days without activity from you (3
-  for [`P0`/`P1`](#issue-priority)), with a warning a day before. Activity is a
-  comment on the issue until you open the pull request, then a push to it; time
-  a ready, green, conflict-free pull request waits on a reviewer does not count.
-  The pull request stays open and counts toward your cap, but cannot merge until
-  you reclaim the issue.
+- **Pull requests:** at most 3 open, drafts included. A fourth may be closed;
+  open it again when a slot frees up.
+- **Expiry:** an issue may be unassigned after 7 days without activity from you
+  (3 for [`P0`/`P1`](#issue-priority)). Activity is a comment on the issue until
+  you open the pull request, then a push to it; time a ready, green,
+  conflict-free pull request waits on a reviewer does not count. The pull
+  request stays open and counts toward your cap, but does not merge until you
+  reclaim the issue.
 
 Maintainers can release or reassign any claim. Existing pull requests and claims
 count toward the caps; inactivity counts from when these limits take effect.
@@ -303,7 +304,7 @@ count toward the caps; inactivity counts from when these limits take effect.
 ```bash
 # Update your local repository
 git checkout main
-git pull upstream main
+git pull upstream main   # or `git pull origin main` if you cloned NVIDIA/aicr directly
 
 # Delete your feature branch
 git branch -d your-branch
@@ -438,7 +439,7 @@ Explain the problem being solved and why this approach was chosen.
 
 - Bullet points are fine
 - Use present tense ("Add feature" not "Added feature")
-- Reference issues: "Fixes #123" or "Related to #456"
+- Reference issues: "Fixes: #123" or "Related: #456", one line per issue
 
 Signed-off-by: Your Name <your@email.com>
 ```
@@ -477,7 +478,7 @@ warning.
 
 ### Getting Help
 
-- **GitHub Issues**: [Create an issue](https://github.com/NVIDIA/aicr/issues/new) with the "question" label
+- **Questions**: Browse [issues labelled `question`](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+label%3Aquestion), also linked as **Questions** on the [new issue page](https://github.com/NVIDIA/aicr/issues/new/choose)
 - **Existing Issues**: Search for similar questions first
 - **Recent PRs**: Look at merged PRs for examples
 

@@ -25,7 +25,7 @@ Related: <!-- #123 if this is partial work, else N/A; one of the two is required
 - [ ] CLI (`cmd/aicr`, `pkg/cli`)
 - [ ] API server (`cmd/aicrd`, `pkg/server`)
 - [ ] Recipe engine / data (`pkg/recipe`)
-- [ ] Bundlers (`pkg/bundler`, `pkg/component/*`)
+- [ ] Bundler and deployers (`pkg/bundler`, `pkg/component`)
 - [ ] Collectors / snapshotter (`pkg/collector`, `pkg/snapshotter`)
 - [ ] Validator (`pkg/validator`)
 - [ ] Core libraries (`pkg/errors`, `pkg/k8s`)
@@ -63,4 +63,4 @@ make qualify
 - [ ] I added/updated tests for new functionality
 - [ ] I updated docs if user-facing behavior changed
 - [ ] Changes follow existing patterns in the codebase
-- [ ] Commits are cryptographically signed (`git commit -S`) — [GPG signing info](https://docs.github.com/en/authentication/managing-commit-signature-verification)
+- [ ] Commits are signed off and cryptographically signed (`git commit -s -S`) — [GPG signing info](https://docs.github.com/en/authentication/managing-commit-signature-verification)

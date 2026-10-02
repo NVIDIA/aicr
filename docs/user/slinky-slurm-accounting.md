@@ -85,8 +85,15 @@ aicr bundle \
   --set slinkyslurm:accounting.storageConfig.database=slurm_acct_db \
   --set slinkyslurm:accounting.storageConfig.username=slurm \
   --set slinkyslurm:accounting.storageConfig.passwordKeyRef.name=accounting-db-password \
+  --system-node-selector nodeGroup=system-worker \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   --output bundle
 ```
+
+`slinky-slurm` requires both node selectors in the component registry, so
+every `aicr bundle` command on this page fails without them. Replace the example
+labels with your system and GPU node pool labels. See
+[`aicr bundle`](cli-reference.md#aicr-bundle).
 
 For several settings, use a typed file:
 
@@ -105,6 +112,8 @@ passwordKeyRef:
 aicr bundle \
   --recipe recipe.yaml \
   --set-file slinkyslurm:accounting.storageConfig=./accounting-storage.yaml \
+  --system-node-selector nodeGroup=system-worker \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   --output bundle
 ```
 
@@ -123,7 +132,11 @@ aicr recipe \
   --slurm-accounting-mode aicr-provided \
   --output recipe.yaml
 
-aicr bundle --recipe recipe.yaml --output bundle
+aicr bundle \
+  --recipe recipe.yaml \
+  --system-node-selector nodeGroup=system-worker \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  --output bundle
 ```
 
 This mode installs the pinned MariaDB Operator CRDs, MariaDB Operator, and a
@@ -136,6 +149,8 @@ aicr bundle \
   --recipe recipe.yaml \
   --storage-class fast-rwo \
   --set slurmaccountingmariadb:mariadb.storage.size=100Gi \
+  --system-node-selector nodeGroup=system-worker \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   --output bundle
 ```
 

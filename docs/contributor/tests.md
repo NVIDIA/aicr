@@ -4,12 +4,14 @@ AICR's test pyramid has five layers. Unit tests are the broad base —
 table-driven, hermetic, `--no-cluster`. Above them sit integration
 tests against a real Kubernetes API (Kind), Chainsaw post-deploy
 health checks, KWOK matrix tests that exercise scheduling shape and
-deployer output without GPU hardware, and a thin top of E2E tests
-against real cloud accounts.
+deployer output without GPU hardware, and E2E tests that drive the
+built `aicr` binary through hermetic Chainsaw CLI suites
+(`--no-cluster`). Testing on real GPU clusters is [UAT](uat.md),
+outside this pyramid.
 
 > **What to use when.** If the code path can be exercised without
 > the Kubernetes API, write a unit test. If it cannot, prefer KWOK
-> or Chainsaw over Kind, and Kind over an E2E.
+> or Chainsaw over Kind, and Kind over a UAT run on real hardware.
 
 The pre-push gate is **`make qualify`**. It runs tests with the race
 detector and coverage threshold, lints (golangci-lint + yamllint),
@@ -24,7 +26,7 @@ CI-only checks (see [The `make qualify` Gate](#the-make-qualify-gate)).
 | **Integration tests (Go)** | Logic touching the K8s API | `*_test.go` with envtest / fake client | `make test` (Kind for live cases) | `make qualify`, push CI |
 | **Chainsaw health checks** | Component-level post-deploy health | `recipes/checks/<name>/health-check.yaml` | `make check-health COMPONENT=<name>` | UAT readiness gate (`aicr validate --phase deployment`), registry-linked checks only; statically by `TestValidateTestReadOnly_AllCheckFiles` under `make test`, which covers opt-in checks too |
 | **KWOK matrix tests** | Recipe scheduling shape + deployer output without GPUs | `kwok/scripts/*`, `recipes/overlays/*` | `make kwok-test-deployer RECIPE=… DEPLOYER=…` | `kwok-recipes.yaml` workflow |
-| **E2E tests** | Full pipeline against real cloud accounts | `tools/e2e` | `unset GITLAB_TOKEN && ./tools/e2e` | `make qualify`, e2e workflow |
+| **E2E tests** | CLI behavior through the built binary, no cluster | `tools/e2e`, `tests/chainsaw/{cli,signing,bundle-templates}/` | `unset GITLAB_TOKEN && ./tools/e2e` | `make qualify`, `CLI E2E` job in `qualification.yaml` |
 
 The rest of this page covers each surface in the order a typical
 change touches them — unit, integration, chainsaw, KWOK, E2E — plus
@@ -262,7 +264,8 @@ simulated reflection of production shape, not a relaxed substitute.
 
 KWOK results are advisory. The `KWOK Test Summary (advisory)` check turns red
 when a tier fails, but it does not block merges. The main branch ruleset
-requires `Merge Gate` and `Check PR Title`. `Merge Gate` is the only required
+requires `gate` (the aggregate job in the `Merge Gate` workflow,
+`merge-gate.yaml`) and `Check PR Title`. `gate` is the only required
 qualification aggregate.
 
 For the design rationale and the spike findings that justify the
@@ -464,7 +467,7 @@ In CI, the `kwok-test` action derives `KWOK_SYNC_DEADLINE_EPOCH` in its
 first step — before toolchain setup and the `aicr` build, so the anchor
 sits within ~60 s of job start — from its `job_timeout_minutes` input
 (required, no default — every caller must wire its own value, which
-must equal that caller's `timeout-minutes`; currently `18` for the
+must equal that caller's `timeout-minutes`; currently `20` for the
 KWOK jobs) minus a 240 s margin reserved for chainsaw catch-block
 diagnostics, pod verification, and debug-artifact upload. The input
 must be a positive integer with no leading zeros, and must leave at
@@ -557,19 +560,23 @@ mode appears.
 
 ## E2E Tests
 
-`./tools/e2e` is the end-to-end pipeline runner. It builds, snapshots,
-generates recipes, validates, bundles, and (when credentials are
-available) deploys against real cloud accounts.
+`./tools/e2e` is the CLI integration runner. It builds the `aicr` binary
+with goreleaser, then runs the Chainsaw suites in `tests/chainsaw/cli/`,
+`tests/chainsaw/signing/`, and `tests/chainsaw/bundle-templates/` with
+`--no-cluster`. Each test invokes the binary and asserts on its exit code
+and output files; no cluster or cloud account is involved.
 
 ```bash
 unset GITLAB_TOKEN
 ./tools/e2e
 ```
 
-`make qualify` invokes the e2e step as part of the pre-push gate.
-CI runs the same script in the push workflow. Cloud credentials are
-optional — without them, the e2e exercises the artifact-generation
-half of the pipeline and skips deploy-side assertions.
+`make qualify` invokes the e2e step (`make e2e`) as part of the pre-push
+gate. Locally, suites labelled `ci=true` (they need a CI-attested binary)
+are skipped, and suites labelled `requires=docker` are skipped when no
+Docker daemon or registry image is available. CI runs the CLI and signing
+suites in the `CLI E2E` job of `qualification.yaml`. Testing on real GPU
+clusters is covered by [UAT](uat.md).
 
 ## The `make qualify` Gate
 
@@ -582,7 +589,7 @@ half of the pipeline and skips deploy-side assertions.
   [Docs YAML Fence Gate](#docs-yaml-fence-gate)).
 - `tuning-check` — node-tuning profile freshness.
 - `coverage-check` — the committed CUJ/CLI coverage matrix against the tree.
-- `e2e` — the end-to-end pipeline runner.
+- `e2e` — the Chainsaw CLI suites via `tools/e2e` (see [E2E Tests](#e2e-tests)).
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
 - bundle layout — `TestBundleLayoutMatchesManifest` renders the frozen fixture
@@ -657,8 +664,8 @@ it by line number so later diagnostics still cite the true line.
 
 `check-docs-mdx-parse` needs Node 20+. Without it the script prints a warning
 and exits 0 locally, but **hard-fails under CI** — the `docs-mdx` job in
-`merge-gate.yaml` blocks on it, and `Merge Gate` is a required status
-check. This is the one place where a green local `make qualify` does not
+`merge-gate.yaml` blocks on it, and that workflow's `gate` job is a
+required status check. This is the one place where a green local `make qualify` does not
 guarantee a green CI: if you have no Node, the MDX gate did not actually run.
 
 Fixing a violation is usually one of:

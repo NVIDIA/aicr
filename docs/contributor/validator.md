@@ -548,7 +548,8 @@ shipped runtime declares, plus `CUDA_VISIBLE_DEVICES` and `LD_LIBRARY_PATH`),
 which is kept because it is the evidence; a key under any **user-keyed map**
 of the PodTemplateSpec API, wherever it sits (`redact.ctrfFreeKeyMaps`:
 `labels`, `annotations`, `nodeSelector`, resource `limits`/`requests`,
-`overhead`, `matchLabels`, CSI `volumeAttributes`, flexVolume `options`)
+`overhead`, `matchLabels`, CSI `volumeAttributes`, flexVolume `options`,
+pod-certificate projection `userAnnotations`)
 collapses to the map unless the **whole key** is in the exact vendor set
 (`redact.ctrfVendorKeys`: `networking.gke.io/interfaces`,
 `networking.gke.io/default-interface`, `devices.gke.io/container.tcpxo-daemon`,
@@ -567,15 +568,18 @@ operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector`,
 `spec.volumes[*].secret.secretName`; lists are deduplicated, sorted and capped
 at 1024 entries. Adding a variable or key to the shipped runtime that the
 inventory should name means adding it to the corresponding set in the same
-change. No value — network name, node name, env value — ever appears. The deployment check `gke-gpu-nic-networks` runs the same recipe →
-deployed → cluster arms, gated on the same predicate, so a base
-`h100-gke-cos-training` recipe (TCPXO, no runtime) keeps its census-only
-behaviour.
+change. No value — network name, node name, env value — ever appears. Separately, two deployment checks cover GKE GPUDirect-TCPXO networking:
+`gke-gpu-nic-networks` runs the census, readiness/binding, and runtime-wiring
+arms over the Network CRs; `gke-gpu-nic-topology` is gated only on the recipe
+declaring `gke-nccl-tcpxo` and reads node `nic-info` annotations to catch a
+gVNIC-displaced GPU NIC. A base `h100-gke-cos-training` recipe (TCPXO, no
+runtime) still runs the census + readiness + topology checks.
 
 **Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/validation/validation.yaml`
 (override via `AICR_SNAPSHOT_PATH`, `AICR_VALIDATION_PATH`).
 
-**Environment** (set by the Job deployer from the catalog entry):
+**Environment** (set by the Job deployer; the catalog entry's `env` values are
+appended after these):
 
 | Variable | Purpose |
 |----------|---------|
@@ -585,7 +589,20 @@ behaviour.
 | `AICR_VALIDATOR_IMAGE_TAG` | Override the resolved tag when the binary's stamped commit has no published image (e.g. `edge` or `sha-<commit>`). See [Validator image tags](#validator-image-tags). Forwarded to inner workloads (including `aiperf-bench`). |
 | `AICR_NODE_SELECTOR` | Comma-separated `key=value`; read via `ctx.NodeSelector` |
 | `AICR_TOLERATIONS` | Comma-separated `key=value:effect`; read via `ctx.Tolerations` |
-| `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | When truthy, the `inference-gateway` check fails if the gateway's `LoadBalancer` Service is open to `0.0.0.0/0` — its `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`). Default (unset): the open exposure is recorded and warned but the check still passes. |
+
+**Forwarded from the orchestrator's shell.** These variables are read from the
+environment of the process running `aicr validate` and forwarded only to the
+listed checks (`buildEnv` in `pkg/validator/v1/job_plan_internal.go`). A
+catalog entry's `env` value for any of these names is dropped, so they cannot
+be set from the catalog or a `--data` overlay:
+
+| Variable | Forwarded to | Purpose |
+|----------|--------------|---------|
+| `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
+| `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
+| `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway's `LoadBalancer` Service is open to `0.0.0.0/0` — its `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`). Default (unset): the open exposure is recorded and warned but the check still passes. |
+| `AICR_NCCL_FABRIC` | `nccl-all-reduce-bw-net` | NET fabric selector: `efa` (default) or `roce`. |
+| `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |
 
 **RBAC.** The engine creates a per-run ServiceAccount and
 ClusterRoleBinding named `aicr-validator-<runID>`. Per-run naming
@@ -990,9 +1007,10 @@ The `inference-perf` check warms vLLM before measuring, so the one-time
 CUDA-graph/JIT compile cost is excluded from the reported throughput and
 p99 TTFT. Its knobs are read by the in-cluster validator from the
 `inference-perf` catalog entry's `env` (override per run with a catalog
-overlay in the `aicr validate --data <dir>` directory). Unlike `HF_TOKEN`,
-they are **not** forwarded from the orchestrator shell, so
-`export AICR_INFERENCE_PERF_…` before `aicr validate` has no effect.
+overlay in the `aicr validate --data <dir>` directory). Unlike `HF_TOKEN` and
+`AICR_INFERENCE_PERF_NO_CLEANUP`, they are **not** forwarded from the
+orchestrator shell, so exporting the knobs below before `aicr validate` has no
+effect.
 
 The **model** and **per-GPU concurrency** can also be set per accelerator in
 the recipe overlay's `performance.constraints`, symmetric with the
@@ -1129,8 +1147,10 @@ run-to-run TTFT fluctuation (see NVIDIA/aicr#1192):
   `timed out waiting for inference endpoint to serve requests` — the *same* outer
   symptom as the (fixed) #1192 discovery panic but a different root cause. AIPerf's
   own warmup absorbs steady-state once the probe passes.
-- **Inspecting a failed run.** `AICR_INFERENCE_PERF_NO_CLEANUP=1` leaves the
-  namespace, DGD, workers, frontend, and AIPerf Job in place after the run so a
+- **Inspecting a failed run.** `AICR_INFERENCE_PERF_NO_CLEANUP=1`, exported in
+  the shell that runs `aicr validate` (it is forwarded to the pod, not read from
+  the catalog), leaves the namespace, DGD, workers, frontend, and AIPerf Job in
+  place after the run so a
   serve-wait / generate hang can be examined live (`kubectl logs` the frontend,
   ping `/v1/models` and `/v1/chat/completions`). Debug-only — delete the namespace
   manually afterward.
@@ -1336,7 +1356,7 @@ for resource blocks that omit one (`defaultNamespaceFetcher` in
 
 A Test that declares no `assert`/`error` operation is rejected rather
 than passing vacuously (#2040); a check that is intentionally a no-op —
-today the three `*-ocp-olm` components, whose readiness is enforced by
+today the four `*-ocp-olm` components, whose readiness is enforced by
 the bundler's `--readiness-hooks` gate instead — must say so with the
 `aicr/no-op-check: "true"` annotation on the Test.
 
@@ -1449,19 +1469,22 @@ whenever the values keep the CR, the render still lists it and the assert
 runs, so only an intentionally-absent CR is tolerated (a CR that *should*
 deploy but is missing on the cluster still fails). The same render drives
 the Go readiness check `verifyNodewrightReady`, so both surfaces agree on
-which CRs to expect. The same dispatch skips the `nodewright-customizations`
-assert on a cluster whose operator predates the `NodeWright` kind the assert
-names. The signal is the recipe's own `nodewright-operator` pin
-(`resolveNodewrightGVR`): a pin below v0.18.0 (or no usable pin) with only
-`skyhook.nvidia.com` served takes the legacy path, where
+which CRs to expect. After the readiness probes finish, the
+`nodewright-customizations` assert is also skipped on a cluster whose operator
+predates the `NodeWright` kind the assert names. The signal is the recipe's own
+`nodewright-operator` pin (`resolveNodewrightGVR`). A pin below v0.18.0 (or no
+usable pin) with only `skyhook.nvidia.com` served takes the legacy path, where
 `verifyNodewrightReady` verifies each `Skyhook` by name, so a healthy legacy
 cluster passes without a static assert that can never match. A v0.18.0+ pin
 on a cluster that does not serve `nodewright.nvidia.com` fails closed — that
 is a broken operator install, and a stale legacy `Skyhook` must not stand in
 for the missing `NodeWright`. A discovery error also fails closed rather than
-skipping. This skip is scoped to
-`nodewright-customizations`; every other component's assert queues
-unconditionally.
+skipping. Discovery counts a group as served only once it lists the `nodewrights`
+(or `skyhooks`) resource itself, and `verifyNodewrightReady` re-resolves that
+on every poll. A recipe that renders Nodewright CRs polls through CRD
+establishment and fails on timeout if neither group ever serves them. This
+discovery-based skip is scoped to `nodewright-customizations`. Other
+components' asserts are subject only to their own render-based suppression.
 
 The suppression must be expressed **in the recipe** — an overlay-declared
 component `overrides:` (how `tuningEnabled: false` ships as the AKS default)

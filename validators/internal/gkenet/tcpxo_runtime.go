@@ -264,27 +264,38 @@ func VerifyMappingMatchesRecipe(recorded, deployed []recipe.NetworkInterfaceMapp
 }
 
 // VerifyNetworksExist is the deployed-vs-cluster leg: every network the runtime
-// selects must exist on this cluster. It is an explicit SET comparison, never
-// index-wise: DiscoverGPUNICNetworks returns names sorted alphabetically, which
-// happens to match numeric order for eight single-digit suffixes today and
-// would silently break on any naming that does not — so the discovered list is
-// treated as a set, and no ordering is inferred from it.
-func VerifyNetworksExist(deployed []recipe.NetworkInterfaceMapping, discovered []string) error {
-	have := make(map[string]struct{}, len(discovered))
-	for _, n := range discovered {
-		have[n] = struct{}{}
+// selects must exist on this cluster AND be usable (Ready + bound). It is an
+// explicit SET comparison, never index-wise. `present` is every discovered
+// gpu-nic Network name; `usable` is the Ready-and-bound subset, so a referenced
+// Network that exists but is unhealthy is reported as such, not as missing.
+func VerifyNetworksExist(deployed []recipe.NetworkInterfaceMapping, usable []string, present []string) error {
+	haveUsable := make(map[string]struct{}, len(usable))
+	for _, n := range usable {
+		haveUsable[n] = struct{}{}
 	}
-	var missing []string
+	havePresent := make(map[string]struct{}, len(present))
+	for _, n := range present {
+		havePresent[n] = struct{}{}
+	}
+	var missing, notUsable []string
 	for _, m := range deployed {
-		if _, ok := have[m.Network]; !ok {
+		if _, ok := havePresent[m.Network]; !ok {
 			missing = append(missing, m.InterfaceName+"->"+m.Network)
+		} else if _, ok := haveUsable[m.Network]; !ok {
+			notUsable = append(notUsable, m.InterfaceName+"->"+m.Network)
 		}
 	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
+	sort.Strings(missing)
+	sort.Strings(notUsable)
+	switch {
+	case len(missing) > 0:
 		return errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("deployed %s runtime selects GPU NIC networks that do not exist on this cluster: %s (cluster has: %s)",
-				TCPXORuntimeName, strings.Join(missing, ", "), strings.Join(discovered, ", ")))
+				TCPXORuntimeName, strings.Join(missing, ", "), strings.Join(present, ", ")))
+	case len(notUsable) > 0:
+		return errors.New(errors.ErrCodeConflict,
+			fmt.Sprintf("deployed %s runtime selects GPU NIC networks that exist but are not Ready/bound: %s (usable on cluster: %s)",
+				TCPXORuntimeName, strings.Join(notUsable, ", "), strings.Join(usable, ", ")))
 	}
 	return nil
 }

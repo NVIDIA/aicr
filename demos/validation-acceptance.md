@@ -13,6 +13,11 @@ brew install aicr
 curl -sfL https://get.aicr.run | bash -s --
 ```
 
+The target EKS cluster needs an AWS credential path for the EBS CSI driver. The
+bundle installs the driver but not its credentials, and without them no volume
+can be provisioned — see
+[EBS CSI Driver Credentials](../docs/user/component-catalog.md#ebs-csi-driver-credentials).
+
 ## Snapshot (prior to deploy)
 
 ```shell
@@ -46,7 +51,8 @@ Expected:
 - Completes in <10s
 - `recipe.yaml` created
 - Criteria matching flags
-- 15 components, 8 overlays
+- Completion log reports `components=` and `overlays=` counts matching
+  `.componentRefs` and `.metadata.appliedOverlays` in `recipe.yaml`
 
 ## Bundle
 
@@ -158,9 +164,19 @@ Expected:
 
 ## Validate (phase not in recipe warning)
 
+The training recipe above defines a performance check, so use a recipe that
+defines none: the same service, accelerator, and OS with the inference intent.
+
 ```shell
+aicr recipe \
+  --service eks \
+  --accelerator h100 \
+  --intent inference \
+  --os ubuntu \
+  --output recipe-no-perf.yaml
+
 aicr validate \
-    --recipe recipe.yaml \
+    --recipe recipe-no-perf.yaml \
     --snapshot snapshot.yaml \
     --no-cluster \
     --phase performance \
@@ -169,7 +185,8 @@ aicr validate \
 
 Expected:
 - Warning logged: `"phase requested but no checks defined in recipe; phase will be empty"`
-- Phase shows `status=skipped`, 0 tests
+- Phase shows `status=skipped`; `--no-cluster` still lists the phase's catalog
+  checks as skipped (`skipped - no-cluster mode`), so the test count is not 0
 - Exit code 0
 
 ## Verify (all reports are valid CTRF JSON)
