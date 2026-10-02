@@ -3433,12 +3433,13 @@ const (
 	draNodeLabelerComponentName = "dra-node-labeler"
 	draNodeLabelerKeyPath       = "labelKey"
 	draNodeLabelerValuePath     = "labelValue"
-	// draNodeLabelerEnabledPath is the manifest's render gate. The manifest is
-	// default-off (values.yaml enabled: false) so the deployment validator,
-	// which resolves effective values without the bundle-time eviction flag,
-	// sees an empty render and suppresses the health check on the default path
-	// (issue #2846). The bundler flips it true here in the same opt-in path
-	// that keeps the component in the bundle, so bundle and gate never drift.
+	// draNodeLabelerEnabledPath is the manifest's render gate, default-off in
+	// values.yaml, and the same key as the ComponentRef `enabled` override
+	// IsEnabled reads: overrides merge into component values. On the opt-in
+	// path the bundler sets it true in the Helm values AND on the labeler's
+	// ref, so the recipe.yaml written into the bundle renders the labeler for
+	// the deployment validator (#2846, #2848). A recipe without the opt-in
+	// renders nothing and the validator suppresses the health check.
 	draNodeLabelerEnabledPath = "enabled"
 )
 
@@ -3674,6 +3675,7 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		// the bundle only on this opt-in path, so this is where its objects
 		// must start rendering (issue #2846).
 		values[draNodeLabelerEnabledPath] = true
+		persistDRANodeLabelerGate(recipeResult)
 		b.warnDRAEvictionLabelDerived(draNames, label)
 		return nil
 	}
@@ -3681,6 +3683,24 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 	b.warnDRAEvictionNodeLabelRequired(draNames, label)
 
 	return nil
+}
+
+// persistDRANodeLabelerGate records the labeler's effective render gate on its
+// ComponentRef. componentValues never reach the recipe.yaml written into the
+// bundle; the deployment validator reads that file, so without this the
+// deployed labeler resolves enabled=false there and its health check is
+// suppressed (#2848). The Overrides map is copied first because the filtered
+// recipe still shares it with the caller's RecipeResult.
+func persistDRANodeLabelerGate(recipeResult *recipe.RecipeResult) {
+	for i := range recipeResult.ComponentRefs {
+		ref := &recipeResult.ComponentRefs[i]
+		if ref.Name != draNodeLabelerComponentName {
+			continue
+		}
+		overrides := serializer.DeepCopyAnyMap(ref.Overrides)
+		overrides[draNodeLabelerEnabledPath] = true
+		ref.Overrides = overrides
+	}
 }
 
 // warnDRAEvictionLabelDerived is the counterpart of

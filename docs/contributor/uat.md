@@ -54,7 +54,7 @@ Deploying the stack and certifying that it converged are two separate runner pha
 | Workflow step (`id`) | Runner phase | What it does | A failure means |
 |---|---|---|---|
 | `UAT - install (helmfile apply)` (`install`); `UAT - install (helmfile apply or argocd sync)` on AWS | `install` | Applies the bundle (helmfile, or the Argo CD app-of-apps), then dumps the post-install cluster state | The apply or sync itself failed: chart fetch, Helm error, Argo CD sync. Often infra; investigate if it recurs |
-| `UAT - readiness gate (validate --phase deployment)` (`readiness`) | `readiness` | Runs `aicr validate --phase deployment` until it passes the required number of consecutive attempts, or times out | A deployment-phase validator never converged. Product signal: the component behind the failing validator did not become ready |
+| `UAT - readiness gate (validate --phase deployment)` (`readiness`) | `readiness` | Runs `aicr validate --recipe bundle/recipe.yaml --phase deployment` (the recipe the bundle deployed, see #2848) until it passes the required number of consecutive attempts, or times out | A deployment-phase validator never converged. Product signal: the component behind the failing validator did not become ready |
 
 Both phases are invoked as `./tests/uat/<cloud>/run <phase> "${TEST_CONFIG}"`; `run all` runs prep, install, readiness, conformance, the CUJ, and verify in that order. On a gate failure the readiness phase emits an `::error title=UAT readiness gate failed::` annotation whose message lists the failing validators and a short reason, so the run summary names the owner without opening the logs.
 

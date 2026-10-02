@@ -201,9 +201,11 @@ crane manifest "ghcr.io/nvidia/aicr-bundle-example@$(cat ./oci-refs/bundle.diges
 
 ## Validate Cluster
 
+Against the bundle's `recipe.yaml`, the recipe the bundle deployed:
+
 ```shell
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe ./bundle/recipe.yaml \
   --require-gpu \
   --phase all
 ```

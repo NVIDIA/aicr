@@ -1480,7 +1480,12 @@ into the validator image):
   transient bundle flag. (`aicr recipe` likewise has no value `--set`, so the
   overlay/inline override is the only channel.) `Overrides` resolved from a
   `--data` overlay *are* honored, because recipe resolution runs CLI-side and
-  bakes them into the serialized recipe before the Job receives it.
+  bakes them into the serialized recipe before the Job receives it. The one
+  bundle-time flag that *is* persisted is `--dra-eviction-node-label`: the
+  bundler writes `enabled: true` onto the `dra-node-labeler` ref in the
+  `recipe.yaml` at the bundle root, which is why post-deployment validation
+  (the UAT readiness gate and conformance run, and the documented user
+  workflows) reads that file rather than the original recipe (#2848).
 - **`--workload-gate` is the exception, honored via the cluster.** The bundler
   writes the taint into the nodewright-operator values
   (`controllerManager.manager.env.runtimeRequiredTaint`), which the chart

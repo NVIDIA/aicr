@@ -753,4 +753,5 @@ per-deployer gates and which of them the cluster can enforce, see
 [Gating Deployment on Verification](../integrator/supply-chain-verification.md#gating-deployment-on-verification).
 
 After deploying, confirm the cluster matches the recipe with
-[`aicr validate`](validation.md).
+[`aicr validate --recipe <bundle>/recipe.yaml`](validation.md#which-recipe-to-validate):
+the bundle's `recipe.yaml` records the component set it deployed.

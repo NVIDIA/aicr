@@ -147,18 +147,21 @@ aicr bundle \
 ## Install Bundle into the Cluster
 
 ```shell
-cd ./bundle && chmod +x deploy.sh && ./deploy.sh
+(cd ./bundle && chmod +x deploy.sh && ./deploy.sh)
 ```
 
 > **GKE only:** If nodewright-operator is already installed on the cluster, generate the bundle without the nodewright components — add `--set nodewright:enabled=false --set nodewrightcustomizations:enabled=false` to the `aicr bundle` command — to avoid upgrade conflicts. Don't hand-edit the generated `deploy.sh`: it deploys the numbered component directories generically, and edits break `aicr verify` because `deploy.sh` is covered by the bundle's `checksums.txt` (whose digest the attestation signs).
 
 ## Validate Cluster
 
+Validate against the bundle's `recipe.yaml`: it records the components the
+bundle actually deployed, which the original recipe cannot.
+
 **EKS**
 
 ```shell
 aicr validate \
-    --recipe recipe.yaml \
+    --recipe ./bundle/recipe.yaml \
     --toleration dedicated=worker-workload:NoSchedule \
     --toleration dedicated=worker-workload:NoExecute \
     --phase all \
@@ -169,7 +172,7 @@ aicr validate \
 
 ```shell
 aicr validate \
-    --recipe recipe.yaml \
+    --recipe ./bundle/recipe.yaml \
     --toleration dedicated=gpu-workload:NoSchedule \
     --toleration nvidia.com/gpu=present:NoSchedule \
     --phase all \
@@ -427,6 +430,7 @@ cd ..
 
 ```shell
 aicr validate --config aicr-config.yaml \
+    --recipe ./bundle/recipe.yaml \
     --phase all \
     --output report.json
 ```

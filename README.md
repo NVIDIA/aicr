@@ -40,7 +40,8 @@ aicr recipe --service eks --accelerator h100 --os ubuntu \
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
 # After deploying the bundle, validate the running cluster against the recipe
-aicr validate --recipe recipe.yaml
+# the bundle deployed (every bundle records it at its root)
+aicr validate --recipe ./bundles/recipe.yaml
 
 # Select hydrated config value (e.g., the resolved GPU driver version)
 aicr query --service eks --accelerator h100 --os ubuntu \

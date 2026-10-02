@@ -101,7 +101,7 @@ All 15 components installed successfully on first attempt.
 
 ```shell
 ../dist/aicr_darwin_arm64_v8.0/aicr validate \
-    --recipe recipe.yaml \
+    --recipe bundle/recipe.yaml \
     --output report.yaml \
     --phase performance \
     --phase deployment \

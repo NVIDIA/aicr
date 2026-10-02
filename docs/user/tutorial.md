@@ -113,12 +113,15 @@ components come up with `kubectl get pods -A -w`.
 
 ## Step 6 — Validate the running cluster
 
-The **validator** compares the recipe against the live cluster — first the
+The **validator** compares a recipe against the live cluster — first the
 declarative constraints, then optional in-cluster phases (deployment,
-performance, conformance):
+performance, conformance). Validate against the bundle's own `recipe.yaml`:
+it records exactly the components the bundle deployed, including any the
+bundler dropped or enabled at bundle time. You are still in `bundles/` from
+Step 5:
 
 ```bash
-aicr validate --recipe recipe.yaml
+aicr validate --recipe recipe.yaml   # bundles/recipe.yaml
 ```
 
 A clean run exits 0. For the phase model, performance testing, and emitting
