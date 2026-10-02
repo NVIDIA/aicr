@@ -84,7 +84,7 @@
   ┌────────────────────────────────────────────────────────────────────────┐
   │ 4. VALIDATE — Verify conformance                                       │
   │                                                                        │
-  │  $ aicr validate --recipe recipe.yaml \                                │
+  │  $ aicr validate --recipe bundle/recipe.yaml \                         │
   │      --phase deployment --phase conformance                            │
   │                                                                        │
   │  ┌──────────────────────────────────────────────────────────────┐      │

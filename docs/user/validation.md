@@ -32,6 +32,26 @@ any phase. If pre-flight fails, no validator Jobs are deployed.
 2. **Recipe** — generate the target configuration for your workload (training vs inference, platform, accelerator).
 3. **Validate** — run one or all phases against the snapshot and live cluster.
 
+## Which recipe to validate
+
+Every bundle writes the recipe it was generated from to `recipe.yaml` at the
+bundle root — after dropping the components it did not render and recording the
+values it derived at bundle time (for example the `dra-node-labeler` opt-in).
+That file is the effective inventory of what was deployed, so validation of a
+deployed cluster reads it:
+
+```bash
+aicr validate --recipe ./bundle/recipe.yaml --phase deployment
+```
+
+The original recipe is the input for the pre-deploy dry run (`--no-cluster`,
+below): the bundle does not exist yet, and the dry run evaluates what the recipe
+asks for, not what a bundle delivered. Validating the original recipe after
+deployment still works, but it cannot see bundle-time decisions: a component the
+bundler dropped is still declared (its health check is skipped when the
+component's own values leave a trace, and reports `NOT_FOUND` otherwise), and
+a component the bundler enabled at bundle time is not checked.
+
 ## Prerequisites
 
 - `aicr` CLI installed (see [installation](installation.md)).
@@ -190,7 +210,7 @@ To run deployment validation first (recommended — verifies GPU Operator, DRA
 driver, and Kubeflow Trainer are installed and healthy before the benchmark):
 
 ```bash
-aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
+aicr validate --recipe ./bundle/recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
 
 ### Grace Blackwell NET preflight: GPUDirect RDMA prerequisites
@@ -663,7 +683,7 @@ driver, Dynamo operator, KAI scheduler, and supporting components are installed
 and healthy):
 
 ```bash
-aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
+aicr validate --recipe ./bundle/recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
 
 ### Skip scenarios
@@ -779,7 +799,7 @@ capability-driven automatic selection.
 ## Running all phases
 
 ```bash
-aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
+aicr validate --recipe ./bundle/recipe.yaml --snapshot snapshot.yaml
 # equivalent to: --phase deployment --phase conformance --phase performance
 ```
 

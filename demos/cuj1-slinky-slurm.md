@@ -339,11 +339,14 @@ Use **deployment** and **conformance**. Performance validation is **not supporte
 | `all`         | Runs deployment → conformance → performance in sequence; the performance step has nothing to run on slurm leaves       |
 
 
+Every post-install run below reads `bundle/recipe.yaml`, the recipe the bundle
+deployed, rather than the original `recipe.yaml`.
+
 ### All phases
 
 ```shell
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe bundle/recipe.yaml \
   --phase all \
   --output report.json
 ```
@@ -355,19 +358,19 @@ Prefer `--phase deployment --phase conformance` when you only want the supported
 ```shell
 # After deploy.sh — component + CR readiness (Chainsaw)
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe bundle/recipe.yaml \
   --phase deployment \
   --output report-deployment.json
 
 # Slurm behavior from login pod (conformance Job)
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe bundle/recipe.yaml \
   --phase conformance \
   --output report-conformance.json
 
 # Both — common after install
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe bundle/recipe.yaml \
   --phase deployment \
   --phase conformance \
   --output report.json
@@ -381,7 +384,7 @@ When validate captures cluster state inline (no `-s`), pass `--node-selector` an
 
 ```shell
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe bundle/recipe.yaml \
   --node-selector nodeGroup=system-worker \
   --toleration dedicated=system-workload:NoSchedule \
   --toleration dedicated=system-workload:NoExecute \
@@ -394,7 +397,7 @@ aicr validate \
 
 ```shell
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe bundle/recipe.yaml \
   --node-selector nodeGroup=system-worker \
   --toleration dedicated=gpu-workload:NoSchedule \
   --phase deployment \
