@@ -86,16 +86,16 @@ jobs:
     runs-on: ubuntu-latest
     # Budget = uncapped non-UAT steps (build, validator image push, AKS
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 25
-    # + readiness 65 + validate 40 + the selected CUJ (train 25 OR serve 40) + verify 5
-    # = up to 190) + ~8 failure-path debug collection (Collect cluster debug
-    # bundle) + the always()-run Destroy Cluster teardown. Only one of
-    # train/serve runs per intent, so the budget counts the larger (serve).
-    # Teardown = up to 3 retries × ~26m real destroy = up to ~78m. The teardown
-    # MUST fit in this budget: a job-level timeout cancels pending always()
-    # steps, so an undersized cap would skip teardown and leak the GPU node /
-    # resource group even after a LATE failure. ~30 setup + 190 UAT + ~8 debug =
-    # 228, + ~78 teardown = 306, so 330 leaves the teardown clear headroom on a
-    # worst-case run.
+    # + readiness 65 + validate 40 + the selected CUJ (train 25 OR serve 40) +
+    # verify 5 + sxidfault 10 = up to 200) + ~8 failure-path debug collection
+    # (Collect cluster debug bundle) + the always()-run Destroy Cluster teardown.
+    # Only one of train/serve runs per intent, so the budget counts the larger
+    # (serve). Teardown = up to 3 retries × ~26m real destroy = up to ~78m. The
+    # teardown MUST fit in this budget: a job-level timeout cancels pending
+    # always() steps, so an undersized cap would skip teardown and leak the GPU
+    # node / resource group even after a LATE failure. ~30 setup + 200 UAT + ~8
+    # debug = 238, + ~78 teardown = 316, so 330 leaves ~14m of teardown headroom
+    # on a worst-case run.
     timeout-minutes: 330
     permissions:
       contents: read
@@ -880,6 +880,18 @@ jobs:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/azure/run sxidfault "${TEST_CONFIG}"
+
+      # phase_sxid_fault_inject records the Stage 1-3 outcome as CTRF
+      # (sxidfault-result.json, #2625). Upload it on every outcome once the
+      # step ran, mirroring the snapshot-result.json upload above.
+      - name: Upload sxidfault result
+        if: always() && steps.sxidfault.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-azure-sxidfault-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sxidfault-result.json
+          retention-days: 30
+          if-no-files-found: warn
 
       # Export the digest-pinned bundle ref for the ingest-evidence job.
       # Reads the pointer the conformance step wrote; emits empty (job

@@ -56,18 +56,19 @@
 # the impl) without threading the values back up as return values.
 _SXID_POD_NAME=""
 _SXID_NS=""
+_SXID_START_MS=""
 
 phase_sxid_fault_inject() {
   ctrf_init "aicr-uat"
-  local start_ms
-  start_ms="$(ctrf_now_ms)"
+  _SXID_START_MS="$(ctrf_now_ms)"
+
+  trap 'uat_sxidfault_on_signal TERM 15' TERM
+  trap 'uat_sxidfault_on_signal INT 2' INT
 
   local rc=0
   _sxid_fault_inject_impl || rc=$?
 
-  if [[ -n "${_SXID_POD_NAME}" ]]; then
-    kubectl delete pod "${_SXID_POD_NAME}" -n "${_SXID_NS}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  fi
+  trap - TERM INT
 
   local status message
   if (( rc == 0 )); then
@@ -77,20 +78,41 @@ phase_sxid_fault_inject() {
     status=failed
     message="phase_sxid_fault_inject exited ${rc}; see the job log above for the failing stage"
   fi
-  ctrf_add sxidfault "${status}" "$(ctrf_elapsed_ms "${start_ms}")" "${message}"
+  _sxid_fault_inject_finalize "${status}" "${message}"
+
+  return "${rc}"
+}
+
+# Armed only while _sxid_fault_inject_impl runs. A TERM/INT (job cancellation
+# or this step's own timeout-minutes firing) would otherwise kill this shell
+# before it reaches the pod delete / CTRF write in _sxid_fault_inject_finalize
+# -- #2625 requires the debug pod removed on every exit path, not just
+# ordinary pass/fail. Mirrors uat_snapshot_on_signal's pattern.
+uat_sxidfault_on_signal() {
+  local sig="$1" num="$2"
+  trap - TERM INT
+  _sxid_fault_inject_finalize other "sxid fault injection interrupted by SIG${sig}"
+  kill -"${sig}" "${BASHPID:-$$}"
+  exit $(( 128 + num ))
+}
+
+_sxid_fault_inject_finalize() {
+  local status="$1" message="${2:-}"
+  if [[ -n "${_SXID_POD_NAME}" ]]; then
+    kubectl delete pod "${_SXID_POD_NAME}" -n "${_SXID_NS}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  fi
+  ctrf_add sxidfault "${status}" "$(ctrf_elapsed_ms "${_SXID_START_MS}")" "${message}" || true
   if ! ctrf_write sxidfault-result.json; then
     echo "::warning::failed to write sxidfault-result.json; the sxidfault outcome is unaffected" >&2
   fi
-
-  return "${rc}"
 }
 
 _sxid_fault_inject_impl() {
   local node_selector="${FAULT_INJECT_NODE_SELECTOR:-nvidia.com/gpu.present=true}"
   local nvs_ns="${FAULT_INJECT_NVSENTINEL_NAMESPACE:-nvsentinel}"
   local condition="${FAULT_INJECT_CONDITION:-SysLogsXIDError}"
-  local breaker_cm="${FAULT_INJECT_CIRCUIT_BREAKER_CONFIGMAP:-fault-quarantine-circuit-breaker}"
-  local breaker_field="${FAULT_INJECT_CIRCUIT_BREAKER_FIELD:-state}"
+  local breaker_cm="${FAULT_INJECT_CIRCUIT_BREAKER_CONFIGMAP:-circuit-breaker}"
+  local breaker_field="${FAULT_INJECT_CIRCUIT_BREAKER_FIELD:-status}"
   local poll_wait_seconds="${FAULT_INJECT_MONITOR_POLL_SECONDS:-60}"
   local detect_timeout_seconds="${FAULT_INJECT_DETECT_TIMEOUT_SECONDS:-300}"
   local remediation_enabled="${FAULT_INJECT_REMEDIATION_ENABLED:-false}"
@@ -160,7 +182,11 @@ _sxid_fault_inject_impl() {
   echo "selected node: ${node}"
 
   local pre_state
-  pre_state="$(kubectl get node "${node}" -o jsonpath="{.status.conditions[?(@.type==\"${condition}\")].status}")"
+  if ! pre_state="$(kubectl get node "${node}" -o jsonpath="{.status.conditions[?(@.type==\"${condition}\")].status}")"; then
+    echo "::error::could not read ${condition} on ${node} before injection; refusing to proceed on an unconfirmed baseline" >&2
+    ctrf_add sxidfault-detect failed 0 "could not read pre-injection node condition"
+    return 1
+  fi
   if [[ "${pre_state}" == "True" ]]; then
     echo "::error::${node} already carries ${condition}=True before injection; a pre-existing condition cannot produce a trustworthy pass" >&2
     ctrf_add sxidfault-detect failed 0 "${node} already carried ${condition}=True before injection"
