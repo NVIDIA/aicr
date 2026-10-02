@@ -96,7 +96,6 @@ type HelmOptions struct {
 	Chart             string   `yaml:"chart,omitempty"`
 	Version           string   `yaml:"version,omitempty"`
 	ValuesFiles       []string `yaml:"valuesFiles,omitempty"`
-	TakeOwnership     bool     `yaml:"takeOwnership,omitempty"`
 	DisablePreProcess bool     `yaml:"disablePreProcess,omitempty"`
 }
 
@@ -456,7 +455,6 @@ func buildFleetYAMLs(folders []localformat.Folder, appName string) ([]FleetYAML,
 			Helm: HelmOptions{
 				ReleaseName:       f.Name,
 				ValuesFiles:       valuesFilesFor(f),
-				TakeOwnership:     true,
 				DisablePreProcess: true,
 			},
 		}

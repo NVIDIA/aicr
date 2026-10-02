@@ -65,7 +65,6 @@ type HelmOpHelm struct {
 	Chart             string         `yaml:"chart,omitempty"`
 	Version           string         `yaml:"version,omitempty"`
 	Values            map[string]any `yaml:"values,omitempty"`
-	TakeOwnership     bool           `yaml:"takeOwnership,omitempty"`
 	DisablePreProcess bool           `yaml:"disablePreProcess,omitempty"`
 }
 
@@ -105,7 +104,6 @@ func (g *Generator) writeHelmOpLayout(outputDir string, output *deployer.Output,
 					Chart:             docs[i].Helm.Chart,
 					Version:           docs[i].Helm.Version,
 					Values:            values,
-					TakeOwnership:     docs[i].Helm.TakeOwnership,
 					DisablePreProcess: docs[i].Helm.DisablePreProcess,
 				},
 				DependsOn: docs[i].DependsOn,
