@@ -224,6 +224,13 @@ func TestUpgradeCheckFromClusterReadsTheInstalledInventory(t *testing.T) {
 	if !reflect.DeepEqual(*report.Source, wantSource) {
 		t.Errorf("report.Source = %#v, want %#v", *report.Source, wantSource)
 	}
+
+	// The read recovers no values, and the `from` identities are copied from
+	// the target, so compared names could only ever read as held.
+	if report.ObjectNamesCompared || !strings.Contains(report.ObjectNamesSkipped, "cluster read") {
+		t.Errorf("ObjectNamesCompared = %v, ObjectNamesSkipped = %q; a cluster source must withdraw the "+
+			"object-name axis and say why", report.ObjectNamesCompared, report.ObjectNamesSkipped)
+	}
 }
 
 // TestReportSourceFromKeepsTheReadersSeparate is the unit-level guard on the

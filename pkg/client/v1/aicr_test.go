@@ -25,6 +25,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -2787,6 +2788,213 @@ func priorRecipe(t *testing.T, path string, namespaces map[string]string) string
 		t.Fatalf("setup: write %s: %v", path, err)
 	}
 	return path
+}
+
+// priorBundle turns dir into a bundle carrying the namespaces prior recipes
+// carry plus the rendered per-release values a deployer wrote, which is the
+// only place a merged fullnameOverride is recorded by value.
+func priorBundle(t *testing.T, dir string, namespaces map[string]string, values map[string]map[string]any) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("setup: mkdir %s: %v", dir, err)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), namespaces)
+
+	releases := make([]bundleinfo.Release, 0, len(namespaces))
+	for i, name := range sortedKeys(namespaces) {
+		path := fmt.Sprintf("%03d-%s", i+1, name)
+		releases = append(releases, bundleinfo.Release{Name: name, Component: name, Path: path})
+		if err := os.MkdirAll(filepath.Join(dir, path), 0o750); err != nil {
+			t.Fatalf("setup: mkdir %s: %v", path, err)
+		}
+		doc, err := yaml.Marshal(values[name])
+		if err != nil {
+			t.Fatalf("setup: marshal values for %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, path, "values.yaml"), doc, 0o600); err != nil {
+			t.Fatalf("setup: write values for %s: %v", name, err)
+		}
+	}
+	writeBundleInfo(t, dir, releases)
+	return dir
+}
+
+// TestResolveRecipe_InheritFromObjectNames proves the second half of #2830's
+// last acceptance criterion: a prior bundle's object names survive
+// re-resolution, so dropping a component's fullnameOverride from its values
+// file does not rename the objects a running release owns (#2835).
+//
+// The pinned component and its current values come from a live resolve rather
+// than from literals, so a registry edit cannot make the assertion vacuous.
+func TestResolveRecipe_InheritFromObjectNames(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	internal := baseline.Resolved()
+	if internal == nil {
+		t.Fatal("baseline carries no resolved recipe")
+	}
+
+	// Any component will do; the first that resolves is enough, because the
+	// behavior under test is about the values chain rather than about which
+	// chart sits at the end of it.
+	pinned := baseline.Components[0].Name
+	currentValues, err := internal.GetValuesForComponentWithContext(t.Context(), pinned)
+	if err != nil {
+		t.Fatalf("resolve current values for %s: %v", pinned, err)
+	}
+	const legacyName = "legacy-object-name"
+	currentNames, err := recipe.ObjectNameValues(currentValues)
+	if err != nil {
+		t.Fatalf("project current names for %s: %v", pinned, err)
+	}
+	if currentNames["fullnameOverride"] == legacyName {
+		t.Fatalf("setup: %s already pins %q, so the test would assert nothing", pinned, legacyName)
+	}
+
+	t.Run("a name the prior bundle pinned is carried forward", func(t *testing.T) {
+		t.Parallel()
+		prior := map[string]map[string]any{pinned: {"fullnameOverride": legacyName}}
+		dir := priorBundle(t, filepath.Join(t.TempDir(), "bundle"),
+			map[string]string{pinned: "legacy-install-namespace"}, prior)
+
+		result, resolveErr := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+		if resolveErr != nil {
+			t.Fatalf("ResolveRecipe: %v", resolveErr)
+		}
+		ref := result.Resolved().GetComponentRef(pinned)
+		if ref == nil {
+			t.Fatalf("%s is missing from the resolved recipe", pinned)
+		}
+		if got := ref.Overrides["fullnameOverride"]; got != legacyName {
+			t.Errorf("overrides[fullnameOverride] = %v, want the inherited %q", got, legacyName)
+		}
+		// The inherited override has to survive into the merged values, not
+		// merely sit on the ref: the bundle renders from the merge.
+		merged, valuesErr := result.Resolved().GetValuesForComponentWithContext(t.Context(), pinned)
+		if valuesErr != nil {
+			t.Fatalf("merged values for %s: %v", pinned, valuesErr)
+		}
+		mergedNames, nameErr := recipe.ObjectNameValues(merged)
+		if nameErr != nil {
+			t.Fatalf("project merged names for %s: %v", pinned, nameErr)
+		}
+		if got := mergedNames["fullnameOverride"]; got != legacyName {
+			t.Errorf("merged fullnameOverride = %q, want %q", got, legacyName)
+		}
+	})
+
+	t.Run("a steady-state inherit adds no override at all", func(t *testing.T) {
+		t.Parallel()
+		// The prior bundle installed exactly what resolves today, so there is
+		// no rename to prevent and the emitted recipe must not restate a
+		// default it would have resolved to anyway.
+		prior := map[string]map[string]any{pinned: currentValues}
+		dir := priorBundle(t, filepath.Join(t.TempDir(), "bundle"),
+			map[string]string{pinned: "legacy-install-namespace"}, prior)
+
+		result, resolveErr := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+		if resolveErr != nil {
+			t.Fatalf("ResolveRecipe: %v", resolveErr)
+		}
+		ref := result.Resolved().GetComponentRef(pinned)
+		if ref == nil {
+			t.Fatalf("%s is missing from the resolved recipe", pinned)
+		}
+		if _, restated := ref.Overrides["fullnameOverride"]; restated {
+			t.Errorf("overrides restate an unchanged object name: %#v", ref.Overrides)
+		}
+	})
+}
+
+// TestResolveRecipe_InheritFromIncompleteBundle covers a flux bundle whose
+// bundle-info.yaml names a HelmRelease the copy lost. Read as "this release
+// pinned nothing", inheritance would write a null for any name the current
+// values set, deleting a deployed fullnameOverride and renaming the running
+// objects. It must refuse the artifact instead.
+func TestResolveRecipe_InheritFromIncompleteBundle(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	pinned := baseline.Components[0].Name
+
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		t.Fatalf("setup: mkdir bundle: %v", mkErr)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), map[string]string{pinned: "legacy-install-namespace"})
+	writeBundleInfo(t, dir, fluxReleases([]string{pinned}))
+
+	result, err := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+	if err == nil {
+		ref := result.Resolved().GetComponentRef(pinned)
+		t.Fatalf("want an incomplete bundle refused, got a recipe with overrides %#v", ref.Overrides)
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
+	}
+	if missing := pinned + "/helmrelease.yaml"; !strings.Contains(err.Error(), missing) {
+		t.Errorf("error %q does not name the missing manifest %q", err.Error(), missing)
+	}
+}
+
+// TestResolveRecipe_InheritFromValuesFromBundle covers a well-formed flux
+// bundle built with --dynamic: its names are partly in a ConfigMap this reader
+// does not follow. Unlike an incomplete bundle that is not refused — the
+// namespace half is still sound — but no object name may be pinned from it,
+// because a name among the unread part would read as unset and be null-pinned.
+func TestResolveRecipe_InheritFromValuesFromBundle(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	pinned := baseline.Components[0].Name
+	const movedNamespace = "legacy-install-namespace"
+
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if mkErr := os.MkdirAll(filepath.Join(dir, pinned), 0o750); mkErr != nil {
+		t.Fatalf("setup: mkdir: %v", mkErr)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), map[string]string{pinned: movedNamespace})
+	writeBundleInfo(t, dir, fluxReleases([]string{pinned}))
+	if wErr := os.WriteFile(filepath.Join(dir, pinned, "helmrelease.yaml"), []byte(
+		"apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nspec:\n"+
+			"  values:\n    other: kept\n"+
+			"  valuesFrom:\n    - kind: ConfigMap\n      name: dynamic\n"), 0o600); wErr != nil {
+		t.Fatalf("setup: write helmrelease: %v", wErr)
+	}
+
+	result, err := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+	if err != nil {
+		t.Fatalf("ResolveRecipe: %v (a well-formed bundle must still pin namespaces)", err)
+	}
+	ref := result.Resolved().GetComponentRef(pinned)
+	if ref == nil {
+		t.Fatalf("%s is missing from the resolved recipe", pinned)
+	}
+	if ref.Namespace != movedNamespace {
+		t.Errorf("namespace = %q, want the inherited %q", ref.Namespace, movedNamespace)
+	}
+	// Relative to the baseline, because an overlay may already set a name key
+	// in Overrides; inheritance must add or change nothing there.
+	base := baseline.Resolved().GetComponentRef(pinned)
+	for _, key := range []string{"fullnameOverride", "nameOverride"} {
+		if got, want := ref.Overrides[key], base.Overrides[key]; !reflect.DeepEqual(got, want) {
+			t.Errorf("overrides[%s] = %#v, want the baseline %#v: no name may be pinned from a bundle "+
+				"whose names are not all readable", key, got, want)
+		}
+	}
 }
 
 func namespacesOf(result *aicr.RecipeResult) map[string]string {

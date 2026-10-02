@@ -155,6 +155,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -936,9 +937,13 @@ func (c *Client) inheritIdentity(
 	if applyErr := recipe.ApplyInheritedIdentity(resolved.ComponentRefs, priorInternal.ComponentRefs); applyErr != nil {
 		return applyErr
 	}
+	if namesErr := c.inheritObjectNames(ctx, inheritFrom, resolved); namesErr != nil {
+		return namesErr
+	}
 	// The inherited fields land after the resolved recipe was last validated,
 	// and a prior artifact can carry a combination the current registry's
 	// shape rejects, so check again before anything is emitted or bundled.
+	// Object-name pins are written into Overrides above, so this sees them too.
 	return resolved.ValidateCoherence()
 }
 
@@ -968,6 +973,60 @@ func checkInheritCriteria(resolved, prior *recipe.Criteria, inheritFrom string) 
 			inheritFrom, d.name, d.was, d.now))
 	}
 	return nil
+}
+
+// inheritObjectNames pins the object names the prior bundle deployed with, so
+// a values-file edit that drops a fullnameOverride does not rename a running
+// release's objects on the next regenerate.
+//
+// Only a bundle can answer. A resolved recipe records valuesFile as a path
+// resolved against whichever binary reads it, so re-reading a prior recipe's
+// values would yield the values THIS binary ships — the very ones inheritance
+// is meant to override. That is reported rather than silently skipped, and it
+// is a warning rather than an error because the namespace half of the flag
+// still did its job.
+func (c *Client) inheritObjectNames(
+	ctx context.Context, inheritFrom string, resolved *recipe.RecipeResult,
+) error {
+
+	dir, isBundle := bundleDirectory(inheritFrom)
+	if !isBundle {
+		slog.Warn("inherit-from cannot pin object names from a recipe file",
+			"inheritFrom", inheritFrom,
+			"reason", "a recipe records its values by reference, so it does not state the object "+
+				"names it deployed with",
+			"remedy", "pass the bundle directory that was deployed")
+		return nil
+	}
+
+	values, err := bundleinfo.ReadReleaseValues(ctx, dir)
+	if err != nil {
+		if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			slog.Warn("inherit-from cannot pin object names from this bundle",
+				"inheritFrom", inheritFrom,
+				"reason", "it has no "+bundleinfo.FileName+", so it predates build-record stamping")
+			return nil
+		}
+		// A well-formed bundle whose names are not all stated where they can
+		// be read. Like the case above, and unlike an incomplete bundle, the
+		// namespace half still holds, so this warns rather than refusing.
+		if stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+			slog.Warn("inherit-from cannot pin object names from this bundle",
+				"inheritFrom", inheritFrom, "reason", err.Error())
+			return nil
+		}
+		return err
+	}
+
+	prior, err := projectObjectNames(values)
+	if err != nil {
+		return err
+	}
+	current, err := internalObjectNames(ctx, resolved)
+	if err != nil {
+		return err
+	}
+	return recipe.ApplyInheritedObjectNames(resolved.ComponentRefs, prior, current)
 }
 
 // requireHydratedRecipe rejects an inheritance source that is not already a

@@ -97,16 +97,17 @@ const (
 )
 
 // Identity is what a recipe pins for a component beyond its version. A move
-// here is invisible to a version comparison but relocates or replaces running
-// objects. Helm cannot move a release between namespaces. A renamed chart or
-// moved source shares no version line with the old one. A kustomize path
-// selects a different manifest set at the same tag. A dropped manifest file
-// deletes a live object under GitOps prune, and a pre-install manifest is a
-// prerequisite the bundle applies before the release.
+// here is invisible to a version comparison but relocates, replaces or renames
+// running objects. Helm cannot move a release between namespaces. A renamed
+// chart or moved source shares no version line with the old one. A kustomize
+// path selects a different manifest set at the same tag. A dropped manifest
+// file deletes a live object under GitOps prune, and a pre-install manifest is
+// a prerequisite the bundle applies before the release. A moved object name
+// renames what the chart owns.
 //
-// Every field but Version, ManifestFiles and PreManifestFiles counts only when
-// both sides state it. The two manifest lists are sets, compared without regard
-// to order.
+// Every field but Version, ManifestFiles, PreManifestFiles and ObjectNames
+// counts only when both sides state it. The two manifest lists are sets,
+// compared without regard to order.
 type Identity struct {
 	Version          string
 	Namespace        string
@@ -116,25 +117,45 @@ type Identity struct {
 	Type             string
 	ManifestFiles    []string
 	PreManifestFiles []string
+
+	// ObjectNames are the merged values naming the objects the chart owns,
+	// keyed by dotted value path ("fullnameOverride",
+	// "grafana.fullnameOverride").
+	//
+	// Empty is not the same as a component pinning none: it is also what a
+	// caller that could not read the values hands over, because a resolved
+	// recipe records them by reference rather than by value. The caller
+	// reports that gap once for the whole run rather than per component, so
+	// nothing here distinguishes the two.
+	ObjectNames map[string]string
 }
 
-// The IdentityChange.Field of each manifest file set, the fields whose move
-// also fills Added and Removed.
+// The IdentityChange.Field of each Identity field. The two manifest file sets
+// are the fields whose move also fills Added and Removed; any Field not listed
+// here is an object-name value path.
 const (
+	fieldNamespace        = "namespace"
+	fieldType             = "type"
+	fieldChart            = "chart"
+	fieldSource           = "source"
+	fieldPath             = "path"
 	fieldManifestFiles    = "manifestFiles"
 	fieldPreManifestFiles = "preManifestFiles"
 )
 
 // IdentityChange names one field that moved between the compared artifacts.
 //
-// Field is the Identity field's name in lower camel case ("namespace",
-// "manifestFiles"), so a consumer branches on it without parsing prose. Version
-// is never one of them. The version axis is ComponentResult.From and To, and
-// the records assess it.
+// Field is either an Identity field's name in lower camel case ("namespace",
+// "manifestFiles") or, for an object name, a dotted value path into the merged
+// values ("fullnameOverride", "grafana.fullnameOverride"), so a consumer
+// branches on it without parsing prose. Version is never one of them. The
+// version axis is ComponentResult.From and To, and the records assess it.
 //
 // For manifestFiles and preManifestFiles From and To are the whole sorted sets
 // joined by commas, and Added and Removed name the entries that differ. They
-// are empty on every scalar field.
+// are empty on every other field. From or To is empty where an object name
+// appeared or disappeared, which is a rename rather than a missing
+// observation; the scalar fields never report an empty side.
 type IdentityChange struct {
 	Field   string
 	From    string
@@ -365,26 +386,30 @@ func MatchIdentities(set Set, from, to map[string]Identity) []ComponentResult {
 	return results
 }
 
-// identityChanges lists the non-version fields that moved.
+// identityChanges lists the non-version fields that moved: the scalar fields,
+// then the manifest file sets, then the object-name paths in sorted order.
 //
 // A scalar field counts only when both sides state it. An empty string is a fact
 // the artifact did not carry rather than a move to the default, so treating it
 // as a value would report a relocation nobody performed for every component the
 // moment one of the two artifacts stops carrying the field.
 //
-// The manifest file sets are the exception. An artifact that lists none is
-// stating that, and the move that matters most is the one that empties it.
+// The manifest file sets and object names are the exceptions, because for them
+// absence is itself a statement. An artifact that lists no manifests is
+// stating that, and the move that matters most is the one that empties it. A
+// chart with no fullnameOverride names its objects after itself, so dropping
+// one renames every object it held, and both directions are moves.
 func identityChanges(from, to Identity) []IdentityChange {
 	var moved []IdentityChange
 	for _, f := range []struct {
 		field    string
 		from, to string
 	}{
-		{"namespace", from.Namespace, to.Namespace},
-		{"type", from.Type, to.Type},
-		{"chart", from.Chart, to.Chart},
-		{"source", from.Source, to.Source},
-		{"path", from.Path, to.Path},
+		{fieldNamespace, from.Namespace, to.Namespace},
+		{fieldType, from.Type, to.Type},
+		{fieldChart, from.Chart, to.Chart},
+		{fieldSource, from.Source, to.Source},
+		{fieldPath, from.Path, to.Path},
 	} {
 		if f.from != "" && f.to != "" && f.from != f.to {
 			moved = append(moved, IdentityChange{Field: f.field, From: f.from, To: f.to})
@@ -408,16 +433,114 @@ func identityChanges(from, to Identity) []IdentityChange {
 			})
 		}
 	}
+	// Sized from one side only, as in recipe.unionPaths: the two lengths come
+	// from a bundle's own files, and their sum is not provably an int.
+	paths := make([]string, 0, len(from.ObjectNames))
+	for path := range from.ObjectNames {
+		paths = append(paths, path)
+	}
+	for path := range to.ObjectNames {
+		if _, inBoth := from.ObjectNames[path]; !inBoth {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		src, tgt := from.ObjectNames[path], to.ObjectNames[path]
+		if src == tgt {
+			continue
+		}
+		moved = append(moved, IdentityChange{Field: path, From: src, To: tgt})
+	}
 	return moved
 }
 
 // identityAdvice is the tail both identity explanations share: why no record
-// covers the move, and why it cannot ride along with an upgrade.
-const identityAdvice = "Transition records assess version boundaries, so none assesses a change of " +
-	"identity. Applying the new recipe would deploy different objects than the running release. " +
-	"A namespace move installs a second copy because Helm cannot move a release between " +
-	"namespaces. A dropped manifest file deletes a live object under GitOps prune. " +
-	"Make the change deliberately, then re-run this check"
+// covers the move, and what the fields that moved will actually do.
+//
+// The clauses are selected rather than fixed. The fields fail differently — a
+// relocation leaves a second copy running, a changed chart, source, path or
+// type deploys different objects, a dropped manifest is pruned, and a rename
+// replaces what the chart owns — and this sentence is what an operator reads
+// at the moment they decide whether to upgrade, so naming the wrong
+// consequence sends them to the wrong remedy.
+//
+// The selector clause is deliberately narrow. The immutable-selector failure
+// needs an object that keeps its NAME while its selector labels change — the
+// standard scaffold's nameOverride moving under a pinned fullnameOverride. A
+// key that renames the object too is plain delete-and-recreate with no error,
+// so the text names the one condition rather than promising a failure that
+// may not happen. It ships in the JSON explanation, so it is worth getting
+// exactly right once.
+func identityAdvice(moved []IdentityChange) string {
+	kinds := identityKindsOf(moved)
+	parts := []string{"Transition records assess version boundaries, so none assesses a change of identity."}
+	if kinds[kindReplace] {
+		parts = append(parts, "Applying the new recipe would deploy different objects than the running release.")
+	}
+	if kinds[kindRelocate] {
+		parts = append(parts, "A namespace move installs a second copy because Helm cannot move a release "+
+			"between namespaces.")
+	}
+	if kinds[kindPrune] {
+		parts = append(parts, "A dropped manifest file deletes a live object under GitOps prune.")
+	}
+	if kinds[kindRename] {
+		parts = append(parts, "Renaming the objects a chart owns is applied as delete-and-recreate, "+
+			"so expect a service gap, and an orphan for anything referenced by name or not owned by "+
+			"the release. Where the moved key changes the selector labels of an object whose name "+
+			"does not change, for example nameOverride moving while fullnameOverride is pinned, "+
+			"spec.selector is immutable and the upgrade fails outright instead.")
+	}
+	return strings.Join(append(parts, "Make the change deliberately, then re-run this check."), " ")
+}
+
+// identityKind is what a move does to the running release, which is what the
+// advice and the notes have to name.
+type identityKind int
+
+const (
+	kindRelocate identityKind = iota
+	kindReplace
+	kindPrune
+	kindRename
+)
+
+// identityKindsOf classifies every move. A manifest set can be two kinds at
+// once: what it drops is pruned, what it adds is new objects.
+func identityKindsOf(moved []IdentityChange) map[identityKind]bool {
+	kinds := make(map[identityKind]bool)
+	for _, c := range moved {
+		switch c.Field {
+		case fieldNamespace:
+			kinds[kindRelocate] = true
+		case fieldType, fieldChart, fieldSource, fieldPath:
+			kinds[kindReplace] = true
+		case fieldManifestFiles, fieldPreManifestFiles:
+			if len(c.Removed) > 0 {
+				kinds[kindPrune] = true
+			}
+			if len(c.Added) > 0 {
+				kinds[kindReplace] = true
+			}
+		default:
+			kinds[kindRename] = true
+		}
+	}
+	return kinds
+}
+
+// isObjectNameField reports whether field is an object-name value path rather
+// than an Identity field. Every Identity field name is a constant here, so
+// anything else came from the merged values.
+func isObjectNameField(field string) bool {
+	switch field {
+	case fieldNamespace, fieldType, fieldChart, fieldSource, fieldPath,
+		fieldManifestFiles, fieldPreManifestFiles:
+		return false
+	}
+	return true
+}
 
 // relocation is the row for a component that held its version and moved anyway.
 //
@@ -440,7 +563,7 @@ func relocation(name, fromVer, toVer string, moved []IdentityChange) ComponentRe
 		Verdict:         VerdictUnknown,
 		Reason:          ReasonIdentityChanged,
 		Explanation: fmt.Sprintf("%s %s, but %s. %s",
-			name, heldPhrase(fromVer), movedPhrase(moved), identityAdvice),
+			name, heldPhrase(fromVer), movedPhrase(moved), identityAdvice(moved)),
 	}
 }
 
@@ -474,19 +597,28 @@ func withIdentityChanges(r ComponentResult, moved []IdentityChange) ComponentRes
 	r.Reason = ReasonIdentityChanged
 	r.Explanation = fmt.Sprintf(
 		"the move from %s to %s is recorded safe, but %s, and no record assessed that. %s",
-		r.From, r.To, movedPhrase(moved), identityAdvice)
+		r.From, r.To, movedPhrase(moved), identityAdvice(moved))
 	return r
 }
 
 // movedPhrase states the moves as the clause both explanations embed.
+//
+// An object name appearing or disappearing gets its own wording, because the
+// from-to form degenerates to "moves from skyhook-operator to" on exactly the
+// row where the rename is the whole finding.
 func movedPhrase(moved []IdentityChange) string {
 	parts := make([]string, len(moved))
 	for i, c := range moved {
-		if c.Field == fieldManifestFiles || c.Field == fieldPreManifestFiles {
+		switch {
+		case c.Field == fieldManifestFiles || c.Field == fieldPreManifestFiles:
 			parts[i] = "its " + c.Field + " " + setChangePhrase(c.Added, c.Removed)
-			continue
+		case c.From == "":
+			parts[i] = fmt.Sprintf("its %s is now set to %s", c.Field, c.To)
+		case c.To == "":
+			parts[i] = fmt.Sprintf("its %s is no longer set, dropping %s", c.Field, c.From)
+		default:
+			parts[i] = fmt.Sprintf("its %s moves from %s to %s", c.Field, c.From, c.To)
 		}
-		parts[i] = fmt.Sprintf("its %s moves from %s to %s", c.Field, c.From, c.To)
 	}
 	return strings.Join(parts, " and ")
 }

@@ -611,3 +611,31 @@ func TestReportFailsRunOnUnmatchedStamps(t *testing.T) {
 		})
 	}
 }
+
+// The notes cell names the kind of identity move a row carries. Every field
+// other than namespace once read as an object name, so a chart swap's row said
+// "no record covers a rename"; this pins the three kinds apart.
+func TestIdentityNounNamesTheKindOfMove(t *testing.T) {
+	tests := []struct {
+		name    string
+		changes []ReportIdentityChange
+		want    string
+	}{
+		{"namespace only", []ReportIdentityChange{{Field: "namespace"}}, "a relocation"},
+		{"object names only", []ReportIdentityChange{
+			{Field: "fullnameOverride"}, {Field: "grafana.fullnameOverride"},
+		}, "a rename"},
+		{"a chart move", []ReportIdentityChange{{Field: "chart"}}, "a change of identity"},
+		{"a manifest set", []ReportIdentityChange{{Field: "manifestFiles"}}, "a change of identity"},
+		{"namespace and a rename", []ReportIdentityChange{
+			{Field: "namespace"}, {Field: "fullnameOverride"},
+		}, "a change of identity"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := identityNoun(tt.changes); got != tt.want {
+				t.Errorf("identityNoun() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
