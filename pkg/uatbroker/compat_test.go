@@ -321,6 +321,39 @@ func TestParseContaining(t *testing.T) {
 	}
 }
 
+func TestLoadContainingFile(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	tests := []struct {
+		name    string
+		path    string
+		want    map[int][]string
+		wantErr bool
+	}{
+		{"valid", write("ok.tsv", "4\tv0.22.0\n10\n"), map[int][]string{4: {"v0.22.0"}, 10: {}}, false},
+		{"missing file", filepath.Join(dir, "nope.tsv"), nil, true},
+		{"oversized", write("big.tsv", "4 "+strings.Repeat("v", int(maxContainingBytes))+"\n"), nil, true},
+		{"malformed", write("bad.tsv", "four\tv1\n"), nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LoadContainingFile(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("LoadContainingFile error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err == nil && !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCompatGate(t *testing.T) {
 	c, err := ParseCompat([]byte(validCompat))
 	if err != nil {

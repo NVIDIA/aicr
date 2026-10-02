@@ -82,9 +82,6 @@ const defaultRegistryPath = "infra/uat/reservations.yaml"
 // root.
 const defaultCompatPath = "tests/uat/compat.yaml"
 
-// maxContainingBytes bounds the --containing file read.
-const maxContainingBytes int64 = 1 << 20 // 1 MiB
-
 // maxTagsBytes bounds the stdin tag-list read so an oversized stream cannot
 // OOM the process.
 const maxTagsBytes int64 = 1 << 20 // 1 MiB
@@ -443,11 +440,7 @@ func runCompatCheck(ctx context.Context, args []string, stdin io.Reader, stdout,
 	if err != nil {
 		return err
 	}
-	data, err := readBounded(*containingPath, "containing file", maxContainingBytes)
-	if err != nil {
-		return err
-	}
-	containing, err := uatbroker.ParseContaining(data)
+	containing, err := uatbroker.LoadContainingFile(*containingPath)
 	if err != nil {
 		return err
 	}
@@ -492,23 +485,6 @@ func runCompatGate(args []string, stdout, stderr io.Writer) error {
 		return errors.Wrap(errors.ErrCodeInternal, "write compat gate result", err)
 	}
 	return nil
-}
-
-// readBounded reads at most limit bytes of path, failing when it is larger.
-func readBounded(path, what string, limit int64) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // operator-supplied path (CLI flag), size-bounded below
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "open "+what+" "+path, err)
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "read "+what+" "+path, err)
-	}
-	if int64(len(data)) > limit {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, what+" "+path+" exceeds size limit")
-	}
-	return data, nil
 }
 
 // parseLineCSV parses a comma-separated list of positive line numbers.

@@ -30,6 +30,9 @@ import (
 // maxCompatBytes bounds the compat file read; it is a small hand-edited file.
 const maxCompatBytes int64 = 1 << 20 // 1 MiB
 
+// maxContainingBytes bounds the tag-containment file read.
+const maxContainingBytes int64 = 1 << 20 // 1 MiB
+
 // Floor problem kinds reported by CheckFloors. Over-high and inconclusive rows
 // must not be honored (the cell runs and shows its real color); an inert row
 // skips nothing in the scheduled window and is informational only.
@@ -421,6 +424,16 @@ func lowestStable(tags []string) *semver.Version {
 		return nil
 	}
 	return stable[len(stable)-1]
+}
+
+// LoadContainingFile reads, size-bounds, and parses the tag-containment file
+// at path (see ParseContaining).
+func LoadContainingFile(path string) (map[int][]string, error) {
+	data, err := readFileBounded(path, "containing file", maxContainingBytes)
+	if err != nil {
+		return nil, err
+	}
+	return ParseContaining(data)
 }
 
 // ParseContaining parses the tag-containment input CheckFloors consumes: one
