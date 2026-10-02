@@ -310,6 +310,12 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 
+	// And on a skip list that would not act as its author meant, for the same
+	// reason and at the same point: before any cluster work.
+	if err = v.preflightSkipChecks(cat, phases, validationInput); err != nil {
+		return nil, err
+	}
+
 	// --no-cluster: report all as skipped, no K8s calls
 	if v.NoCluster {
 		return v.phasesSkipped(cat, phases, "skipped - no-cluster mode"), nil
@@ -359,7 +365,7 @@ func (v *Validator) runPhases(
 	for _, phase := range phases {
 		select {
 		case <-ctx.Done():
-			return results, errors.Wrap(errors.ErrCodeTimeout, "context canceled during phase iteration", ctx.Err())
+			return results, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "iterating validation phases")
 		default:
 		}
 
@@ -418,6 +424,9 @@ func (v *Validator) ValidatePhase(
 	// matching ValidatePhases: a per-phase caller must not be able to skip an
 	// unresolved required gate into a spuriously passing run (issue #2121).
 	if err = v.preflightDeclaredChecks(cat, []Phase{phase}, validationInput); err != nil {
+		return nil, err
+	}
+	if err = v.preflightSkipChecks(cat, []Phase{phase}, validationInput); err != nil {
 		return nil, err
 	}
 
@@ -511,18 +520,21 @@ func (v *Validator) runPhase(
 	start := time.Now()
 	allEntries := cat.ForPhase(phase)
 
-	// Filter catalog entries by checks declared in the validation for this phase.
-	// Returns an empty set if no checks are declared for the phase.
-	entries := v1.FilterEntriesByValidation(allEntries, phase, validationInput)
+	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
+
+	// Filter catalog entries by checks declared in the validation for this
+	// phase, then withhold the ones the caller skipped, recording each on the
+	// builder as it goes. Returns an empty set if no checks are declared.
+	entries := v.selectEntries(builder, phase, allEntries, validationInput)
 	slog.Info("running validation phase", "phase", phase,
-		"catalog", len(allEntries), "selected", len(entries))
+		"catalog", len(allEntries), "selected", len(entries),
+		"skipped", len(v.SkipChecks))
 
 	// Note: unmatched, cross-phase, and duplicate declared checks are rejected
 	// up front by preflightDeclaredChecks (in ValidatePhase/ValidatePhases)
 	// before this phase ever runs, so by here every declared check for the
-	// phase resolves to exactly one catalog entry.
-
-	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
+	// phase resolves to exactly one catalog entry. preflightSkipChecks rejects
+	// a skip list that would leave this phase with nothing to run.
 
 	// Pre-flight: validate all dependencyAffinity for required components
 	// resolve before any Job is deployed. This honors the per-validator
@@ -532,7 +544,7 @@ func (v *Validator) runPhase(
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled during dependencyAffinity pre-flight", ctx.Err())
+			return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "running dependencyAffinity pre-flight")
 		default:
 		}
 		if err := v1.ValidateDependencyAffinity(entry.DependencyAffinity, validationInput.GetComponentRefs()); err != nil {
@@ -549,7 +561,7 @@ func (v *Validator) runPhase(
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled during entry evaluation", ctx.Err())
+			return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "evaluating validator entries")
 		default:
 		}
 
@@ -655,6 +667,11 @@ func (v *Validator) runPhase(
 		"validators", report.Results.Summary.Tests,
 		"passed", report.Results.Summary.Passed,
 		"failed", report.Results.Summary.Failed,
+		// Printed for the same reason passed and failed are: the three
+		// together account for the validator count, and without it a phase
+		// that withheld half its checks is indistinguishable from one that ran
+		// them all.
+		"skipped", report.Results.Summary.Skipped,
 		"duration", duration)
 
 	return &PhaseResult{

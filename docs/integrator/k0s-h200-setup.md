@@ -24,9 +24,8 @@ a physical host carrying the same driver looks identical to it.
 - **Install the NVIDIA driver on the node before deploying.** The recipe
   assumes a host-provided driver: it turns the GPU Operator's driver
   install off, points the DRA driver at the host root
-  (`nvidiaDriverRoot: /`), sets NVSentinel's labeler to
-  `assumeDriverInstalled`, and disables its metadata collector. These four
-  settings ship together in the leaf, and AICR's driver-ownership
+  (`nvidiaDriverRoot: /`), and sets NVSentinel's labeler to
+  `assumeDriverInstalled`. These three settings ship together in the leaf, and AICR's driver-ownership
   coherence checks fail closed if they diverge — don't override one
   without the others. If you want the GPU Operator to install the driver
   instead, this leaf is not your coordinate — author one with the

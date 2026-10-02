@@ -72,17 +72,38 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Runs beside discover so its wall-clock-bound suites (they assert that a
+  # hanging pull or exhausted budget stays inside its deadline) stay off the
+  # path that gates the tiers.
+  script-tests:
+    name: KWOK Script Tests
+    if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Script unit tests (kwok/scripts/lib)
+        run: |
+          # yq is required by profile-select_test.sh. Fail closed so a runner
+          # image without yq cannot silently skip the assertions.
+          command -v yq >/dev/null || { echo "::error::yq is required for kwok/scripts/lib tests"; exit 1; }
+          bash kwok/scripts/lib/sync-budget_test.sh
+          bash kwok/scripts/lib/deployer-map_test.sh
+          bash kwok/scripts/lib/upgrade-readback_test.sh
+          bash kwok/scripts/lib/profile-select_test.sh
+          bash kwok/scripts/lib/preload-image_test.sh
+          bash kwok/scripts/lib/image-cache_test.sh
+          bash kwok/scripts/run-all-recipes_test.sh
+
   discover:
     name: Discover Recipes
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    # Raised from 5→10 when image-cache_test.sh joined the script unit tests
-    # below. Those suites are deliberately wall-clock bound — they assert that
-    # a hanging pull or an exhausted budget stays inside its deadline, which
-    # costs real seconds — and the block now runs ~90s locally before this job
-    # even starts classifying recipes. A discovery job that times out would be
-    # exactly the kind of self-inflicted red this change exists to remove.
-    timeout-minutes: 10
+    timeout-minutes: 5
     outputs:
       tier1_pairs: ${{ steps.classify.outputs.tier1_pairs }}
       tier2_pairs: ${{ steps.classify.outputs.tier2_pairs }}
@@ -94,18 +115,6 @@ jobs:
           persist-credentials: false
           # Full checkout needed for diff-aware Tier 2 discovery
           fetch-depth: 0
-
-      - name: Script unit tests (kwok/scripts/lib)
-        run: |
-          # yq is required by profile-select_test.sh; fail closed here so a
-          # runner image without yq cannot silently skip the assertions and
-          # let the CI light lie about coverage (#1997).
-          command -v yq >/dev/null || { echo "::error::yq is required for kwok/scripts/lib tests"; exit 1; }
-          bash kwok/scripts/lib/sync-budget_test.sh
-          bash kwok/scripts/lib/profile-select_test.sh
-          bash kwok/scripts/lib/preload-image_test.sh
-          bash kwok/scripts/lib/image-cache_test.sh
-          bash kwok/scripts/run-all-recipes_test.sh
 
       - name: Classify recipes into tiers
         id: classify
@@ -134,6 +143,9 @@ jobs:
           # pairs. Tier 2 stays helm-only by deliberate policy (see ADR-003
           # "Tier 2 deployer coverage"). Keep .github/actions/kwok-test/action.yml's
           # deployer input doc-string in sync with this list (prose only, not enforced).
+          # kwok/scripts/lib/deployer-map.sh must map every entry to an aicr
+          # --deployer value; that one IS enforced, by deployer-map_test.sh,
+          # which reads this array.
           deployers='["helm","argocd-oci","argocd-helm-oci","argocd-git","flux-oci","flux-git"]'
 
           # --- workflow_dispatch: test exactly the requested recipe ---
@@ -393,8 +405,21 @@ jobs:
           # --- Tier 3: full matrix (all testable overlays) ---
           tier3="$all"
 
-          tier1_pairs=$(jq -cn --argjson recipes "$tier1" --argjson deployers "$deployers" '
-            [ $recipes[] as $r | $deployers[] as $d | {recipe: $r, deployer: $d} ]
+          # Every generic recipe runs on helm. Each other deployer runs on one
+          # probe recipe. eks-training is preferred because it carries more
+          # components than the bare eks base, so the GitOps paths see a
+          # realistic bundle. The first generic recipe is the fallback when it
+          # is absent. GitOps templating specific to other recipes is covered
+          # by Tier 3.
+          probe="eks-training"
+          if ! echo "$tier1" | jq -e --arg p "$probe" 'index($p) != null' >/dev/null; then
+            probe=$(echo "$tier1" | jq -r '.[0] // empty')
+          fi
+          tier1_pairs=$(jq -cn --argjson recipes "$tier1" --argjson deployers "$deployers" --arg probe "$probe" '
+            [ $recipes[] as $r | {recipe: $r, deployer: "helm"} ]
+            + (if $probe == "" then [] else
+                [ $deployers[] | select(. != "helm") | {recipe: $probe, deployer: .} ]
+              end)
           ')
 
           tier2_pairs=$(jq -cn --argjson recipes "$tier2" '
@@ -445,7 +470,7 @@ jobs:
           tier2_count=$(echo "$tier2_pairs" | jq 'length')
           tier3_pairs=$(echo "$tier3_batches" | jq '[.[].pairs[]] | length')
           tier3_batch_count=$(echo "$tier3_batches" | jq 'length')
-          echo "Tier 1 (generic):      $(echo "$tier1" | jq 'length') recipe(s) × $(echo "$deployers" | jq 'length') deployer(s) = ${tier1_count} pair(s)"
+          echo "Tier 1 (generic):      $(echo "$tier1" | jq 'length') recipe(s) × helm + probe '${probe}' × $(echo "$deployers" | jq 'length - 1') other deployer(s) = ${tier1_count} pair(s)"
           echo "Tier 2 (diff-aware):   $(echo "$tier2" | jq 'length') recipe(s) × 1 deployer (helm) = ${tier2_count} pair(s)"
           echo "Tier 3 (full matrix):  $(echo "$tier3" | jq 'length') recipe(s) × $(echo "$deployers" | jq 'length') deployer(s) = ${tier3_pairs} pair(s) in ${tier3_batch_count} batch(es)"
           dropped_count=$(echo "$dropped" | jq 'length')
@@ -454,8 +479,9 @@ jobs:
           fi
   # ── Image cache priming: one pull per run, not one per matrix job (#2483) ──
   #
-  # The KWOK lanes need two public images — an in-cluster OCI registry, and
-  # Gitea for the *-git deployers. Every matrix job used to pull them itself.
+  # The KWOK lanes need four public images: the Kind node image, an in-cluster
+  # OCI registry, Gitea for the *-git deployers, and the Redis the Argo CD chart
+  # pulls for the argocd-* deployers. Every matrix job used to pull them itself.
   # In run 33350102144, 127 jobs pulled registry:3.1.1 at the same moment from
   # the shared GitHub-runner egress IPs; 125 succeeded and the one that was
   # shed reddened main. That is a per-IP throttle, not an outage, so retrying
@@ -471,19 +497,22 @@ jobs:
   # burning a rollout timeout. The summary job fails with it — without that, a
   # failed prime would skip the tiers and the run would report green.
   #
-  # One job per image (rather than one job for both) so a Gitea failure cannot
-  # discard a registry pull that already succeeded: actions/cache saves at the
-  # end of a job only when that job succeeds.
+  # One job per image (rather than one job for all of them) so a Gitea failure
+  # cannot discard a registry pull that already succeeded: actions/cache saves
+  # at the end of a job only when that job succeeds.
   prime-images:
     name: 'Prime Image Cache (${{ matrix.image }})'
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # A failed kind_node pull must not skip every tier. Lanes that miss the
+    # cache fall back to `kind create cluster` pulling the node image itself.
+    continue-on-error: ${{ matrix.image == 'kind_node' }}
     strategy:
       fail-fast: false
       matrix:
         # Must match IMAGE_CACHE_IMAGES in kwok/scripts/lib/image-cache.sh.
-        image: [registry, gitea]
+        image: [registry, gitea, argocd_redis, kind_node]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -515,12 +544,75 @@ jobs:
           set -euo pipefail
           bash kwok/scripts/lib/image-cache.sh save "${CACHE_DIR}" "${IMAGE}"
 
+  # Builds the aicr binary once and shares it with every matrix cell. The
+  # artifact name must match the download in .github/actions/kwok-test.
+  build-aicr:
+    name: Build aicr
+    if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # One entry per go.sum, saved only by a push to main. A cache entry is
+      # immutable, so this bounds the space used to one snapshot per
+      # dependency set and cannot evict the image tarballs. The dependency
+      # compile dominates the build, so a snapshot that lags main still pays.
+      - name: Restore Go build cache
+        id: gocache
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-
+
+      - name: Build aicr binary
+        run: bash .github/actions/aicr-build/build-cli.sh
+
+      - name: Save Go build cache
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.gocache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ hashFiles('go.sum') }}
+
+      - name: Upload aicr binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: kwok-aicr-bin
+          path: dist/
+          if-no-files-found: error
+          # Re-running failed jobs later reuses this build, so it must outlive
+          # the run. Overwrite lets "Re-run all jobs" replace it in place.
+          overwrite: true
+          retention-days: 7
+
   # Thin caller of the shared kwok-test-run.yaml reusable workflow (#1172).
   # tier1_pairs is well under 256 entries, so it's passed in a single call —
   # no batching needed.
   test-tier1:
     name: 'Tier 1'
-    needs: [discover, prime-images]
+    needs: [discover, prime-images, build-aicr]
     if: >-
       github.event_name != 'schedule' &&
       needs.discover.outputs.tier1_pairs != '[]' &&
@@ -533,7 +625,7 @@ jobs:
   # Helm-only by deliberate policy — see ADR-003 "Tier 2 deployer coverage".
   test-tier2:
     name: 'Tier 2'
-    needs: [discover, prime-images]
+    needs: [discover, prime-images, build-aicr]
     if: >-
       github.event_name == 'pull_request' &&
       needs.discover.outputs.tier2_pairs != '[]' &&
@@ -551,7 +643,7 @@ jobs:
   # single run in its own group so they all run in parallel.
   test-tier3:
     name: 'Tier 3'
-    needs: [discover, prime-images]
+    needs: [discover, prime-images, build-aicr]
     concurrency:
       group: kwok-tier3-${{ github.sha }}-${{ matrix.batch.id }}
       cancel-in-progress: false
@@ -569,31 +661,51 @@ jobs:
 
   # ── Summary: aggregate all tiers ──
   summary:
-    name: KWOK Test Summary
-    needs: [prime-images, test-tier1, test-tier2, test-tier3]
+    name: KWOK Test Summary (advisory)
+    needs: [script-tests, discover, prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
     steps:
       - name: Check test results
         run: |
-          echo "## KWOK Cluster Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## KWOK Cluster Validation Summary (advisory)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Advisory only. This check does not block merges. The required checks are Merge Gate and Check PR Title." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
+          scripts="${{ needs.script-tests.result }}"
+          discover="${{ needs.discover.result }}"
           prime="${{ needs.prime-images.result }}"
+          build="${{ needs.build-aicr.result }}"
           tier1="${{ needs.test-tier1.result }}"
           tier2="${{ needs.test-tier2.result }}"
           tier3="${{ needs.test-tier3.result }}"
 
           echo "| Stage | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Script unit tests | ${scripts} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Recipe discovery | ${discover} |" >> $GITHUB_STEP_SUMMARY
           echo "| Image cache priming | ${prime} |" >> $GITHUB_STEP_SUMMARY
+          echo "| aicr build | ${build} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 1 (generic) | ${tier1} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 2 (diff-aware) | ${tier2} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 3 (full matrix) | ${tier3} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           failed=false
+
+          # The script tests gate no tier, so their failure is only visible here.
+          if [[ "$scripts" == "failure" || "$scripts" == "cancelled" ]]; then
+            echo "Script unit tests failed or were cancelled" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+
+          # A failed discovery skips every tier, and the tier checks below tolerate skipped.
+          if [[ "$discover" == "failure" || "$discover" == "cancelled" ]]; then
+            echo "Recipe discovery failed or was cancelled. No tier ran" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
 
           # Priming gates every tier, so its failure must be checked HERE and
           # not inferred from the tiers. A failed prime leaves them "skipped",
@@ -602,6 +714,12 @@ jobs:
           # nothing.
           if [[ "$prime" == "failure" || "$prime" == "cancelled" ]]; then
             echo "Image cache priming failed or was cancelled — no tier ran" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+
+          # A failed build skips every tier, and the tier checks below tolerate skipped.
+          if [[ "$build" == "failure" || "$build" == "cancelled" ]]; then
+            echo "aicr build failed or was cancelled. No tier ran" >> $GITHUB_STEP_SUMMARY
             failed=true
           fi
 
@@ -624,6 +742,7 @@ jobs:
           fi
 
           if [[ "$failed" == "true" ]]; then
+            echo "::warning::KWOK validation failed. This check is advisory and does not block merges."
             exit 1
           fi
 

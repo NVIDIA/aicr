@@ -125,7 +125,7 @@ jobs:
       # Same action and digest-pinned image as renovate.yaml; keep them in
       # lockstep with RENOVATE_VALIDATOR_IMAGE in the Makefile.
       - name: Run Renovate (dry-run, registry chart pins only)
-        uses: renovatebot/github-action@dcfba84a42d1b5d5e49bf131b1bf53511851a123  # v46.3.1
+        uses: renovatebot/github-action@1cd96b855fee0da6f230617e89dbff0e06ea393a  # v46.3.5
         with:
           renovate-version: '43@sha256:00185c0d63462acec8331cc9a94dcd74a763f2765fca0edcc3ff568af1dc8104'
         env:
@@ -149,6 +149,14 @@ jobs:
           # deps active — the .settings.yaml and .go-version customManagers
           # stay off.
           #
+          # The second rule also sets separateMinorPatch. Renovate folds patch
+          # into minor by default and reports only the newest of the two, which
+          # hides a same-line patch whenever a minor also exists: kai-scheduler
+          # is pinned to v0.16.9 and the 2026-09-28 report offered only
+          # `minor -> v0.20.1` (a version upstream has since retracted), while
+          # the patch v0.16.10 released that same day never appeared at all
+          # (#2791). Separating them costs one extra entry per dep and is what
+          # lets tools/drift-report list the safer step beside the larger one.
           # The third rule forces `semver` versioning on registry-chart OCI
           # pins (datasource=docker). Docker's default `docker` versioning
           # treats everything after a tag's first hyphen as a compatibility
@@ -179,7 +187,7 @@ jobs:
           # SHA-suffixed tags so the RC never wins the comparison.
           RENOVATE_FORCE: >-
             {"packageRules":[{"matchPackageNames":["*"],"enabled":false},
-            {"matchDepTypes":["registry-chart"],"enabled":true},
+            {"matchDepTypes":["registry-chart"],"enabled":true,"separateMinorPatch":true},
             {"matchDepTypes":["registry-chart"],"matchDatasources":["docker"],"versioning":"semver"},
             {"matchDepNames":["ghcr.io/ai-dynamo/grove/grove-charts"],"versioning":"regex:^v(?<major>[0-9]+)[.](?<minor>[0-9]+)[.](?<patch>[0-9]+)-alpha[.](?<build>[0-9]+)$"}]}
           RENOVATE_REPORT_TYPE: file

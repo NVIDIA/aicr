@@ -336,8 +336,8 @@ func (r *RecipeResult) validateGKEConfiguration() error {
 	}
 	if !header.IsSupportedProfileAPIVersion(r.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("configuration.gke.tcpxoInterfaces requires apiVersion %q or %q (got %q)",
-				ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2, r.APIVersion))
+			fmt.Sprintf("configuration.gke.tcpxoInterfaces requires apiVersion %q (got %q%s)",
+				header.GroupVersionV1Beta2, r.APIVersion, header.RetirementNote(r.APIVersion)))
 	}
 	if err := ValidateGKETCPXOInterfaces(mapping); err != nil {
 		return err

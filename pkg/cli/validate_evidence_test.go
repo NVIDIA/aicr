@@ -43,6 +43,7 @@ func runEvidenceCmd(t *testing.T, args []string, att aicr.EvidenceOptions) (*rec
 			&cli.StringFlag{Name: "identity-token"},
 			&cli.BoolFlag{Name: "oidc-device-flow"},
 			&cli.BoolFlag{Name: "full"},
+			&cli.BoolFlag{Name: flagAllowMutableValidatorTags},
 		},
 		Action: func(_ context.Context, c *cli.Command) error {
 			got = buildRecipeEvidenceConfig(c, att)
@@ -128,6 +129,27 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "allow-mutable-validator-tags flag opts out of the provenance gate",
+			args: []string{"--emit-attestation", "/tmp/out", "--" + flagAllowMutableValidatorTags},
+			att:  aicr.EvidenceOptions{},
+			want: &recipeEvidenceConfig{
+				OutDir:                    "/tmp/out",
+				AllowMutableValidatorTags: true,
+			},
+		},
+		{
+			// The gate is CLI-only on purpose: a committed config must not be
+			// able to switch off validator-provenance enforcement for every
+			// later run that loads it.
+			name: "config cannot enable allow-mutable-validator-tags",
+			args: []string{"--emit-attestation", "/tmp/out"},
+			att:  aicr.EvidenceOptions{AllowMutableValidatorTags: true},
+			want: &recipeEvidenceConfig{
+				OutDir:                    "/tmp/out",
+				AllowMutableValidatorTags: false,
+			},
+		},
+		{
 			name: "flag overrides config when both set",
 			args: []string{"--emit-attestation", "/flag/out", "--push", "ttl.sh/flag:1h"},
 			att: aicr.EvidenceOptions{
@@ -182,6 +204,10 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 			}
 			if got.Full != tt.want.Full {
 				t.Errorf("Full = %v, want %v", got.Full, tt.want.Full)
+			}
+			if got.AllowMutableValidatorTags != tt.want.AllowMutableValidatorTags {
+				t.Errorf("AllowMutableValidatorTags = %v, want %v",
+					got.AllowMutableValidatorTags, tt.want.AllowMutableValidatorTags)
 			}
 		})
 	}

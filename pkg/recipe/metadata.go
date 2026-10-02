@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
@@ -284,56 +286,124 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 	// DataProvider is available. See issue #1219.
 }
 
-// ApplyInheritedIdentity overwrites each ref's namespace with the one a prior
-// recipe resolved for the same component, so an AICR upgrade does not silently
-// relocate a running component when a registry default moves. A component the
-// prior recipe does not name keeps its default: it is a first deploy as far as
-// that artifact knows.
+// ApplyInheritedIdentity overwrites each ref's deployment identity with the one
+// a prior recipe resolved for the same component, so an AICR upgrade does not
+// silently relocate or replace a running component when a registry default
+// moves. The identity is the namespace, chart, source, kustomize path and the
+// manifest and pre-manifest file sets. Version, tag, values and overrides are
+// configuration and stay as resolved. A component the prior recipe does not
+// name keeps its defaults. It is a first deploy as far as that artifact knows.
+//
+// A field the prior recipe leaves empty is not inherited, so an artifact that
+// never carried it does not blank the default, and a manifest the current
+// registry adds is not dropped. A non-empty manifest or pre-manifest file set is
+// restored whole, so an entry the registry dropped is kept.
+// A component whose deployment type differs from the prior one keeps only the
+// namespace, since no chart, source, path or manifest set carries across a Helm
+// and Kustomize flip. upgrade-check reports the type move.
 //
 // Runs after ApplyRegistryDefaults rather than inside it, because that method is
 // exported and called from four packages.
-// A prior artifact is operator-supplied input that no loader validates for
-// Kubernetes namespace syntax, and this assignment lands after the current
-// recipe has already been validated. Deployers interpolate the namespace into
-// generated install scripts, so a value carrying shell metacharacters would
-// reach a shell the operator runs. Every inherited value is therefore checked
-// before it is copied, and one bad value rejects the whole artifact rather
-// than being skipped: a silently ignored pin is the relocation this function
-// exists to prevent.
+// A prior artifact is operator-supplied input that no loader validates, and
+// this assignment lands after the current recipe has already been validated.
+// Deployers interpolate the namespace into generated install scripts, so a
+// value carrying shell metacharacters would reach a shell the operator runs,
+// and the file set and path select files to read. Every inherited value is
+// therefore checked before it is copied, and one bad value on a component the
+// current recipe also names rejects the whole artifact rather than being
+// skipped, and refs is left unmodified. A silently ignored pin is the
+// relocation this function exists to prevent. A prior component absent from
+// the current recipe is never copied, so it is not validated.
 func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 	if len(prior) == 0 {
 		return nil
 	}
-	namespaces := make(map[string]string, len(prior))
+	// Mutated on a copy and published only on success, so a bad value on a
+	// later component leaves refs exactly as the caller passed them in.
+	work := slices.Clone(refs)
+	pinned := make(map[string]ComponentRef, len(prior))
 	for _, p := range prior {
-		if p.Namespace == "" {
-			continue
-		}
-		// A namespace is a DNS-1123 label, not a subdomain: no dots, 63 chars.
-		if errs := validation.IsDNS1123Label(p.Namespace); len(errs) > 0 {
-			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-				"inherited namespace %q for component %q is not a valid Kubernetes namespace: %s",
-				p.Namespace, p.Name, strings.Join(errs, "; ")))
-		}
-		namespaces[p.Name] = p.Namespace
+		pinned[p.Name] = p
 	}
-	for i := range refs {
-		ns, ok := namespaces[refs[i].Name]
-		if !ok || ns == refs[i].Namespace {
+	for i := range work {
+		p, ok := pinned[work[i].Name]
+		if !ok {
 			continue
 		}
-		// Rebind before assigning, so a ref changes both fields or neither.
-		// Assigning first would leave the new namespace beside assertions
-		// still naming the old one on the error path, and the guard above
-		// would then skip the ref on a retry, stranding the stale YAML.
-		// The health check is static, loaded verbatim from the registry's
-		// assertFile, so its namespaces name wherever the registry currently
-		// puts the component. Leaving them behind would fail validation
-		// against a deployment this function just correctly preserved.
-		if err := rebindHealthCheckNamespace(&refs[i], refs[i].Namespace, ns); err != nil {
+		if err := validateInheritedIdentity(p); err != nil {
 			return err
 		}
-		refs[i].Namespace = ns
+		if p.Namespace != "" && p.Namespace != work[i].Namespace {
+			// Rebind before assigning, so a ref changes both fields or neither.
+			// Assigning first would leave the new namespace beside assertions
+			// still naming the old one on the error path, and the guard above
+			// would then skip the ref on a retry, stranding the stale YAML.
+			// The health check is static, loaded verbatim from the registry's
+			// assertFile, so its namespaces name wherever the registry currently
+			// puts the component. Leaving them behind would fail validation
+			// against a deployment this function just correctly preserved.
+			if err := rebindHealthCheckNamespace(&work[i], work[i].Namespace, p.Namespace); err != nil {
+				return err
+			}
+			work[i].Namespace = p.Namespace
+		}
+		if p.Type != "" && work[i].Type != "" && p.Type != work[i].Type {
+			continue
+		}
+		if p.Chart != "" {
+			work[i].Chart = p.Chart
+		}
+		if p.Source != "" {
+			work[i].Source = p.Source
+		}
+		if p.Path != "" {
+			work[i].Path = p.Path
+		}
+		if len(p.ManifestFiles) > 0 {
+			work[i].ManifestFiles = slices.Clone(p.ManifestFiles)
+		}
+		if len(p.PreManifestFiles) > 0 {
+			work[i].PreManifestFiles = slices.Clone(p.PreManifestFiles)
+		}
+	}
+	copy(refs, work)
+	return nil
+}
+
+// validateInheritedIdentity rejects a prior ref whose identity fields could not
+// have come from a resolved recipe.
+func validateInheritedIdentity(p ComponentRef) error {
+	bad := func(field, value, isNot, why string) error {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"inherited %s %q for component %q is not %s: %s", field, value, p.Name, isNot, why))
+	}
+	if p.Namespace != "" {
+		// A namespace is a DNS-1123 label, not a subdomain, so no dots and 63 chars.
+		if errs := validation.IsDNS1123Label(p.Namespace); len(errs) > 0 {
+			return bad("namespace", p.Namespace, "a valid Kubernetes namespace", strings.Join(errs, "; "))
+		}
+	}
+	if p.Chart != "" {
+		// Helm's chart best practices require chart names to be DNS-1123 labels.
+		if errs := validation.IsDNS1123Label(p.Chart); len(errs) > 0 {
+			return bad("chart", p.Chart, "a valid chart name", strings.Join(errs, "; "))
+		}
+	}
+	if p.Source != "" && strings.ContainsFunc(p.Source, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return bad("source", p.Source, "a valid source", "contains whitespace or control characters")
+	}
+	if p.Path != "" && !filepath.IsLocal(p.Path) {
+		return bad("path", p.Path, "a valid path", "must be a relative path inside the source")
+	}
+	for _, f := range p.ManifestFiles {
+		if !filepath.IsLocal(f) {
+			return bad("manifest file", f, "a valid path", "must be a relative path inside the data root")
+		}
+	}
+	for _, f := range p.PreManifestFiles {
+		if !filepath.IsLocal(f) {
+			return bad("pre-manifest file", f, "a valid path", "must be a relative path inside the data root")
+		}
 	}
 	return nil
 }
@@ -842,9 +912,11 @@ func (r *RecipeResult) ValidateCoherence() error {
 	if r == nil {
 		return nil
 	}
-	if r.APIVersion != "" && !header.IsSupportedRecipeResultAPIVersion(r.APIVersion) {
+	if !header.IsSupportedRecipeResultAPIVersion(r.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("RecipeResult apiVersion %q is not supported", r.APIVersion))
+			fmt.Sprintf("RecipeResult apiVersion %q is not supported%s; expected %q or %q",
+				r.APIVersion, header.RetirementNoteWithAbsent(r.APIVersion),
+				header.GroupVersionV1, header.GroupVersionV1Beta2))
 	}
 	if err := r.validateAccountingConfiguration(); err != nil {
 		return err

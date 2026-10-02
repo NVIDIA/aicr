@@ -12,15 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Allows maintainers to run the full qualification suite on fork PRs
-# by commenting "/ok-to-test" on the PR. This runs in the base repo
-# context. The called qualification workflow checks out and runs
-# fork-controlled local actions (`./.github/actions/*`), so the
-# privileged jobs (cli-e2e with id-token: write, security-scan with
-# security-events: write) are gated by `if: inputs.privileged_ci` in
-# qualification.yaml and we pass `privileged_ci: false` below. Those
-# jobs are skipped before any step runs, so no fork-controlled code
-# ever executes with elevated tokens.
+# Allows maintainers to run the full qualification suite on fork PRs by
+# commenting "/ok-to-test" on the PR.
+#
+# Running this command vouches for the whole diff, its `.github/` portion
+# included. The suite executes `./.github/actions/*` from the fork's checkout
+# in a run whose `github.ref` is the default branch, so a crafted PR can write
+# into main's cache scope and the `privileged_ci` inputs inside those actions
+# cannot stop it. That exposure is accepted (#2681); `.github/actions/README.md`
+# records which controls are boundaries and which are not.
+#
+# The job-level `if: inputs.privileged_ci` in qualification.yaml IS a boundary,
+# because it lives in the trusted file — but it guards only `cli-e2e` and
+# `security-scan`, keeping elevated tokens away from fork code. It does not
+# guard the cache: `test`, `lint` and `e2e` carry no job-level gate and run
+# whatever the fork's action files say. Hence `privileged_ci: false` below,
+# which narrows the default-on writes without closing the hole.
+#
+# Because the vouch is the control, the authorize job refuses a bare
+# "/ok-to-test" when the PR touches `.github/**` — or is too large to check —
+# and requires "/ok-to-test confirm-ci" instead.
+#
+# What that gate does not close: the author can push between the comment and
+# the run, so the head this qualifies may not be the head the maintainer read.
+# The gate binds its own file check to the SHA it hands the tests job, so it
+# never reports on a commit other than the one tested — but binding the
+# maintainer's reading to a commit would take naming the SHA in the comment,
+# which is not worth the friction for a command that already rests on a vouch.
 #
 # We must still declare id-token: write and security-events: write on
 # the reusable-workflow call: GitHub validates the union of permissions
@@ -48,9 +66,15 @@ jobs:
     name: Authorize
     if: >-
       github.event.issue.pull_request &&
-      github.event.comment.body == '/ok-to-test'
+      (github.event.comment.body == '/ok-to-test' ||
+       github.event.comment.body == '/ok-to-test confirm-ci')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # Added for the compare call below; the workflow-level block grants only
+      # contents: read, which does not cover it.
+      pull-requests: read
     outputs:
       ref: ${{ steps.pr.outputs.ref }}
     steps:
@@ -80,7 +104,57 @@ jobs:
               pull_number: context.issue.number,
             });
             core.setOutput('ref', pr.head.sha);
+            core.setOutput('base', pr.base.sha);
             core.info(`PR #${context.issue.number} head SHA: ${pr.head.sha}`);
+
+      # A PR touching `.github/**` asks the maintainer to vouch for the CI
+      # definition itself, which this command then executes from the fork.
+      #
+      # Deliberately scoped to the SHA resolved above rather than to the live
+      # PR. The tests job checks out that same SHA, so listing the live diff
+      # instead would leave a gap: a push landing between the two reads would
+      # run CI files this gate never looked at.
+      #
+      # Fails closed twice: a listing error fails the step, and so does a list
+      # that may be truncated.
+      #
+      # The compare endpoint returns at most 300 files, on the first page only;
+      # paging it walks commits and never yields more. The list is path-sorted,
+      # and `-`, `.aaa/`, `.agents/` and `.claude/` all sort ahead of `.github/`,
+      # so a PR padded with 300 such files pushes every CI change out of view.
+      # At the ceiling, absence of `.github/` is unprovable — refuse.
+      - name: Require explicit confirmation for CI-path changes
+        if: github.event.comment.body == '/ok-to-test'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base }}
+          HEAD_SHA: ${{ steps.pr.outputs.ref }}
+        with:
+          script: |
+            const COMPARE_FILE_LIMIT = 300;
+            const { data } = await github.rest.repos.compareCommitsWithBasehead({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              basehead: `${process.env.BASE_SHA}...${process.env.HEAD_SHA}`,
+            });
+            const files = data.files ?? [];
+            if (files.length >= COMPARE_FILE_LIMIT) {
+              core.setFailed(
+                `This PR changes at least ${COMPARE_FILE_LIMIT} files, the most the compare API ` +
+                `lists, so whether it touches .github/ cannot be checked. Review the full diff ` +
+                `at ${process.env.HEAD_SHA}, then comment exactly: /ok-to-test confirm-ci`
+              );
+              return;
+            }
+            const ci = files.map((f) => f.filename).filter((f) => f.startsWith('.github/'));
+            if (ci.length) {
+              core.setFailed(
+                `This PR changes .github/, which /ok-to-test runs from the fork's checkout:\n` +
+                ci.map((f) => `  - ${f}`).join('\n') +
+                `\n\nRe-read those files at ${process.env.HEAD_SHA}, ` +
+                `then comment exactly: /ok-to-test confirm-ci`
+              );
+            }
 
   tests:
     needs: authorize

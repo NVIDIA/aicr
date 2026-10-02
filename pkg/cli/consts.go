@@ -77,6 +77,10 @@ const (
 	// flagFull ships an unredacted evidence bundle. By default the bundle is
 	// minimized (sensitive snapshot fields and CTRF logs removed).
 	flagFull = "full"
+	// flagAllowMutableValidatorTags emits evidence even when a validator image
+	// resolves to a moving tag, which emission otherwise refuses because the
+	// predicate identifies validators by tag alone (#2873).
+	flagAllowMutableValidatorTags = "allow-mutable-validator-tags"
 	// flagAssumeYes bypasses the interactive keyless-signing identity
 	// disclosure prompt (see confirmKeylessSigningDisclosure). The banner is
 	// still emitted; only the y/N pause is skipped.

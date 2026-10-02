@@ -15,6 +15,7 @@
 package recipes
 
 import (
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -101,5 +102,55 @@ func TestGB200RDMAInstallerAcceleratedNodeSelector(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestGB200RDMARuntimeRendersFabricWiring pins the GPUDirect-RDMA settings a
+// TrainJob cannot supply for itself, and the bundler-injected node scheduling
+// that lets it submit without podTemplateOverrides. A job that loses NCCL_NET
+// or the interfaces annotation falls back to TCP and runs slowly rather than
+// failing, so neither is left to the bundle checksum alone.
+func TestGB200RDMARuntimeRendersFabricWiring(t *testing.T) {
+	content, err := FS.ReadFile(
+		"components/kubeflow-trainer/manifests/torch-distributed-rdma-cluster-training-runtime.yaml")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+
+	rendered, err := manifest.Render(content, manifest.RenderInput{
+		ComponentName: "kubeflow-trainer",
+		Namespace:     "kubeflow",
+		ChartName:     "kubeflow-trainer",
+		ChartVersion:  "2.2.0",
+		Values: map[string]any{
+			"acceleratedNodeSelector": map[string]any{"nodeGroup": "customer-gpu"},
+			"acceleratedTolerations": []any{
+				map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	out := string(rendered)
+
+	for _, want := range []string{
+		`networking.gke.io/interfaces: '[{"interfaceName":"eth0","network":"default"},` +
+			`{"interfaceName":"eth1","network":"gvnic-1"},{"interfaceName":"eth2","network":"rdma-0"},` +
+			`{"interfaceName":"eth3","network":"rdma-1"},{"interfaceName":"eth4","network":"rdma-2"},` +
+			`{"interfaceName":"eth5","network":"rdma-3"}]'`,
+		"name: NCCL_NET",
+		"value: gIB",
+		// A misspelled key in either with block renders nothing and reports no
+		// error, making the bundler's scheduling flags a silent no-op.
+		"nodeGroup: customer-gpu",
+		"key: nvidia.com/gpu",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered manifest missing %q", want)
+		}
+	}
+	if strings.Contains(out, "{{") {
+		t.Error("rendered manifest contains unresolved template actions")
 	}
 }

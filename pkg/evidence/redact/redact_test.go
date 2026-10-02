@@ -34,7 +34,7 @@ import (
 func fullSnapshot() *snapshotter.Snapshot {
 	s := snapshotter.NewSnapshot()
 	s.Kind = header.KindSnapshot
-	s.APIVersion = header.GroupVersion
+	s.APIVersion = header.GroupVersionV1
 	s.Metadata = map[string]string{
 		"timestamp":   "2026-06-22T00:00:00Z",
 		"version":     "0.11.1",
@@ -439,6 +439,15 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			name: "another listed skip code survives",
 			in:   map[string]string{"skipReason": "no-schedulable-gpu-nodes"},
 			want: map[string]string{"skipReason": "no-schedulable-gpu-nodes"},
+		},
+		{
+			// pkg/validator mints this for a check the CALLER withheld
+			// (--skip-check). It has to clear the allowlist or the signed
+			// bundle records WHICH check was withheld but not WHY: the
+			// message that used to carry the reason is blanked above.
+			name: "caller-declared skip code survives",
+			in:   map[string]string{"skipReason": "named-in-skip-checks"},
+			want: map[string]string{"skipReason": "named-in-skip-checks"},
 		},
 		{
 			name: "well-formed but unlisted skip code is dropped",

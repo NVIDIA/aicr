@@ -236,9 +236,8 @@ names the ones at the end of a chain.
 
 `RecipeMetadata.Spec.Profile` declares one overlay-scoped enum for qualified
 configuration ownership modes. A declaration requires recipe apiVersion
-`aicr.run/v1beta2`, or the superseded `aicr.run/v1alpha3`; either profile
-track without a declaration, or a declaration on a default-track version, is
-rejected. Profile-version metadata and recipe artifacts are strictly decoded
+`aicr.run/v1beta2`; the profile track without a declaration, or a declaration
+on a default-track version, is rejected. Profile-version metadata and recipe artifacts are strictly decoded
 so an unknown field cannot silently disappear.
 
 The core `ProfileValue` contract is closed to `advertiser`, `constraints`,
@@ -355,7 +354,7 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
   `preManifestFiles`, `dependencyRefs`. Setting any of `chart`,
   `type`, `source`, `version`, `tag`, `path`, `valuesFile`,
   `patches`, `cleanup`, `expectedResources`,
-  `healthCheckAsserts` is rejected at compose time — those fields
+  `healthCheckAsserts`, or `healthCheckSkip` is rejected at compose time — those fields
   silently override the chain's chosen chart, so the resolver names
   the offending field and refuses to merge (see ADR-005 "Silent
   constraint override" mitigation).
@@ -766,6 +765,10 @@ externally-visible product. Fields beyond `ComponentRefs` and
 4. **Run `make bom-docs` and commit `docs/user/container-images.md`**
    if your change touches `registry.yaml`, a component's `values.yaml`,
    or a chart version pin (see [BOM regeneration](#bom-regeneration)).
+   A chart that renders no container images (CRD-only) must also be
+   listed in `expectedNoImages` in `tools/bom/main.go`, otherwise
+   `make bom-docs` fails. Nothing at PR time renders charts, so this
+   surfaces only when `make bom-docs` or the scheduled BOM refresh runs.
 5. **Unit tests.** `make test` runs the recipe-resolution suite —
    `pkg/recipe/yaml_test.go` (static catalog: parse, refs, enum
    values, inheritance depth, no cycles) and

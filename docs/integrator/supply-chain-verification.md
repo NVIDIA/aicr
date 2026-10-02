@@ -340,10 +340,10 @@ would mean the evidence never reached the registry.
 
 ```shell
 # Grype: apply the VEX document to a scan of the same platform manifest
-grype "${IMAGE}@${DIGEST_AMD64}" --vex aicr-openvex.json --only-fixed --fail-on high
+grype "${IMAGE}@${DIGEST_AMD64}" --vex aicr-openvex-linux-amd64.json --only-fixed --fail-on high
 
 # Trivy: same document, same effect
-trivy image --vex aicr-openvex.json "${IMAGE}@${DIGEST_AMD64}"
+trivy image --vex aicr-openvex-linux-amd64.json "${IMAGE}@${DIGEST_AMD64}"
 ```
 
 Statements apply only to products whose PURL matches, so passing the document to
@@ -490,11 +490,11 @@ predicate type and the subject to the release:
 | Releases | Predicate type | Subject | Retrieved from |
 |----------|----------------|---------|----------------|
 | Through v0.18.x | `--type spdxjson` | multi-platform **index** digest | legacy `.att` tag, not the referrers path |
-| v0.19.0 through the release before this change | `--type spdxjson` | **per-platform** manifest digest | OCI referrer ([#1957](https://github.com/NVIDIA/aicr/issues/1957)) |
-| This change onward | `--type cyclonedx` | **per-platform** manifest digest | OCI referrer |
+| v0.19.0 through v0.20.x | `--type spdxjson` | **per-platform** manifest digest | OCI referrer ([#1957](https://github.com/NVIDIA/aicr/issues/1957)) |
+| v0.21.0 onward | `--type cyclonedx` | **per-platform** manifest digest | OCI referrer |
 
-So the current change alters the predicate type only; the subject moved one
-release earlier, in v0.19.0. Querying a v0.18.x image on a platform digest, or a
+So v0.21.0 altered the predicate type only; the subject moved earlier, in
+v0.19.0. Querying a v0.18.x image on a platform digest, or a
 v0.19.0+ image on the index digest, reports valid evidence as missing.
 
 To migrate a current verification, change `--type spdxjson` to

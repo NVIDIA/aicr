@@ -733,9 +733,9 @@ func TestRecipeCmd_UnusableSnapshotRejected(t *testing.T) {
 		name        string
 		yamlContent string
 	}{
-		{"unknown measurement type", "kind: Snapshot\nmeasurements:\n  - type: Bogus\n"},
-		{"whitespace-only measurement type", "kind: Snapshot\nmeasurements:\n  - type: \"  \"\n"},
-		{"recognized type without content", "kind: Snapshot\nmeasurements:\n  - type: K8s\n"},
+		{"unknown measurement type", "kind: Snapshot\napiVersion: aicr.run/v1\nmeasurements:\n  - type: Bogus\n"},
+		{"whitespace-only measurement type", "kind: Snapshot\napiVersion: aicr.run/v1\nmeasurements:\n  - type: \"  \"\n"},
+		{"recognized type without content", "kind: Snapshot\napiVersion: aicr.run/v1\nmeasurements:\n  - type: K8s\n"},
 	}
 
 	for _, tt := range tests {
@@ -770,7 +770,7 @@ func TestRecipeCmd_UnusableSnapshotWithOverrideProceeds(t *testing.T) {
 	dir := t.TempDir()
 	snapFile := filepath.Join(dir, "snapshot.yaml")
 	// A recognized-but-empty K8s measurement yields criteria(any) on its own.
-	if err := os.WriteFile(snapFile, []byte("kind: Snapshot\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
+	if err := os.WriteFile(snapFile, []byte("kind: Snapshot\napiVersion: aicr.run/v1\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
 		t.Fatalf("failed to write test snapshot file: %v", err)
 	}
 

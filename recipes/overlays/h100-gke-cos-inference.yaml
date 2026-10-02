@@ -60,10 +60,14 @@ spec:
         topologyUpdater:
           enable: true
 
-    # Runtime AI-workload inventory (ADR-019, amendment section C). This is the
-    # single stock recipe in scope for k8s-aibom; do not lift it to
-    # gke-cos-inference, gke-cos, or base. Namespace opt-in is the chart
-    # default, so nothing is inventoried until an operator labels a namespace
+    # Runtime AI-workload inventory (ADR-019, amendment section C). This is
+    # the only stock recipe that carries the component by default; do not
+    # lift it to gke-cos-inference, gke-cos, or base -- that would default
+    # every descendant into the component instead of leaving adoption to
+    # explicit per-recipe opt-in. Any GKE recipe can now receive the
+    # component that way, with `aicr recipe --runtime-inventory enabled`
+    # (#2962). Namespace opt-in is the chart default, so nothing is
+    # inventoried until an operator labels a namespace
     # aibom.k8saibom.dev/enabled=true. Decline at generation time with
     # `aicr recipe --runtime-inventory disabled`.
     - name: k8s-aibom

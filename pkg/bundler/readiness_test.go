@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const validReadinessTestYAML = `apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -86,7 +87,7 @@ func TestValidateReadinessTestYAML(t *testing.T) {
 
 func TestCollectComponentReadiness(t *testing.T) {
 	tmpData := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), []byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile registry.yaml: %v", err)
 	}
 	compDir := filepath.Join(tmpData, "components", "gpu-operator")
@@ -148,6 +149,60 @@ func TestCollectComponentReadiness(t *testing.T) {
 		}
 		if !strings.Contains(s, "ghcr.io/nvidia/aicr-gate:v0.13.0") {
 			t.Errorf("missing normalized gate image tag:\n%s", s)
+		}
+	})
+
+	// #2590: on a cluster whose every node is tainted, a gate without the
+	// bundle's system tolerations is unschedulable and never reports. The
+	// keyless tolerate-all default is not carried: it would also tolerate
+	// not-ready, unreachable and cordoned nodes.
+	t.Run("system node scheduling reaches the gate Job", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig(
+			config.WithReadinessHooks(true),
+			config.WithDeployer(config.DeployerArgoCDHelm),
+			config.WithSystemNodeSelector(map[string]string{"node.dgxc.nvidia.com/dedicated": "system-workload"}),
+			config.WithSystemNodeTolerations([]corev1.Toleration{
+				{Operator: corev1.TolerationOpExists},
+				{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+			}),
+		)))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		got, err := b.collectComponentReadiness(context.Background(), rr)
+		if err != nil {
+			t.Fatalf("collectComponentReadiness: %v", err)
+		}
+		body := string(got["gpu-operator"][readinessManifestKey])
+		for _, want := range []string{
+			"      nodeSelector:\n        node.dgxc.nvidia.com/dedicated: system-workload\n",
+			"      tolerations:\n      - effect: NoSchedule\n        key: CriticalAddonsOnly\n        operator: Exists\n      containers:\n",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("gate manifest missing %q:\n%s", want, body)
+			}
+		}
+	})
+
+	// An invalid system scheduling value is the user's input, not a
+	// readiness.yaml defect, so the error names where it came from.
+	t.Run("invalid system node scheduling names its source", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig(
+			config.WithReadinessHooks(true),
+			config.WithDeployer(config.DeployerHelm),
+			config.WithSystemNodeTolerations([]corev1.Toleration{{
+				Key: "dedicated", Operator: corev1.TolerationOpExists, Value: "system",
+			}}),
+		)))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		_, err = b.collectComponentReadiness(context.Background(), rr)
+		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("collectComponentReadiness error = %v, want ErrCodeInvalidRequest", err)
+		}
+		if !strings.Contains(err.Error(), "--system-node-toleration") {
+			t.Errorf("error does not name the source flag: %v", err)
 		}
 	})
 
@@ -284,7 +339,7 @@ func TestCollectComponentReadiness(t *testing.T) {
 
 	t.Run("malformed test rejected", func(t *testing.T) {
 		badDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(badDir, "registry.yaml"), []byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(badDir, "registry.yaml"), []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("WriteFile registry.yaml: %v", err)
 		}
 		badComp := filepath.Join(badDir, "components", "gpu-operator")
@@ -706,7 +761,7 @@ func TestBuildDeployer_ReadinessHooksUnsupportedDeployer(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}}}
-	_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+	_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 	if err == nil {
 		t.Fatal("expected error for flux + readiness-hooks")
 	}

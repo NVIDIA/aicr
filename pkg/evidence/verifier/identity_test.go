@@ -32,7 +32,7 @@ import (
 // "satisfies" a fabricated profile ubuntu=training).
 func TestCheckRecipeIdentity(t *testing.T) {
 	const recipeYAML = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 criteria:
   service: eks
   accelerator: gb200
@@ -125,7 +125,7 @@ criteria:
 // checkRecipeIdentity).
 func TestCheckRecipeIdentity_ProfileBinding(t *testing.T) {
 	const recipeYAML = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: gpuStack
@@ -240,7 +240,7 @@ func TestCheckRecipeIdentity_RecipeSwapAfterInventoryRejected(t *testing.T) {
 	// Swap: replace the caller-owned recipe.yaml with recipe B and present
 	// a predicate that matches B exactly.
 	const recipeB = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 criteria:
   service: gke
   accelerator: h100
@@ -285,7 +285,7 @@ criteria:
 // this same swap would fail under those types.
 func TestCheckRecipeIdentity_V3IgnoresMetadataVersion(t *testing.T) {
 	const recipeV1 = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: 1.0.0
 criteria:
@@ -295,7 +295,7 @@ criteria:
   intent: training
 `
 	const recipeV2 = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: 2.0.0
 criteria:

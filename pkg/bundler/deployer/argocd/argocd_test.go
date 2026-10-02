@@ -320,6 +320,60 @@ func snippetAround(haystack, needle string) string {
 	return haystack[i:end]
 }
 
+// TestGenerate_UpgradeNotice covers a non-empty notice. The README has no
+// golden, so the empty case asserts the Components table still runs straight
+// into Prerequisites.
+func TestGenerate_UpgradeNotice(t *testing.T) {
+	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
+	tests := []struct {
+		name   string
+		notice string
+	}{
+		{"empty", ""},
+		{"set", notice},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			g := newTestGenerator(t)
+			g.UpgradeNotice = tt.notice
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			readme := string(readBundleFile(t, outputDir, "README.md"))
+			if tt.notice == "" {
+				if strings.Contains(readme, "Before You Upgrade") {
+					t.Errorf("README rendered an upgrade notice that was not set:\n%s", readme)
+				}
+				if !strings.Contains(readme, "|\n\n## Prerequisites") {
+					t.Errorf("Components table must be followed by one blank line and Prerequisites:\n%s", readme)
+				}
+				return
+			}
+			assertUpgradeNoticePlacement(t, readme, tt.notice, "## Components", "## Prerequisites")
+		})
+	}
+}
+
+// assertUpgradeNoticePlacement checks that notice sits after afterHeading, has
+// exactly one blank line before it, and is directly followed by beforeHeading.
+func assertUpgradeNoticePlacement(t *testing.T, readme, notice, afterHeading, beforeHeading string) {
+	t.Helper()
+	idx := strings.Index(readme, notice)
+	if idx < 0 {
+		t.Fatalf("README missing upgrade notice:\n%s", readme)
+	}
+	if after := strings.Index(readme, afterHeading); after < 0 || after > idx {
+		t.Errorf("upgrade notice must follow %q:\n%s", afterHeading, readme)
+	}
+	if !strings.HasPrefix(readme[idx+len(notice):], beforeHeading) {
+		t.Errorf("upgrade notice must directly precede %q:\n%s", beforeHeading, readme)
+	}
+	if prefix := readme[:idx]; !strings.HasSuffix(prefix, "\n\n") || strings.HasSuffix(prefix, "\n\n\n") {
+		t.Errorf("want exactly one blank line before the upgrade notice:\n%s", readme)
+	}
+}
+
 func TestGenerate_NilRecipeResult(t *testing.T) {
 	g := &Generator{
 		Version: "v0.9.0",
@@ -2227,6 +2281,7 @@ metadata:
   name: gpu-operator-readiness
 `),
 		deployer,
+		gatemanifest.Placement{},
 	)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -2571,126 +2626,5 @@ func TestGenerate_ApplyOutOfSyncOnlySyncOptions(t *testing.T) {
 	}
 	if !strings.Contains(string(readiness), "- ApplyOutOfSyncOnly=true") {
 		t.Errorf("readiness Application must contain \"- ApplyOutOfSyncOnly=true\":\n%s", readiness)
-	}
-}
-
-// TestGenerate_IgnoreComputeDomainCRDDiff asserts the gpu-operator
-// Application carries the computedomains ignoreDifferences stopgap only
-// when the bundle also ships a standalone DRA driver component. See
-// NVIDIA/aicr#2546.
-func TestGenerate_IgnoreComputeDomainCRDDiff(t *testing.T) {
-	computeDomainJSONPointers := []string{
-		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/required",
-		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/default",
-		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/minimum",
-		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/description",
-	}
-
-	tests := []struct {
-		name           string
-		draDriverName  string // "" = no DRA driver component in the bundle
-		gpuOperatorPin string // "" = v26.7.0, the first version shipping the contested CRD
-		wantIgnore     bool
-	}{
-		{name: "gpu-operator alone", draDriverName: "", wantIgnore: false},
-		{name: "gpu-operator with nvidia-dra-driver-gpu", draDriverName: "nvidia-dra-driver-gpu", wantIgnore: true},
-		{name: "gpu-operator with nvidia-dra-driver-gpu-ocp", draDriverName: "nvidia-dra-driver-gpu-ocp", wantIgnore: true},
-		// Version gate: below v26.7.0 gpu-operator's chart ships no
-		// computedomains CRD, so there is nothing to arbitrate and the
-		// Application-wide RespectIgnoreDifferences must not be emitted.
-		{name: "gpu-operator v26.3.3 with DRA driver", draDriverName: "nvidia-dra-driver-gpu", gpuOperatorPin: "v26.3.3", wantIgnore: false},
-		{name: "gpu-operator v27.0.0 with DRA driver", draDriverName: "nvidia-dra-driver-gpu", gpuOperatorPin: "v27.0.0", wantIgnore: true},
-		// A non-semver pin cannot be ordered against the threshold; the
-		// guard fails open so a custom chart still gets the mitigation.
-		{name: "gpu-operator unparseable pin with DRA driver", draDriverName: "nvidia-dra-driver-gpu", gpuOperatorPin: "custom-build", wantIgnore: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gpuOperatorPin := tt.gpuOperatorPin
-			if gpuOperatorPin == "" {
-				gpuOperatorPin = "v26.7.0"
-			}
-			componentRefs := []recipe.ComponentRef{
-				{
-					Name:      "gpu-operator",
-					Namespace: "gpu-operator",
-					Chart:     "gpu-operator",
-					Version:   gpuOperatorPin,
-					Type:      recipe.ComponentTypeHelm,
-					Source:    "https://helm.ngc.nvidia.com/nvidia",
-				},
-			}
-			deploymentOrder := []string{"gpu-operator"}
-			componentValues := map[string]map[string]any{"gpu-operator": {}}
-			if tt.draDriverName != "" {
-				componentRefs = append(componentRefs, recipe.ComponentRef{
-					Name:      tt.draDriverName,
-					Namespace: "nvidia-dra-driver",
-					Chart:     "dra-driver-nvidia-gpu",
-					Version:   "0.5.0",
-					Type:      recipe.ComponentTypeHelm,
-					Source:    "oci://registry.k8s.io/dra-driver-nvidia/charts",
-				})
-				deploymentOrder = append(deploymentOrder, tt.draDriverName)
-				componentValues[tt.draDriverName] = map[string]any{}
-			}
-
-			recipeResult := &recipe.RecipeResult{}
-			recipeResult.Metadata.Version = testVersion
-			recipeResult.ComponentRefs = componentRefs
-			recipeResult.DeploymentOrder = deploymentOrder
-
-			g := &Generator{
-				RecipeResult:    recipeResult,
-				ComponentValues: componentValues,
-				Version:         "v0.0.0-test",
-				RepoURL:         "https://github.com/example/aicr-bundles.git",
-				TargetRevision:  "main",
-			}
-
-			ctx := context.Background()
-			outputDir := t.TempDir()
-			if _, err := g.Generate(ctx, outputDir); err != nil {
-				t.Fatalf("Generate() error = %v", err)
-			}
-
-			app, err := os.ReadFile(filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
-			if err != nil {
-				t.Fatalf("read gpu-operator application.yaml: %v", err)
-			}
-			got := string(app)
-
-			if !tt.wantIgnore {
-				if strings.Contains(got, "RespectIgnoreDifferences") || strings.Contains(got, "ignoreDifferences") {
-					t.Errorf("gpu-operator Application without a DRA driver component must not mention ignoreDifferences:\n%s", got)
-				}
-				return
-			}
-
-			if !strings.Contains(got, "- RespectIgnoreDifferences=true") {
-				t.Errorf("gpu-operator Application must contain \"- RespectIgnoreDifferences=true\":\n%s", got)
-			}
-			if !strings.Contains(got, "name: computedomains.resource.nvidia.com") {
-				t.Errorf("gpu-operator Application must ignoreDifferences on computedomains.resource.nvidia.com:\n%s", got)
-			}
-			for _, pointer := range computeDomainJSONPointers {
-				if !strings.Contains(got, pointer) {
-					t.Errorf("gpu-operator Application must ignore jsonPointer %q:\n%s", pointer, got)
-				}
-			}
-
-			// F6: the ignoreDifferences stopgap must be scoped to gpu-operator's own
-			// Application only — the DRA driver's Application must not carry it, or
-			// the DRA driver's schema would no longer be authoritative. See #2546.
-			draApp, err := os.ReadFile(filepath.Join(outputDir, "002-"+tt.draDriverName, "application.yaml"))
-			if err != nil {
-				t.Fatalf("read %s application.yaml: %v", tt.draDriverName, err)
-			}
-			gotDRA := string(draApp)
-			if strings.Contains(gotDRA, "RespectIgnoreDifferences") || strings.Contains(gotDRA, "ignoreDifferences") {
-				t.Errorf("%s Application must not mention ignoreDifferences:\n%s", tt.draDriverName, gotDRA)
-			}
-		})
 	}
 }

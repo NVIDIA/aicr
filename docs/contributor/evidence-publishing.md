@@ -14,6 +14,78 @@ a specific cluster existed). Producing it has two legs:
 The two legs need different network access, and the signing leg is the one
 contributors most often can't complete locally.
 
+## Validator image provenance
+
+**On a release or merged-`main` build, pass no `AICR_VALIDATOR_IMAGE_TAG`.**
+The binary already resolves an immutable validator tag on its own — `:vX.Y.Z`
+for a release build, `:sha-<commit>` for a `main`-tip build — and the override
+replaces it unconditionally, including over a release tag.
+
+That matters more here than in an ordinary validate run, because the predicate
+identifies the validators that ran by *tag alone*: `validatorImages[].digest`
+is deliberately empty (resolving it would cost a registry round-trip per
+image), so a moving tag leaves the attestation with nothing to fall back on.
+Once `:edge` advances, the bundle's claim about which validator code produced
+its results is no longer true, and nothing in the bundle records that. This is
+not hypothetical — `:edge` has been observed moving to a commit with a breaking
+rename about 75 minutes after a run it was recorded in, and moving twice within
+a single working session ([#2873](https://github.com/NVIDIA/aicr/issues/2873)).
+
+`aicr validate --emit-attestation` therefore **fails closed** on a mutable
+validator tag:
+
+```text
+[INVALID_REQUEST] refusing to emit evidence naming validator images that are not
+immutably pinned: ghcr.io/nvidia/aicr-validators/performance:edge: validator
+image tag can be repointed after the run, leaving the attestation unverifiable
+```
+
+(One line in the terminal; wrapped here.)
+
+A reference qualifies two ways, and only two:
+
+1. **It is digest-pinned** (`name@sha256:…`), from any registry. A digest is
+   self-verifying, so no promise about the publisher is needed.
+2. **It carries a tag AICR's CI freezes _and_ lives under
+   `ghcr.io/nvidia/aicr-validators/`** — `:vX.Y.Z` and its pre-releases
+   (`on-tag.yaml`), `:sha-<full-40-char-commit>` (`on-push.yaml`), or
+   `:uat-<run-id>` (the UAT lanes).
+
+The second half of that is the part worth internalizing: **tag syntax is not
+proof of immutability.** `example.com/validators/performance:v1.0.0` looks
+exactly like a release pin and means nothing — no workflow in this repository
+governs how that registry moves its tags, and it may repoint `:v1.0.0`
+whenever it likes. The same applies to a mirror of NVIDIA's own images reached
+via `AICR_VALIDATOR_IMAGE_REGISTRY`, and to any validator supplied by an
+external catalog. Those must be pinned by digest to vouch for provenance.
+
+Everything else is mutable: `:edge`, `:latest`, a bare `:1.0.0` with no `v`, a
+leading-zero `:v01.0.0`, a short `:sha-` prefix, an untagged ref, and any tag
+or registry the allowlist does not recognize. It is an allowlist precisely so
+a shape nobody anticipated fails closed rather than slipping through.
+
+Use `:edge` only when `:sha-<commit>` is genuinely unpublished (a
+feature-branch build, or right after a docs-only merge to `main`, which
+publishes no image). Check before assuming it is:
+
+```shell
+crane digest ghcr.io/nvidia/aicr-validators/performance:sha-$(git rev-parse origin/main)
+```
+
+If it resolves, drop the override and re-run — that is all the correction
+takes. When you genuinely must publish with a moving tag, pass
+`--allow-mutable-validator-tags` and **say so in the PR body**, naming which
+tag and why no immutable one was available. A reviewer cannot otherwise tell a
+deliberate exception from an override left over from a previous command.
+
+On the CLI the opt-out is a flag only — no environment variable, no
+config-file key. That is deliberate: an override exported once for a throwaway
+run is exactly how `:edge` reached committed evidence in the first place, and a
+guard that can be switched off by an inherited variable is not a guard. (Go
+callers set `EvidenceOptions.AllowMutableValidatorTags` explicitly, which is
+the same deliberate per-call act — see the
+[Go library guide](../integrator/go-library.md#what-evidenceattestationoptions-does-and-does-not-carry).)
+
 ## The Fulcio connectivity problem
 
 Keyless signing reaches `fulcio.sigstore.dev` and `rekor.sigstore.dev`.
@@ -54,7 +126,10 @@ declaration default and `aicr validate` has no `--profile` flag:
 # AKS only: capture the pool projection first.
 az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json
 aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml
-# GKE: a plain `aicr snapshot -o snapshot.yaml` suffices.
+# GKE gke-default: a plain `aicr snapshot -o snapshot.yaml` suffices.
+# GKE bundle-installer: also capture the pool projection.
+#   gcloud container node-pools list --cluster <cluster> --format=json > pools.json
+#   aicr snapshot --gke-gpu-pools pools.json -o snapshot.yaml
 aicr recipe -s snapshot.yaml \
   --intent <training|inference> \
   --profile gpuStack=<value> \
@@ -66,8 +141,10 @@ aicr validate -r recipe.yaml -s snapshot.yaml ... # rest as above
 
 On AKS, capture the snapshot with the pool projection (resolution fails
 closed without the `K8s.aks-gpu-pools.gpu-driver` reading); on GKE the
-plain snapshot already carries the node labels the profile constraints
-read. Then hydrate the recipe with the target leaf's criteria AND the
+plain snapshot already carries the node labels `gke-default`'s constraint
+reads, but `bundle-installer` also needs the `--gke-gpu-pools` projection
+(resolution fails closed without the `K8s.gke-gpu-pools.gpu-driver-installation`
+reading). Then hydrate the recipe with the target leaf's criteria AND the
 profile selection, and validate that recipe. A v2 pointer records its
 selection in a `profile:` field — replay it verbatim. Legacy v1 pointers
 (`schemaVersion: 1.0.0`, e.g. the pre-profile `h100-gke-cos-training`

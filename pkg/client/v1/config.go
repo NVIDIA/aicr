@@ -528,7 +528,12 @@ type ValidateSettings struct {
 	Tolerations        []corev1.Toleration
 	RequireGPU         bool
 	Phases             []Phase
-	NoCluster          bool
+
+	// SkipChecks is spec.validate.execution.skipChecks verbatim. It reaches
+	// ValidateState through WithValidationSkipChecks.
+	SkipChecks []string
+
+	NoCluster bool
 
 	// Cleanup is INVERTED against spec.validate.execution.noCleanup. The
 	// config field says "do not clean up"; this says "clean up". Passing it
@@ -640,6 +645,7 @@ func (c *Config) ValidateSettings() (ValidateSettings, bool, error) {
 		Tolerations:        resolved.Tolerations,
 		RequireGPU:         resolved.RequireGPU,
 		Phases:             phases,
+		SkipChecks:         resolved.SkipChecks,
 		NoCluster:          resolved.NoCluster,
 		// Inverted on purpose. See the field godoc.
 		Cleanup:  !resolved.NoCleanup,
@@ -908,8 +914,8 @@ func (c *Config) CNCFEvidenceOptions() (CNCFEvidenceOptions, error) {
 //
 // Callers deliver with snapshotter.DeliverSnapshot, passing Snapshot.Raw.
 //
-// Kubeconfig, Debug, ClusterConfigPath, AKSGPUPoolsPath, DiscoverNetwork,
-// RunID and NameBase are left at their zero values. None has a spec.snapshot
+// Kubeconfig, Debug, ClusterConfigPath, AKSGPUPoolsPath, GKEGPUPoolsPath,
+// DiscoverNetwork, RunID and NameBase are left at their zero values. None has a spec.snapshot
 // counterpart — they are per-invocation or caller-owned. NameBase in
 // particular carries the "aicr" default prefix that lets an unset job name
 // stay empty while deployed objects keep their released names, which is a

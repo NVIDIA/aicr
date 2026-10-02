@@ -49,9 +49,16 @@ is closed. Artifact maturity and the project's v1 release remain separate axes.
   surface, and bundle layout/artifact schemas each have a committed baseline.
 - Compatibility checks for all four surfaces run in `make qualify` and the
   merge gate.
-- An integrator can implement the complete workflow using
-  `github.com/NVIDIA/aicr/pkg/client/v1` plus standard-library and explicitly
-  stable third-party types, without importing another AICR `pkg/*` package.
+- An integrator can implement the snapshot, recipe, bundle, validate, and
+  recipe-evidence workflow using `github.com/NVIDIA/aicr/pkg/client/v1` plus
+  standard-library and explicitly stable third-party types, without importing
+  another AICR `pkg/*` package. CNCF AI Conformance evidence emission is the
+  one documented exception: it is reachable only through the CLI, which calls
+  `pkg/evidence/cncf` directly. The gap is recorded in
+  `tests/architecture/facade-policy.yaml` and tracked by
+  [#2561](https://github.com/NVIDIA/aicr/issues/2561). Closing it adds exported
+  identifiers to the facade, which is additive under the table in `RELEASE.md`
+  and therefore does not require the v1 tag.
 - `RELEASE.md` defines breaking changes and the deprecation policy for every
   surface. Breaking changes after v1 require a major version bump.
 
@@ -103,6 +110,14 @@ the remaining fabric-runtime parity work is tracked by
   independently constructed test fixture.
 - The evidence for the declared v1 matrix is readable and independently
   verifiable through <https://validation.aicr.run/>.
+- Evidence trust class is **not** part of the Supported definition for v1.
+  Every committed pointer under `recipes/evidence/` today is `community`
+  class — signed by a contributor identity pinned in
+  `recipes/evidence/allowlist.yaml` and admitted by maintainer review — and
+  none is `first-party`. That includes both Supported GB300 coordinates.
+  Requiring first-party attestation for Supported is a post-v1 tightening,
+  not a v1 exit gate; what v1 commits to is that the signer is recorded,
+  allowlisted, and verifiable.
 
 ## Established foundations
 

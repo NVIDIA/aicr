@@ -588,3 +588,150 @@ func firstContainerImage(t *testing.T, podSpec map[string]interface{}) string {
 	image, _, _ := unstructured.NestedString(c, "image")
 	return image
 }
+
+// claimRuntime returns a supplied runtime whose "node" job (or, when onLauncher
+// is set, a "launcher" job) carries the given pod-level resourceClaims block.
+func claimRuntime(claims string, onLauncher bool) string {
+	job := "node"
+	if onLauncher {
+		job = "launcher"
+	}
+	rt := `apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: supplied
+spec:
+  template:
+    spec:
+      replicatedJobs:
+        - name: ` + job + `
+          template:
+            spec:
+              template:
+                spec:
+` + claims + `
+                  containers:
+                    - name: node
+                      image: example.com/nccl:latest
+`
+	if onLauncher {
+		rt += `        - name: node
+          template:
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: example.com/nccl:latest
+`
+	}
+	return rt
+}
+
+func TestCustomRuntimeManagesIMEX(t *testing.T) {
+	imexClaim := `                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimTemplateName: ` + ncclIMEXClaimTemplateName
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+		wantErr string
+	}{
+		{"empty runtime", "", false, ""},
+		{"no resourceClaims", validBenchmarkRuntime, false, ""},
+		{"validator-managed IMEX template on node job", claimRuntime(imexClaim, false), true, ""},
+		{"validator-managed IMEX template on launcher job", claimRuntime(imexClaim, true), true, ""},
+		{"other template is unsatisfiable", claimRuntime(`                  resourceClaims:
+                    - name: nic
+                      resourceClaimTemplateName: my-nics`, false), false, `ResourceClaimTemplate "my-nics"`},
+		{"named claim is unsatisfiable", claimRuntime(`                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimName: precreated-imex`, false), false, `ResourceClaim "precreated-imex"`},
+		{"malformed resourceClaims", claimRuntime(`                  resourceClaims: not-a-list`, false), false, "malformed resourceClaims"},
+		{"malformed resourceClaims entry", claimRuntime(`                  resourceClaims:
+                    - just-a-string`, false), false, "malformed resourceClaims entry"},
+		{"non-string resourceClaimTemplateName", claimRuntime(`                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimTemplateName: 123`, false), false, "malformed resourceClaimTemplateName"},
+		{"non-string resourceClaimName", claimRuntime(`                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimName: [a]`, false), false, "malformed resourceClaimName"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := customRuntimeManagesIMEX(tt.content)
+			if tt.wantErr != "" {
+				if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("want ErrCodeInvalidRequest containing %q, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("customRuntimeManagesIMEX = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestApplyNCCLResourcesCustomRuntimeIMEX pins #2569: a supplied runtime that
+// references the validator-managed IMEX template gets its ComputeDomain in the
+// per-run namespace on any variant (the observed failure was the default
+// variant), and one that does not gets none.
+func TestApplyNCCLResourcesCustomRuntimeIMEX(t *testing.T) {
+	const ns = "aicr-nccl-perf-default-abc123"
+	imexRuntime := claimRuntime(`                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimTemplateName: `+ncclIMEXClaimTemplateName, false)
+
+	tests := []struct {
+		name    string
+		runtime string
+		variant ncclVariant
+		wantCD  bool
+	}{
+		{"default variant: IMEX reference provisions ComputeDomain", imexRuntime, variantDefault, true},
+		{"default variant: no claim reference provisions nothing", validBenchmarkRuntime, variantDefault, false},
+		{"nvls variant: IMEX reference provisions ComputeDomain", imexRuntime, variantNVLS, true},
+		{"nvls variant: no claim reference provisions nothing", validBenchmarkRuntime, variantNVLS, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			managed, err := customRuntimeManagesIMEX(tt.runtime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := &benchmarkRuntimePlan{carrier: tt.runtime, source: runtimeSourceRecipeSupplied, managedIMEX: managed}
+			fakeClient := newFakeDynamicClient()
+			// Stand in for the DRA driver, which reconciles the ComputeDomain
+			// into this template; the wait then takes its fast path.
+			rct := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "resource.k8s.io/v1",
+				"kind":       "ResourceClaimTemplate",
+				"metadata":   map[string]any{"name": ncclIMEXClaimTemplateName, "namespace": ns},
+			}}
+			if _, cerr := fakeClient.Resource(resourceClaimTemplateGVR).Namespace(ns).Create(context.Background(), rct, metav1.CreateOptions{}); cerr != nil {
+				t.Fatal(cerr)
+			}
+			ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient, Namespace: ns}
+			config := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8, Namespace: ns}
+			if aerr := applyNCCLResources(ctx, fakeClient, config,
+				recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2, tt.variant, fabricEFA,
+				tt.runtime, "", plan); aerr != nil {
+				t.Fatalf("applyNCCLResources failed: %v", aerr)
+			}
+			_, err = fakeClient.Resource(computeDomainGVR).Namespace(ns).
+				Get(context.Background(), ncclComputeDomainName, metav1.GetOptions{})
+			if gotCD := err == nil; gotCD != tt.wantCD {
+				t.Errorf("ComputeDomain present = %v, want %v (get err: %v)", gotCD, tt.wantCD, err)
+			}
+			if _, terr := fakeClient.Resource(trainJobGVR).Namespace(ns).
+				Get(context.Background(), ncclTrainJobName, metav1.GetOptions{}); terr != nil {
+				t.Errorf("TrainJob not applied after IMEX provisioning: %v", terr)
+			}
+		})
+	}
+}

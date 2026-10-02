@@ -239,7 +239,7 @@ fi
 # evaluate the case the harness is actually exercising.
 cat > "${WORK_DIR}/recipe.yaml" <<EOF
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: component-test
 criteria:

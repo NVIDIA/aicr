@@ -43,10 +43,11 @@ func LoadFromFile(ctx context.Context, path string) (*Snapshot, error) {
 //   - A non-empty kind other than Snapshot (e.g. AICRConfig) is the wrong
 //     document type. An empty kind is tolerated because older snapshots predate
 //     the field.
-//   - A non-empty apiVersion this build does not understand means the snapshot
-//     came from an incompatible aicr version, so we fail closed rather than
-//     risk a schema mismatch during validation. An empty apiVersion is
-//     tolerated for the same backward-compatibility reason.
+//   - An apiVersion this build does not understand means the snapshot came
+//     from an incompatible aicr version, so we fail closed rather than risk a
+//     schema mismatch during validation. Empty counts as not understood: that
+//     tolerance retired at ADR-022 N+2 (#2417), unlike the empty-kind one
+//     above, which survives.
 //   - A document with no usable measurement — regardless of kind — cannot be
 //     distinguished from empty cluster state and would still derive
 //     criteria(any). A measurement is usable only if it is non-nil and carries
@@ -67,13 +68,16 @@ func LoadFromFileWithKubeconfig(ctx context.Context, path, kubeconfig string) (*
 				path, snap.Kind, header.KindSnapshot))
 	}
 
-	if snap.APIVersion != "" && !header.IsSupportedAPIVersion(snap.APIVersion) {
+	// Naming the file matters more here than it looks: a catalog scan reads many
+	// snapshots, and this is the error the retired WarnDeprecatedAPIVersion used
+	// to carry that information in. The two sibling errors above and below name
+	// it for the same reason.
+	if !header.IsSupportedAPIVersion(snap.APIVersion) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("snapshot file has apiVersion %q, which this aicr build does not support (expected %q or %q); "+
-				"recapture the snapshot with a matching aicr version",
-				snap.APIVersion, header.GroupVersion, header.GroupVersionV1))
+			fmt.Sprintf("file %q has apiVersion %q, which this aicr build does not support%s; "+
+				"expected %q — recapture the snapshot with a matching aicr version",
+				path, snap.APIVersion, header.RetirementNoteWithAbsent(snap.APIVersion), header.GroupVersionV1))
 	}
-	header.WarnDeprecatedAPIVersion(path, snap.APIVersion, header.GroupVersionV1)
 
 	usable := 0
 	for _, m := range snap.Measurements {

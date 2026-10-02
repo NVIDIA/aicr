@@ -87,20 +87,27 @@ func LoadFromFileWithProviderProfile(
 	// hydrated RecipeResult always carries a supported version).
 	inputAPIVersion := rec.APIVersion
 
+	// Reject a wrong kind before the version gate. A RecipeMixin or
+	// ComponentRegistry handed to --recipe carries a perfectly valid
+	// apiVersion for its own track, so gating on version first would answer a
+	// question the user did not ask ("v1beta1 is unsupported") and hide the one
+	// they need ("this is not a RecipeResult"). RecipeMetadata is exempt: it is
+	// a legitimate input that auto-hydrates below.
+	if rec.Kind != "" && rec.Kind != RecipeResultKind && rec.Kind != RecipeMetadataKind {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("recipe file has kind %q, but %q is required; "+
+				"run \"aicr recipe\" to generate a hydrated RecipeResult first",
+				rec.Kind, RecipeResultKind))
+	}
+
 	// Reject an artifact stamped with an apiVersion this build does not
 	// understand before an overlay can trigger provider-backed hydration.
-	// The accepted set is selected by wire kind/schema track; an empty value
-	// remains tolerated for pre-apiVersion RecipeResult files only, and is
-	// rejected for RecipeMetadata so this path agrees with the catalog scanner.
-	if versionErr := validateRecipeInputAPIVersion(rec.Kind, inputAPIVersion); versionErr != nil {
+	// The accepted set is selected by wire kind/schema track. Since ADR-022 N+2
+	// an empty value is rejected on every track, so this path and the catalog
+	// scanner agree by construction rather than by matching special cases.
+	if versionErr := validateRecipeInputAPIVersion(path, rec.Kind, inputAPIVersion); versionErr != nil {
 		return nil, versionErr
 	}
-	// Warned here rather than inside validateRecipeInputAPIVersion because the
-	// helper takes only kind and apiVersion, and a warning that cannot name the
-	// file is not the warning RELEASE.md promises.
-	header.WarnDeprecatedAPIVersion(path, inputAPIVersion,
-		deprecatedInputTarget(rec.Kind, inputAPIVersion))
-
 	// Users often pass overlay files directly; auto-hydrate so they don't need
 	// a separate "aicr recipe" step before consuming the recipe.
 	if rec.Kind == RecipeMetadataKind {
@@ -220,10 +227,10 @@ func LoadFromFileWithProviderProfile(
 // rejects; the two paths disagreeing on the same bytes was the fail-open seam
 // in #2421.
 //
-// The empty-value tolerance survives only for RecipeResult inputs, which
-// genuinely predate the apiVersion field. ADR-022 §3 retires that at Release
-// N+2 (#2417).
-func validateRecipeInputAPIVersion(kind, apiVersion string) error {
+// An empty value is rejected on every track. It was tolerated for RecipeResult
+// inputs, which genuinely predate the apiVersion field; ADR-022 §3 retired that
+// tolerance at Release N+2 (#2417).
+func validateRecipeInputAPIVersion(path, kind, apiVersion string) error {
 	if kind == RecipeMetadataKind {
 		if header.IsSupportedAuthoringAPIVersion(apiVersion) ||
 			header.IsSupportedProfileAPIVersion(apiVersion) {
@@ -231,37 +238,20 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 			return nil
 		}
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("recipe metadata file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
+			fmt.Sprintf("recipe metadata file %q has apiVersion %q%s, which this aicr build does not support (expected %q or %q); "+
 				"update the catalog header for this aicr release",
-				apiVersion, header.GroupVersion, header.GroupVersionV1Beta1,
-				header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
-	}
-
-	if apiVersion == "" {
-		return nil
+				path, apiVersion, header.RetirementNote(apiVersion),
+				header.GroupVersionV1Beta1, header.GroupVersionV1Beta2))
 	}
 
 	if header.IsSupportedRecipeResultAPIVersion(apiVersion) {
 		return nil
 	}
 	return errors.New(errors.ErrCodeInvalidRequest,
-		fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
+		fmt.Sprintf("recipe file %q has apiVersion %q%s, which this aicr build does not support (expected %q or %q); "+
 			"regenerate the recipe with a matching aicr version",
-			apiVersion, header.GroupVersion, header.GroupVersionV1,
-			header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
-}
-
-// deprecatedInputTarget is the §2 value a recipe input should carry, given its
-// wire kind and whatever it carries today. An alpha profile document keeps the
-// profile track (v1beta2); everything else follows its kind.
-func deprecatedInputTarget(kind, apiVersion string) string {
-	if apiVersion == header.RecipeResultGroupVersion {
-		return header.GroupVersionV1Beta2
-	}
-	if kind == RecipeMetadataKind {
-		return header.GroupVersionV1Beta1
-	}
-	return header.GroupVersionV1
+			path, apiVersion, header.RetirementNoteWithAbsent(apiVersion),
+			header.GroupVersionV1, header.GroupVersionV1Beta2))
 }
 
 // ensureDirectOverlayMixinsApplied rejects a directly-passed overlay whose

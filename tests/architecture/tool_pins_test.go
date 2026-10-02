@@ -15,8 +15,8 @@
 package architecture
 
 import (
-	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -200,6 +200,16 @@ func settingsString(t *testing.T, tree map[string]any, path []string) (string, b
 // A repo-wide scan rather than a list of known callers: the readers missed
 // were tools/setup-tools and tools/generate-notices, both extensionless
 // scripts that a *.sh glob does not match.
+//
+// Scope comes from git, not from walking the worktree. A walk also reads
+// whatever the developer happens to have on disk -- agent scratch
+// directories, extra git worktrees, editor caches, local virtualenvs -- and
+// reports their contents as defects in this repository. Those paths are
+// ignored precisely because they are not the repository, and a denylist of
+// directory basenames never keeps up with the next tool to invent one.
+// `--cached --others --exclude-standard` is the honest universe: everything
+// tracked plus everything untracked that is not ignored, so a brand-new
+// reader is still caught before it is staged.
 func TestNoFileReadsTheRemovedToolPins(t *testing.T) {
 	root := repoRoot(t)
 
@@ -208,47 +218,167 @@ func TestNoFileReadsTheRemovedToolPins(t *testing.T) {
 		"linting" + "." + "apidiff",
 		"linting" + "." + "go_licenses",
 	}
-	skipDirs := map[string]bool{
-		".git": true, "node_modules": true, "vendor": true, "dist": true, "bin": true,
-	}
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	const self = "tests/architecture/tool_pins_test.go"
+
+	// -z because a path may contain anything but NUL; the default listing
+	// quotes such paths instead, which would not resolve as a filename.
+	cmd := exec.Command("git", "-C", root, "ls-files", "--cached", "--others",
+		"--exclude-standard", "-z")
+	cmd.Env = gitScanEnv(t)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		// Without stderr this reports only "exit status 128", which is the
+		// same for a missing git, a non-repository, and a permission error.
+		t.Fatalf("git ls-files in %s: %v: %s", root, err, strings.TrimSpace(stderr.String()))
+	}
+	paths := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+
+	scanned := 0
+	for _, rel := range paths {
+		if rel == "" || rel == self {
+			continue
 		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
+		path := filepath.Join(root, rel)
+		info, statErr := os.Stat(path)
+		if statErr != nil || info.IsDir() || info.Size() > 1<<20 {
+			// Submodule gitlinks are directories, a tracked path may be
+			// deleted in the worktree, and an oversized file is not a
+			// hand-written pin reader.
+			continue
 		}
-		if path == filepath.Join(root, "tests", "architecture", "tool_pins_test.go") {
-			return nil
+		data, readErr := os.ReadFile(path) //nolint:gosec // repo-relative, from git ls-files
+		if readErr != nil {
+			continue
 		}
-		info, err := d.Info()
-		if err != nil || info.Size() > 1<<20 {
-			return nil //nolint:nilerr // unreadable or oversized files are not pin readers
-		}
-		data, err := os.ReadFile(path) //nolint:gosec // repo-relative walk
-		if err != nil {
-			return nil //nolint:nilerr // binaries and transient files are not pin readers
-		}
+		scanned++
 		for _, needle := range needles {
 			if !strings.Contains(string(data), needle) {
 				continue
-			}
-			rel, relErr := filepath.Rel(root, path)
-			if relErr != nil {
-				rel = path
 			}
 			t.Errorf("%s still references .settings.yaml %s, which no longer exists.\n"+
 				"yq prints \"null\" for a missing key and exits 0, so this reader gets the "+
 				"string \"null\" as a version rather than an error. Read the go.mod require "+
 				"line instead -- go_mod_required_version in tools/common does it.", rel, needle)
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
 	}
+
+	// Without this the scan passes vacuously when git is unavailable or the
+	// listing comes back empty, which is the one failure mode a grep-based
+	// guard cannot survive: it would report success having read nothing.
+	if scanned == 0 {
+		t.Fatal("git ls-files yielded no readable files; discovery is broken and this scan " +
+			"would pass without having examined anything")
+	}
+}
+
+// TestToolPinScanIgnoresInheritedGitDir pins the hazard gitScanEnv exists for:
+// an inherited GIT_DIR retargets `git -C root ls-files` at another repository,
+// and the scan above would then examine that repository's files and report a
+// clean result for this one.
+//
+// Both directions are asserted. Checking only that the sanitized listing is
+// correct would still pass if -C already beat the environment, leaving the
+// sanitizing dead code that no one could safely remove.
+func TestToolPinScanIgnoresInheritedGitDir(t *testing.T) {
+	root := repoRoot(t)
+
+	// A decoy repository holding exactly one file, so a hijacked listing is
+	// unmistakable rather than merely different.
+	//
+	// Build it with the sanitized environment too. These commands run before
+	// the t.Setenv calls below, but the ambient environment may already carry
+	// GIT_DIR -- which is the situation this test exists for. `git init` would
+	// then initialize that repository instead of the decoy, and worse, `git
+	// config` would write into it: a test leaving its fixture's identity in
+	// the developer's real repository.
+	cleanEnv := gitScanEnv(t)
+	decoy := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "test"},
+	} {
+		setup := exec.Command("git", append([]string{"-C", decoy}, args...)...)
+		setup.Env = cleanEnv
+		if out, err := setup.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in decoy: %v: %s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(decoy, "decoy.txt"), []byte("decoy\n"), 0o600); err != nil {
+		t.Fatalf("write decoy file: %v", err)
+	}
+
+	t.Setenv("GIT_DIR", filepath.Join(decoy, ".git"))
+	t.Setenv("GIT_WORK_TREE", decoy)
+
+	list := func(env []string) string {
+		t.Helper()
+		cmd := exec.Command("git", "-C", root, "ls-files", "--cached", "--others",
+			"--exclude-standard", "-z")
+		cmd.Env = env
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git ls-files: %v", err)
+		}
+		return string(out)
+	}
+
+	// The environment wins over -C: without sanitizing, the scan reads the
+	// decoy. If this stops holding, gitScanEnv is no longer load-bearing.
+	if raw := list(os.Environ()); strings.Contains(raw, "go.mod") {
+		t.Error("an inherited GIT_DIR no longer retargets the listing, so gitScanEnv " +
+			"guards nothing; confirm before deleting it")
+	}
+
+	if sanitized := list(gitScanEnv(t)); !strings.Contains(sanitized, "go.mod") {
+		t.Error("sanitized listing does not contain go.mod, so the scan is still reading " +
+			"the repository the environment points at rather than the one under test")
+	}
+}
+
+// gitScanEnv returns the process environment with git's repository-local
+// variables stripped, so `git -C root` resolves the repository by ordinary
+// discovery from root.
+//
+// -C only changes the directory git starts in. GIT_DIR, GIT_WORK_TREE,
+// GIT_INDEX_FILE and their siblings override discovery outright and win over
+// it. Git sets several of them for hooks, and `git bisect run`, `git rebase
+// --exec`, and CI wrappers all propagate them into child processes -- so a
+// scan inheriting them silently reads a different repository. Measured here:
+// an inherited GIT_DIR took the listing from 2523 files to 1, which this test
+// would then have reported as a clean scan.
+//
+// The names come from git rather than a literal list, for the same reason the
+// scan above no longer keeps a literal list of directories to skip: the set
+// grows, and `git rev-parse --local-env-vars` is the maintained answer. It
+// reports names only, needing no repository of its own, so it is safe to call
+// before the environment has been cleaned.
+func gitScanEnv(t *testing.T) []string {
+	t.Helper()
+
+	out, err := exec.Command("git", "rev-parse", "--local-env-vars").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --local-env-vars: %v", err)
+	}
+	local := make(map[string]bool)
+	for name := range strings.FieldsSeq(string(out)) {
+		local[name] = true
+	}
+	if len(local) == 0 {
+		t.Fatal("git rev-parse --local-env-vars named nothing; the sanitizing step below " +
+			"would be a no-op and an inherited GIT_DIR would retarget the scan")
+	}
+
+	env := os.Environ()
+	kept := make([]string, 0, len(env))
+	for _, entry := range env {
+		if name, _, ok := strings.Cut(entry, "="); ok && local[name] {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
 }

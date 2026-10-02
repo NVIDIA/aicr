@@ -85,7 +85,7 @@ Every handler is an adapter. The shape, in order:
 2. **Per-handler context timeout.** `context.WithTimeout(r.Context(), defaults.RecipeHandlerTimeout)` (30s) or `BundleHandlerTimeout` (60s). All must be ≤ `ServerHandlerTimeout` (90s) or the outer middleware clamps them.
 3. **Parse input.** Query parameters via `recipe.ParseCriteriaFromRequest`; bodies via `json.NewDecoder` wrapped in `http.MaxBytesReader` for the per-endpoint cap.
 4. **Allowlist pre-check.** `validateAgainstAllowLists(h.allowLists, criteria)` runs the same projection the facade uses (`aicr.ToInternalAllowLists`) so the handler error message and facade backstop never drift.
-5. **Call the facade.** `Client.ResolveRecipeFromCriteria`, `Client.AdoptRecipe`, `Client.MakeBundle`. No business logic in the handler itself.
+5. **Call the facade.** `Client.ResolveRecipeFromCriteriaWithOptions`, `Client.AdoptRecipe`, `Client.MakeBundle`. No business logic in the handler itself.
 6. **Format the response.** `serializer.RespondJSON` for JSON; stream zip bytes directly for bundle. Set `Cache-Control: public, max-age=<RecipeCacheTTL>` on cacheable GETs.
 7. **Errors via `WriteErrorFromErr`.**
 
@@ -291,15 +291,16 @@ contains two contract gates:
   constants. It matches the `allOf` branches by content rather than position,
   since `allOf` is semantically unordered.
 
-  Runtime acceptance of the legacy header shapes is pinned separately by
-  `TestBundleHandler_LegacyRecipeHeaders`, which posts absent, empty, and
-  target-`apiVersion` bodies to the handler, asserts 200, and round-trips the
-  emitted `recipe.yaml` back through the file loader to prove the ingest
-  normalization holds. The spec gate alone would only be checking the spec
-  against itself. The one legacy shape that is *not* accepted, `kind: Recipe`
-  (published through v0.18.0 and removed by the v1 collapse), is pinned by
-  `TestBundleHandler_RejectsLegacyRecipeKind` so the rejection stays a decision
-  rather than becoming an accident of a later refactor.
+  Runtime handling of the legacy header shapes is pinned separately by
+  `TestBundleHandler_LegacyRecipeHeaders`. It asserts 200 for a target
+  `apiVersion` with an absent or empty `kind`, and round-trips the emitted
+  `recipe.yaml` back through the file loader to prove the ingest normalization
+  holds. It asserts 400 for an absent or empty `apiVersion`, which v1.0.0
+  retired. The spec gate alone would only be checking the spec against itself.
+  The legacy `kind: Recipe` (published through v0.18.0 and removed by the v1
+  collapse) is pinned by `TestBundleHandler_RejectsLegacyRecipeKind` so the
+  rejection stays a decision rather than becoming an accident of a later
+  refactor.
 
 Drift is a contract bug: clients conforming to the spec will reject
 inputs the server actually accepts, or generate types that reject
@@ -442,7 +443,7 @@ every response, not just 429s, so clients can back off proactively.
 
 **Panic recovery.** Wraps `rateLimit` + `bodyLimit` + handler. A panic
 becomes a 500 via `WriteError(..., ErrCodeInternal, ...)`, increments
-the `aicr_server_panic_recoveries_total` counter, and logs the full
+the `aicr_panic_recoveries_total` counter, and logs the full
 panic value at Error. The `loggingMiddleware` is outside this layer so
 the completion log still fires.
 
@@ -453,10 +454,10 @@ the allow-list in `isValidAPIVersion` (currently `v1` only), and sets
 Add `v2` by extending the map in `version.go`.
 
 **Metrics.** Prometheus collectors registered via `promauto` in
-`metrics.go`: `aicr_server_requests_total{method,path,status}`,
-`aicr_server_request_duration_seconds`, `aicr_server_requests_in_flight`,
-`aicr_server_rate_limit_rejects_total`,
-`aicr_server_panic_recoveries_total`.
+`metrics.go`: `aicr_http_requests_total{method,path,status}`,
+`aicr_http_request_duration_seconds`, `aicr_http_requests_in_flight`,
+`aicr_rate_limit_rejects_total`,
+`aicr_panic_recoveries_total`.
 
 ## Testing
 

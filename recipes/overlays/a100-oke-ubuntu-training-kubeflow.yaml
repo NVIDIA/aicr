@@ -40,3 +40,9 @@ spec:
       value: ">= 1.32"
 
   componentRefs: []
+
+  validation:
+    conformance:
+      checks:
+        - robust-controller
+        - secure-accelerator-access

@@ -25,6 +25,10 @@ import (
 // SlackPayload renders the weekly digest as a ready-to-POST incoming-webhook
 // body. The JSON is encoded here rather than interpolated in the workflow's
 // shell so a chart name containing a quote cannot produce a malformed request.
+//
+// The digest carries counts, a link, and a call to action — never the per-chart
+// rows. Those live in drift-report.json, which the review skill reads anyway,
+// and a 24-line channel post is scrolled past rather than read.
 func SlackPayload(r Report) ([]byte, error) {
 	date := r.GeneratedAt
 	if i := strings.Index(date, "T"); i > 0 {
@@ -40,13 +44,6 @@ func SlackPayload(r Report) ([]byte, error) {
 		// implying all three share a unit.
 		fmt.Fprintf(&b, "AICR component drift - %s (%d pins, %d charts behind, %d charts unresolved)",
 			date, r.Summary.Tracked, r.Summary.Behind, r.Summary.Unresolved)
-		for _, row := range r.Drift {
-			fmt.Fprintf(&b, "\n• %s  %s -> %s  %s",
-				strings.Join(row.Components, ", "), row.Current, row.Latest, row.UpdateType)
-		}
-		for _, u := range r.Unresolved {
-			fmt.Fprintf(&b, "\n• %s  unresolved: %s", strings.Join(u.Components, ", "), u.Reason)
-		}
 	}
 	if r.RunURL != "" {
 		fmt.Fprintf(&b, "\n<%s|report artifact>", r.RunURL)

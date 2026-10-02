@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **50**
-- Unique images: **112**
+- Components: **49**
+- Unique images: **113**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -45,11 +45,11 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.7.0 | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.1 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
-| grove | helm | grove-charts | v0.1.0-alpha.12 | 1 |
-| k8s-aibom | helm | k8s-aibom | 1.3.0 | 1 |
+| grove | helm | grove-charts | v0.1.0-alpha.13 | 1 |
+| k8s-aibom | helm | k8s-aibom | 1.5.1 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -66,16 +66,15 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
-| nodewright-customizations | manifest | — | — | 6 |
+| nodewright-customizations | manifest | — | — | 7 |
 | nodewright-operator | helm | nodewright | v0.19.0 | 2 |
 | nvcre | helm | cluster-readiness-engine | v0.2.0 | 1 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
-| nvsentinel | helm | nvsentinel | v1.20.0 | 6 |
+| nvsentinel | helm | nvsentinel | v1.25.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
-| rdma-netns-exclusive | manifest | — | — | 1 |
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
@@ -131,7 +130,7 @@ _No images extracted._
 
 ### dra-node-labeler
 
-- `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
+- `docker.io/alpine/kubectl:1.37.1@sha256:7b4cc9a9ce0d064cedeb85550266c11f2b32f010ca299525518646261e4d955e`
 
 ### dranet
 
@@ -162,25 +161,25 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:26.04@sha256:9559ceb7c21e528e233e8dff26a0fb2682f4094cce06176eeb075d87a22b31de`
+- `ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
 
-- `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
-- `nvcr.io/nvidia/cloud-native/dcgm:4.6.0-1-ubuntu24.04`
+- `docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e`
+- `nvcr.io/nvidia/cloud-native/dcgm:4.6.1-1-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6`
-- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.3`
-- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.0`
-- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.0`
+- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.4`
+- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.1`
+- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.1`
 - `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4`
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
-- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.0`
+- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.1`
 - `nvcr.io/nvidia/driver:580.173.02`
-- `nvcr.io/nvidia/gpu-operator:v26.7.0`
-- `nvcr.io/nvidia/k8s-device-plugin:v0.20.0`
-- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.0`
-- `nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless`
+- `nvcr.io/nvidia/gpu-operator:v26.7.1`
+- `nvcr.io/nvidia/k8s-device-plugin:v0.20.1`
+- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.1`
+- `nvcr.io/nvidia/k8s/dcgm-exporter:4.6.1-4.8.4-distroless`
 - `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.6.0`
 
 ### gpu-operator-ocp
@@ -193,11 +192,11 @@ _No images extracted._
 
 ### grove
 
-- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.12`
+- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.13`
 
 ### k8s-aibom
 
-- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:f8e48d4edc44e6ee8e40a2ac6c5f60b190aa18d411a75702dc5798a77a039e8d`
+- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:7b02731563a5ec524ed3396a07a524b02e3f51e17c976e02e65fc680b51e8164`
 
 ### k8s-ephemeral-storage-metrics
 
@@ -258,7 +257,7 @@ _No images extracted._
 
 ### network-operator
 
-- `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
+- `docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni:v4.2.1`
 - `ghcr.io/k8snetworkplumbingwg/plugins:v1.6.2-update.1`
 - `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin:v3.9.0`
@@ -303,6 +302,7 @@ _No images extracted._
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.2@sha256:a8bdca40dbe36de9d7a13e6afada49870714784fd9a3b9ce08717d675978c2b6`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
+- `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
 
 ### nodewright-operator
 
@@ -323,12 +323,12 @@ _No images extracted._
 
 ### nvsentinel
 
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.20.0-dcgm-3.x`
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.20.0-dcgm-4.x`
-- `ghcr.io/nvidia/nvsentinel/labeler:v1.20.0`
-- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.20.0`
-- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.20.0`
-- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.20.0`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.25.0-dcgm-3.x`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.25.0-dcgm-4.x`
+- `ghcr.io/nvidia/nvsentinel/labeler:v1.25.0`
+- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.25.0`
+- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.25.0`
+- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.25.0`
 
 ### prometheus-adapter
 
@@ -341,10 +341,6 @@ _No images extracted._
 ### prometheus-operator-crds
 
 _No images extracted._
-
-### rdma-netns-exclusive
-
-- `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
 
 ### slinky-slurm
 
@@ -392,15 +388,15 @@ AICR pins some images directly in this repository — in `recipes/components/<na
 
 **OLM-managed components are a third, uninventoried category.** `cert-manager-ocp`, `cert-manager-ocp-olm`, `gpu-operator-ocp`, `gpu-operator-ocp-olm`, `network-operator-ocp`, `network-operator-ocp-olm`, `nfd-ocp`, and `nfd-ocp-olm` install their operator and operand images by resolving a ClusterServiceVersion (CSV) through the Red Hat OperatorHub catalog at install time — not from a local `values.yaml` or vendored manifest. This BOM cannot enumerate those images: they aren't declared anywhere in this repository, and the actual image digests are pinned by whichever CSV version OLM resolves from the subscribed channel on the target cluster. The `0`-image rows for these components in the table above reflect that gap, not an empty deployment.
 
-Air-gapped OpenShift deployments must separately mirror the relevant Red Hat certified-operator catalog (`redhat-operators`) alongside the images this BOM does track. See the [OpenShift documentation on mirroring Operator catalogs](https://docs.openshift.com/container-platform/latest/operators/admin/olm-restricted-networks.html) and this repo's [air-gap mirroring guide](https://github.com/NVIDIA/aicr/issues/743) for the OLM-specific mirroring workflow.
+Air-gapped OpenShift deployments must separately mirror the relevant Red Hat certified-operator catalog (`redhat-operators`) alongside the images this BOM does track. See the [OpenShift documentation on mirroring Operator catalogs](https://docs.openshift.com/container-platform/latest/operators/admin/olm-restricted-networks.html) for the OLM-specific mirroring workflow, and this repo's [air-gap mirroring guide](air-gap-mirror.md) for the images this BOM tracks.
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
 
 **Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Four known cases, none counted in the `nvsentinel` row's image count above. Three set a `global.*` toggle:
 
-- The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/bitnamilegacy/os-shell:12-debian-12-r30`) to the `platform-connectors` DaemonSet and `labeler` Deployment. It is a third-party image AICR does not otherwise mirror.
-- The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.20.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
-- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.20.0`. Its `chown` init container reuses `docker.io/bitnamilegacy/os-shell:12-debian-12-r30` — the same third-party image the observability mixin above already pulls in, not a second one. Unlike the other two, this mixin is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not.
+- The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e`) to the `platform-connectors` DaemonSet and `labeler` Deployment. The chart's own default for this init container is `docker.io/bitnamilegacy/os-shell:12-debian-12-r30`, which sits in Bitnami's frozen archive and will never be patched; AICR overrides `global.initContainerImage` in `recipes/components/nvsentinel/values.yaml` to the same digest-pinned busybox it already ships in the `network-operator` and `gpu-operator` manifests.
+- The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.25.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
+- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.25.0`. Its `chown` init container reuses `docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e` — the same overridden `global.initContainerImage` the observability mixin above already pulls in, not a second one. Unlike the other two, this mixin is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not.
 
 A recipe composing any of these mixins **with `nvsentinel` still enabled** adds that mixin's images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship none of them.
 
@@ -424,12 +420,12 @@ AICR pulls from a deliberately diverse set of registries:
 - **`quay.io`** — cert-manager and Prometheus components.
 - **`registry.k8s.io`** — Kubernetes SIG components (DRA driver, NFD, prometheus-adapter, kueue, csi-sidecars).
 - **`public.ecr.aws`** — AWS public artifacts (aws-ebs-csi-driver).
-- **Regional ECR** (`<account>.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons. The `aws-efa` entry below shows `us-west-2` because that is the in-tree default; deployments in other regions override `awsefa:image.repository` at bundle or install time. See [Regional registry overrides](../integrator/recipe-development.md#regional-registry-overrides) for the pattern.
+- **Regional ECR** (`<account>.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons. The `aws-efa` entry above shows `us-west-2` because that is the in-tree default; deployments in other regions override `awsefa:image.repository` at bundle or install time. See [Regional registry overrides](../integrator/recipe-development.md#regional-registry-overrides) for the pattern.
 - **`gcr.io`, `gke.gcr.io`, `us-docker.pkg.dev`** — GCP/GKE add-ons (gke-nccl-tcpxo).
 - **`cr.agentgateway.dev`** — agentgateway (AI inference gateway).
 - **`docker.io`** — assorted upstream images (`busybox`, `pytorch`, etc.).
 
-Customers running in air-gapped or private-registry environments need to mirror every registry above. A dedicated mirroring guide is tracked under [#743](https://github.com/NVIDIA/aicr/issues/743).
+Customers running in air-gapped or private-registry environments need to mirror every registry above. See the [air-gap mirroring guide](air-gap-mirror.md).
 
 ### Reproducibility
 
@@ -494,7 +490,7 @@ provenance attestation is attached. A non-zero exit from the first
 the three commands above and emits a per-component report:
 
 ```bash
-tools/s3c gpu-operator
+tools/s3c nvidia-dra-driver-gpu
 ```
 
 Example output:
@@ -567,11 +563,11 @@ make bom-docs
 make bom-check
 ```
 
-Both targets shell out to `helm template` for every chart, so an internet connection is required.
+All three targets shell out to `helm template` for every chart, so an internet connection is required.
 
 ## Related
 
 - [Component Catalog](component-catalog.md) — what each component does and its scheduling characteristics.
 - [`tools/s3c`](https://github.com/NVIDIA/aicr/blob/main/tools/s3c) — on-demand cosign presence check for a component's images.
 - [Supply chain epic](https://github.com/NVIDIA/aicr/issues/739) — visibility, reproducibility, and provenance roadmap.
-- [Air-gap mirroring guide](https://github.com/NVIDIA/aicr/issues/743) — planned follow-up.
+- [Air-gap mirroring guide](air-gap-mirror.md) — discover and mirror a recipe's images and charts.

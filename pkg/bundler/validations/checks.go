@@ -1891,8 +1891,8 @@ func CheckNVSentinelDriverLabelDetectable(ctx context.Context, componentName str
 // defaultRuntimeClassName is the shared chart default: the gpu-operator
 // chart ships operator.runtimeClass: nvidia (v26.7.0, verified against
 // the pinned chart values), and nvsentinel's metadata-collector subchart
-// ships runtimeClassName: "nvidia" (v1.9.0, charts/metadata-collector/
-// values.yaml:31). Either side left unset therefore resolves to this
+// ships runtimeClassName: "nvidia" (v1.25.0, charts/metadata-collector/
+// values.yaml:35). Either side left unset therefore resolves to this
 // name.
 const defaultRuntimeClassName = "nvidia"
 
@@ -2690,11 +2690,13 @@ const preflightEnabledPath = "global.preflight.enabled"
 // decides which hostengine the check talks to.
 const preflightDCGMDiagContainer = "preflight-dcgm-diag"
 
-// chartDefaultDCGMHostengineAddr is the DCGM_HOSTENGINE_ADDR the preflight
-// subchart ships on preflight-dcgm-diag. Helm replaces lists wholesale, so an
-// unset preflight.initContainers means the chart's own list runs -- the check
-// is injected and points here. Treating that as "no check configured" would
-// skip validation for exactly the configurations this gate exists to reject.
+// chartDefaultDCGMHostengineAddr is the ClusterPolicy-mode entry in the
+// DCGM_HOSTENGINE_ADDR candidate list the preflight subchart ships on
+// preflight-dcgm-diag. Helm replaces lists wholesale, so an unset
+// preflight.initContainers means the chart's own list runs -- the check is
+// injected with that list, and in ClusterPolicy mode only this candidate
+// resolves. Treating that as "no check configured" would skip validation for
+// exactly the configurations this gate exists to reject.
 const chartDefaultDCGMHostengineAddr = "nvidia-dcgm.gpu-operator.svc:5555"
 
 // preflightConfiguredDCGMAddr returns the DCGM_HOSTENGINE_ADDR configured on
@@ -2756,6 +2758,11 @@ func preflightConfiguredDCGMAddr(values map[string]any) (addr string, found bool
 		value, ok := entry["value"].(string)
 		if !ok || strings.TrimSpace(value) == "" {
 			return "", false, fmt.Sprintf("%s sets DCGM_HOSTENGINE_ADDR to %v, want a non-empty string", preflightDCGMDiagContainer, entry["value"])
+		}
+		// A candidate list would parse as one external host and skip the gate.
+		if strings.Contains(value, ",") {
+			return "", false, fmt.Sprintf("%s sets DCGM_HOSTENGINE_ADDR to the list %q; this gate verifies a single "+
+				"host:port, so set the one hostengine the check should use", preflightDCGMDiagContainer, value)
 		}
 		return value, true, ""
 	}

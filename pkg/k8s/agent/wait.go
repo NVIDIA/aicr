@@ -350,7 +350,7 @@ func (d *Deployer) findOrWatchPodName(ctx context.Context) (string, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return "", errors.Wrap(errors.ErrCodeTimeout, "timeout waiting for Pod creation", ctx.Err())
+			return "", errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "waiting for Pod creation")
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				// apiserver hiccups, LB drops, and rolling restarts commonly

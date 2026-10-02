@@ -41,6 +41,11 @@ spec:
       valuesFile: components/kubeflow-trainer/values.yaml
       manifestFiles:
         - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml
+        # torch-distributed-rdma ships pre-wired for GPUDirect-RDMA over the
+        # gvnic-1/rdma-0..3 Network objects. Those names are fixed on every
+        # GB200/GKE cluster, so no recipe-recorded interface mapping is
+        # required to render it.
+        - components/kubeflow-trainer/manifests/torch-distributed-rdma-cluster-training-runtime.yaml
       dependencyRefs:
         - cert-manager
         - kube-prometheus-stack

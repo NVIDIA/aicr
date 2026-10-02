@@ -37,7 +37,7 @@ make qualify        # Full check: test-coverage + lint + tuning-check + coverage
 | **make** | Build automation | Pre-installed on macOS; `apt install make` on Ubuntu/Debian |
 | **git** | Version control | Pre-installed on most systems |
 | **Docker** | Container builds | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
-| **yq** | YAML processing | Required for `make tools-setup/check`. See [github.com/mikefarah/yq](https://github.com/mikefarah/yq) |
+| **yq** | YAML processing | Installed by `make tools-setup`: the pinned version on Linux, via Homebrew on macOS. `make tools-check` needs it |
 
 ### Development Tools (installed by `make tools-setup`)
 
@@ -70,11 +70,9 @@ On Ubuntu 24.04+ and other systems using PEP 668, system-wide pip installs are b
 sudo apt-get install -y make git curl pipx
 pipx ensurepath
 pipx install yamllint
-
-# Install yq
-sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-sudo chmod +x /usr/local/bin/yq
 ```
+
+`make tools-setup` installs yq itself, at the version pinned in `.settings.yaml`, checksum-verified. It keeps a yq that is already on `PATH`, so run `make tools-update` to replace a hand-installed one.
 
 ## Development Setup
 
@@ -655,7 +653,7 @@ make server
 make cluster-status
 
 # View Tilt logs
-tilt logs -f tilt/Tiltfile
+tilt logs -f
 
 # Reset everything
 make dev-reset
@@ -845,12 +843,12 @@ For detailed information on adding validation checks and constraint validators, 
 **[docs/contributor/validator.md](docs/contributor/validator.md)**
 
 This comprehensive guide covers:
-- Architecture overview (Job-based validation, test registration framework)
-- Quick start with code generator: `make generate-validator`
-- How-to guides for adding checks and constraint validators
-- Testing patterns (unit tests vs integration tests)
-- Enforcement mechanisms (automated registration validation)
-- Troubleshooting common issues
+- Declarative constraints and the constraint evaluation algorithm
+- Quick start for adding a container-per-validator check
+- The container contract and the `validators.Context` API
+- Component validations (bundle-time)
+- Chainsaw health checks
+- Testing checklist and common pitfalls
 
 ## Additional Resources
 

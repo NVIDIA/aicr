@@ -28,7 +28,7 @@ The board is a five-level addressing space. You navigate it the way you reason a
 | **Group** | service (the CSP) | `eks` |
 | **Dashboard** | accelerator + OS | `h100-ubuntu` |
 | **Tab** | intent, optionally with platform | `training-kubeflow` |
-| **Row** | validation `<phase>/<check>` | `conformance/gpu-operator-ready` |
+| **Row** | validation `<phase>/<check>` | `conformance/gpu-operator-health` |
 | **Column** | one build | one validation run |
 
 The first three levels (group, dashboard, tab) come from the **recipe** — they identify *which cell* a result belongs in. The last two (row, column) come from the **validation run** — they describe *what is in that cell*: which checks ran, in which build. A recipe never decides its own rows or columns.

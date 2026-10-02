@@ -224,14 +224,14 @@ metadata:
   name: gpu-operator
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "1"  # Deployed after cert-manager (wave 0)
+    argocd.argoproj.io/sync-wave: "<N>"  # dependency level × 4 + 1 (primary folder), so it follows cert-manager and its other dependencies
 spec:
   project: default
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
       chart: gpu-operator
-      targetRevision: v26.7.0
+      targetRevision: v26.7.1
       helm:
         valueFiles:
           # Values live under the numbered bundle dir (NNN-<component>/)
@@ -252,6 +252,7 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
 ```
 
 ### Pattern 4: Multi-Environment GitOps
@@ -420,7 +421,7 @@ def get_recipe(params):
 # Generate recipes for multiple environments in parallel
 environments = [
     {'os': 'ubuntu', 'accelerator': 'h100', 'service': 'eks'},
-    {'os': 'ubuntu', 'accelerator': 'gb200', 'service': 'gke'},
+    {'os': 'cos', 'accelerator': 'gb200', 'service': 'gke'},
     {'os': 'cos', 'accelerator': 'h100', 'service': 'gke'},
 ]
 

@@ -35,9 +35,12 @@ inputs:
   privileged_ci:
     description: >-
       Whether this run checked out trusted content. Only trusted runs write any
-      cache: ok-to-test executes an untrusted PR head inside the default
-      branch's cache scope, so a write from there can plant an entry a later
-      trusted run consumes. Restore is unconditional either way.
+      cache; restore is unconditional either way. Defense in depth against an
+      ordinary fork run, not a boundary: on the ok-to-test path this file comes
+      from the fork and qualification.yaml's `lint` job has no job-level gate,
+      so a crafted PR can restore the write and plant an entry in main's cache
+      scope (#2681, accepted). See .github/actions/README.md for which controls
+      on that path are boundaries and which are not.
     required: false
     default: 'true'
 

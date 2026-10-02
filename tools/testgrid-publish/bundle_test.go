@@ -45,6 +45,8 @@ func TestParseCriteria(t *testing.T) {
 		{
 			name: "full criteria with k8s constraint",
 			recipeYAML: `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   service: eks
   accelerator: h100
@@ -65,6 +67,8 @@ constraints:
 		{
 			name: "bare intent no platform no constraint",
 			recipeYAML: `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   service: gke
   accelerator: h100
@@ -80,6 +84,8 @@ criteria:
 		{
 			name: "uppercase service and accelerator are normalized",
 			recipeYAML: `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   service: EKS
   accelerator: H100
@@ -96,6 +102,8 @@ criteria:
 		{
 			name: "whitespace in quoted criteria fields is trimmed",
 			recipeYAML: `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   service: " eks "
   accelerator: " h100 "
@@ -110,6 +118,8 @@ criteria:
 		{
 			name: "missing service",
 			recipeYAML: `
+apiVersion: aicr.run/v1
+kind: RecipeResult
 criteria:
   accelerator: h100
   os: ubuntu
@@ -124,7 +134,7 @@ criteria:
 		},
 		{
 			name: "profile artifact carries the lowercase profile segment",
-			recipeYAML: `apiVersion: aicr.run/v1alpha3
+			recipeYAML: `apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 metadata:
   selectedProfile:

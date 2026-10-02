@@ -18,9 +18,9 @@ tau-operator 0.17.2 -> 0.18.1  (manual)
   recorded manual: the record covering 0.18.0 describes the move from 0.17.2
   to 0.18.1. Follow the steps below, then apply
 
-  This hop also relocates the component: namespace tau-system ->
-  nvidia-tau-system. No record assesses a relocation, and the steps below
-  neither perform it nor account for it.
+  This hop also carries a relocation: namespace tau-system ->
+  nvidia-tau-system. No record assesses it, and the steps below neither
+  perform it nor account for it.
 
   PRECONDITION
     No object is mid-rollout.
@@ -28,5 +28,13 @@ tau-operator 0.17.2 -> 0.18.1  (manual)
   STEPS (deployer: argocd)
     1. rename-crs
        Rewrite apiVersion and kind, then apply.
+
+AT RISK (advisory)
+  Objects of the kinds the crossed transition records name that carry neither
+  Helm nor Argo CD ownership. AICR does not manage them and cannot restore
+  them; removing a CRD takes its objects with it. Advisory only: this never
+  changes the exit code.
+
+  not scanned: no cluster access requested
 
 5 component changes, 4 need attention

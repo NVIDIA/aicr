@@ -72,8 +72,19 @@ MONITOR_SELECTOR="app.kubernetes.io/name=kubernetes-object-monitor"
 # shorter negative window would pass on timing alone, before the monitor had a
 # chance to fire at all.
 CONDITION_WAIT_SECONDS=80
-# The backdater must outlive the assertion window it supports.
-PATCH_LOOP_SECONDS=$((CONDITION_WAIT_SECONDS + 20))
+# How long the published event may lag the node condition that precedes it. Only
+# spent when the event is genuinely absent: the happy path finds it on the first
+# read, so this costs nothing on a passing run.
+#
+# Headroom, not a tuned value. No such lag has actually been measured -- the
+# failures in #2866 were the tail cap above, where the event was already in the
+# log and the query could not see it. The two are separate writes, though, so
+# this covers the ordering the tail fix does not. Re-tune it against a real
+# observation rather than this number if one ever appears.
+EVENT_WAIT_SECONDS=30
+# The backdater must outlive the assertion window it supports -- which is both
+# waits, since the event poll runs after the condition wait returns.
+PATCH_LOOP_SECONDS=$((CONDITION_WAIT_SECONDS + EVENT_WAIT_SECONDS + 20))
 
 WORK=""
 CREATED_CLUSTER=false
@@ -222,10 +233,10 @@ install_nvsentinel() {
   done
 
   (cd "${CRDS_DIR}" && chmod +x install.sh &&
-    KUBECONFIG_FLAG="--kube-context ${KUBE_CONTEXT}" ./install.sh) ||
+    KUBE_CONTEXT="${KUBE_CONTEXT}" ./install.sh) ||
     err "prometheus-operator-crds install failed"
   (cd "${BUNDLE_DIR}" && chmod +x install.sh &&
-    KUBECONFIG_FLAG="--kube-context ${KUBE_CONTEXT}" ./install.sh) ||
+    KUBE_CONTEXT="${KUBE_CONTEXT}" ./install.sh) ||
     err "nvsentinel install failed"
 
   # install.sh runs `helm upgrade --install` without --wait (COMPONENT_WAIT_ARGS
@@ -336,8 +347,21 @@ patch_start_time_loop() {
 # record naming $1, or nothing. Both the positive and negative assertions go
 # through it so they cannot drift apart: matching in two stages (message, then
 # a fixed-string pod match) rather than one `msg.*pod` regex keeps it
-# independent of slog's attribute order. $2 bounds the query by time instead of
-# a line count, so a chatty log cannot scroll the evidence out of view.
+# independent of slog's attribute order.
+#
+# `--tail=-1` is required, not cosmetic. `kubectl logs` defaults to the last 10
+# lines *whenever a selector is given* and to the whole log otherwise, and
+# `--since-time` does not lift that cap -- both filters apply. Without it this
+# query reads only the last 10 lines, and the monitor emits far more than that
+# while reconciling: in run 36418909956, 17 lines landed between the event being
+# published and this function reading the log, so the event it was looking for
+# had already scrolled out of the window (#2866). The sibling npd script has
+# always passed it (`npd-nvsentinel-object-monitor/run.sh`, wait_for_log_line).
+#
+# The cap silently weakened the negative assertions too: an event that scrolled
+# out reads as "no event published", so assert_no_health_event could pass
+# without the property holding.
+#
 # Returns nonzero if the log query fails, rather than calling err: this runs
 # inside a command substitution, where err would exit only the subshell and
 # leave the caller reading empty output as "no event published" -- passing a
@@ -345,18 +369,35 @@ patch_start_time_loop() {
 published_event_for() {
   local pod="$1" since="$2" logs
   logs=$(kubectl --context "${KUBE_CONTEXT}" -n nvsentinel logs -l "${MONITOR_SELECTOR}" \
-    --since-time="${since}") || return 1
+    --since-time="${since}" --tail=-1) || return 1
   grep '"msg":"Publishing health event"' <<<"${logs}" | grep -F "${pod}" | tail -n 1 || true
 }
 
 # Asserts the event payload, which the node condition alone does not cover.
+#
+# Polls rather than reading once. The node condition and the health event are
+# separate writes, and the caller gets here the moment the condition lands, so a
+# single read can arrive before the event is in the log. `wait_for_node_condition`
+# above and the sibling npd script's `wait_for_log_line` both poll for the same
+# reason; this assertion was the one place asserting an async write synchronously.
+#
+# Only the positive assertion needs this. assert_no_health_event stays one-shot:
+# every caller precedes it with a full grace-period wait, so it is not racing
+# anything, and polling for an absence would only slow the suite down.
 assert_health_event() {
-  local node="$1" pod="$2" since="$3" event missing=()
-  if ! event=$(published_event_for "${pod}" "${since}"); then
-    err "could not read kubernetes-object-monitor logs -- cannot verify the published event"
-  fi
+  local node="$1" pod="$2" since="$3" event missing=() elapsed=0
+  while :; do
+    if ! event=$(published_event_for "${pod}" "${since}"); then
+      err "could not read kubernetes-object-monitor logs -- cannot verify the published event"
+    fi
+    [[ -n "${event}" ]] && break
+    [[ "${elapsed}" -ge "${EVENT_WAIT_SECONDS}" ]] && break
+    sleep 3
+    elapsed=$((elapsed + 3))
+  done
   if [[ -z "${event}" ]]; then
-    fail "nvsentinel-object-monitor/health-event" "no published health event mentions pod ${pod}"
+    fail "nvsentinel-object-monitor/health-event" \
+      "no published health event mentions pod ${pod} within ${EVENT_WAIT_SECONDS}s"
     return
   fi
 

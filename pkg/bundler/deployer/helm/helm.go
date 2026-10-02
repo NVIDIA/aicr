@@ -130,6 +130,10 @@ type Generator struct {
 	// charts/<chart>-<version>.tgz adjacent to a wrapper Chart.yaml).
 	VendorCharts bool
 
+	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
+	// first deployment heading of README.md. Empty adds nothing.
+	UpgradeNotice string
+
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so generateProvenanceFile can write provenance.yaml
 	// without re-threading the slice through every helper call. The
@@ -426,6 +430,7 @@ func (g *Generator) generateRootREADME(ctx context.Context, components []Compone
 		ReleasesReversed: reverseReleases(folders),
 		Criteria:         criteriaLines,
 		Constraints:      g.RecipeResult.Constraints,
+		UpgradeNotice:    g.UpgradeNotice,
 	}
 
 	readmePath, readmeSize, err := deployer.GenerateFromTemplate(readmeTemplate, data, outputDir, "README.md")
@@ -473,6 +478,7 @@ type readmeTemplateData struct {
 	ReleasesReversed []releaseRef
 	Criteria         []string
 	Constraints      []recipe.Constraint
+	UpgradeNotice    string
 }
 
 // releaseRef pairs a helm release name with its target namespace. The

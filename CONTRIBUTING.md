@@ -47,22 +47,18 @@ Before contributing:
 - Ensure all tests pass and code meets quality standards
 - Write tests for new functionality
 
-#### Start with an issue for substantial changes
+#### Start with an issue
 
-Open an issue before writing code for anything substantial: a new feature, a
-change to existing behavior, or any change whose approach is worth agreeing on
-first. Describe the problem and the approach you have in mind, and give
-maintainers a chance to respond. Settling the design in an issue costs less than
-reworking a finished pull request.
+Every pull request, documentation included, links an issue assigned to its
+author, one line per issue: `Fixes: #N` if it closes the issue, `Related: #N` if
+it is partial work. Claim the issue with `/assign` first (see
+[Claiming an Issue](#claiming-an-issue)). Bots are exempt; vulnerability fixes
+follow [SECURITY.md](SECURITY.md) instead.
 
-Bug fixes, typos, and documentation can go straight to a pull request, as can any
-small self-contained change where the approach is not in question. If you are not
-sure which kind you have, open an issue and ask.
-
-When an issue already exists, comment `/assign` to claim it before you start (see
-[Claiming an Issue](#claiming-an-issue)). Link the issue from the pull request so
-the discussion and the change stay together; the template's `Fixes:` and
-`Related:` fields take `N/A` when there is no issue.
+For a new feature, a change to existing behavior, or any change whose approach
+is worth agreeing on first, describe the problem and the approach in the issue
+and give maintainers a chance to respond before writing code. Settling the design
+in an issue costs less than reworking a finished pull request.
 
 #### Go dependencies
 
@@ -72,24 +68,12 @@ Module integrity comes from `go.sum`, which Go verifies on every build; `sum.gol
 
 #### Adding Validation Constraints
 
-AICR uses a validator framework to check cluster state against requirements. To add new validation constraints:
+AICR uses a validator framework to check cluster state against requirements. A declarative constraint needs no code: add it to a recipe overlay's `constraints:` list. To add a check that probes a live cluster:
 
-**Quick Start:**
-```bash
-# Generate all necessary files
-make generate-validator ARGS="--constraint Deployment.my-app.version --phase deployment --description 'Validates my-app version'"
-```
-
-This creates three files with TODOs guiding implementation:
-- Helper functions with validation logic
-- Unit tests with table-driven test cases
-- Integration test with automatic registration
-
-**Next Steps:**
-1. Implement the TODOs in generated files
-2. Add comprehensive test cases
-3. Run `make test` - registration validation ensures completeness
-4. Submit PR - CI enforces all requirements
+1. Implement it in `validators/<phase>/`
+2. Register it in that phase's `main.go`
+3. Add a catalog entry in `recipes/validators/catalog.yaml`
+4. Run `make test` and submit the PR
 
 **See [docs/contributor/validator.md](docs/contributor/validator.md) for complete guide with examples, architecture overview, and troubleshooting.**
 
@@ -182,6 +166,7 @@ Trust is established through evidence, not assertions. Every released artifact c
 1. Push your branch and open a PR against `main`
 2. Fill out the PR template completely:
    - **Summary**: Brief description of changes
+   - **Fixes / Related**: The issue assigned to you (see [Start with an issue](#start-with-an-issue))
    - **Type of Change**: Bug fix, feature, breaking change, etc.
    - **Testing**: What testing was performed
    - **Checklist**: Verify all items
@@ -296,6 +281,22 @@ release it first with `/unassign`. Comment `/unassign` to release an issue
 assigned to you — it only ever removes your own claim. GitHub only allows
 assigning users with triage/write access or prior activity in the repository;
 the bot comments if it cannot assign a requested user.
+
+Limits apply to every author except bot accounts; a pull request an agent opens
+for you counts as yours:
+
+- **Claims:** at most 3 issues assigned to you, however assigned.
+- **Pull requests:** at most 3 open, drafts included. A fourth is closed
+  automatically; open it again when a slot frees up.
+- **Expiry:** an issue is unassigned after 7 days without activity from you (3
+  for [`P0`/`P1`](#issue-priority)), with a warning a day before. Activity is a
+  comment on the issue until you open the pull request, then a push to it; time
+  a ready, green, conflict-free pull request waits on a reviewer does not count.
+  The pull request stays open and counts toward your cap, but cannot merge until
+  you reclaim the issue.
+
+Maintainers can release or reassign any claim. Existing pull requests and claims
+count toward the caps; inactivity counts from when these limits take effect.
 
 ### After Merging
 

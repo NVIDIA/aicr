@@ -203,7 +203,7 @@ func TestBundleCmd_AllConfigSectionsResolve(t *testing.T) {
 	}
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     input:
@@ -316,7 +316,7 @@ func TestBundleCmd_SigningKeyFromConfig(t *testing.T) {
 		}
 		cfgPath := filepath.Join(tmp, "config.yaml")
 		cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     input:
@@ -426,7 +426,7 @@ func TestBundleCmd_OIDCDeviceFlowFlagOverridesConfigSigningKeyConflict(t *testin
 	}
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     input:
@@ -463,7 +463,7 @@ func TestBundleCmd_FlagOverridesEverySection(t *testing.T) {
 	}
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     input:
@@ -554,7 +554,7 @@ func TestRecipeCmd_ConfigFillsMissingFromConfig(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   recipe:
     criteria:
@@ -588,7 +588,7 @@ func TestRecipeCmd_ConfigBadEnumRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	bad := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   recipe:
     criteria:
@@ -613,7 +613,7 @@ func TestBundleCmd_ConfigBadDeployerRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	bad := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     deployment:
@@ -644,7 +644,7 @@ func TestE2E_RecipeAndBundleShareConfig(t *testing.T) {
 	cfgPath := filepath.Join(tmp, "config.yaml")
 
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: e2e-shared
 spec:

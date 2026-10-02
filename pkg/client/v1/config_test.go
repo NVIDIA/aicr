@@ -46,7 +46,7 @@ func writeConfig(t *testing.T, body string) string {
 // valid AICRConfig. Splitting them also exercises the case a team actually
 // hits: a document that configures some sections and not others.
 
-const recipeConfig = `apiVersion: aicr.run/v1alpha2
+const recipeConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -64,7 +64,7 @@ spec:
       nodes: 8
 `
 
-const snapshotInputConfig = `apiVersion: aicr.run/v1alpha2
+const snapshotInputConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -74,7 +74,7 @@ spec:
       snapshot: ./snapshot.yaml
 `
 
-const verifyConfig = `apiVersion: aicr.run/v1alpha2
+const verifyConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -314,7 +314,7 @@ func TestLoadConfig_Guards(t *testing.T) {
 		// TestLoadConfig_ExternalCatalogCriteria). A negative count is
 		// registry-independent and still fails here.
 		_, err := aicr.LoadConfig(context.Background(), writeConfig(t,
-			"apiVersion: aicr.run/v1alpha2\nkind: AICRConfig\nmetadata:\n  name: t\nspec:\n  recipe:\n    criteria:\n      nodes: -1\n"))
+			"apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nmetadata:\n  name: t\nspec:\n  recipe:\n    criteria:\n      nodes: -1\n"))
 		if err == nil {
 			t.Fatal("expected an error for a negative node count")
 		}
@@ -359,7 +359,7 @@ func TestWrapConfig(t *testing.T) {
 	}
 }
 
-const accountingConfig = `apiVersion: aicr.run/v1alpha2
+const accountingConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -524,7 +524,7 @@ func TestLoadConfig_ExternalCatalogCriteria(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve fixture path: %v", err)
 	}
-	cfgPath := writeConfig(t, `apiVersion: aicr.run/v1alpha2
+	cfgPath := writeConfig(t, `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: external
@@ -599,7 +599,7 @@ func TestLoadConfig_ExternalCatalogCriteriaStillFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve fixture path: %v", err)
 	}
-	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1alpha2
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: external
@@ -627,7 +627,7 @@ spec:
 	}
 }
 
-const runtimeInventoryConfig = `apiVersion: aicr.run/v1alpha2
+const runtimeInventoryConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test
@@ -1463,7 +1463,7 @@ func TestConfig_CNCFEvidenceOptions_Absent(t *testing.T) {
 	}
 }
 
-const recipeOutputConfig = `apiVersion: aicr.run/v1alpha2
+const recipeOutputConfig = `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 metadata:
   name: test

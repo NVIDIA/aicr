@@ -509,9 +509,9 @@ attestation + maintainer judgement.
 ## Evidence-Backed Review (Future State per ADR-007)
 
 > **Status (partially landed).** `recipes/evidence/` now exists: the
-> per-source pointer tree (`#1347` Option A / `#1401`) shipped, and two
+> per-source pointer tree (`#1347` Option A / `#1401`) shipped, and
 > signed nested pointers are committed today
-> (`h100-gke-cos-training`, `gb200-eks-ubuntu-training`), each under
+> (e.g. `h100-gke-cos-training`, `gb200-eks-ubuntu-training`), each under
 > `recipes/evidence/<recipe>/<src>/<digest>.yaml`. Two gates run on
 > `recipes/evidence/**`: the **blocking** *Evidence Pointer Contract*
 > (`tools/evidence-pointercheck`) rejects any committed pointer that lacks a

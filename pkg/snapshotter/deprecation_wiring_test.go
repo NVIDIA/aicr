@@ -15,8 +15,6 @@
 package snapshotter
 
 import (
-	"bytes"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,8 +46,6 @@ func writeSnapshotWithAPIVersion(t *testing.T, name, v string) string {
 	if err != nil {
 		t.Fatalf("marshal snapshot: %v", err)
 	}
-	// t.TempDir is unique per run, so the dedup subject (which embeds the path)
-	// differs on every invocation and `go test -count=2` still sees a warning.
 	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatalf("write snapshot: %v", err)
@@ -57,87 +53,78 @@ func writeSnapshotWithAPIVersion(t *testing.T, name, v string) string {
 	return path
 }
 
-func captureWarn(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	return &buf
-}
+// These were the Release N+1 wiring tests, asserting that an archived alpha or
+// headerless snapshot still LOADED and merely warned. ADR-022 §3 N+2 (#2417)
+// inverted that contract, and they are inverted with it rather than deleted:
+// what they exist to catch is unchanged. The gate lives at the call site, so
+// without a test at this level the narrowed check is deletable green -- the
+// pkg/header unit tests prove the predicate, not that any loader consults it.
 
-// TestLoadFromFileWarnsOnAlphaAPIVersion binds the snapshot loader to the
-// deprecation channel. Without a test at this level the call site is deletable
-// green — the pkg/header unit tests prove the helper works, not that any loader
-// calls it.
-//
-// It also pins the Release N+1 acceptance criterion that matters most: an
-// archived alpha snapshot must still LOAD. Narrowing that gate is #2417.
-func TestLoadFromFileWarnsOnAlphaAPIVersion(t *testing.T) {
-	path := writeSnapshotWithAPIVersion(t, "legacy-snapshot.yaml", header.GroupVersion)
-	buf := captureWarn(t)
+// TestLoadFromFileRejectsRetiredAPIVersion pins the acceptance criterion: the
+// rejection names the observed value, the expected value, and why an artifact
+// that used to load no longer does.
+func TestLoadFromFileRejectsRetiredAPIVersion(t *testing.T) {
+	path := writeSnapshotWithAPIVersion(t, "legacy-snapshot.yaml", header.RetiredGroupVersionV1Alpha2)
 
-	if _, err := LoadFromFile(t.Context(), path); err != nil {
-		t.Fatalf("alpha snapshot must still load until %s: %v", header.AlphaRemovedIn, err)
+	_, err := LoadFromFile(t.Context(), path)
+	if err == nil {
+		t.Fatalf("a snapshot stamped %q must be rejected since %s",
+			header.RetiredGroupVersionV1Alpha2, header.AlphaRemovedIn)
 	}
 
-	got := buf.String()
+	got := err.Error()
+	// Naming the file is what made the retired warning actionable across a
+	// catalog of many snapshots, and the rejection inherits that obligation.
+	// Asserted here because nothing else would notice it going missing.
 	if !strings.Contains(got, "legacy-snapshot.yaml") {
-		t.Errorf("warning does not name the file: %q", got)
+		t.Errorf("error does not name the file: %q", got)
 	}
-	if !strings.Contains(got, header.AlphaRemovedIn) {
-		t.Errorf("warning does not name the removal release %q: %q", header.AlphaRemovedIn, got)
+	// The observed value, not just the expected one: without this a loader that
+	// reported the wrong version -- or an empty one -- still satisfies the rest.
+	if !strings.Contains(got, header.RetiredGroupVersionV1Alpha2) {
+		t.Errorf("error does not name the observed apiVersion %q: %q",
+			header.RetiredGroupVersionV1Alpha2, got)
 	}
 	if !strings.Contains(got, header.GroupVersionV1) {
-		t.Errorf("warning does not name the stable target %q: %q", header.GroupVersionV1, got)
+		t.Errorf("error does not name the stable target %q: %q", header.GroupVersionV1, got)
 	}
-	// The observed value, not just the target: without this a loader that passed
-	// through the wrong version — or an empty one — still satisfies every other
-	// assertion here.
-	if !strings.Contains(got, header.GroupVersion) {
-		t.Errorf("warning does not name the observed apiVersion %q: %q", header.GroupVersion, got)
+	if !strings.Contains(got, header.AlphaRemovedIn) {
+		t.Errorf("error does not name the removal release %q: %q", header.AlphaRemovedIn, got)
 	}
 }
 
-// TestLoadFromFileIsSilentOnTargetAPIVersion is the other half: a snapshot
-// recaptured on v0.22 must not nag. A channel that fires on the value the user
-// was just told to adopt teaches them to filter it out.
-func TestLoadFromFileIsSilentOnTargetAPIVersion(t *testing.T) {
+// TestLoadFromFileRejectsAbsentAPIVersion covers the other retired shape.
+// ADR-011 §3 granted the empty-value tolerance to the snapshot, recipe and
+// criteria loaders; ADR-022 §3 retired it at v1.0.0 alongside the alpha values.
+func TestLoadFromFileRejectsAbsentAPIVersion(t *testing.T) {
+	path := writeSnapshotWithAPIVersion(t, "headerless-snapshot.yaml", "")
+
+	_, err := LoadFromFile(t.Context(), path)
+	if err == nil {
+		t.Fatalf("a headerless snapshot must be rejected since %s", header.AlphaRemovedIn)
+	}
+
+	got := err.Error()
+	if !strings.Contains(got, "headerless-snapshot.yaml") {
+		t.Errorf("error does not name the file: %q", got)
+	}
+	// An absent header has no observed value to echo, so the file, the expected
+	// value and the release that withdrew the tolerance are the whole
+	// actionable payload.
+	if !strings.Contains(got, header.GroupVersionV1) {
+		t.Errorf("error does not name the stable target %q: %q", header.GroupVersionV1, got)
+	}
+	if !strings.Contains(got, header.AlphaRemovedIn) {
+		t.Errorf("error does not name the removal release %q: %q", header.AlphaRemovedIn, got)
+	}
+}
+
+// TestLoadFromFileAcceptsTargetAPIVersion is the other half, and the reason the
+// two above cannot be satisfied by a loader that rejects everything.
+func TestLoadFromFileAcceptsTargetAPIVersion(t *testing.T) {
 	path := writeSnapshotWithAPIVersion(t, "current-snapshot.yaml", header.GroupVersionV1)
-	buf := captureWarn(t)
 
 	if _, err := LoadFromFile(t.Context(), path); err != nil {
 		t.Fatalf("target snapshot must load: %v", err)
-	}
-	if got := buf.String(); got != "" {
-		t.Errorf("target apiVersion must not warn, got: %q", got)
-	}
-}
-
-// TestLoadFromFileWarnsOnAbsentAPIVersion covers the other deprecated shape.
-// ADR-011 §3 grants the empty-value tolerance to the snapshot, recipe and
-// criteria loaders only, and ADR-022 §3 retires it at v1.0.0 alongside the
-// alpha values — so this is the window in which it must load *and* say so.
-func TestLoadFromFileWarnsOnAbsentAPIVersion(t *testing.T) {
-	path := writeSnapshotWithAPIVersion(t, "headerless-snapshot.yaml", "")
-	buf := captureWarn(t)
-
-	if _, err := LoadFromFile(t.Context(), path); err != nil {
-		t.Fatalf("headerless snapshot must still load until %s: %v", header.AlphaRemovedIn, err)
-	}
-	got := buf.String()
-	if !strings.Contains(got, "absent apiVersion") {
-		t.Errorf("absent header must warn: %q", got)
-	}
-	if !strings.Contains(got, "headerless-snapshot.yaml") {
-		t.Errorf("warning does not name the file: %q", got)
-	}
-	// An absent header has no observed value to report, so the replacement and
-	// the removal release are the whole actionable payload here.
-	if !strings.Contains(got, header.GroupVersionV1) {
-		t.Errorf("warning does not name the stable target %q: %q", header.GroupVersionV1, got)
-	}
-	if !strings.Contains(got, header.AlphaRemovedIn) {
-		t.Errorf("warning does not name the removal release %q: %q", header.AlphaRemovedIn, got)
 	}
 }

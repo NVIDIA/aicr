@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -26,6 +27,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// draLabelerImageRE matches the labeler's image line in rendered output: a
+// literal, digest-pinned alpine/kubectl reference. The registry host stays
+// explicit because short-name-enforcing runtimes reject unqualified references,
+// and the tag is constrained to a version shape so a floating tag such as
+// :latest cannot satisfy it.
+var draLabelerImageRE = regexp.MustCompile(`(?m)^\s*image: docker\.io/alpine/kubectl:[0-9]+(?:\.[0-9]+)*@sha256:[0-9a-f]{64}\s*$`)
 
 // testDRANodeLabelerRecipeResult is testDRAEvictionRecipeResult plus the
 // dra-node-labeler component wired the way recipes/overlays/base.yaml wires
@@ -369,14 +377,18 @@ func TestMake_DRANodeLabelerRendered(t *testing.T) {
 			// Ready only once the node carries the key (#2813 review).
 			`command: ["test", "-f", "/var/run/dra-node-labeler/labeled"]`,
 			`touch "${READY}"`,
-			// Literal, digest-pinned image so tools/bom inventories it.
-			"image: docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95",
 			"cpu: 20m",
 			"cpu: 200m",
 		} {
 			if !strings.Contains(manifest, want) {
 				t.Errorf("rendered labeler lacks %q", want)
 			}
+		}
+		// Shape rather than an exact digest: Renovate rotates the digest as
+		// upstream rebuilds the tag. The reference must stay literal and
+		// digest-pinned; see TestSurveyComponent_DRANodeLabelerImageInventoried.
+		if !draLabelerImageRE.MatchString(manifest) {
+			t.Errorf("rendered labeler lacks a literal digest-pinned image matching %s", draLabelerImageRE)
 		}
 		if strings.Contains(manifest, "hostNetwork") {
 			t.Errorf("labeler must not request hostNetwork")
