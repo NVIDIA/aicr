@@ -35,6 +35,7 @@
 //   - DeployerArgoCDHelm: Generates a Helm chart app-of-apps for Argo CD
 //   - DeployerFlux: Generates Flux HelmRelease manifests
 //   - DeployerHelmfile: Generates a helmfile.yaml release graph
+//   - DeployerFleet: Generates a Rancher Fleet GitRepo bundle
 //
 // Use ParseDeployerType() to parse user input and GetDeployerTypes() for CLI help.
 //

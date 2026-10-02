@@ -1718,3 +1718,72 @@ func assertDeadlineWithin(t *testing.T, ctx context.Context, max time.Duration) 
 		t.Fatalf("deadline remaining = %s, want (0,%s]", remaining, max)
 	}
 }
+
+// TestParseBundleCmdOptions_Fleet covers the --deployer fleet options: mode
+// and namespace are validated at parse time, the app name must be a DNS-1123
+// label, and OCI output is rejected.
+func TestParseBundleCmdOptions_Fleet(t *testing.T) {
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	out := filepath.Join(tmp, "out")
+	base := []string{"--recipe", recipePath, "--output", out, "--deployer", "fleet"}
+
+	t.Run("defaults", func(t *testing.T) {
+		opts := captureBundleOpts(t, base)
+		if opts == nil {
+			t.Fatal("captureBundleOpts returned nil")
+		}
+		if opts.fleetMode != "gitrepo" || opts.fleetNamespace != "fleet-default" {
+			t.Errorf("fleetMode/fleetNamespace = %q/%q, want gitrepo/fleet-default", opts.fleetMode, opts.fleetNamespace)
+		}
+	})
+
+	t.Run("helmop mode normalized", func(t *testing.T) {
+		opts := captureBundleOpts(t, append(append([]string(nil), base...), "--fleet-mode", "HelmOp"))
+		if opts == nil {
+			t.Fatal("captureBundleOpts returned nil")
+		}
+		if opts.fleetMode != "helmop" {
+			t.Errorf("fleetMode = %q, want helmop", opts.fleetMode)
+		}
+	})
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"invalid mode", []string{"--fleet-mode", "bundle"}, "invalid fleet mode"},
+		{"invalid namespace", []string{"--fleet-namespace", "Fleet Default"}, "--fleet-namespace"},
+		{"app name with dots", []string{"--app-name", "team.a"}, "DNS-1123 label"},
+		{"mode on other deployer", nil, "only valid with --deployer fleet"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append(append([]string(nil), base...), tt.args...)
+			if tt.name == "mode on other deployer" {
+				args = []string{"--recipe", recipePath, "--output", out, "--deployer", "helm", "--fleet-mode", "helmop"}
+			}
+			opts, err := tryCaptureBundleOpts(t, args)
+			if err == nil {
+				t.Fatalf("expected error, got opts=%+v", opts)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+
+	t.Run("OCI output rejected", func(t *testing.T) {
+		opts, err := tryCaptureBundleOpts(t, []string{"--recipe", recipePath, "--output", "oci://registry.example.com/aicr/bundle:v1", "--deployer", "fleet"})
+		if err == nil {
+			t.Fatalf("expected error rejecting OCI output, got opts=%+v", opts)
+		}
+		if !strings.Contains(err.Error(), "does not support OCI output") {
+			t.Errorf("error = %v, want OCI rejection", err)
+		}
+	})
+}

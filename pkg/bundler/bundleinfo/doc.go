@@ -17,8 +17,8 @@
 //
 // It answers three questions a bundle cannot answer for itself: which
 // deployer built it, which aicr binary built it, and which release landed in
-// which directory. Write is called unconditionally by all five deployers
-// (helm, argocd, argocd-helm, flux, helmfile) — there is no flag that
+// which directory. Write is called unconditionally by every deployer
+// (helm, argocd, argocd-helm, flux, helmfile, fleet) — there is no flag that
 // suppresses it, so a bundle's absence of bundle-info.yaml is itself a
 // meaningful signal: the bundle predates this artifact.
 //

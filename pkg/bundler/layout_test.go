@@ -55,7 +55,7 @@ const (
 
 // layoutDeployers is every deployer the bundle CLI accepts. It is checked
 // against the OpenAPI enum, so a new deployer cannot ship unfrozen.
-var layoutDeployers = []string{"helm", "argocd", "argocd-helm", "flux", "helmfile"}
+var layoutDeployers = []string{"helm", "argocd", "argocd-helm", "flux", "helmfile", "fleet"}
 
 // TestBundleLayoutMatchesManifest asserts each deployer emits the frozen tree.
 //
@@ -278,6 +278,7 @@ var requiredRootPaths = map[string][]string{
 	"argocd-helm": {"checksums.txt", "README.md", "Chart.yaml", "values.yaml", "recipe.yaml", "bundle-info.yaml"},
 	"flux":        {"checksums.txt", "README.md", "kustomization.yaml", "recipe.yaml", "bundle-info.yaml"},
 	"helmfile":    {"checksums.txt", "README.md", "helmfile.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"fleet":       {"checksums.txt", "README.md", "gitrepo.yaml", "recipe.yaml", "bundle-info.yaml"},
 }
 
 // TestBundleLayoutManifestsAreComplete rejects a truncated manifest.

@@ -865,6 +865,23 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 			wantRepoURL:        "https://github.com/YOUR_ORG/YOUR_REPO.git",
 			wantTargetRevision: "main",
 		},
+		{
+			// fleet: gitrepo.yaml carries the repo and branch, and the app
+			// name is both the GitRepo name and the bundle-name prefix.
+			name:               "fleet",
+			deployer:           config.DeployerFleet,
+			configure:          true,
+			wantRepoURL:        repoURL,
+			wantTargetRevision: targetRevision,
+			wantAppName:        appName,
+		},
+		{
+			name:               "fleet unset",
+			deployer:           config.DeployerFleet,
+			wantRepoURL:        "https://github.com/YOUR_ORG/YOUR_REPO.git",
+			wantTargetRevision: "main",
+			wantAppName:        "aicr",
+		},
 	}
 
 	covered := make(map[string]bool, len(tests))

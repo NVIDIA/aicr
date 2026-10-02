@@ -83,8 +83,9 @@ transitions:
               --version v0.1.0-alpha.12 | sed -n '/^---$/,$p' |
               kubectl apply --server-side --force-conflicts -f -
             reason: >-
-              Neither Flux nor Argo CD applies a changed crds/ directory on
-              upgrade, so the CRDs are installed out of band here too.
+              Neither Flux, Argo CD, nor Fleet applies a changed crds/
+              directory on upgrade, so the CRDs are installed out of band
+              here too.
           - id: reconcile
             description: >-
               Reconcile or sync the affected releases as usual.
@@ -135,8 +136,9 @@ transitions:
               --version v0.1.0-alpha.13 | sed -n '/^---$/,$p' |
               kubectl apply --server-side --force-conflicts -f -
             reason: >-
-              Neither Flux nor Argo CD applies a changed crds/ directory on
-              upgrade, so the CRDs are installed out of band here too.
+              Neither Flux, Argo CD, nor Fleet applies a changed crds/
+              directory on upgrade, so the CRDs are installed out of band
+              here too.
           - id: reconcile
             description: >-
               Reconcile or sync the affected releases as usual.
