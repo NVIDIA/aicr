@@ -109,11 +109,13 @@ actually being usable, not just nameable:
 - **`gke-gpu-nic-topology`** (sibling) reads each a3 GPU node's
   `networking.gke.io/nic-info` annotation and fails on gVNIC displacement,
   detected three ways: an interface beyond `eth0`–`eth8`, fewer than 8 of
-  `eth1`–`eth8` mapped, or a node whose GPU-NIC PCI set differs from the rest
-  of its pool. A node with no/invalid annotation counts as unverified (not a
-  hard failure); when no node can be verified, the check Skips and records
-  coverage counts (nodes validated / unverified / total). Verify a node's
-  mapping with:
+  `eth1`–`eth8` mapped, or — via a join with `networking.gke.io/north-interfaces`
+  — a GPU NIC interface that maps to a non-GPU-NIC Network (the uniform case:
+  one gVNIC plus seven GPU NICs present `eth0`–`eth8` on every node, invisible
+  to name/PCI alone). A node with no annotation counts as unverified; a node
+  with a present-but-unparseable annotation fails the check. When no node can
+  be verified, the check Skips and records coverage counts (nodes validated /
+  total). Verify a node's mapping with:
 
   ```shell
   kubectl get node <gpu-node> -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
@@ -432,7 +434,7 @@ kubectl get node <gpu-node> \
   -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
 ```
 
-All 8 GPU NIC PCI addresses should be mapped to `eth1`–`eth8`. The observed a3-megagpu-8g GPU NIC PCI layout is `0000:06:00.0`, `0000:07:00.0`, `0000:0d:00.0`, `0000:0e:00.0`, `0000:86:00.0`, `0000:87:00.0`, `0000:8d:00.0`, `0000:8e:00.0` (observed on live nodes; not a stable contract). A gVNIC additional network takes one of these GPU NIC slots, so a displaced node shows either an extra interface beyond `eth0`–`eth8`, fewer than 8 of `eth1`–`eth8`, or a node whose GPU-NIC PCI set differs from the rest of its pool.
+All 8 GPU NIC PCI addresses should be mapped to `eth1`–`eth8`. A gVNIC additional network takes one of these GPU NIC slots, so a displaced node shows an extra interface beyond `eth0`–`eth8` or fewer than 8 of `eth1`–`eth8`. The uniform case — one gVNIC plus seven GPU NICs, so all of `eth0`–`eth8` are present — is caught by the `gke-gpu-nic-topology` check's `north-interfaces` join: the displaced interface's underlay IP maps to the gVNIC Network, not a GPU NIC Network. Verify a node's interface→Network mapping with `kubectl get node <gpu-node> -o jsonpath='{.metadata.annotations.networking\.gke\.io/north-interfaces}'`.
 
 ### RxDM detects 0/8 GPUs
 
