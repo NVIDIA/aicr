@@ -310,10 +310,10 @@ func checkExpectedResources(ctx *validators.Context) error {
 			if suppressed {
 				fmt.Printf("  [chainsaw] %s: skipped — %s\n", ref.Name, reason)
 			} else {
-				if ref.Name == nodewrightOperatorComponent && ref.Namespace != "" {
+				if ref.Name == nodewrightOperatorComponent {
 					// The health check matches by label and passes on any one
 					// available match, so require exactly one here.
-					if _, _, err := nodewrightController(ctx, ref.Namespace); err != nil {
+					if err := requireOneNodewrightController(ctx, ref.Namespace); err != nil {
 						failures = append(failures, fmt.Sprintf("[chainsaw] %s: %s", ref.Name, err))
 					}
 				}
@@ -989,6 +989,17 @@ func nodewrightController(ctx *validators.Context, namespace string) (appsv1.Dep
 	return appsv1.Deployment{}, false, errors.New(errors.ErrCodeConflict,
 		fmt.Sprintf("%d Deployments match %s in namespace %s, so the operator is ambiguous",
 			len(list.Items), nodewrightControllerLabels, namespace))
+}
+
+// requireOneNodewrightController returns an error unless namespace holds at
+// most one controller-manager Deployment. An empty namespace is an error, since
+// the lookup would span every namespace.
+func requireOneNodewrightController(ctx *validators.Context, namespace string) error {
+	if namespace == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "operator component has no namespace to check for a single controller")
+	}
+	_, _, err := nodewrightController(ctx, namespace)
+	return err
 }
 
 // runtimeRequiredTaints returns the workload-gate taints the deployment gate

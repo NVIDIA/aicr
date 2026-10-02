@@ -1515,8 +1515,6 @@ spec:
                 labels:
                   control-plane: controller-manager
 `
-	refs := []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: "skyhook", HealthCheckAsserts: assertYAML}}
-
 	// Serves just enough API discovery for the chainsaw fetcher to resolve
 	// Deployments. The dynamic fake holds one matching Deployment, so the assert
 	// passes whatever the controller count and only the cardinality check varies.
@@ -1540,20 +1538,28 @@ spec:
 
 	tests := []struct {
 		name      string
+		namespace string
 		objects   []runtime.Object
-		wantAmbig bool
+		wantErr   string
 	}{
 		{
-			name:    "one controller Deployment",
-			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv("skyhook", "")},
+			name:      "one controller Deployment",
+			namespace: "skyhook",
+			objects:   []runtime.Object{nodewrightOperatorDeploymentWithEnv("skyhook", "")},
 		},
 		{
-			name: "two controller Deployments",
+			name:      "two controller Deployments",
+			namespace: "skyhook",
 			objects: []runtime.Object{
 				nodewrightOperatorDeploymentWithEnv("skyhook", ""),
 				nodewrightOperatorDeploymentNamed("skyhook", "nodewright-controller-manager", ""),
 			},
-			wantAmbig: true,
+			wantErr: "operator is ambiguous",
+		},
+		{
+			name:    "no namespace on the component",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv("skyhook", "")},
+			wantErr: "no namespace",
 		},
 	}
 
@@ -1569,13 +1575,22 @@ spec:
 					"labels": map[string]any{"control-plane": "controller-manager"},
 				},
 			}}
+			refs := []recipe.ComponentRef{{
+				Name: nodewrightOperatorComponent, Namespace: tt.namespace, HealthCheckAsserts: assertYAML,
+			}}
 			ctx := newDeploymentTestContext(t, append([]runtime.Object{activeNamespace("skyhook")}, tt.objects...),
 				[]runtime.Object{live}, refs)
 			ctx.RESTConfig = &rest.Config{Host: discovery.URL}
 
 			err := checkExpectedResources(ctx)
-			if got := err != nil && strings.Contains(err.Error(), "operator is ambiguous"); got != tt.wantAmbig {
-				t.Fatalf("checkExpectedResources() error = %v, ambiguous = %v, want %v", err, got, tt.wantAmbig)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("checkExpectedResources() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("checkExpectedResources() error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
 	}
