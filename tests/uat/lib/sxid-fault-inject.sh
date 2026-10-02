@@ -272,7 +272,10 @@ MANIFEST
     if [[ "${state}" == "True" ]]; then
       break
     fi
-    sleep 10
+    sleep 10 &
+    if ! wait $!; then
+      return 1
+    fi
     waited=$(( waited + 10 ))
   done
   echo "::endgroup::"
@@ -296,7 +299,10 @@ MANIFEST
         cordoned=true
         break
       fi
-      sleep 10
+      sleep 10 &
+      if ! wait $!; then
+        return 1
+      fi
       qwaited=$(( qwaited + 10 ))
     done
     echo "::endgroup::"
@@ -321,7 +327,10 @@ MANIFEST
         rebooted=true
         break
       fi
-      sleep 15
+      sleep 15 &
+      if ! wait $!; then
+        return 1
+      fi
       rwaited=$(( rwaited + 15 ))
     done
     echo "::endgroup::"
