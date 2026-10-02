@@ -21,8 +21,10 @@ package adds the Fleet-specific files on top:
 
   - NNN-<component>/fleet.yaml: one Fleet bundle per folder. Upstream-chart
     folders set helm.repo/chart/version; local-chart folders (Chart.yaml
-    present) are deployed as the folder itself. values.yaml and, when
-    present, cluster-values.yaml are passed through helm.valuesFiles.
+    present) set helm.chart to "." and are deployed as the folder itself.
+    values.yaml and, when present, cluster-values.yaml are passed through
+    helm.valuesFiles, which Fleet reads only when helm.chart or helm.repo
+    is set.
   - NNN-<component>/.fleetignore: keeps install.sh and upstream.env out of
     the Fleet Bundle resource.
   - gitrepo.yaml: a fleet.cattle.io/v1alpha1 GitRepo listing every folder
