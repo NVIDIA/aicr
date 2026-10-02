@@ -226,6 +226,7 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tools/generate-notices'
+              - 'tools/normalize-go-license-urls'
               - 'tools/check-fence-balance'
               - 'tools/generate-python-licenses'
               - 'validators/performance/requirements.txt'
