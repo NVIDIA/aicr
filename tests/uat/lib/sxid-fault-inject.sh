@@ -135,8 +135,14 @@ _sxid_fault_inject_impl() {
       return 1
     fi
   else
-    local breaker_state
-    breaker_state="$(jq -r --arg f "${breaker_field}" '.data[$f] // "UNKNOWN"' <<<"${breaker_json}")"
+    local breaker_state breaker_jq_rc=0
+    breaker_state="$(jq -r --arg f "${breaker_field}" '.data[$f] // "UNKNOWN"' <<<"${breaker_json}")" || breaker_jq_rc=$?
+    if (( breaker_jq_rc != 0 )); then
+      echo "::error::could not parse circuit-breaker ConfigMap ${breaker_cm} JSON in ${nvs_ns}; failing closed rather than assuming the breaker is clear" >&2
+      rm -f /tmp/breaker-err.log
+      ctrf_add sxidfault-detect failed 0 "circuit-breaker precheck failed closed (unparseable JSON)"
+      return 1
+    fi
     echo "circuit-breaker ${breaker_cm}.${breaker_field}=${breaker_state}"
     if [[ "${breaker_state}" == "TRIPPED" ]]; then
       echo "::error::fault-quarantine circuit breaker is TRIPPED; refusing to inject another fault" >&2
