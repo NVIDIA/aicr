@@ -66,7 +66,7 @@ transitions:
           - Skyhook
           - DeploymentPolicy
     stepsByDeployer:
-      - deployers: [argocd, argocd-helm, flux]
+      - deployers: [argocd, argocd-helm, flux, fleet]
         steps:
           - id: expect-operator-downtime-during-the-hook
             description: >-
@@ -83,11 +83,13 @@ transitions:
               predates label-based webhook discovery. The hook ships in the
               chart rather than the deployer, so any path that runs the chart's
               hooks carries the same gap between delete and recreate; the
-              failure was not reproduced on argocd or flux specifically.
+              failure was not reproduced on argocd, flux, or fleet
+              specifically.
           - id: upgrade-operator
             description: >-
-              Bump the operator's chart version in its own Application or
-              HelmRelease and sync it, before touching any CR.
+              Bump the operator's chart version in its own Application,
+              HelmRelease, or Fleet bundle and sync it, before touching any
+              CR.
             reason: >-
               The chart ships both groups' CRDs and RBAC, and the mirror
               imports each Skyhook into a NodeWright. Per-node state is copied

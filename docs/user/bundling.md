@@ -132,7 +132,7 @@ the upgrade steps instead.
 ### Bundle info
 
 Every bundle carries a `bundle-info.yaml` at its root, written unconditionally
-by all five deployers — no flag turns it off. It answers three questions a
+by every deployer — no flag turns it off. It answers three questions a
 bundle cannot answer for itself: which deployer built it, which `aicr` binary
 built it, and which Helm release landed in which directory.
 

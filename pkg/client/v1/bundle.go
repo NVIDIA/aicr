@@ -408,7 +408,7 @@ func (c *Client) AdoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 // in memory), MakeBundle produces the SAME complete artifact the CLI
 // bundle command emits — README, deploy.sh, per-component directories,
 // checksums — in the deployer layout selected by opts.Config.Deployer()
-// (helm, argocd, argocd-helm, flux, helmfile).
+// (helm, argocd, argocd-helm, flux, helmfile, fleet).
 //
 // # When to call
 //

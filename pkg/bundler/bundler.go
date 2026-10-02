@@ -37,6 +37,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/fleet"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/flux"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helmfile"
@@ -812,7 +813,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		switch b.Config.Deployer() {
 		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm:
 			// supported
-		case config.DeployerFlux, config.DeployerHelmfile:
+		case config.DeployerFlux, config.DeployerHelmfile, config.DeployerFleet:
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm",
 					b.Config.Deployer()))
@@ -1004,6 +1005,35 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			Serial:                 b.Config.Serial(),
 		}, nil
 
+	case config.DeployerFleet:
+		componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component pre-manifests")
+		}
+		componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component post-manifests")
+		}
+		return &fleet.Generator{
+			RecipeResult:           recipeResult,
+			ComponentValues:        componentValues,
+			Version:                b.Config.Version(),
+			AppName:                b.Config.AppName(),
+			Namespace:              b.Config.FleetNamespace(),
+			Mode:                   b.Config.FleetMode(),
+			RepoURL:                b.Config.RepoURL(),
+			TargetRevision:         b.Config.TargetRevision(),
+			IncludeChecksums:       false,
+			ComponentPreManifests:  componentPreManifests,
+			ComponentPostManifests: componentPostManifests,
+			DataFiles:              dataFiles,
+			DynamicValues:          dynamicValues,
+			VendorCharts:           b.Config.VendorCharts(),
+			UpgradeNotice:          upgradeNotice,
+		}, nil
+
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
@@ -1173,6 +1203,8 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 		return "flux-manifests", "Flux manifests"
 	case config.DeployerHelmfile:
 		return "helmfile-bundle", "Helmfile release graph"
+	case config.DeployerFleet:
+		return "fleet-bundle", "Rancher Fleet bundle"
 	default:
 		return types.BundleType(dt), string(dt)
 	}

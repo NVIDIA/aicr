@@ -1122,7 +1122,7 @@ components:
       description: Bundle deployment method.
       schema:
         type: string
-        enum: [helm, argocd, argocd-helm, flux, helmfile]
+        enum: [helm, argocd, argocd-helm, flux, helmfile, fleet]
         default: helm
     BundleRepo:
       name: repo
@@ -1182,7 +1182,9 @@ components:
       name: app-name
       in: query
       required: false
-      description: Parent Argo CD Application name.
+      description: >-
+        Parent Argo CD Application name (argocd, argocd-helm), or the Fleet
+        GitRepo name and bundle-name prefix (fleet; must be a DNS-1123 label).
       schema:
         type: string
         pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'

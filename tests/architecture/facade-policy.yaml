@@ -105,9 +105,11 @@ constrained:
       ComponentPath: type
       Config: type
       Config.VendorCharts: behavioral
+      DefaultFleetNamespace: const
       DefaultFluxNamespace: const
       DeployerArgoCD: const
       DeployerArgoCDHelm: const
+      DeployerFleet: const
       DeployerFlux: const
       DeployerHelm: const
       DeployerHelmfile: const
@@ -115,6 +117,7 @@ constrained:
       DeployerType.String: behavioral
       GetDeployerTypes: behavioral
       NewConfig: behavioral
+      ParseFleetMode: behavioral
       NodeLabel: type
       NodeLabel.String: behavioral
       ParseDeployerType: behavioral
@@ -125,6 +128,7 @@ constrained:
       ParseValueOverridesJSON: behavioral
       TypedComponentPath: type
       ValidateAppName: behavioral
+      ValidateFleetName: behavioral
       ValidateHTTPSURL: behavioral
       WithAcceleratedNodeSelector: behavioral
       WithAcceleratedNodeTolerations: behavioral
@@ -137,6 +141,8 @@ constrained:
       WithDeployer: behavioral
       WithDynamicValuePaths: behavioral
       WithEstimatedNodeCount: behavioral
+      WithFleetMode: behavioral
+      WithFleetNamespace: behavioral
       WithFluxNamespace: behavioral
       WithOCIParentNamespace: behavioral
       WithOCISourceName: behavioral

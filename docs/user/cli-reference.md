@@ -1578,7 +1578,7 @@ aicr upgrade-check --from <recipe|bundle|cluster> [--to <recipe|bundle>] [--depl
 |------|-------|------|---------|-------------|
 | `--from` | `-f` | string | | Source: recipe file, bundle directory, ConfigMap URI, or the literal `cluster` to read the installed inventory instead of an artifact. **Required.** |
 | `--to` | | string | re-resolve | Target artifact. When omitted, `--from`'s own criteria are re-resolved against this binary's registry. **Required with `--from cluster`**, which carries no criteria to re-resolve. |
-| `--deployer` | `-d` | string | | Deployer the reported steps are scoped to: `argocd`, `argocd-helm`, `flux`, `helm`, `helmfile`. **Always required with `--from cluster`**; otherwise required whenever any component needs steps. |
+| `--deployer` | `-d` | string | | Deployer the reported steps are scoped to: `argocd`, `argocd-helm`, `fleet`, `flux`, `helm`, `helmfile`. **Always required with `--from cluster`**; otherwise required whenever any component needs steps. |
 | `--scan-cluster` | | bool | off (on with `--from cluster`) | Also report live objects the upgrade could disturb that carry no deployer ownership marker. Implied by `--from cluster`; pass `--scan-cluster=false` there to skip the scan. Advisory: findings never change the exit code. |
 | `--fail-on-error` | | bool | **true** | Exit non-zero when any component needs attention. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. |
@@ -1785,8 +1785,8 @@ aicr bundle [flags]
 | `--recipe` | `-r` | string | Path to recipe file (required, or via `spec.bundle.input.recipe` in `--config`) |
 | `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Bundle Config File Mode](#bundle-config-file-mode). |
 | `--output` | `-o` | string | Local output directory or `oci://` registry URI (default: current directory) |
-| `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, `flux`, or `helmfile` |
-| `--repo` | | string | Git/OCI repository URL baked into GitOps sources: Argo CD Application sources with `--deployer argocd`, and the Flux `GitRepository` source for local-chart components with `--deployer flux` (a placeholder URL is written when omitted). Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
+| `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, `flux`, `helmfile`, or `fleet` |
+| `--repo` | | string | Git/OCI repository URL baked into GitOps sources: Argo CD Application sources with `--deployer argocd`, the Flux `GitRepository` source for local-chart components with `--deployer flux`, and `spec.repo` of the Fleet `GitRepo` with `--deployer fleet` (a placeholder URL is written when omitted). Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
 | `--set` | | string[] | Override **scalar** values in bundle files (repeatable, format: `component:path=value`). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`). Scalar-only — for list/object values use `--set-json` / `--set-file`. An override whose component is absent from the generated bundle is rejected rather than silently discarded; the scalar `enabled=false` spelling is exempt on a declared component (it is the removal mechanism). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
 | `--set-json` | | string[] | Override values with a JSON-encoded **list or object** (repeatable, format: `component:path=<json>`, e.g. `--set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'`). Object values deep-merge into existing maps; lists and scalars replace. Takes precedence over `--set` on the same path. An override whose component is absent from the generated bundle is rejected — no `enabled` exemption on the typed path (`enabled` is honored only via scalar `--set`); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). See [List and Object Value Overrides](#list-and-object-value-overrides). |
 | `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge and absent-component-rejection semantics (no `enabled` exemption on the typed path). |
@@ -1807,7 +1807,9 @@ aicr bundle [flags]
 | `--serial` | | bool | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `--deployer argocd`, `argocd-helm`, `flux`, and `helmfile` (helm is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, and helmfile chains every release via `needs:` into one linear apply chain. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. Off by default. |
 | `--flux-oci-source-name` | | string | Name of the OCIRepository CR that Flux uses to pull the bundle (default: `aicr-bundle`). Used with `--deployer flux` and OCI output. Must match the OCIRepository deployed in the target cluster. See [Flux OCI Mode](#flux-oci-mode). |
 | `--flux-namespace` | | string | Kubernetes namespace where Flux CRs (HelmRelease, sources, ArtifactGenerator) are deployed (default: `flux-system`). Must match the namespace of the Flux installation in the target cluster. |
-| `--app-name` | | string | Parent Argo Application name (default: `aicr-stack` for `--deployer argocd-helm`, `nvidia-stack` for `--deployer argocd`). Must be a DNS-1123 subdomain. Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `--deployer argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected on other deployers (`helm`, `flux`, `helmfile`). |
+| `--fleet-namespace` | | string | Fleet workspace the generated GitRepo is applied to (default: `fleet-default`, which targets downstream clusters registered with Rancher). `fleet-local` targets the Rancher local cluster. Used with `--deployer fleet`. |
+| `--fleet-mode` | | string | Fleet output shape for `--deployer fleet`: `gitrepo` (default) writes a `fleet.yaml` per component plus `gitrepo.yaml`; `helmop` writes `helmops.yaml` with one HelmOp per component. HelmOps reference charts instead of embedding them in Fleet Bundles, so large charts (for example kube-prometheus-stack) stay under the ~1MiB Bundle limit, but local charts (raw manifests, `--vendor-charts`) are rejected. |
+| `--app-name` | | string | Parent Argo Application name (default: `aicr-stack` for `--deployer argocd-helm`, `nvidia-stack` for `--deployer argocd`), or the Fleet GitRepo name and bundle-name prefix for `--deployer fleet` (default: `aicr`). Must be a DNS-1123 subdomain. Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `--deployer argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected on other deployers (`helm`, `flux`, `helmfile`). |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
@@ -2122,6 +2124,7 @@ The `--deployer` flag controls how deployment artifacts are generated:
 | `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All non-profile-owned values overridable at install time via `helm --set`; a profiled recipe ships a lock template that rejects overrides on profile-owned paths. Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
 | `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
 | `helmfile` | Generates a `helmfile.yaml` release graph driven by the upstream [helmfile](https://helmfile.readthedocs.io/) CLI (`helmfile apply` / `diff` / `destroy`). Supports `--dynamic` via per-release `cluster-values.yaml`. Requires the `helmfile` binary at deploy time. |
+| `fleet` | Generates a [Rancher Fleet](https://fleet.rancher.io/) GitRepo bundle: one `fleet.yaml` per component folder plus a root `gitrepo.yaml`. Supports `--dynamic` via per-folder `cluster-values.yaml`. Clusters opt in with the `aicr.nvidia.com/bundle=<app-name>` label. OCI output (`--output oci://`) is not supported. |
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all non-profile-owned values are overridable at install time (a profiled recipe ships a lock template that rejects install-time values on profile-owned paths).
 
@@ -2137,6 +2140,7 @@ Ordering follows each component's declared dependencies (`dependencyRefs`), not 
 - **Argo CD** / **Argo CD (Helm)**: `argocd.argoproj.io/sync-wave` annotation assigned by dependency depth. Independent components share a wave and sync together; a dependent lands in a later wave band that Argo starts only after the prior tier (including any readiness gate) is healthy.
 - **Flux**: `dependsOn` references in each `HelmRelease` mirror the component's declared `dependencyRefs` directly (a component with no dependencies has no `dependsOn` and reconciles in parallel). Pre/post manifests preserve the per-component chain `<name>-pre → <name> → <name>-post`. The bundle's root `kustomization.yaml` is a plain Kustomize file (not a Flux Kustomization CR).
 - **Helmfile**: emits one `level-N.yaml` sub-helmfile per dependency tier, processed in sequence (so each tier's CRDs register before the next tier renders). Within a tier, `needs:` chains only a component's own `-pre → primary → -post` releases; independent components carry no edge, so helmfile applies them concurrently.
+- **Fleet**: every folder's `fleet.yaml` `dependsOn` the previous folder's bundle, so Fleet reconciles strictly in folder order, including `-pre` / `-post` folders. Each bundle starts only after its predecessor is `Ready`.
 
 Pass `--serial` to force every deployer to install strictly one component at a time in deployment order (reverts argocd/argocd-helm/flux/helmfile to a linear chain; helm is already serial). For the full model and per-deployer rationale, see [Deployment ordering](../contributor/component.md#deployment-ordering).
 
@@ -2469,7 +2473,7 @@ With the flag set, the bundler emits an extra folder, `NNN-<name>-readiness/`, i
 - **`helm`** — `deploy.sh` runs the readiness folder with `helm upgrade --install --wait`. The gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`, so the latter is not needed. Helm's own `--timeout` is derived by the bundler from the gate's `--max-wait` plus a buffer, so the gate owns the deadline (Helm never preempts it).
 - **`argocd` / `argocd-helm`** — the readiness folder inherits the next sync-wave after its component, and Argo CD blocks that wave on the gate Job via its built-in `batch/Job` health (Progressing → Healthy on success, Degraded on failure). No custom health Lua and no direct `ClusterPolicy` watch — the readiness logic stays encapsulated in the Chainsaw test the Job runs.
 
-`flux` and `helmfile` are not yet supported and `--readiness-hooks` is rejected for them. Components without a `readiness.yaml` are unaffected.
+`flux`, `helmfile`, and `fleet` are not yet supported and `--readiness-hooks` is rejected for them. Components without a `readiness.yaml` are unaffected.
 
 The gate only reads API objects, so it needs a healthy node rather than the gated component's node. Its pod carries the bundle's system node selector (`--system-node-selector`, or `scheduling.systemNodeSelector` in the config file) and its keyed system tolerations (`--system-node-toleration`, or `scheduling.systemNodeTolerations`). Keyless tolerations are not applied to the gate — that includes the tolerate-all default the CLI and API use when no toleration is set, and an explicit `*` — because a toleration with no key also matches the not-ready, unreachable and cordoned taints, which would let the gate bind to an unhealthy node. On a cluster whose every node is tainted, pass a keyed `--system-node-toleration` for the system nodes' taint so the gate can schedule ([#2590](https://github.com/NVIDIA/aicr/issues/2590)). Placement does not follow the gated component's own `--set` or `--dynamic` scheduling values. Go SDK callers get only what they set with `config.WithSystemNodeSelector` / `config.WithSystemNodeTolerations`.
 
@@ -3360,6 +3364,17 @@ helmfile -f helmfile.yaml destroy
 CRD / PVC cleanup follows the **helm** walkthrough above. See the
 [Helmfile `destroy` documentation](https://github.com/helmfile/helmfile/blob/main/docs/index.md)
 for flags and behavior.
+
+##### fleet
+
+Delete the GitRepo from the Rancher management cluster; Fleet uninstalls
+every bundle it created:
+
+```bash
+kubectl delete -f gitrepo.yaml
+```
+
+CRD / PVC cleanup follows the **helm** walkthrough above.
 
 ---
 

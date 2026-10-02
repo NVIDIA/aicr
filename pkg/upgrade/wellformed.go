@@ -187,7 +187,7 @@ func checkVerdictFields(where string, t *Transition) []string {
 //
 // localformat is deliberately absent — it is the internal bundle-layout package
 // every deployer consumes, not a selectable deployer.
-var canonicalDeployers = []string{"argocd", "argocd-helm", "flux", "helm", "helmfile"}
+var canonicalDeployers = []string{"argocd", "argocd-helm", "fleet", "flux", "helm", "helmfile"}
 
 // checkStepGroups implements rule 6. Groups partition the deployers: no two
 // explicit groups may claim the same one, at most one group may omit deployers

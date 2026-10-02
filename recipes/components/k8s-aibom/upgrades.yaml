@@ -74,7 +74,7 @@ transitions:
         kinds:
           - AIBOMControllerConfig
     stepsByDeployer:
-      - deployers: [helmfile]
+      - deployers: [helmfile, fleet]
         steps:
           - id: apply-new-crds
             description: >-
@@ -86,8 +86,9 @@ transitions:
               CHART=oci://ghcr.io/googlecloudplatform/charts/k8s-aibom and
               VERSION=1.5.1.
             reason: >-
-              helmfile has no automated equivalent for ownsCRDs components;
-              it is the one deployer that never updates them for you.
+              helmfile and fleet have no automated equivalent for ownsCRDs
+              components; they are the deployers that never update them for
+              you (Fleet's Helm upgrade skips crds/, like plain Helm).
               Measured on GKE: against stale v1.3.0 CRDs, setting
               config.verification aborts the release with
               ".spec.verification: field not declared in schema" once the
