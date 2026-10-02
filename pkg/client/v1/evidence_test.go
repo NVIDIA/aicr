@@ -27,10 +27,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
+// requireCode asserts the outermost structured code, which is what callers
+// branch on. errors.Is would also match a code buried deeper in the chain.
 func requireCode(t *testing.T, err error, code aicrerrors.ErrorCode) {
 	t.Helper()
-	if !stderrors.Is(err, aicrerrors.New(code, "")) {
-		t.Fatalf("error = %v, want code %s", err, code)
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != code {
+		t.Fatalf("error = %v, want outermost code %s", err, code)
 	}
 }
 
@@ -123,6 +126,11 @@ func TestCollectCNCFEvidence(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
+	expired, cancelExpired := context.WithTimeout(context.Background(), 0)
+	t.Cleanup(cancelExpired)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
 	valid := CNCFCollectOptions{Dir: t.TempDir(), NoCluster: true}
 	withFeatures := func(f ...string) CNCFCollectOptions {
 		o := valid
@@ -145,6 +153,8 @@ func TestCollectCNCFEvidence(t *testing.T) {
 		{name: "feature aliases and all", client: client, ctx: context.Background(), opts: withFeatures("dra", "all")},
 		{name: "unknown feature", client: client, ctx: context.Background(), opts: withFeatures("nonexistent"), wantCode: aicrerrors.ErrCodeInvalidRequest},
 		{name: "unresolvable allocation policy fails closed", client: client, ctx: context.Background(), rec: badAdvertiser, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "policy resolution past deadline is a timeout", client: client, ctx: expired, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeTimeout},
+		{name: "policy resolution after cancel is canceled", client: client, ctx: canceled, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeCanceled},
 		{name: "recipe missing internal", client: client, ctx: context.Background(), rec: &RecipeResult{Name: "x"}, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
 		{name: "recipe from another client", client: newClientForBundleTest(t), ctx: context.Background(), rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
 		{name: "empty dir", client: client, ctx: context.Background(), opts: withoutDir, wantCode: aicrerrors.ErrCodeInvalidRequest},

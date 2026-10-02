@@ -16,6 +16,7 @@ package aicr
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -260,6 +261,7 @@ func (c *Client) RenderCNCFEvidence(ctx context.Context, report *ctrf.Report, di
 //     unresolved or owned by another Client.
 //   - ErrCodeUnavailable when bash or kubectl is not on PATH.
 //   - ErrCodeTimeout when collection exceeds its deadline.
+//   - ErrCodeCanceled when ctx is canceled during policy resolution.
 //   - The policy resolver's own code when rec's allocation policy is invalid.
 //   - ErrCodeInternal when one or more sections fail.
 func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opts CNCFCollectOptions) error {
@@ -305,8 +307,11 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	if rec != nil {
 		var err error
 		if policy, err = validatorv1.ResolveGPUAllocationPolicy(ctx, rec.internal); err != nil {
-			return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
-				"failed to resolve the GPU allocation policy for CNCF evidence collection")
+			const msg = "failed to resolve the GPU allocation policy for CNCF evidence collection"
+			if stderrors.Is(err, context.DeadlineExceeded) || stderrors.Is(err, context.Canceled) {
+				return errors.WrapCtxErr(err, errors.ErrCodeTimeout, msg)
+			}
+			return errors.PropagateOrWrap(err, errors.ErrCodeInternal, msg)
 		}
 	}
 
