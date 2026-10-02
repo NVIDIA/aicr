@@ -306,7 +306,7 @@ Set `--storage-class` to a StorageClass that exists (`kubectl get storageclass`)
 ## Install Bundle
 
 ```shell
-cd ./bundle && chmod +x deploy.sh && ./deploy.sh
+(cd ./bundle && chmod +x deploy.sh && ./deploy.sh)
 ```
 
 Deploy order: `cert-manager` → `slinky-slurm-operator-crds` → `slinky-slurm-operator` → `slinky-slurm` (→ `slinky-topograph` on the H100 GKE and Kind leaves, after `slinky-slurm` so the slurm chart owns the ConfigMap Topograph patches).
