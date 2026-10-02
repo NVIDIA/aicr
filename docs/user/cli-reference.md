@@ -1225,7 +1225,7 @@ aicr validate \
 # Validate deployment phase after components are installed; the bundle's
 # recipe.yaml records the component set it deployed
 aicr validate \
-  --recipe ./bundle/recipe.yaml \
+  --recipe ./bundles/recipe.yaml \
   --snapshot snapshot.yaml \
   --phase deployment
 

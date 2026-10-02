@@ -39,10 +39,12 @@ bundle root, after dropping the components it did not render. Bundle-time
 `--set` values are not written back to it; the one bundle-time decision that is
 persisted is the `dra-node-labeler` enablement under `--dra-eviction-node-label`.
 That file is the effective component inventory of what was deployed, so
-validation of a deployed cluster reads it:
+validation of a deployed cluster reads it. The examples below assume the bundle
+was written with `aicr bundle --output ./bundles`, as in
+[Generating Bundles](bundling.md):
 
 ```bash
-aicr validate --recipe ./bundle/recipe.yaml --phase deployment
+aicr validate --recipe ./bundles/recipe.yaml --phase deployment
 ```
 
 The original recipe is the input for the pre-deploy dry run (`--no-cluster`,
@@ -211,7 +213,7 @@ To run deployment validation first (recommended — verifies GPU Operator, DRA
 driver, and Kubeflow Trainer are installed and healthy before the benchmark):
 
 ```bash
-aicr validate --recipe ./bundle/recipe.yaml --snapshot snapshot.yaml --phase deployment
+aicr validate --recipe ./bundles/recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
 
 ### Grace Blackwell NET preflight: GPUDirect RDMA prerequisites
@@ -684,7 +686,7 @@ driver, Dynamo operator, KAI scheduler, and supporting components are installed
 and healthy):
 
 ```bash
-aicr validate --recipe ./bundle/recipe.yaml --snapshot snapshot.yaml --phase deployment
+aicr validate --recipe ./bundles/recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
 
 ### Skip scenarios
@@ -800,7 +802,7 @@ capability-driven automatic selection.
 ## Running all phases
 
 ```bash
-aicr validate --recipe ./bundle/recipe.yaml --snapshot snapshot.yaml
+aicr validate --recipe ./bundles/recipe.yaml --snapshot snapshot.yaml
 # equivalent to: --phase deployment --phase conformance --phase performance
 ```
 
