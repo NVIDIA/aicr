@@ -210,6 +210,11 @@ type Generator struct {
 	// VendorCharts pulls upstream chart bytes into the bundle.
 	VendorCharts bool
 
+	// Puller fetches upstream chart bytes when VendorCharts is set. nil
+	// resolves to localformat's default *CLIChartPuller; tests inject a stub
+	// here.
+	Puller localformat.ChartPuller
+
 	// UpgradeNotice is inserted verbatim before the README deployment section.
 	UpgradeNotice string
 }
@@ -317,6 +322,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
 		VendorCharts:           g.VendorCharts,
+		Puller:                 g.Puller,
 	})
 	if err != nil {
 		return nil, err
@@ -470,6 +476,12 @@ func buildFleetYAMLs(folders []localformat.Folder, appName string) ([]FleetYAML,
 			}
 		case localformat.KindLocalHelm:
 			// The folder holds Chart.yaml; Fleet deploys it as a local chart.
+			// Fleet parses helm.valuesFiles only when helm.chart or helm.repo
+			// is set, yet always drops those files from the Bundle, so an
+			// empty chart would lose every value. "." keeps the folder as the
+			// chart source: a chart path that exists on disk with no repo is
+			// read locally, never downloaded.
+			doc.Helm.Chart = "."
 		default:
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("unsupported folder kind %v for %s", f.Kind, f.Dir))

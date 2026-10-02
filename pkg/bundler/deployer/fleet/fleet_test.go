@@ -16,6 +16,9 @@ package fleet
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +26,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -205,8 +209,8 @@ func TestGenerate_PostManifestsLocalChart(t *testing.T) {
 		t.Fatalf("expected local chart in -post folder: %v", err)
 	}
 	post := readFleetYAML(t, postDir)
-	if post.Helm.Repo != "" || post.Helm.Chart != "" || post.Helm.Version != "" {
-		t.Errorf("local chart helm = %+v, want no repo/chart/version", post.Helm)
+	if post.Helm.Repo != "" || post.Helm.Chart != "." || post.Helm.Version != "" {
+		t.Errorf("local chart helm = %+v, want chart \".\" and no repo/version", post.Helm)
 	}
 	if post.Helm.ReleaseName != "gpu-operator-post" {
 		t.Errorf("local chart releaseName = %q", post.Helm.ReleaseName)
@@ -507,5 +511,62 @@ func TestGenerate_ReadmeMatchesMode(t *testing.T) {
 				t.Errorf("gitrepo README does not mention fleet.yaml:\n%s", text)
 			}
 		})
+	}
+}
+
+// stubChartPuller returns a deterministic .tgz payload for any Pull call.
+type stubChartPuller struct{}
+
+var _ localformat.ChartPuller = (*stubChartPuller)(nil)
+
+func (s *stubChartPuller) Pull(_ context.Context, c localformat.Component) ([]byte, localformat.VendorRecord, string, error) {
+	chartName := c.ChartName
+	if chartName == "" {
+		chartName = c.Name
+	}
+	tgz := []byte(fmt.Sprintf("fake-tgz-%s-%s", chartName, c.Version))
+	sum := sha256.Sum256(tgz)
+	tarball := fmt.Sprintf("%s-%s.tgz", chartName, c.Version)
+	return tgz, localformat.VendorRecord{
+		Name:          c.Name,
+		Chart:         chartName,
+		Version:       c.Version,
+		Repository:    c.Repository,
+		SHA256:        hex.EncodeToString(sum[:]),
+		TarballName:   tarball,
+		PullerVersion: "stub v0.0.0",
+	}, tarball, nil
+}
+
+// A vendored chart is a local chart whose templates read .Values. Fleet
+// parses helm.valuesFiles only when helm.chart or helm.repo is set, so the
+// folder must name itself as the chart or every value is dropped.
+func TestGenerate_VendoredChartKeepsValues(t *testing.T) {
+	g := &Generator{
+		RecipeResult: recipeWith(
+			ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
+		),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}, "replicaCount": 3},
+		},
+		DynamicValues: map[string][]string{"cert-manager": {"replicaCount"}},
+		Version:       testBundlerVersion,
+		VendorCharts:  true,
+		Puller:        &stubChartPuller{},
+	}
+	out := t.TempDir()
+	if _, err := g.Generate(context.Background(), out); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	dir := filepath.Join(out, "001-cert-manager")
+	if _, err := os.Stat(filepath.Join(dir, "Chart.yaml")); err != nil {
+		t.Fatalf("vendored folder has no Chart.yaml: %v", err)
+	}
+	doc := readFleetYAML(t, dir)
+	if doc.Helm.Chart != "." || doc.Helm.Repo != "" || doc.Helm.Version != "" {
+		t.Errorf("vendored helm = %+v, want chart \".\" and no repo/version", doc.Helm)
+	}
+	if strings.Join(doc.Helm.ValuesFiles, ",") != fileValues+","+fileClusterValues {
+		t.Errorf("valuesFiles = %v, want [%s %s]", doc.Helm.ValuesFiles, fileValues, fileClusterValues)
 	}
 }
