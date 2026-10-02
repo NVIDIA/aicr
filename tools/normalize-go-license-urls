@@ -139,6 +139,17 @@ url_status() {
     awk -F '\t' -v url="$(probe_url "$1")" '$1 == url { print $2; exit }' "${CANDIDATE_STATUS}"
 }
 
+# curl's error message for a candidate whose transfer failed, if any.
+url_error() {
+    awk -F '\t' -v url="$(probe_url "$1")" '$1 == url { print $3; exit }' "${CANDIDATE_STATUS}"
+}
+
+# A status that says nothing about whether the URL exists: no response, a
+# timeout, rate limiting, or a server error.
+inconclusive_status() {
+    [[ -z "$1" || "$1" == "000" || "$1" == "408" || "$1" == "429" || "$1" == 5?? ]]
+}
+
 TMP=$(mktemp -d)
 trap 'rm -rf "${TMP}"' EXIT
 readonly CANDIDATE_URLS="${TMP}/candidate-urls"
@@ -150,8 +161,13 @@ while IFS=, read -r package url license; do
     url_candidates "${url}" >> "${CANDIDATE_URLS}"
 done < "${INPUT}"
 
-# Probes every URL in $1 and appends "<url>\t<status>" lines to $2. Extra
-# arguments are passed to curl ahead of the URLs.
+# Probes every URL in $1 and appends "<url>\t<status>\t<curl error>" lines to $2.
+# Extra arguments are passed to curl ahead of the URLs.
+#
+# curl exits non-zero when any one transfer fails, yet still reports that
+# transfer as status 000 with its error. The resolution below decides whether a
+# failed probe matters, so curl's exit status is fatal only when it did not
+# report every URL, which means curl itself failed.
 probe() {
     local input=$1
     local output=$2
@@ -165,7 +181,10 @@ probe() {
         return
     fi
 
-    if ! "${CURL_BIN}" \
+    local expected=$(( ${#requests[@]} / 3 ))
+    local before rc=0
+    before=$(wc -l < "${output}")
+    "${CURL_BIN}" \
         "$@" \
         --parallel \
         --parallel-max "${PARALLEL_REQUESTS}" \
@@ -175,10 +194,11 @@ probe() {
         --connect-timeout "${CONNECT_TIMEOUT_SECONDS}" \
         --max-time "${TOTAL_TIMEOUT_SECONDS}" \
         --retry "${RETRIES}" \
-        --retry-connrefused \
-        --write-out '%{url}\t%{http_code}\n' \
-        "${requests[@]}" >> "${output}"; then
-        echo "ERROR: failed to check license source URLs." >&2
+        --retry-all-errors \
+        --write-out '%{url}\t%{http_code}\t%{errormsg}\n' \
+        "${requests[@]}" >> "${output}" || rc=$?
+    if (( $(wc -l < "${output}") - before != expected )); then
+        echo "ERROR: failed to check license source URLs (curl exit ${rc} without a result for each of ${expected} URLs)." >&2
         exit 1
     fi
 }
@@ -222,10 +242,17 @@ unreachable=0
 while IFS=, read -r package url license; do
     [[ -z "${package}" ]] && continue
 
+    # Stop at an inconclusive candidate rather than falling through: it may be
+    # the reachable one, and emitting a lower-ranked URL in its place would make
+    # the output depend on network luck.
     resolved=""
     while IFS= read -r candidate; do
-        if [[ "$(url_status "${candidate}")" == "200" ]]; then
+        status=$(url_status "${candidate}")
+        if [[ "${status}" == "200" ]]; then
             resolved=${candidate}
+            break
+        fi
+        if inconclusive_status "${status}"; then
             break
         fi
     done < <(url_candidates "${url}")
@@ -240,13 +267,18 @@ while IFS=, read -r package url license; do
         echo "ERROR: no reachable license source URL for ${package}:"
         while IFS= read -r candidate; do
             code=$(url_status "${candidate}")
-            echo "  tried (${code:-no response}): ${candidate}"
+            err=$(url_error "${candidate}")
+            echo "  tried (${code:-no response}${err:+: ${err}}): ${candidate}"
         done < <(url_candidates "${url}")
     } >&2
 done < "${INPUT}"
 
 if (( unreachable > 0 )); then
     echo "ERROR: ${unreachable} package(s) have no reachable license source URL." >&2
+    failed=$(awk -F '\t' '$2 == "000" { n++ } END { print n + 0 }' "${CANDIDATE_STATUS}")
+    if (( failed > 0 )); then
+        echo "${failed} probe(s) got no HTTP response, which is not evidence of a dead URL." >&2
+    fi
     throttled=$(awk -F '\t' '$2 == "429" || $2 == "503" { n++ } END { print n + 0 }' "${CANDIDATE_STATUS}")
     if (( throttled > 0 )); then
         echo "${throttled} probe(s) were rate-limited (HTTP 429/503), which is not evidence of a dead URL." >&2

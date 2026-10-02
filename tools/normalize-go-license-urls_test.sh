@@ -31,6 +31,7 @@ printf '%s\n' "$*" >> "${STUB_ARGV_LOG:-/dev/null}"
 head_request=false
 config=""
 prev=""
+rc=0
 for arg in "$@"; do
     if [[ "${prev}" == "--config" ]]; then
         config=${arg}
@@ -60,15 +61,23 @@ for arg in "$@"; do
         https://github.com/blang/semver/blob/v4.0.0/LICENSE | \
         https://github.com/cel-expr/cel-go/blob/v0.31.0/LICENSE | \
         https://github.com/example/repo/blob/nested/v1.2.3/LICENSE | \
+        https://github.com/flaky/repo/blob/v1.0.0/sub/LICENSE | \
+        https://github.com/flaky/repo/blob/v2.0.0/LICENSE | \
         https://github.com/kyverno/kyverno/blob/48769d003e55/LICENSE | \
         https://github.com/root/module/blob/v1.2.3/LICENSE)
-            printf '%s\t200\n' "${arg}"
+            printf '%s\t200\t\n' "${arg}"
+            ;;
+        # Like real curl, a failed transfer is still reported, and fails the exit status.
+        https://github.com/flaky/repo/blob/v1.0.0/LICENSE | \
+        https://github.com/flaky/repo/blob/v2.0.0/sub/LICENSE)
+            printf '%s\t000\tConnection reset by peer\n' "${arg}"
+            rc=56
             ;;
         https://github.com/throttled/*)
-            printf '%s\t503\n' "${arg}"
+            printf '%s\t503\t\n' "${arg}"
             ;;
         *)
-            printf '%s\t404\n' "${arg}"
+            printf '%s\t404\t\n' "${arg}"
             ;;
     esac
 done
@@ -76,6 +85,7 @@ if [[ "${head_request}" != "true" ]]; then
     echo "license URL check did not use HEAD requests" >&2
     exit 1
 fi
+exit "${rc}"
 EOF
 chmod +x "${TMP}/curl"
 
@@ -190,5 +200,58 @@ for msg in "rate-limited (HTTP 429/503)" "Set GITHUB_TOKEN"; do
         exit 1
     fi
 done
+
+# One failed transfer makes curl exit non-zero for the whole batch. When every
+# package still resolves, that must not fail the run.
+cat > "${TMP}/flaky-irrelevant.csv" <<'EOF'
+github.com/flaky/repo/sub,https://github.com/flaky/repo/blob/v1.0.0/sub/LICENSE,MIT
+github.com/root/module,https://github.com/root/module/blob/v1.2.3/LICENSE,MIT
+EOF
+if ! CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/flaky-irrelevant.csv" \
+    > "${TMP}/flaky-irrelevant.out" 2> "${TMP}/flaky-irrelevant.err"; then
+    echo "normalizer failed on a transfer error no package depended on:" >&2
+    cat "${TMP}/flaky-irrelevant.err" >&2
+    exit 1
+fi
+diff -u "${TMP}/flaky-irrelevant.csv" "${TMP}/flaky-irrelevant.out"
+
+# A failed transfer on a higher-ranked candidate must not fall through to a
+# lower-ranked one: the emitted URL would then depend on the network. It is
+# reported with curl's error instead.
+cat > "${TMP}/flaky-blocking.csv" <<'EOF'
+github.com/flaky/repo/sub,https://github.com/flaky/repo/blob/v2.0.0/sub/LICENSE,MIT
+github.com/root/module,https://github.com/root/module/blob/v1.2.3/LICENSE,MIT
+EOF
+if CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/flaky-blocking.csv" \
+    > "${TMP}/flaky-blocking.out" 2> "${TMP}/flaky-blocking.err"; then
+    echo "normalizer skipped past a candidate whose probe failed" >&2
+    exit 1
+fi
+for msg in \
+    "no reachable license source URL for github.com/flaky/repo/sub:" \
+    "tried (000: Connection reset by peer): https://github.com/flaky/repo/blob/v2.0.0/sub/LICENSE" \
+    "1 probe(s) got no HTTP response"; do
+    if ! grep -qF "${msg}" "${TMP}/flaky-blocking.err"; then
+        echo "normalizer did not report the failed probe (missing: ${msg})" >&2
+        exit 1
+    fi
+done
+if grep -qF "github.com/flaky/repo/sub," "${TMP}/flaky-blocking.out"; then
+    echo "normalizer emitted a fallback URL for a package whose preferred probe failed" >&2
+    exit 1
+fi
+
+# curl failing outright, without a result per URL, is still fatal.
+printf '#!/usr/bin/env bash\nexit 2\n' > "${TMP}/curl-broken"
+chmod +x "${TMP}/curl-broken"
+if CURL_BIN="${TMP}/curl-broken" "${TOOL}" "${TMP}/input.csv" \
+    > /dev/null 2> "${TMP}/broken-curl.err"; then
+    echo "normalizer accepted a curl run that reported no results" >&2
+    exit 1
+fi
+if ! grep -qF "failed to check license source URLs (curl exit 2" "${TMP}/broken-curl.err"; then
+    echo "normalizer did not report the curl failure" >&2
+    exit 1
+fi
 
 echo "normalize-go-license-urls tests passed"
