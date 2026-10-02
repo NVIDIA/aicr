@@ -226,6 +226,7 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tools/generate-notices'
+              - 'tools/normalize-go-license-urls'
               - 'tools/check-fence-balance'
               - 'tools/generate-python-licenses'
               - 'validators/performance/requirements.txt'
@@ -754,6 +755,10 @@ jobs:
         # its own. What is asserted is that the generator completes — every
         # failure mode it guards is fatal, so a non-zero exit here is the same
         # signal `make release` would get at tag time.
+        # The token authenticates the license-URL probes; anonymous github.com
+        # requests from runner IPs are rate-limited (tools/normalize-go-license-urls).
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: make notices
 
   notices-generator-skip:
