@@ -55,6 +55,7 @@ cluster:
     # collides with the bootstrap one and 409s.
     adminRoles:
       - AWSReservedSSO_CS-Admin_41c4b4abb8231e94
+      - nvsentinel-e2e-runner-role
     controlPlane:
       allowedCidrs:
         - 216.228.127.128/30
