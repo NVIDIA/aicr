@@ -70,9 +70,11 @@ const (
 	// GitRepo selects on.
 	BundleLabel = "aicr.nvidia.com/bundle"
 
-	// maxBundleNameLen keeps bundle names usable as Helm release names,
-	// which Fleet derives from them when helm.releaseName is unset.
-	maxBundleNameLen = 53
+	// maxBundleNameLen is the label-value limit: Fleet copies every bundle
+	// name into the fleet.cattle.io/bundle-name label of its
+	// BundleDeployments, so a longer name cannot be deployed. An explicit
+	// fleet.yaml name is used verbatim, never shortened.
+	maxBundleNameLen = validation.LabelValueMaxLength
 )
 
 // ignoredFiles are localformat files Fleet has no use for. install.sh and
@@ -289,6 +291,13 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			fmt.Sprintf("invalid Fleet mode %q: must be %q or %q", g.Mode, ModeGitRepo, ModeHelmOp))
 	}
 
+	// Like the HelmOp checks above, reject before writing anything.
+	for _, release := range plannedReleases(g.RecipeResult.ComponentRefs, g.ComponentPreManifests, g.ComponentPostManifests) {
+		if err := checkBundleNameLen(bundleName(g.appName(), release)); err != nil {
+			return nil, err
+		}
+	}
+
 	output := &deployer.Output{Files: make([]string, 0)}
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
@@ -444,9 +453,10 @@ func buildFleetYAMLs(folders []localformat.Folder, appName string) ([]FleetYAML,
 	prevBundle := ""
 	for _, f := range folders {
 		name := bundleName(appName, f.Name)
-		if len(name) > maxBundleNameLen {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("Fleet bundle name %q exceeds %d characters; use a shorter --app-name", name, maxBundleNameLen))
+		// Generate checks the planned names before writing; this catches a
+		// folder localformat added that plannedReleases does not know about.
+		if err := checkBundleNameLen(name); err != nil {
+			return nil, err
 		}
 		doc := FleetYAML{
 			Name:             name,
@@ -553,6 +563,31 @@ func (g *Generator) writeGitRepoLayout(outputDir string, output *deployer.Output
 
 func bundleName(appName, release string) string {
 	return appName + "-" + release
+}
+
+func checkBundleNameLen(name string) error {
+	if len(name) > maxBundleNameLen {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("Fleet bundle name %q exceeds %d characters; use a shorter --app-name", name, maxBundleNameLen))
+	}
+	return nil
+}
+
+// plannedReleases lists the release (folder) names localformat writes for
+// refs: each component, plus <name>-pre when it has pre-phase manifests and
+// <name>-post when a chart-backed component has post-phase manifests.
+func plannedReleases(refs []recipe.ComponentRef, pre, post map[string]map[string][]byte) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, ref.Name)
+		if len(pre[ref.Name]) > 0 {
+			out = append(out, ref.Name+"-pre")
+		}
+		if len(post[ref.Name]) > 0 && ref.Source != "" {
+			out = append(out, ref.Name+"-post")
+		}
+	}
+	return out
 }
 
 // valuesFilesFor lists the values files localformat wrote for f, relative
