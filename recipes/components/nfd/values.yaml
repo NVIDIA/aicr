@@ -23,6 +23,15 @@
 # upstream chart defaults on future chart upgrades.
 master:
   enable: true
+  # The chart's 4Gi limit OOMKills the master on a 1720-node cluster: the
+  # startup and hourly resyncPeriod passes over ~2700 NodeFeature objects
+  # peak at ~4.3Gi (#3038). 8Gi is ~2x that peak, as #1825 did for the
+  # topology-updater.
+  resources:
+    requests:
+      memory: 2Gi
+    limits:
+      memory: 8Gi
 
 worker:
   enable: true
