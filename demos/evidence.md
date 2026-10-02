@@ -250,14 +250,18 @@ and read `.exit` via `jq`. Write the JSON to a file rather than piping into
 script before the `case` runs, and `|| true` keeps it from tripping `set -e`:
 
 ```shell
+rm -f result.json
 aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-9f8e7d6c5b4a3210fedcba9876543210abcdef0123456789fedcba9876543210.yaml \
   --format json -o result.json || true
+if [ ! -s result.json ]; then
+  echo "verifier wrote no result — treat as a failure"; exit 1
+fi
 case "$(jq '.exit' result.json)" in
   0) echo "evidence valid" ;;
-  1) echo "validator phases failed" ;;
-  2) echo "bundle invalid" ;;
-  3) echo "no verdict reached (infrastructure fault or aborted) — do not reject" ;;
-  *) echo "unrecognized verdict — treat as a failure" ;;
+  1) echo "validator phases failed"; exit 1 ;;
+  2) echo "bundle invalid"; exit 1 ;;
+  3) echo "no verdict reached (infrastructure fault or aborted) — retry, do not reject"; exit 3 ;;
+  *) echo "unrecognized verdict — treat as a failure"; exit 1 ;;
 esac
 ```
 

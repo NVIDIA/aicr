@@ -101,7 +101,7 @@ intent; the linked page has the walkthrough.
 |--------------|-------|-------|
 | Make an existing Helm or Kustomize chart available to recipes | `recipes/registry.yaml` entry | [component.md](component.md) |
 | Bump a pinned chart version, and record whether the upgrade is safe | `recipes/components/<name>/upgrades.yaml` | [upgrade-records.md](upgrade-records.md) |
-| Pin a chart version | `helm.defaultVersion` (or `kustomize.defaultTag`) in `recipes/registry.yaml`; an overlay pin only as a declared divergence in `versionPinExemptions` | [recipe.md](recipe.md#version-pinning-is-single-source) |
+| Pin a chart version | `helm.defaultVersion` (or `kustomize.defaultTag`) in `recipes/registry.yaml`; an overlay pin only as a declared Helm `version` divergence in `versionPinExemptions` (Kustomize `tag` exemptions are rejected today) | [recipe.md](recipe.md#version-pinning-is-single-source) |
 | Set values or define scheduling for a specific cluster shape | Recipe overlay in `recipes/overlays/` | [recipe.md](recipe.md) |
 | Share OS or platform fragments across overlays | Recipe mixin in `recipes/mixins/` | [recipe.md](recipe.md#mixin-composition) |
 | Capture a new dimension of cluster / OS / GPU state | New collector in `pkg/collector/<kind>/` | [collector.md](collector.md) |
@@ -347,6 +347,6 @@ By reference:
 - [RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md) — release process for maintainers
 - [SECURITY.md](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md) — supply-chain security, attestation verification
 - [CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md) — coding rules, error wrapping, context, HTTP, logging, K8s patterns
-- [docs/design/](https://github.com/NVIDIA/aicr/tree/main/docs/design) — architecture decision records (ADRs), accepted and proposed; each ADR's Status section says which
+- [docs/design/](https://github.com/NVIDIA/aicr/tree/main/docs/design) — architecture decision records (ADRs), accepted and proposed; each ADR's Status section says which state it is in
 - [docs/integrator/](https://github.com/NVIDIA/aicr/tree/main/docs/integrator) — embedding AICR in your platform
 - [docs/user/](https://github.com/NVIDIA/aicr/tree/main/docs/user) — end-user reference (CLI flags, API endpoints, component catalog)

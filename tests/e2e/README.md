@@ -58,6 +58,7 @@ FAKE_GPU_ENABLED=true AICR_IMAGE=localhost:5001/aicr:local ./tests/e2e/run.sh
 ```bash
 make tools-setup  # kind, tilt, ctlptl, ko, kubectl; make tools-check confirms the .settings.yaml pins
 ```
+
 Plus: Docker.
 
 ## Environment Variables

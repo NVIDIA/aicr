@@ -965,12 +965,14 @@ aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 `--push`, `--no-sign`, `--bom`, signing and registry options) are documented in
 the [`aicr validate` flag table](cli-reference.md#aicr-validate).
 
-Emission fails closed with `INVALID_REQUEST` when any validator image is not
-immutably pinned (a moving tag such as `:latest`, or a non-AICR registry without
-a digest), because the attestation names validators by tag; unset a stale
-`AICR_VALIDATOR_IMAGE_TAG` rather than passing
-`--allow-mutable-validator-tags`. For the recommended producer workflow, which
-pushes an unsigned bundle from the cluster and signs it in CI, see
+By default, emission fails closed with `INVALID_REQUEST` when any validator
+image is not immutably pinned (a moving tag such as `:latest`, or a non-AICR
+registry without a digest), because the attestation names validators by tag.
+The usual cause is a stale `AICR_VALIDATOR_IMAGE_TAG`; unset it.
+`--allow-mutable-validator-tags` is the explicit opt-out: it emits anyway, so
+use it only for disposable evidence you will not publish. For the recommended
+producer workflow, which pushes an unsigned bundle from the cluster and signs it
+in CI, see
 [Publishing Recipe Evidence](../contributor/evidence-publishing.md).
 
 **Registry requirements:** the registry must support the OCI 1.1

@@ -46,7 +46,7 @@ From the repo root, this is the whole thing — download the attested release bi
 
 ```shell
 # 1. Download the attested release binary (it ships its aicr-attestation.sigstore.json sidecar)
-AICR_VERSION=$(gh release view -R NVIDIA/aicr --json tagName -q .tagName)
+AICR_VERSION="${AICR_VERSION:-$(gh release view -R NVIDIA/aicr --json tagName -q .tagName)}"
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m); case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
 gh release download "${AICR_VERSION}" -R NVIDIA/aicr -p "aicr_*_${OS}_${ARCH}.tar.gz"

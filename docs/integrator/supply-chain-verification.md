@@ -1135,7 +1135,9 @@ already fetched from a registry, an inherently online context. Binary and
 bundle verification uses `sigstore-go` with a local trusted root instead.
 Verification is a read operation that may run frequently — in CI pipelines, in clusters
 verifying deployed bundles, or by audit tools — and must not be coupled to
-external API availability or rate limits. Cryptographic security is
+external API availability or rate limits. That holds for the registry-referrer
+and local-trusted-root paths; the GitHub attestation API fallback for images
+does depend on the API and can fail during an outage or under rate limiting. Cryptographic security is
 identical in both cases; the Rekor inclusion proof is embedded in every
 `.sigstore.json` bundle and verified locally.
 
