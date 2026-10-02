@@ -260,7 +260,7 @@ func TestGenerate_FleetLocalTargetsLocalCluster(t *testing.T) {
 }
 
 func TestGenerate_Errors(t *testing.T) {
-	longName := strings.Repeat("a", 40)
+	longName := strings.Repeat("a", 50)
 	tests := []struct {
 		name string
 		gen  *Generator
@@ -580,5 +580,68 @@ func TestGenerate_VendoredChartKeepsValues(t *testing.T) {
 	}
 	if strings.Join(doc.Helm.ValuesFiles, ",") != fileValues+","+fileClusterValues {
 		t.Errorf("valuesFiles = %v, want [%s %s]", doc.Helm.ValuesFiles, fileValues, fileClusterValues)
+	}
+}
+
+// Fleet copies the bundle name into a label value, so an over-long
+// <app>-<release> is rejected, and before anything is written: a failure on
+// the last folder must not leave the earlier ones behind.
+func TestGenerate_LongBundleNameWritesNothing(t *testing.T) {
+	gpu := ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia")
+	postCM := map[string]map[string][]byte{
+		"gpu-operator": {"components/gpu-operator/manifests/cm.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n  namespace: gpu-operator\n")},
+	}
+	tests := []struct {
+		name string
+		gen  *Generator
+		want string
+	}{
+		{
+			// The last component pushes past the limit; the first fits.
+			name: "last component",
+			gen: &Generator{
+				RecipeResult: recipeWith(
+					ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
+					ref("k8s-ephemeral-storage-metrics", "monitoring", "k8s-ephemeral-storage-metrics", "1.0.0", "https://example.com"),
+				),
+				AppName: strings.Repeat("a", 34),
+			},
+			want: "k8s-ephemeral-storage-metrics",
+		},
+		{
+			// aicr-x...-gpu-operator fits; only the injected -post folder
+			// exceeds the limit.
+			name: "post folder",
+			gen: &Generator{
+				RecipeResult:           recipeWith(gpu),
+				ComponentPostManifests: postCM,
+				AppName:                strings.Repeat("a", maxBundleNameLen-len("-gpu-operator")),
+			},
+			want: "gpu-operator-post",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "bundle")
+			_, err := tt.gen.Generate(context.Background(), out)
+			if err == nil || !strings.Contains(err.Error(), "exceeds") || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Generate() error = %v, want a length error naming %s", err, tt.want)
+			}
+			if _, statErr := os.Stat(out); !os.IsNotExist(statErr) {
+				t.Errorf("rejected bundle left output behind: stat err = %v", statErr)
+			}
+		})
+	}
+}
+
+func TestGenerate_BundleNameAtLimit(t *testing.T) {
+	g := &Generator{
+		RecipeResult: recipeWith(
+			ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia"),
+		),
+		AppName: strings.Repeat("a", maxBundleNameLen-len("-gpu-operator")),
+	}
+	if _, err := g.Generate(context.Background(), t.TempDir()); err != nil {
+		t.Errorf("Generate() error = %v, want a %d-character bundle name accepted", err, maxBundleNameLen)
 	}
 }
