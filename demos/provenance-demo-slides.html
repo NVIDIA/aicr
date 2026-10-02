@@ -344,7 +344,7 @@
 <pre><span class="c"># Pull and verify the CycloneDX SBOM attestation (per-platform manifest digest).</span>
 <span class="p">$</span> cosign verify-attestation --type cyclonedx \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
+    --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
     "$IMAGE@$DIGEST_AMD64" > predicate.json
 
 <span class="c"># Vulnerability scan, straight off the SBOM (no re-pull).</span>
@@ -419,32 +419,21 @@
     <div class="label">06 · Enforce</div>
     <h2>Block unsigned pulls at admission</h2>
     <p>Verification at <code class="inl">docker pull</code> is opt-in. To make it a property of
-      the cluster, enforce it with an admission controller — either
+      the cluster, enforce it with an admission controller that verifies the Sigstore
+      <em>bundle</em> format AICR&rsquo;s images carry:
       <a href="https://docs.sigstore.dev/policy-controller/overview/">Sigstore Policy Controller</a>
-      (validated for AICR) or <a href="https://kyverno.io/">Kyverno</a> (its bundle support was cluster-tested and does not yet verify AICR — see #1537).</p>
-    <div class="code">
-      <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">ClusterImagePolicy (sigstore)</span><button class="copy">copy</button></div>
-<pre><span class="d">apiVersion:</span> policy.sigstore.dev/v1beta1
-<span class="d">kind:</span> ClusterImagePolicy
-<span class="d">metadata: { name: aicr-images-require-attestation }</span>
-<span class="d">spec:</span>
-  <span class="d">images:</span>
-  - <span class="d">glob:</span> <span class="g">"ghcr.io/nvidia/aicr**"</span>
-  <span class="d">authorities:</span>
-  - <span class="d">signatureFormat:</span> bundle
-    <span class="d">keyless:</span>
-      <span class="d">url:</span> https://fulcio.sigstore.dev
-      <span class="d">identities:</span>
-      - <span class="d">issuer:</span> https://token.actions.githubusercontent.com
-        <span class="d">subjectRegExp:</span> <span class="g">'^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$'</span>
-    <span class="d">ctlog: { url: https://rekor.sigstore.dev }</span>
-    <span class="d">attestations:</span>
-    - <span class="d">name:</span> build-provenance
-      <span class="d">predicateType:</span> https://slsa.dev/provenance/v1</pre>
+      v0.13.0+ (<code class="inl">signatureFormat: bundle</code>) or
+      <a href="https://kyverno.io/">Kyverno</a> (<code class="inl">type: SigstoreBundle</code>; cluster testing has not yet verified AICR images).</p>
+    <div class="note">
+      <span class="t info">Release identity</span>
+      Issuer <code class="inl">https://token.actions.githubusercontent.com</code>, subject
+      <code class="inl">https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/*</code>.
+      Validated, cluster-tested copy-paste policies are tracked in
+      <a href="https://github.com/NVIDIA/aicr/issues/1537">#1537</a>.
     </div>
     <div class="grid2">
       <div class="mini"><h4 class="ok">Allowed</h4><p><code class="inl">kubectl run a --image=ghcr.io/nvidia/aicr:vX.Y.Z</code> — has attestation, identity matches.</p></div>
-      <div class="mini"><h4 class="bad">Rejected</h4><p>A <code class="inl">ghcr.io/nvidia/aicr*</code> image without a valid release attestation — <em>no matching attestations found</em>. Images outside the glob (e.g. <code class="inl">nginx:latest</code>) are not evaluated.</p></div>
+      <div class="mini"><h4 class="bad">Rejected</h4><p>A <code class="inl">ghcr.io/nvidia/aicr*</code> image without a valid release attestation — <em>no matching attestations found</em>. Images the policy does not match (e.g. <code class="inl">nginx:latest</code>) are not evaluated.</p></div>
     </div>
   </div>
 </section>

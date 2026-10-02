@@ -14,7 +14,7 @@ snapshot of it.
 Maintainers are responsible for:
 
 - Reviewing and merging pull requests
-- Triaging issues and discussions
+- Triaging issues
 - Ensuring code quality and test coverage
 - Making release decisions
 - Upholding the [Code of Conduct](CODE_OF_CONDUCT.md)

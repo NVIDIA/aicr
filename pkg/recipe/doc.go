@@ -193,6 +193,7 @@
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
 //   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, any (default: any)
+//   - platform: dynamo, kubeflow, nim, runai, slurm, any (default: any)
 //   - nodes: integer node count (default: 0 = any)
 //
 // # Criteria Files (CLI and HTTP API - POST)

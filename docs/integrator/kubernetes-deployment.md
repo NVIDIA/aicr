@@ -195,7 +195,7 @@ metadata:
   namespace: aicr
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/limit-rps: "100"  # per client IP
 spec:
   ingressClassName: nginx
   tls:
@@ -296,9 +296,8 @@ For all four, the operational control is a Kubernetes `NetworkPolicy` on
 the aicrd pod or an equivalent egress firewall that allow-lists only the
 public chart registries the deployment needs. If you cannot enforce that
 network boundary, keep `AICR_ALLOW_VENDOR_CHARTS` off and front the server
-with authenticated ingress. A follow-up will move the tarball fetch
-in-process to close these residuals without needing a network-layer
-control.
+with authenticated ingress. The tarball fetch does not run in-process yet,
+so these residuals still need a network-layer control.
 
 ### ConfigMap for Custom Recipe Data (Advanced)
 
@@ -450,16 +449,27 @@ spec:
     - to:
         - namespaceSelector: {}
       ports:
+        - protocol: UDP
+          port: 53  # DNS
         - protocol: TCP
           port: 53  # DNS
+    # Only with AICR_ALLOW_VENDOR_CHARTS=true or server-side signing: HTTPS to
+    # the chart registries, or to the KMS / Fulcio / Rekor / Sigstore TUF
+    # endpoints. NetworkPolicy matches IPs, not hostnames.
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
+        - ipBlock:
+            cidr: 203.0.113.0/24  # placeholder: replace with those endpoints' ranges
       ports:
         - protocol: TCP
-          port: 443  # Kubernetes API
+          port: 443
 ```
+
+aicrd never calls the Kubernetes API, so it needs no egress to the API server.
+Without vendor charts or server-side signing it needs no egress beyond DNS; drop
+the second rule. NetworkPolicy cannot allow-list by hostname, so when the
+registry or signing endpoints have no stable IP ranges, enforce the hostname
+allowlist in an egress proxy or firewall instead (see
+[Network Egress from the Vendor-Charts Path](#network-egress-from-the-vendor-charts-path)).
 
 ### Pod Security Standards
 
@@ -596,7 +606,7 @@ Rate-limit settings are **compiled-in** constants from `pkg/defaults`; the
 server does not read `RATE_LIMIT`/`RATE_BURST` (or any rate-limit) environment
 variables. To change the effective limits, front the server with an
 ingress/gateway that enforces its own rate limit (see the Ingress example
-above, which sets `nginx.ingress.kubernetes.io/rate-limit`), or build a custom
+above, which sets ingress-nginx's per-client `limit-rps`), or build a custom
 `aicrd` image with adjusted `pkg/defaults` values.
 
 Rate-limit rejections surface in the `aicr_rate_limit_rejects_total` metric and

@@ -12,7 +12,7 @@ Typical integration workflows:
 4. **Deployment**: Apply generated configuration to cluster
 5. **Validation**: Verify deployment using test workloads
 
-**Supported CI/CD platforms**: GitHub Actions, GitLab CI, Jenkins, Argo Workflows, Tekton
+**CI/CD platforms covered**: GitHub Actions, plus a stage mapping for GitLab CI, CircleCI, and Terraform (see [Translating to other CI systems](#translating-to-other-ci-systems))
 
 ## Integration Patterns
 
@@ -37,6 +37,15 @@ jobs:
         uses: azure/k8s-set-context@v4
         with:
           kubeconfig: ${{ secrets.KUBECONFIG }}
+
+      - name: Setup aicr
+        run: |
+          # GoReleaser archives are versioned (aicr_<version>_<os>_<arch>.tar.gz),
+          # so resolve the latest tag first rather than a fixed filename.
+          VERSION=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+          curl -sLO "https://github.com/NVIDIA/aicr/releases/download/${VERSION}/aicr_${VERSION#v}_linux_amd64.tar.gz"
+          tar -xzf "aicr_${VERSION#v}_linux_amd64.tar.gz"
+          sudo mv aicr aicr-attestation.sigstore.json /usr/local/bin/
       
       # On AKS, the gpuStack profile qualifies against the
       # K8s.aks-gpu-pools.gpu-driver reading — capture it BEFORE the
@@ -103,6 +112,15 @@ jobs:
         uses: azure/k8s-set-context@v4
         with:
           kubeconfig: ${{ secrets.KUBECONFIG }}
+
+      - name: Setup aicr
+        run: |
+          # GoReleaser archives are versioned (aicr_<version>_<os>_<arch>.tar.gz),
+          # so resolve the latest tag first rather than a fixed filename.
+          VERSION=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+          curl -sLO "https://github.com/NVIDIA/aicr/releases/download/${VERSION}/aicr_${VERSION#v}_linux_amd64.tar.gz"
+          tar -xzf "aicr_${VERSION#v}_linux_amd64.tar.gz"
+          sudo mv aicr aicr-attestation.sigstore.json /usr/local/bin/
 
       # 1. Snapshot: agent Job writes cluster state to a ConfigMap.
       #    aicr snapshot waits synchronously for the Job and cleans it up,
@@ -172,9 +190,18 @@ on:
 jobs:
   generate-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # keyless signing for `aicr bundle --attest`
+    env:
+      GITOPS_REPO: my-org/my-gitops-repo
     steps:
-      - name: Checkout
+      - name: Checkout GitOps repo
         uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          path: gitops-repo
+          token: ${{ secrets.GITOPS_REPO_TOKEN }}  # write access to GITOPS_REPO
       
       - name: Setup aicr
         run: |
@@ -183,7 +210,8 @@ jobs:
           VERSION=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
           curl -sLO "https://github.com/NVIDIA/aicr/releases/download/${VERSION}/aicr_${VERSION#v}_linux_amd64.tar.gz"
           tar -xzf "aicr_${VERSION#v}_linux_amd64.tar.gz"
-          sudo mv aicr /usr/local/bin/
+          # --attest needs the binary attestation next to the binary.
+          sudo mv aicr aicr-attestation.sigstore.json /usr/local/bin/
       
       - name: Generate recipe
         run: |
@@ -199,8 +227,13 @@ jobs:
           aicr bundle \
             --recipe recipe.yaml \
             --deployer argocd \
-            --repo https://github.com/${{ github.repository }}.git \
+            --attest \
+            --repo https://github.com/${{ env.GITOPS_REPO }}.git \
             --output ./bundles
+
+      # Gate what enters the GitOps repo; Argo CD syncs whatever is committed.
+      - name: Verify bundle
+        run: aicr verify ./bundles --min-trust-level verified
       
       - name: Commit to GitOps repo
         run: |
@@ -210,10 +243,17 @@ jobs:
           cp -r bundles/* gitops-repo/
           
           cd gitops-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
           git commit -m "Update GPU stack components"
           git push
 ```
+
+Verify the bundle directory, never the GitOps repository: verification is
+closed-world and fails on any file not listed in the bundle's `checksums.txt`.
+See [Gating Argo CD](supply-chain-verification.md#gating-argo-cd) for making
+the commit itself a binding control.
 
 **Generated Argo CD Application with multi-source:**
 ```yaml

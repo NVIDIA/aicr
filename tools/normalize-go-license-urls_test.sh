@@ -19,17 +19,40 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TOOL="${ROOT}/tools/normalize-go-license-urls"
 TMP=$(mktemp -d)
 trap 'rm -rf "${TMP}"' EXIT
+# CI runners may export a token; the default-path cases below must not see it.
+unset GITHUB_TOKEN
 
+# The stub answers for github.com blob URLs and their raw.githubusercontent.com
+# equivalents alike, and fails if the auth config travels with any other host.
 cat > "${TMP}/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$*" >> "${STUB_ARGV_LOG:-/dev/null}"
 head_request=false
+config=""
+prev=""
 for arg in "$@"; do
+    if [[ "${prev}" == "--config" ]]; then
+        config=${arg}
+    fi
+    prev=${arg}
     if [[ "${arg}" == "--head" ]]; then
         head_request=true
         continue
     fi
-    case "${arg}" in
+    [[ "${arg}" == https://* ]] || continue
+    lookup=${arg}
+    if [[ "${arg}" =~ ^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)$ ]]; then
+        if [[ -z "${config}" ]] || ! grep -q '^header = "Authorization: Bearer ' "${config}"; then
+            echo "raw.githubusercontent.com probed without the auth config" >&2
+            exit 1
+        fi
+        lookup="https://github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/blob/${BASH_REMATCH[3]}"
+    elif [[ -n "${config}" ]]; then
+        echo "auth config sent with a non-raw URL: ${arg}" >&2
+        exit 1
+    fi
+    case "${lookup}" in
         https://cs.opensource.google/go/x/term/+/v0.34.0:LICENSE | \
         https://github.com/NVIDIA/aicr/blob/HEAD/licenses/overrides/example/LICENSE | \
         https://github.com/Azure/azure-sdk-for-go/blob/sdk/azcore/v1.20.0/sdk/azcore/LICENSE.txt | \
@@ -41,7 +64,10 @@ for arg in "$@"; do
         https://github.com/root/module/blob/v1.2.3/LICENSE)
             printf '%s\t200\n' "${arg}"
             ;;
-        https://*)
+        https://github.com/throttled/*)
+            printf '%s\t503\n' "${arg}"
+            ;;
+        *)
             printf '%s\t404\n' "${arg}"
             ;;
     esac
@@ -124,5 +150,45 @@ if ! grep -qF "github.com/root/module," "${TMP}/multi.out"; then
     echo "normalizer dropped a reachable row while reporting failures" >&2
     exit 1
 fi
+
+# With a token, github.com blob URLs are probed through raw.githubusercontent.com
+# with the token in a curl config file. The output still cites github.com, and
+# the token never reaches curl's argv.
+GITHUB_TOKEN=stub-token-value STUB_ARGV_LOG="${TMP}/argv.log" CURL_BIN="${TMP}/curl" \
+    "${TOOL}" "${TMP}/input.csv" > "${TMP}/actual-token.csv"
+diff -u "${TMP}/expected.csv" "${TMP}/actual-token.csv"
+if grep -qF stub-token-value "${TMP}/argv.log"; then
+    echo "normalizer passed the token on curl's command line" >&2
+    exit 1
+fi
+if ! grep -qF https://raw.githubusercontent.com/root/module/v1.2.3/LICENSE "${TMP}/argv.log"; then
+    echo "normalizer did not probe github.com URLs through raw.githubusercontent.com" >&2
+    exit 1
+fi
+if grep -qE 'https://github\.com/[^ ]+/blob/' "${TMP}/argv.log"; then
+    echo "normalizer probed a github.com blob URL anonymously despite a token" >&2
+    exit 1
+fi
+if ! grep -qF https://cs.opensource.google/go/x/term/+/v0.34.0:LICENSE "${TMP}/argv.log"; then
+    echo "normalizer dropped the non-GitHub probes in token mode" >&2
+    exit 1
+fi
+
+# A rate-limited probe is reported as such, with the remedy, rather than
+# reading as a dead URL.
+cat > "${TMP}/throttled.csv" <<'EOF'
+github.com/throttled/repo,https://github.com/throttled/repo/blob/v1.0.0/LICENSE,MIT
+EOF
+if CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/throttled.csv" \
+    > /dev/null 2> "${TMP}/throttled.err"; then
+    echo "normalizer accepted a rate-limited URL" >&2
+    exit 1
+fi
+for msg in "rate-limited (HTTP 429/503)" "Set GITHUB_TOKEN"; do
+    if ! grep -qF "${msg}" "${TMP}/throttled.err"; then
+        echo "normalizer did not report rate limiting (missing: ${msg})" >&2
+        exit 1
+    fi
+done
 
 echo "normalize-go-license-urls tests passed"

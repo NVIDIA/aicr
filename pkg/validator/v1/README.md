@@ -11,9 +11,7 @@ deploy AICR validator Jobs.
 >
 > **Provenance.** This package previously lived at
 > `pkg/api/validator/v1` and was relocated under `pkg/validator/v1` so the
-> on-disk layout matches its position in the validation pipeline. Re-exported
-> aliases keep older import paths source-compatible during the transition;
-> new code should import this path directly.
+> on-disk layout matches its position in the validation pipeline.
 
 ## Package surface
 

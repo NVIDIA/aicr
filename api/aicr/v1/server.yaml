@@ -1207,7 +1207,7 @@ components:
           examples:
             - INVALID_REQUEST
             - METHOD_NOT_ALLOWED
-            - INTERNAL_ERROR
+            - INTERNAL
             - RATE_LIMIT_EXCEEDED
         message:
           type: string
