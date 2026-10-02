@@ -300,8 +300,8 @@ func TestCheckExpectedResources_FailsWhenNodewrightCRMissing(t *testing.T) {
 // timeout), a Go-resident readiness check must NOT treat that as "CRD not
 // registered" and skip. Anything other than IsNotFound means we cannot
 // prove readiness, so the check must surface a failure. Exercised here via
-// the Nodewright discovery gate, which shares the fail-closed pattern with
-// the other GPU readiness signals.
+// Nodewright discovery, which shares the fail-closed pattern with the other
+// GPU readiness signals.
 func TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError(t *testing.T) {
 	t.Parallel()
 
@@ -1170,8 +1170,8 @@ func TestVerifyGPUReadinessSignalsPreservesOrderConcurrently(t *testing.T) {
 		{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
 		{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
 	}
-	// The Nodewright GroupVersion is registered so the signal reaches its poll
-	// and fails on the canceled budget. Both signals must report.
+	// The canceled budget fails both signals on their first poll. Both must
+	// report.
 	ctx := newDeploymentTestContextWithDiscovery(t, nil, nil, []schema.GroupVersion{nodewrightGVR.GroupVersion()}, nil, refs)
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel() // force every probe's poll loop to exit on its first iteration
