@@ -77,9 +77,9 @@ const (
 	maxBundleNameLen = validation.LabelValueMaxLength
 )
 
-// ignoredFiles are localformat files Fleet has no use for. install.sh and
-// upstream.env drive the helm deployer's scripts; Fleet reads the same
-// coordinates from fleet.yaml.
+// ignoredFiles are localformat files Fleet has no use for. install.sh,
+// upstream.env and apply-crds.sh drive the helm deployer's scripts; Fleet
+// reads the same coordinates from fleet.yaml and cannot run the CRD step.
 var ignoredFiles = []string{"install.sh", "upstream.env", "apply-crds.sh"}
 
 // FleetYAML is the subset of the fleet.yaml schema this deployer emits.

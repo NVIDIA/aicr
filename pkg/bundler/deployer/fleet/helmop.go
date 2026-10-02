@@ -126,8 +126,6 @@ func (g *Generator) writeHelmOpLayout(outputDir string, output *deployer.Output,
 	return addFile(output, outputDir, fileHelmOps)
 }
 
-// mergedValues reads f's values files in order and deep-merges them, later
-// files winning, the same precedence helm applies to repeated --values.
 // localChartComponents lists the components localformat would write as (or
 // with) a local chart: kustomize or manifest-only components, and Helm
 // components carrying pre- or post-phase raw manifests.
@@ -143,6 +141,8 @@ func localChartComponents(refs []recipe.ComponentRef, pre, post map[string]map[s
 	return out
 }
 
+// mergedValues reads f's values files in order and deep-merges them, later
+// files winning, the same precedence helm applies to repeated --values.
 func mergedValues(outputDir string, f localformat.Folder, valuesFiles []string) (map[string]any, error) {
 	merged := map[string]any{}
 	for _, name := range valuesFiles {
