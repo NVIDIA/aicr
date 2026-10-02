@@ -193,8 +193,15 @@ check "the CI lane does not drive the nvkind runner" "0" \
 # can create a cluster, and nothing else here can. That drops an editor
 # backup or a `.sh.bak` left by a mutation run, which would otherwise fail
 # this check on a developer machine for a file git never sees.
-duplicates="$(grep -rl 'kind create cluster' \
-    "${REPO_ROOT}/.github/workflows" "${REPO_ROOT}/tests/uat" 2>/dev/null \
+#
+# A creator counts only when it builds THE slurm cluster: its operative lines
+# name the slurm kind config or the slurm cluster name. A copied bootstrap
+# carries the config, an inlined create carries the name, and a lane with its
+# own topology and name (the Mokka gpu-operator lane) is not a second copy of
+# this one. An empty DEFAULT_CLUSTER_NAME matches every line, so a lost name
+# flags every creator rather than none.
+slurm_cluster_creators() {
+    grep -rl 'kind create cluster' "$@" 2>/dev/null \
     | awk -F/ '{ base = $NF }
         base == "bootstrap-cluster.sh" || base == "bootstrap-cluster_test.sh" { next }
         base ~ /\.(ya?ml|sh)$/ || base !~ /\./ { print }' \
@@ -204,9 +211,32 @@ duplicates="$(grep -rl 'kind create cluster' \
         # sequence report as no-match, so this guard would drop a real
         # duplicate and pass. That direction is silent.
         file_ops="$(operative "$f")"
-        grep -q 'kind create cluster' <<<"${file_ops}" && printf '%s\n' "$f"
-      done)"
+        grep -q 'kind create cluster' <<<"${file_ops}" || continue
+        grep -qF -e 'slurm-cluster-config' -e "${DEFAULT_CLUSTER_NAME}" <<<"${file_ops}" \
+            && printf '%s\n' "$f"
+      done
+}
+duplicates="$(slurm_cluster_creators "${REPO_ROOT}/.github/workflows" "${REPO_ROOT}/tests/uat")"
 check "nothing else creates the slurm cluster" "" "${duplicates}"
+
+# Both directions of that scoping, on fixtures: the two duplicate shapes are
+# caught, and neither an independent topology nor a slurm name that appears
+# only in a comment is.
+fixture="$(mktemp -d)"
+mkdir -p "${fixture}/workflows"
+# shellcheck disable=SC2016 # the fixture holds the copied script's text, unexpanded
+printf '%s\n' 'BOOTSTRAP_KIND_CONFIG="${DIR}/slurm-cluster-config.yaml"' \
+    'kind create cluster --config "${BOOTSTRAP_KIND_CONFIG}"' > "${fixture}/bootstrap-cluster-v2.sh"
+printf '%s\n' "run: kind create cluster --name ${DEFAULT_CLUSTER_NAME} --config /tmp/k.yaml" \
+    > "${fixture}/workflows/inline-slurm.yaml"
+printf '%s\n' 'run: kind create cluster --name aicr-mokka --config /tmp/kind-mokka.yaml' \
+    > "${fixture}/workflows/independent.yaml"
+printf '%s\n' "# sized like ${DEFAULT_CLUSTER_NAME}" 'run: kind create cluster --name other --config /tmp/o.yaml' \
+    > "${fixture}/workflows/comment-only.yaml"
+check "a copied bootstrap and an inlined slurm create are duplicates; other topologies are not" \
+    "$(printf '%s\n' "${fixture}/bootstrap-cluster-v2.sh" "${fixture}/workflows/inline-slurm.yaml" | sort)" \
+    "$(slurm_cluster_creators "${fixture}" | sort)"
+rm -rf "${fixture}"
 
 # The runner shim must not restate the cluster shape either: both the census
 # count and the census selector are derived from setup-gpu-sim.sh's map and

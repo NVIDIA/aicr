@@ -503,7 +503,7 @@ Generate recipes using direct system parameters:
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
-| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE) |
+| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE, `gpuStack=bundle-installer` on GKE, `gpuStack=mokka-mock` on Kind, which needs a Mokka cluster as noted below); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE, `gpuStack=nvkind-host` on Kind) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` grants the component on a GKE recipe that neither declares nor declines it, confirms it where the recipe already declares it, and is rejected over an explicit recipe decline (any service) or against a non-GKE recipe that does not declare it; `disabled` is unchanged and always requires the recipe to already declare the component. Recorded in the generated recipe |
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
@@ -526,6 +526,13 @@ node shape the resolved recipe targets. See
 > **`--service rke2` and `--accelerator vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
 > **`--service k0s` is Preview**, covering the single `k0s / h200 / ubuntu / training` coordinate. See [k0s H200 Setup](../integrator/k0s-h200-setup.md) for its prerequisites and known gaps.
+
+> **`--profile gpuStack=mokka-mock` needs a Mokka cluster, not stock Kind.** A stock `kindest/node` has no `nvidia` containerd runtime handler, which every GPU Operator operand requests, and no driver, so the operands cannot start. Before deploying the bundle:
+>
+> - Create the cluster from the Mokka node image, `ghcr.io/nvidia/mokka-kind-node`, with at least one worker node. The Kind overlay keeps GPU operands off the control plane.
+> - Install the nvml-mock chart, `oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock`, with `--set imex.mockChannels.enabled=true` and an explicit `--set image.tag`. The DRA driver's kubelet plugin mounts the IMEX file that setting stages, and the chart's default image tag floats.
+>
+> The tested node image, chart version, and image tag are pinned in [`.settings.yaml`](https://github.com/NVIDIA/aicr/blob/main/.settings.yaml) (`testing.mokka_kind_node_image` and `testing.component_test.nvml_mock_*`), and the [GPU-free CI lane](https://github.com/NVIDIA/aicr/blob/main/.github/workflows/gpu-operator-mokka-test.yaml) runs this setup end to end.
 
 **Examples:**
 ```shell
@@ -3562,7 +3569,7 @@ aicr evidence digest -r <recipe-or-overlay> [flags]
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--recipe` | `-r` | string | | Path/URI to a recipe or overlay file (file, HTTP/HTTPS, or `cm://namespace/name`). Required. |
-| `--profile` | | string | | Profile selection in exact `name=value` form for overlay inputs on a profiled family (e.g. `gpuStack=operator-managed` on AKS); omit for the declaration default. Rejected when the input is a hydrated `RecipeResult` — its selection is already baked into `metadata.selectedProfile`. |
+| `--profile` | | string | | Profile selection in exact `name=value` form for overlay inputs on a profiled family (e.g. `gpuStack=operator-managed` on AKS, `gpuStack=mokka-mock` on Kind); omit for the declaration default. Rejected when the input is a hydrated `RecipeResult` — its selection is already baked into `metadata.selectedProfile`. |
 | `--kubeconfig` | `-k` | string | | Kubeconfig path; consulted only when the input is a `cm://` URI. |
 
 **Exit codes:**

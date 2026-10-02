@@ -2946,7 +2946,7 @@ h100-kind-inference-dynamo:
   012-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   012-gpu-operator/upstream.env: 8717b2f1fcb9ed39fd0e87ef4b65b7df42bc12e5cbffa47dc2e3ceb0b286e142
-  012-gpu-operator/values.yaml: 0ac41de3e799598d7fa704d1fd9c4c2dda384d7c593e38ac7847f73c13f3369a
+  012-gpu-operator/values.yaml: 4f927eb01fa1064c86686e82f20eb5f2aa6f6f2c82ee104efe004f7c8391b39e
   013-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-k8s-ephemeral-storage-metrics/install.sh: 727160f359e5476c7211551f781f1a857aedd834922ed255197f7059d78ea816
   013-k8s-ephemeral-storage-metrics/upstream.env: dbb5b7f8b156e8f1ad3ace176d3d1bef38280a533242107e49e0b76b24fbf435
@@ -2962,7 +2962,7 @@ h100-kind-inference-dynamo:
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   016-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
-  016-nvidia-dra-driver-gpu/values.yaml: 29d932ee0f5b0a24fb23f28942fff00c3290ece78ce6dc1f14cd72d7d37eb1f1
+  016-nvidia-dra-driver-gpu/values.yaml: 17b63c1d7ad64cca85f3ce598308f26a5d8eac61a9c0b478515e1644899c8009
   017-nvsentinel/apply-crds.sh: 8ebb8136b451e489e5c02e8766a509e8b97e77ee15d9c03640a211ac1aa834cc
   017-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
@@ -2974,10 +2974,10 @@ h100-kind-inference-dynamo:
   018-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: ab9eb42e715795deb1f8ed539ee4a8a7a47772beb80fee3fe11ee30c298f664e
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
-  bundle-info.yaml: 3b1624a1f0e84de11b081953baa4ba2d15d386ffeb6424227b04e2e4832d0bc8
-  checksums.txt: e4543bd82ce721f567fab1b1f2bf6c41df514eda1762ba3d00758a07e0612c6a
+  bundle-info.yaml: 403bba35deffa38cdabca94aa396eb3915ed9b1cb203bfb2634e6fa372518dff
+  checksums.txt: 90e0d5dd373f89ca904d8e7219882a8dbe2e31378abba0404fcb0d9344b31870
   deploy.sh: 18827849e66bfdd7d103aeab9f6374a7018500f6b57a3e3a68fc789bf40ec5b4
-  recipe.yaml: 8547fce134e27a15ffc64eda6bb79398e2d7f5a23a3d9a6d98829654909383c0
+  recipe.yaml: 1720beed743a45f63fd97930118e4ed7feb725265c198350cbb03eb49b53a106
 h100-kind-training-kubeflow:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -3006,7 +3006,7 @@ h100-kind-training-kubeflow:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8717b2f1fcb9ed39fd0e87ef4b65b7df42bc12e5cbffa47dc2e3ceb0b286e142
-  007-gpu-operator/values.yaml: 0ac41de3e799598d7fa704d1fd9c4c2dda384d7c593e38ac7847f73c13f3369a
+  007-gpu-operator/values.yaml: 4f927eb01fa1064c86686e82f20eb5f2aa6f6f2c82ee104efe004f7c8391b39e
   008-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-k8s-ephemeral-storage-metrics/install.sh: 727160f359e5476c7211551f781f1a857aedd834922ed255197f7059d78ea816
   008-k8s-ephemeral-storage-metrics/upstream.env: dbb5b7f8b156e8f1ad3ace176d3d1bef38280a533242107e49e0b76b24fbf435
@@ -3027,7 +3027,7 @@ h100-kind-training-kubeflow:
   012-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   012-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
-  012-nvidia-dra-driver-gpu/values.yaml: 29d932ee0f5b0a24fb23f28942fff00c3290ece78ce6dc1f14cd72d7d37eb1f1
+  012-nvidia-dra-driver-gpu/values.yaml: 17b63c1d7ad64cca85f3ce598308f26a5d8eac61a9c0b478515e1644899c8009
   013-nvsentinel/apply-crds.sh: 8ebb8136b451e489e5c02e8766a509e8b97e77ee15d9c03640a211ac1aa834cc
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
@@ -3039,10 +3039,10 @@ h100-kind-training-kubeflow:
   014-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: bf5195c04e85d5dfab9768cf5ee5be7a8f5370a0272557dfa1782b84ef65bf94
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
-  bundle-info.yaml: 5d8907879020323f5cff687edb1fdfe98b6c26f7166a62517c4cfeabde9ffd46
-  checksums.txt: 54e0f136ade2c2af0a3290ff89ed1fdc7017365b41b1929a2c19064259f1d03d
+  bundle-info.yaml: 5d818d670bd118620bc7c5c14ac860740eb9759b771441778839d4f36da896a2
+  checksums.txt: d2490fabb56ad2e466671699dcd06e506d031ecc6871d41a37b80a1f30fc566d
   deploy.sh: 83fa4613633138d6b344997098cc0b2f77082f6fc1ba1cca6cef729b1a316cd3
-  recipe.yaml: e25f52da6bcb17d0d098ca48b6eaf83fde3d5030554f934870e6f4e252ba59c6
+  recipe.yaml: 5871e94eb0daa7c4fc8a8890322b74db189e2166d265f32f044824c658ef5360
 h100-kind-training-slurm:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -3071,7 +3071,7 @@ h100-kind-training-slurm:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8717b2f1fcb9ed39fd0e87ef4b65b7df42bc12e5cbffa47dc2e3ceb0b286e142
-  007-gpu-operator/values.yaml: 0ac41de3e799598d7fa704d1fd9c4c2dda384d7c593e38ac7847f73c13f3369a
+  007-gpu-operator/values.yaml: 4f927eb01fa1064c86686e82f20eb5f2aa6f6f2c82ee104efe004f7c8391b39e
   008-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-k8s-ephemeral-storage-metrics/install.sh: 727160f359e5476c7211551f781f1a857aedd834922ed255197f7059d78ea816
   008-k8s-ephemeral-storage-metrics/upstream.env: dbb5b7f8b156e8f1ad3ace176d3d1bef38280a533242107e49e0b76b24fbf435
@@ -3083,7 +3083,7 @@ h100-kind-training-slurm:
   010-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   010-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
-  010-nvidia-dra-driver-gpu/values.yaml: 29d932ee0f5b0a24fb23f28942fff00c3290ece78ce6dc1f14cd72d7d37eb1f1
+  010-nvidia-dra-driver-gpu/values.yaml: 17b63c1d7ad64cca85f3ce598308f26a5d8eac61a9c0b478515e1644899c8009
   011-nvsentinel/apply-crds.sh: 8ebb8136b451e489e5c02e8766a509e8b97e77ee15d9c03640a211ac1aa834cc
   011-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
@@ -3116,10 +3116,10 @@ h100-kind-training-slurm:
   017-slinky-topograph/values.yaml: 8cc3bf52dbab729d1b71e495c8d51a58a5ea3592b18b356e4bbc0ff7b587b188
   README.md: 9e75e15c8f365e9420fa72d715062ee018329edd610099734138753fa2c23146
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
-  bundle-info.yaml: a93cb191edf0c4e9a18dbf165832a44a2e6bddb9dcb3a724ca21741884347fb0
-  checksums.txt: 1bd46eb553298268a254522feb66ad2761a31339363457422ebe562fa9637ec8
+  bundle-info.yaml: a30965b306a0ccc36a7f4fe982034bf9d3b53c79e3e7f3b1112773e656aac331
+  checksums.txt: 0b16d619fadc9878a4ba196afb3570cbf3c943c0f71441914132195ec95dd7bb
   deploy.sh: a9268f292354d1038ae6c7401d39c2fd190aafd3e2f0f7a3820ee740e685255b
-  recipe.yaml: 385bac65d13d3a64c7de7f8f300fe0d6811914d2e65206072d3bf8606d642fc5
+  recipe.yaml: 91aa2c38c7bd259928f8caef70956481867f7617aaa399e0aa62a6e5d8355915
 h200-any:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd

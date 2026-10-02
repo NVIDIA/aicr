@@ -111,7 +111,7 @@ make component-cleanup DELETE_CLUSTER=true
 |----------|---------|---------|
 | `NVML_MOCK_VERSION` | from `.settings.yaml` | nvml-mock version |
 | `NVML_MOCK_IMAGE` | `ghcr.io/nvidia/nvml-mock` | Image override |
-| `GPU_PROFILE` | `a100` | GPU profile: `a100`, `h100`, `gb200` |
+| `GPU_PROFILE` | `a100` | GPU profile: `a100`, `h100`, `gb200`. The manifest fallback, used when Helm is missing or the chart install fails, serves `a100` only |
 | `GPU_COUNT` | `8` | GPUs per node |
 | `DRIVER_VERSION` | auto from profile | Mock driver version (e.g., `550.163.01`) |
 | `MOCK_READY_TIMEOUT` | `300s` | DaemonSet readiness timeout |
