@@ -273,3 +273,29 @@ func TestTopologyCoverageEmitCounts(t *testing.T) {
 		}
 	})
 }
+
+// When no GPU NIC networks are discoverable (empty gpuSet), the displacement join
+// cannot run — the node must NOT fail (the empty Network set is the sibling
+// census's problem) but must be reported as displacement-unverified, not a clean pass.
+func TestCheckGKEGPUNICTopologyEmptyGPUSet(t *testing.T) {
+	t.Parallel()
+	// Healthy nic-info + north-interfaces, but the cluster has NO gpu-nic Networks.
+	nicE := make([]string, 0, 1+len(topoIfs))
+	nicE = append(nicE, `{"birthName":"eth0","birthIP":"10.0.0.9","pciAddress":"0000:00:0c.0"}`)
+	northE := make([]string, 0, len(topoIfs))
+	for i, name := range topoIfs {
+		ip := fmt.Sprintf("10.0.%d.3", 16*(i+1))
+		nicE = append(nicE, fmt.Sprintf(`{"birthName":%q,"birthIP":%q,"pciAddress":%q}`, name, ip, topoSlots[i]))
+		northE = append(northE, fmt.Sprintf(`{"network":%q,"ipAddress":%q}`, fmt.Sprintf("aicr-test-gpu-nic-%d", i), ip))
+	}
+	node := topoNode("[" + strings.Join(nicE, ",") + "]")
+	node.Annotations["networking.gke.io/north-interfaces"] = "[" + strings.Join(northE, ",") + "]"
+
+	ctx := topoContext(k8sfake.NewClientset(node), true)
+	ctx.DynamicClient = gkeNetworkClient() // zero Network objects -> empty gpuSet
+
+	err := checkGKEGPUNICTopology(ctx)
+	if err != nil && !validators.IsSkip(err) {
+		t.Fatalf("empty gpuSet must not produce a topology failure, got %v", err)
+	}
+}

@@ -155,6 +155,12 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 			if displaced := gkenet.DisplacedGPUNICInterfaces(info, northByIP, gpuSet); len(displaced) > 0 {
 				problems = append(problems, fmt.Sprintf("node %q has GPU NIC interface(s) mapped to a non-GPU network (gVNIC displacement): %s", node.Name, strings.Join(displaced, ",")))
 			}
+		default:
+			// The annotation parsed but no GPU NIC networks were discovered, so the join
+			// cannot validate displacement. Do not count the node as verified for it
+			// (the empty Network set itself is the sibling census's failure, not ours).
+			slog.Warn("GPU NIC network set is empty; NIC displacement unverified", "node", node.Name)
+			displacementUnverified = append(displacementUnverified, node.Name)
 		}
 	}
 
