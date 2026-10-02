@@ -80,24 +80,15 @@ The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both inte
 | Reservation | Cloud | `nightly-intents` | Nightly CUJs |
 |-------------|-------|-------------------|--------------|
 | `aws-h100-ct-2` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
-| `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step live, #1644); training gated to `>= v0.22.0` via `nightly-intent-min-versions` |
-| `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); both intents gated to `>= v0.18.0` via `nightly-intent-min-versions` (see **Cost / tuning** below) |
-| `kind-h100` | kind (nvkind) | `[training, inference]` | training → `phase_train`; inference runs **no `phase_serve`** — its evidence comes from the `--phase all` conformance step (vLLM is excluded from UAT, as on the cloud lanes; #1644). Single-GPU; both intents gated to `>= v0.18.0` via `nightly-intent-min-versions` (the lane + os-agnostic coordinate fix #1851 postdate v0.17.0) |
+| `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step live, #1644); training release cells gated to `>= v0.22.0` by the [harness-compat floor](#release-cells-and-the-harness-compat-floor) |
+| `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); release cells gated to `>= v0.18.0` by the [harness-compat floor](#release-cells-and-the-harness-compat-floor) |
+| `kind-h100` | kind (nvkind) | `[training, inference]` | training → `phase_train`; inference runs **no `phase_serve`** — its evidence comes from the `--phase all` conformance step (vLLM is excluded from UAT, as on the cloud lanes; #1644). Single-GPU; release cells gated to `>= v0.18.0` by the [harness-compat floor](#release-cells-and-the-harness-compat-floor) (the lane + os-agnostic coordinate fix #1851 postdate v0.17.0) |
 
 **How it stays contention-free — serialize, don't add a second cron.** The intents are folded into the existing [version matrix](#the-version-matrix) as extra cells rather than a second scheduled job. The controller's drive loop is **version outer / intent inner**: for each version it dispatches one intent's full provision→CUJ→teardown cell (an AWS or Azure inference cell currently runs provision→validate→teardown; its serve CUJ stays commented out pending #1644), waits for it (`gh run watch`), then dispatches the next — all through the *same* per-reservation lease. So the intents serialize naturally, and because `main` runs every intent before any release cell, a time-box drop only ever sheds the oldest *release* cells (never `main`'s inference). This is the deliberate DC3 cadence decision: **never schedule two daily crons against one reservation** — the lease is a single-slot queue (one in-progress + one pending), so a second cron plus an occasional human dispatch on the same reservation is a routine three-contender case whose loser is silently [superseded](#how-queuing-works-the-reservation-lease). One cron dispatching serialized cells sidesteps that entirely.
 
 **Cost / tuning.** Listing both intents roughly **doubles a reservation's nightly cell count** (each version now runs two full cluster lifecycles). If the batch [time-box](#the-version-matrix) is exceeded the oldest cells are dropped first, so `main`+freshest always land; tune `previous_n` (fewer release versions) or `deadline_offset_hours` to fit the window. A released version that predates a platform (e.g. `dynamo`) fails its inference cell's recipe resolution as a genuine regression signal — drop `previous_n` if that coverage is premature. Changing which intents a reservation runs is a registry edit — no workflow change; the `uatbroker` committed-registry test pins the launch set.
 
-**Gating an intent to a minimum release — `nightly-intent-min-versions`.** When an intent only became *supported* on a reservation at a particular release — a fix or platform that older releases lack — running it on the pre-support releases produces a permanently-red cell, not a regression signal. Express the floor per intent in the registry row:
-
-```yaml
-- name: azure-h100
-  nightly-intents: [training, inference]
-  nightly-intent-min-versions:
-    inference: v0.18.0   # first release that carries the AKS perf fix (#1767)
-```
-
-Semantics: **`main` is never gated** (it is built from source and carries the newest fixes, so it always runs every listed intent); a **release** cell drops any intent whose minimum version is newer than the tag (semver; a tag `>=` the minimum runs). The gate lives in the schedule (`uat-broker schedule` attaches each cell's eligible `intents`), so the controller simply never dispatches a gated `(version × intent)` — no per-version workflow logic. Pointing the floor at a **not-yet-tagged** release is intentional and self-resolving: until that release ships, the intent runs on **`main` only** (green, continuous coverage of the fix), and the release enrolls automatically once it exists. `Validate` rejects a floor for an intent the row does not run, or a non-semver value. Bump the floor if the real first-fixed tag differs — an over-low floor surfaces as a visible red (safe), an over-high floor silently skips a good release (bump down).
+**Gating an intent to a minimum release.** A release that cannot pass `main`'s fixtures or harness for an intent is gated by a floor in `tests/uat/compat.yaml`, not by the registry; see [Release cells and the harness-compat floor](#release-cells-and-the-harness-compat-floor).
 
 ## Selecting the deployer
 
@@ -273,7 +264,7 @@ This replaces the previous behavior, where a second run hitting a busy AWS reser
 
 ## The version matrix
 
-The nightly batch runs a **cross-version regression** per reservation: `main` (built from source at tip) plus the previous **N** stable releases, so an older stable `aicr` is re-checked against today's cluster. `uat-broker schedule` orders the cells `main`-first, then releases in descending semver order; the controller runs them **sequentially** on the reservation (each cell dispatched through `uat-run.yaml`, so they share the lease) and **time-boxes** the batch — once the deadline passes it stops dispatching, so the in-flight cell finishes and the remaining (oldest) releases are dropped, guaranteeing `main` and the freshest releases always land.
+The nightly batch runs a **cross-version regression** per reservation: `main` (built from source at tip) plus the previous **N** stable releases, so an older stable `aicr` is re-checked against today's cluster. `uat-broker schedule` orders the cells `main`-first, then releases in descending semver order; the controller runs them **sequentially** on the reservation (each cell dispatched through `uat-run.yaml`, so they share the lease) and **time-boxes** the batch — once the deadline passes it stops dispatching, so the in-flight cell finishes and the remaining (oldest) releases are dropped, guaranteeing `main` and the freshest releases always land. Release cells run against `main`'s fixtures and harness, so a release that predates a breaking `tests/uat/**` change is skipped by the [harness-compat floor](#release-cells-and-the-harness-compat-floor).
 
 **Release cells install released artifacts, not source.** A `main` cell builds the `aicr` binary + validator/agent images from the checked-out tree. A release cell (`aicr_version=vX.Y.Z`) instead downloads the released `aicr` binary at that tag; the released binary self-resolves its own version's validator images (`…/aicr-validators/<phase>:vX.Y.Z`) and snapshot agent (`ghcr.io/nvidia/aicr:vX.Y.Z`), so no images are built for release cells. Each run's summary records its `aicr_version` (`main` or the tag).
 
@@ -286,6 +277,51 @@ The nightly batch runs a **cross-version regression** per reservation: `main` (b
 - `max_cell_minutes` — wall-clock a single dispatched cell may need to complete (default `150`). Sets the drive job's dispatch reserve: a new cell is dispatched only if at least this many minutes remain before the job's `timeout-minutes` (a small setup slack is also held back), so an overrun sheds the oldest remaining cell gracefully instead of hard-failing the leg mid-cell. Keep it at or above the realistic worst-case cell duration.
 
 To test a single released version by hand: `gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100-ct-2 -f aicr_version=v1.2.3`. (`--ref main` dispatches the nightly-path revision of the workflow, not your feature branch's.)
+
+## Release cells and the harness-compat floor
+
+**The contract.** A release cell runs a **released** `aicr` binary against **`main`'s** `tests/uat/**` fixtures and harness, driven by `main`'s `.github/**` workflows. Fixture and harness move together, and neither is pinned to the release tag. The alternatives were rejected: checking out `tests/uat/**` at the tag would run against old workflows and composites it was never paired with; pinning only fixtures would split the fixture from the harness that reads it; and dropping release cells would lose the cross-version signal. The cost of this contract is that a `tests/uat/**` change can require a newer binary than an older release ships. When that happens, the release is skipped by a **floor**, so its cell is not reported red on a break it cannot satisfy.
+
+**When you must add a floor.** Add or raise a floor for any `tests/uat/**` change that a released binary cannot satisfy: a new recipe-config field in a lane fixture (a released binary's strict decode rejects it, as in #2705), a new training runtime, or a phase that calls a new CLI flag. Put the floor in `tests/uat/compat.yaml` **in the same commit** as the change, set to the **first release that contains the change**. While the change is unreleased, that is the next release (`vX.Y.Z+1` or `vX.Y+1.0`). An unreleased floor is self-resolving: until that release ships, the lane and intent run on `main` only, and the release enrolls automatically once it exists. Most `tests/uat/**` edits are compatible and need no floor. No PR check nudges you when the harness changes, so the author and reviewer own this decision.
+
+**Schema.** Floors are keyed by **lane**, the reservation's `cloud`, because the fixture and harness boundary is the per-cloud `tests/uat/<lane>/` directory, which every reservation on that cloud shares:
+
+```yaml
+floors:
+  - lane: gcp                 # == reservation `cloud` == tests/uat/<lane>/
+    intents: [training]       # non-empty subset of {training, inference}
+    min-release: v0.22.0      # stable semver tag, `v` prefix required
+    reason: >-                # required; names the mechanism, printed in the notice
+      #2705: spec.recipe.configuration.gke.tcpxoInterfaces (unknown field pre-v0.22.0)
+```
+
+The file is decoded strictly, so an unknown key fails. `lane` must be a `cloud` in `infra/uat/reservations.yaml` and have a `tests/uat/<lane>/` directory. `intents` must be non-empty, valid, and free of duplicates, and each (lane, intent) pair may appear in **at most one** row, so raising a floor means editing that row. `min-release` must be a stable semver tag with no pre-release segment and a `v` prefix, and `reason` must be non-empty. A shared `tests/uat/lib/**` break is expressed by listing each affected lane; there is no wildcard. The registry field `nightly-intent-min-versions` that used to carry these floors has been removed, and a registry that still sets it fails to parse.
+
+**What you'll see.** `main` is never gated, because it is built from source and always runs every listed intent. A release cell below a floor is gated differently depending on how it was started:
+
+- **Nightly batch.** `uat-broker schedule --compat tests/uat/compat.yaml` drops the gated (version × intent) pairs and reports each one in its JSON. The controller prints one notice per skipped pair, even when every intent of a version is skipped, and appends a *Release cells skipped by harness-compat floor* table to the step summary:
+
+  ```text
+  ::notice title=UAT release cell skipped (compat floor)::gcp-h100 training @ v0.21.1 skipped: tests/uat/compat.yaml requires >= v0.22.0 for lane gcp (#2705: ...). main still runs this intent.
+  ```
+
+  The schedule is computed once from the batch's own checkout, but each cell's `uat-run.yaml` dispatch runs at `main`'s tip. If a floor raise merges while a batch is running, `uat-run.yaml` refuses an already-scheduled cell below the new floor and the leg goes red instead of skipping it. That cell would have run red against the new fixtures anyway; the refusal is just faster and names the floor ([#3059](https://github.com/NVIDIA/aicr/issues/3059) tracks keeping both on one revision).
+
+- **`uat-run.yaml` dispatch.** A below-floor `aicr_version` is **refused** with an `::error` naming the floor, because the run is guaranteed red and would hold the reservation for hours. To reproduce the incompatibility deliberately, set `allow_below_compat_floor=true`. The refusal then becomes a `::warning` and the run proceeds. Release candidates need the same override: a floor names the next release while it is unreleased, and `v0.24.0-rc.1` sorts below a `v0.24.0` floor, so hand-validating an RC of the floor release requires `allow_below_compat_floor=true`:
+
+  ```shell
+  gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
+    -f reservation=gcp-h100 -f aicr_version=v0.21.1 -f allow_below_compat_floor=true
+  ```
+
+The per-cloud pipelines (`uat-{aws,gcp,azure,kind}.yaml`) are `workflow_call`-only, so every run reaches them through `uat-run.yaml` and its gate; they carry no gate of their own.
+
+**Floor correctness.** A floor that is too **high** silently skips a good release, which is the dangerous direction, so it is checked. `uat-broker compat check` receives git facts computed by the workflow: `git blame` finds the commit that last edited each row's `min-release` line, and `git tag --contains` lists the tags that carry that commit. A floor is rejected when a stable tag below it already contains the commit (the error names the lowest such tag as the correct floor), or when no tag contains the commit and the floor is neither an existing tag nor the next patch, minor, or major release after the latest tag. Because the check blames the line, any edit to a `min-release` line, even reformatting, moves blame to the newer commit and loses the proof for that row; do not touch a `min-release` line you are not changing. The check runs in two places:
+
+- **At PR time,** by the `UAT Compat Floor Check` workflow (`compat-floor-check.yaml`) on any PR touching `tests/uat/compat.yaml`, `infra/uat/reservations.yaml`, or the broker. It fails the PR's check before merge; it is not part of the required merge gate.
+- **In the nightly batch.** A rejected row, or an inconclusive check (for example, no stable tags visible), is **not honored**. The cell runs and shows its real color, the planner prints an `::error title=UAT compat floor rejected` naming the expected floor, and the leg ends red.
+
+A floor that is too **low** is left alone: it shows up as a red release cell, which is the safe direction, and the fix is to raise the floor. A row whose floor is at or below the oldest scheduled release skips nothing, and the planner reports it with an `::notice title=UAT compat floor inert`. Delete an inert row once no `previous_n` window can reach below its floor.
 
 ## Adding a reservation
 
