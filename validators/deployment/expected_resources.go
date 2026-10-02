@@ -1432,12 +1432,12 @@ func extractNodewrightNamesFromManifest(content []byte) []string {
 // deployer assumption. If the upstream chart ever renames the component,
 // this constant moves with it.
 func verifyDRAKubeletPluginReady(ctx *validators.Context, namespace string) error {
-	// Upfront structural gate (mirrors verifyNodewrightReady's CRD discovery
-	// gate): fail fast on an AMBIGUOUS suffix match. More than one DaemonSet
-	// carrying the "-kubelet-plugin" role suffix is a deterministic
-	// misconfiguration (a stale DaemonSet from a prior deploy under a different
-	// fullname, or two charts) that retrying for the full poll budget cannot
-	// resolve — so surface it immediately instead of after GPUReadinessTimeout.
+	// Upfront structural gate that fails fast on an AMBIGUOUS suffix match.
+	// More than one DaemonSet carrying the "-kubelet-plugin" role suffix is a
+	// deterministic misconfiguration (a stale DaemonSet from a prior deploy
+	// under a different fullname, or two charts) that retrying for the full
+	// poll budget cannot resolve, so surface it immediately instead of after
+	// GPUReadinessTimeout.
 	// Zero-match and not-yet-ready status stay in the polled path below: the
 	// DaemonSet's pods churn to 0/0 across a GPU-node reboot, which the dwell is
 	// there to ride through.
