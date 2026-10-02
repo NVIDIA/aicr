@@ -1469,19 +1469,22 @@ whenever the values keep the CR, the render still lists it and the assert
 runs, so only an intentionally-absent CR is tolerated (a CR that *should*
 deploy but is missing on the cluster still fails). The same render drives
 the Go readiness check `verifyNodewrightReady`, so both surfaces agree on
-which CRs to expect. The same dispatch skips the `nodewright-customizations`
-assert on a cluster whose operator predates the `NodeWright` kind the assert
-names. The signal is the recipe's own `nodewright-operator` pin
-(`resolveNodewrightGVR`): a pin below v0.18.0 (or no usable pin) with only
-`skyhook.nvidia.com` served takes the legacy path, where
+which CRs to expect. After the readiness probes finish, the
+`nodewright-customizations` assert is also skipped on a cluster whose operator
+predates the `NodeWright` kind the assert names. The signal is the recipe's own
+`nodewright-operator` pin (`resolveNodewrightGVR`). A pin below v0.18.0 (or no
+usable pin) with only `skyhook.nvidia.com` served takes the legacy path, where
 `verifyNodewrightReady` verifies each `Skyhook` by name, so a healthy legacy
 cluster passes without a static assert that can never match. A v0.18.0+ pin
 on a cluster that does not serve `nodewright.nvidia.com` fails closed — that
 is a broken operator install, and a stale legacy `Skyhook` must not stand in
 for the missing `NodeWright`. A discovery error also fails closed rather than
-skipping. This skip is scoped to
-`nodewright-customizations`; every other component's assert queues
-unconditionally.
+skipping. Discovery counts a group as served only once it lists the `nodewrights`
+(or `skyhooks`) resource itself, and `verifyNodewrightReady` re-resolves that
+on every poll. A recipe that renders Nodewright CRs polls through CRD
+establishment and fails on timeout if neither group ever serves them. This
+discovery-based skip is scoped to `nodewright-customizations`. Other
+components' asserts are subject only to their own render-based suppression.
 
 The suppression must be expressed **in the recipe** — an overlay-declared
 component `overrides:` (how `tuningEnabled: false` ships as the AKS default)
