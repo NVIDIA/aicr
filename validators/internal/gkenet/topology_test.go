@@ -295,3 +295,40 @@ func TestDisplacedGPUNICInterfaces(t *testing.T) {
 		t.Errorf("expected eth1 flagged as displaced, got %v", d)
 	}
 }
+
+// liveA3NICInfoWithIPs and liveA3NorthInterfaces are a MATCHED pair captured from
+// the same live a3-megagpu-8g node (cluster hxgrpkme-dgxc-k8s-gcp-ams-dev1): the
+// nic-info birth IPs exactly equal the north-interfaces underlay IPs, and each
+// ethN joins to gpu-nic(N-1). This is the real-data proof (#2265) that the
+// birthIP == ipAddress join holds on hardware, closing the last schema assumption.
+const liveA3NICInfoWithIPs = `[{"birthIP":"10.0.0.10","pciAddress":"0000:00:0c.0","birthName":"eth0"},{"birthIP":"10.0.16.4","pciAddress":"0000:06:00.0","birthName":"eth1"},{"birthIP":"10.0.32.4","pciAddress":"0000:07:00.0","birthName":"eth2"},{"birthIP":"10.0.48.4","pciAddress":"0000:0d:00.0","birthName":"eth3"},{"birthIP":"10.0.64.4","pciAddress":"0000:0e:00.0","birthName":"eth4"},{"birthIP":"10.0.80.4","pciAddress":"0000:86:00.0","birthName":"eth5"},{"birthIP":"10.0.96.4","pciAddress":"0000:87:00.0","birthName":"eth6"},{"birthIP":"10.0.112.4","pciAddress":"0000:8d:00.0","birthName":"eth7"},{"birthIP":"10.0.128.4","pciAddress":"0000:8e:00.0","birthName":"eth8"}]`
+
+const liveA3NorthInterfaces = `[{"network":"gpu-nic0","ipAddress":"10.0.16.4"},{"network":"gpu-nic1","ipAddress":"10.0.32.4"},{"network":"gpu-nic2","ipAddress":"10.0.48.4"},{"network":"gpu-nic3","ipAddress":"10.0.64.4"},{"network":"gpu-nic4","ipAddress":"10.0.80.4"},{"network":"gpu-nic5","ipAddress":"10.0.96.4"},{"network":"gpu-nic6","ipAddress":"10.0.112.4"},{"network":"gpu-nic7","ipAddress":"10.0.128.4"}]`
+
+// The real captured pair joins cleanly: every ethN's nic-info birth IP maps via
+// north-interfaces to a gpu-nic Network, so no interface is flagged displaced.
+func TestDisplacedGPUNICInterfacesLiveAnnotations(t *testing.T) {
+	t.Parallel()
+	info, err := ParseNICInfo(liveA3NICInfoWithIPs)
+	if err != nil {
+		t.Fatalf("ParseNICInfo on the live pair: %v", err)
+	}
+	byIP, err := ParseNorthInterfaces(liveA3NorthInterfaces)
+	if err != nil {
+		t.Fatalf("ParseNorthInterfaces on the live pair: %v", err)
+	}
+	gpu := map[string]bool{}
+	for _, n := range []string{"gpu-nic0", "gpu-nic1", "gpu-nic2", "gpu-nic3", "gpu-nic4", "gpu-nic5", "gpu-nic6", "gpu-nic7"} {
+		gpu[n] = true
+	}
+	if displaced := DisplacedGPUNICInterfaces(info, byIP, gpu); len(displaced) != 0 {
+		t.Errorf("the live healthy pair must have no displaced interfaces, got %v", displaced)
+	}
+	// And the join must resolve every ethN (no silent misses from an IP mismatch).
+	for _, name := range tcpXOInterfaces {
+		ip := info.IPByInterface[name]
+		if _, ok := byIP[ip]; !ok {
+			t.Errorf("%s birth IP %q not found in north-interfaces — the join would silently miss it", name, ip)
+		}
+	}
+}

@@ -294,8 +294,7 @@ func TestCheckGKEGPUNICTopologyEmptyGPUSet(t *testing.T) {
 	ctx := topoContext(k8sfake.NewClientset(node), true)
 	ctx.DynamicClient = gkeNetworkClient() // zero Network objects -> empty gpuSet
 
-	err := checkGKEGPUNICTopology(ctx)
-	if err != nil && !validators.IsSkip(err) {
-		t.Fatalf("empty gpuSet must not produce a topology failure, got %v", err)
+	if err := checkGKEGPUNICTopology(ctx); err != nil {
+		t.Fatalf("empty gpuSet must be a caveated pass (nil), not a failure or Skip: %v", err)
 	}
 }

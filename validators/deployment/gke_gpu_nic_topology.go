@@ -171,7 +171,7 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 		return validators.Skip(fmt.Sprintf("could not verify NIC topology on any of the %d a3 GPU node(s) (%d without a nic-info annotation)", totalNodes, len(unverified)))
 	}
 	if len(unverified) > 0 || len(displacementUnverified) > 0 {
-		fmt.Printf("Verified NIC topology on %d a3 GPU node(s); %d node(s) have no nic-info annotation (unverified); %d node(s) lack north-interfaces (displacement unverified)\n", verifiedCount, len(unverified), len(displacementUnverified))
+		fmt.Printf("Verified NIC topology on %d a3 GPU node(s); %d node(s) have no nic-info annotation (unverified); %d node(s) displacement unverified (no north-interfaces annotation, or no GPU NIC Networks discovered to join against)\n", verifiedCount, len(unverified), len(displacementUnverified))
 		return nil
 	}
 	fmt.Printf("Verified NIC topology on %d a3 GPU node(s): all map %d GPU NIC interfaces (eth1..eth8)\n",
