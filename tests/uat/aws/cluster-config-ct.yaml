@@ -55,12 +55,14 @@ cluster:
     # collides with the bootstrap one and 409s.
     adminRoles:
       - AWSReservedSSO_CS-Admin_41c4b4abb8231e94
+      - nvsentinel-e2e-runner-role
     controlPlane:
       allowedCidrs:
         - 216.228.127.128/30
         - 52.41.222.58/32
         - 54.68.11.139/32
         - 128.77.49.32/30
+        - 35.236.84.119/32
     addOns:
       coreDns: ""
       kubeProxy: ""

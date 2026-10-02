@@ -30,6 +30,7 @@ cluster:
     version: "1.35"
     adminRoles:
       - AWSReservedSSO_CS-Admin_55d42b5a9a2a8c35
+      - nvsentinel-e2e-runner-role
     controlPlane:
       allowedCidrs:
         - 216.228.127.128/30
