@@ -69,10 +69,9 @@ type EvidenceOptions struct {
 	// predicate identifies validators by tag alone. See #2873.
 	AllowMutableValidatorTags bool
 
-	// Commit is the build commit used to resolve the validator catalog for
-	// the bundle's BOM. The Client's version is used for the catalog version
-	// and stamped as AICRVersion; commit has no Client-level home, so it is
-	// supplied per call.
+	// Commit is the build commit. It resolves the validator catalog for the
+	// bundle's BOM and is stamped into the predicate as AICRCommit. The
+	// Client has no commit of its own, so it is supplied per call.
 	Commit string
 
 	// OIDCResolve carries keyless-signing token-resolution inputs, consumed
@@ -175,6 +174,7 @@ func (c *Client) EmitRecipeEvidence(
 		PhaseResults: toInternalPhaseResults(results),
 		Catalog:      cat,
 		AICRVersion:  clientVersion,
+		AICRCommit:   opts.Commit,
 		OIDCResolve:  opts.OIDCResolve,
 	})
 	return err

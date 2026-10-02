@@ -91,6 +91,10 @@ type EmitOptions struct {
 	// metadata.tools entry.
 	AICRVersion string
 
+	// AICRCommit is the build commit stamped into the predicate. A value
+	// that is not a commit SHA (e.g. the unstamped "unknown") is omitted.
+	AICRCommit string
+
 	// OIDCResolve is consulted only when Push is set. Resolution is
 	// deferred until adjacent to SignStatement so Fulcio's nonce-binding
 	// window is respected — a long Helm-render-and-push phase between
@@ -222,6 +226,7 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		BOM:                     BOMInputs{Body: bomBody, CycloneDXVersion: DefaultCycloneDXVersion},
 		PhaseResults:            phaseResults,
 		AICRVersion:             opts.AICRVersion,
+		AICRCommit:              opts.AICRCommit,
 		ValidatorCatalogVersion: CatalogVersion(opts.Catalog),
 		ValidatorImages:         validatorImages,
 		Redaction:               redaction,
