@@ -412,7 +412,8 @@ Some overlays apply across an entire criteria dimension without being
 referenced via `spec.base` or `spec.mixins`. The resolver picks them
 up automatically because `FindMatchingOverlays` returns *all* maximal
 matches, not just the most specific one. Two wildcard patterns in
-the tree today: `gb200-any.yaml` (matches `service: any`) and
+the tree today: the per-accelerator `<accelerator>-any.yaml` overlays
+such as `gb200-any.yaml` (match `service: any`) and
 `monitoring-hpa.yaml` (matches `intent: any`).
 
 ```yaml

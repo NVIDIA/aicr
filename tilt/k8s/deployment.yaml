@@ -40,13 +40,10 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
-            - name: metrics
-              containerPort: 9090
-              protocol: TCP
           env:
             - name: PORT
               value: "8080"
-            - name: LOG_LEVEL
+            - name: AICR_LOG_LEVEL
               value: "debug"
             - name: SHUTDOWN_TIMEOUT_SECONDS
               value: "10"

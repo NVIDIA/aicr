@@ -241,7 +241,7 @@ Every release must pass these automated gates before artifacts are published:
 - golangci-lint + yamllint
 - License header verification
 - Vulnerability scans (Anchore in release workflows, Grype in `make scan`)
-- E2E tests on Kind cluster
+- E2E tests: hermetic Chainsaw CLI suites (`--no-cluster`) and the `aicrd` + CLI suite on a Kind cluster
 - Per-platform vulnerability scans of the exact candidate image digests
 - SLSA Build Level 3 provenance for those same digests
 

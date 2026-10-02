@@ -161,6 +161,7 @@ This matches all levels:
     - monitoring-hpa
     - gb200-any
     - eks
+    - eks-ubuntu
     - eks-training
     - gb200-eks-training
     - gb200-eks-ubuntu-training

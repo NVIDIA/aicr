@@ -50,7 +50,7 @@
 //
 // 1. **CLI Mode (default for CLI applications)**: Minimal user-friendly output
 //
-//	logging.SetDefaultCLILogger(slog.LevelInfo)
+//	logging.SetDefaultCLILogger("info")
 //	slog.Info("Snapshot captured successfully")  // Output: Snapshot captured successfully
 //	slog.Error("Failed to connect")              // Output: Failed to connect (in red)
 //
@@ -61,13 +61,13 @@
 //
 // 3. **JSON Mode (--log-json flag)**: Machine-readable structured logs
 //
-//	logging.SetDefaultStructuredLogger("aicr", "v1.0.0")
+//	logging.SetDefaultStructuredLoggerWithLevel("aicr", "v1.0.0", "info")
 //	// Output: {"time":"2025-01-06T10:30:00.123Z","level":"INFO","module":"aicr","version":"v1.0.0","msg":"server started"}
 //
 // Setting the default logger (CLI mode for user-facing tools):
 //
 //	func main() {
-//	    logging.SetDefaultCLILogger(slog.LevelInfo)
+//	    logging.SetDefaultCLILogger("info")
 //	    slog.Info("application started")
 //
 //	    // Errors display in red
@@ -92,12 +92,13 @@
 //
 // # Environment Configuration
 //
-// The AICR_LOG_LEVEL environment variable controls logging verbosity:
+// The AICR_LOG_LEVEL environment variable sets the level of loggers created by
+// SetDefaultStructuredLogger, which the aicrd API server uses:
 //
-//	AICR_LOG_LEVEL=debug aicr snapshot
 //	AICR_LOG_LEVEL=error aicrd
 //
-// If AICR_LOG_LEVEL is not set, defaults to INFO level.
+// If AICR_LOG_LEVEL is not set, defaults to INFO level. The aicr CLI does not
+// read it; the CLI's level comes from its --debug flag (or AICR_DEBUG).
 //
 // CLI color output is suppressed when:
 //   - The NO_COLOR environment variable is set (any value), or
@@ -148,7 +149,7 @@
 //
 //	// CLI applications: Use CLI logger for user-friendly output
 //	func main() {
-//	    logging.SetDefaultCLILogger(slog.LevelInfo)
+//	    logging.SetDefaultCLILogger("info")
 //	    slog.Info("application started")
 //	    // ...
 //	}

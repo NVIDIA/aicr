@@ -765,7 +765,7 @@ tuning-check: ## Verifies $(TUNING_DOC_PATH) tuning-status table is up to date (
 server: ## Starts a local development server with debug logging
 	@set -e; \
 	echo "Starting local development server..."; \
-	GOFLAGS="-mod=readonly" LOG_LEVEL=debug go run cmd/aicrd/main.go
+	GOFLAGS="-mod=readonly" AICR_LOG_LEVEL=debug go run cmd/aicrd/main.go
 
 .PHONY: docs
 docs: ## Serves Go documentation on http://localhost:6060
@@ -960,10 +960,6 @@ bump-promote: ## Promotes a pre-release to stable on the same SHA. Use TAG=v1.2.
 changelog: ## Shows changes since the last release
 	@tools/changelog
 
-.PHONY: changelog-file
-changelog-file: ## Updates CHANGELOG.md with changes since the last release
-	@tools/changelog --file
-
 .PHONY: clean
 clean: ## Cleans build artifacts (dist, coverage files, third-party notices)
 	@rm -rf ./dist ./bin ./coverage.out ./coverage.full.out ./THIRD_PARTY_NOTICES.md ./.licenses-cache
@@ -979,12 +975,6 @@ clean-all: clean ## Deep cleans including Go module cache
 .PHONY: cleanup
 cleanup: ## Cleans up AICR Kubernetes resources (requires kubectl)
 	tools/cleanup
-
-.PHONY: demos
-demos: ## Creates demo GIFs using VHS tool (requires: brew install vhs)
-	@command -v vhs >/dev/null 2>&1 || (echo "Error: vhs is not installed. Install: brew install vhs" && exit 1)
-	vhs demos/videos/cli.tape -o demos/videos/cli.gif
-	vhs demos/videos/e2e.tape -o demos/videos/e2e.gif
 
 # =============================================================================
 # Tilt Local Development
@@ -1366,7 +1356,6 @@ help-full: ## Displays commands grouped by category
 	@echo "  make bump-minor     Tag minor version (1.2.3 -> 1.3.0)"
 	@echo "  make bump-major     Tag major version (1.2.3 -> 2.0.0)"
 	@echo "  make changelog      Show changes since last release"
-	@echo "  make changelog-file Update CHANGELOG.md with unreleased changes"
 	@echo ""
 	@echo "\033[1m=== Local Development ===\033[0m"
 	@echo "  make dev-env        Create cluster and start Tilt (full setup)"
@@ -1405,7 +1394,6 @@ help-full: ## Displays commands grouped by category
 	@echo "\033[1m=== Utilities ===\033[0m"
 	@echo "  make info           Print project info"
 	@echo "  make docs           Serve Go documentation"
-	@echo "  make demos          Create demo GIFs (requires vhs)"
 	@echo "  make clean          Clean build artifacts"
 	@echo "  make clean-all      Deep clean including module cache"
 	@echo "  make cleanup        Clean up AICR Kubernetes resources"
