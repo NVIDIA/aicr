@@ -45,7 +45,7 @@ Caption: "Use existing OSS tooling to deploy to your cluster"
 
 **Step 4 - VALIDATE**
 Icon: Inspection magnifying glass with Checkmark shield
-Command: `aicr validate -r bundle/recipe.yaml --phase deployment --phase conformance --phase performance`
+Command: `aicr validate -r ./bundles/recipe.yaml --phase deployment --phase conformance --phase performance`
 Visual: Recipe compared against snapshot with green checkmarks
 Caption: "Verify recipe was correctly reconciled in your cluster"
 

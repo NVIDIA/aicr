@@ -101,12 +101,23 @@ func TestDRANodeLabelerHealthCheckClusterStates(t *testing.T) {
 		{
 			// The labeler retries in place; a restart means its script exited,
 			// which the readiness probe cannot see once the pod is Running again.
-			// One pod only: the list form passes when ANY item matches, so a
-			// healthy sibling would mask the restarting pod.
-			name:       "restarting labeler pod fails closed",
-			daemonSet:  daemonSet(1, 1, 1),
-			pods:       []map[string]any{pod("dra-node-labeler-a", "Running", 3)},
-			wantOutput: "Pod",
+			// The pod step is a negative (error) form, so a healthy sibling
+			// cannot mask the restarting pod.
+			name:       "one restarting pod among healthy siblings fails closed",
+			daemonSet:  daemonSet(2, 2, 2),
+			pods:       []map[string]any{pod("dra-node-labeler-a", "Running", 0), pod("dra-node-labeler-b", "Running", 3)},
+			wantOutput: "dra-node-labeler-b",
+		},
+		{
+			name:      "pod stuck in ImagePullBackOff while the DaemonSet counts it fails closed",
+			daemonSet: daemonSet(2, 2, 2),
+			pods: []map[string]any{pod("dra-node-labeler-a", "Running", 0), {
+				"apiVersion": "v1", "kind": "Pod",
+				"metadata": map[string]any{"name": "dra-node-labeler-c", "namespace": "gpu-operator", "labels": map[string]any{"app": "dra-node-labeler"}},
+				"status": map[string]any{"phase": "Running", "containerStatuses": []any{map[string]any{
+					"name": "labeler", "restartCount": 0, "state": map[string]any{"waiting": map[string]any{"reason": "ImagePullBackOff"}}}}},
+			}},
+			wantOutput: "dra-node-labeler-c",
 		},
 	}
 
