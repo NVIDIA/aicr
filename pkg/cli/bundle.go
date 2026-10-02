@@ -355,6 +355,12 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 			return nil, modeErr
 		}
 		opts.fleetMode = mode
+		// A HelmOp references charts, not a Git repository, so --repo has no
+		// effect there. Warn as --deployer argocd-helm does.
+		if mode == config.FleetModeHelmOp && opts.repoURL != "" {
+			slog.Warn("--repo is ignored with --fleet-mode helmop; HelmOps reference charts, not a Git repository",
+				"repo", opts.repoURL)
+		}
 	} else {
 		for _, name := range []string{"fleet-namespace", "fleet-mode"} {
 			if cmd.IsSet(name) {
@@ -994,7 +1000,7 @@ Package with explicit tag (overrides CLI version):
 					"component and a GitRepo; helmop writes one HelmOp per component in helmops.yaml, " +
 					"which references charts instead of embedding them (no ~1MiB Bundle limit) but " +
 					"cannot deploy local charts (raw manifests).",
-				Value:    "gitrepo",
+				Value:    config.FleetModeGitRepo,
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{

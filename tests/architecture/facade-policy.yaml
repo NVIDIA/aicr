@@ -115,6 +115,8 @@ constrained:
       DeployerHelmfile: const
       DeployerType: type
       DeployerType.String: behavioral
+      FleetModeGitRepo: const
+      FleetModeHelmOp: const
       GetDeployerTypes: behavioral
       NewConfig: behavioral
       ParseFleetMode: behavioral

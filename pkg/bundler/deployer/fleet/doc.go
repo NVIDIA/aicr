@@ -25,8 +25,8 @@ package adds the Fleet-specific files on top:
     values.yaml and, when present, cluster-values.yaml are passed through
     helm.valuesFiles, which Fleet reads only when helm.chart or helm.repo
     is set.
-  - NNN-<component>/.fleetignore: keeps install.sh and upstream.env out of
-    the Fleet Bundle resource.
+  - NNN-<component>/.fleetignore: keeps install.sh, upstream.env and
+    apply-crds.sh out of the Fleet Bundle resource.
   - gitrepo.yaml: a fleet.cattle.io/v1alpha1 GitRepo listing every folder
     path, applied to the Fleet workspace (default fleet-default).
   - README.md: deployment instructions.

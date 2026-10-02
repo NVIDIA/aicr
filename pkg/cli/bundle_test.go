@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	stderrors "errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1776,6 +1777,26 @@ func TestParseBundleCmdOptions_Fleet(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("repo warned in helmop mode only", func(t *testing.T) {
+		for _, tc := range []struct {
+			mode     string
+			wantWarn bool
+		}{{"helmop", true}, {"gitrepo", false}} {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			opts := captureBundleOpts(t, append(append([]string(nil), base...),
+				"--fleet-mode", tc.mode, "--repo", "https://example.com/fleet.git"))
+			slog.SetDefault(prev)
+			if opts == nil {
+				t.Fatalf("%s: captureBundleOpts returned nil", tc.mode)
+			}
+			if got := strings.Contains(buf.String(), "--repo is ignored with --fleet-mode helmop"); got != tc.wantWarn {
+				t.Errorf("%s: warned = %v, want %v; log:\n%s", tc.mode, got, tc.wantWarn, buf.String())
+			}
+		}
+	})
 
 	t.Run("OCI output rejected", func(t *testing.T) {
 		opts, err := tryCaptureBundleOpts(t, []string{"--recipe", recipePath, "--output", "oci://registry.example.com/aicr/bundle:v1", "--deployer", "fleet"})
