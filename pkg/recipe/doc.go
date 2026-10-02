@@ -100,6 +100,7 @@
 //   - CriteriaOSAmazonLinux: Amazon Linux
 //   - CriteriaOSOracleLinux: Oracle Linux (OKE Gen2 GPU image)
 //   - CriteriaOSTalos: Talos Linux
+//   - CriteriaOSSLES: SUSE Linux Enterprise Server
 //   - CriteriaOSAny: Any OS (wildcard)
 //
 // Platform types for workload frameworks:
