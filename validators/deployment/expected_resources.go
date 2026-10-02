@@ -298,12 +298,12 @@ func checkExpectedResources(ctx *validators.Context) error {
 		}
 		if ref.HealthCheckAsserts != "" {
 			// The registry-declared static assert cannot see value gates, so on a
-			// component whose effective values suppress the Skyhook CR the assert
-			// targets (e.g. tuningEnabled=false on a single-package tuning
-			// manifest) it would fail on a deliberately-untuned cluster. Skip it
-			// in that case, mirroring the render-aware Go readiness check. Only
-			// nodewright-customizations is subject to this; a render/read error
-			// propagates rather than silently skipping. See #1844.
+			// component whose effective values gate off the objects the assert
+			// targets (e.g. tuningEnabled=false on a single-package Nodewright
+			// tuning manifest) it would fail on a cluster where they are
+			// deliberately absent. Skip it in that case. gatedHealthCheckSuppressed
+			// names the components subject to this, and a render or read error
+			// propagates rather than silently skipping.
 			suppressed, reason, suppressErr := gatedHealthCheckSuppressed(ctx, ref)
 			if suppressErr != nil {
 				return suppressErr
