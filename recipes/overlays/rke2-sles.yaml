@@ -1,0 +1,65 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: rke2-sles
+
+spec:
+  base: rke2
+
+  # RKE2 on SUSE Linux Enterprise Server. Follows the GPU Operator manifest
+  # in the RKE2 documentation (docs.rke2.io/add-ons/gpu_operators, default
+  # tab), which SUSE documents for SLES: the non-NRI toolkit path and SUSE's
+  # signed, precompiled driver containers.
+  criteria:
+    service: rke2
+    os: sles
+
+  mixins:
+    - os-sles
+
+  componentRefs:
+    # Toolkit path: the rke2 root enables the CDI NRI plugin, which NVIDIA
+    # documents as experimental and which deletes the `nvidia` RuntimeClass
+    # RKE2 ships. SLES uses the documented non-NRI path instead: the toolkit
+    # registers the nvidia runtime through RKE2's containerd socket
+    # (CONTAINERD_SOCKET, never CONTAINERD_CONFIG=config.toml.tmpl, which
+    # breaks RKE2 on reboot: NVIDIA/gpu-operator#992), so the `nvidia`
+    # RuntimeClass stays available to components that request it. The
+    # toolkit's containerd reload restarts the RKE2 agent once at install.
+    #
+    # Driver: SUSE's precompiled containers, selected per node by running
+    # kernel (<branch>-<uname -r>-sles<version>). `version` is the driver
+    # branch, not a full version; 595 is published for SLES 15 SP7 and
+    # SLES 16 on x86_64 and arm64 (default and 64kb kernels). Choose the
+    # branch your GPU generation requires. Nodes need the full kernel-default
+    # (or kernel-default-64kb) package; kernel-default-base lacks modules the
+    # driver container needs. With Secure Boot enabled, set
+    # kernelModuleType: open.
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        cdi:
+          enabled: true
+          nriPluginEnabled: false
+        toolkit:
+          env:
+            - name: CONTAINERD_SOCKET
+              value: /run/k3s/containerd/containerd.sock
+        driver:
+          repository: registry.suse.com/third-party/nvidia
+          usePrecompiled: true
+          version: "595"

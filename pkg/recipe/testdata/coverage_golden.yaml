@@ -128,6 +128,13 @@ criteria(service=, accelerator=, intent=, os=ol, platform=kubeflow):
             - service=eks, accelerator=h200, intent=training
             - service=kind, accelerator=h100, intent=training
             - service=oke, accelerator=l40s, intent=training
+criteria(service=, accelerator=, intent=, os=sles, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - service=rke2
 criteria(service=, accelerator=, intent=, os=ubuntu, platform=):
     outcome: error
     uncovered:
@@ -5347,6 +5354,8 @@ criteria(service=rke2, accelerator=, intent=, os=, platform=kubeflow):
     validCompletions:
         platform:
             - accelerator=vr200, intent=training, os=ubuntu
+criteria(service=rke2, accelerator=, intent=, os=sles, platform=):
+    outcome: success
 criteria(service=rke2, accelerator=, intent=, os=ubuntu, platform=):
     outcome: error
     uncovered:

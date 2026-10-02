@@ -234,6 +234,7 @@
             "cos",
             "ol",
             "rhel",
+            "sles",
             "talos",
             "ubuntu"
           ]

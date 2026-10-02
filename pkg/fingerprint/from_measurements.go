@@ -463,6 +463,8 @@ func normalizeOSID(id string) string {
 		return oskind.OracleLinux
 	case oskind.Talos:
 		return oskind.Talos
+	case oskind.SLES:
+		return oskind.SLES
 	default:
 		return ""
 	}

@@ -1,0 +1,36 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# os-sles mixin: OS constraints for SUSE Linux Enterprise Server GPU nodes.
+#
+# The floor is SLES 15 SP7: SUSE publishes precompiled NVIDIA driver
+# containers for SLES 15 SP7 and SLES 16 (registry.suse.com/third-party/nvidia,
+# tags <branch>-<uname -r>-sles<version>). No kernel version is constrained:
+# the GPU Operator selects the driver image matching the node's running
+# kernel, so any kernel SUSE ships a precompiled image for is valid.
+#
+# Component overrides live in the service+os overlay (e.g. rke2-sles), not
+# here: mixins may only set registry-allowlisted override paths.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: os-sles
+
+spec:
+  constraints:
+    - name: OS.release.ID
+      value: sles
+    - name: OS.release.VERSION_ID
+      value: ">= 15.7"

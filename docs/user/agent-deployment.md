@@ -150,7 +150,7 @@ aicr snapshot \
 - `--privileged`: Run agent in privileged mode (default: enabled; required for GPU/SystemD collectors). Set to `false` for PSS-restricted namespaces.
 - `--require-gpu`: In privileged mode (the default), requests an `nvidia.com/gpu` resource for the agent pod (required in CDI environments). With `--privileged=false` it adds no GPU request, but still disables automatic GPU-node selection; pass `--node-selector` to target GPU nodes.
 - `--runtime-class`: Set `runtimeClassName` on the agent pod for `nvidia-smi` access without consuming a GPU. Use with `--node-selector` to target GPU nodes.
-- `--os`: Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`). Selects the per-OS pod configuration and service collector backend.
+- `--os`: Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `sles`). Selects the per-OS pod configuration and service collector backend.
 - `--requests` / `--limits`: Override agent container resource requests/limits (comma-separated `name=quantity` pairs).
 - `--cluster-config`: Path to a pre-existing k8s-launch-kit cluster-config.yaml to ingest network topology (local agent mode only).
 - `--oke-addons`: Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump, projected into the `K8s.oke-addons.nvidia-gpu-plugin` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.

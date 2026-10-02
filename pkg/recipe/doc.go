@@ -28,7 +28,7 @@
 //	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, any
 //	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any
 //	    Intent      CriteriaIntentType      // training, inference, any
-//	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, any
+//	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, sles, any
 //	    Platform    CriteriaPlatformType    // dynamo, kubeflow, nim, runai, slurm, any
 //	    Nodes       int                     // node count (0 = any)
 //	}
@@ -192,7 +192,7 @@
 //   - accelerator: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
-//   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, any (default: any)
+//   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, sles, any (default: any)
 //   - platform: dynamo, kubeflow, nim, runai, slurm, any (default: any)
 //   - nodes: integer node count (default: 0 = any)
 //

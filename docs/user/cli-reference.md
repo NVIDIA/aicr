@@ -97,7 +97,7 @@ aicr snapshot [flags]
 | `--runtime-class` | | string | | Runtime class for GPU access without consuming a GPU allocation (e.g., `nvidia`). Mutually exclusive with `--require-gpu`. Reads `AICR_RUNTIME_CLASS` env when unset. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 | `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
-| `--os` | | string | | Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`). Selects the per-OS pod configuration and in-pod service collector backend. `talos` skips the `/run/systemd` and `/etc/os-release` hostPath mounts and uses the Kubernetes-API service backend. Reads `AICR_OS` env when unset. |
+| `--os` | | string | | Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `sles`). Selects the per-OS pod configuration and in-pod service collector backend. `talos` skips the `/run/systemd` and `/etc/os-release` hostPath mounts and uses the Kubernetes-API service backend. Reads `AICR_OS` env when unset. |
 | `--requests` | | string | | Override agent container resource requests as a comma-separated list of `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. Reads `AICR_REQUESTS` env when unset. |
 | `--limits` | | string | | Override agent container resource limits as a comma-separated list of `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when `--limits` does not already contain that key — an explicit `--limits nvidia.com/gpu=N` wins. Reads `AICR_LIMITS` env when unset. |
 | `--cluster-config` | | string | | Path to a pre-existing k8s-launch-kit (l8k) `cluster-config.yaml`. Ingests the file's per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) into the snapshot as a `NetworkTopology` Measurement. **Local agent mode only for now** (`AICR_AGENT_MODE=true`) — Job-mode rejects this flag with an `INVALID_REQUEST` error until ConfigMap mounting is implemented. Mutually exclusive with `--discover-network` at the collector level — file path wins when both are set, so callers can default discovery from a flag without inadvertent cluster contact. Reads `AICR_CLUSTER_CONFIG_PATH` env when unset. |
@@ -241,7 +241,7 @@ spec:
         - nvidia.com/gpu=present:NoSchedule
       requireGpu: false
       runtimeClassName: ""         # mutually exclusive with requireGpu
-      os: ""                       # ubuntu | rhel | cos | amazonlinux | ol | talos
+      os: ""                       # ubuntu | rhel | cos | amazonlinux | ol | talos | sles
       requests: ""                 # "cpu=500m,memory=1Gi"
       limits: ""                   # "cpu=1,memory=2Gi"
     execution:
@@ -503,7 +503,7 @@ Generate recipes using direct system parameters:
 | `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot`; recipe evidence records the service dimension as `not-inferable` with the observed provider, which does not disqualify the evidence |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
-| `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
+| `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos, sles |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |

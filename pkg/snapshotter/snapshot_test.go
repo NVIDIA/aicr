@@ -593,6 +593,7 @@ func TestParseOSEnv(t *testing.T) {
 		{name: "set but empty", env: "", want: ""},
 		{name: "talos", env: "talos", want: "talos"},
 		{name: "ubuntu passthrough", env: "ubuntu", want: "ubuntu"},
+		{name: "sles passthrough", env: "sles", want: "sles"},
 		{name: "uppercase normalized", env: "Talos", want: "talos"},
 		{name: "whitespace trimmed", env: "  talos  ", want: "talos"},
 		{name: "invalid value drops to default", env: "talsoo", want: ""},
