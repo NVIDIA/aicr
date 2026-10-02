@@ -1202,20 +1202,28 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 // recipeFilePath is the caller's already resolved (flag > config) --recipe
 // value. When set, its GPU allocation policy selects the mechanism the
 // collector exercises. When empty, the collector detects the mechanism from
-// cluster capabilities.
+// cluster capabilities, and the embedded client is used so an unread --data
+// or spec.recipe.data path cannot fail the run.
 func runCNCFSubmission(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, recipeFilePath string, opts aicr.CNCFCollectOptions) error {
+	if recipeFilePath == "" {
+		client, err := embeddedClient(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = client.Close() }()
+		return client.CollectCNCFEvidence(ctx, nil, opts)
+	}
+
 	client, err := recipeClientFromCmd(ctx, cmd, cfg)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = client.Close() }()
 
-	var rec *aicr.RecipeResult
-	if recipeFilePath != "" {
-		slog.Info("loading recipe to resolve the GPU allocation policy for CNCF evidence collection", "uri", recipeFilePath)
-		if rec, err = client.LoadRecipe(ctx, recipeFilePath, cmd.String("kubeconfig")); err != nil {
-			return err
-		}
+	slog.Info("loading recipe to resolve the GPU allocation policy for CNCF evidence collection", "uri", recipeFilePath)
+	rec, err := client.LoadRecipe(ctx, recipeFilePath, cmd.String("kubeconfig"))
+	if err != nil {
+		return err
 	}
 	return client.CollectCNCFEvidence(ctx, rec, opts)
 }

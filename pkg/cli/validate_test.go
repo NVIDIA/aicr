@@ -29,10 +29,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// TestValidateCmd_CNCFSubmissionRecipe covers the --recipe half of a
+// TestValidateCmd_CNCFSubmissionRecipe covers the recipe source of a
 // --cncf-submission run. Every case fails before the collector starts, so
-// nothing reaches a cluster. An unreadable recipe fails closed, and a
-// loadable one proceeds to the facade, which rejects the unknown feature.
+// nothing reaches a cluster. An unreadable recipe fails closed, a loadable
+// one proceeds to the facade, which rejects the unknown feature, and a
+// recipe-less run ignores --data because it never reads recipe data.
 func TestValidateCmd_CNCFSubmissionRecipe(t *testing.T) {
 	validRecipe := filepath.Join(t.TempDir(), "recipe.yaml")
 	recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
@@ -43,17 +44,19 @@ func TestValidateCmd_CNCFSubmissionRecipe(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		recipePath string
+		args       []string
 		errContain string
 	}{
-		{"unreadable recipe fails closed", filepath.Join(t.TempDir(), "does-not-exist.yaml"), "does-not-exist.yaml"},
-		{"loaded recipe reaches the facade", validRecipe, "unknown feature"},
+		{"unreadable recipe fails closed", []string{"--recipe", filepath.Join(t.TempDir(), "does-not-exist.yaml")}, "does-not-exist.yaml"},
+		{"loaded recipe reaches the facade", []string{"--recipe", validRecipe}, "unknown feature"},
+		{"recipe-less run ignores --data", []string{"--data", filepath.Join(t.TempDir(), "missing-data-dir")}, "unknown feature"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app := &cli.Command{Name: "aicr", Commands: []*cli.Command{validateCmd()}}
-			err := app.Run(t.Context(), []string{"aicr", "validate", "--cncf-submission",
-				"--evidence-dir", t.TempDir(), "--recipe", tt.recipePath, "--feature", "nonexistent"})
+			args := append([]string{"aicr", "validate", "--cncf-submission",
+				"--evidence-dir", t.TempDir(), "--feature", "nonexistent"}, tt.args...)
+			err := app.Run(t.Context(), args)
 			if err == nil || !strings.Contains(err.Error(), tt.errContain) {
 				t.Fatalf("error = %v, want error containing %q", err, tt.errContain)
 			}
