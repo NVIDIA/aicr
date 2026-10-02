@@ -513,13 +513,6 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     #      Waiting on every gpu.present=true node would block until the
     #      15-min timeout for any GPU node the operator deliberately
     #      excludes.
-    DRIVER_DS_NS=$(kubectl get daemonset -A -o jsonpath='{.items[?(@.metadata.name=="nvidia-driver-daemonset")].metadata.namespace}' 2>/dev/null | awk '{print $1}')
-    if [[ -z "${DRIVER_DS_NS}" ]]; then
-    #      operator's reconciler sets that label only on nodes its
-    #      driver DaemonSet selects (this respects
-    #      --accelerated-node-selector). Waiting on every
-    #      gpu.present=true node would block until the 15-min timeout
-    #      for any GPU node the operator deliberately excludes.
     # Driver-DaemonSet lookup is name-prefix matched, not exact: the
     # certified OpenShift build renders it as
     # nvidia-driver-daemonset-<rhcos-version> via the Driver Toolkit,
@@ -592,7 +585,6 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     else
       echo "  WARNING: no DRA kubelet plugin daemonset found in {{ .Namespace }}"
     fi
-  fi
   {{- end }}
   {{- end }}
 done
