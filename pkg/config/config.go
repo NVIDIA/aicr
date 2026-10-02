@@ -222,9 +222,11 @@ type DeploymentSpec struct {
 	Dynamic      []string `yaml:"dynamic,omitempty" json:"dynamic,omitempty"`
 	VendorCharts bool     `yaml:"vendorCharts,omitempty" json:"vendorCharts,omitempty"`
 	// AppName overrides the parent Argo Application's `metadata.name` for the
-	// argocd-helm and argocd deployers. Empty means each deployer applies its
-	// own default ("aicr-stack" / "nvidia-stack"). Required for multi-bundle
-	// installs that share an Argo CD namespace. See #1011.
+	// argocd-helm and argocd deployers, and names the GitRepo and prefixes
+	// every bundle name for the fleet deployer. Empty means each deployer
+	// applies its own default ("aicr-stack" / "nvidia-stack" / "aicr").
+	// Required for multi-bundle installs that share an Argo CD namespace or
+	// Fleet workspace. See #1011.
 	AppName string `yaml:"appName,omitempty" json:"appName,omitempty"`
 }
 

@@ -267,9 +267,9 @@ func readManifest(t *testing.T, deployer string) []string {
 // recipe.yaml, and each deployer has its own entry point that integrator
 // automation invokes.
 //
-// recipe.yaml is listed for all five because it was helm-only until #2753, and
-// the additive direction of TestBundleLayoutMatchesManifest cannot catch its
-// loss on the other four -- a regression there would read as a manifest that
+// recipe.yaml is listed for every deployer because it was helm-only until
+// #2753, and the additive direction of TestBundleLayoutMatchesManifest cannot
+// catch its loss on the others -- a regression there would read as a manifest that
 // had not been refreshed. bundle-info.yaml is listed for the same reason: it
 // arrived after the baselines were frozen (#2758).
 var requiredRootPaths = map[string][]string{
@@ -360,7 +360,7 @@ func TestBundleLayoutManifestsAreComplete(t *testing.T) {
 // and would arrive silently with the first overlapping pair.
 //
 // Comparison is per path segment, after stripping the NNN- ordering prefix that
-// four of the five deployers use and any file extension, so it matches
+// five of the six deployers use and any file extension, so it matches
 // "002-nfd/values.yaml", "nfd/helmrelease.yaml" and "templates/nfd.yaml"
 // without matching "nfd-extras/values.yaml".
 func pathMentionsComponent(path, component string) bool {

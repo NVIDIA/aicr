@@ -354,7 +354,7 @@ func TestLoadAllowsNilSourceWhenNothingReferencesAFile(t *testing.T) {
 // bearing: rule 3 needs the two `from` domains to meet and to reach the pin,
 // rule 7 needs each `from` to stop at its own `to` floor, rule 8 needs the two
 // floors to differ, and rule 6 needs the explicit group plus the remainder to
-// cover all five deployers.
+// cover all six deployers.
 func TestLoadAndValidateAcceptAWellFormedRecord(t *testing.T) {
 	const body = `apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
