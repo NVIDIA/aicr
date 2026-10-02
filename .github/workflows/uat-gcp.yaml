@@ -106,9 +106,7 @@ jobs:
     # Worst case is a second apply running near the full 60m: ~278 base already
     # counts one ~60m provisioning attempt inside its ~30m "setup + provisioning"
     # slice PLUS the remaining phases, so a second ~60m attempt (plus the 60s
-    # backoff) adds ~61m on top, for a recomputed worst case of ~339m (278 + 61;
-    # a prior version of this comment stated ~353m, which did not follow from
-    # the ~268 base it quoted -- #2625 review caught the inconsistency).
+    # backoff) adds ~61m on top, for a recomputed worst case of ~339m (278 + 61).
     #
     # GitHub-hosted runners (ubuntu-latest) hard-cap a job at 360m of execution
     # (6h); a larger timeout-minutes is silently clamped to 360, so 360 is the

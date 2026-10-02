@@ -45,11 +45,10 @@
 # snapshot-result.json pattern, #1806) so they show up in the UAT report
 # alongside the other CUJ lanes, win or lose.
 #
-# CONFIRM BEFORE ENABLING IN A NIGHTLY LANE: this function was written
-# against the issue's description of upstream's tests/uat/tests.sh, which is
-# not vendored in this repo. Before this runs unattended, diff the
-# circuit-breaker ConfigMap name/namespace/field (FAULT_INJECT_* below) and
-# the synthetic kmsg line format against the actual upstream script.
+# Verified against upstream's tests/uat/tests.sh (not vendored in this
+# repo): the circuit-breaker ConfigMap name/namespace/field (FAULT_INJECT_*
+# below) and the synthetic kmsg line format (see the XID 79 line below)
+# match upstream as of this writing.
 
 # Set by _sxid_fault_inject_impl once it knows them, so the outer wrapper can
 # clean up the debug pod on every exit path (including a `return` deep inside
@@ -237,14 +236,16 @@ spec:
         path: /
 MANIFEST
 
-  if ! kubectl wait pod "${_SXID_POD_NAME}" -n "${nvs_ns}" --for=condition=Ready --timeout=120s; then
+  kubectl wait pod "${_SXID_POD_NAME}" -n "${nvs_ns}" --for=condition=Ready --timeout=120s &
+  wait $!
+  if [[ $? -ne 0 ]]; then
     echo "::error::fault-injection debug pod did not become Ready" >&2
     kubectl describe pod "${_SXID_POD_NAME}" -n "${nvs_ns}" || true
     ctrf_add sxidfault-detect failed 0 "debug pod never became Ready"
     return 1
   fi
 
-  local kmsg_line="<3>NVRM: Xid (PCI:0000:00:00): 79, pid=1, Channel ID 00000000 intr 00000000 (GPU has fallen off the bus)."
+  local kmsg_line="<3>[6085126.134786] NVRM: Xid (PCI:0002:00:00): 79, pid=1582259, name=nvc:[driver], GPU has fallen off the bus."
   if ! kubectl exec "${_SXID_POD_NAME}" -n "${nvs_ns}" -- chroot /host sh -c "echo '${kmsg_line}' > /dev/kmsg"; then
     echo "::error::failed to write synthetic XID to ${node}'s /dev/kmsg" >&2
     ctrf_add sxidfault-detect failed 0 "could not write to ${node}'s /dev/kmsg"
