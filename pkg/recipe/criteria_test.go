@@ -791,7 +791,7 @@ func TestGetCriteriaOSTypes(t *testing.T) {
 	types := GetCriteriaOSTypes()
 
 	// Should return sorted list
-	expected := []string{"amazonlinux", "cos", "ol", "rhel", "talos", "ubuntu"}
+	expected := []string{"amazonlinux", "cos", "ol", "rhel", "sles", "talos", "ubuntu"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaOSTypes() returned %d types, want %d", len(types), len(expected))
 	}
@@ -885,6 +885,8 @@ func TestParseCriteriaOSType_AllAliases(t *testing.T) {
 		{"cos", "cos", CriteriaOSCOS},
 		{"talos", "talos", CriteriaOSTalos},
 		{"Talos uppercase", "Talos", CriteriaOSTalos},
+		{"sles", "sles", CriteriaOSSLES},
+		{"SLES uppercase", "SLES", CriteriaOSSLES},
 	}
 
 	for _, tt := range tests {

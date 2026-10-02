@@ -385,6 +385,8 @@ func TestFromMeasurements_OSDetection(t *testing.T) {
 		{"al2 alias", "al2", "2", "amazonlinux", "2"},
 		{"talos", "talos", "1.7.6", "talos", "1.7.6"},
 		{"oracle linux", "ol", "8.10", "ol", "8.10"},
+		{"sles 16", "sles", "16.0", "sles", "16.0"},
+		{"sles 15", "sles", "15.7", "sles", "15.7"},
 		{"unknown ID drops both value and version", "freebsd", "13", "", ""},
 		{"both empty", "", "", "", ""},
 	}

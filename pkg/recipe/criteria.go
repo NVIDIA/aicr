@@ -251,6 +251,7 @@ const (
 	CriteriaOSAmazonLinux CriteriaOSType = oskind.AmazonLinux
 	CriteriaOSOracleLinux CriteriaOSType = oskind.OracleLinux
 	CriteriaOSTalos       CriteriaOSType = oskind.Talos
+	CriteriaOSSLES        CriteriaOSType = oskind.SLES
 )
 
 // ParseOS parses a string into a CriteriaOSType against this registry.
@@ -271,6 +272,8 @@ func (r *CriteriaRegistry) ParseOS(s string) (CriteriaOSType, error) {
 		return CriteriaOSOracleLinux, nil
 	case oskind.Talos:
 		return CriteriaOSTalos, nil
+	case oskind.SLES:
+		return CriteriaOSSLES, nil
 	default:
 		if r.Has(FieldOS, s) {
 			return CriteriaOSType(normalizeCriteriaValue(s)), nil

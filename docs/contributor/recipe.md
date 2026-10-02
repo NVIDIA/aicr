@@ -186,7 +186,7 @@ Criteria fields (see `pkg/recipe/criteria.go` `type Criteria`):
 | `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s` |
 | `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200` |
 | `intent` | `CriteriaIntentType` | `any` or empty | `training`, `inference` |
-| `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos` |
+| `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `sles` |
 | `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `nim`, `runai`, `slurm` |
 | `nodes` | int | `0` | any positive int |
 
@@ -335,7 +335,7 @@ spec:
   componentRefs: []   # optional
 ```
 
-Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
+Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-sles`,
 `platform-inference`, `platform-kubeflow`, `nvsentinel-observability`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
 `nvsentinel-preflight`, `npd`.

@@ -3838,6 +3838,58 @@ ocp-training:
   checksums.txt: d025c06d7a4b12a0d6826c4b90b9506dc5bbba0c76eaff19f47e2a6a6a118ae7
   deploy.sh: 57db5c15a9f544ccf2f58e52e0de14b990672c2cc82af04cb6f12b83a46b94f1
   recipe.yaml: be82f14aba09224250a0cdfba0af51aadb4719d346f35bd3ac14b8e0724de710
+rke2-sles:
+  001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
+  001-cert-manager/upstream.env: 8984ad504d9290d252f1fd39602328bce17d424b3a96e1dc794b4887b949c01e
+  001-cert-manager/values.yaml: cfed5371a715b1fea083d7aa4d690c6c2029a6c845d1fe63c5210898cbe5f557
+  002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
+  002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
+  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
+  003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
+  003-nodewright-operator/values.yaml: e83be883aa3fa7eb9b9a8a3303466e212d102ac7df7f54163a1836f8938af1c6
+  004-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  004-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
+  004-prometheus-operator-crds/upstream.env: 79fc2ce93f1bb62225f9b62cfe618fde8081bce8f7a6d9a56f3a118346da4a4c
+  004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
+  005-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  005-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
+  005-kube-prometheus-stack/upstream.env: 4cb3f21994a62e8c6f073fca04e2fa0361f9e2841932205321375af4c8ee638a
+  005-kube-prometheus-stack/values.yaml: 122b439e5924baec0aef15d9e8353aef7d578de01566ac240e5ca77e7a5792da
+  006-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  006-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
+  006-gpu-operator/upstream.env: 8717b2f1fcb9ed39fd0e87ef4b65b7df42bc12e5cbffa47dc2e3ceb0b286e142
+  006-gpu-operator/values.yaml: 5ddd942dbd7545e5f951570edbd3a8aa7b4fc5e1f0afea1b6a9e9836ae7c5a04
+  007-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  007-k8s-ephemeral-storage-metrics/install.sh: 727160f359e5476c7211551f781f1a857aedd834922ed255197f7059d78ea816
+  007-k8s-ephemeral-storage-metrics/upstream.env: dbb5b7f8b156e8f1ad3ace176d3d1bef38280a533242107e49e0b76b24fbf435
+  007-k8s-ephemeral-storage-metrics/values.yaml: bd965e10e0f6eca07d732ea00d66e8327c176acfdc52d998809f7d4d53e056e8
+  008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
+  008-kai-scheduler/upstream.env: 28796b9c560ab50439fa444585d161dfdb838c82420680a85a0e6eeef3fb7af0
+  008-kai-scheduler/values.yaml: 478f75baf393a9f6c9425b543f8ea2b3103b090e75dea49284805e0ddd625265
+  009-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  009-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
+  009-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
+  009-nvidia-dra-driver-gpu/values.yaml: b29f52e1948897c887111cbfdc86c49fc3b0c94e1c9ac7611593ff0394f67563
+  010-nvsentinel/apply-crds.sh: 8ebb8136b451e489e5c02e8766a509e8b97e77ee15d9c03640a211ac1aa834cc
+  010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
+  010-nvsentinel/upstream.env: dc803b57ba58abb37794021ba342503ccf79047efc3b72068b198cc5f566678f
+  010-nvsentinel/values.yaml: 5dbdd974de19bda092dff19de6a6fbb9489b7e7629abdeab2d1a8fe0bff69247
+  011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
+  011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
+  011-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
+  README.md: 30263c7f696963c7f0be0cfc7ce81b805d95dec535018ea8b4f014d18d7a2bb6
+  UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
+  bundle-info.yaml: 3330d68a76f9d92250016b78f0cf52124da254ce322bcc817414865f187b5096
+  checksums.txt: 23a7126d759bc072a32fa2588928c3859cfda65090e0cee84e7b7346c748169b
+  deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
+  recipe.yaml: b4f61437e18c305709af8cb7bb5289d0bc3ebbf6a23d4c9278edf1bb394ac985
 rtx-pro-6000-any:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
