@@ -924,7 +924,8 @@ Package with explicit tag (overrides CLI version):
 					"Argo CD namespace so the parent Applications do not collide. " +
 					"For --deployer argocd-helm, the value is the chart default and can be " +
 					"overridden at install time via `helm install --set appName=...`. " +
-					"Must be a DNS-1123 subdomain.",
+					"Must be a DNS-1123 subdomain; with --deployer fleet, a DNS-1123 label whose " +
+					"<app-name>-<release> bundle names stay within 63 characters.",
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{

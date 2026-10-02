@@ -232,7 +232,7 @@ func TestK8sAIBOM_AllDeployersCarrySecureDefaults(t *testing.T) {
 // collectRenderedValues walks every YAML document in a rendered bundle and
 // returns each value found under the given key, at any depth.
 //
-// Depth-agnostic on purpose: the five deployers nest component values
+// Depth-agnostic on purpose: the deployers nest component values
 // differently (a numbered values.yaml, an Argo CD Application source, a Flux
 // HelmRelease's spec.values), and pinning the layout per deployer would make
 // this test break on every unrelated bundle-shape change while still not

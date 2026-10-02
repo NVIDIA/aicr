@@ -45,7 +45,7 @@ belong:
 
 | Claim | Where |
 |---|---|
-| Renders through `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux` with the qualified digest and secure defaults | `pkg/bundler/k8s_aibom_render_parity_test.go` |
+| Renders through `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `fleet` (both modes) with the qualified digest and secure defaults | `pkg/bundler/k8s_aibom_render_parity_test.go` |
 | Vendored-chart output at the shared-writer level | same file, `TestK8sAIBOM_VendoredChartRendersThroughWriter` |
 | `hasSelfRefCRDs` produces Helmfile `disableValidation: true` | same file, `TestK8sAIBOM_HelmfileDisablesValidation` |
 | Scheduling injected at the registry-declared value paths | same file, `TestK8sAIBOM_SystemSchedulingInjectionPaths` |
