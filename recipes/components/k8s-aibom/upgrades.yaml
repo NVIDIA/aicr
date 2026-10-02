@@ -57,15 +57,15 @@ transitions:
     summary: >-
       The CRD change is additive only, and with the verification block unset
       (the value AICR ships) a plain chart bump against stale v1.3.0 CRDs
-      upgrades cleanly on every deployer, helmfile included. Setting
+      upgrades cleanly on every deployer, helmfile and fleet included. Setting
       config.verification is what breaks the upgrade: the field does not
       exist in the v1.3.0 schema, so helm fails while building the
       server-side-apply patch for the AIBOMControllerConfig and aborts the
       release. The value is not silently pruned, but the abort lands after
       the Deployment has already rolled to the v1.5.1 image, leaving a
-      release marked failed partway through. helmfile is the one deployer
-      with no automated CRD-update path, so there the CRDs have to be
-      applied by hand first. The chart's rendered AIBOMControllerConfig CR
+      release marked failed partway through. helmfile and fleet are the
+      deployers with no automated CRD-update path, so there the CRDs have
+      to be applied by hand first. The chart's rendered AIBOMControllerConfig CR
       also moves from v1alpha1 to v1beta1, but both stay served, so that is
       a template change rather than an API break.
     reversible: false
