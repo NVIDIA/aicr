@@ -13,7 +13,7 @@ a100-aks-ubuntu-training-kubeflow:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  002-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -84,7 +84,7 @@ a100-aks-ubuntu-training-kubeflow:
   README.md: c59cdceff0e9959d375d3c4e6725eb4df735e8979ccefb79f9bd6d75a60935b5
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: b8757b034c4af4ea4260caf4c3311f2b805a435155323196e8fa30394aff7e1c
-  checksums.txt: 8f99b2583e2dcf38e6b997da8a5e39d7d3cf86bf410511e2cf58bb76d78f0e02
+  checksums.txt: f970488f533d3f87f329ce1b55b5cede11d0f2b05ee51a1510c68228d0dfdac1
   deploy.sh: 578de8756d8c7fd3f4cb092af39adaeefd0e3df50e5d248893b42bd1029f4532
   recipe.yaml: 31de158c477835adc03f540590bfa4e53e366df642faad27e257830a2701ea92
 a100-any:
@@ -95,7 +95,7 @@ a100-any:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -136,7 +136,7 @@ a100-any:
   README.md: 9ca6e45a84a07008ffa7cdfa3c51bcaf13a3e992b8069cf6327882d32d8ce806
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: ad4f9557a3b9797a2ffb23f6873c1935e283599143f741c823d83798a200132c
-  checksums.txt: 467ea1ae826459ae2b5e392009d9da59d4e7379587476f76c00b8faa6b932d6a
+  checksums.txt: 0c131b8c3b015dacda4bf79dcbd74e9f804417582a5db8fb7f3f9b55b03770cd
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: 67ce39f490a229ef7eaf80e15316edd3f19dd077f23b39c12f63a9bb13f0970d
 a100-eks-ubuntu-training-kubeflow:
@@ -155,7 +155,7 @@ a100-eks-ubuntu-training-kubeflow:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -210,7 +210,7 @@ a100-eks-ubuntu-training-kubeflow:
   README.md: c2fb67edc7eca8b6988382312a0aefef868066029c2a3cb7e1e8e59cc6566373
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 7d9b1fdd481ae80b6fe9aa8079bbb3604ec1ce9c11002c985f186f91c5659f01
-  checksums.txt: 21aa52ca92161d183c6eb6d4d7dd08894aa73299e4d9ec46c1a564c308f4d8bb
+  checksums.txt: 3b17309c38611a2a4a661f9f7c68e95a5dd558d266421f7443b42ef741b00e4e
   deploy.sh: 5b2acd33c456f23e8d1f4d574f94b9ba2bce52147876f165a54e3395e55de09b
   recipe.yaml: 9c868eb55b01a98513d2e341d7242e9d0b9b1b5969206c6415d4cecdc2abfa30
 a100-gke-cos-training-kubeflow:
@@ -225,7 +225,7 @@ a100-gke-cos-training-kubeflow:
   003-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   003-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  003-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  003-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   004-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   004-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -285,7 +285,7 @@ a100-gke-cos-training-kubeflow:
   README.md: e21a4b1766a05e41473e85415eddc8c3c72fac6d5eb3851c5da02c946cb2dfed
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: e9231504d14acfc247811326fdf17edb8022c38a238c3113ceb4792fffb79ea3
-  checksums.txt: f565ee5440332343e50bed71c77ab2b534401260273563b2eacfa13a2a143312
+  checksums.txt: b971f70f5b696126a94961632b215fd7890bb8a6814d6e2c9d4dd4247f7e7d6f
   deploy.sh: 2b0cd173c38bb27ee4cdb7d6c4d1d94d523b56fed94d6889cacd342b0b5a0dfd
   recipe.yaml: 9ba7f55ca95b2b646138e1364ed8cce1ef085c141b6092e9acec1b2e3496a427
 a100-oke-ubuntu-training-kubeflow:
@@ -296,7 +296,7 @@ a100-oke-ubuntu-training-kubeflow:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  002-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -346,7 +346,7 @@ a100-oke-ubuntu-training-kubeflow:
   README.md: bb7d5d0404f2dc415d3559a7d1e8f1b2288fd6684a76b4758278020a65736424
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 4e734937ad34f76384eaaa848b203ae607df88334ea31ddbe8e489b0c3f52fbe
-  checksums.txt: a3f4866685d7443a8519e2245e2b7ea3bf693732d0b51eaea77a673d75860684
+  checksums.txt: cda53465880fdc848457facb67462b819e79db9bca8652a14f972a8efa5b31ca
   deploy.sh: 8ebf4bd801a6d8fd6cba8979dc354e9aeeb8d5cfccbee9e6e7262417b175c6f4
   recipe.yaml: 36381c1944cba39d385c0ab8faf89e15bb5cf8c320e384196b56b68e5854d516
 aks-ubuntu:
@@ -357,7 +357,7 @@ aks-ubuntu:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -414,7 +414,7 @@ aks-ubuntu:
   README.md: 47818d601139c841e2b931899d4b1579acbcf5bcfc6bb6bb064c4f83a0ffeb90
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 052dbe04fd5e7a135bc6e6df50aa560516183938c65b3f3dac132cb143fe0c6f
-  checksums.txt: 10c3564d5c3e5d3fa518ea444e506669ab8f9b377cd8edd0b58b61f100a5a326
+  checksums.txt: 9d4f437b5063428a464e39a4c58b04b4a81d4222578a1c083af37186a049668b
   deploy.sh: 1d5c9d627548eabf502d0ca6ecacddce17627e87ebdbd095333df77e8cdad2df
   recipe.yaml: 1c4ba900739f229c70ecacaf72ff790e7a554880b226655c32f0284c4076eee7
 b200-any:
@@ -425,7 +425,7 @@ b200-any:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -466,7 +466,7 @@ b200-any:
   README.md: cf4d7e0922c8821fcac68e37444beff835581194b11b0a11c2ddae7be474c80b
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 678737aa5616f511a57776d0d357073c70ca2bfeb83d29dbd317ef82964aa039
-  checksums.txt: 02e447100626305aa65ee3ee6c3502966dfaced063ae8b3c5ecf9b225227af5b
+  checksums.txt: 9c9603052f219402e054064929e4bbffe04dda6abae077101d2beb3ac479bf6b
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: fec141debfbc24173ddcc5e05f3678d11fc936f6092f6f4d24dab9893218fd6a
 b200-gke-cos-inference-dynamo:
@@ -504,7 +504,7 @@ b200-gke-cos-inference-dynamo:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  008-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -559,7 +559,7 @@ b200-gke-cos-inference-dynamo:
   README.md: 5703af26dd5ce9982bd5949da24bef64cd5da4ffe5f2f73d3978e52a48c3ae25
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: 4a472490a261894fc68b4a5b67f482ed3fea56d64abe501043f3c342b2c3fb2a
-  checksums.txt: ed5a971694464d9108a69611b1005affe45648b91a73443894312d10ae6600fd
+  checksums.txt: 9fa75b0e0a03a79700544a02983acdb4b9b5203b2c3dea1205bd51c89bf36c23
   deploy.sh: 62b3ab91044223177c74d3aee7241f4aeae64e6bdb31481f7da642dbf4556e9a
   recipe.yaml: e9db226befc5008771e8e32c6ea5fd998501fd003e502005fbaf322e13fd196a
 b200-gke-cos-training-kubeflow:
@@ -574,7 +574,7 @@ b200-gke-cos-training-kubeflow:
   003-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   003-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  003-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  003-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   004-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   004-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -634,7 +634,7 @@ b200-gke-cos-training-kubeflow:
   README.md: 35ee900dad87a1d7a0ea53ca7f9422f602fbcdfff8884086977f599620f7a686
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 910e640f7e7442cb6e8537a11d86b7307096564795f52461a21341f2a175415f
-  checksums.txt: b061ce0b6c797ec2d3b140b32b32778ccb27c0464e9783d9064809c4b125c283
+  checksums.txt: ad918f9abaffe62df0fb7399223d8bf42ac2b945f4292d2a456ba733815bc2b5
   deploy.sh: 2b0cd173c38bb27ee4cdb7d6c4d1d94d523b56fed94d6889cacd342b0b5a0dfd
   recipe.yaml: fbffcad95923a554f5c6ca4d9833cdec38be012ca146a8b1c265487ca531a915
 bcm-inference:
@@ -664,7 +664,7 @@ bcm-inference:
   006-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   006-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  006-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  006-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   007-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   007-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -710,7 +710,7 @@ bcm-inference:
   README.md: 8cf61b75e92017ac8ad83f09b58b101e0506883369e7b31155bc4c4b61492dff
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 62faebc11da34bc66e56ba5e8a6d493ee7300c1b4a49ea60685281d3496d2781
-  checksums.txt: 2e783d80116d6eecada96939f62a220361697b37875ad4ec13b85b10406c8c91
+  checksums.txt: 3eaad1ab20310f6ed74ffa681d50ab339ab27ab826b031a190900490e3e7afda
   deploy.sh: 0e40b3c44ac83591b443c18609eb82ddbdb3f5d410cb8eaff31a5533f9348d6e
   recipe.yaml: 8953e615d4d84bd0a860b1e8aea84c00fa1edbf64028c3c1d7db37807357dfa7
 eks-ubuntu:
@@ -729,7 +729,7 @@ eks-ubuntu:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  004-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -770,7 +770,7 @@ eks-ubuntu:
   README.md: f73fdb0f62f176b0cc9b735d3ded5bfeca4539daa2c9e97167b3da7055d573d5
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 866da806c394a3ed15397e03afc376e6be7012328971ce88ce84039ff478d58a
-  checksums.txt: ab0b7daaa49c1cfcee81c3b107e08aaadc2758eefeb578aef0f80d45a3f96566
+  checksums.txt: 03368b2e5147ca10658af2cfa60a7051e4225c29096d48a5404a9531cb77d702
   deploy.sh: 2fd097b74541a045e1a07751042298f7d295f8071c60bbd9be76029f9ac34959
   recipe.yaml: afeb379a07ad5bcf87007bb99a0aab395959e4a61ef92ed5b46092730f5cdd6e
 gb200-any:
@@ -781,7 +781,7 @@ gb200-any:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -822,7 +822,7 @@ gb200-any:
   README.md: 7b43d55c87cb3312c54d1a52f083ccec7e9f9182ae49aeb2790159acd927eda3
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 42c13acd0638fc09d941d4cafd2b4e9c4a99f618e1ebf427aaf3956b686a722a
-  checksums.txt: 7264b1623b4a9482ba592c63ce9ecec40949f0bd3c0f717ef5cd58be8e83747c
+  checksums.txt: 7f8d630261f4f9c0243793e6cf551f96cbf28479c3851f8a1cac15c17677a547
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: 0f7d86bd9c759548abf944cab2d28b2e2e9416670ed6c10c240dca14967474a1
 gb200-eks-ubuntu-inference-dynamo:
@@ -864,7 +864,7 @@ gb200-eks-ubuntu-inference-dynamo:
   009-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   009-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  009-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  009-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   010-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   010-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -919,7 +919,7 @@ gb200-eks-ubuntu-inference-dynamo:
   README.md: 7d812ea5dcf6bd12128bdf94ebd300306eccb146814de5ff0a3998833f151a0e
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: 441da0c5ae961abe27cba8c07bcc12d51fc9869b1159ace189e2ca7a8729a63f
-  checksums.txt: 043f454553883ffa5adf31a96535ef71f59e6d0acc2f3d867ad6b6684661a0fb
+  checksums.txt: 657225965411e0d2b9595eb93c93b290d4e51b96be7f4fb8551e0af9fdb36398
   deploy.sh: 7a305353d31349834943e912d9c671f1e44a3b9ec914d8862017d7e56dee9a96
   recipe.yaml: 99016877d03d3f8badd84640e47e5f1b4dff71d45e2fef3da6c2769064805175
 gb200-eks-ubuntu-training-kubeflow:
@@ -938,7 +938,7 @@ gb200-eks-ubuntu-training-kubeflow:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -998,7 +998,7 @@ gb200-eks-ubuntu-training-kubeflow:
   README.md: 43af1d677a691a4e8131ef67fa50deb7921d9fedbe0aae6a941a990cb2fe0a44
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 2321ed37c5fa7add302079333778e6c7eba3d6f152d59603d69389a0617e5857
-  checksums.txt: bdfb35553255177fe8a7b05916068c0a9f64390da25603acbb50ba76b5e006d2
+  checksums.txt: 88f012211b1b748b0b059d1cbc9323f59a17a6aefa148b9381047cbb659a3b2e
   deploy.sh: 5b2acd33c456f23e8d1f4d574f94b9ba2bce52147876f165a54e3395e55de09b
   recipe.yaml: 4fe166f7e3189c7a81eee37ba61056a17f722ed79501c376c5ec4dd65014f956
 gb200-eks-ubuntu-training-slurm:
@@ -1017,7 +1017,7 @@ gb200-eks-ubuntu-training-slurm:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -1086,7 +1086,7 @@ gb200-eks-ubuntu-training-slurm:
   README.md: cd743008c0568e64613a3621351bdaa2504bf9f365c7702065f27bc064ebc1fa
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 9905ee9008d86ae458d7f11ace060abf90c8c9199e9bbbbe9b82b72bf31f730a
-  checksums.txt: 3f05044bd2bbd368e50d408f415f27f4df38aff8cf29231ca9eb766760043697
+  checksums.txt: 00fda968ac6605da1fba913000c006efeed2f724c757302abde493ef63a13f09
   deploy.sh: 3bf1475ef39efa155a2cdff6c99ffeba55d931adf38871f8bc74467845584eae
   recipe.yaml: e0d3e329aff972080d3f76604ad6d18971fe685190ceb7e6753e06473640bf8e
 gb200-gke-cos-inference-dynamo:
@@ -1129,7 +1129,7 @@ gb200-gke-cos-inference-dynamo:
   009-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   009-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  009-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  009-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   010-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   010-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -1190,7 +1190,7 @@ gb200-gke-cos-inference-dynamo:
   README.md: 0f883b8cf45ab50d6e046d71ca483e90a9133c0a344b384328d4bbd9a9ae0da5
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: eac5f1b4ca396596923b1a92a4cdd3769773fa41d47168210946188eec55e03e
-  checksums.txt: d88489ee25679ea0091e9b4d87c11c731a21f1bf6a3adc3e8abc86bf9022f989
+  checksums.txt: 9c06846da90efff658c6a1f0f7771f33597b63fa60f30ce2c31b4c372609daad
   deploy.sh: c27046f23c79d92f9cdcc9725b9ef25978758818975807ba376dc5e6f9fda214
   recipe.yaml: 9cac37bba449e4309e64f0926ea3b48296310c0dd6f5002760697b9621c33576
 gb200-gke-cos-training-kubeflow:
@@ -1210,7 +1210,7 @@ gb200-gke-cos-training-kubeflow:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -1272,7 +1272,7 @@ gb200-gke-cos-training-kubeflow:
   README.md: 9f72f7c976888ac46558f3a26424107314227af1a20ecc23e28fd9ea212af575
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 8c5b3d8800aeeff6bc4ddf607b0ff9ef49b20eb95159a3641226ffea26063677
-  checksums.txt: 7d5b7b2fc417a8d1f6cd1137cece802fbc5a44b39e0f8a54342f05313f2ad652
+  checksums.txt: 4ba42ee8d479cb97e3827b27417f9febdf977498cf5dfdc4b27f3e60fb1ad832
   deploy.sh: 7d1e5335991335299686c41cb44d9609d4ed3b5aa59506a38dd64949a2553c54
   recipe.yaml: c2fbdbbe659d84d23e21f9da54825a1ec83e37139e26feb9c2592fef5af42ed0
 gb200-gke-cos-training-slurm:
@@ -1292,7 +1292,7 @@ gb200-gke-cos-training-slurm:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -1362,7 +1362,7 @@ gb200-gke-cos-training-slurm:
   README.md: 77013cccf74249773878eb911d4af2c86db0de11f2a0a186dcc14a61d73792fd
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: d2be07c4bd13419a9c0f7e71a0e3abcad9329f9a51a7aed9765d6997f690e0de
-  checksums.txt: 161f7c24292ba1caef47d090a14a43dd1c5bf2067571453ee1ca1f576ee29223
+  checksums.txt: a2ccce2ea3033fc3de8515b22075be551b0fa988249e4051e895484f7c48d8ca
   deploy.sh: ef955644171896a717b59c2582b0fbef5b6cab0d2f67c89924656b3aee005c73
   recipe.yaml: 0cf270c23abb5c143982232de0b6115c9502e29392acfaab8de683edc8398f18
 gb200-oke-ubuntu-inference-dynamo:
@@ -1396,7 +1396,7 @@ gb200-oke-ubuntu-inference-dynamo:
   007-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   007-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  007-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  007-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   008-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   008-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -1441,7 +1441,7 @@ gb200-oke-ubuntu-inference-dynamo:
   README.md: 6242517b67ea219b0acbe46ed9c8f1569eba35255f82532c25446030a7eea85d
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: f369d8bf5acb55840e9179d05230aabd42c25e87b718adc49fb54adb531f8cdb
-  checksums.txt: 1aa423dd42ad6833b8de79a9b2788f570cea2a16c9647ea2980f1be3fe59aa0c
+  checksums.txt: 83871a20f282be807f5defdbdf1b0bd37df397f07315f5329c90e6a0ee066212
   deploy.sh: 6c9407779b830bf0997644af6ced980afe20317b576ffc024df41eb719b8d949
   recipe.yaml: e3a1bb44834e5b242e5e6b2b7be04c29b4d9b106e292d90ce47d52a1ae582243
 gb200-oke-ubuntu-training-kubeflow:
@@ -1452,7 +1452,7 @@ gb200-oke-ubuntu-training-kubeflow:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  002-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -1516,7 +1516,7 @@ gb200-oke-ubuntu-training-kubeflow:
   README.md: eeb441534e6dac00ae0c4262b729b23be1148be66f9602bd85cf82aba605fe7f
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: bd28c90092298d3cb527df155396b31adb575214fd90e8e381ef888cdbdf400d
-  checksums.txt: 25a4383f42ce818758b79c89bbe9d63b71dd3c1adf9096ea8c445fe4e816d50a
+  checksums.txt: ea553279ef399a7d5bf41143a404609297aef0d989ced62f4d4945fa1cacaf8e
   deploy.sh: 83fa4613633138d6b344997098cc0b2f77082f6fc1ba1cca6cef729b1a316cd3
   recipe.yaml: 533380c82da0b4dbda99f3b5d744057c82fb7ccdd0a470b05c65bc29671059b9
 gb300-any:
@@ -1527,7 +1527,7 @@ gb300-any:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -1568,7 +1568,7 @@ gb300-any:
   README.md: 3ef7ab2055833c836afe728785e2d1c477e22def8a9087b5ac64f60e5593eb6c
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 812ec5168e9be198310acde61285650d43964ac9bc0bb3dc7d5c336e87eb658f
-  checksums.txt: 3cda8f96de5948165e5ac5d771f3a265af09da16f8cdc4e8dd5770e60c506198
+  checksums.txt: 23dcf69b86d38423ea8dae9ce2a29f1988f638786434ffa1282d1f1fc5b86eb7
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: b77d5c4ef355d75f0c9b4999f0d57b3d5ff426f78cab48012d0eb1815a037394
 gb300-eks-ubuntu-inference-dynamo:
@@ -1610,7 +1610,7 @@ gb300-eks-ubuntu-inference-dynamo:
   009-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   009-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  009-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  009-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   010-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   010-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -1665,7 +1665,7 @@ gb300-eks-ubuntu-inference-dynamo:
   README.md: a511d3e61c3f67f76df9ab26a2a7f5d4cc5343993dc96374b2de60d3b1ea3e33
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: 616d719558836e403f23137366f5a49ee112bc02ca55410f0376dabf126dbb49
-  checksums.txt: 5c25e708e55ffbd9d51e814c765f7c89996d51631261156517d157255878ad1d
+  checksums.txt: 3f1ae4b0237c2603f68c97f60a088ab32ec9e9c11bfa3c9e0081fd666090a6b7
   deploy.sh: 7a305353d31349834943e912d9c671f1e44a3b9ec914d8862017d7e56dee9a96
   recipe.yaml: 4aa6f0d612c3e364603fa25a8e3e3527c203f81736e5cecc718828a9c2c98d60
 gb300-eks-ubuntu-training-kubeflow:
@@ -1684,7 +1684,7 @@ gb300-eks-ubuntu-training-kubeflow:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -1744,7 +1744,7 @@ gb300-eks-ubuntu-training-kubeflow:
   README.md: 6e06975e1ff735dd78f986ffce4e16742dfd8b114f8427bfb149570312465292
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 1d30e69141e264a6cffbbfc0199baec719fe3694f29e1af99c55a222eb52af73
-  checksums.txt: c6d0235d2666496aed8fd54cb2919df529e455483a31113a4697031b5d4f3927
+  checksums.txt: 5e086dc9a32f4db5b0d383b60241e66f965d1cbd7487fb3228c283b975062780
   deploy.sh: 5b2acd33c456f23e8d1f4d574f94b9ba2bce52147876f165a54e3395e55de09b
   recipe.yaml: e017dd3bf35f86f1e94d252ae6dd3ad95726071726d3c99530a6899e3a412b66
 gb300-eks-ubuntu-training-slurm:
@@ -1763,7 +1763,7 @@ gb300-eks-ubuntu-training-slurm:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -1832,7 +1832,7 @@ gb300-eks-ubuntu-training-slurm:
   README.md: 7ec5178e47106fc572219ead6a6e1a8c91177ab6c48edeedfc37f699a64b3067
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: e6ec5054f3016420f86e78c3473cc0786b01d7e7437389b28700226bf968ffa3
-  checksums.txt: 5e0f22b09af08c40532c3f8dfb61b88c654cd4cb22c62935c6c76b85f5310b60
+  checksums.txt: f7b8ac6ddc60cdb14481cf487e0bdc8f5ea0f4f465942d6907c64fb85f809348
   deploy.sh: 3bf1475ef39efa155a2cdff6c99ffeba55d931adf38871f8bc74467845584eae
   recipe.yaml: c711fe632ed29fa531c91eed1bf43f0b04c985168f3f07df85030a7cce6b4f08
 gb300-generic-ubuntu-training:
@@ -1843,7 +1843,7 @@ gb300-generic-ubuntu-training:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  002-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -1898,7 +1898,7 @@ gb300-generic-ubuntu-training:
   README.md: 220ee0f077375a93701aa20ad10fc325d5a2be5c6cb5ec0d56310de4c5a7f2d6
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 01c4c17f8cfb3a1bc3b5739ec81c5922e2ade03f6115fb447ebb4361741f10b9
-  checksums.txt: 261a4892c756ba9b26d130309d520c04b0d86b59411d321fc544fe4125b073d1
+  checksums.txt: f26cc4a67139a8a4d24e143ef7e64e6bad8cc1cfb2783e9b6188d5221175dedc
   deploy.sh: a4407de071637cc7bcd2e67d43c3d51bc767423e6200467a435e1898f67b0627
   recipe.yaml: 4d69760384d18a3291c6dc0a5a20f8e0e3ecff9fe814160861beda5c0b984376
 h100-aks-ubuntu-inference-dynamo:
@@ -1932,7 +1932,7 @@ h100-aks-ubuntu-inference-dynamo:
   007-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   007-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  007-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  007-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   008-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   008-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -1998,7 +1998,7 @@ h100-aks-ubuntu-inference-dynamo:
   README.md: 8ffffac5dffea4fc5493a5d2144bcc4f819304c71f4b0e753b2dfcc53d88c224
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: 5dceea0a0f68d6247bdd12ae8a53cacc738a855579503a44235d58c27ed68e6e
-  checksums.txt: 9e134c598f981da5d91058a3bd4834ea965b0decc37aec4b003cc5ccf8ac2b6a
+  checksums.txt: 74ddf21479ec366d1483d680f7787e66828c92c85d73cde1daab2c2145b49d55
   deploy.sh: 8fe244abd3dd37ba57ffd0c551fe092c6c2c7fe033799da927170855d0104583
   recipe.yaml: 91155a3b152a7efc742884990e01075f0a0a42379f75fa92d08dee0e9b89fab2
 h100-aks-ubuntu-training-kubeflow:
@@ -2009,7 +2009,7 @@ h100-aks-ubuntu-training-kubeflow:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  002-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -2080,7 +2080,7 @@ h100-aks-ubuntu-training-kubeflow:
   README.md: 62edf7818cb89a0d4d40a9c6ad451df97b7664ea01b23bee64403d3c47a8b406
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: a4bc974b5a744dbd68200b2c840b8c21feefefd36afd3a676fc9419878383579
-  checksums.txt: 3912eec5a32e70a5b21298ac12a2272303845b8453913e31e184010b2a2e1941
+  checksums.txt: 23f15e89434c0d3e1b3cda0fc8fb43deae6a44824676095c1a1ded9b471795f8
   deploy.sh: 578de8756d8c7fd3f4cb092af39adaeefd0e3df50e5d248893b42bd1029f4532
   recipe.yaml: ab935ef631c32798d5680c1c2e2c770cb4eff3534e19a87efd41a544e5d86ef2
 h100-aks-ubuntu-training-slurm:
@@ -2091,7 +2091,7 @@ h100-aks-ubuntu-training-slurm:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  002-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -2170,7 +2170,7 @@ h100-aks-ubuntu-training-slurm:
   README.md: af73cb4c0d378ce9f520a8d8b8eca27b9bab58e563867071147136cb6030ab36
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 916c3459e3eb96504a80c75513b36d27705f5cf0ad3d7134baed19967cf76e4c
-  checksums.txt: c51103017f51436cc2a1f168845508c481520316ba160c4da29ce8dfa9c3b05c
+  checksums.txt: 179825ed67ee8a6dbd8c443b9d36d3d6337fc0129161f1071ae1d69233da596f
   deploy.sh: 9b4d0619afbaa1425c76e4035df5a7a41bb8c10f35fd0892b7e552a3bc72d66d
   recipe.yaml: e1fbd4c2236e574456d9ee80cfd4bb61dec01b33e293edfc858de6bb87d4bebb
 h100-any:
@@ -2181,7 +2181,7 @@ h100-any:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -2222,7 +2222,7 @@ h100-any:
   README.md: c9c17733e6903e0c364122d669a050b87e7a5ed1aab5ec25cf28806e7216ebfd
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 5ae21a9ee0637c62e0c4b4bb907a63fdccf6f999ccccd67264c22f48cd423746
-  checksums.txt: 54927b14ee2d9b142f34cb8a446eaf763fb2b2f59a3bf7f708e8563fe1579709
+  checksums.txt: 3cdd44953e8c3e8efd1714c6c2955cf47414b6e8b5688d378996e73835775663
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: 2e0d488d24e987f116cb37ceb665dfef4df87ecc0018a0777337cf9e052ffd4c
 h100-bcm-ubuntu-training-kubeflow:
@@ -2233,7 +2233,7 @@ h100-bcm-ubuntu-training-kubeflow:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  002-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -2288,7 +2288,7 @@ h100-bcm-ubuntu-training-kubeflow:
   README.md: b948a5b9a3a419f5208de7f79d9ae81a73cbdcdced0e23b67b14ea9784207d5a
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 81601dd90ae55fa09407c5bef15c53280feb7852fabd037406171e594902f262
-  checksums.txt: c10e4f159d384f1502e338566072573ba55f10c9d83de8f0945966a5beea8777
+  checksums.txt: 2ea91393293228ebf16739c7f02f28148e73cc9101a44941b7d2eb1c72b5f771
   deploy.sh: 942b1194469de9dfc1e8b55420980e47fb7cafa917ef628d29af8817dfbd9d79
   recipe.yaml: 438a504c7b781356509eae930652b5db7413d8fd188b0f553fc6cb7a063c561c
 h100-eks-ubuntu-inference-dynamo:
@@ -2330,7 +2330,7 @@ h100-eks-ubuntu-inference-dynamo:
   009-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   009-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  009-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  009-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   010-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   010-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -2380,7 +2380,7 @@ h100-eks-ubuntu-inference-dynamo:
   README.md: af590efaa7ca1d2760af737fa973ee54e7cfc273529f94b7fb08170f1ce70c4c
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: 6fffe7c7863286b5589c835af53914ca05afccd20596e185cd799e18980c1fb2
-  checksums.txt: 131b82d42932e40287d6a61e17196aed80d169241505d7ca6382bef58ba1299c
+  checksums.txt: 1f43e524d30962a7c657b0da4066d31945bdbf37953e2002b2c3e17671436781
   deploy.sh: 7a305353d31349834943e912d9c671f1e44a3b9ec914d8862017d7e56dee9a96
   recipe.yaml: 8162d79cda156236cb4078ad712d927ec88f954fadf3d2c60edbb77deae6e688
 h100-eks-ubuntu-inference-nim:
@@ -2418,7 +2418,7 @@ h100-eks-ubuntu-inference-nim:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  008-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -2468,7 +2468,7 @@ h100-eks-ubuntu-inference-nim:
   README.md: b65217878628ebcba2f35f8006ee24ccf705434f0a794d749edb384c367f25da
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 7c006a7f70694e0539479a2f137418328306c4e73d4ab016f7b52f4e86c7c013
-  checksums.txt: 558b8bdc0a4bb5510976c4a2dbf9fe8bdc7d2b1b79de4fec92385478c8786c6f
+  checksums.txt: 942112ea8216414a4cc09349a642b01b9ad05dff8bff4a815fee39cb3c0bc0ea
   deploy.sh: 038181d6586cb77d4ab6094a7ddd94e9db4b9c73160da7aa5f13d7389f5166e0
   recipe.yaml: 231dd0717f699e2db1b686a097dac7b637783b50410d3361cb73dd73bad3b8a1
 h100-eks-ubuntu-training-kubeflow:
@@ -2487,7 +2487,7 @@ h100-eks-ubuntu-training-kubeflow:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -2542,7 +2542,7 @@ h100-eks-ubuntu-training-kubeflow:
   README.md: 4993cbc00e197f69746b9d2688e3e3f3afffaced1053d030997a7b71564a014b
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 9e27217baf0328163053412a9ec906133043721593b1123c1fecd6ce33e58881
-  checksums.txt: df791557f6a8717b23a1fabc9b65f862ee31f8ddb5385a21c57fe3bd119fa5ad
+  checksums.txt: 8514e8852e08a46aa05001170222d5e9b281af14b4c763097779d2f5f0a324e0
   deploy.sh: 5b2acd33c456f23e8d1f4d574f94b9ba2bce52147876f165a54e3395e55de09b
   recipe.yaml: df5b2f780667e7d3d5987ad6aa76cc470355b84800dbf5d1f6ea950bdad4b027
 h100-eks-ubuntu-training-slurm:
@@ -2561,7 +2561,7 @@ h100-eks-ubuntu-training-slurm:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -2624,7 +2624,7 @@ h100-eks-ubuntu-training-slurm:
   README.md: 7a2c2b2631c320f17839dc9f06dc5a1b206e05619ed84c151b08079b848d9d7e
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 0365df9937fab0521f97faabb994fd738a5fa3168a29d3cb163f6e78f267c169
-  checksums.txt: d5de8542d78559f6e1b286da28e5d26cb80baf3c929725cb441e45f86d009208
+  checksums.txt: 4d6dc44bc859b9e4a3de9d201f0cdb5f2fecd60522f246d95f0b52f37c7e3cd9
   deploy.sh: 3bf1475ef39efa155a2cdff6c99ffeba55d931adf38871f8bc74467845584eae
   recipe.yaml: bbbac2a32846177e3d7d9ce205fa12ffb50e95d4556de7651a9540c93eddec9d
 h100-gke-cos-inference-dynamo:
@@ -2662,7 +2662,7 @@ h100-gke-cos-inference-dynamo:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  008-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -2717,7 +2717,7 @@ h100-gke-cos-inference-dynamo:
   README.md: 0816d3e944d74c218fcafa501024c8fe7cabd7a6834db08f58094e4d62e3f7e2
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: aee2fd047e41143b9e2d7b18704875d0f40a77bfaedfa17cdbea2a399eb28d50
-  checksums.txt: 86221bd5d33eeb9847be560a82a0f252ddf4701445df45b517921c6e95ccdc02
+  checksums.txt: c4463c697f49496da81e547b367405fa8f3322171b30bb11a02e64136a3ca237
   deploy.sh: 62b3ab91044223177c74d3aee7241f4aeae64e6bdb31481f7da642dbf4556e9a
   recipe.yaml: b1134834618a00ab52c1450588179c15228c089715e79d1b45fe325c4e7d2165
 h100-gke-cos-training-kubeflow:
@@ -2732,7 +2732,7 @@ h100-gke-cos-training-kubeflow:
   003-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   003-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  003-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  003-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   004-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   004-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -2799,7 +2799,7 @@ h100-gke-cos-training-kubeflow:
   README.md: 720cf3194fa2d25b9f7c4f751a09225a836b8b3fbaba9129a12636043eae6db6
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: e5d30a9b0c04b614ebc00788765f4f7504e9a6312656da531624db7c89e81cce
-  checksums.txt: 73ca430580be881db1dd7af98ef73949b0b8e02904075f5b4821decdfdd4ea8d
+  checksums.txt: b2a7b83ebaa08de01302340c46c13a720d9bda3c58dc96e7c0669473b76df526
   deploy.sh: fdb5b08014a89062f4b304cce41d91410d4a690f2c5a723cdb4b08028097d92d
   recipe.yaml: 00c3652a4b3ac832d31a2eba90101a452e15e5fa5d76fb03df81c3097c8d2a69
 h100-gke-cos-training-slurm:
@@ -2814,7 +2814,7 @@ h100-gke-cos-training-slurm:
   003-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   003-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  003-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  003-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   004-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   004-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -2892,7 +2892,7 @@ h100-gke-cos-training-slurm:
   README.md: 9ffec06121fc2e14304bef09888c1c94eba7c70d3b696eb31013fb412cde9ff1
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 190a095cad5a8cfe43281912e3fce8c35f85097ae4044e773786f0fd06b49be2
-  checksums.txt: 4107477a4145b228017a21aa15c12cd82b3145ca19730c1fd76bf9b003eb60c9
+  checksums.txt: a5eab4d474df9df2e47e06aea8744ed79b03303689f96114a7b1fa3ea7059d04
   deploy.sh: 26b5bbeba08ab0830741d513d86fb9b24a204d48968b95c88fb5eadc9fe67cba
   recipe.yaml: 31cac72b5e159b01f9bb6a69e53189e9a3c743c6ed55b168884cc7637eb8d3ff
 h100-kind-inference-dynamo:
@@ -2926,7 +2926,7 @@ h100-kind-inference-dynamo:
   007-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   007-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  007-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  007-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   008-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   008-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -2975,7 +2975,7 @@ h100-kind-inference-dynamo:
   README.md: ab9eb42e715795deb1f8ed539ee4a8a7a47772beb80fee3fe11ee30c298f664e
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: 3b1624a1f0e84de11b081953baa4ba2d15d386ffeb6424227b04e2e4832d0bc8
-  checksums.txt: e4543bd82ce721f567fab1b1f2bf6c41df514eda1762ba3d00758a07e0612c6a
+  checksums.txt: 430d1bd369e497aacea99184d290086017336dc576498241833b15734d0fde34
   deploy.sh: 18827849e66bfdd7d103aeab9f6374a7018500f6b57a3e3a68fc789bf40ec5b4
   recipe.yaml: 8547fce134e27a15ffc64eda6bb79398e2d7f5a23a3d9a6d98829654909383c0
 h100-kind-training-kubeflow:
@@ -2986,7 +2986,7 @@ h100-kind-training-kubeflow:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -3040,7 +3040,7 @@ h100-kind-training-kubeflow:
   README.md: bf5195c04e85d5dfab9768cf5ee5be7a8f5370a0272557dfa1782b84ef65bf94
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 5d8907879020323f5cff687edb1fdfe98b6c26f7166a62517c4cfeabde9ffd46
-  checksums.txt: 54e0f136ade2c2af0a3290ff89ed1fdc7017365b41b1929a2c19064259f1d03d
+  checksums.txt: dba87d87b11b42516fdaf9fc3ff456521ec226eb3eb24907a357c91a3bbbb7ad
   deploy.sh: 83fa4613633138d6b344997098cc0b2f77082f6fc1ba1cca6cef729b1a316cd3
   recipe.yaml: e25f52da6bcb17d0d098ca48b6eaf83fde3d5030554f934870e6f4e252ba59c6
 h100-kind-training-slurm:
@@ -3051,7 +3051,7 @@ h100-kind-training-slurm:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -3117,7 +3117,7 @@ h100-kind-training-slurm:
   README.md: 9e75e15c8f365e9420fa72d715062ee018329edd610099734138753fa2c23146
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: a93cb191edf0c4e9a18dbf165832a44a2e6bddb9dcb3a724ca21741884347fb0
-  checksums.txt: 1bd46eb553298268a254522feb66ad2761a31339363457422ebe562fa9637ec8
+  checksums.txt: af9856c14b0d93dee5f17956ff5762be778ff67bcdc3fcdee0d3e071514e7a58
   deploy.sh: a9268f292354d1038ae6c7401d39c2fd190aafd3e2f0f7a3820ee740e685255b
   recipe.yaml: 385bac65d13d3a64c7de7f8f300fe0d6811914d2e65206072d3bf8606d642fc5
 h200-any:
@@ -3128,7 +3128,7 @@ h200-any:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3169,7 +3169,7 @@ h200-any:
   README.md: b7491c1e6319aa4363c353d8759e50cf4551e524917cca63f6298707bccc11f0
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 514837028e4e12b7355ad78abc8ec7e8375263349badd4b06e9e21513c83188b
-  checksums.txt: 64c76eb41171549ee79d9fffdbcf3e3a0038c11de90c0baf3f229da0bf2c602f
+  checksums.txt: ff0523953b2b33c04d71df6c2250b45370cab7626093ea5e71a189cf8b77fc8f
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: d64ffd6cf71899c321776323620b7599b641ed934fb21a32d09e9427645f8af7
 h200-eks-inference:
@@ -3207,7 +3207,7 @@ h200-eks-inference:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  008-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3253,7 +3253,7 @@ h200-eks-inference:
   README.md: e5bfff423abbef94b1784b7d6557f04ff53715ba2f86dd90bbf04824ed0c5d45
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: c04691fb7b2a50ff090141c7e9349eb1d9599c28ea05f763695d12b8f1ff27b0
-  checksums.txt: fe62743ace57e986333b62630bb8ac7295ef869b376317adbda7296a4b67c661
+  checksums.txt: bcfc3ab8a623375eb088b298a9cf5c31875e9416eb60f86622fe704934632906
   deploy.sh: e149421402115939cf19fcde8aabd5386462e32d4c422b8bea3cbef73a9633e9
   recipe.yaml: 1c68a28cff255ff927ffb43aa0f016f768980cad3d87020dc8914eea7b85d8f6
 h200-eks-training-kubeflow:
@@ -3272,7 +3272,7 @@ h200-eks-training-kubeflow:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3327,7 +3327,7 @@ h200-eks-training-kubeflow:
   README.md: f759b48a96d5d551eef4943dea02a35745980642d599167e354cf4a2e9fade24
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 7da9c570b61105e630eb03ef7b7950d432c04dcdfa14d3f5f4b03d490fead274
-  checksums.txt: 21c88c5219c1b5958231732984aef152305ceb7256781d67cae0dbd5651d5c3b
+  checksums.txt: fef1232bb9cc97c32766134081a7fe9eb3b3fa1c13bc7d757ba87abd9bec8b3e
   deploy.sh: 5b2acd33c456f23e8d1f4d574f94b9ba2bce52147876f165a54e3395e55de09b
   recipe.yaml: a306d46ce21d404b811e5c4d896e9b08cb066b939b323f32b4dcd31ab1408b1e
 h200-k0s-ubuntu-training:
@@ -3338,7 +3338,7 @@ h200-k0s-ubuntu-training:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3379,7 +3379,7 @@ h200-k0s-ubuntu-training:
   README.md: 108a41246f6812282fff9686c82a9dd8b5298e424d98034adbae462b0838381f
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: e1e276ddcf93d161ac458f60ccfd053898a0c447345a8eb4601d3455cb0777b7
-  checksums.txt: a454a3eb0889c1841f8e4f96646542123d9ecdf09e735fe8f9aa242d91bcbd6d
+  checksums.txt: 0f3b18bd6f7355147243622a94da5f723c5865346fb1934b13f7a08c2133e734
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: a832789daf7f642c3859e7b4250c48775b4909ad6ebab1e28fe35da6b039d7fd
 l40-any:
@@ -3390,7 +3390,7 @@ l40-any:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3431,7 +3431,7 @@ l40-any:
   README.md: e37d0a2de4211cdab60ee38ed8238d108299b48a24b3486597aa513d3e7dd6a0
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 8bf89ddb5d08fa480102fd5b94cfc503136b6e32dc9112670d34e88be35e512b
-  checksums.txt: 73064a3827687cadf478e01f205199ab2cebec4b6ba2a87639bafcfea5f165ac
+  checksums.txt: 57cc1319a34c7d8bc47339d11bd8a143555e523177343bddf052ee6d19892dd8
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: c345318265e9156cb210d47e6481ce4d106c458072658fcb215b7e1a8af3775a
 l40s-any:
@@ -3442,7 +3442,7 @@ l40s-any:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3483,7 +3483,7 @@ l40s-any:
   README.md: 845cef314022dcb5eeca65b550104b817046d099937cfadcf711cd300485e0cb
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 5efaf3183b4bba279b84f3d5100d73d558eade1efb9d0881f7a591f8cb1ed11e
-  checksums.txt: c5c6510bb8087ccfbb89061a0010095fd8f3e444544cada5374ff3bdbb5a58a3
+  checksums.txt: 5e1a130243b697a24a13e00bef5854f75f35e3d8f76c49501e97fc1c07b36181
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: eb12a1fc5f7544b4d1ef4a6fe3519bcc40b86d89f5ab45a8d3b5b250e772cbb3
 l40s-oke-inference:
@@ -3513,7 +3513,7 @@ l40s-oke-inference:
   006-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   006-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  006-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  006-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   007-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   007-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3554,7 +3554,7 @@ l40s-oke-inference:
   README.md: 1d8048fb45f088cce8cc0a6c19fdecdb9a6c7ae544b2710a80e19899d4c3db00
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: b8aa88d25e096ab8e45f06784d774d41f409528a2da6ce49a4302d321715b6a6
-  checksums.txt: 8d73a9fb56f2641c36011e5bb1f8a5b211cf0d5a171625192a466aa31118247b
+  checksums.txt: 0366d9391f47ca00dabe095f89be5d3ff43773408dc5a128ffaac21ec8e9baf9
   deploy.sh: f5e448117266a5341c361f7468d2b4b0460be002aeb1dbe550a89e24a4689240
   recipe.yaml: 71537d8ac7d90713062ea4fa3eede3a657948522970e42ba8fc957807c4793b9
 l40s-oke-training-kubeflow:
@@ -3565,7 +3565,7 @@ l40s-oke-training-kubeflow:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  002-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: bee6465a02245e027c93b643de53775eab2cd948c247db33742921e48b33ff6c
@@ -3624,7 +3624,7 @@ l40s-oke-training-kubeflow:
   README.md: c28b433be87a8cdb602607be8189d565ba7b30f21848ccf2d6c59514499f5869
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: a66fb62309da40de238b26ca0fd93c63fa29ad7b2ab7aafd715cf3c14d32ccd4
-  checksums.txt: 75f1eb31fe54571404147cb4f096ff87d174f68711d5c29743ad4dd124457993
+  checksums.txt: c146b9273967156f24f29fb89bba73fa2bd6c1e71253dde5f454204a0ced9d86
   deploy.sh: 83fa4613633138d6b344997098cc0b2f77082f6fc1ba1cca6cef729b1a316cd3
   recipe.yaml: 452940cced0ab1323605544acbedd1e6b79cc5e388aeb3c57334d8fe5ca49db5
 monitoring-hpa:
@@ -3635,7 +3635,7 @@ monitoring-hpa:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3676,7 +3676,7 @@ monitoring-hpa:
   README.md: 3d899242cdd95f1b3eecae98bf74d77ec53b68fc8a6e6569114e49a055444ab0
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: a20831b311ca30312daed6109af9023f25ddbd565139a531c4ceeab0e16d93c7
-  checksums.txt: fdf572c819d4b79490af4fd28f3766f63e4d282940dc3797db53eba2e4ec9ee4
+  checksums.txt: ac66c2548258e258bd0975e3dd506e27cc4e679dfd448d759673511f8cb5b205
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: 24ab49f88b9ed8b9cb3b1efdf9e9b609a1e6cbfbaa83686dbc5a29fb0f59a1dc
 ocp-inference-nim:
@@ -3846,7 +3846,7 @@ rtx-pro-6000-any:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e696c7dca2d75d2f894232cffef67d0d6b9b5751062e415075aa0df4bfa84255
+  002-nfd/values.yaml: f5d99cf2f53d9e2896362d83b3907666e4a14f0d124abe277e669a60825aa533
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3887,7 +3887,7 @@ rtx-pro-6000-any:
   README.md: 34f29655c21d9afcc0522ad8e0fa0ae3dc6fa4d6437f71bdb9b8bdde8411b2bb
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: eefab36fd4795211a800193574a9257548c39c449b56050f1e7cecbb88c88b57
-  checksums.txt: 819541252dbbc3ff0214e2ec32f9011e502d7b35aab28fc2f575db569530c2ec
+  checksums.txt: 26e25c0d3fb7130fd9667a7139ce647295690b2e43937a23225817ffe67d343b
   deploy.sh: ea70804cf5d8c0bb716ccd59ea4a31a1037672453aa11e2e2bfbd20daf55d901
   recipe.yaml: 32b380c2cd938bb330972b086538fbb275b350af83d0ca97fe5813a4f2db6dbd
 rtx-pro-6000-eks-ubuntu-inference-dynamo:
@@ -3929,7 +3929,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   009-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   009-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  009-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  009-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   010-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   010-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -3979,7 +3979,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   README.md: 4bfdda900cf0d4b4c257a275350390c565a2c25cb57884c5fc72a3ab6d5556c2
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: 6f400007a5f7ee13ac7e76b43954dd1ad8110b46b96d3fcf2fccf70b272d435a
-  checksums.txt: b78183464390709453062df610bd30d1c28ce314103e9dc34a26a3222e158821
+  checksums.txt: ac79f10fdfe430ccc37defb8c444591c134f210170c7b3616dd5b3447ab1019d
   deploy.sh: 7a305353d31349834943e912d9c671f1e44a3b9ec914d8862017d7e56dee9a96
   recipe.yaml: 4db38877fde150873df88175456a635e4838c46139cffc06a1ea6c91dd8afd52
 rtx-pro-6000-eks-ubuntu-inference-nim:
@@ -4017,7 +4017,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  008-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -4067,7 +4067,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   README.md: 661463f3a9658588dddef8934f676c7bd67f5cd785be1e5ae643d296924e8b79
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 6204dcb7f80da4d3a4527810e266489ac872aa415044cddcb824e30ca8425a4d
-  checksums.txt: fc08342e3dcbd31e8cf84aa563dd3efbc1b4baf49403c0917092cd9afc99603f
+  checksums.txt: d3fbe12703ac117ac68f02b41098c78cf6637a07e563fe115dd658c5462b07dc
   deploy.sh: 038181d6586cb77d4ab6094a7ddd94e9db4b9c73160da7aa5f13d7389f5166e0
   recipe.yaml: 21c7bf1e9aab60439f6dc9d84178045fc74187d858eec18bc82be7cbaf5a5855
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
@@ -4086,7 +4086,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   004-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   004-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  004-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  004-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -4141,7 +4141,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   README.md: a0984a093f9000cad08c5ecbbd7088ecd4b54ab3fb35f401d0e2ca531ed2edfc
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: b049397b787a94d946349995bb2f1002fefd2552e479bef7ec019b5a2eca2be6
-  checksums.txt: 6843362c2aac4e41c84b499d141c691a5d0e6fba6b3e31f103be97b4a33be15d
+  checksums.txt: 096ecfe3f3bcee6dfe3b8891b35bdfd1ed7bd39038666872fc7e0fe207253ce5
   deploy.sh: 5b2acd33c456f23e8d1f4d574f94b9ba2bce52147876f165a54e3395e55de09b
   recipe.yaml: 20afdda5c4355624e51050d78973b4f016e83cb9bce0b4bbf25e83c1e5f2514e
 rtx-pro-6000-lke-ubuntu-inference:
@@ -4171,7 +4171,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   006-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   006-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  006-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  006-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   007-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   007-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -4212,7 +4212,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   README.md: 2bf65a4c61206273ba292c2cbaea904102487ef248887eeba67114d9a13cdca3
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: f2b647f4d5a54286cb6a4fb7860e51e49231535ac15b6536dbd13d262f2aa0d1
-  checksums.txt: c6ba60cd0d11227022dfcfaea0d4c7716a71c4388f9b2cafa0fc2af85de257cb
+  checksums.txt: 179b66b6d145b7696876d65f97510508ae9b87af67e77234689d68ea8e8b0426
   deploy.sh: f5e448117266a5341c361f7468d2b4b0460be002aeb1dbe550a89e24a4689240
   recipe.yaml: 2637f0fd131e88d5adafa415d7de0be4e9bfdd38a17288f880dd40f3d616eedf
 rtx-pro-6000-lke-ubuntu-training-kubeflow:
@@ -4223,7 +4223,7 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   002-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   002-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  002-nfd/values.yaml: e0733fc0fb07c6537f42a284c28eb11e4b899f208931fbe3459760731a7dfcd6
+  002-nfd/values.yaml: a3f6b293aca9b6a9d83d5e9ac43e6f924e0843e76c82301950ff7baa1dbdc901
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   003-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -4273,7 +4273,7 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   README.md: 7c35d1cc30c8e737e00bb5316bd85226e888834ba942cf1acec838e7cd435000
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 3b51439df6f782b0664fb14b73c7decb36cd2d943ff11a39478eb26d9348723a
-  checksums.txt: 8e1207dc77a0b1cc087633248bd58507ee1e8e7944cf3356fa709d13c354fca5
+  checksums.txt: d92f3ab46df07671c0db2b748d4747dcbe72b631ce50a94e64bf4e982e108844
   deploy.sh: 8ebf4bd801a6d8fd6cba8979dc354e9aeeb8d5cfccbee9e6e7262417b175c6f4
   recipe.yaml: 953b93749485bc38a22acf5d0ac2b0e458df9d02d9e087c3e095403df7f8e84a
 vr200-rke2-ubuntu-inference-dynamo:
@@ -4313,7 +4313,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: 91a4a043ed920690ba8ce6131ca82df7939010906b3ba69a64be403c7903fad7
+  008-nfd/values.yaml: dbe0f635807baee93ac6df20c775d831b9a40c3f90072b6d03c8380824ed35bd
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -4363,7 +4363,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   README.md: b0d4dc1341565474394f7c338e1187f97aaa84f2506642d2c91a212f57ba1669
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
   bundle-info.yaml: 3614ecc79f449848f257e036fb15a0b8fb7cf24fcad50d0079468a98cc92fda3
-  checksums.txt: e89cc487af73cecd7dee840f690c6cc66a1c41f27f337eb4eb00506336fd09d5
+  checksums.txt: 2ee6c6a96c15586087fe3e957c485d6892257bb7c6e83319e05aa369a54a20fb
   deploy.sh: 62b3ab91044223177c74d3aee7241f4aeae64e6bdb31481f7da642dbf4556e9a
   recipe.yaml: e3ca2966624bc02a472b86a93d10a8786a869e74fb461420ebf4d8fc0b208f87
 vr200-rke2-ubuntu-training-kubeflow:
@@ -4379,7 +4379,7 @@ vr200-rke2-ubuntu-training-kubeflow:
   003-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   003-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  003-nfd/values.yaml: 91a4a043ed920690ba8ce6131ca82df7939010906b3ba69a64be403c7903fad7
+  003-nfd/values.yaml: dbe0f635807baee93ac6df20c775d831b9a40c3f90072b6d03c8380824ed35bd
   004-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   004-nodewright-operator/upstream.env: 6bb77965fad210448ef776ea62b94da7b7d2a70a5177e088ee96b1553f678540
@@ -4434,6 +4434,6 @@ vr200-rke2-ubuntu-training-kubeflow:
   README.md: 80e547edb47741f31f7b21d02cbf9b0fa9a17a99b2a7320cbdff82d856d1cb81
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
   bundle-info.yaml: 5bfe00acd931aef4736d88e05805e651f6bbb6d1afa830294329f81d2a74c7f5
-  checksums.txt: 5ca2e27c469f913d24310d8fcfeda43dfa41610d63be12718d6c4a105dae9db6
+  checksums.txt: ecbea2db6d9997c4d8246f2a46f5416bc497c574ef64ef67ee87dc74a38b7611
   deploy.sh: 2b0cd173c38bb27ee4cdb7d6c4d1d94d523b56fed94d6889cacd342b0b5a0dfd
   recipe.yaml: eae45aaf8edf5ea05bc9e583440d75ffcdf378166ca86e5e469cd3e572b00e07
