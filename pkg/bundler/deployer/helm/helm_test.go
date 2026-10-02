@@ -562,6 +562,129 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 	}
 }
 
+// TestGenerate_DeployScriptRendersValidBash pins the regression from PR
+// #2346's review: the per-component DRA guard's closing `fi` was dropped in
+// a restructure, and because the goldens compare rendered bytes rather than
+// parsing them, that broke every bundle containing a DRA component (OCP or
+// canonical) without failing any existing test. This renders deploy.sh for
+// both the canonical and OCP recipe shapes and asserts the result is valid
+// bash via `bash -n`, so a reintroduced syntax error fails CI directly
+// instead of only showing up at actual deploy time.
+func TestGenerate_DeployScriptRendersValidBash(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available in PATH; skipping syntax check")
+	}
+
+	canonicalRecipeResult := &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: "aicr.run/v1alpha2",
+		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+		Criteria: &recipe.Criteria{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "gpu-operator",
+				Namespace: "gpu-operator",
+				Chart:     "gpu-operator",
+				Version:   "v25.3.3",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name:      "nvidia-dra-driver-gpu",
+				Namespace: "nvidia-dra-driver",
+				Chart:     "nvidia-dra-driver-gpu",
+				Version:   "0.4.1",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+		DeploymentOrder: []string{"gpu-operator", "nvidia-dra-driver-gpu"},
+	}
+
+	ocpRecipeResult := &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: "aicr.run/v1alpha2",
+		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+		Criteria: &recipe.Criteria{
+			Service:     "ocp",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "gpu-operator-ocp",
+				Namespace: "gpu-operator",
+				Chart:     "gpu-operator",
+			},
+			{
+				Name:      "nvidia-dra-driver-gpu-ocp",
+				Namespace: "nvidia-dra-driver",
+				Chart:     "nvidia-dra-driver-gpu",
+				Version:   "0.4.1",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+		DeploymentOrder: []string{"gpu-operator-ocp", "nvidia-dra-driver-gpu-ocp"},
+	}
+
+	tests := []struct {
+		name            string
+		recipeResult    *recipe.RecipeResult
+		componentValues map[string]map[string]any
+	}{
+		{
+			name:         "canonical DRA component, operator-managed driver",
+			recipeResult: canonicalRecipeResult,
+			componentValues: map[string]map[string]any{
+				"gpu-operator":          {"driver": map[string]any{"enabled": true}},
+				"nvidia-dra-driver-gpu": {},
+			},
+		},
+		{
+			name:         "canonical DRA component, host-managed driver",
+			recipeResult: canonicalRecipeResult,
+			componentValues: map[string]map[string]any{
+				"gpu-operator":          {"driver": map[string]any{"enabled": false}},
+				"nvidia-dra-driver-gpu": {},
+			},
+		},
+		{
+			name:         "OCP DRA component, operator-managed driver",
+			recipeResult: ocpRecipeResult,
+			componentValues: map[string]map[string]any{
+				"gpu-operator-ocp":          {"driver": map[string]any{"enabled": true}},
+				"nvidia-dra-driver-gpu-ocp": {},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			g := &Generator{
+				RecipeResult:    tt.recipeResult,
+				ComponentValues: tt.componentValues,
+				Version:         "v1.0.0",
+			}
+
+			if _, err := g.Generate(ctx, outputDir); err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+
+			deployPath := filepath.Join(outputDir, "deploy.sh")
+			cmd := exec.Command("bash", "-n", deployPath)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Errorf("rendered deploy.sh failed bash -n syntax check: %v\noutput:\n%s", err, out)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Property tests (helpers and data-shape preservation)
 // ---------------------------------------------------------------------------
