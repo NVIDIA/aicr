@@ -235,8 +235,7 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 // queued no asserts.
 //
 // Errors from gatedHealthCheckSuppressed and buildResourceFetcher are returned
-// directly under an ErrCodeInternal wrap, discarding the failures collected so
-// far.
+// as-is, discarding the failures collected so far.
 func checkExpectedResources(ctx *validators.Context) error {
 	if ctx.ValidationInput == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
