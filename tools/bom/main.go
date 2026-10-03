@@ -55,7 +55,6 @@ var expectedNoImages = map[string]string{
 	"mariadb-operator-crds":      crdsOnly,
 	"prometheus-operator-crds":   crdsOnly,
 	"slinky-slurm-operator-crds": crdsOnly,
-	"slurm-accounting-mariadb":   "custom resources only, the operator supplies the images",
 }
 
 // renderTimeout and renderRetryBackoff are vars so tests can shrink them.

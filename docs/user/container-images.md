@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **49**
-- Unique images: **113**
+- Unique images: **114**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -53,12 +53,12 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
-| kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
+| kai-scheduler | helm | kai-scheduler | v0.17.2 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
-| kueue | helm | kueue | 0.19.3 | 1 |
-| mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
-| mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
+| kueue | helm | kueue | 0.19.6 | 1 |
+| mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
+| mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
 | network-operator | helm | nvidia/network-operator | 26.4.1 | 12 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
@@ -75,11 +75,11 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
-| slinky-slurm | helm | slurm | 1.2.0 | 5 |
-| slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
-| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
+| slinky-slurm | helm | slurm | 1.2.2 | 5 |
+| slinky-slurm-operator | helm | slurm-operator | 1.2.2 | 2 |
+| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.2 | 0 |
 | slinky-topograph | helm | topograph/topograph | 1.0.0 | 1 |
-| slurm-accounting-mariadb | helm | mariadb-cluster | 26.6.0 | 0 |
+| slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.1 | 1 |
 
 ## Version variants
 
@@ -212,18 +212,18 @@ _No images extracted._
 
 ### kai-scheduler
 
-- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.17.2`
+- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.17.2`
 
 ### kube-prometheus-stack
 
@@ -245,11 +245,11 @@ _No images extracted._
 
 ### kueue
 
-- `registry.k8s.io/kueue/kueue:v0.19.3`
+- `registry.k8s.io/kueue/kueue:v0.19.6`
 
 ### mariadb-operator
 
-- `ghcr.io/mariadb-operator/mariadb-operator:26.6.0`
+- `ghcr.io/mariadb-operator/mariadb-operator:26.10.1`
 
 ### mariadb-operator-crds
 
@@ -352,8 +352,8 @@ _No images extracted._
 
 ### slinky-slurm-operator
 
-- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.0`
-- `ghcr.io/slinkyproject/slurm-operator:1.2.0`
+- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.2`
+- `ghcr.io/slinkyproject/slurm-operator:1.2.2`
 
 ### slinky-slurm-operator-crds
 
@@ -365,7 +365,7 @@ _No images extracted._
 
 ### slurm-accounting-mariadb
 
-_No images extracted._
+- `mariadb:11.8.8`
 
 ### kube-prometheus-stack@83.7.0 (variant)
 

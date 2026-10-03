@@ -1,0 +1,280 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: mariadb-operator
+transitions:
+  # from opens below 26.10.0 rather than at 26.6.0: upstream uses CalVer and
+  # the only 26.x releases below 26.10.0 are 26.3.0 and 26.6.0, so an operator
+  # arriving from either crosses the same boundary. Naming 26.6.0 as the floor
+  # would leave every earlier pin matching nothing.
+  #
+  # to reaches 26.10.1 because upstream's 26.10.1 guide takes an operator
+  # from before 26.10.x straight to 26.10.1 with this same procedure; a
+  # ceiling at 26.10.0 would block that jump at 26.10.0.
+  #
+  # verdict is manual, not safe, and carries no verifiedBy: no UAT lane or
+  # KWOK run has exercised this transition. The procedure below is transcribed
+  # from upstream's own upgrade guide, not vouched for by a run here.
+  - from: "<26.10.0"
+    to: ">=26.10.0 <=26.10.1"
+    verdict: manual
+    summary: >-
+      26.10.0 changes the replication configuration rendered by the MariaDB
+      init container and the replication liveness probe served by the agent,
+      so the data plane must move with the operator, and 26.10.1 keeps that
+      requirement. autoUpdateDataPlane defaults to false, so an operator
+      upgraded without setting it first runs 26.10.1 against init and agent
+      containers left at the prior version. 26.10.0 also changes the
+      operator's default server image to mariadb:12.3.3; AICR pins
+      mariadb:11.8.8 in the slurm-accounting-mariadb values, so a cluster
+      bundled from this recipe is unaffected, but any MariaDB CR that omits
+      spec.image will come up on a new MariaDB major version. The init
+      container and agent are the HA data plane, so they
+      exist only where Galera or replication is enabled; the data-plane steps
+      below are inert on a single-instance non-HA MariaDB, which is what the
+      accounting database AICR ships is by default.
+    precondition: >-
+      Know which MariaDB resources the operator manages and whether any omits
+      spec.image. Check with
+      `kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,IMAGE:.spec.image,GALERA:.spec.galera.enabled,REPLICATION:.spec.replication.enabled`;
+      a blank IMAGE column means that cluster takes the operator default and
+      will move to mariadb:12.3.3 on its next reconcile. Rows where both
+      GALERA and REPLICATION are absent or false have no data plane, so only
+      the CRD and operator upgrades apply to them.
+    affectedResources:
+      - group: k8s.mariadb.com
+        kinds:
+          - MariaDB
+    stepsByDeployer:
+      - deployers: [helm, helmfile]
+        steps:
+          - id: enable-dataplane-autoupdate
+            description: >-
+              For every HA MariaDB the precondition listed:
+              `kubectl patch mariadb <name> -n <namespace> --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'`.
+            reason: >-
+              Upstream requires this before the operator moves, so the operator
+              updates the init and agent containers instead of leaving them
+              behind at the prior version. A non-HA instance, such as the
+              accounting database AICR ships, needs no patch: it has no agent
+              or init container to update.
+          - id: upgrade-crds
+            description: >-
+              Confirm the namespace the existing release lives in with
+              `helm list -A | grep mariadb-operator-crds`, then upgrade in
+              place: `helm upgrade --install mariadb-operator-crds
+              oci://ghcr.io/mariadb-operator/charts/mariadb-operator-crds
+              --version 26.10.1 --namespace mariadb-system`, substituting the
+              namespace the previous command reported.
+            reason: >-
+              CRDs go first, and in place. helm uninstall on the CRD chart
+              deletes the CRDs and cascade-deletes every MariaDB, User,
+              Database and Grant with them. --namespace is not optional here:
+              Helm scopes a release by namespace, so without it the request
+              lands in whatever namespace the kubeconfig context points at and
+              --install does not find the existing release. The install it
+              attempts instead fails Helm's ownership check, because the
+              existing CRDs carry the original release's
+              meta.helm.sh/release-namespace annotation, so nothing is
+              upgraded. mariadb-system is the registry default and no overlay
+              overrides it, but an inherited bundle may differ, which is what
+              the helm list confirms.
+          - id: upgrade-operator
+            description: >-
+              Re-run install.sh (helm) or helmfile apply (helmfile).
+            reason: >-
+              Moves the operator to 26.10.1 once the new CRD schema is
+              Established.
+          - id: await-dataplane-template
+            description: >-
+              For each HA MariaDB patched in the first step, set
+              IMG=ghcr.io/mariadb-operator/mariadb-operator:26.10.1 and wait
+              until its StatefulSet renders both data-plane containers from it:
+              `kubectl wait sts <name> -n <namespace> --timeout=10m
+              --for=jsonpath='{.spec.template.spec.initContainers[?(@.name=="init")].image}'=$IMG`,
+              then the same with
+              `--for=jsonpath='{.spec.template.spec.containers[?(@.name=="agent")].image}'=$IMG`.
+            reason: >-
+              The MariaDB Updated and Ready conditions cannot show this. The
+              operator computes both against whatever StatefulSet exists, so
+              they are already True before 26.10.1 first reconciles the
+              resource, and a flag reverted at that point leaves 26.10.1
+              keeping the old init and agent images. The operator writes the
+              new images into the MariaDB spec before it renders the
+              StatefulSet, so once the template carries them the revert can no
+              longer take them back. A resource that names its own init or
+              agent image, such as a mirror, keeps that repository and takes
+              only the 26.10.1 tag, so set IMG to match. Skip non-HA instances:
+              they have no init or agent container, so this wait runs to its
+              timeout.
+          - id: await-dataplane-pods
+            description: >-
+              Wait until every pod runs the new data plane, naming each pod,
+              `<name>-0` up to `<name>-<replicas-1>`:
+              `kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace>
+              --timeout=15m
+              --for=jsonpath='{.status.initContainerStatuses[?(@.name=="init")].image}'=$IMG`,
+              then the same with
+              `--for=jsonpath='{.status.containerStatuses[?(@.name=="agent")].image}'=$IMG`.
+            reason: >-
+              A new template only starts the roll: under the default
+              ReplicasFirstPrimaryLast strategy the operator deletes and
+              recreates the pods one at a time, replicas first. Name the pods
+              rather than selecting them with -l. A label selector resolves the
+              pod list once, when the command starts, so a pod being recreated
+              at that moment is never waited on; a named pod that is missing
+              fails the command instead, and you rerun it.
+          - id: await-dataplane-rollout
+            description: >-
+              Wait until the roll has finished, with N the replica count:
+              `kubectl wait sts <name> -n <namespace> --timeout=15m
+              --for=jsonpath='{.status.updatedReplicas}'=N`, then the same with
+              `--for=jsonpath='{.status.readyReplicas}'=N`.
+            reason: >-
+              updatedReplicas counts the pods on the StatefulSet's newest
+              revision, so N updated and N ready is the finished roll. Both
+              counts mean that only after the steps above: before the new
+              template exists they already equal N for the old revision.
+          - id: revert-dataplane-autoupdate
+            description: >-
+              For every HA MariaDB patched in the first step:
+              `kubectl patch mariadb <name> -n <namespace> --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":false}}}'`.
+            reason: >-
+              Upstream recommends returning it to false so a later operator
+              bump does not update the data plane unattended. An instance left
+              at true gets exactly that on the next bump.
+      - steps:
+          - id: enable-dataplane-autoupdate
+            description: >-
+              In the desired configuration the Argo CD or Flux application
+              syncs, set spec.updateStrategy.autoUpdateDataPlane: true on every
+              HA MariaDB the precondition listed, commit it, and sync that
+              application before the CRD and operator syncs below. Confirm each
+              live resource carries it:
+              `kubectl get mariadb <name> -n <namespace>
+              -o jsonpath='{.spec.updateStrategy.autoUpdateDataPlane}'` prints
+              true.
+            reason: >-
+              Same upstream requirement, and it has to live in git rather than
+              in a live patch. A pruning or self-healing sync restores whatever
+              git says, and if git still says false when the upgraded operator
+              first reconciles an HA MariaDB, the operator's Galera and
+              replication defaulting keep the old init and agent images: the
+              data-plane upgrade is skipped and the waits below time out. Keep
+              true in git until those waits pass. On a non-HA instance the
+              field is accepted and does nothing.
+          - id: sync-crds
+            description: >-
+              Sync or reconcile the mariadb-operator-crds release to 26.10.1
+              before the operator release.
+            reason: >-
+              The operator release needs the new CRD schema, so the CRD
+              release syncs first. Never prune or delete the CRD release to
+              achieve the version change: that cascade-deletes every MariaDB.
+          - id: sync-operator
+            description: >-
+              Sync or reconcile the mariadb-operator release.
+            reason: >-
+              Moves the operator to 26.10.1 once the new CRD schema is
+              Established.
+          - id: await-dataplane-template
+            description: >-
+              For each HA MariaDB patched in the first step, set
+              IMG=ghcr.io/mariadb-operator/mariadb-operator:26.10.1 and wait
+              until its StatefulSet renders both data-plane containers from it:
+              `kubectl wait sts <name> -n <namespace> --timeout=10m
+              --for=jsonpath='{.spec.template.spec.initContainers[?(@.name=="init")].image}'=$IMG`,
+              then the same with
+              `--for=jsonpath='{.spec.template.spec.containers[?(@.name=="agent")].image}'=$IMG`.
+            reason: >-
+              The MariaDB Updated and Ready conditions cannot show this. The
+              operator computes both against whatever StatefulSet exists, so
+              they are already True before 26.10.1 first reconciles the
+              resource, and a flag reverted at that point leaves 26.10.1
+              keeping the old init and agent images. The operator writes the
+              new images into the MariaDB spec before it renders the
+              StatefulSet, so once the template carries them the revert can no
+              longer take them back. A resource that names its own init or
+              agent image, such as a mirror, keeps that repository and takes
+              only the 26.10.1 tag, so set IMG to match. Skip non-HA instances:
+              they have no init or agent container, so this wait runs to its
+              timeout.
+          - id: await-dataplane-pods
+            description: >-
+              Wait until every pod runs the new data plane, naming each pod,
+              `<name>-0` up to `<name>-<replicas-1>`:
+              `kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace>
+              --timeout=15m
+              --for=jsonpath='{.status.initContainerStatuses[?(@.name=="init")].image}'=$IMG`,
+              then the same with
+              `--for=jsonpath='{.status.containerStatuses[?(@.name=="agent")].image}'=$IMG`.
+            reason: >-
+              A new template only starts the roll: under the default
+              ReplicasFirstPrimaryLast strategy the operator deletes and
+              recreates the pods one at a time, replicas first. Name the pods
+              rather than selecting them with -l. A label selector resolves the
+              pod list once, when the command starts, so a pod being recreated
+              at that moment is never waited on; a named pod that is missing
+              fails the command instead, and you rerun it.
+          - id: await-dataplane-rollout
+            description: >-
+              Wait until the roll has finished, with N the replica count:
+              `kubectl wait sts <name> -n <namespace> --timeout=15m
+              --for=jsonpath='{.status.updatedReplicas}'=N`, then the same with
+              `--for=jsonpath='{.status.readyReplicas}'=N`.
+            reason: >-
+              updatedReplicas counts the pods on the StatefulSet's newest
+              revision, so N updated and N ready is the finished roll. Both
+              counts mean that only after the steps above: before the new
+              template exists they already equal N for the old revision.
+          - id: revert-dataplane-autoupdate
+            description: >-
+              After the waits above pass, set
+              spec.updateStrategy.autoUpdateDataPlane back to false in the
+              same desired configuration, commit it, and sync.
+            reason: >-
+              Upstream recommends returning it to false so a later operator
+              bump does not update the data plane unattended. Do it in git: a
+              live patch alone is undone by the next sync.
+    references:
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.0.md
+      - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.0
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
+      - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.1
+
+  # from starts at 26.10.0: an operator below it crosses the 26.10.0
+  # boundary, which the record above describes through 26.10.1.
+  - from: ">=26.10.0 <26.10.1"
+    to: "26.10.1"
+    verdict: safe
+    verifiedBy: >-
+      Upstream upgrade guide UPGRADE_26.10.1.md (mariadb-operator), which
+      applies only when updating from a version prior to 26.10.x and
+      otherwise allows upgrading directly, and the 26.10.1 release note,
+      which describes it as a patch release on top of 26.10.0. The CRD delta
+      adds optional fields only. Under AICR's values the mariadb-operator
+      render moves only the operator image tag, the version labels and the
+      config checksum that tracks them, and the mariadb-cluster render moves
+      only its chart label.
+    summary: >-
+      Patch release within 26.10.x that adds only optional CRD fields: MariaDB
+      updateStrategy.mariadbAutoUpgradeEnabled, false by default, and MaxScale
+      filters and volumes. Nothing to change on upgrade.
+    references:
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
+      - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.1
