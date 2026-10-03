@@ -156,7 +156,7 @@ spec:
       target: ./bundles              # local dir or oci:// URI
       imageRefs: ""                  # external digest file; OCI output only
     deployment:
-      deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux
+      deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux | fleet
       repo: ""
       set: []                        # value overrides, "key:path=value"
       dynamic: []

@@ -22,7 +22,7 @@
 // one resolved kubeconfig, since a second authentication path could land on a
 // different context and an inventory assembled from two clusters is a
 // confident wrong answer, then reads the one source the named deployer
-// writes. Helm's release records for helm, helmfile and flux: one paged List
+// writes. Helm's release records for helm, helmfile, flux and fleet: one paged List
 // per storage driver, reduced to the newest revision of each release, decoded
 // from the stored payload. Argo CD's Applications for argocd and argocd-helm:
 // one paged List of the CRD. Both project onto one shape.
@@ -92,7 +92,7 @@
 // nothing on the record tells them apart.
 //
 // Each deployer's rule inverts what that deployer writes: the component's own
-// name for helm and helmfile, "<namespace>-<name>" for flux, and for Argo CD a
+// name for helm, helmfile and fleet, "<namespace>-<name>" for flux, and for Argo CD a
 // raw suffix — its namePrefix is user-settable and need not end in a
 // separator, so it cannot be enumerated — anchored by requiring the
 // Application's destination namespace to be the component's. An injected

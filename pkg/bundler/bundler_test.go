@@ -445,23 +445,13 @@ func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
 }
 
 func TestMake_ClosedWorldAllDeployers(t *testing.T) {
-	tests := []struct {
-		name     string
-		deployer config.DeployerType
-		repoURL  string
-	}{
-		{name: "helm", deployer: config.DeployerHelm},
-		{name: "argocd", deployer: config.DeployerArgoCD, repoURL: "https://github.com/example/bundles.git"},
-		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
-		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
-		{name: "helmfile", deployer: config.DeployerHelmfile},
-	}
+	// helm and helmfile ignore the repo URL; the GitOps deployers need one.
+	tests := allDeployerCases()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := config.NewConfig(
-				config.WithDeployer(tt.deployer),
-				config.WithRepoURL(tt.repoURL),
+			cfg := tt.configFor(
+				config.WithRepoURL("https://github.com/example/bundles.git"),
 				config.WithIncludeChecksums(true),
 			)
 			b, err := New(WithConfig(cfg))
@@ -486,7 +476,7 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 }
 
 // TestMake_EveryDeployerEmitsRecipe covers #2753: the recipe write used to be
-// gated on the helm deployer, so four of the five bundle formats carried no
+// gated on the helm deployer, so every bundle format but helm's carried no
 // recipe and could not be fed back to anything that re-resolves one.
 //
 // The byte-identity assertion is the part that would not survive a plausible
@@ -495,24 +485,14 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 // recipe would disagree. That breaks the digest the attestation is taken over
 // rather than anything visible in a file listing.
 func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
-	tests := []struct {
-		name     string
-		deployer config.DeployerType
-		repoURL  string
-	}{
-		{name: "helm", deployer: config.DeployerHelm},
-		{name: "argocd", deployer: config.DeployerArgoCD, repoURL: "https://github.com/example/bundles.git"},
-		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
-		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
-		{name: "helmfile", deployer: config.DeployerHelmfile},
-	}
+	// helm and helmfile ignore the repo URL; the GitOps deployers need one.
+	tests := allDeployerCases()
 
 	emitted := make(map[string][]byte, len(tests))
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := config.NewConfig(
-				config.WithDeployer(tt.deployer),
-				config.WithRepoURL(tt.repoURL),
+			cfg := tt.configFor(
+				config.WithRepoURL("https://github.com/example/bundles.git"),
 				config.WithIncludeChecksums(true),
 			)
 			b, err := New(WithConfig(cfg))
@@ -717,17 +697,8 @@ func TestBundleWritesBundleInfo(t *testing.T) {
 // inventory finalization rejects any unexpected bundle file before the record
 // can be observed; that path fails loudly, and this one is the quiet one.
 func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
-	tests := []struct {
-		name     string
-		deployer config.DeployerType
-		repoURL  string
-	}{
-		{name: "helm", deployer: config.DeployerHelm},
-		{name: "argocd", deployer: config.DeployerArgoCD, repoURL: "https://github.com/example/bundles.git"},
-		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
-		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
-		{name: "helmfile", deployer: config.DeployerHelmfile},
-	}
+	// helm and helmfile ignore the repo URL; the GitOps deployers need one.
+	tests := allDeployerCases()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -737,9 +708,8 @@ func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
 				t.Fatalf("plant stale provenance: %v", err)
 			}
 
-			b, err := New(WithConfig(config.NewConfig(
-				config.WithDeployer(tt.deployer),
-				config.WithRepoURL(tt.repoURL),
+			b, err := New(WithConfig(tt.configFor(
+				config.WithRepoURL("https://github.com/example/bundles.git"),
 				config.WithIncludeChecksums(false),
 				config.WithVendorCharts(false),
 			)))
@@ -812,6 +782,7 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 	tests := []struct {
 		name               string
 		deployer           config.DeployerType
+		fleetMode          string
 		configure          bool
 		wantRepoURL        string
 		wantTargetRevision string
@@ -865,6 +836,38 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 			wantRepoURL:        "https://github.com/YOUR_ORG/YOUR_REPO.git",
 			wantTargetRevision: "main",
 		},
+		{
+			// fleet: gitrepo.yaml carries the repo and branch, and the app
+			// name is both the GitRepo name and the bundle-name prefix.
+			name:               "fleet",
+			deployer:           config.DeployerFleet,
+			configure:          true,
+			wantRepoURL:        repoURL,
+			wantTargetRevision: targetRevision,
+			wantAppName:        appName,
+		},
+		{
+			name:               "fleet unset",
+			deployer:           config.DeployerFleet,
+			wantRepoURL:        "https://github.com/YOUR_ORG/YOUR_REPO.git",
+			wantTargetRevision: "main",
+			wantAppName:        "aicr",
+		},
+		{
+			// fleet helmop: helmops.yaml names no Git source, so only the
+			// app name (HelmOp name prefix) is recorded.
+			name:        "fleet helmop",
+			deployer:    config.DeployerFleet,
+			fleetMode:   config.FleetModeHelmOp,
+			configure:   true,
+			wantAppName: appName,
+		},
+		{
+			name:        "fleet helmop unset",
+			deployer:    config.DeployerFleet,
+			fleetMode:   config.FleetModeHelmOp,
+			wantAppName: "aicr",
+		},
 	}
 
 	covered := make(map[string]bool, len(tests))
@@ -872,6 +875,9 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 		covered[tt.deployer.String()] = true
 		t.Run(tt.name, func(t *testing.T) {
 			opts := []config.Option{config.WithDeployer(tt.deployer)}
+			if tt.fleetMode != "" {
+				opts = append(opts, config.WithFleetMode(tt.fleetMode))
+			}
 			if tt.configure {
 				opts = append(opts,
 					config.WithRepoURL(repoURL),

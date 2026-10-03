@@ -114,7 +114,7 @@ type Toleration struct {
 // Layout indexes what the bundle emitted and where, so automation reads one
 // key instead of branching on the deployer. Entrypoint is the file a consumer
 // invokes or applies: deploy.sh, helmfile.yaml, app-of-apps.yaml, Chart.yaml,
-// or kustomization.yaml.
+// kustomization.yaml, gitrepo.yaml, or helmops.yaml.
 type Layout struct {
 	Entrypoint string    `json:"entrypoint" yaml:"entrypoint"`
 	Provenance string    `json:"provenance,omitempty" yaml:"provenance,omitempty"`
@@ -141,7 +141,7 @@ type Layout struct {
 // Releases is emitted in deployment order and that ordering is normative:
 // consumers read sequence from list position. There is deliberately no
 // ordinal field — it would restate list position, restate the NNN- path
-// prefix on the four deployers that have one, and imply a sequencing flux
+// prefix on the five deployers that have one, and imply a sequencing flux
 // does not perform (flux orders by dependsOn, a graph rather than a line).
 type Release struct {
 	Name      string `json:"name" yaml:"name"`

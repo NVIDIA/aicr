@@ -69,6 +69,7 @@ const (
 	DeployerFlux       Deployer = "flux"
 	DeployerArgoCD     Deployer = "argocd"
 	DeployerArgoCDHelm Deployer = "argocd-helm"
+	DeployerFleet      Deployer = "fleet"
 )
 
 // allDeployers is every deployer this package knows a name transform for.
@@ -78,6 +79,7 @@ var allDeployers = []Deployer{
 	DeployerFlux,
 	DeployerArgoCD,
 	DeployerArgoCDHelm,
+	DeployerFleet,
 }
 
 // Component is what the mapping layer needs to know about a registry entry.
@@ -259,7 +261,7 @@ func read(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface
 // readsHelm reports whether d installs components as Helm releases, which
 // decides the one reader a read runs.
 //
-// The two are exclusive per deployer. helm, helmfile and flux write a Helm
+// The two are exclusive per deployer. helm, helmfile, flux and fleet write a Helm
 // release per component and no Application. argocd and argocd-helm write an
 // Application per component and no per-component release; argocd-helm's one
 // Helm release is the app-of-apps, which is no component. Reading the other
@@ -542,7 +544,9 @@ func attributeRecord(d Deployer, comps []Component, record installedRelease) (in
 //
 // Each deployer's rule is the inverse of what that deployer writes. helm and
 // helmfile install under the component's own name
-// (localformat's install-local-helm.sh). Flux writes a HelmRelease with a name
+// (localformat's install-local-helm.sh), and fleet sets helm.releaseName to
+// that same name in every fleet.yaml and HelmOp, so Fleet's agent stores the
+// release under it. Flux writes a HelmRelease with a name
 // and a targetNamespace and never a releaseName, so helm-controller composes
 // the release name from the two. Argo CD prepends a user-settable namePrefix
 // to every child Application, which cannot be enumerated and need not end in a
@@ -552,7 +556,7 @@ func attributeRecord(d Deployer, comps []Component, record installedRelease) (in
 // being reported as that component.
 func matchComponent(d Deployer, c *Component, record installedRelease) (matchKind, string) {
 	switch d {
-	case DeployerHelm, DeployerHelmfile:
+	case DeployerHelm, DeployerHelmfile, DeployerFleet:
 		return matchName(record.Name, c.Name, false)
 	case DeployerFlux:
 		return matchFlux(c, record)

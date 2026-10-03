@@ -36,7 +36,7 @@ curl -sfL https://get.aicr.run | bash -s --
 aicr recipe --service eks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
-# Render it into deployment-ready bundles (helm, argocd, argocd-helm, flux, or helmfile)
+# Render it into deployment-ready bundles (helm, argocd, argocd-helm, flux, helmfile, or fleet)
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
 # After deploying the bundle, validate the running cluster against the recipe
@@ -48,7 +48,7 @@ aicr query --service eks --accelerator h100 --os ubuntu \
   --selector components.gpu-operator.values.driver.version
 ```
 
-The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, or simple Helm commands for `helm`.
+The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, Fleet `fleet.yaml` bundles and a `GitRepo` (or `HelmOp`s) for `fleet`, or simple Helm commands for `helm`.
 
 See the [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 

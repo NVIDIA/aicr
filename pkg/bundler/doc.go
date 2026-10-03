@@ -24,7 +24,7 @@ the declarative component registry (recipes/registry.yaml).
 
   - DefaultBundler: Orchestrates bundle generation; the concrete output is produced by a deployer
   - Component Registry: Declarative configuration in recipes/registry.yaml
-  - Deployers: helm (default), argocd, argocd-helm, flux, helmfile, localformat
+  - Deployers: helm (default), argocd, argocd-helm, flux, helmfile, fleet, localformat
   - result.Output: Aggregated generation results
 
 # Quick Start

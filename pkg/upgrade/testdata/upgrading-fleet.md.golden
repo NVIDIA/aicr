@@ -1,0 +1,52 @@
+# Before You Upgrade
+
+This bundle was generated for the `fleet` deployer. The steps below apply only
+when this bundle is applied over an existing installation of an earlier version.
+A fresh install can skip this file.
+
+Each entry covers only the boundary this bundle's pinned version lands in. To
+check your exact move, including any earlier boundary you would cross, run
+`aicr upgrade-check` against the recipe you deployed from.
+
+## gamma-operator: manual
+
+This bundle pins `v2.1.0`. Applies when upgrading from `<2.0.0` into `>=2.0.0 <=2.1.0`.
+
+The legacy API group is renamed. A mirror controller copies existing objects.
+
+**Before you start:** No object is mid-rollout.
+
+**Reversible:** no. Objects under the new group are not read by 1.x controllers.
+
+**Steps for fleet:**
+
+1. `upgrade-operator`: Upgrade the operator release.
+2. `rename`: Rewrite apiVersion and kind, then apply.
+3. `delete-legacy`: Delete the legacy objects once their replacements are reconciling.\
+   *Why:* the mirror controller does not prune them.
+
+**References:**
+
+- https://example.com/gamma/2.0-migration
+
+## delta-operator: blocked
+
+This bundle pins `v3.0.0`. Applies when upgrading from `<3.0.0` into `>=3.0.0`.
+
+3.0.0 drops in-place conversion; the store has to be exported first.
+
+**Blocked:** do not upgrade from `<3.0.0` into `>=3.0.0` in one step.
+
+No steps are recorded for the `fleet` deployer; see the component's upstream release notes.
+
+## epsilon-operator: manual
+
+This bundle pins `v0.5.2`. Applies when upgrading from `<0.5.0` into `>=0.5.0 <0.6.0`.
+
+The webhook certificate moves to a new Secret.
+
+No steps are recorded for the `fleet` deployer; see the references below.
+
+**References:**
+
+- https://example.com/epsilon/0.5-notes

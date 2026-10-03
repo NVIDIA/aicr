@@ -40,6 +40,8 @@ flag    aicr bundle  --data  type=string default= required=false hidden=false en
 flag    aicr bundle  --deployer,-d  type=string default= required=false hidden=false env=
 flag    aicr bundle  --dra-eviction-node-label  type=string default= required=false hidden=false env=
 flag    aicr bundle  --dynamic  type=string default= required=false hidden=false env=
+flag    aicr bundle  --fleet-mode  type=string default="gitrepo" required=false hidden=false env=
+flag    aicr bundle  --fleet-namespace  type=string default="fleet-default" required=false hidden=false env=
 flag    aicr bundle  --flux-namespace  type=string default="flux-system" required=false hidden=false env=
 flag    aicr bundle  --flux-oci-source-name  type=string default="aicr-bundle" required=false hidden=false env=
 flag    aicr bundle  --fulcio-url  type=string default= required=false hidden=false env=AICR_FULCIO_URL

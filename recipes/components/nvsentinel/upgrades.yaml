@@ -57,7 +57,7 @@ transitions:
       running no NVSentinel datastore; the rollback itself was not
       exercised.
     stepsByDeployer:
-      - deployers: [helmfile]
+      - deployers: [helmfile, fleet]
         steps:
           - id: check-host-port
             description: >-
@@ -91,13 +91,17 @@ transitions:
               docs/user/component-catalog.md, with
               CHART=oci://ghcr.io/nvidia/nvsentinel and VERSION=v1.25.0.
             reason: >-
-              helmfile never updates CRDs for ownsCRDs components. The
+              helmfile and fleet never update CRDs for ownsCRDs components
+              (Fleet's Helm upgrade skips crds/). The
               v1.25.0 changes are cosmetic (a description and a vr shortName
               on ValidationRequest), so skipping this leaves the v1.22.0
               schema text in place rather than breaking anything.
           - id: apply
             description: >-
-              Run helmfile apply from a bundle generated at the new pin.
+              Run helmfile apply from a bundle generated at the new pin
+              (helmfile), or push the regenerated bundle (fleet GitRepo
+              mode) or apply the regenerated helmops.yaml (fleet HelmOp
+              mode) and let Fleet reconcile it.
             reason: >-
               Rolls the DaemonSets and Deployments to v1.25.0.
           - id: verify

@@ -46,7 +46,7 @@ Both forms above compare artifacts, so they answer for the recipe you *think* yo
 aicr upgrade-check --from cluster --to new-recipe.yaml --deployer helm
 ```
 
-That reads the record your deployer leaves behind, and only that one: Helm's release records for `helm`, `helmfile` and `flux`, and Argo CD's `Application` objects for `argocd` and `argocd-helm`, which write no per-component Helm release at all. The `--to` side is still an artifact; there is nothing in a cluster to upgrade *to*.
+That reads the record your deployer leaves behind, and only that one: Helm's release records for `helm`, `helmfile`, `flux` and `fleet`, and Argo CD's `Application` objects for `argocd` and `argocd-helm`, which write no per-component Helm release at all. The `--to` side is still an artifact; there is nothing in a cluster to upgrade *to*.
 
 Two flags stop being optional here. `--to`, because a cluster carries no criteria to re-resolve, so the "am I behind?" form has nothing to work from. And `--deployer`, whether or not any component turns out to carry steps: a release name encodes the deployer that wrote it (flux composes `<targetNamespace>-<name>`, Argo CD prepends a prefix you set), so without one nothing installed maps to a component and the read could only report an empty cluster.
 
@@ -58,7 +58,7 @@ The report grows a `READ FROM CLUSTER` block above the rows, naming the kubeconf
 
 A component installed outside its registry default namespace is still found: the read also tries the namespace your `--to` recipe puts it in (an overlay or mixin can move it, and `--inherit-from` keeps it where it was), and under `flux` the namespace the release itself records. A strict run also fails when the block reports AICR-stamped releases that match no component, since that means the read lost track of something AICR installed.
 
-One axis the cluster read does not cover is the namespace. [When a component moves namespace](#when-a-component-moves-namespace) is an artifact-to-artifact comparison only: the read recovers a version and no namespace, because the namespace is an input to the attribution rather than something the records hand back, and three of the five deployers could not report one at all. A relocation row therefore never appears against `--from cluster`. Keep the artifact comparison for that question.
+One axis the cluster read does not cover is the namespace. [When a component moves namespace](#when-a-component-moves-namespace) is an artifact-to-artifact comparison only: the read recovers a version and no namespace, because the namespace is an input to the attribution rather than something the records hand back, and three of the six deployers could not report one at all. A relocation row therefore never appears against `--from cluster`. Keep the artifact comparison for that question.
 
 ## Objects the upgrade could destroy
 
