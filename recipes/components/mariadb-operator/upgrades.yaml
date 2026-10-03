@@ -63,15 +63,15 @@ transitions:
         steps:
           - id: enable-dataplane-autoupdate
             description: >-
-              kubectl patch mariadb mariadb -n slurm --type merge -p
-              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
+              For every HA MariaDB the precondition listed:
+              `kubectl patch mariadb <name> -n <namespace> --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'`.
             reason: >-
               Upstream requires this before the operator moves, so the operator
               updates the init and agent containers instead of leaving them
-              behind at the prior version. Repeat for every HA MariaDB the
-              precondition listed. On a non-HA instance the field is accepted
-              and does nothing, because there is no agent or init container to
-              update.
+              behind at the prior version. A non-HA instance, such as the
+              accounting database AICR ships, needs no patch: it has no agent
+              or init container to update.
           - id: upgrade-crds
             description: >-
               Confirm the namespace the existing release lives in with
@@ -85,12 +85,14 @@ transitions:
               deletes the CRDs and cascade-deletes every MariaDB, User,
               Database and Grant with them. --namespace is not optional here:
               Helm scopes a release by namespace, so without it the request
-              lands in whatever namespace the kubeconfig context points at,
-              --install does not find the existing release, and Helm installs
-              a second one that then fights the first for ownership of
-              cluster-scoped CRDs. mariadb-system is the registry default and
-              no overlay overrides it, but an inherited bundle may differ,
-              which is what the helm list confirms.
+              lands in whatever namespace the kubeconfig context points at and
+              --install does not find the existing release. The install it
+              attempts instead fails Helm's ownership check, because the
+              existing CRDs carry the original release's
+              meta.helm.sh/release-namespace annotation, so nothing is
+              upgraded. mariadb-system is the registry default and no overlay
+              overrides it, but an inherited bundle may differ, which is what
+              the helm list confirms.
           - id: upgrade-operator
             description: >-
               Re-run install.sh (helm) or helmfile apply (helmfile).
@@ -122,7 +124,7 @@ transitions:
           - id: await-dataplane-pods
             description: >-
               Wait until every pod runs the new data plane, naming each pod,
-              <name>-0 up to <name>-<replicas-1>:
+              `<name>-0` up to `<name>-<replicas-1>`:
               `kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace>
               --timeout=15m
               --for=jsonpath='{.status.initContainerStatuses[?(@.name=="init")].image}'=$IMG`,
@@ -149,11 +151,13 @@ transitions:
               template exists they already equal N for the old revision.
           - id: revert-dataplane-autoupdate
             description: >-
-              kubectl patch mariadb mariadb -n slurm --type merge -p
-              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":false}}}'
+              For every HA MariaDB patched in the first step:
+              `kubectl patch mariadb <name> -n <namespace> --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":false}}}'`.
             reason: >-
               Upstream recommends returning it to false so a later operator
-              bump does not update the data plane unattended.
+              bump does not update the data plane unattended. An instance left
+              at true gets exactly that on the next bump.
       - steps:
           - id: enable-dataplane-autoupdate
             description: >-
@@ -179,8 +183,8 @@ transitions:
               Sync or reconcile the mariadb-operator-crds release to 26.10.1
               before the operator release.
             reason: >-
-              Neither Flux nor Argo CD applies a changed crds/ directory on
-              upgrade, and the CRD chart must never be pruned or deleted to
+              The operator release needs the new CRD schema, so the CRD
+              release syncs first. Never prune or delete the CRD release to
               achieve the version change: that cascade-deletes every MariaDB.
           - id: sync-operator
             description: >-
@@ -213,7 +217,7 @@ transitions:
           - id: await-dataplane-pods
             description: >-
               Wait until every pod runs the new data plane, naming each pod,
-              <name>-0 up to <name>-<replicas-1>:
+              `<name>-0` up to `<name>-<replicas-1>`:
               `kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace>
               --timeout=15m
               --for=jsonpath='{.status.initContainerStatuses[?(@.name=="init")].image}'=$IMG`,
