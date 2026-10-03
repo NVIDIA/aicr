@@ -41,7 +41,8 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `expected-resources` | Verify expected Kubernetes resources exist and are healthy (runs ExpectedResources + Chainsaw assert paths side-by-side) | 8m |
 | `gpu-operator-version` | Validate GPU Operator version against recipe constraints | 2m |
 | `check-nvidia-smi` | Verify nvidia-smi works on all schedulable GPU nodes (cordoned nodes are disclosed, not silently skipped) | 10m |
-| `gke-gpu-nic-networks` | Verify the GKE cluster has the GPU NIC networks GPUDirect TCPXO requires (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
+| `gke-gpu-nic-networks` | Verify the GKE cluster has the GPU NIC networks GPUDirect TCPXO requires, and that each is Ready with an intact GKENetworkParamSet binding (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
+| `gke-gpu-nic-topology` | Verify each a3 GPU node maps all 8 GPU NIC PCI slots to eth1..eth8 with no gVNIC displacement (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
 
 ### Performance Phase
 

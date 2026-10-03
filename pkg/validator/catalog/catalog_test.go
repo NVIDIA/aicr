@@ -1524,9 +1524,9 @@ func TestIsImmutableRefAcceptsResolveImageOutput(t *testing.T) {
 }
 
 // TestIsImmutableRefRejectsUnpublishedShortSHAResolution documents a deliberate
-// asymmetry with ResolveImage: isValidCommit accepts a 7-40 char SHA, so a
-// binary stamped with a short commit resolves to :sha-<short> — a tag on-push
-// never published, since it tags with the full github.sha. Such a run cannot
+// asymmetry with ResolveImage. IsValidCommit accepts a 7-40 char SHA, so a
+// binary stamped with a short commit resolves to :sha-<short>. On-push never
+// publishes that tag, since it tags with the full github.sha. Such a run cannot
 // produce evidence anyway (the validator Job would fail to pull), so the gate
 // rejecting it is correct rather than a coupling break.
 func TestIsImmutableRefRejectsUnpublishedShortSHAResolution(t *testing.T) {

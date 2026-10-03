@@ -1,9 +1,9 @@
 # Generating Bundles
 
 `aicr bundle` materializes a recipe into deployment-ready artifacts — one
-folder per component, each with Helm values, checksums, and a README. This
-guide covers the common bundling tasks: choosing a deployer, overriding values,
-enabling or disabling components, pinning node scheduling, producing offline
+folder per component with its Helm values, plus a root README, `checksums.txt`,
+and `bundle-info.yaml`. This guide covers the common bundling tasks: choosing a
+deployer, overriding values, enabling or disabling components, pinning node scheduling, producing offline
 bundles, and gating on component readiness.
 
 This is a task-oriented how-to. For the complete flag list and exit codes, see
@@ -237,17 +237,17 @@ layout:
     - component: network-operator
       manifest: 003-network-operator/application.yaml
       name: network-operator
-      namespace: network-operator
+      namespace: nvidia-network-operator
       path: 003-network-operator
     - component: network-operator
       manifest: 004-network-operator-post/application.yaml
       name: network-operator-post
-      namespace: network-operator
+      namespace: nvidia-network-operator
       path: 004-network-operator-post
     - component: network-operator
       manifest: 005-network-operator-readiness/application.yaml
       name: network-operator-readiness
-      namespace: network-operator
+      namespace: nvidia-network-operator
       path: 005-network-operator-readiness
 metadata:
   version: v0.22.0
@@ -471,6 +471,13 @@ aicr bundle --recipe recipe.yaml \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   --output ./bundles
 ```
+
+Most components treat the selectors as optional, but components that declare
+`requireNodeSelector` in the registry (`slinky-slurm`, `slurm-accounting-mariadb`)
+fail the bundle without them. `kube-prometheus-stack` requires
+`--system-node-selector` once it has a storage class, so following the bundle's
+PVC warning with `--storage-class` alone fails. See the selector rows in the
+[`aicr bundle` flag table](cli-reference.md#aicr-bundle).
 
 ## Prepare DRA nodes when opting in to eviction coordination
 

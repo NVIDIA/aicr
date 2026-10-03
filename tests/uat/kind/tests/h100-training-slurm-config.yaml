@@ -1,0 +1,353 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AICRConfig consumed by `aicr {snapshot,recipe,bundle,validate} --config`.
+#
+# The `platform: slurm` sibling of h100-training-config.yaml: same service,
+# accelerator and intent, resolving the h100-kind-training-slurm leaf
+# (recipes/overlays/) instead of the kubeflow one. Everything not called out
+# below is the kubeflow config verbatim and the two files should be kept in
+# step.
+#
+# ONE lane runs this file: .github/workflows/uat-kind-sim.yaml, which names
+# it outright and stands up four kind workers with SIMULATED GPUs on a
+# GitHub-hosted runner. uat-kind.yaml could once compose the same path from
+# its `platform` input; it now admits only an empty platform, because its
+# single-node nvkind cluster cannot satisfy the requirement below and
+# accepting the dispatch only spent a leased GPU slot before failing.
+#
+# What differs from the kubeflow sibling:
+#
+#   - criteria.platform: slurm, and a matching per-recipe evidence repo.
+#   - bundle.deployment.set raises the slurmd replica count (see below).
+#   - bundle.deployment.set EXCLUDES the two driver-dependent components
+#     (see the scope note below).
+#
+# WHAT THIS LANE DEPLOYS, AND WHAT IT DELIBERATELY DOES NOT.
+#
+# THE TWO DRIVER-DEPENDENT COMPONENTS ARE EXCLUDED: gpu-operator and
+# nvidia-dra-driver-gpu. That is a decision with a structural reason, not an
+# oversight and not a tuning gap, and it bounds what a green run here means.
+#
+# Both fail for the same underlying reason, at different layers, and both were
+# measured on this lane's own bundle rather than predicted:
+#
+#   gpu-operator: its operands (device plugin, GFD, DCGM exporter, operator
+#   validator) all run with `runtimeClassName: nvidia`. A stock kindest/node
+#   image carries only the `runc` and `test-handler` containerd runtimes, so
+#   every operand dies at sandbox creation with `no runtime for "nvidia" is
+#   configured`, ClusterPolicy never leaves `notReady`, and `helmfile apply`
+#   fails on it. The runtime is normally installed by the NVIDIA Container
+#   Toolkit, which recipes/overlays/kind.yaml disables because "nvkind
+#   pre-configures the host container runtime" -- true of the nvkind lane's
+#   real H100 host, false of a GitHub-hosted runner. Upstream's own answer is a
+#   custom node image with nvidia-container-runtime baked in
+#   (NVIDIA/k8s-test-infra deployments/kind-nvidia-cdi/), and building and
+#   maintaining one was declined for this lane.
+#
+#   nvidia-dra-driver-gpu: kind.yaml pins `nvidiaDriverRoot: "/"` for the same
+#   host-installed driver, and the kubelet plugin's init container blocks
+#   forever waiting for it: `/driver-root (/ on host): nvidia-smi: not found,
+#   libnvidia-ml.so.1: not found`. The mocked driver tree is at
+#   /var/lib/nvml-mock/driver, not at /. Repointing it is NOT a lane-level fix:
+#   kind.yaml is shared with the nvkind lane, where "/" is correct, and
+#   nvidiaDriverRoot moves in lockstep with hostPaths.driverInstallDir under
+#   TestDriverRootLockstep (#1087).
+#
+# AND THE DEPLOYMENT VALIDATION PHASE IS NOT RUN, which follows from the
+# exclusions rather than being a separate choice. `aicr validate` validates the
+# RECIPE, not the subset a lane deployed, and it has no component filter, so the
+# deployment phase evaluates checks about both excluded components. It does not
+# merely fail: `expected-resources` polls verifyDRAKubeletPluginReady for a
+# DaemonSet that will never be created, and that poll's zero-match case is
+# deliberately a poll rather than a fast fail, running to
+# defaults.GPUReadinessTimeout (8 minutes), which is exactly the validator Job's
+# own deadline. Measured: rc=8 after 574s, 4/4 validators failed,
+# expected-resources killed at its deadline having logged nothing past namespace
+# verification. tests/uat/kind/run-sim sets VALIDATE_PHASES=conformance, which
+# also turns off the post-install readiness gate, and carries the long form.
+#
+# THIS DIVERGES FROM THE CLOUD LANES. uat-aws / uat-gcp / uat-azure run
+# `--phase all` and gate on the deployment phase; this one does not. A reviewer
+# should not have to find that by diffing workflows.
+#
+# SO THIS LANE VALIDATES THE SLURM PATH, NOT THE GPU STACK, AND DOES NOT ASSERT
+# DEPLOYMENT READINESS. What it does cover: the Slinky operator, the Slurm
+# cluster, topograph resolving a block topology over real slurmd pods on
+# GPU-labelled nodes, the conformance phase (including slinky-slurm-health), and
+# the #2358 topology assertion. What a green run does NOT tell you, in one list:
+#
+#   1. a regression in gpu-operator
+#   2. a regression in nvidia-dra-driver-gpu
+#   3. a deployment-readiness regression, in ANY component, since that phase
+#      never runs here
+#   4. a regression in THIS LEAF'S OWN inline healthCheckAsserts, including the
+#      topology assertion below. They are dispatched by `expected-resources`
+#      (validators/deployment/expected_resources.go, the only consumer of
+#      HealthCheckAsserts in the tree), which is a DEPLOYMENT-phase check, so
+#      skipping that phase skips them. They are still covered, just not by this
+#      lane: hermetically by TestSlurmTopologyHealthCheckClusterStates on every
+#      `make test`, and live by any consumer that runs `aicr validate --phase
+#      deployment` against a full deployment of this recipe.
+#   5. a regression in any of the SEVEN CONFORMANCE CHECKS this lane skips.
+#      They are named one by one under spec.validate.execution.skipChecks
+#      below, each with the prerequisite it needs and why this lane cannot
+#      supply it. Three checks still run and still gate: gang-scheduling,
+#      cluster-autoscaling, and slinky-slurm-health, which is the one that
+#      validates the path this lane exists for.
+#
+# AND THE CONFORMANCE PHASE IS NARROWED, for the same reason as the deployment
+# phase and by the same ruling one level down: the lane runs the checks it CAN
+# satisfy. `aicr validate` validates the RECIPE, and the recipe's
+# validation.conformance.checks list is inherited from kind.yaml and base, so it
+# names checks about the GPU stack this lane does not deploy and about real
+# accelerator hardware this lane does not have. Measured before the narrowing:
+# rc=8 after 184s, 10 validators, 2 passed, 7 failed, 1 skipped.
+#
+# The skips are NOT a way of ignoring a failing check. Every one of them is
+# REPORTED as skipped in the CTRF report the signed evidence bundle is rendered
+# from, so the bundle attests to the suite that actually ran. The reason travels
+# with it as the structured code `extra.skipReason: named-in-skip-checks`, which
+# is what survives the default bundle's redaction policy, which blanks
+# every test's prose `message`, and this lane does not pass `--full`.
+# `aicr validate` rejects the run if a skipped name matches no check, or if the
+# list would leave a requested phase with nothing to run.
+#
+# WHICH IS WHY tests/uat/kind/verify-topology.sh IS A WORKFLOW STEP rather than
+# only a recipe assertion. It is what actually gates the topology on this lane,
+# it derives its expectation from the live cluster instead of the recipe, and
+# the conformance job is gated on it. Without it, scoping the validation would
+# have removed the acceptance gate for #2358 altogether.
+#
+# The nvkind lane (uat-kind.yaml) is what exercises the GPU stack on hardware,
+# and the cloud lanes are what gate deployment readiness.
+#
+# The GPU capacity the topology rests on never came from either excluded
+# component anyway: tests/uat/kind/setup-gpu-sim.sh installs its own NVIDIA
+# device plugin against the mocked NVML tree, and that is what puts
+# `nvidia.com/gpu: 8` and the clique labels on the four workers.
+#
+# THE REPLICA OVERRIDE, and why it lives here.
+#
+# A Slurm topology block groups SLURM nodes, and a Slurm node is a slurmd POD,
+# not the Kubernetes node underneath it. The leaf ships
+# `nodesets.slinky.replicas: 1` (recipes/components/slinky-slurm/values.yaml),
+# so as shipped there is one slurmd pod, one accelerator domain, and no block
+# large enough to fill: the leaf's `blockSizes: [2]` never groups anything.
+# Raising the count to 4 gives two blocks of two, the smallest shape where the
+# grouping is observable rather than trivial.
+#
+# The override is deliberately confined to this lane. The shipped recipe stays
+# at one replica, because the right replica count is a property of the cluster
+# a consumer deploys onto and not of the recipe. The accepted tradeoff is that
+# this lane exercises a scaled-up variant of the leaf rather than the leaf
+# exactly as shipped; the topology plumbing under test (provider, engine,
+# plugin, clique label) is unchanged by the count.
+#
+# ONE SLURMD POD PER KUBERNETES NODE is what makes the clique labels line up
+# with the blocks. It is enforced by the Slinky operator, not by this file:
+# `oversubscribeNode: false` makes the operator attach a hard
+# podAntiAffinity (requiredDuringSchedulingIgnoredDuringExecution over
+# kubernetes.io/hostname, selecting app.kubernetes.io/name=slurmd) to every
+# NodeSet pod, so a replica with no free node stays Pending instead of
+# doubling up. That is the fail-closed direction: a co-located pair would
+# inherit one clique label, collapse two domains into one, and produce a
+# lopsided topology with no error anywhere. `false` is also the chart default
+# (nodesetDefaults in slurm 1.2.0), so the line below changes nothing today --
+# it is pinned explicitly so a future chart-default flip cannot silently
+# un-spread this lane.
+#
+# WHAT THAT REQUIRES OF THE CLUSTER, and what each lane provides. Four
+# schedulable nodes.
+#
+# uat-kind-sim.yaml provides them: tests/uat/kind/bootstrap-cluster.sh
+# creates the four-worker cluster tests/uat/kind/slurm-cluster-config.yaml
+# declares and gives each worker simulated GPU capacity.
+#
+# A single-node cluster does not, which is what uat-kind.yaml's platform
+# gate now says outright: one slurmd pod would run, three would stay Pending,
+# and no block would fill. Four schedulable nodes are a prerequisite for this
+# config to exercise the two-block shape, not something it arranges for
+# itself.
+kind: AICRConfig
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: kind-h100-training-slurm-uat
+
+spec:
+  snapshot:
+    output:
+      path: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      # Tolerate every taint, in step with the kubeflow sibling: the snapshot
+      # agent has no placement requirement of its own on this lane.
+      tolerations:
+        - "*"
+
+  recipe:
+    criteria:
+      # No os: the h100-kind-* overlays are os-agnostic (kind runs on whatever
+      # the runner has), so specifying an os fails resolution ("no recipe
+      # provides os 'ubuntu'"). The cloud lanes pin os because their overlays
+      # declare one (ubuntu/cos); the kind overlays deliberately do not.
+      service: kind
+      accelerator: h100
+      intent: training
+      platform: slurm
+    output:
+      path: recipe.yaml
+
+  bundle:
+    input:
+      recipe: recipe.yaml
+    output:
+      target: ./bundle
+    deployment:
+      deployer: helmfile
+      set:
+        # Four slurmd pods, which is what `blockSizes: [2]` on the leaf's
+        # topograph engine needs to fill two blocks rather than none. This
+        # REQUIRES four schedulable nodes; the header says what a smaller
+        # cluster does with it.
+        - slinkyslurm:nodesets.slinky.replicas=4
+        # Restates the chart default so the operator keeps injecting the
+        # per-hostname anti-affinity, which is what makes the pod count and
+        # the node count line up one to one. See the header.
+        - slinkyslurm:nodesets.slinky.oversubscribeNode=false
+        # Excludes the two driver-dependent components from the bundle; the
+        # header says why, and what it costs in coverage.
+        #
+        # `aicr bundle` prints a deprecation notice for this key: "the
+        # allocation policy validators verify is resolved from the recipe, so a
+        # bundle-time change will be reported as recipe/cluster drift; move the
+        # allocation mode to a recipe overlay (issue #1327)". The notice is
+        # accurate and the drift is real: the recipe still declares
+        # gpu-operator, so `aicr validate` still evaluates its health check and
+        # reports it absent. A recipe-level exclusion is the durable fix and it
+        # is not available from a lane config today -- neither `aicr recipe` nor
+        # `aicr validate` takes a component override, and the leaf itself must
+        # keep gpu-operator for the deployments it is actually for.
+        - gpuoperator:enabled=false
+        - dradriver:enabled=false
+    scheduling:
+      # In step with the kubeflow sibling: no nodeSelector (no component in
+      # this recipe requires one on kind -- the slurm leaf opts out of
+      # registry.yaml's requireNodeSelector guard by declaring an explicit
+      # empty selector on every scheduling path it owns), and a toleration
+      # for the accelerated-node taint so GPU operands are not excluded from
+      # a tainted worker pool.
+      acceleratedNodeTolerations:
+        - nvidia.com/gpu=present:NoSchedule
+      # Bind PVCs to the kind default StorageClass rather than hardcoding a
+      # provider-specific name.
+      storageClass: ""
+
+  validate:
+    execution:
+      # failFast stops the run if the deployment (readiness) phase fails, so the
+      # conformance/performance phases are not evaluated against a not-yet-
+      # converged cluster. The `../run` readiness gate gives the operator stack
+      # time to converge before validate.
+      failFast: true
+      # The conformance checks this lane cannot satisfy, each with the
+      # prerequisite it needs. Six follow from the two excluded components; the
+      # seventh follows from the devices being simulated. See the header for
+      # what this costs, and pkg/validator/skip_checks.go for the two guards
+      # that keep this list from becoming a way to hide a failure.
+      #
+      # THIS LIST IS SELF-CORRECTING IN BOTH DIRECTIONS. A check that is renamed
+      # or removed makes the run fail at once, on the name that no longer
+      # matches. A check that is ADDED to the inherited list is not silenced by
+      # anything here: it runs, and the lane goes red until someone decides
+      # whether it belongs. That is why this is a skip list and not a list of
+      # the checks to run.
+      #
+      # WHAT IT DOES NOT DO IS STOP YOU ADDING slinky-slurm-health. `aicr
+      # validate` refuses a skip list only when it empties a phase COMPLETELY,
+      # so with gang-scheduling and cluster-autoscaling still here the run would
+      # be accepted and the lane would go green having stopped testing the Slurm
+      # path it exists for. tests/uat/kind/skip-checks_test.sh is what forbids
+      # that, along with the other two survivors and the count below; it runs on
+      # every `make test-shell`.
+      skipChecks:
+        # Reads the gpu-operator Deployment, ClusterPolicy state=ready and the
+        # DCGM exporter DaemonSet. All three are gpu-operator.
+        - gpu-operator-health
+        # Reads the DRA driver controller, the kubelet plugin DaemonSet and
+        # NVIDIA ResourceSlices. All nvidia-dra-driver-gpu, which the check's
+        # own doc comment says is a FAILURE rather than a skip while the recipe
+        # still enables the component.
+        - dra-support
+        # Dials http://nvidia-dcgm-exporter.gpu-operator.svc:9400/metrics, a
+        # Service owned by a gpu-operator operand.
+        - accelerator-metrics
+        # Needs GPU metric time series in Prometheus, which come from the same
+        # DCGM exporter. Observed logging "DCGM_FI_DEV_GPU_UTIL not yet
+        # available, retrying" until it gave up.
+        - ai-service-metrics
+        # Needs the external metric dcgm_gpu_power_usage to drive its HPA
+        # behavioral test. Same exporter again.
+        - pod-autoscaling
+        # Runs a CUDA container that must see /dev/nvidia* device nodes and
+        # count exactly one usable GPU. The mocked NVML tree supplies
+        # libnvidia-ml.so and no device nodes, and a stock kindest/node has no
+        # nvidia container runtime to inject any. This one would fail on the
+        # simulated devices even with the whole GPU stack deployed.
+        - secure-accelerator-access
+        # Walks every componentRef in the recipe and asserts its namespace and
+        # expected resources are healthy. The recipe still declares the two
+        # excluded components, so it reports them absent. This check is the
+        # recipe/cluster drift the `aicr bundle` deprecation notice predicts,
+        # measured rather than predicted.
+        - platform-health
+    input:
+      recipe: recipe.yaml
+      snapshot: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      tolerations:
+        - "*"
+    evidence:
+      attestation:
+        # Setting `out` enables emit. The push target is the stable
+        # per-recipe repo; inject_push_target in tests/uat/lib/phases.sh
+        # appends a `:run-${RUN_ID}` tag for per-run isolation. Must fall
+        # under a trusted registry (ghcr.io/nvidia) for ingest.
+        #
+        # WHAT THIS LANE PUSHES HERE ATTESTS TO SIMULATED DEVICES. The
+        # repo is per-RECIPE, not per-lane, so a future lane running this
+        # recipe on real silicon would push beside it. Two things make that
+        # safe, and one makes it an auditor's extra step:
+        #
+        # Safe: a simulated bundle cannot reach the corroboration dashboard.
+        # Ingest classifies the SIGNER against recipes/evidence/allowlist.yaml,
+        # and both that file and evidence-ingest.yaml's FIRST_PARTY_IDENTITY
+        # pin `uat-(aws|gcp|azure|kind).yaml`. uat-kind-sim.yaml does not
+        # match either, so its bundles are never corroborating evidence, by
+        # the trust root rather than by convention.
+        #
+        # Safe: each bundle carries its own keyless signing identity, which
+        # names the workflow that produced it and is verifiable
+        # (`aicr evidence verify --expected-identity-regexp`).
+        #
+        # The extra step: the repo NAME does not say which is which, so an
+        # operator browsing the repo must read the signer to tell a simulated
+        # run from a real one. That is deliberate. A `-sim` repo would need
+        # either a second near-identical config, which is the drift this lane
+        # was built to avoid, or an override inside the shared phase library
+        # that three cloud lanes depend on. Neither is worth paying for a
+        # label when the discriminator already exists and is cryptographic.
+        out: ./evidence
+        push: ghcr.io/nvidia/aicr-evidence/h100-kind-training-slurm

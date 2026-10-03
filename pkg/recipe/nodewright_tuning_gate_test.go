@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"path"
 	"slices"
@@ -195,7 +196,8 @@ func renderNodewrightTuningRaw(t *testing.T, content []byte, values map[string]a
 //     the Skyhook CR renders — behavior identical to before the gate;
 //   - explicit tuningEnabled=false suppresses the whole CR (the tuning
 //     package is the CR's only package, so an empty packages map would be
-//     the alternative);
+//     the alternative) — except on a tuning-rke2.yaml leaf that also sets
+//     rdmaNetnsExclusive, where the CR keeps only the RDMA package;
 //   - explicit tuningEnabled=true renders byte-identically to the default.
 func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 	ctx := context.Background()
@@ -245,7 +247,11 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 				disabled := make(map[string]any, len(values)+1)
 				maps.Copy(disabled, values)
 				disabled["tuningEnabled"] = false
-				if got := renderNodewrightTuningRaw(t, content, disabled); strings.Contains(got, "kind: NodeWright") {
+				if fmt.Sprint(values["rdmaNetnsExclusive"]) == "true" {
+					if got := slices.Sorted(maps.Keys(renderedNodewrightPackages(t, content, disabled))); !slices.Equal(got, []string{"rdma-netns-exclusive"}) {
+						t.Errorf("tuningEnabled=false with rdmaNetnsExclusive must keep only the RDMA package, got %v", got)
+					}
+				} else if got := renderNodewrightTuningRaw(t, content, disabled); strings.Contains(got, "kind: NodeWright") {
 					t.Errorf("tuningEnabled=false must suppress the whole NodeWright CR:\n%s", got)
 				}
 
@@ -263,4 +269,82 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 			t.Errorf("no catalog leaf wiring %s was resolved", manifestPath)
 		}
 	}
+}
+
+// renderedNodewrightPackages renders a single-CR nodewright manifest and
+// returns the CR's packages, or nil when the gates suppress the CR.
+func renderedNodewrightPackages(t *testing.T, content []byte, values map[string]any) map[string]any {
+	t.Helper()
+
+	var cr map[string]any
+	if err := yaml.Unmarshal([]byte(renderNodewrightTuningRaw(t, content, values)), &cr); err != nil {
+		t.Fatalf("unmarshal rendered manifest: %v", err)
+	}
+	if cr == nil {
+		return nil
+	}
+	return valueAtPath[map[string]any](t, cr, "spec", "packages")
+}
+
+// TestNodewrightTuningRKE2RDMAGate pins the two independent package gates in
+// tuning-rke2.yaml (#2572): tuningEnabled (default on) gates nvidia-tuned,
+// rdmaNetnsExclusive (default off) gates rdma-netns-exclusive, and the CR
+// renders only when a package does. Each gate is also exercised in the string
+// form --deployer flux delivers values in.
+func TestNodewrightTuningRKE2RDMAGate(t *testing.T) {
+	content, err := GetManifestContentWithContext(context.Background(), nil, nodewrightTuningRKE2Manifest)
+	if err != nil {
+		t.Fatalf("GetManifestContentWithContext(%q): %v", nodewrightTuningRKE2Manifest, err)
+	}
+
+	tests := []struct {
+		name      string
+		overrides map[string]any
+		want      []string
+	}{
+		{"default renders tuning only", nil, []string{"nvidia-tuned"}},
+		{"rdma enabled", map[string]any{"rdmaNetnsExclusive": true}, []string{"nvidia-tuned", "rdma-netns-exclusive"}},
+		{"rdma enabled as string", map[string]any{"rdmaNetnsExclusive": "true"}, []string{"nvidia-tuned", "rdma-netns-exclusive"}},
+		{"rdma disabled as string", map[string]any{"rdmaNetnsExclusive": "false"}, []string{"nvidia-tuned"}},
+		{"tuning disabled keeps rdma", map[string]any{"rdmaNetnsExclusive": true, "tuningEnabled": false}, []string{"rdma-netns-exclusive"}},
+		{"tuning disabled as string keeps rdma", map[string]any{"rdmaNetnsExclusive": "true", "tuningEnabled": "false"}, []string{"rdma-netns-exclusive"}},
+		{"both disabled suppresses the CR", map[string]any{"tuningEnabled": false}, nil},
+		{"component disabled suppresses the CR", map[string]any{"rdmaNetnsExclusive": true, "enabled": false}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string]any{"service": "rke2", "accelerator": "vr200", "intent": "inference"}
+			maps.Copy(values, tt.overrides)
+			packages := renderedNodewrightPackages(t, content, values)
+			if got := slices.Sorted(maps.Keys(packages)); !slices.Equal(got, tt.want) {
+				t.Errorf("packages = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	// Both packages reboot. nodewright merges their reboots only when they are
+	// runnable in the same pass (neither dependsOn the other), and the first
+	// package in name order issues the merged reboot as soon as no package Job
+	// is running, so it must be the slower nvidia-tuned: were the one-line RDMA
+	// package first, the reboot could fire between nvidia-tuned's stages.
+	t.Run("both packages share one reboot", func(t *testing.T) {
+		packages := renderedNodewrightPackages(t, content, map[string]any{
+			"service": "rke2", "accelerator": "vr200", "intent": "inference", "rdmaNetnsExclusive": true,
+		})
+		for name, raw := range packages {
+			pkg, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("package %q is %T, want map[string]any", name, raw)
+			}
+			if _, ok := pkg["dependsOn"]; ok {
+				t.Errorf("package %q declares dependsOn; it would run in a later pass and reboot separately", name)
+			}
+			if got := valueAtPath[string](t, pkg, "interrupt", "type"); got != "reboot" {
+				t.Errorf("package %q interrupt.type = %q, want reboot", name, got)
+			}
+		}
+		if first := slices.Sorted(maps.Keys(packages))[0]; first != "nvidia-tuned" {
+			t.Errorf("first package in name order = %q, want nvidia-tuned to issue the merged reboot", first)
+		}
+	})
 }

@@ -16,6 +16,7 @@ package attestation
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"os"
@@ -124,11 +125,42 @@ func TestEmit_MinimalByDefault_RedactsSnapshotAndRecordsPolicy(t *testing.T) {
 	if res.Bundle.Predicate.Redaction == nil {
 		t.Fatalf("minimal bundle must record a redaction policy")
 	}
-	if res.Bundle.Predicate.Redaction.Policy != "minimal" || res.Bundle.Predicate.Redaction.Version != "v3" {
+	if res.Bundle.Predicate.Redaction.Policy != "minimal" || res.Bundle.Predicate.Redaction.Version != "v4" {
 		t.Errorf("unexpected redaction provenance: %+v", res.Bundle.Predicate.Redaction)
 	}
 	if len(res.Bundle.Predicate.Redaction.Applied) == 0 {
 		t.Errorf("expected applied rules recorded")
+	}
+}
+
+func TestEmit_StampsAICRCommitIntoStatement(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	dir := t.TempDir()
+	res, err := Emit(context.Background(), EmitOptions{
+		OutDir:      dir,
+		Recipe:      emitRecipe(),
+		Snapshot:    snapshotWithSensitiveData(),
+		AICRVersion: "main",
+		AICRCommit:  sha,
+	})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if res.Bundle.Predicate.AICRCommit != sha {
+		t.Errorf("predicate AICRCommit = %q, want %q", res.Bundle.Predicate.AICRCommit, sha)
+	}
+	stmt, err := os.ReadFile(filepath.Join(dir, SummaryBundleDirName, StatementFilename))
+	if err != nil {
+		t.Fatalf("read statement: %v", err)
+	}
+	var parsed struct {
+		Predicate Predicate `json:"predicate"`
+	}
+	if err := json.Unmarshal(stmt, &parsed); err != nil {
+		t.Fatalf("parse statement: %v", err)
+	}
+	if parsed.Predicate.AICRCommit != sha {
+		t.Errorf("statement predicate aicrCommit = %q, want %q", parsed.Predicate.AICRCommit, sha)
 	}
 }
 

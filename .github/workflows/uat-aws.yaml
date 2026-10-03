@@ -107,18 +107,20 @@ jobs:
     # UAT-phase-step budgets by (deployer, intent), using the current
     # timeout-minutes on each step below (install is deployer-conditional;
     # readiness is the post-install gate, 65 on both deployers):
-    #   helmfile+training:  prep 15 + install 25 + readiness 65 + validate 40 + train 25 + verify 5 = 175
-    #   helmfile+inference: prep 15 + install 25 + readiness 65 + validate 40 + serve 40 + verify 5 = 190
-    #   argocd+training:    prep 15 + install 45 + readiness 65 + validate 40 + train 25 + verify 5 = 195   (issue #2194, aws-h100 only)
-    #   argocd+inference:   not shipped today; would be 15 + 45 + 65 + 40 + 40 + 5 = 210                   (needs cap bump below)
+    #   helmfile+training:  prep 15 + install 25 + readiness 65 + validate 40 + train 25 + verify 5 + sxidfault 10 = 185
+    #   helmfile+inference: prep 15 + install 25 + readiness 65 + validate 40 + serve 40 + verify 5 + sxidfault 10 = 200
+    #   argocd+training:    prep 15 + install 45 + readiness 65 + validate 40 + train 25 + verify 5 + sxidfault 10 = 205   (issue #2194, aws-h100 only)
+    #   argocd+inference:   not shipped today; would be 15 + 45 + 65 + 40 + 40 + 5 + 10 = 220                            (needs cap bump below)
     #
     # Total = ~30 setup + <UAT> + ~8 debug + ~54 teardown. On today's
-    # worst-case (argocd+training or helmfile+inference), ~30 + max(195,190)
-    # + ~8 + ~54 = ~287, so 300 leaves ~13m of teardown headroom.
+    # worst-case (argocd+training), ~30 + 205 + ~8 + ~54 = ~297, so 300
+    # leaves only ~3m of teardown headroom -- thin, since sxidfault (#2625)
+    # added 10m on top of the previous ~287/~13m. If this grows further the
+    # lever is trimming bounded work above, not raising this past 300.
     # NOTE: the "not shipped today" argocd+inference row would push total to
-    # ~302, over the cap. If a future PR wires the argocd variant for the
+    # ~312, over the cap. If a future PR wires the argocd variant for the
     # inference cell (or re-enables phase_serve alongside argocd), raise this
-    # to ~330 in the same PR.
+    # to ~340 in the same PR.
     timeout-minutes: 300
     permissions:
       contents: read
@@ -843,16 +845,22 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/aws/run conformance "${TEST_CONFIG}"
 
-      # The CUJ phase is intent-selected, mirroring the runner's intent-aware
-      # `all`: training runs the Kubeflow TrainJob; inference would run the
-      # served DynamoGraphDeployment (phase_serve, DC3). For training, the
-      # TrainJob fires; for inference the serve step is currently disabled (see
-      # below), so verify/evidence cover the deployed stack either way.
+      # The CUJ phase is selected by intent AND platform, mirroring the
+      # runner's `all` (cuj_phase_for, tests/uat/lib/cuj-dispatch.sh): platform
+      # decides whether a Kubernetes-native CUJ exists at all, intent decides
+      # which one. Every cell this pipeline runs declares kubeflow or dynamo,
+      # so the intent-only condition below selects the same phase `all` would;
+      # the one platform with no CUJ (slurm, where a TrainJob would bypass
+      # slurmd) has no cell here. Training runs the Kubeflow TrainJob;
+      # inference would run the served DynamoGraphDeployment (phase_serve,
+      # DC3). For training, the TrainJob fires; for inference the serve step is
+      # currently disabled (see below), so verify/evidence cover the deployed
+      # stack either way.
 
-      # One refresh before the intent-selected CUJ — currently the training
-      # TrainJob (the inference serve step is disabled above). Gates on
-      # conformance success, matching the CUJ step it precedes; if serve is
-      # re-enabled it shares this same gate, so exactly one CUJ runs per intent.
+      # One refresh before the selected CUJ, currently the training TrainJob
+      # (the inference serve step is disabled above). Gates on conformance
+      # success, matching the CUJ step it precedes; if serve is re-enabled it
+      # shares this same gate, so exactly one CUJ runs per cell.
       - name: Refresh AWS credentials before CUJ
         if: steps.conformance.outcome == 'success'
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd  # v6.3.0
@@ -912,6 +920,28 @@ jobs:
           EXPECTED_ISSUER: https://token.actions.githubusercontent.com
           EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
         run: ./tests/uat/aws/run verify "${TEST_CONFIG}"
+
+      - name: "UAT - sxid fault injection (NVSentinel detection, #2625)"
+        id: sxidfault
+        if: steps.conformance.outcome == 'success'
+        timeout-minutes: 10
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/aws/run sxidfault "${TEST_CONFIG}"
+
+      # phase_sxid_fault_inject records the Stage 1-3 outcome as CTRF
+      # (sxidfault-result.json, #2625). Upload it on every outcome once the
+      # step ran, mirroring the snapshot-result.json upload above.
+      - name: Upload sxidfault result
+        if: always() && steps.sxidfault.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-aws-sxidfault-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sxidfault-result.json
+          retention-days: 30
+          if-no-files-found: warn
 
       # Export the digest-pinned bundle ref for the ingest-evidence job.
       # Reads the pointer the conformance step wrote; emits empty (job
@@ -1008,6 +1038,12 @@ jobs:
           SUMMARY_INTENT: ${{ inputs.intent }}
           SUMMARY_LIFECYCLE: ${{ inputs.lifecycle }}
           SUMMARY_DEPLOYER: ${{ inputs.deployer }}
+          # Via env, not inline ${{ }} in the run block: github.ref_name can
+          # carry shell-active characters (expression injection), which
+          # `git check-ref-format --branch 'feat/a$(id)b'` accepts. sha is safe
+          # but is routed the same way, as uat-azure.yaml does.
+          SUMMARY_SHA: ${{ github.sha }}
+          SUMMARY_REF: ${{ github.ref_name }}
         run: |
           {
             echo "## UAT Results (AWS)"
@@ -1023,7 +1059,7 @@ jobs:
             fi
             printf '**Cluster:** `%s`\n' "$DEPLOYMENT_ID"
             printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
-            echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
+            printf '**Build:** `%s` (branch: `%s`)\n' "$SUMMARY_SHA" "$SUMMARY_REF"
             echo ""
             echo "| Phase | Status |"
             echo "|-------|--------|"
@@ -1040,6 +1076,7 @@ jobs:
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Serve | disabled (vLLM excluded from UAT) |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
+            echo "| SXID fault injection | ${{ steps.sxidfault.outcome }} |"
             if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""
               echo "**Evidence (OCI):** \`${{ steps.evidence_ref.outputs.ref }}\`"

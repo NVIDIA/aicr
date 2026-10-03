@@ -86,10 +86,40 @@ letting it surface later as a performance-phase abort with no bandwidth number.
 
 **Important:** The GPU node pool must be provisioned with only the 8 GPU NIC
 networks (`gpu-nic-0` through `gpu-nic-7`). Do **not** include a gVNIC additional
-network — it takes a GPU NIC PCI slot (`0000:06:00.0`), leaving only 7/8 GPUs
+network — it takes one of the GPU NIC PCI slots, leaving only 7/8 GPUs
 available for TCPXO. This is distinct from the `--enable-gvnic` node-pool flag,
 which selects the gVNIC driver and **is** required: pass the flag, but do not add
 a ninth `--additional-node-network` entry for it.
+
+### What the deployment checks verify
+
+Beyond the name count above, two deployment-phase checks gate on the fabric
+actually being usable, not just nameable:
+
+- **`gke-gpu-nic-networks`** verifies each `gpu-nic*` Network reports
+  `Ready=True` and `ParamsReady=True` (an intact `GKENetworkParamSet` binding),
+  and requires **at least eight** to be healthy and bound. A leftover Network
+  beyond the ready eight (for example from a deleted pool) does not fail the
+  cluster. Verify a Network's state with:
+
+  ```shell
+  kubectl get network.networking.gke.io <name> -o jsonpath='{.status.conditions}'
+  ```
+
+- **`gke-gpu-nic-topology`** (sibling) reads each a3 GPU node's
+  `networking.gke.io/nic-info` annotation and fails on gVNIC displacement,
+  detected three ways: an interface beyond `eth0`–`eth8`, fewer than 8 of
+  `eth1`–`eth8` mapped, or — via a join with `networking.gke.io/north-interfaces`
+  — a GPU NIC interface that maps to a non-GPU-NIC Network (the uniform case:
+  one gVNIC plus seven GPU NICs present `eth0`–`eth8` on every node, invisible
+  to name/PCI alone). A node with no annotation counts as unverified; a node
+  with a present-but-unparseable annotation fails the check. When no node can
+  be verified, the check Skips and records coverage counts (nodes validated /
+  total). Verify a node's mapping with:
+
+  ```shell
+  kubectl get node <gpu-node> -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
+  ```
 
 ## The shipped `torch-distributed-tcpxo` runtime
 
@@ -253,7 +283,7 @@ To hand-author a `TrainingRuntime` — a bundle you did not generate, or a
 shape the shipped runtime does not cover — see
 [Attaching a Training Workload to the Cluster Fabric](../user/fabric-attached-training.md).
 
-See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example. (pinned to the same coupled pair the recipe ships, plugin `v1.0.15` with daemon `v1.0.21`)
+See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example (pinned to the same coupled pair the recipe ships, plugin `v1.0.15` with daemon `v1.0.21`).
 
 ## NCCL Plugin Version Matching
 
@@ -404,7 +434,7 @@ kubectl get node <gpu-node> \
   -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
 ```
 
-All 8 GPU NIC PCI addresses should be mapped to `eth1`–`eth8`. If a gVNIC is present, it typically occupies PCI `0000:06:00.0`, displacing the first GPU NIC.
+All 8 GPU NIC PCI addresses should be mapped to `eth1`–`eth8`. A gVNIC additional network takes one of these GPU NIC slots, so a displaced node shows an extra interface beyond `eth0`–`eth8` or fewer than 8 of `eth1`–`eth8`. The uniform case — one gVNIC plus seven GPU NICs, so all of `eth0`–`eth8` are present — is caught by the `gke-gpu-nic-topology` check's `north-interfaces` join: the displaced interface's underlay IP maps to the gVNIC Network, not a GPU NIC Network. Verify a node's interface→Network mapping with `kubectl get node <gpu-node> -o jsonpath='{.metadata.annotations.networking\.gke\.io/north-interfaces}'`.
 
 ### RxDM detects 0/8 GPUs
 

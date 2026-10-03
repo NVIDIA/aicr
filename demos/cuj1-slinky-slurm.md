@@ -11,7 +11,8 @@ CLI reference.
 ## Assumptions
 
 - `kubectl` is configured for the target cluster.
-- GPU leaves assume H100 nodes with drivers (or Kind for the CPU-only path).
+- Cloud leaves assume GPU nodes with drivers. The Kind leaf runs on simulated GPUs instead; see [Kind (simulated GPUs)](#kind-simulated-gpus).
+- On EKS, an AWS credential path for the EBS CSI driver. The bundle installs the driver but not its credentials, and without them no volume can be provisioned — see [EBS CSI Driver Credentials](../docs/user/component-catalog.md#ebs-csi-driver-credentials).
 - Node pools use a `nodeGroup` label (adjust if your cluster uses different keys).
 - Inspect taints before bundling: `kubectl get nodes -o custom-columns=NAME:.metadata.name,GROUP:.metadata.labels.nodeGroup,TAINTS:.spec.taints`
 
@@ -25,12 +26,12 @@ CLI reference.
 1. **Generate recipe** — direct criteria or snapshot-derived infrastructure criteria plus `--platform slurm` resolve a Slurm leaf overlay to `recipe.yaml`.
 2. **Generate bundle** — apply `--system-*` / `--accelerated-*` scheduling and optional `--set` / `--set-json` / `--set-file` on `slinkyslurm`.
 3. **Install** — run `deploy.sh`; cert-manager and Slinky operator come up, then the cluster chart in `slurm`.
-4. **Validate** — run `deployment` (Chainsaw component health) and `conformance` (`slinky-slurm-health` from the login pod, including a conditional `sacct` probe when accounting is enabled). **Performance validation is not supported yet** on slurm leaves.
+4. **Validate** — run `deployment` (Chainsaw component health) and `conformance` (the AI conformance checks the leaf inherits, plus `slinky-slurm-health` from the login pod, including a conditional `sacct` probe when accounting is enabled). **Performance validation is not supported yet** on slurm leaves.
 5. **Smoke job** — `kubectl exec` into the login pod and run `srun` to confirm scheduling.
 
 ## Generate Recipe
 
-Pick the row that matches your cluster. Each resolves to a slurm leaf with at least three inline Slinky components: `slinky-slurm-operator-crds`, `slinky-slurm-operator`, and `slinky-slurm`. The GKE and Kind leaves also include `slinky-topograph` (topology-aware scheduling) — GKE with the `gcp` provider, Kind with the `test` provider and a fixed topology fixture. The EKS leaf does not include it today; see [Slinky Slurm Inline Components](https://github.com/NVIDIA/aicr/blob/main/docs/integrator/recipe-development.md#slinky-slurm-inline-components) to add it to another leaf.
+Pick the row that matches your cluster. Each resolves to a slurm leaf with at least three inline Slinky components: `slinky-slurm-operator-crds`, `slinky-slurm-operator`, and `slinky-slurm`. The H100 GKE and Kind leaves also include `slinky-topograph` (topology-aware scheduling): GKE with the `gcp` provider, Kind with the `dra` provider reading each node's `nvidia.com/gpu.clique` label. The other leaves do not include it today; see [Slinky Slurm Inline Components](https://github.com/NVIDIA/aicr/blob/main/docs/integrator/recipe-development.md#slinky-slurm-inline-components) to add it to another leaf.
 
 
 | Cloud    | Command                                                                                                      | Leaf overlay                                               |
@@ -38,10 +39,13 @@ Pick the row that matches your cluster. Each resolves to a slurm leaf with at le
 | **AKS**  | `aicr recipe --service aks --accelerator h100 --intent training --os ubuntu --platform slurm -o recipe.yaml` | `h100-aks-ubuntu-training-slurm`                           |
 | **EKS**  | `aicr recipe --service eks --accelerator h100 --intent training --os ubuntu --platform slurm -o recipe.yaml` | `h100-eks-ubuntu-training-slurm`                           |
 | **GKE**  | `aicr recipe --service gke --accelerator h100 --intent training --os cos --platform slurm -o recipe.yaml`    | `h100-gke-cos-training-slurm`                              |
-| **Kind** | `aicr recipe --service kind --accelerator h100 --intent training --platform slurm -o recipe.yaml`            | `h100-kind-training-slurm` (CPU-only NodeSet; no GPU GRES) |
+| **EKS GB200** | `aicr recipe --service eks --accelerator gb200 --intent training --os ubuntu --platform slurm -o recipe.yaml` | `gb200-eks-ubuntu-training-slurm`                     |
+| **EKS GB300** | `aicr recipe --service eks --accelerator gb300 --intent training --os ubuntu --platform slurm -o recipe.yaml` | `gb300-eks-ubuntu-training-slurm`                     |
+| **GKE GB200** | `aicr recipe --service gke --accelerator gb200 --intent training --os cos --platform slurm -o recipe.yaml`    | `gb200-gke-cos-training-slurm`                        |
+| **Kind** | `aicr recipe --service kind --accelerator h100 --intent training --platform slurm -o recipe.yaml`            | `h100-kind-training-slurm` (simulated GPUs; no GPU GRES)   |
 
 
-H100 cloud leaves bake in `Gres=gpu:h100:8` and matching `nvidia.com/gpu: 8` slurmd limits so `srun --gres=gpu:N` works after deploy.
+H100 cloud leaves bake in `Gres=gpu:h100:8` and matching `nvidia.com/gpu: 8` slurmd limits so `srun --gres=gpu:N` works after deploy; the GB200 and GB300 leaves bake in `Gres=gpu:gb200:4` / `Gres=gpu:gb300:4` with `nvidia.com/gpu: 4`.
 
 ### Hybrid snapshot mode
 
@@ -245,16 +249,47 @@ aicr bundle \
 
 AKS ships `managed-csi` as the default StorageClass; omit `--storage-class` unless you need a non-default class.
 
-### Kind (CPU-only smoke / CI)
+### Kind (simulated GPUs)
 
-No GPU pools or taints; omit accelerated flags unless your Kind config adds them.
+The Kind leaf runs Topograph with the `dra` provider, which builds Slurm blocks from each node's `nvidia.com/gpu.clique` label and drops nodes that have none. A stock Kind cluster has neither GPUs nor that label, so build the cluster the way the gated [`uat-kind-sim`](../.github/workflows/uat-kind-sim.yaml) lane does, with the lane's own files. Run these from the root of a checkout of this repository:
 
 ```shell
-aicr bundle \
-  --recipe recipe.yaml \
-  --deployer helm \
-  --output bundle
+# Four workers with simulated H100s (mocked NVML plus the NVIDIA device plugin)
+# in two nvidia.com/gpu.clique cliques of two; the control plane stays GPU-free.
+# Needs kind, kubectl, helm 4, and yq (.settings.yaml pins the lane's versions).
+tests/uat/kind/bootstrap-cluster.sh
+kubectl config use-context kind-aicr-uat-slurm
+
+# The lane's AICRConfig without its evidence block, which would sign the
+# validation result and push it to the project's registry.
+yq 'del(.spec.validate.evidence)' tests/uat/kind/tests/h100-training-slurm-config.yaml > kind-slurm.yaml
+
+aicr snapshot --config kind-slurm.yaml   # snapshot.yaml, read by validate below
+aicr recipe --config kind-slurm.yaml     # recipe.yaml, the same leaf as the Kind row above
+aicr bundle --config kind-slurm.yaml     # ./bundle, helmfile deployer
 ```
+
+The config's `spec.bundle.deployment.set` fits the bundle to this cluster; its header gives the full reasoning:
+
+- `slinkyslurm:nodesets.slinky.replicas=4`: one slurmd pod per worker, so the leaf's `blockSizes: [2]` fills two blocks. The leaf itself ships one replica.
+- `gpuoperator:enabled=false` and `dradriver:enabled=false`: gpu-operator needs the `nvidia` container runtime and the DRA driver needs a driver root on the node, and `kindest/node` has neither, so neither would become ready. `aicr bundle` prints a deprecation notice for these two keys, which the config header explains.
+
+Install the bundle and check the topology, in place of the `deploy.sh` step under [Install Bundle](#install-bundle):
+
+```shell
+(cd bundle && helmfile apply --skip-diff-on-install)   # prerequisites: bundle/README.md
+tests/uat/kind/verify-topology.sh
+```
+
+`verify-topology.sh` derives the expected blocks from where the slurmd pods landed and each node's clique label, and compares them with the `topology.conf` Topograph writes, retrying for up to five minutes while Topograph syncs.
+
+Validate the conformance phase only:
+
+```shell
+aicr validate --config kind-slurm.yaml --phase conformance --output report.json
+```
+
+The deployment phase does not apply here: it checks the excluded gpu-operator and DRA driver, and waits for them until the validator Job's deadline. The config's `spec.validate.execution.skipChecks` withholds the seven conformance checks that need the real GPU stack and reports them as skipped; `slinky-slurm-health`, `gang-scheduling`, and `cluster-autoscaling` still run. Then continue at [Run Job](#run-job).
 
 > No `nv-sentinel` flag is needed on any of these platforms. The driver is
 > host-installed on Kind (and node-image-installed on GKE COS and AKS
@@ -262,7 +297,7 @@ aicr bundle \
 > the recipes now assign `labeler.assumeDriverInstalled` themselves. See
 > [NVSentinel on provider-installed-driver platforms](../docs/user/component-catalog.md#nvsentinel-on-provider-installed-driver-platforms).
 
-For automated no-GPU checks, see `make kwok-e2e` / `make check-health COMPONENT=slinky-slurm` in the repo Makefile.
+The automated run of the Kind path is the `uat-kind-sim` workflow, dispatched manually on `main`. `make kwok-e2e` does not cover this leaf: KWOK has no `kind` node profile, and its nodes have no kubelet to run slurmd. `make check-health COMPONENT=slinky-slurm` runs that component's Chainsaw health check against the current cluster.
 
 ### Storage class
 
@@ -274,7 +309,7 @@ Set `--storage-class` to a StorageClass that exists (`kubectl get storageclass`)
 cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 ```
 
-Deploy order: `cert-manager` → `slinky-slurm-operator-crds` → `slinky-slurm-operator` → `slinky-slurm` (→ `slinky-topograph` on the GKE and Kind leaves, after `slinky-slurm` so the slurm chart owns the ConfigMap Topograph patches).
+Deploy order: `cert-manager` → `slinky-slurm-operator-crds` → `slinky-slurm-operator` → `slinky-slurm` (→ `slinky-topograph` on the H100 GKE and Kind leaves, after `slinky-slurm` so the slurm chart owns the ConfigMap Topograph patches).
 
 ```shell
 kubectl rollout status -n slinky deploy/slurm-operator
@@ -299,7 +334,7 @@ Use **deployment** and **conformance**. Performance validation is **not supporte
 | Phase         | What it checks                                                                                                         |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `deployment`  | Component Chainsaw health (CRs, Deployments, DaemonSets ready), including `slinky-slurm` readiness (long retry budget) |
-| `conformance` | `slinky-slurm-health`: controller and node health, bounded `srun`, and completed-job persistence through `sacct` when accounting is enabled |
+| `conformance` | The inherited AI conformance checks (`platform-health`, `gpu-operator-health`, `dra-support`, `gang-scheduling`, `secure-accelerator-access`, and the rest; run `yq .validation.conformance.checks recipe.yaml` for the leaf's list) plus `slinky-slurm-health`: controller and node health, bounded `srun`, and completed-job persistence through `sacct` when accounting is enabled. The GB200 and GB300 leaves add `slinky-slurm-imex-channel` |
 | `performance` | **Not supported yet** on slurm leaves                                                                                  |
 | `all`         | Runs deployment → conformance → performance in sequence; the performance step has nothing to run on slurm leaves       |
 
@@ -425,9 +460,9 @@ Helm does not remove CRDs or PVCs by default; delete manually when you need a cl
 
 ## Success
 
-- `deployment` + `conformance` phases pass in the CTRF report.
+- `deployment` + `conformance` phases pass in the CTRF report (`conformance` only on Kind).
 - `sinfo` shows NodeSet nodes idle.
 - `srun hostname` returns worker hostnames.
-- On GPU leaves, `srun --gres=gpu:8 nvidia-smi -L` reaches all GPUs per node.
+- On GPU leaves, `srun --gres=gpu:N nvidia-smi -L` reaches all GPUs per node (`N` is 8 on H100, 4 on GB200 and GB300).
 
 > Multi-node NCCL via `srun` + Pyxis/Enroot is the natural Slurm-native performance path; it is out of scope for this smoke CUJ and not covered by `aicr validate --phase performance` today.

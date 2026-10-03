@@ -36,7 +36,7 @@ curl -sfL https://get.aicr.run | bash -s --
 aicr recipe --service eks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
-# Render it into deployment-ready bundles (helm, argocd, flux, or helmfile)
+# Render it into deployment-ready bundles (helm, argocd, argocd-helm, flux, or helmfile)
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
 # After deploying the bundle, validate the running cluster against the recipe

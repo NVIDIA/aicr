@@ -58,7 +58,7 @@ throughput-primary gate.
 | GKE H100 | GKE | `a3-megagpu-8g` (208 vCPU) | 8× H100-SXM | us-central1 |
 | EKS RTX Pro 6000 | EKS | RTX PRO 6000 | 8 | us-west-2 |
 
-Non-GPU nodes were small on both EKS H100 paths: EKS H100 system nodes =
+Non-GPU nodes were small on both H100 clusters: EKS H100 system nodes =
 `m7i.xlarge` (4 vCPU); GKE = `n2-standard-8` cpu-worker (8 vCPU) + `e2-standard-4`
 system nodes (4 vCPU).
 
@@ -107,7 +107,7 @@ workloads.**
   `thread 'tokio-runtime-worker' panicked … Unfold must not be polled after it
   returned Poll::Ready(None)` (24×) and `KVStoreDiscovery … bucket missing for
   query=AllEndpoints` (97×) — worker discovery died, `/v1/chat/completions` hung.
-- **Root cause:** upstream `futures-util 0.3.31` bug ([ai-dynamo/dynamo#7328]),
+- **Root cause:** upstream `futures-util 0.3.31` bug ([ai-dynamo/dynamo#7328](https://github.com/ai-dynamo/dynamo/issues/7328)),
   fixed in `futures-util 0.3.32`, first shipped in **dynamo v1.0.0**, never
   backported to 0.9.x. AICR ran a **version skew**: the `dynamo-platform`
   operator chart was `1.0.2` but the runtime **image tags were still `0.9.0`**

@@ -87,11 +87,12 @@ a latent one.
 
 **Surface:** bundle and artifact schemas ·
 **Deprecated in:** v0.22 ·
-**Removed in:** v1.0.0 for `RecipeResult` inputs; **already removed in v0.21**
-for `RecipeMetadata` overlays
+**Removed in:** v1.0.0 for `Snapshot`, `RecipeCriteria`, and `RecipeResult`
+inputs — **this removal has happened**; **already removed in v0.21** for
+`RecipeMetadata` overlays
 
-Artifacts predating the `apiVersion` field load today with the field absent or
-empty. That tolerance retires alongside the alpha values — except for
+Artifacts predating the `apiVersion` field loaded with the field absent or
+empty. That tolerance retired alongside the alpha values — except for
 `RecipeMetadata`, which lost it a release early and without a warning window;
 see below.
 
@@ -99,12 +100,50 @@ One narrowing landed earlier than the rest: as of v0.21, a `RecipeMetadata`
 overlay passed directly (`aicr bundle -r overlay.yaml`,
 `aicr validate -r overlay.yaml`) must carry an `apiVersion`, because the catalog
 scanner already required one and the two paths disagreed on the same bytes
-([#2421](https://github.com/NVIDIA/aicr/issues/2421)). Hydrated `RecipeResult`
-inputs keep the tolerance until v1.0.0.
+([#2421](https://github.com/NVIDIA/aicr/issues/2421)). `Snapshot`,
+`RecipeCriteria`, and hydrated `RecipeResult` inputs kept the tolerance until
+v1.0.0.
 
 **What to do.** Add an `apiVersion` header to any artifact you author or retain.
 Use the target value from the table above, not the alpha one — v0.21 onward
 accepts both, and only the target survives v1.0.0.
+
+### Bundle-time GPU allocation-policy overrides
+
+**Surface:** bundle value overrides ·
+**Deprecated in:** v0.17 · **Removed in:** not scheduled
+
+A static bundle-time override (`--set`, `--set-json`, `--set-file`, or a config
+file) of a key that selects the GPU allocation policy still applies, but warns.
+The keys are `devicePlugin.enabled` on `gpu-operator`(`-ocp`),
+`resources.gpus.enabled` and `gpuResourcesEnabledOverride` on
+`nvidia-dra-driver-gpu`(`-ocp`), and the `enabled` toggle of those components.
+Validators verify the allocation policy resolved from the recipe, so a
+bundle-time change is reported as recipe/cluster drift. `--dynamic` on these
+keys is already rejected. See
+[Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
+
+No removal release is set yet, so the warning does not name one.
+
+**What to do.** Set the allocation mode in a recipe overlay instead of at
+bundle time.
+
+### Bundle-time `slinky-slurm:accounting.enabled` on legacy Slurm recipes
+
+**Surface:** bundle value overrides ·
+**Deprecated in:** v0.19 · **Removed in:** not scheduled
+
+A Slurm recipe that records no accounting mode (no
+`configuration.slurm.accounting`) predates `--slurm-accounting-mode`. Bundling
+one with a `slinky-slurm:accounting.enabled` override still works, but warns:
+the override selects only customer-managed accounting, and it is not recorded
+in recipe evidence. On a recipe that records a mode, the same override is
+rejected; see [Slurm Accounting](slinky-slurm-accounting.md).
+
+No removal release is set yet, so the warning does not name one.
+
+**What to do.** Regenerate the recipe with `--slurm-accounting-mode` (for
+example `customer-managed`) and drop the override.
 
 ## Removed
 

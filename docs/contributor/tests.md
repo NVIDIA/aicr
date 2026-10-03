@@ -4,12 +4,14 @@ AICR's test pyramid has five layers. Unit tests are the broad base —
 table-driven, hermetic, `--no-cluster`. Above them sit integration
 tests against a real Kubernetes API (Kind), Chainsaw post-deploy
 health checks, KWOK matrix tests that exercise scheduling shape and
-deployer output without GPU hardware, and a thin top of E2E tests
-against real cloud accounts.
+deployer output without GPU hardware, and E2E tests that drive the
+built `aicr` binary through hermetic Chainsaw CLI suites
+(`--no-cluster`). Testing on real GPU clusters is [UAT](uat.md),
+outside this pyramid.
 
 > **What to use when.** If the code path can be exercised without
 > the Kubernetes API, write a unit test. If it cannot, prefer KWOK
-> or Chainsaw over Kind, and Kind over an E2E.
+> or Chainsaw over Kind, and Kind over a UAT run on real hardware.
 
 The pre-push gate is **`make qualify`**. It runs tests with the race
 detector and coverage threshold, lints (golangci-lint + yamllint),
@@ -24,7 +26,7 @@ CI-only checks (see [The `make qualify` Gate](#the-make-qualify-gate)).
 | **Integration tests (Go)** | Logic touching the K8s API | `*_test.go` with envtest / fake client | `make test` (Kind for live cases) | `make qualify`, push CI |
 | **Chainsaw health checks** | Component-level post-deploy health | `recipes/checks/<name>/health-check.yaml` | `make check-health COMPONENT=<name>` | UAT readiness gate (`aicr validate --phase deployment`), registry-linked checks only; statically by `TestValidateTestReadOnly_AllCheckFiles` under `make test`, which covers opt-in checks too |
 | **KWOK matrix tests** | Recipe scheduling shape + deployer output without GPUs | `kwok/scripts/*`, `recipes/overlays/*` | `make kwok-test-deployer RECIPE=… DEPLOYER=…` | `kwok-recipes.yaml` workflow |
-| **E2E tests** | Full pipeline against real cloud accounts | `tools/e2e` | `unset GITLAB_TOKEN && ./tools/e2e` | `make qualify`, e2e workflow |
+| **E2E tests** | CLI behavior through the built binary, no cluster | `tools/e2e`, `tests/chainsaw/{cli,signing,bundle-templates}/` | `unset GITLAB_TOKEN && ./tools/e2e` | `make qualify`, `CLI E2E` job in `qualification.yaml` |
 
 The rest of this page covers each surface in the order a typical
 change touches them — unit, integration, chainsaw, KWOK, E2E — plus
@@ -260,6 +262,12 @@ renders but pods stay Pending or land on the wrong nodes. Extend
 `kwok/profiles/` rather than relax the recipe — KWOK is the
 simulated reflection of production shape, not a relaxed substitute.
 
+KWOK results are advisory. The `KWOK Test Summary (advisory)` check turns red
+when a tier fails, but it does not block merges. The main branch ruleset
+requires `gate` (the aggregate job in the `Merge Gate` workflow,
+`merge-gate.yaml`) and `Check PR Title`. `gate` is the only required
+qualification aggregate.
+
 For the design rationale and the spike findings that justify the
 chart pin and Repository-secret shape, see
 [ADR-008](https://github.com/NVIDIA/aicr/blob/main/docs/design/008-kwok-deployer-matrix.md);
@@ -272,7 +280,7 @@ see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 
 | Tier | Trigger | Deployers exercised |
 |------|---------|----------------------|
-| Tier 1 — generic overlays | every PR + push | `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` |
+| Tier 1 — generic overlays | every PR + push | `helm` on every generic overlay, plus each other deployer on one probe overlay (`eks-training`) |
 | Tier 2 — diff-aware accelerator overlays | PR only, conditional on changed files | `helm` only |
 | Tier 3 — full overlay set | push to `main` + nightly schedule | `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` |
 
@@ -285,6 +293,13 @@ see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 | `flux-oci` | source-controller OCI pull | kustomize-controller apply | all HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `flux-git` | source-controller Git clone (in-cluster Gitea) | kustomize-controller apply | GitRepositories Ready + all HelmReleases `Ready=True` |
 
+Tier 1 crosses the non-`helm` deployers with a single probe overlay to keep
+the PR matrix small. The probe is `eks-training`, which carries more
+components than the bare `eks` base, and falls back to the first generic
+overlay when it is absent. GitOps templating regressions specific to a component that the
+probe does not include are caught by Tier 3, which runs the full recipe x
+deployer cross-product after merge.
+
 Tier 2 stays `helm`-only because its job is to verify accelerator-specific
 overlays still render correctly when their inputs change. The deployer
 shape is orthogonal — re-running through Argo CD would only re-exercise
@@ -293,6 +308,69 @@ overlays. The `flux-git` and `argocd-git` lanes cover the filesystem
 (Git-source) round-trip of
 [#963](https://github.com/NVIDIA/aicr/issues/963) for both GitOps
 controllers, sharing the same in-cluster Gitea infrastructure.
+
+### Inventory Read-Back
+
+Every matrix cell ends by reading the bundle it just deployed back out of
+the cluster and requiring the two answers to agree. `validate-scheduling.sh`
+step 7 runs `aicr upgrade-check` twice against the same target recipe, once
+with `--from cluster` and once with `--from <bundle-dir>`, and diffs the
+per-component rows of the two JSON reports.
+
+The bundle is the oracle. The `recipe.yaml` at its root lists exactly the
+releases the bundler emitted, at exactly the versions it pinned, so there is
+no golden to maintain and nothing to drift against: a per-component
+divergence is by construction a defect in the cluster read. That matters
+most for the deployers whose release naming is not the component's own name
+(Flux composes `<targetNamespace>-<name>` and Argo CD prepends a settable
+prefix), where a mapping that no longer matches reports an empty inventory
+and a confident "every component is new". This is ADR-021 acceptance
+criterion 4, and running it on the existing `{recipe, deployer}` matrix is
+what makes the criterion's per-deployer requirement free.
+
+Compared: the component name, the kind of change, the `from` and `to`
+versions, and the verdict with the reason that produced it, plus the summary
+counts. Excluded, because they differ by construction: the top-level `from`
+(the literal `cluster` on one side, a path on the other), the `source` block
+(a cluster read has one, an artifact comparison does not), and `atRisk` (the
+cluster read implies the scan, the artifact comparison does not perform it).
+The `source` block is asserted on separately, since a read that matched
+nothing produces the same table a broken artifact read would and two
+degenerate reads must not agree their way to a pass.
+
+One row is excused, on the Argo CD lanes only. The cluster read takes an
+Argo CD chart version from what a sync established, never from the pin, and
+on KWOK some Applications never establish one: their sync operation waits on
+a health state the simulator does not produce. Such a component reads as
+`unversioned` with no `from`. The lane lists the Applications before the
+read, and a component may take that row shape only when its Application is
+neither `Synced` nor has a completed sync in `status.history`, and only when
+it is on `READBACK_UNSETTLED_ALLOWLIST` in `upgrade-readback.sh`: components
+observed to stall on KWOK, kai-scheduler today. Any other unsettled
+Application fails, so a lane cannot pass having compared nothing. Every other
+difference for an allowlisted component still fails, each excused row is
+logged, and the list is kept as `excused-unsettled.txt` beside the reports.
+
+Both invocations pass `--fail-on-error=false`: the question is whether the
+two paths agree, not whether the upgrade is safe, so a verdict-driven
+non-zero exit must not stand in for the comparison. A non-zero exit with
+that flag set is a real failure of the command.
+
+On a mismatch the lane prints a unified diff of the two projections and
+leaves both reports under `/tmp/kwok-debug-artifacts/upgrade-check/<recipe>-<deployer>/`,
+which the composite action uploads. The comparison itself lives in
+`kwok/scripts/lib/upgrade-readback.sh` and is unit-tested against fixture
+reports by `upgrade-readback_test.sh`; the matrix-deployer to `--deployer`
+mapping (`argocd-git` → `argocd`, `argocd-helm-oci` → `argocd-helm`) lives
+once in `kwok/scripts/lib/deployer-map.sh`.
+
+Readiness is deliberately not a precondition, so KWOK never producing a
+Ready workload cannot affect it. The read needs release records to exist,
+which the deploy step has already established: Helm writes its storage
+record before any pod runs, the Argo CD gate asserts the root Application
+reached `operationState.phase==Succeeded` (so every child Application is
+materialized), and the Flux gate asserts every HelmRelease reached
+`deployed`.
 
 ### Running KWOK Locally
 
@@ -356,6 +434,7 @@ and local loops can branch on failure mode without parsing logs.
 | `install-infra.sh` | 21 | Registry not reachable on host port within 60 s |
 | `install-infra.sh` | 30 | Argo CD Helm install failed |
 | `install-infra.sh` | 31 | `applications.argoproj.io` CRD not Established within 120 s |
+| `install-infra.sh` | 32 | Patching `argocd-cm` with the CSIDriver diff customization failed |
 | `install-infra.sh` | 40 | Repository secret apply failed |
 | `install-infra.sh` | 60 | Flux install manifest apply failed |
 | `install-infra.sh` | 61 | Flux controller not Ready within 180 s |
@@ -388,7 +467,7 @@ In CI, the `kwok-test` action derives `KWOK_SYNC_DEADLINE_EPOCH` in its
 first step — before toolchain setup and the `aicr` build, so the anchor
 sits within ~60 s of job start — from its `job_timeout_minutes` input
 (required, no default — every caller must wire its own value, which
-must equal that caller's `timeout-minutes`; currently `18` for the
+must equal that caller's `timeout-minutes`; currently `20` for the
 KWOK jobs) minus a 240 s margin reserved for chainsaw catch-block
 diagnostics, pod verification, and debug-artifact upload. The input
 must be a positive integer with no leading zeros, and must leave at
@@ -481,19 +560,23 @@ mode appears.
 
 ## E2E Tests
 
-`./tools/e2e` is the end-to-end pipeline runner. It builds, snapshots,
-generates recipes, validates, bundles, and (when credentials are
-available) deploys against real cloud accounts.
+`./tools/e2e` is the CLI integration runner. It builds the `aicr` binary
+with goreleaser, then runs the Chainsaw suites in `tests/chainsaw/cli/`,
+`tests/chainsaw/signing/`, and `tests/chainsaw/bundle-templates/` with
+`--no-cluster`. Each test invokes the binary and asserts on its exit code
+and output files; no cluster or cloud account is involved.
 
 ```bash
 unset GITLAB_TOKEN
 ./tools/e2e
 ```
 
-`make qualify` invokes the e2e step as part of the pre-push gate.
-CI runs the same script in the push workflow. Cloud credentials are
-optional — without them, the e2e exercises the artifact-generation
-half of the pipeline and skips deploy-side assertions.
+`make qualify` invokes the e2e step (`make e2e`) as part of the pre-push
+gate. Locally, suites labelled `ci=true` (they need a CI-attested binary)
+are skipped, and suites labelled `requires=docker` are skipped when no
+Docker daemon or registry image is available. CI runs the CLI and signing
+suites in the `CLI E2E` job of `qualification.yaml`. Testing on real GPU
+clusters is covered by [UAT](uat.md).
 
 ## The `make qualify` Gate
 
@@ -506,7 +589,7 @@ half of the pipeline and skips deploy-side assertions.
   [Docs YAML Fence Gate](#docs-yaml-fence-gate)).
 - `tuning-check` — node-tuning profile freshness.
 - `coverage-check` — the committed CUJ/CLI coverage matrix against the tree.
-- `e2e` — the end-to-end pipeline runner.
+- `e2e` — the Chainsaw CLI suites via `tools/e2e` (see [E2E Tests](#e2e-tests)).
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
 - bundle layout — `TestBundleLayoutMatchesManifest` renders the frozen fixture
@@ -536,7 +619,7 @@ golangci-lint run -c .golangci.yaml ./pkg/<affected>/...
 golangci-lint run -c .golangci.yaml ./...           # full sweep
 ```
 
-This applies even to PRs labeled `documentation` when they include
+This applies even to PRs labeled `area/docs` when they include
 incidental Go changes. Do not rely on CI to surface lint failures —
 the pre-push gate is local.
 
@@ -581,8 +664,8 @@ it by line number so later diagnostics still cite the true line.
 
 `check-docs-mdx-parse` needs Node 20+. Without it the script prints a warning
 and exits 0 locally, but **hard-fails under CI** — the `docs-mdx` job in
-`merge-gate.yaml` blocks on it, and the merge gate is the only required status
-check. This is the one place where a green local `make qualify` does not
+`merge-gate.yaml` blocks on it, and that workflow's `gate` job is a
+required status check. This is the one place where a green local `make qualify` does not
 guarantee a green CI: if you have no Node, the MDX gate did not actually run.
 
 Fixing a violation is usually one of:

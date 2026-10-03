@@ -2762,7 +2762,7 @@ h100-gke-cos-training-kubeflow:
   010-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   010-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: a04f4cb601173796a6907d6b094469aff6bca74c3328ebc1dbe8ec9dd91e6c15
+  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 45f8286e557afc185534f3e190388fa314807433c3d4639ab6658801e93ad739
   010-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   010-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2798,10 +2798,10 @@ h100-gke-cos-training-kubeflow:
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 720cf3194fa2d25b9f7c4f751a09225a836b8b3fbaba9129a12636043eae6db6
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
-  bundle-info.yaml: e5d30a9b0c04b614ebc00788765f4f7504e9a6312656da531624db7c89e81cce
-  checksums.txt: 73ca430580be881db1dd7af98ef73949b0b8e02904075f5b4821decdfdd4ea8d
+  bundle-info.yaml: 0eccb5f38da442d462ab76de778688a955067a424fe503b3d308e9fc4e7edfac
+  checksums.txt: 1e243c5ae49b1809d026f35ff2d236b56961796a5383bc942785524c153f1367
   deploy.sh: fdb5b08014a89062f4b304cce41d91410d4a690f2c5a723cdb4b08028097d92d
-  recipe.yaml: 00c3652a4b3ac832d31a2eba90101a452e15e5fa5d76fb03df81c3097c8d2a69
+  recipe.yaml: 778f4f38cf2bda39db6c70b3f77bc9cef2a3459980789175b7a25dbce77657ce
 h100-gke-cos-training-slurm:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -2844,7 +2844,7 @@ h100-gke-cos-training-slurm:
   010-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   010-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: a04f4cb601173796a6907d6b094469aff6bca74c3328ebc1dbe8ec9dd91e6c15
+  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 45f8286e557afc185534f3e190388fa314807433c3d4639ab6658801e93ad739
   010-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   010-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2891,10 +2891,10 @@ h100-gke-cos-training-slurm:
   020-slinky-topograph/values.yaml: 433c88d6355bfefd023c111e008a39e7c07c913401708a2641717ca5a796a1dd
   README.md: 9ffec06121fc2e14304bef09888c1c94eba7c70d3b696eb31013fb412cde9ff1
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
-  bundle-info.yaml: 21699aab1a6ecff80dff653d6412edf124e3f53fb00cef090ce20cb2784cfb40
-  checksums.txt: f8725701a4b717393bb50ab8f92fd238fbf1dc25cdc11a73ddfe748f3a6ef641
+  bundle-info.yaml: 5f04c03c47b0a86fede255c77ef02c137cb9bc4240fb53f3848ec1ac8a718f15
+  checksums.txt: a3645ca6b803c8244e84003102be37331aff09ab76ab3ec160357d6e72872003
   deploy.sh: 26b5bbeba08ab0830741d513d86fb9b24a204d48968b95c88fb5eadc9fe67cba
-  recipe.yaml: 9d9b77a2c69766434658d588365dc48fd43950ece03e06744d125e568ab6115d
+  recipe.yaml: 5337077a0192ff123d1987616ce4d8963679cf2b8328b12f291ffe4488ccee1d
 h100-kind-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -3105,21 +3105,21 @@ h100-kind-training-slurm:
   015-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
   015-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
-  015-slinky-slurm-pre/values.yaml: cd2aebf004a13a262bd9e6a72e7d28879abd762909a02c339f0447a6fbae570a
+  015-slinky-slurm-pre/values.yaml: 3437013a830e817f14f65f7e6dc75729beff0ab88b1ce008867aa464d066a514
   016-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm/install.sh: f8fc21f4d86df489d9fa6f5492e84954826b7dd5944b6e1e494c5e27e9ba20eb
   016-slinky-slurm/upstream.env: ae0598bf066c26ec0f76503212f4c50dc09103750aa36700e514fcfcbaad8c30
-  016-slinky-slurm/values.yaml: cd2aebf004a13a262bd9e6a72e7d28879abd762909a02c339f0447a6fbae570a
+  016-slinky-slurm/values.yaml: 3437013a830e817f14f65f7e6dc75729beff0ab88b1ce008867aa464d066a514
   017-slinky-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-topograph/install.sh: 19c15d32f7578504e561768affa18c21390db951c791a33998fd2bab58a881d8
   017-slinky-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
-  017-slinky-topograph/values.yaml: 4392d5c24c812f456c976cd34549a27c8c5369199c3075c430a075811a45c4cd
+  017-slinky-topograph/values.yaml: 8cc3bf52dbab729d1b71e495c8d51a58a5ea3592b18b356e4bbc0ff7b587b188
   README.md: 9e75e15c8f365e9420fa72d715062ee018329edd610099734138753fa2c23146
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
-  bundle-info.yaml: 078c94f71ba4769eb2758e77f4edb41e6f20d0129ae7bf54a88853e95ee09ebb
-  checksums.txt: a2822ed41faef0278b5455b7641112fa99a33bfaa87b385edc49dd992f3de29c
+  bundle-info.yaml: a93cb191edf0c4e9a18dbf165832a44a2e6bddb9dcb3a724ca21741884347fb0
+  checksums.txt: 1bd46eb553298268a254522feb66ad2761a31339363457422ebe562fa9637ec8
   deploy.sh: a9268f292354d1038ae6c7401d39c2fd190aafd3e2f0f7a3820ee740e685255b
-  recipe.yaml: a1ba6421e56bcc606606314e025ec6c8f2be19efb9563dadee9237d16f6b2141
+  recipe.yaml: 385bac65d13d3a64c7de7f8f300fe0d6811914d2e65206072d3bf8606d642fc5
 h200-any:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -4304,7 +4304,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   006-dranet/Chart.yaml: afeb8fc7d2d11ad349641c63cb13d55d7528027571c2061f0754bd96fcef0e16
   006-dranet/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-dranet/install.sh: 73c95f06b87cec0844c51cffb5eff5cf4333d51d6bde9750b935fb3089756a4b
-  006-dranet/templates/dranet.yaml: d018b41c1cb580cb0d485b7458d734bd1f069f20d5347e20a47f88dcfbb16cba
+  006-dranet/templates/dranet.yaml: 278b29a7f5dea711e0f7d227dd39b37b767cd6b62eebac2908b5c3e11bd1086f
   006-dranet/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -4321,8 +4321,8 @@ vr200-rke2-ubuntu-inference-dynamo:
   010-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   010-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-customizations/install.sh: 17a57ee11c5b776ba3866f91d1c5233b709e728df358d8e467b2856dc687e80f
-  010-nodewright-customizations/templates/tuning-rke2.yaml: 2f8bbb2816615ac069410deafe9af733ee3ef751a9d6a7477d10f261978e0a83
-  010-nodewright-customizations/values.yaml: 1f04ef1afaaf02402631e1d11110c12197afd8427b01e5022aad81a763aaf0d3
+  010-nodewright-customizations/templates/tuning-rke2.yaml: c4108ebf1c24aa32ec362980ed19ac6815edf936bfb4d9df312003694abcc46c
+  010-nodewright-customizations/values.yaml: dee8ff46c4da7faebf53dd0b38619b565b97e599daa01a3a19c3a3dc6d0d79d6
   011-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
   011-prometheus-operator-crds/upstream.env: 79fc2ce93f1bb62225f9b62cfe618fde8081bce8f7a6d9a56f3a118346da4a4c
@@ -4360,17 +4360,12 @@ vr200-rke2-ubuntu-inference-dynamo:
   019-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  020-rdma-netns-exclusive/Chart.yaml: 69e89838b1100cae78e991f464d9898ba86b3ebd4a5192237df9bb203f4b064b
-  020-rdma-netns-exclusive/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  020-rdma-netns-exclusive/install.sh: b9ef51031b7243a5a2b2e7e276a2e417a1400ff29bf47666f0f7752d8c2fd257
-  020-rdma-netns-exclusive/templates/skyhook.yaml: fdcf5b2179700489b1035740390c495e0f6013c8ee42838571a6071c3fff0ada
-  020-rdma-netns-exclusive/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  README.md: 12e1ad8d449ad94e461f7c513a1a6e27ed301529b03c281c0587936a69d67fa4
+  README.md: b0d4dc1341565474394f7c338e1187f97aaa84f2506642d2c91a212f57ba1669
   UPGRADING.md: d27ec18c5dbe463bc50dfdde771821d0a717e350be36a89f87297ada543ba81c
-  bundle-info.yaml: ee5b01bad113d057bbd17bd0fb79b2815952fd283b561e76413c204a914ca759
-  checksums.txt: 288a8f013f15c4530db80b8ca4a900d5d6e77b740f64cb1c1a50443470d2e29d
-  deploy.sh: 7fbd6e917f944b91715182e767d5372b959cdbdbfad5519fc03003b50a554df8
-  recipe.yaml: b01489cfbfccddf260c3cddfa11e7877f53186c77c824893f6c7a99611377149
+  bundle-info.yaml: 3614ecc79f449848f257e036fb15a0b8fb7cf24fcad50d0079468a98cc92fda3
+  checksums.txt: e89cc487af73cecd7dee840f690c6cc66a1c41f27f337eb4eb00506336fd09d5
+  deploy.sh: 62b3ab91044223177c74d3aee7241f4aeae64e6bdb31481f7da642dbf4556e9a
+  recipe.yaml: e3ca2966624bc02a472b86a93d10a8786a869e74fb461420ebf4d8fc0b208f87
 vr200-rke2-ubuntu-training-kubeflow:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -4379,7 +4374,7 @@ vr200-rke2-ubuntu-training-kubeflow:
   002-dranet/Chart.yaml: afeb8fc7d2d11ad349641c63cb13d55d7528027571c2061f0754bd96fcef0e16
   002-dranet/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-dranet/install.sh: 73c95f06b87cec0844c51cffb5eff5cf4333d51d6bde9750b935fb3089756a4b
-  002-dranet/templates/dranet.yaml: d018b41c1cb580cb0d485b7458d734bd1f069f20d5347e20a47f88dcfbb16cba
+  002-dranet/templates/dranet.yaml: 278b29a7f5dea711e0f7d227dd39b37b767cd6b62eebac2908b5c3e11bd1086f
   002-dranet/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
@@ -4392,8 +4387,8 @@ vr200-rke2-ubuntu-training-kubeflow:
   005-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   005-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-customizations/install.sh: 17a57ee11c5b776ba3866f91d1c5233b709e728df358d8e467b2856dc687e80f
-  005-nodewright-customizations/templates/tuning-rke2.yaml: c790dba3a64187639d23834f7d09cc477946d84be301711c639a77dfae9909f6
-  005-nodewright-customizations/values.yaml: 5f40bf32faf80baafdfbf50a7386510aef07ce7a1d697af84bd49c4b96db1a58
+  005-nodewright-customizations/templates/tuning-rke2.yaml: ac517959b4b3d78e0db0c4cecdf2d98c2217a2e8b20725caaca85bc79bb9f0c2
+  005-nodewright-customizations/values.yaml: 393a1b3cc65393331da510cea3c0f89d22e173a62babcd4b7f33c6d9d4c15937
   006-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
   006-prometheus-operator-crds/upstream.env: 79fc2ce93f1bb62225f9b62cfe618fde8081bce8f7a6d9a56f3a118346da4a4c
@@ -4436,14 +4431,9 @@ vr200-rke2-ubuntu-training-kubeflow:
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  016-rdma-netns-exclusive/Chart.yaml: 69e89838b1100cae78e991f464d9898ba86b3ebd4a5192237df9bb203f4b064b
-  016-rdma-netns-exclusive/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  016-rdma-netns-exclusive/install.sh: b9ef51031b7243a5a2b2e7e276a2e417a1400ff29bf47666f0f7752d8c2fd257
-  016-rdma-netns-exclusive/templates/skyhook.yaml: fdcf5b2179700489b1035740390c495e0f6013c8ee42838571a6071c3fff0ada
-  016-rdma-netns-exclusive/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  README.md: d4fa98f33706e40d230a211c485647770123ad654b9c34f67cb9f7024b7fcf76
+  README.md: 80e547edb47741f31f7b21d02cbf9b0fa9a17a99b2a7320cbdff82d856d1cb81
   UPGRADING.md: ac50a3b91fe4d02988ef696661f8ac7d5e6854e49419d573361ad4f2b280c327
-  bundle-info.yaml: 025befde4a74a56487a607753cfdc01952e8e0459bc3f3eaf29ccca850aa7f0d
-  checksums.txt: 1f4d28b6f7965bde07dd1b4987c7ae9902a9981d2f280e1855ad5107184a0daf
-  deploy.sh: 13f4e53fce935d1a1dbcfcd4c026299e7b3352b2ba2f83aed98f5bee64fe7399
-  recipe.yaml: 46f8d6877d28b10532e31b52dfa56e7f8024669298b647caddd2c7c03c5abeb4
+  bundle-info.yaml: 5bfe00acd931aef4736d88e05805e651f6bbb6d1afa830294329f81d2a74c7f5
+  checksums.txt: 5ca2e27c469f913d24310d8fcfeda43dfa41610d63be12718d6c4a105dae9db6
+  deploy.sh: 2b0cd173c38bb27ee4cdb7d6c4d1d94d523b56fed94d6889cacd342b0b5a0dfd
+  recipe.yaml: eae45aaf8edf5ea05bc9e583440d75ffcdf378166ca86e5e469cd3e572b00e07

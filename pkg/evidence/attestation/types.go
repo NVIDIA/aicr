@@ -143,10 +143,15 @@ func CTRFRelPath(p Phase) string {
 // Fingerprint and CriteriaMatch are pkg/fingerprint types used
 // directly so the predicate-v1 schema stays exactly aligned with what
 // fingerprint.FromMeasurements and Fingerprint.Match produce.
+//
+// AICRCommit is the git commit the aicr binary was built from. It is
+// omitted when the binary carries no valid commit stamp, so evidence from
+// an unstamped build serializes without the field.
 type Predicate struct {
 	SchemaVersion           string                  `json:"schemaVersion" yaml:"schemaVersion"`
 	AttestedAt              time.Time               `json:"attestedAt" yaml:"attestedAt"`
 	AICRVersion             string                  `json:"aicrVersion" yaml:"aicrVersion"`
+	AICRCommit              string                  `json:"aicrCommit,omitempty" yaml:"aicrCommit,omitempty"`
 	ValidatorCatalogVersion string                  `json:"validatorCatalogVersion" yaml:"validatorCatalogVersion"`
 	ValidatorImages         []ValidatorImage        `json:"validatorImages" yaml:"validatorImages"`
 	Recipe                  RecipeRef               `json:"recipe" yaml:"recipe"`

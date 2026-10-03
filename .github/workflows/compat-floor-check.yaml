@@ -1,0 +1,123 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# PR-time over-high floor check for tests/uat/compat.yaml (#2860).
+#
+# An over-high harness-compat floor silently skips a good UAT release cell, so
+# it is rejected before merge. At PR time the floor-introducing commit is in no
+# tag yet, so the floor may name only an existing stable tag or the very next
+# release (IncPatch/IncMinor/IncMajor of the latest stable). The nightly batch
+# (uat-nightly-batch.yaml) re-runs the same check after the change ships and
+# refuses to honor a floor that fails it.
+#
+# Deliberately not named uat-*.yaml: that glob is the per-cloud UAT pipeline set
+# scanned by the coverage-matrix generator and the tests/uat workflow tests.
+name: UAT Compat Floor Check
+
+on:
+  pull_request:
+    paths:
+      - 'tests/uat/compat.yaml'
+      - 'infra/uat/reservations.yaml'
+      - 'pkg/uatbroker/**'
+      - 'tools/uat-broker/**'
+      - '.github/workflows/compat-floor-check.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  compat-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0  # full history + tags for git blame / git tag --contains
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+      # Same blame + tag-contains loop as the nightly compat step, over every
+      # lane. A line whose git lookup fails is omitted from the containing file,
+      # which the broker reports as inconclusive: fail closed, never pass.
+      - name: Check harness-compat floors
+        env:
+          COMPAT_FILE: tests/uat/compat.yaml
+        run: |
+          set -euo pipefail
+          go build -o ./bin/uat-broker ./tools/uat-broker
+          containing="${RUNNER_TEMP}/compat-containing.tsv"
+          : > "$containing"
+
+          list=$(./bin/uat-broker compat list --file "$COMPAT_FILE")
+          mapfile -t lines < <(awk -F'\t' '{ print $1 }' <<<"$list" | sed '/^$/d' | sort -un)
+          if (( ${#lines[@]} == 0 )); then
+            echo "No harness-compat floors in ${COMPAT_FILE}."
+            exit 0
+          fi
+          for n in "${lines[@]}"; do
+            if [[ ! "$n" =~ ^[0-9]+$ ]]; then
+              echo "::error::uat-broker compat list returned a non-numeric line '${n}'."
+              exit 1
+            fi
+            if ! blame=$(git blame --porcelain -L "${n},${n}" -- "$COMPAT_FILE"); then
+              echo "::warning::git blame failed for ${COMPAT_FILE}:${n}"; continue
+            fi
+            sha=${blame%% *}
+            if [[ ! "$sha" =~ ^[0-9a-f]{40}$ || "$sha" =~ ^0+$ ]]; then
+              echo "::warning::no committed blame for ${COMPAT_FILE}:${n} (got '${sha}')"; continue
+            fi
+            if ! tags=$(git tag -l --contains "$sha" 'v*'); then
+              echo "::warning::git tag --contains failed for ${sha}"; continue
+            fi
+            printf '%s' "$n" >> "$containing"
+            while IFS= read -r t; do
+              [[ -n "$t" ]] && printf '\t%s' "$t" >> "$containing"
+            done <<<"$tags"
+            printf '\n' >> "$containing"
+          done
+
+          all_tags=$(git tag -l 'v*')
+          problems=$(./bin/uat-broker compat check --file "$COMPAT_FILE" \
+            --containing "$containing" <<<"$all_tags")
+          jq -e 'type == "array"' >/dev/null <<<"$problems"
+          failed=""
+          while IFS=$'\t' read -r line kind msg; do
+            msg=${msg//'%'/'%25'}
+            if [[ "$kind" == "inert" ]]; then
+              echo "::notice file=${COMPAT_FILE},line=${line},title=UAT compat floor inert::${msg}"
+              continue
+            fi
+            echo "::error file=${COMPAT_FILE},line=${line},title=UAT compat floor rejected::[${kind}] ${msg}"
+            failed=1
+          done < <(jq -r '.[] | [(.line | tostring), (.kind // "unknown"),
+              ((.message // "") | gsub("[\r\n\t]+"; " "))] | @tsv' <<<"$problems")
+          if [[ -n "$failed" ]]; then
+            echo "::error::${COMPAT_FILE} has over-high or unverifiable floors. A new floor must be the next release (the first stable release that will contain this change)."
+            exit 1
+          fi
+          echo "All harness-compat floors verified."

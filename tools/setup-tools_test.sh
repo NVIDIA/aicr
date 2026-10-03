@@ -341,6 +341,171 @@ if ! reason=$(check_sidecar_specs); then
 fi
 echo "Sidecar sources: default suffix per algorithm, explicit suffix honored, unsupported algorithm rejected"
 
+# curl does the transient-failure retrying, so these checks pin what this script
+# controls: the retry count it hands curl, the diagnosis it prints for each
+# failure, and the retry loop around installer scripts. A fake curl reads its
+# behavior from a script file. Each line is "<http_code> <exit>", and the last
+# line repeats once exhausted. Every call's arguments are appended to a log.
+check_download_retry() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true" RETRY_ATTEMPTS=3 RETRY_BASE_DELAY=0
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        scratch=$(mktemp -d)
+        trap 'rm -rf "${scratch}"' EXIT
+        cat > "${scratch}/curl" <<'FAKE'
+#!/usr/bin/env bash
+n=$(( $(cat "${FAKE_DIR}/count" 2>/dev/null || echo 0) + 1 ))
+echo "${n}" > "${FAKE_DIR}/count"
+echo "$*" >> "${FAKE_DIR}/args"
+line=$(sed -n "${n}p" "${FAKE_DIR}/script"); [[ -n "${line}" ]] || line=$(tail -n1 "${FAKE_DIR}/script")
+read -r code rc <<< "${line}"
+printf '%s' "${code}"
+exit "${rc}"
+FAKE
+        chmod +x "${scratch}/curl"
+        export PATH="${scratch}:${PATH}" FAKE_DIR="${scratch}"
+
+        # probe <want-rc> <want-calls> <want-message> <label> <script-lines...>
+        probe() {
+            local want_rc="$1" want_n="$2" want_msg="$3" label="$4" rc=0 out; shift 4
+            printf '%s\n' "$@" > "${scratch}/script"; rm -f "${scratch}/count" "${scratch}/args"
+            out=$(verify_download_url "https://example.invalid/x" "${label}" 2>&1) || rc=$?
+            [[ "${rc}" -eq "${want_rc}" ]] || { echo "${label}: exit ${rc}, want ${want_rc}"; exit 1; }
+            [[ "${out}" == *"${want_msg}"* ]] || { echo "${label}: output lacks '${want_msg}': ${out}"; exit 1; }
+            [[ "$(wc -l < "${scratch}/args")" -eq "${want_n}" ]] ||
+                { echo "${label}: $(wc -l < "${scratch}/args") curl calls, want ${want_n}"; exit 1; }
+        }
+
+        probe 0 1 ""                       "healthy URL"      "200 0"
+        probe 1 1 "File not found (404)"   "404 fails fast"   "404 22"
+        probe 1 3 "Access forbidden (403)" "403 keeps failing" "403 22"
+        probe 0 3 ""                       "403 clears"       "403 22" "403 22" "200 0"
+        probe 1 3 "redirect target did not answer" "dead redirect" "302 35"
+        probe 0 3 ""                       "redirect recovers" "302 35" "302 35" "200 0"
+        probe 1 1 "Could not resolve host" "no DNS"           "000 6"
+
+        # A first-hop reset, empty reply, or TLS error is not retried by curl, so
+        # the probe retries it. A timeout after a redirect is already retried by
+        # curl, so the probe must not retry it again.
+        probe 0 3 ""                       "first hop reset clears" "000 56" "000 56" "200 0"
+        probe 1 3 "curl exit 52"           "first hop empty reply"  "000 52"
+        probe 1 1 "redirect target did not answer" "redirect timeout is not retried twice" "302 28"
+        probe 1 1 "curl exit 7"            "refused is not retried twice" "000 7"
+
+        # N attempts is N-1 curl retries. Only downloads retry a 404, since the
+        # probe has already confirmed their URL.
+        probe 0 1 "" "flags" "200 0"
+        grep -q -- '--retry 2 ' "${scratch}/args" && ! grep -q -- '--retry-all-errors' "${scratch}/args" ||
+            { echo "the probe must pass --retry 2 without --retry-all-errors: $(cat "${scratch}/args")"; exit 1; }
+        [[ " ${CURL_RETRY_ALL[*]} " == *" --retry-all-errors "* ]] || { echo "downloads do not retry all errors"; exit 1; }
+
+        # A Retry-After wait is bounded, and the last --retry-max-time wins.
+        grep -q -- '--retry-max-time 60 ' "${scratch}/args" ||
+            { echo "the probe must bound retries with --retry-max-time 60: $(cat "${scratch}/args")"; exit 1; }
+        [[ " ${CURL_RETRY_ALL[*]} " == *" --retry-max-time 600 "* ]] ||
+            { echo "downloads do not bound retries with --retry-max-time 600"; exit 1; }
+
+        # retry_transient wraps installer scripts. Check the attempt count, the
+        # final status, and that the warning names the label.
+        flaky() { local n; n=$(( $(cat "${scratch}/runs" 2>/dev/null || echo 0) + 1 )); echo "${n}" > "${scratch}/runs"; [[ "${n}" -ge "$1" ]]; }
+        attempt() {
+            local want_rc="$1" want_n="$2" label="$3" succeed_on="$4" rc=0 out
+            rm -f "${scratch}/runs"
+            out=$(retry_transient "${label}" flaky "${succeed_on}" 2>&1) || rc=$?
+            [[ "${rc}" -eq "${want_rc}" ]] || { echo "${label}: exit ${rc}, want ${want_rc}"; exit 1; }
+            [[ "$(cat "${scratch}/runs")" -eq "${want_n}" ]] || { echo "${label}: $(cat "${scratch}/runs") attempts, want ${want_n}"; exit 1; }
+            [[ "${want_rc}" -eq 0 && "${want_n}" -eq 1 ]] || [[ "${out}" == *"${label} attempt 1/3 failed"* ]] ||
+                { echo "${label}: warning does not name the label: ${out}"; exit 1; }
+        }
+        attempt 0 1 "installer clean"       1
+        attempt 0 3 "installer blip"        3
+        attempt 1 3 "installer down"        99
+    )
+}
+
+# Retry knobs reach shell arithmetic, so a malformed override must fall back to
+# the default rather than abort the install or silently disable retrying.
+check_retry_overrides() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        expect_knobs() {
+            local attempts="$1" delay="$2" want_attempts="$3" want_delay="$4" got
+            got=$(RETRY_ATTEMPTS="${attempts}" RETRY_BASE_DELAY="${delay}" bash -c \
+                'source "$1"; echo "${RETRY_ATTEMPTS} ${RETRY_BASE_DELAY}"' _ "${SETUP_TOOLS}") \
+                || { echo "attempts='${attempts}' delay='${delay}' aborted the script"; exit 1; }
+            [[ "${got}" == "${want_attempts} ${want_delay}" ]] \
+                || { echo "attempts='${attempts}' delay='${delay}' gave '${got}', want '${want_attempts} ${want_delay}'"; exit 1; }
+        }
+        expect_knobs ""    ""    3 5
+        expect_knobs 5     0     5 0
+        expect_knobs abc   1.5   3 5
+        expect_knobs 0     08    3 5
+        expect_knobs -1    09    3 5
+        expect_knobs 007   10    3 10
+    )
+}
+
+if ! reason=$(check_retry_overrides); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Retry overrides: valid values honored, malformed attempts and delays fall back to the defaults"
+
+if ! reason=$(check_download_retry); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Download retry: curl gets RETRY_ATTEMPTS-1 retries, each failure is diagnosed once, installer scripts retry under a labeled loop"
+
+# Runs install_release_binary end to end with a fake curl and sudo. The probe
+# passes, the asset and its sidecar digest come from separate downloads, and the
+# binary lands only when the sidecar digest matches the asset.
+check_sidecar_install() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        scratch=$(mktemp -d)
+        trap 'rm -rf "${scratch}"' EXIT
+        cat > "${scratch}/curl" <<'FAKE'
+#!/usr/bin/env bash
+out=""; url=""
+while [[ $# -gt 0 ]]; do
+    [[ "$1" == "-o" ]] && { out="$2"; shift; }
+    url="$1"; shift
+done
+case "${url}" in
+    *.sha256sum) printf '%s  tool\n' "${FAKE_DIGEST}" > "${out}" ;;
+    *) if [[ "${out}" == /dev/null ]]; then printf '200'; else printf 'aicr' > "${out}"; fi ;;
+esac
+FAKE
+        printf '#!/usr/bin/env bash\n[[ "$1" == install ]] && cp "$4" "${FAKE_DIR}/installed"\n' > "${scratch}/sudo"
+        chmod +x "${scratch}/curl" "${scratch}/sudo"
+        export PATH="${scratch}:${PATH}" FAKE_DIR="${scratch}"
+
+        FAKE_DIGEST="${DIGEST_PAYLOAD_SHA256}" install_release_binary \
+            "https://example.invalid/tool" "sidecar:sha256" tool "tool" >/dev/null 2>&1 ||
+            { echo "a matching sidecar digest did not install"; exit 1; }
+        [[ "$(cat "${scratch}/installed")" == "aicr" ]] || { echo "the verified binary was not installed"; exit 1; }
+
+        rm -f "${scratch}/installed"
+        if ( FAKE_DIGEST="${DIGEST_PAYLOAD_SHA256/3/4}" install_release_binary \
+            "https://example.invalid/tool" "sidecar:sha256" tool "tool" ) >/dev/null 2>&1; then
+            echo "a mismatched sidecar digest installed"; exit 1
+        fi
+        [[ ! -e "${scratch}/installed" ]] || { echo "a binary was installed despite a mismatched sidecar digest"; exit 1; }
+    )
+}
+
+if ! reason=$(check_sidecar_install); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Sidecar install: a matching digest installs the binary, a mismatched one installs nothing"
+
 # A combined checksums file comes in two shapes: GNU (`<digest>  <file>`, or
 # `<digest> *<file>` in binary mode) and BSD (`SHA256 (<file>) = <digest>`,
 # which yq publishes). The lookup matches the asset name exactly, because real
