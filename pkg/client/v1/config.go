@@ -767,10 +767,9 @@ func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
 // The evidence section carries two kinds; this method covers one.
 // CNCFEvidenceOptions covers the other — it is a separate method, not folded
 // in here, because the two target different consumers: this one feeds
-// Client.EmitRecipeEvidence, while CNCF AI Conformance markdown has no
-// Client.Emit* counterpart and is consumed directly by the caller (the CLI's
-// validateFlagCombinations, cncf.New and runCNCFSubmission). Reading that
-// half through Unwrap() is no longer necessary.
+// Client.EmitRecipeEvidence, while CNCF AI Conformance evidence goes through
+// Client.RenderCNCFEvidence and Client.CollectCNCFEvidence, after the caller
+// decides which of the two a run takes.
 //
 // Returns (zero, false, nil) for a nil Config, an absent spec.validate, or an
 // absent evidence.attestation. An empty out also returns ok=false, but unlike
@@ -819,13 +818,12 @@ func (c *Config) EvidenceAttestationOptions() (EvidenceOptions, bool, error) {
 	return opts, true, nil
 }
 
-// CNCFEvidenceOptions carries spec.validate.evidence.cncf — the CNCF AI
-// Conformance evidence-markdown settings (--evidence-dir / --cncf-submission
-// / --feature). Consumed by the CALLER, not by a Client method: there is no
-// Client.Emit* for CNCF evidence, so validateFlagCombinations, cncf.New and
-// runCNCFSubmission read this directly. Mirrors SnapshotOutputOptions, which
-// carries spec.snapshot.output the same way despite Client.CollectSnapshot
-// not consuming it either.
+// CNCFEvidenceOptions carries spec.validate.evidence.cncf, the CNCF AI
+// Conformance evidence settings (--evidence-dir / --cncf-submission /
+// --feature). The CALLER reads it, applies its own flag precedence, and then
+// picks a Client method. CNCFSubmission true means Client.CollectCNCFEvidence
+// with Dir and Features in CNCFCollectOptions. Otherwise a non-empty Dir
+// means Client.RenderCNCFEvidence after ValidateState.
 type CNCFEvidenceOptions struct {
 	// Dir is spec.validate.evidence.cncf.dir, the directory CNCF AI
 	// Conformance evidence markdown is written to.

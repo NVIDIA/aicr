@@ -17,12 +17,165 @@ package aicr
 import (
 	"context"
 	stderrors "errors"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
+
+// requireCode asserts the outermost structured code, which is what callers
+// branch on. errors.Is would also match a code buried deeper in the chain.
+func requireCode(t *testing.T, err error, code aicrerrors.ErrorCode) {
+	t.Helper()
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != code {
+		t.Fatalf("error = %v, want outermost code %s", err, code)
+	}
+}
+
+func TestCNCFEvidenceFeatures_ReturnsCopy(t *testing.T) {
+	t.Parallel()
+	got := CNCFEvidenceFeatures()
+	if !slices.Contains(got, "dra-support") {
+		t.Fatalf("CNCFEvidenceFeatures() = %v, want it to contain dra-support", got)
+	}
+	got[0] = "mutated"
+	if CNCFEvidenceFeatures()[0] == "mutated" {
+		t.Error("CNCFEvidenceFeatures() returned a shared slice")
+	}
+}
+
+func TestRenderCNCFEvidence(t *testing.T) {
+	t.Parallel()
+
+	report := &ctrf.Report{}
+	report.Results.Tests = []ctrf.TestResult{
+		{Name: "dra-support", Status: ctrf.StatusPassed, Duration: 1000},
+		{Name: "gang-scheduling", Status: ctrf.StatusSkipped},
+	}
+
+	t.Run("writes submission evidence", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		if err := (&Client{}).RenderCNCFEvidence(context.Background(), report, dir); err != nil {
+			t.Fatalf("RenderCNCFEvidence: %v", err)
+		}
+		for _, f := range []string{"index.md", "dra-support.md"} {
+			if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+				t.Errorf("%s not written: %v", f, err)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(dir, "gang-scheduling.md")); !os.IsNotExist(err) {
+			t.Errorf("gang-scheduling.md written for a skipped check (stat err = %v)", err)
+		}
+	})
+
+	tests := []struct {
+		name   string
+		client *Client
+		ctx    context.Context
+		dir    string
+	}{
+		{"nil client", nil, context.Background(), "out"},
+		{"nil context", &Client{}, nil, "out"},
+		{"empty dir", &Client{}, context.Background(), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			requireCode(t, tt.client.RenderCNCFEvidence(tt.ctx, report, tt.dir), aicrerrors.ErrCodeInvalidRequest)
+		})
+	}
+}
+
+// TestCollectCNCFEvidence runs every case in NoCluster mode, so the collector
+// short-circuits and nothing reaches a cluster. Policy resolution and input
+// validation still run first.
+func TestCollectCNCFEvidence(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	recipePath := filepath.Join(t.TempDir(), "recipe.yaml")
+	recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
+		"    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n"
+	if err = os.WriteFile(recipePath, []byte(recipeYAML), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	rec, err := client.LoadRecipe(context.Background(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+
+	badAdvertiser, err := client.LoadRecipe(context.Background(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	badAdvertiser.internal.Metadata.SelectedProfile = &recipe.SelectedProfile{Advertiser: "csp"}
+
+	closed := newClientForBundleTest(t)
+	if err = closed.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	expired, cancelExpired := context.WithTimeout(context.Background(), 0)
+	t.Cleanup(cancelExpired)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	valid := CNCFCollectOptions{Dir: t.TempDir(), NoCluster: true}
+	withFeatures := func(f ...string) CNCFCollectOptions {
+		o := valid
+		o.Features = f
+		return o
+	}
+	withoutDir := valid
+	withoutDir.Dir = ""
+
+	tests := []struct {
+		name     string
+		client   *Client
+		ctx      context.Context
+		rec      *RecipeResult
+		opts     CNCFCollectOptions
+		wantCode aicrerrors.ErrorCode
+	}{
+		{name: "standalone run", client: client, ctx: context.Background(), opts: valid},
+		{name: "recipe-backed run", client: client, ctx: context.Background(), rec: rec, opts: valid},
+		{name: "feature aliases and all", client: client, ctx: context.Background(), opts: withFeatures("dra", "all")},
+		{name: "unknown feature", client: client, ctx: context.Background(), opts: withFeatures("nonexistent"), wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "unresolvable allocation policy fails closed", client: client, ctx: context.Background(), rec: badAdvertiser, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "policy resolution past deadline is a timeout", client: client, ctx: expired, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeTimeout},
+		{name: "policy resolution after cancel is canceled", client: client, ctx: canceled, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeCanceled},
+		{name: "recipe missing internal", client: client, ctx: context.Background(), rec: &RecipeResult{Name: "x"}, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "recipe from another client", client: newClientForBundleTest(t), ctx: context.Background(), rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "empty dir", client: client, ctx: context.Background(), opts: withoutDir, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "nil client", ctx: context.Background(), opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "nil context", client: client, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "closed client", client: closed, ctx: context.Background(), opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := tt.client.CollectCNCFEvidence(tt.ctx, tt.rec, tt.opts)
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("CollectCNCFEvidence: %v", err)
+				}
+				return
+			}
+			requireCode(t, err, tt.wantCode)
+		})
+	}
+}
 
 func TestMergeReports(t *testing.T) {
 	t.Parallel()
