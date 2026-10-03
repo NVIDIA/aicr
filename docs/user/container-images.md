@@ -388,7 +388,7 @@ AICR pins some images directly in this repository — in `recipes/components/<na
 
 **OLM-managed components are a third, uninventoried category.** `cert-manager-ocp`, `cert-manager-ocp-olm`, `gpu-operator-ocp`, `gpu-operator-ocp-olm`, `network-operator-ocp`, `network-operator-ocp-olm`, `nfd-ocp`, and `nfd-ocp-olm` install their operator and operand images by resolving a ClusterServiceVersion (CSV) through the Red Hat OperatorHub catalog at install time — not from a local `values.yaml` or vendored manifest. This BOM cannot enumerate those images: they aren't declared anywhere in this repository, and the actual image digests are pinned by whichever CSV version OLM resolves from the subscribed channel on the target cluster. The `0`-image rows for these components in the table above reflect that gap, not an empty deployment.
 
-Air-gapped OpenShift deployments must separately mirror the relevant Red Hat certified-operator catalog (`redhat-operators`) alongside the images this BOM does track. See the [OpenShift documentation on mirroring Operator catalogs](https://docs.openshift.com/container-platform/latest/operators/admin/olm-restricted-networks.html) and this repo's [air-gap mirroring guide](https://github.com/NVIDIA/aicr/issues/743) for the OLM-specific mirroring workflow.
+Air-gapped OpenShift deployments must separately mirror the relevant Red Hat certified-operator catalog (`redhat-operators`) alongside the images this BOM does track. See the [OpenShift documentation on mirroring Operator catalogs](https://docs.openshift.com/container-platform/latest/operators/admin/olm-restricted-networks.html) for the OLM-specific mirroring workflow, and this repo's [air-gap mirroring guide](air-gap-mirror.md) for the images this BOM tracks.
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
 
@@ -420,12 +420,12 @@ AICR pulls from a deliberately diverse set of registries:
 - **`quay.io`** — cert-manager and Prometheus components.
 - **`registry.k8s.io`** — Kubernetes SIG components (DRA driver, NFD, prometheus-adapter, kueue, csi-sidecars).
 - **`public.ecr.aws`** — AWS public artifacts (aws-ebs-csi-driver).
-- **Regional ECR** (`<account>.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons. The `aws-efa` entry below shows `us-west-2` because that is the in-tree default; deployments in other regions override `awsefa:image.repository` at bundle or install time. See [Regional registry overrides](../integrator/recipe-development.md#regional-registry-overrides) for the pattern.
+- **Regional ECR** (`<account>.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons. The `aws-efa` entry above shows `us-west-2` because that is the in-tree default; deployments in other regions override `awsefa:image.repository` at bundle or install time. See [Regional registry overrides](../integrator/recipe-development.md#regional-registry-overrides) for the pattern.
 - **`gcr.io`, `gke.gcr.io`, `us-docker.pkg.dev`** — GCP/GKE add-ons (gke-nccl-tcpxo).
 - **`cr.agentgateway.dev`** — agentgateway (AI inference gateway).
 - **`docker.io`** — assorted upstream images (`busybox`, `pytorch`, etc.).
 
-Customers running in air-gapped or private-registry environments need to mirror every registry above. A dedicated mirroring guide is tracked under [#743](https://github.com/NVIDIA/aicr/issues/743).
+Customers running in air-gapped or private-registry environments need to mirror every registry above. See the [air-gap mirroring guide](air-gap-mirror.md).
 
 ### Reproducibility
 
@@ -490,7 +490,7 @@ provenance attestation is attached. A non-zero exit from the first
 the three commands above and emits a per-component report:
 
 ```bash
-tools/s3c gpu-operator
+tools/s3c nvidia-dra-driver-gpu
 ```
 
 Example output:
@@ -563,11 +563,11 @@ make bom-docs
 make bom-check
 ```
 
-Both targets shell out to `helm template` for every chart, so an internet connection is required.
+All three targets shell out to `helm template` for every chart, so an internet connection is required.
 
 ## Related
 
 - [Component Catalog](component-catalog.md) — what each component does and its scheduling characteristics.
 - [`tools/s3c`](https://github.com/NVIDIA/aicr/blob/main/tools/s3c) — on-demand cosign presence check for a component's images.
 - [Supply chain epic](https://github.com/NVIDIA/aicr/issues/739) — visibility, reproducibility, and provenance roadmap.
-- [Air-gap mirroring guide](https://github.com/NVIDIA/aicr/issues/743) — planned follow-up.
+- [Air-gap mirroring guide](air-gap-mirror.md) — discover and mirror a recipe's images and charts.

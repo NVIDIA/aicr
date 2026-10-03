@@ -89,7 +89,7 @@ aicr --version
 # View available commands
 aicr --help
 
-# Test snapshot (requires GPU)
+# Test snapshot (requires access to a Kubernetes cluster; deploys the snapshot agent Job)
 aicr snapshot --format json | jq '.measurements | length'
 ```
 
@@ -154,7 +154,8 @@ docker run -p 8080:8080 ghcr.io/nvidia/aicrd:latest
 
 ## Next Steps
 
-See [CLI Reference](cli-reference.md) for command usage
+- [End-to-End Tutorial](tutorial.md): recipe, bundle, deploy, and validate, start to finish
+- [CLI Reference](cli-reference.md): command usage
 
 ## Troubleshooting
 
@@ -200,6 +201,7 @@ sudo rm -f /usr/local/share/zsh/site-functions/_aicr
 sudo rm -f /opt/homebrew/share/zsh/site-functions/_aicr
 sudo rm -f /opt/homebrew/etc/bash_completion.d/aicr
 sudo rm -f /usr/local/etc/bash_completion.d/aicr
+sudo rm -f /usr/share/fish/vendor_completions.d/aicr.fish
 rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/aicr"
 rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_aicr"
 rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/aicr.fish"

@@ -38,6 +38,8 @@ cluster:
           name: nw2
         - cidr: 128.77.49.32/30
           name: nw3
+        - cidr: 35.236.84.119/32
+          name: nvs
 
 network:
   gke:
@@ -79,7 +81,7 @@ compute:
         machineType: e2-standard-4
         autoscaling:
           enabled: true
-          minNodes: 1
+          minNodes: 3
           maxNodes: 3
         nodeConfig:
           labels:

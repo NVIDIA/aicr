@@ -16,7 +16,6 @@ package uatbroker
 
 import (
 	stderrors "errors"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -533,64 +532,9 @@ reservations:
 			code:    errors.ErrCodeInvalidRequest,
 		},
 		{
-			// A min-version gate for an intent the reservation does not run is
-			// dead config / a typo — reject it.
-			name: "min-version for an unrun intent",
-			yaml: `
-reservations:
-  - name: azure-h100
-    slug: zh1
-    cloud: azure
-    accelerator: h100
-    gpu-count: 8
-    cluster-config-path: c.yaml
-    test-config-dir: t
-    nightly-intents: [training]
-    nightly-intent-min-versions:
-      inference: v0.18.0
-`,
-			wantErr: true,
-			code:    errors.ErrCodeInvalidRequest,
-		},
-		{
-			name: "min-version for an unknown intent",
-			yaml: `
-reservations:
-  - name: azure-h100
-    slug: zh1
-    cloud: azure
-    accelerator: h100
-    gpu-count: 8
-    cluster-config-path: c.yaml
-    test-config-dir: t
-    nightly-intents: [training, inference]
-    nightly-intent-min-versions:
-      serving: v0.18.0
-`,
-			wantErr: true,
-			code:    errors.ErrCodeInvalidRequest,
-		},
-		{
-			name: "min-version that is not semver",
-			yaml: `
-reservations:
-  - name: azure-h100
-    slug: zh1
-    cloud: azure
-    accelerator: h100
-    gpu-count: 8
-    cluster-config-path: c.yaml
-    test-config-dir: t
-    nightly-intents: [training, inference]
-    nightly-intent-min-versions:
-      inference: not-a-tag
-`,
-			wantErr: true,
-			code:    errors.ErrCodeInvalidRequest,
-		},
-		{
-			// A valid gate on a listed intent parses cleanly.
-			name: "valid nightly-intent-min-versions",
+			// The floors moved to tests/uat/compat.yaml (#2860); strict decoding
+			// must reject a leftover key loudly rather than ignore the gate.
+			name: "retired nightly-intent-min-versions key",
 			yaml: `
 reservations:
   - name: azure-h100
@@ -604,6 +548,8 @@ reservations:
     nightly-intent-min-versions:
       inference: v0.18.0
 `,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
 		},
 		{
 			// Two daytime reservations on one cloud would contend for the same
@@ -966,9 +912,8 @@ func TestCommittedRegistryValid(t *testing.T) {
 		"azure-h100": {IntentTraining, IntentInference},
 		// kind-h100 (nvkind real-silicon lane, DC5 #1278) enrolled with both
 		// intents after green manual H100 acceptance runs (training 29954092703,
-		// inference 29965464868). Release cells are gated to v0.18.0 via
-		// nightly-intent-min-versions (the lane + os-agnostic coordinate fix
-		// #1851 postdate v0.17.0), so only `main` runs nvkind nightly for now.
+		// inference 29965464868). Release cells are gated by the kind floor in
+		// tests/uat/compat.yaml.
 		"kind-h100": {IntentTraining, IntentInference},
 	}
 	for name, want := range wantNightly {
@@ -980,27 +925,6 @@ func TestCommittedRegistryValid(t *testing.T) {
 		got := res.NightlyIntentsOrDefault()
 		if !slices.Equal(got, want) {
 			t.Errorf("committed registry nightly-intents[%q] = %v, want %v", name, got, want)
-		}
-	}
-
-	// The release-cell min-version gates (nightly-intent-min-versions). Locked so
-	// a future edit cannot silently drop a gate — which would let a release cell
-	// run a pre-fix aicr and emit failing/unusable evidence. azure-h100 gates its
-	// AKS perf + driver-only fixes; kind-h100 gates the uat-kind lane + the
-	// os-agnostic coordinate fix (#1851). All landed post-v0.17.0.
-	wantMinVersions := map[string]map[string]string{
-		"azure-h100": {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
-		"kind-h100":  {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
-	}
-	for name, want := range wantMinVersions {
-		res, lookupErr := reg.Lookup(name)
-		if lookupErr != nil {
-			t.Errorf("committed registry missing %q: %v", name, lookupErr)
-			continue
-		}
-		if !maps.Equal(res.NightlyIntentMinVersions, want) {
-			t.Errorf("committed registry nightly-intent-min-versions[%q] = %v, want %v",
-				name, res.NightlyIntentMinVersions, want)
 		}
 	}
 }

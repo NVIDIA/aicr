@@ -113,6 +113,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/platform-crd-map.sh"
 # Lives alongside this file in tests/uat/lib/.
 # shellcheck source=./cuj-dispatch.sh
 source "$(dirname "${BASH_SOURCE[0]}")/cuj-dispatch.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/sxid-fault-inject.sh"
 
 # Train-job knobs (overridable for local reproduction or future inference variant).
 TRAINJOB_NAMESPACE="${TRAINJOB_NAMESPACE:-kubeflow}"
@@ -1870,7 +1871,7 @@ uat_main() {
 
   if [[ -z "${phase}" || -z "${config}" ]]; then
     echo "Usage: $0 <phase> <test-config.yaml>" >&2
-    echo "Phases: prep | install | readiness | conformance | train | serve | verify | debug | all" >&2
+    echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
     exit 2
   fi
 
@@ -1890,6 +1891,7 @@ uat_main() {
     train)       phase_train ;;
     serve)       phase_serve ;;
     verify)      phase_verify ;;
+    sxidfault)   phase_sxid_fault_inject ;;
     debug)
       # Refresh cloud credentials first (no-op on AWS/GCP; Azure redeems a fresh
       # federated session). A failure that surfaces after a long phase can leave a
@@ -1933,7 +1935,7 @@ uat_main() {
       ;;
     *)
       echo "unknown phase: ${phase}" >&2
-      echo "Phases: prep | install | readiness | conformance | train | serve | verify | debug | all" >&2
+      echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
       exit 2
       ;;
   esac

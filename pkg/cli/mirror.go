@@ -241,7 +241,7 @@ func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *aicr.Con
 		}
 		if cmd.IsSet(flagInheritFrom) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"--inherit-from pins namespaces during criteria resolution and cannot be combined with --recipe; the recipe file already records the namespaces it resolved to")
+				"--inherit-from pins component identity during criteria resolution and cannot be combined with --recipe. The recipe file already records the identity it resolved to")
 		}
 		// The config-file mapping is equally a criteria-resolution input; the
 		// recipe file on disk already records its mapping. Mirror the profile

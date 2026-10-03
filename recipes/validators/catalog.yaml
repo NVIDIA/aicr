@@ -77,6 +77,13 @@ validators:
     timeout: 2m
     args: ["gke-gpu-nic-networks"]
     env: []
+  - name: gke-gpu-nic-topology
+    phase: deployment
+    description: "Verify each a3 GPU node maps all 8 GPU NIC PCI slots to eth1-eth8 (no gVNIC displacement) for GPUDirect TCPXO (skipped unless the recipe declares gke-nccl-tcpxo)"
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    timeout: 2m
+    args: ["gke-gpu-nic-topology"]
+    env: []
   # Performance phase
   #
   # The NCCL checks (nccl-all-reduce-bw and the -net/-nvls variants at the

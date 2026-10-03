@@ -51,10 +51,11 @@ the `< 1.36.0` Kubernetes cap and the Gateway API / LoadBalancer prerequisites
   VR200 NVL72 reference image ships Ubuntu 26.04 with
   `7.0.0-*-nvidia-bos-64k`.
 - **StorageClass.** RKE2 ships no default StorageClass (unlike k3s, which
-  bundles `local-path-provisioner`). The training recipe does not need one,
-  but `inference-dynamo` does — its bundled NATS JetStream StatefulSet
-  requests a PVC that will otherwise hang Pending. Install any dynamic
-  provisioner and mark it default before deploying the inference bundle.
+  bundles `local-path-provisioner`). None of the four recipes needs one:
+  as of Dynamo 1.4, `dynamo-platform` no longer installs the bundled NATS
+  JetStream StatefulSet whose PVC previously required a StorageClass. If you
+  opt back into bundled NATS, install any dynamic provisioner and mark it
+  default before deploying the `inference-dynamo` bundle.
 - **LoadBalancer (inference chain only).** RKE2 provisions no LoadBalancer
   controller, and the `inference-gateway` Service the `rke2-inference` base
   installs is `type: LoadBalancer`. Install a bare-metal LB implementation

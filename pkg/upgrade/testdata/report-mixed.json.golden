@@ -2,6 +2,7 @@
   "from": "./bundles-v0.16.0",
   "to": "./bundles-v0.17.0",
   "deployer": "argocd",
+  "objectNamesCompared": false,
   "components": [
     {
       "component": "alpha-operator",
@@ -179,5 +180,9 @@
   "summary": {
     "components": 11,
     "failing": 8
+  },
+  "atRisk": {
+    "scanned": false,
+    "reason": "no cluster access requested"
   }
 }

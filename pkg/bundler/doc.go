@@ -66,8 +66,8 @@ Helm (default):
 
 Argo CD:
   - app-of-apps.yaml: Parent Argo CD Application
-  - <component>/application.yaml: Argo CD Application per component
-  - <component>/values.yaml: Values for each component
+  - NNN-<component>/application.yaml: Argo CD Application per component
+  - NNN-<component>/values.yaml: Values for each component
 
 # Configuration
 

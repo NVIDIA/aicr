@@ -30,8 +30,16 @@ aicr bundle \
   --set slinkyslurm:enroot.config.ENROOT_MOUNT_HOME=no \
   --set slinkyslurm:enroot.env.NCCL_DEBUG=INFO \
   --set slinkyslurm:enroot.env.NCCL_DEBUG_SUBSYS=INIT,NET \
+  --system-node-selector nodeGroup=system-worker \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   --output bundle
 ```
+
+`slinky-slurm` requires both node selectors in the component registry, so
+`aicr bundle` fails without them. The system selector places the controller,
+REST API, login, and accounting pods; the accelerated selector places the
+NodeSet (`slurmd`) pods. Replace the example labels with your system and GPU
+node pool labels. See [`aicr bundle`](cli-reference.md#aicr-bundle).
 
 Use `enroot.config` for Enroot runtime settings and `enroot.env` for
 cluster-wide environment defaults that should apply to every Enroot container.
@@ -148,3 +156,52 @@ scontrol update NodeName=ALL State=RESUME
 srun --container-image=docker://alpine:latest \
   env | grep '^NCCL_DEBUG'
 ```
+
+## Prolog and epilog scripts
+
+AICR ships no Slurm prolog or epilog scripts. The Slinky Slurm chart accepts
+them as maps from script filename to script contents, set on the
+`slinky-slurm` component while generating the bundle:
+
+| Component value | Runs on | Slurm setting |
+| --- | --- | --- |
+| `prologScripts` | NodeSets | `Prolog` |
+| `epilogScripts` | NodeSets | `Epilog` |
+| `prologSlurmctldScripts` | `slurmctld` | `PrologSlurmctld` |
+| `epilogSlurmctldScripts` | `slurmctld` | `EpilogSlurmctld` |
+
+Put each map in its own YAML file; `epilog-scripts.yaml` below uses the same
+format. Every script must start with a shebang:
+
+```yaml
+# prolog-scripts.yaml
+00-site-prolog.sh: |
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Site-specific setup commands go here.
+  exit 0
+```
+
+```shell
+aicr bundle \
+  --recipe recipe.yaml \
+  --set-file slinkyslurm:prologScripts=./prolog-scripts.yaml \
+  --set-file slinkyslurm:epilogScripts=./epilog-scripts.yaml \
+  --system-node-selector nodeGroup=system-worker \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  --output bundle
+```
+
+The map key becomes the script filename; add entries for more scripts.
+`--set-file` parses the file as one YAML or JSON value, so do not pass a raw
+`.sh` file: it is read as a YAML string, its shebang becomes a comment, and the
+bundle succeeds with an unusable value.
+
+`slinkyslurm` and `slurmcluster` both address the Slurm cluster chart. The
+`slurm` key addresses the `slinky-slurm-operator` chart instead, so
+`slurm:prologScripts` lands in the operator's values and has no effect.
+
+See [Slurm Prolog and Epilog](https://slurm.schedmd.com/prolog_epilog.html)
+for hook ordering, environment, timeouts, and failure behavior, and the
+[Slinky Slurm demo](https://github.com/NVIDIA/aicr/blob/main/demos/cuj1-slinky-slurm.md)
+for an end-to-end deployment.

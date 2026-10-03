@@ -234,17 +234,8 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 // they can still exhaust the budget themselves on a recipe whose enabled refs
 // queued no asserts.
 //
-// gatedHealthCheckSuppressed and buildResourceFetcher still return directly on
-// error — both are hard errors, not budget-exhaustion handling.
-// gatedHealthCheckSuppressed's error has three sources, and that path discards
-// whatever failures were already collected under an ErrCodeInternal wrap
-// rather than the fail-closed ErrCodeTimeout above. Two are rare: a broken
-// Helm render, and cancellation (it threads ctx.Ctx into that render). The
-// third is not — it calls resolveNodewrightGVR, so a transient non-NotFound
-// discovery error, an apiserver 503 while the loop happens to be on
-// nodewright-customizations, collapses the whole expected-resources report
-// into one ErrCodeInternal. Routing it through the failures accumulator is a
-// known gap, deliberately out of scope here.
+// Errors from gatedHealthCheckSuppressed and buildResourceFetcher are returned
+// as-is, discarding the failures collected so far.
 func checkExpectedResources(ctx *validators.Context) error {
 	if ctx.ValidationInput == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
@@ -307,12 +298,12 @@ func checkExpectedResources(ctx *validators.Context) error {
 		}
 		if ref.HealthCheckAsserts != "" {
 			// The registry-declared static assert cannot see value gates, so on a
-			// component whose effective values suppress the Skyhook CR the assert
-			// targets (e.g. tuningEnabled=false on a single-package tuning
-			// manifest) it would fail on a deliberately-untuned cluster. Skip it
-			// in that case, mirroring the render-aware Go readiness check. Only
-			// nodewright-customizations is subject to this; a render/read error
-			// propagates rather than silently skipping. See #1844.
+			// component whose effective values gate off the objects the assert
+			// targets (e.g. tuningEnabled=false on a single-package Nodewright
+			// tuning manifest) it would fail on a cluster where they are
+			// deliberately absent. Skip it in that case. gatedHealthCheckSuppressed
+			// names the components subject to this, and a render or read error
+			// propagates rather than silently skipping.
 			suppressed, reason, suppressErr := gatedHealthCheckSuppressed(ctx, ref)
 			if suppressErr != nil {
 				return suppressErr
@@ -368,7 +359,21 @@ func checkExpectedResources(ctx *validators.Context) error {
 
 	if budgetExhausted != "" {
 		failures = markUndispatched(failures, chainsawAsserts, unreachedRefs, gpuProbes, budgetExhausted)
-	} else if len(chainsawAsserts) > 0 {
+	} else {
+		// Selecting by discovery after the readiness probes sees a group that
+		// became served during the window. A discovery error joins failures
+		// and omits the assert it blocks.
+		var dropErr error
+		chainsawAsserts, dropErr = dropDiscoverySuppressedAsserts(ctx, chainsawAsserts)
+		if dropErr != nil {
+			failures = append(failures, dropErr.Error())
+			if firstStructuredErr == nil {
+				firstStructuredErr = dropErr
+			}
+		}
+	}
+
+	if budgetExhausted == "" && len(chainsawAsserts) > 0 {
 		slog.Info("running health check assertions", "components", len(chainsawAsserts))
 		fetcher, fetcherErr := buildResourceFetcher(ctx)
 		if fetcherErr != nil {
@@ -727,17 +732,6 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 		return nil
 	}
 
-	gvr, registered, err := resolveNodewrightGVR(ctx)
-	if err != nil {
-		return err
-	}
-	if !registered {
-		fmt.Printf("  Nodewright: neither %s nor %s registered, skipping\n",
-			nodewrightGVR.GroupVersion(), legacySkyhookGVR.GroupVersion())
-		return nil
-	}
-	fmt.Printf("  Nodewright: polling %s\n", gvr.GroupResource())
-
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
 		return err
@@ -760,9 +754,24 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 	// done on every node. Polling rides through the reboot flaps rather than
 	// failing the deployment phase on a transient in_progress / re-taint. See
 	// pkg/defaults GPUReadiness* for sizing.
+	//
+	// CRDs that are not served yet count as not ready. The GVR is re-resolved
+	// each iteration so a group established mid-poll is picked up.
+	var gvr schema.GroupVersionResource
 	return pollUntilStable(ctx,
 		fmt.Sprintf("%d expected Nodewright(s) + runtime-required taint clearance", len(expectedNames)),
 		func() error {
+			resolved, registered, resolveErr := resolveNodewrightGVR(ctx)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			if !registered {
+				return errors.New(errors.ErrCodeNotFound,
+					fmt.Sprintf("Nodewright: neither %s nor %s serves its resource yet (recipe declared %d CR(s))",
+						nodewrightGVR.GroupVersion(), legacySkyhookGVR.GroupVersion(), len(expectedNames)))
+			}
+			gvr = resolved
+
 			// The CR status Gets and the node-list taint scan are independent
 			// read-only calls, so fan them out (per repo CLAUDE.md "Sequential
 			// calls to N independent read-only K8s APIs → fan-out with
@@ -799,39 +808,46 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 		},
 		func() {
 			for _, name := range expectedNames {
-				fmt.Printf("  Nodewright %s: %s (stable ≥%s)\n", name, nodewrightCompleteState, gpuReadinessStabilityWindow)
+				fmt.Printf("  Nodewright %s (%s): %s (stable ≥%s)\n",
+					name, gvr.GroupResource(), nodewrightCompleteState, gpuReadinessStabilityWindow)
 			}
 			fmt.Printf("  Nodewright runtime-required taint (%s): cleared from all nodes (stable ≥%s)\n",
 				taintStrings(gate), gpuReadinessStabilityWindow)
 		})
 }
 
-// resolveNodewrightGVR discovery-gates the Nodewright CR kinds before any Get
-// by name, preferring nodewrightGVR. The legacySkyhookGVR fallback is taken
-// only when legacySkyhookAllowed permits it: a recipe that pins the operator at
-// nodewrightRenameVersion or later must serve the new group, so a legacy-only
-// cluster there is a broken install (or stale Skyhooks from a prior operator)
-// and fails closed rather than being read as ready. registered is false when
-// neither group is served (the caller skips per #607). Any discovery error
-// other than NotFound fails closed so a transient failure cannot mask
-// readiness.
+// resolveNodewrightGVR returns the Nodewright CR resource the cluster serves,
+// preferring nodewrightGVR. registered is false when neither group lists its
+// resource. It returns legacySkyhookGVR only when legacySkyhookAllowed permits
+// it, and an error otherwise. A discovery error other than NotFound is also
+// returned, so a transient failure cannot mask readiness.
 func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResource, registered bool, err error) {
 	served := func(candidate schema.GroupVersionResource) (bool, error) {
 		gv := candidate.GroupVersion().String()
 		// Through helper rather than DiscoveryInterface directly: the
 		// interface method issues its request with context.TODO() internally,
 		// so an unresponsive apiserver would outlive both cancellation and the
-		// readiness budget. This runs ahead of pollUntilStable, which is the
-		// window where nothing else would notice.
-		_, discErr := helper.GroupVersionResources(ctx.Ctx, ctx.Clientset, gv)
+		// readiness budget.
+		// Bounded per request so a stalled apiserver cannot hold the readiness
+		// poll past its deadline.
+		discCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.ResourceVerificationTimeout)
+		defer cancel()
+		list, discErr := helper.GroupVersionResources(discCtx, ctx.Clientset, gv)
 		switch {
 		case discErr == nil:
-			return true, nil
+			// A group/version is listed once any one of its CRDs is
+			// established, so the resource name has to be listed too.
+			for _, r := range list.APIResources {
+				if r.Name == candidate.Resource {
+					return true, nil
+				}
+			}
+			return false, nil
 		case apierrors.IsNotFound(discErr):
 			return false, nil
 		case stderrors.Is(discErr, context.Canceled), stderrors.Is(discErr, context.DeadlineExceeded):
 			return false, errors.Wrap(errors.ErrCodeTimeout,
-				fmt.Sprintf("Nodewright discovery of %s did not complete within the validation budget", gv), discErr)
+				fmt.Sprintf("Nodewright discovery of %s was canceled or exceeded the %s per-request limit", gv, defaults.ResourceVerificationTimeout), discErr)
 		default:
 			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("Nodewright: failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
@@ -846,6 +862,9 @@ func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResou
 	if err != nil || !ok {
 		return schema.GroupVersionResource{}, false, err
 	}
+	// A recipe pinned at nodewrightRenameVersion or later must serve the new
+	// group, so a legacy-only cluster is a broken install or holds stale
+	// Skyhooks from a prior operator.
 	if allowed, pin := legacySkyhookAllowed(ctx); !allowed {
 		return schema.GroupVersionResource{}, false, errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("%s is not served but the recipe pins %s %s (>= %s serves it); refusing the legacy %s fallback — check the operator install rather than a stale Skyhook",
@@ -1125,38 +1144,15 @@ func isRuntimeRequiredTaint(t *corev1.Taint, gate []corev1.Taint) bool {
 	return false
 }
 
-// gatedHealthCheckSuppressed dispatches the static-assert suppression for the
-// small set of components whose registry health check targets objects that
-// may legitimately be absent: values-gated renders, and for
-// nodewright-customizations a cluster whose operator predates the NodeWright
-// kind the assert names. Every other component's assert queues
-// unconditionally. Fail-closed throughout: a render, read, or discovery error
-// propagates so a broken template or an unreachable API server is never
-// mistaken for "nothing to assert".
-func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef) (bool, string, error) {
+// gatedHealthCheckSuppressed reports whether the registry health check assert
+// for ref is skipped because ref's effective values gate off the objects it
+// targets. reason says why. A render or read error is returned, so a broken
+// template is never read as nothing to assert.
+func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef) (suppressed bool, reason string, err error) {
 	switch ref.Name {
 	case nodewrightCustomizationsComponent:
-		//nolint:contextcheck // pre-existing ctx-less chain (expectedNodewrightNames); threading ctx through it is tracked separately from this dispatch.
 		suppressed, err := nodewrightHealthCheckSuppressed(ref)
-		if err != nil || suppressed {
-			return suppressed, "effective values suppress the tuning Nodewright CR (see #1844)", err
-		}
-		// The assert names the NodeWright kind (nodewright-operator v0.18.0+).
-		// When resolveNodewrightGVR accepts the legacy fallback (operator
-		// pinned below the rename), the Go readiness check verifies each
-		// declared Skyhook by name, so the static assert has nothing valid to
-		// target. A cluster serving neither group keeps the assert so its own
-		// failure surfaces the missing operator; a v0.18.0 pin on a legacy-only
-		// cluster is the resolver's fail-closed error.
-		gvr, registered, err := resolveNodewrightGVR(ctx)
-		if err != nil {
-			return false, "", err
-		}
-		if registered && gvr == legacySkyhookGVR {
-			return true, fmt.Sprintf("cluster serves only the legacy %s group; the %s readiness check covers the Skyhook CRs by name",
-				legacySkyhookGVR.Group, nodewrightGVR.Group), nil
-		}
-		return false, "", nil
+		return suppressed, "effective values suppress the tuning Nodewright CR", err
 	case gcpDriverInstallerComponent:
 		suppressed, err := emptyRenderHealthCheckSuppressed(ctx.Ctx, ref)
 		return suppressed, "effective values gate the component off (installer.enabled=false); it renders no objects", err
@@ -1176,6 +1172,39 @@ func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef
 	default:
 		return false, "", nil
 	}
+}
+
+// dropDiscoverySuppressedAsserts returns asserts without the
+// nodewright-customizations assert when the cluster serves only the legacy
+// Skyhook group. When the group cannot be resolved it also omits that assert
+// and returns the first resolution error.
+func dropDiscoverySuppressedAsserts(ctx *validators.Context, asserts []chainsaw.ComponentAssert) ([]chainsaw.ComponentAssert, error) {
+	kept := make([]chainsaw.ComponentAssert, 0, len(asserts))
+	var firstErr error
+	for _, a := range asserts {
+		if a.Name != nodewrightCustomizationsComponent {
+			kept = append(kept, a)
+			continue
+		}
+		// The assert names the NodeWright kind (nodewright-operator v0.18.0+).
+		// On a legacy-only cluster the Go readiness check verifies each
+		// Skyhook by name. A cluster serving neither group keeps the assert so
+		// its failure surfaces the missing operator.
+		gvr, registered, err := resolveNodewrightGVR(ctx)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if registered && gvr == legacySkyhookGVR {
+			fmt.Printf("  [chainsaw] %s: skipped, cluster serves only the legacy %s group and the %s readiness check covers the Skyhook CRs by name\n",
+				a.Name, legacySkyhookGVR.Group, nodewrightGVR.Group)
+			continue
+		}
+		kept = append(kept, a)
+	}
+	return kept, firstErr
 }
 
 // emptyRenderHealthCheckSuppressed reports whether the component's manifests
@@ -1402,12 +1431,12 @@ func extractNodewrightNamesFromManifest(content []byte) []string {
 // deployer assumption. If the upstream chart ever renames the component,
 // this constant moves with it.
 func verifyDRAKubeletPluginReady(ctx *validators.Context, namespace string) error {
-	// Upfront structural gate (mirrors verifyNodewrightReady's CRD discovery
-	// gate): fail fast on an AMBIGUOUS suffix match. More than one DaemonSet
-	// carrying the "-kubelet-plugin" role suffix is a deterministic
-	// misconfiguration (a stale DaemonSet from a prior deploy under a different
-	// fullname, or two charts) that retrying for the full poll budget cannot
-	// resolve — so surface it immediately instead of after GPUReadinessTimeout.
+	// Upfront structural gate that fails fast on an AMBIGUOUS suffix match.
+	// More than one DaemonSet carrying the "-kubelet-plugin" role suffix is a
+	// deterministic misconfiguration (a stale DaemonSet from a prior deploy
+	// under a different fullname, or two charts) that retrying for the full
+	// poll budget cannot resolve, so surface it immediately instead of after
+	// GPUReadinessTimeout.
 	// Zero-match and not-yet-ready status stay in the polled path below: the
 	// DaemonSet's pods churn to 0/0 across a GPU-node reboot, which the dwell is
 	// there to ride through.

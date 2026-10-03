@@ -24,7 +24,7 @@ adding or changing components.
 |---|---|---|
 | Make an existing chart or kustomization available to recipes | `recipes/registry.yaml` entry | this page |
 | Set default values for the chart | `recipes/components/<name>/values.yaml` | this page |
-| Pin a chart version for a specific cluster shape | Recipe overlay in `recipes/overlays/` | [recipe.md](recipe.md) |
+| Pin a chart version | `registry.yaml` `helm.defaultVersion`; an overlay pin only as a declared divergence in `versionPinExemptions` | [recipe.md](recipe.md#version-pinning-is-single-source) |
 | Add a bundle-time validation warning | `registry.yaml` `validations:` block | [validator.md](validator.md#component-validations-bundle-time) |
 | Add a chainsaw health check | `registry.yaml` `healthCheck.assertFile` + `recipes/checks/<name>/health-check.yaml` | [validator.md](validator.md) |
 | Adjust where node selectors land in chart values | `registry.yaml` `nodeScheduling` paths | this page |
@@ -44,7 +44,7 @@ Kustomize limitations to know up front:
 
 - `--set <key>:<path>=<value>` flows through Helm value rendering only; Kustomize components silently ignore overrides.
 - `nodeScheduling.system` / `accelerated` paths target Helm values; they do not apply to Kustomize sources.
-- The bundler runs `kustomize build` at bundle time and wraps the output as `templates/manifest.yaml` inside the standard local-format folder (see [index.md](index.md) for the classification rule).
+- The bundler runs `kustomize build` at bundle time and wraps the output as `templates/manifest.yaml` inside the standard local-format folder (see [Local Format and Bundle Classification](#local-format-and-bundle-classification) for the classification rule).
 
 ## Adding a Helm Component
 
@@ -339,9 +339,10 @@ is a worked example of the latter.
 
 `RecipeResult.DeploymentOrder` is **derived**, not authored.
 `TopologicalSort` in `pkg/recipe/metadata.go` orders components
-by `componentRefs[].dependencyRefs` declared in the overlay. When no
-dependencies are declared, the order falls back to the order in
-which components are listed in the overlay's `componentRefs`. Express
+by `componentRefs[].dependencyRefs` declared in the overlay. Components
+with no dependency between them are emitted in alphabetical order
+(Kahn's algorithm over a sorted queue), not in the order they are
+listed in `componentRefs`. Express
 ordering by declaring `dependencyRefs` on the dependent component, not
 by writing a separate `deploymentOrder` block.
 

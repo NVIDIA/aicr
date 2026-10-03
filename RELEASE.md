@@ -241,7 +241,7 @@ Every release must pass these automated gates before artifacts are published:
 - golangci-lint + yamllint
 - License header verification
 - Vulnerability scans (Anchore in release workflows, Grype in `make scan`)
-- E2E tests on Kind cluster
+- E2E tests: hermetic Chainsaw CLI suites (`--no-cluster`) and the `aicrd` + CLI suite on a Kind cluster
 - Per-platform vulnerability scans of the exact candidate image digests
 - SLSA Build Level 3 provenance for those same digests
 
@@ -330,7 +330,8 @@ but they do not update:
 
 - Homebrew formula (users on `brew upgrade` are unaffected)
 - Container `:latest` tags (only candidate and version aliases are written)
-- Site documentation (GitHub Pages stays on latest stable)
+- Site documentation versions (the Fern docs publish runs, but a pre-release
+  tag registers no new docs version)
 
 Slack notifications fire for both pre-releases and stable releases.
 
@@ -465,7 +466,10 @@ Every release includes:
   `aiperf-bench` image (collected out-of-band by `make python-licenses`,
   which needs network access to PyPI, then committed as a rendered
   fragment). Note that `make notices` is no longer offline either: a cold
-  module cache means it fetches. The Go half
+  module cache means it fetches, and it probes every license URL. With
+  `GITHUB_TOKEN` set (the release and merge-gate jobs set it), the
+  github.com probes are authenticated; anonymous ones from shared CI runner
+  IPs get rate-limited (HTTP 429/503) and fail the run. The Go half
   is the union of the dependency graph across every released OS/arch
   target, generated deterministically so it is byte-identical on macOS and
   Linux. The file is not committed: `make release` depends on `make
