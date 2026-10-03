@@ -70,10 +70,36 @@ cluster:
 
 network:
   eks:
-    # No securityGroups.additionalRules. This block carried a single 4222
-    # ingress rule for NATS, which AICR no longer installs by default as of
-    # the dynamo-platform 1.4+ bump (#1983) — the subchart is still bundled,
-    # the chart just defaults global.nats.install to false.
+    # One securityGroups.additionalRules entry, for NVSentinel's MongoDB
+    # store. AICR's own NVSentinel install leaves that store off (the chart
+    # default); NVSentinel's e2e pipeline reinstalls on these clusters with
+    # it on (values-aicr-aws-uat.yaml in the NVSentinel repo), pinning the
+    # MongoDB replica set behind Service mongodb-headless (TCP 27017) to
+    # nodeGroup: system-worker. platform-connectors is a DaemonSet that
+    # tolerates every taint, so it also runs on the GPU nodes and connects to
+    # MongoDB from there.
+    #
+    # Without this rule the system security group drops that connection.
+    # Because addOns.vpcCni is set, the pinned actuator (EKS_IMAGE in
+    # .github/workflows/uat-aws.yaml, v0.5.1) enables VPC CNI custom
+    # networking and writes per-zone ENIConfigs that give each pod its node
+    # group's subnet and security group: MongoDB pods carry the system group,
+    # and GPU-node pods take IPs from the worker subnet. From outside itself,
+    # the system group admits only 443, 8080, 9090, 10250, 53, and NodePorts
+    # from the public subnets — the worker group, by contrast, admits all
+    # traffic from the system subnets — so platform-connectors on the GPU
+    # nodes exits on a MongoDB server-selection timeout.
+    #
+    # A rule's source can only be CIDR blocks, not a security group.
+    # 10.0.128.0/17 is the worker subnet, the range GPU-node pods actually use.
+    # 100.65.0.0/16 is the pod CIDR; the pinned actuator assigns no pod IPs
+    # from it, since its ENIConfigs cover only the system and worker subnets,
+    # but the NATS rule described below listed it too, so it stays.
+    #
+    # This block once carried a single 4222 ingress rule for NATS, which AICR
+    # no longer installs by default as of the dynamo-platform 1.4+ bump
+    # (#1983) — the subchart is still bundled, the chart just defaults
+    # global.nats.install to false.
     #
     # Its replacement planes need no rule here. Dynamo now talks
     # frontend<->worker directly: request and response streams on OS-assigned
@@ -89,6 +115,15 @@ network:
     # Splitting Frontend and Worker across separate security groups instead
     # needs bidirectional OS-assigned-port rules plus TCP 5557 — see
     # docs/integrator/eks-dynamo-networking.md for that contract.
+    securityGroups:
+      additionalRules:
+        - target: system
+          direction: ingress
+          fromPort: 27017
+          toPort: 27017
+          protocol: tcp
+          cidrBlocks: ["10.0.128.0/17", "100.65.0.0/16"]  # worker subnet + pod CIDR
+          description: "Allow NVSentinel MongoDB from GPU worker pods"
     cidrs:
       host: 10.0.0.0/16
       pod: 100.65.0.0/16
