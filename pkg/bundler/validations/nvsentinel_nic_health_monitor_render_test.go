@@ -29,7 +29,7 @@ import (
 // against its base values only, so it cannot see a mixin-gated subchart --
 // these assertions are what keep that note honest.
 const (
-	nicHealthMonitorImage = "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.20.0"
+	nicHealthMonitorImage = "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.25.0"
 	// Asserting this also pins the override that displaces the chart's
 	// frozen bitnamilegacy default; a dropped override renders the chart
 	// value and fails here rather than shipping quietly.

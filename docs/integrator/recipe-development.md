@@ -8,25 +8,29 @@ New to recipe development? Follow these minimal steps to contribute:
 
 **1. Copy an existing overlay** ([details](#working-with-recipes))
 ```bash
-cp recipes/overlays/h100-eks-ubuntu-training.yaml recipes/overlays/gb200-eks-ubuntu-training.yaml
+cp recipes/overlays/h100-eks-ubuntu-training.yaml recipes/overlays/h200-eks-ubuntu-training.yaml
 ```
 
-**2. Edit criteria and components** ([criteria](#recipe-structure), [components](#component-configuration))
+**2. Edit name, criteria, and components** ([criteria](#recipe-structure), [components](#component-configuration))
 ```yaml
-# recipes/overlays/gb200-eks-ubuntu-training.yaml
+# recipes/overlays/h200-eks-ubuntu-training.yaml
+metadata:
+  name: h200-eks-ubuntu-training  # Must be unique; overlays are keyed by name
 spec:
-  base: eks-training  # Inherit from intermediate recipe
+  base: h200-eks-training  # Inherit from intermediate recipe
   criteria:
     service: eks
-    accelerator: gb200  # Changed from h100
+    accelerator: h200  # Changed from h100
     os: ubuntu
     intent: training
+  mixins:
+    - os-ubuntu  # Shared Ubuntu constraints
   componentRefs:
     - name: gpu-operator
-      valuesFile: components/gpu-operator/eks-gb200-training.yaml
+      valuesFile: components/gpu-operator/values-eks-training.yaml
       overrides:
         driver:
-          version: "580.82.07"  # GB200-specific driver
+          version: "580.82.07"  # Hardware-specific override
 ```
 
 **3. Run tests** ([details](#testing-and-validation))
@@ -56,6 +60,25 @@ Recipe files in `recipes/` are embedded at compile time. Integrators can extend 
 
 For query matching and overlay merging internals, see [Data Architecture](../contributor/recipe.md).
 
+### Recipe stewardship and composition
+
+A resolved recipe is not a standalone, independently owned configuration file.
+It is materialized from a directed acyclic graph of registry defaults, overlays,
+mixins, [configuration profiles](#configuration-profiles), and any external
+configuration supplied via `--data`. AICR deliberately attaches no NCP, ISV, or
+NVIDIA owner to that output: AICR maintainers are accountable for the catalog
+accepted into the project, and the AICR community collectively owns and evolves
+it. See
+[Areas of Ownership](https://github.com/NVIDIA/aicr/blob/main/GOVERNANCE.md#areas-of-ownership).
+
+`metadata.appliedOverlays` records the order in which overlays were merged into a
+result. It is deliberately not an attribution ledger: once configuration is
+loaded into the graph, resolution materializes the effective configuration rather
+than preserving authorship for every contributing value. Repository history
+identifies who contributed a given source file — an overlay, a mixin, a values
+file — but that describes the layer, not the resolved recipe. See
+[Observable RecipeResult Surfaces](../contributor/recipe.md#observable-reciperesult-surfaces).
+
 ## Recipe Structure
 
 ### Multi-Level Inheritance
@@ -63,7 +86,7 @@ For query matching and overlay merging internals, see [Data Architecture](../con
 Recipes use `spec.base` to inherit configurations. Chains progress from general (base) to specific (leaf):
 
 ```
-base.yaml → eks.yaml → eks-training.yaml → gb200-eks-ubuntu-training.yaml
+base.yaml → eks.yaml → eks-training.yaml → gb200-eks-training.yaml → gb200-eks-ubuntu-training.yaml
 ```
 
 **Intermediate recipes** (partial criteria) capture shared configs:
@@ -83,17 +106,18 @@ spec:
 ```yaml
 # gb200-eks-ubuntu-training.yaml
 spec:
-  base: eks-training  # Inherits from intermediate
+  base: gb200-eks-training  # Inherits from intermediate
   criteria:
     service: eks
     accelerator: gb200
     os: ubuntu
     intent: training  # Complete
-  componentRefs:
-    - name: gpu-operator
-      overrides:
-        driver:
-          version: "580.82.07"  # Hardware-specific override
+  mixins:
+    - os-ubuntu
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+  componentRefs: []  # Components come from the inheritance chain
 ```
 
 **Leaf recipes with mixins** compose shared fragments:
@@ -237,7 +261,7 @@ aicr bundle --recipe recipe.yaml \
   -o ./bundle
 ```
 
-For `provider.name: dra` (Kubernetes Dynamic Resource Allocation, GA in K8s 1.34), topology is sourced from the DRA API — no cloud provider IAM or ServiceAccount annotations are needed. Use `dra` for clusters actually running DRA drivers with GPU resource claims. Kind-based CI clusters should use the `test` provider with a model fixture instead (as this repo's `h100-kind-training-slurm` overlay does) — a CPU-only Kind cluster has no DRA resources for the `dra` provider to read.
+For `provider.name: dra` (Kubernetes Dynamic Resource Allocation, GA in K8s 1.34), topology is sourced from the DRA API, and no cloud provider IAM or ServiceAccount annotations are needed. Use `dra` for clusters actually running DRA drivers with GPU resource claims. The accelerator domain can come from a node label instead: this repo's `h100-kind-training-slurm` overlay sets `params.accelerator.source: kubernetes-label` with key `nvidia.com/gpu.clique`, and the slinky engine drops nodes without that label from the block domains. A stock Kind cluster carries no such label, so that overlay needs the simulated-GPU cluster its UAT lane builds; the [Slinky Slurm walkthrough](https://github.com/NVIDIA/aicr/blob/main/demos/cuj1-slinky-slurm.md#kind-simulated-gpus) shows how.
 
 ### Inference performance constraints
 
@@ -383,8 +407,8 @@ A Preview coordinate promises that:
 
 - The recipe resolves for the exact coordinate declared as Preview.
 - `aicr bundle` generates deployable artifacts for it.
-- It passes the repository's static, render, and KWOK coverage gates on
-  every merge to `main`.
+- It passes the repository's static and render gates. KWOK coverage runs on
+  every merge to `main` as advisory validation, not a gate.
 - Evidence has been published at [validation.aicr.run](https://validation.aicr.run/); freshness may lag recipe iteration, so consult each coordinate's row in the table below for its evidence status.
 
 A Preview coordinate deliberately does **not** promise broader coverage.
@@ -468,7 +492,7 @@ componentRefs:
 ```yaml
 componentRefs:
   - name: gpu-operator
-    valuesFile: components/gpu-operator/eks-gb200-training.yaml
+    valuesFile: components/gpu-operator/values-eks-training.yaml
     overrides:
       driver:
         version: "580.82.07"  # Override just this field
@@ -974,15 +998,18 @@ kind: RecipeMetadata
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
-  base: eks-training
+  base: gb200-eks-training
   criteria:
     service: eks
     accelerator: gb200
     os: ubuntu
     intent: training
-  componentRefs:
-    - name: gpu-operator
-      valuesFile: components/gpu-operator/eks-gb200-training.yaml
+  mixins:
+    - os-ubuntu
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+  componentRefs: []
 ```
 
 ### Updating Recipes
@@ -994,7 +1021,7 @@ spec:
 # recipes/registry.yaml
 - name: gpu-operator
   helm:
-    defaultVersion: v26.7.0  # Changed from v26.3.3
+    defaultVersion: v26.7.1  # Changed from v26.7.0
 ```
 
 **Adding components:**
@@ -1150,6 +1177,7 @@ aicr --debug recipe --service eks --data ./my-data
 
 **Behavior:**
 - Overlays: Same `metadata.name` replaces embedded
+- A file at an embedded overlay's path that carries only `spec.profile` adds values to that overlay's profile
 - Registry: Merged; same-named components replaced
 - Values: External valuesFile references take precedence
 - Criteria values: External overlays' `spec.criteria` values become valid CLI / API inputs at runtime via the criteria registry; `--criteria-strict` (or `AICR_CRITERIA_STRICT=1`) rejects external-only values for OSS CI gates
@@ -1186,7 +1214,7 @@ aicr bundle --recipe recipe.yaml \
 helm install ... --set image.repository=602401143452.dkr.ecr.eu-west-1.amazonaws.com/eks/aws-efa-k8s-device-plugin
 ```
 
-`--dynamic` is supported with `helm`, `argocd-helm`, and `flux` deployers; `argocd` does not support it (use `argocd-helm` instead). See [Dynamic Install-Time Values](../user/cli-reference.md#dynamic-install-time-values) for the broader pattern.
+`--dynamic` is supported with `helm`, `helmfile`, `argocd-helm`, and `flux` deployers; `argocd` does not support it (use `argocd-helm` instead). See [Dynamic Install-Time Values](../user/cli-reference.md#dynamic-install-time-values) for the broader pattern.
 
 **Partition-aware variants.** Standard AWS uses account ID `602401143452`. GovCloud and China use different accounts and URI suffixes:
 
@@ -1295,10 +1323,11 @@ git add "$DEST"
 > **The signer must be allowlisted.** The blocking *Evidence Pointer Contract*
 > gate rejects a committed pointer whose signer is not listed in
 > `recipes/evidence/allowlist.yaml` ("signer … is not in the allowlist; add a
-> community/partner entry"). A maintainer adds your verified signer (keyed by
-> its one-way `source` slug, or an anchored `identityPattern` for CI) as a
-> `community`/`partner` entry — coordinate this in your PR; the pointer cannot
-> merge until the entry exists.
+> community/partner entry"). Add your verified signer (keyed by its one-way
+> `source` slug, or an anchored `identityPattern` for CI) as a
+> `community`/`partner` entry in the same PR; maintainer review of that entry is
+> the trust gate, and the pointer cannot merge until it exists. See
+> [Add your signer to the allowlist](../contributor/evidence-publishing.md#4-add-your-signer-to-the-allowlist).
 
 `--push` signs the bundle (cosign keyless via Sigstore) and attaches it to the
 OCI artifact as a Sigstore Bundle referrer. The tag is just a label — the

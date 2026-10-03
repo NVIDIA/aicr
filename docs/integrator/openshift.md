@@ -58,7 +58,8 @@ The Operator Lifecycle Manager provides a declarative approach to managing opera
 - **Certified Operators**: OCP components use Red Hat-certified operator catalogs (`certified-operators`, `redhat-operators`) when available
 - **Security Context Constraints (SCC)**: Operators may require privileged access for driver installation
 - **Entitlement**: RHEL-based driver builds may require Red Hat entitlement ConfigMaps
-- **Version Alignment**: Operator channel versions must align with OpenShift Container Platform (OCP) version
+- **Version Alignment**: Operator channel versions must align with OpenShift Container Platform (OCP) version. The GPU Operator Subscription tracks the certified `v26.7` channel, which is published for OCP 4.18 through 4.22.
+- **Channel changes upgrade in place**: every AICR Subscription uses `installPlanApproval: Automatic`, so redeploying a bundle whose channel moved upgrades the running operator immediately. Moving the GPU Operator from `v25.10` to `v26.7` goes straight to v26.7.1 in one step.
 
 ### Readiness Gates
 
@@ -113,24 +114,25 @@ The recipe includes OpenShift-specific component references with two-phase OLM d
 
 ```yaml
 # Earlier recipe fields omitted.
-spec:
-  componentRefs:
-    - name: gpu-operator-ocp-olm
-      type: Helm
-      valuesFile: components/gpu-operator-ocp-olm/values.yaml
-      manifestFiles:
-        - components/gpu-operator-ocp-olm/manifests/operatorgroup.yaml
-        - components/gpu-operator-ocp-olm/manifests/subscription.yaml
-      dependencyRefs:
-        - nfd-ocp        # waits for NFD CR to be applied
+componentRefs:
+  - name: gpu-operator-ocp-olm
+    type: Helm
+    valuesFile: components/gpu-operator-ocp-olm/values.yaml
+    manifestFiles:
+      - components/gpu-operator-ocp-olm/manifests/operatorgroup.yaml
+      - components/gpu-operator-ocp-olm/manifests/subscription.yaml
+    dependencyRefs:
+      - nfd-ocp        # waits for NFD CR to be applied
 
-    - name: gpu-operator-ocp
-      type: Helm
-      valuesFile: components/gpu-operator-ocp/values.yaml
-      manifestFiles:
-        - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
-      dependencyRefs:
-        - gpu-operator-ocp-olm  # waits for OLM phase to complete
+  - name: gpu-operator-ocp
+    type: Helm
+    valuesFile: components/gpu-operator-ocp/values.yaml
+    manifestFiles:
+      - components/gpu-operator-ocp/manifests/dcgm-exporter-configmap.yaml
+      - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
+    dependencyRefs:
+      - gpu-operator-ocp-olm  # waits for OLM phase to complete
+      - network-operator-ocp  # NicClusterPolicy before the GPU driver stack
 # Remaining recipe fields omitted.
 ```
 
@@ -228,7 +230,7 @@ oc get csv -n <operator-namespace>
 
 ```text
 NAME                                  DISPLAY        VERSION   REPLACES   PHASE
-<operator-name>.v25.10.1              <Display>      25.10.1              Succeeded
+<operator-name>.v26.7.1               <Display>      26.7.1               Succeeded
 ```
 
 **Check operator Deployment:**
@@ -406,7 +408,7 @@ base.yaml → ocp.yaml → ocp-<intent>.yaml → ocp-<intent>-<platform>.yaml
 
 The **base OCP overlay** (`ocp.yaml`) declares the OLM/CR component pairs for all operators supported on the platform and disables base components that are either replaced by OLM equivalents or not applicable to OpenShift (e.g., components managed natively by OCP or not yet supported).
 
-**Intent overlays** (e.g., `ocp-training.yaml`) inherit from the base and apply workload-specific values overrides to operator CRs.
+**Intent overlays** (e.g., `ocp-training.yaml`) inherit from the base and can apply workload-specific values overrides to operator CRs.
 
 
 

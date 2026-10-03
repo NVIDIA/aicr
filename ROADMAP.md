@@ -142,8 +142,9 @@ end-user verification documentation are shipped.
 - Promote VR200 from Preview to Supported through broader recipe coverage,
   hardware qualification, UAT, observability, and operational runbooks.
 - Continue contribution-path automation and review-pipeline improvements.
-- Build the machine-readable component upgrade lifecycle described by
-  [#2424](https://github.com/NVIDIA/aicr/issues/2424), including cluster-aware
-  upgrade checks and upgrade/rollback validation.
+- Finish the machine-readable component upgrade lifecycle described by
+  [#2424](https://github.com/NVIDIA/aicr/issues/2424): upgrade and rollback
+  validation in KWOK and UAT, and pre-migration releases for transitions that
+  need hooks.
 - Continue CNCF AI Conformance work as its requirements mature, treating
   conformance evidence as a first-class validator output.

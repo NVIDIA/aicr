@@ -33,7 +33,7 @@ This section is for users who:
 | [Container Images](container-images.md) | Container image inventory across all components (BOM) |
 | [Component Version Matrix](component-version-matrix.md) | Which component version shipped in each AICR release, and what changed (generated) |
 | [Recipe Health](recipe-health.md) | Per-recipe health and validation status tracking |
-| [TestGrid](testgrid.md) | Live per-recipe validation pass/fail board and its coordinate scheme |
+| [TestGrid](testgrid.md) | Planned per-recipe validation pass/fail board (not shipped yet) and its coordinate scheme |
 | [Evidence Dashboard](evidence-dashboard.md) | Signed third-party recipe evidence, consensus model, and deep links |
 | [Coverage Matrix](coverage-matrix.md) | Which CUJs and CLI verbs are exercised, on what hardware, at what cadence (generated) |
 | [Air-Gap Mirror](air-gap-mirror.md) | Mirror images and charts for air-gapped deployment |

@@ -78,10 +78,23 @@ on:
         type: string
         default: ''
       intent:
-        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml) and recipe criteria.'
+        description: 'Recipe intent: selects the per-intent test config (h100-<intent>[-<platform>]-config.yaml) and recipe criteria.'
         type: choice
         options: [training, inference]
         default: training
+      platform:
+        # Only run-kind forwards this. uat-aws/gcp/azure.yaml declare no
+        # platform input and build TEST_CONFIG from intent alone, so a
+        # non-empty value dispatched at a cloud reservation is INERT: that cell
+        # resolves its usual per-intent config and runs it. Nothing sets this
+        # but a manual dispatch (neither the nightly batch nor the daytime
+        # scheduler passes it), so the exposure is a hand-typed
+        # reservation/platform mismatch. actionlint rejects an empty string in
+        # a choice's options, so this is a free-form string whose allowed
+        # values the kind lane bounds in its own `Validate inputs` step.
+        description: 'Recipe platform: appends a -<platform> segment to the test-config filename. Empty selects the default per-intent config. Only the kind lane supports a non-empty value today.'
+        type: string
+        default: ''
       lifecycle:
         description: 'Cluster lifecycle. nightly: provision→CUJ→teardown. daytime-up: stable-named cluster, holds on success, tears down on failure or cancellation. daytime-down: tear down cluster.'
         type: choice
@@ -113,6 +126,10 @@ on:
         type: choice
         options: [helmfile, argocd]
         default: helmfile
+      allow_below_compat_floor:
+        description: 'Run a release below its tests/uat/compat.yaml harness-compat floor anyway (warns instead of refusing; for reproducing the incompatibility).'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       reservation:
@@ -127,6 +144,9 @@ on:
       intent:
         type: string
         default: training
+      platform:
+        type: string
+        default: ''
       lifecycle:
         type: string
         default: nightly
@@ -142,6 +162,9 @@ on:
       deployer:
         type: string
         default: helmfile
+      allow_below_compat_floor:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -200,6 +223,62 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
+      - name: Build uat-broker
+        run: go build -o ./bin/uat-broker ./tools/uat-broker
+      # Harness-compat floor (#2860): a release cell runs a RELEASED aicr
+      # against main's tests/uat/**, so a release below the lane's
+      # tests/uat/compat.yaml floor is guaranteed red and would burn a GPU lease.
+      # Refuse it unless allow_below_compat_floor is set (then only warn). main
+      # (aicr_version empty) is never gated, and nightly cells never trip this:
+      # the planner already dropped them. This runs BEFORE "Resolve reservation
+      # row" on purpose: the run-<cloud> jobs are `always()`-gated on the
+      # resolved cloud output, so a refusal must fail the job before that output
+      # is written, or the pipeline would still dispatch.
+      - name: Harness-compat floor gate
+        if: inputs.aicr_version != ''
+        env:
+          RESERVATION: ${{ inputs.reservation }}
+          INTENT: ${{ inputs.intent }}
+          AICR_VERSION: ${{ inputs.aicr_version }}
+          ALLOW_BELOW_COMPAT_FLOOR: ${{ inputs.allow_below_compat_floor }}
+        run: |
+          set -euo pipefail
+          case "${ALLOW_BELOW_COMPAT_FLOOR}" in
+            true|false) ;;
+            *) echo "::error::allow_below_compat_floor must be true or false; got '${ALLOW_BELOW_COMPAT_FLOOR}'"; exit 1 ;;
+          esac
+          CLOUD=$(./bin/uat-broker reservations --name "$RESERVATION" | sed -n 's/^cloud=//p')
+          if [[ -z "$CLOUD" ]]; then
+            echo "::error::could not resolve cloud for reservation '${RESERVATION}'"; exit 1
+          fi
+          rc=0
+          out=$(./bin/uat-broker compat gate --cloud "$CLOUD" --intent "$INTENT" \
+            --version "$AICR_VERSION" 2>&1) || rc=$?
+          # Single-line + %-escape: the message is echoed into a workflow command.
+          msg=$(tr '\r\n' '  ' <<<"$out")
+          msg=${msg//'%'/'%25'}
+          if (( rc == 0 )); then
+            echo "${out}"
+            exit 0
+          fi
+          # The override applies to the below-floor refusal alone: exit 2
+          # (INVALID_REQUEST) AND the broker's below-floor message. Other exit-2
+          # failures (malformed compat file, non-semver version) share the code,
+          # so they, and any other failure, fail closed regardless.
+          below_floor=""
+          if (( rc == 2 )) && [[ "$out" == *"is below the harness-compat floor"* ]]; then
+            below_floor=1
+          fi
+          if [[ -n "$below_floor" && "${ALLOW_BELOW_COMPAT_FLOOR}" == "true" ]]; then
+            echo "::warning title=UAT release below compat floor::${msg} Proceeding because allow_below_compat_floor=true; expect this run to fail."
+            exit 0
+          fi
+          if [[ -n "$below_floor" ]]; then
+            echo "::error title=UAT release below compat floor::${msg} Refusing to dispatch; set allow_below_compat_floor=true to run it anyway."
+          else
+            echo "::error title=UAT compat gate failed::uat-broker compat gate exited ${rc}: ${msg}"
+          fi
+          exit 1
       - name: Resolve reservation row
         id: row
         env:
@@ -207,6 +286,7 @@ jobs:
           # injection through the dispatch input.
           RESERVATION: ${{ inputs.reservation }}
           SLOT: ${{ inputs.slot }}
+          PLATFORM: ${{ inputs.platform }}
         run: |
           set -euo pipefail
           # Only slot 0 is provisioned today (ADR-017). Reject any other value at
@@ -217,8 +297,58 @@ jobs:
           if [[ "${SLOT}" != "0" ]]; then
             echo "::error::unsupported slot '${SLOT}' (only slot 0 is enabled today)"; exit 1
           fi
-          go build -o ./bin/uat-broker ./tools/uat-broker
-          ./bin/uat-broker reservations --name "$RESERVATION" >> "$GITHUB_OUTPUT"
+          # Hold the row in a variable rather than piping it straight to
+          # GITHUB_OUTPUT: the platform gate below needs the resolved cloud,
+          # which does not exist until the broker has run, and the row must not
+          # be published until the gate has passed (see below).
+          ROW="$(./bin/uat-broker reservations --name "$RESERVATION")"
+
+          # Fail closed on a platform the resolved lane cannot serve. Only
+          # run-kind forwards `platform` to its reusable pipeline; the other
+          # run-<cloud> jobs drop it, and uat-aws/gcp/azure.yaml build
+          # TEST_CONFIG from intent alone, so such a cell would resolve its
+          # usual per-intent config, run it to completion and report SUCCESS
+          # for a recipe nobody asked for. A false green is worse than a
+          # missing file, which at least goes red.
+          #
+          # The gate lives here rather than on each run-<cloud> job so it is
+          # stated once. What stops a lane from starting anyway is the ORDER of
+          # this step, not the fact that the step exits non-zero: a rejected
+          # dispatch never reaches the publish below, so `cloud` is never set,
+          # and every run-<cloud> job's `if` compares
+          # needs.resolve.outputs.cloud against a literal name that the empty
+          # string cannot equal. Three of those jobs carry `always()`, which
+          # runs a job whose `needs` failed, so relying on the failure alone
+          # would rest on what a failed job does with its outputs. Publishing
+          # last removes the question.
+          #
+          # The `case` arms are an ALLOWLIST OF LANES that can serve a
+          # non-empty platform, not a list of rejected platform values, so a
+          # platform added later is refused everywhere except the lanes listed
+          # and a lane that gains a platform input gets an arm. WHICH values a
+          # listed lane accepts stays with that lane (uat-kind.yaml's
+          # `Validate inputs`), so the allowed set is written down once.
+          if [[ -n "${PLATFORM}" ]]; then
+            CLOUD="$(printf '%s\n' "${ROW}" | sed -n 's/^cloud=//p')"
+            case "${CLOUD}" in
+              kind) ;;
+              *)
+                echo "::error::platform='${PLATFORM}' cannot be served by the '${CLOUD:-<unresolved>}' lane (reservation '${RESERVATION}')."
+                echo "::error::Only run-kind forwards a platform to its pipeline. uat-${CLOUD:-<unresolved>}.yaml declares no"
+                echo "::error::platform input and builds TEST_CONFIG from intent alone, so this cell would run its"
+                echo "::error::default per-intent config and report success for a recipe that was not requested."
+                echo "::error::Dispatch a kind reservation, or omit platform to run this lane's default."
+                exit 1
+                ;;
+            esac
+          fi
+
+          # Publish LAST, so no gate above it can be bypassed by a lane reading
+          # an output that was written before the check ran. The broker emits
+          # plain `key=value` lines (tools/uat-broker/main.go), never the
+          # `key<<EOF` multiline form, so re-emitting the captured text
+          # reproduces this step's outputs byte for byte.
+          printf '%s\n' "${ROW}" >> "$GITHUB_OUTPUT"
 
   # One of run-aws / run-gcp / run-azure / run-kind fires based on the resolved
   # cloud (the registry validates cloud membership, so at most one matches; the
@@ -334,6 +464,7 @@ jobs:
       reservation: ${{ inputs.reservation }}
       aicr_version: ${{ inputs.aicr_version }}
       intent: ${{ inputs.intent }}
+      platform: ${{ inputs.platform }}
       lifecycle: ${{ inputs.lifecycle }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}

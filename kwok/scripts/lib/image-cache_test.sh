@@ -206,6 +206,8 @@ reset() {
 
 IMG="public.ecr.aws/docker/library/registry:3.1.1"
 GITEA="docker.gitea.com/gitea:1.27.0-rootless"
+REDIS="ecr-public.aws.com/docker/library/redis:8.2.3-alpine"
+KIND_NODE="kindest/node:v1.37.0"
 
 # ── image_cache_key ──────────────────────────────────────────────────────────
 
@@ -464,22 +466,31 @@ unset STUB_LOAD_SLOW STUB_INSPECT_SLOW KWOK_IMAGE_CACHE_BUDGET_SECONDS
 
 # ── image_cache_settings ─────────────────────────────────────────────────────
 
-# 18. Both pins resolve, and each key matches what image_cache_key produces for
+# 18. Every pin resolves, and each key matches what image_cache_key produces for
 #     that ref. The prime job and the matrix jobs both go through this, so a
 #     disagreement here is a cache that misses every time while looking healthy.
+#     The emitted order follows IMAGE_CACHE_IMAGES, which the workflow matrix
+#     mirrors.
 reset
 SETTINGS="${STUB_DIR}/settings.yaml"
 cat > "${SETTINGS}" <<EOF
 testing_tools:
   registry_image: '${IMG}'
   gitea_image: '${GITEA}'
+  argocd_redis_image: '${REDIS}'
+testing:
+  kind_node_image: '${KIND_NODE}'
 EOF
 out=$(image_cache_settings "${SETTINGS}" 2>&1); rc=$?
 check_rc "settings-succeeds" 0 "${rc}"
 want="registry_image=${IMG}
 registry_key=$(image_cache_key "${IMG}")
 gitea_image=${GITEA}
-gitea_key=$(image_cache_key "${GITEA}")"
+gitea_key=$(image_cache_key "${GITEA}")
+argocd_redis_image=${REDIS}
+argocd_redis_key=$(image_cache_key "${REDIS}")
+kind_node_image=${KIND_NODE}
+kind_node_key=$(image_cache_key "${KIND_NODE}")"
 if [[ "${out}" == "${want}" ]]; then
     pass "settings-emits-images-and-matching-keys"
 else
@@ -501,9 +512,22 @@ cat > "${SETTINGS}" <<EOF
 testing_tools:
   registry_image: ''
   gitea_image: '${GITEA}'
+  argocd_redis_image: '${REDIS}'
+testing:
+  kind_node_image: '${KIND_NODE}'
 EOF
 image_cache_settings "${SETTINGS}" >/dev/null 2>&1; rc=$?
 check_rc_nonzero "settings-empty-pin-fails" "${rc}"
+
+# The Kind node pin lives under `testing`, not `testing_tools`.
+cat > "${SETTINGS}" <<EOF
+testing_tools:
+  registry_image: '${IMG}'
+  gitea_image: '${GITEA}'
+  argocd_redis_image: '${REDIS}'
+EOF
+image_cache_settings "${SETTINGS}" >/dev/null 2>&1; rc=$?
+check_rc_nonzero "settings-missing-kind-node-pin-fails" "${rc}"
 
 image_cache_settings "${STUB_DIR}/does-not-exist.yaml" >/dev/null 2>&1; rc=$?
 check_rc_nonzero "settings-missing-file-fails" "${rc}"
@@ -515,6 +539,9 @@ cat > "${SETTINGS}" <<EOF
 testing_tools:
   registry_image: 'public.ecr.aws/docker/library/registry :3.1.1'
   gitea_image: '${GITEA}'
+  argocd_redis_image: '${REDIS}'
+testing:
+  kind_node_image: '${KIND_NODE}'
 EOF
 image_cache_settings "${SETTINGS}" >/dev/null 2>&1; rc=$?
 check_rc_nonzero "settings-whitespace-in-pin-fails" "${rc}"
@@ -527,7 +554,14 @@ REAL_SETTINGS="$(cd "${SCRIPT_DIR}/../../.." && pwd)/.settings.yaml"
 if [[ -r "${REAL_SETTINGS}" ]]; then
     out=$(image_cache_settings "${REAL_SETTINGS}" 2>&1); rc=$?
     check_rc "settings-reads-the-real-settings-file" 0 "${rc}"
-    if [[ "${out}" == *"registry_image=public.ecr.aws/"* && "${out}" == *"gitea_image=docker.gitea.com/"* ]]; then
+    # The host prefixes are asserted, not just the keys. registry_image and
+    # gitea_image were deliberately moved off Docker Hub to escape a rate limit;
+    # argocd_redis_image inherits whatever host the Argo CD chart renders. A bump
+    # that regressed any of the three would reintroduce a rate-limit failure.
+    if [[ "${out}" == *"registry_image=public.ecr.aws/"* &&
+          "${out}" == *"gitea_image=docker.gitea.com/"* &&
+          "${out}" == *"argocd_redis_image=ecr-public.aws.com/"* &&
+          "${out}" == *"kind_node_image=kindest/node:"* ]]; then
         pass "settings-resolves-the-pinned-registries"
     else
         fail "settings-resolves-the-pinned-registries (got: ${out})"

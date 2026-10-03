@@ -13,7 +13,7 @@ AICR uses three roles. They map directly to the project's GitHub teams and to
 
 ### Contributors
 
-Anyone who opens an issue, pull request, or discussion. Contributors follow the
+Anyone who opens an issue or pull request. Contributors follow the
 [Code of Conduct](CODE_OF_CONDUCT.md) and sign off their commits under the DCO
 (see [CONTRIBUTING.md](CONTRIBUTING.md)). No special access is required to
 contribute.
@@ -49,8 +49,8 @@ Maintainers hold cross-cutting responsibility across all areas.
 
 ## Decision-Making
 
-AICR decides by **lazy consensus**: a proposal (pull request, issue, or
-discussion) is accepted if no maintainer raises a blocking objection within a
+AICR decides by **lazy consensus**: a proposal (pull request or issue) is
+accepted if no maintainer raises a blocking objection within a
 reasonable review window — at least five business days for non-trivial changes.
 Most day-to-day changes are merged through normal code-owner review under
 [`.github/CODEOWNERS`](.github/CODEOWNERS) and the process in

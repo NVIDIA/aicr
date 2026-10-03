@@ -22,6 +22,11 @@
 //
 // # Commands
 //
+// The workflow commands and the skill utility are summarized below. The CLI also
+// provides query, verify, evidence, diff, upgrade-check, mirror, trust, and
+// completion; run "aicr --help" for the full list, and see
+// docs/user/cli-reference.md for every command and flag.
+//
 // snapshot - Capture system configuration (Step 1):
 //
 //	aicr snapshot [--output FILE] [--format yaml|json|table]
@@ -34,7 +39,7 @@
 //
 // recipe - Generate configuration recipes (Step 2):
 //
-//	aicr recipe --os ubuntu --osv 24.04 --service eks --gpu h100 --intent training
+//	aicr recipe --os ubuntu --service eks --gpu h100 --intent training
 //	aicr recipe --snapshot system.yaml --intent inference --output recipe.yaml
 //	aicr recipe -s cm://namespace/snapshot -o cm://namespace/recipe  # ConfigMap I/O
 //	aicr recipe --config config.yaml --output recipe.yaml  # Config file mode
@@ -74,11 +79,12 @@
 //
 //	aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 //	aicr validate -r recipe.yaml -s cm://default/aicr-snapshot
-//	aicr validate -r recipe.yaml -s cm://ns/snapshot --fail-on-error
+//	aicr validate -r recipe.yaml -s cm://ns/snapshot --fail-on-error=false
 //
 // Validates recipe constraints against actual measurements from a snapshot.
 // Supports version comparisons (>=, <=, >, <), equality (==, !=), and exact match.
-// Use --fail-on-error for CI/CD pipelines (non-zero exit on failures).
+// Failed checks exit non-zero by default (--fail-on-error is on); pass
+// --fail-on-error=false to report failures without failing the command.
 //
 // bundle - Create deployment bundles (Step 4):
 //
@@ -106,12 +112,13 @@
 //
 // # Global Flags
 //
-//	--output, -o   Output file path (default: stdout)
-//	--format, -t   Output format: yaml, json, table (default: yaml)
 //	--debug        Enable debug logging
 //	--log-json     Output logs in JSON format
 //	--help, -h     Show command help
 //	--version, -v  Show version information
+//
+// Output destination and format (--output/-o, --format/-t) are per-command
+// flags; see each command's --help.
 //
 // # Output Formats
 //
@@ -143,9 +150,9 @@
 //	aicr validate -r cm://default/aicr-recipe -s cm://default/aicr-snapshot
 //	aicr bundle -r cm://default/aicr-recipe -o ./bundles
 //
-// Generate recipe for Ubuntu 24.04 on EKS with H100 GPUs:
+// Generate recipe for Ubuntu on EKS with H100 GPUs:
 //
-//	aicr recipe --os ubuntu --osv 24.04 --service eks --gpu h100 --intent training
+//	aicr recipe --os ubuntu --service eks --gpu h100 --intent training
 //
 // Override bundle values at generation time:
 //
@@ -153,7 +160,8 @@
 //
 // # Environment Variables
 //
-//	AICR_LOG_LEVEL         Set logging verbosity (debug, info, warn, error)
+//	AICR_DEBUG             Same as --debug
+//	AICR_LOG_JSON          Same as --log-json
 //	AICR_LOG_PREFIX        Override the CLI log prefix (default: "cli")
 //	NO_COLOR               Suppress ANSI color codes in CLI logger output
 //	NODE_NAME              Override node name for Kubernetes collection
@@ -163,9 +171,11 @@
 //
 // # Exit Codes
 //
-//	0  Success
-//	1  General error (invalid arguments, execution failure)
-//	2  Context canceled or timeout
+// The exit code is derived from the failure's error code (ExitCodeFromError in
+// pkg/errors): 0 on success, 1 for an unclassified error, and a distinct code
+// from 2 to 9 per error class (for example 2 for invalid input, 5 for a timeout,
+// 9 when the operator cancels). The full table is in the Exit Codes section of
+// docs/user/cli-reference.md.
 //
 // # Architecture
 //

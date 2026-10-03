@@ -16,7 +16,7 @@ catalog content) or overrides (for component files) the embedded equivalent.
 | Need | How `--data` helps |
 |---|---|
 | Add a non-public Kubernetes service (`service=ncp-internal`) | Drop an overlay declaring that criteria value; the criteria registry admits it. |
-| Add a proprietary platform (`platform=runai`, `platform=nvmesh`) | Same — an overlay's `spec.criteria.platform` registers the value. |
+| Add a proprietary platform (`platform=nvmesh`) | Same — an overlay's `spec.criteria.platform` registers the value. |
 | Add a future GPU SKU before AICR's next release | Add `accelerator: <name>` in an overlay; CLI / API admit it on the fly. |
 | Add an internal component (e.g., an in-house operator) | Add a component definition under `components/` and reference it in an overlay or mixin. |
 | Override an embedded chart version / values file | Drop a same-path file under your `--data` dir; external takes precedence. |
@@ -285,6 +285,7 @@ with only pre-manifests is rejected as having no deployable primary.
 | `registry.yaml` | **Merged**: embedded + external component lists. On name collision, external wins. |
 | `validators/catalog.yaml` | **Merged**: embedded + external validator lists, by validator name. A same-named external validator replaces the embedded one; new validators are appended. |
 | Files in `components/`, `mixins/`, `overlays/` | **Replaced**: any external file at the same relative path completely replaces the embedded equivalent. No partial-content merge. |
+| Profile-only file in `overlays/` | **Extended**. An external overlay that carries only a `spec.profile` adds its values to the embedded overlay at the same path and replaces nothing else (see below). |
 
 When in doubt, `aicr --debug recipe ... --data <dir>` logs the resolved source
 (`embedded` / `external` / `merged`) for every loaded file.
@@ -304,10 +305,44 @@ When an external data directory replaces a declaring overlay, or converts a
 family to a profile, the replacement rules above interact with the profile
 mechanics:
 
+- **A profile-only file extends the declaration.** An external overlay at
+  the path of an embedded one that carries only `apiVersion`, `kind`,
+  `metadata.name` and `spec.profile` adds its values to the embedded
+  overlay's profile. Nothing else in the embedded overlay is replaced, so the
+  catalog does not fork the overlay or re-sync it on upgrade. This
+  `overlays/gke-cos.yaml` adds a `custom` value to `gpuStack`:
+
+  ```yaml
+  apiVersion: aicr.run/v1beta2
+  kind: RecipeMetadata
+  metadata:
+    name: gke-cos
+  spec:
+    profile:
+      name: gpuStack
+      values:
+        custom:
+          advertiser: external
+          componentRefs:
+            - name: gcp-driver-installer
+              overrides: {installer: {enabled: false}}
+            - name: gpu-operator
+              overrides: {devicePlugin: {enabled: false}}
+            - name: nvsentinel
+              overrides: {labeler: {assumeDriverInstalled: true}}
+  ```
+
+  A patch can only add values. Catalog load fails when it redeclares an
+  embedded value, sets `default` or `description`, names a different profile,
+  or adds no values. Union totality is checked over the merged values, so
+  each added value must assign exactly the path set the embedded values
+  assign. A value that assigns other paths or leaves some out fails closed.
+  An overlay that also carries `spec.criteria`, `componentRefs` or any other
+  field is not a patch and follows the replacement rule below.
 - **A same-path replacement replaces the declaration too.** An external
-  `overlays/aks.yaml` completely replaces the embedded file — including its
-  `spec.profile` block. Keep the declaration in the replacement — dropping it
-  while keeping profile apiVersion `aicr.run/v1beta2` fails catalog validation
+  `overlays/aks.yaml` that carries more than a profile block completely
+  replaces the embedded file, including its `spec.profile` block. Keep the
+  declaration in the replacement. Dropping it while keeping profile apiVersion `aicr.run/v1beta2` fails catalog validation
   (the version⟺declaration cross-check). That guardrail protects an
   integrator *editing* a profile-track file: de-profiling one requires BOTH
   removing the declaration AND downgrading the overlay to the legacy
@@ -408,8 +443,6 @@ Sample output (truncated):
 ```text
 [cli] initializing external data provider: directory=./my-external-data
 [cli] layered data provider initialized: external_dir=./my-external-data external_files=12
-[cli] data provider set: generation=1
-[cli] external data provider initialized successfully: directory=./my-external-data
 [cli] building recipe from criteria: criteria=criteria(service=eks, accelerator=h100, intent=any, os=any)
 [cli] recipe generation completed: output=stdout components=8 overlays=2
 ```

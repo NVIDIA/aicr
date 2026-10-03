@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1069,6 +1070,45 @@ func TestWithValidationFailFast_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestWithValidationSkipChecks_RoundTrip pins that WithValidationSkipChecks
+// captures the names into validateConfig and that validateOptionsFromConfig
+// lands them on the Validator, so a lane-config skip list reaches the preflight
+// that acts on it. An unset list must emit no option at all: pre-seeding a
+// validator and confirming the translation leaves it alone is what catches a
+// regression that always emitted WithSkipChecks(nil) and quietly cleared a
+// caller-supplied list.
+func TestWithValidationSkipChecks_RoundTrip(t *testing.T) {
+	t.Run("set", func(t *testing.T) {
+		cfg := buildValidateConfig([]ValidateOption{
+			WithValidationSkipChecks("gpu-operator-health", "dra-support"),
+		})
+		v := validator.New(validateOptionsFromConfig(cfg)...)
+		if !slices.Equal(v.SkipChecks, []string{"gpu-operator-health", "dra-support"}) {
+			t.Errorf("validator.SkipChecks = %v, want [gpu-operator-health dra-support]", v.SkipChecks)
+		}
+	})
+
+	t.Run("unset emits no option", func(t *testing.T) {
+		cfg := buildValidateConfig(nil)
+		v := validator.New(append(
+			[]validator.Option{validator.WithSkipChecks("pre-seeded")},
+			validateOptionsFromConfig(cfg)...)...)
+		if !slices.Equal(v.SkipChecks, []string{"pre-seeded"}) {
+			t.Errorf("validator.SkipChecks = %v; an unset list must emit no option", v.SkipChecks)
+		}
+	})
+
+	t.Run("the slice is copied", func(t *testing.T) {
+		names := []string{"gpu-operator-health"}
+		cfg := buildValidateConfig([]ValidateOption{WithValidationSkipChecks(names...)})
+		names[0] = "mutated-after-handoff"
+		v := validator.New(validateOptionsFromConfig(cfg)...)
+		if !slices.Equal(v.SkipChecks, []string{"gpu-operator-health"}) {
+			t.Errorf("validator.SkipChecks = %v; the caller mutated the facade's copy", v.SkipChecks)
+		}
+	})
+}
+
 // TestValidateState_ThreadsClientVersion pins FIX B: ValidateState threads
 // the Client's version into the validator (it rewrites :latest images and
 // populates AICR_CLI_VERSION). Run in no-cluster mode so no Kubernetes
@@ -2036,5 +2076,63 @@ func TestRejectUnverifiableCatalogSigning(t *testing.T) {
 				t.Error("returned a config for a request that named no signing config")
 			}
 		})
+	}
+}
+
+// TestResolveRecipeInheritFromRestoresRegistryIdentity proves chart, source and
+// both manifest sets survive a resolve. The manifest sets are not public
+// ComponentRef fields, so the result is read back through the internal recipe.
+func TestResolveRecipeInheritFromRestoresRegistryIdentity(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	req := RecipeRequest{Service: "eks", Accelerator: "h100", OS: "ubuntu", Intent: "training"}
+
+	baseline, err := client.ResolveRecipe(t.Context(), req)
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	var name string
+	for _, c := range baseline.Components {
+		if c.Kind == "Helm" {
+			name = c.Name
+			break
+		}
+	}
+	if name == "" {
+		t.Fatal("setup: baseline resolved no Helm component")
+	}
+
+	prior := filepath.Join(t.TempDir(), "prior.yaml")
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n" +
+		"  - name: " + name + "\n    type: Helm\n    chart: prior-chart\n    source: https://charts.invalid/prior\n" +
+		"    version: 1.0.0\n    namespace: prior-ns\n    manifestFiles:\n      - components/prior/a.yaml\n" +
+		"    preManifestFiles:\n      - components/prior/pre.yaml\n"
+	if writeErr := os.WriteFile(prior, []byte(doc), 0o600); writeErr != nil {
+		t.Fatalf("setup: write prior: %v", writeErr)
+	}
+	req.InheritFrom = prior
+
+	result, err := client.ResolveRecipe(t.Context(), req)
+	if err != nil {
+		t.Fatalf("ResolveRecipe: %v", err)
+	}
+	ref := result.internal.GetComponentRef(name)
+	if ref == nil {
+		t.Fatalf("resolved recipe has no component %q", name)
+	}
+	if ref.Chart != "prior-chart" || ref.Source != "https://charts.invalid/prior" || ref.Namespace != "prior-ns" {
+		t.Errorf("chart/source/namespace = %q/%q/%q, want the inherited prior-chart/https://charts.invalid/prior/prior-ns",
+			ref.Chart, ref.Source, ref.Namespace)
+	}
+	if !slices.Equal(ref.ManifestFiles, []string{"components/prior/a.yaml"}) {
+		t.Errorf("ManifestFiles = %v, want the inherited set", ref.ManifestFiles)
+	}
+	if !slices.Equal(ref.PreManifestFiles, []string{"components/prior/pre.yaml"}) {
+		t.Errorf("PreManifestFiles = %v, want the inherited set", ref.PreManifestFiles)
 	}
 }

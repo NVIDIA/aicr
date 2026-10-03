@@ -213,3 +213,32 @@ func TestLimitedWriterSingleWriteOverflow(t *testing.T) {
 		t.Errorf("buffer should be empty after rejected write, got %q", buf.String())
 	}
 }
+
+func TestSummarizeHelmError(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   string
+	}{
+		{"empty", "", ""},
+		{"no error line", "WARNING: something happened", ""},
+		{"single line", "Error: chart not found", "chart not found"},
+		{
+			"warning mentioning Error is skipped",
+			"WARNING: retry after Error: timeout\nError: failed to pull chart",
+			"failed to pull chart",
+		},
+		{
+			"continuation lines are kept",
+			"Error: template: x/templates/a.yaml:3:4: executing\n  nil pointer evaluating\n\nUse --debug",
+			"template: x/templates/a.yaml:3:4: executing nil pointer evaluating",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := summarizeHelmError(tt.stderr); got != tt.want {
+				t.Errorf("summarizeHelmError() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

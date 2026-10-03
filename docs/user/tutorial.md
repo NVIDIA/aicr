@@ -16,6 +16,10 @@ lists, see the [CLI Reference](cli-reference.md).
   local Kind/KWOK cluster for a dry run). `kubectl` configured to reach it.
 - The `helm` binary on your `PATH` (the default `helm` deployer emits Helm
   commands).
+- On EKS, an AWS credential path for the EBS CSI driver. The bundle installs
+  the driver but not its credentials, and without them no volume can be
+  provisioned — see
+  [EBS CSI Driver Credentials](component-catalog.md#ebs-csi-driver-credentials).
 - About 15 minutes. No NVIDIA hardware is required to generate a recipe or a
   bundle — only the deploy and validate stages touch a real cluster.
 
@@ -84,7 +88,8 @@ aicr query \
 ## Step 4 — Render deployment bundles
 
 The **bundler** materializes the recipe into deployment-ready artifacts — one
-folder per component, each with Helm values, checksums, and a README:
+folder per component with its Helm values, plus a root README, `checksums.txt`,
+and `bundle-info.yaml`:
 
 ```bash
 aicr bundle --recipe recipe.yaml --output ./bundles

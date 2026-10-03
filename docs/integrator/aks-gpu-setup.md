@@ -471,7 +471,7 @@ time with the complete legacy override set (`--set gpuoperator:driver.enabled=tr
 legacy artifacts; on profiled recipes these paths are owned and flags
 diverging from the selected value are rejected). Criteria-only resolves
 (`aicr recipe --service aks ...`) have no cluster signal and record no state —
-the deployment-phase `gpu-operator-health` validation is the backstop.
+the conformance-phase `gpu-operator-health` validation is the backstop.
 
 `Standard_ND96isr_H100_v5` is the 8-GPU ND H100 v5 SKU. The AKS Dynamo
 inference throughput gate (`inference-throughput`) is a fixed absolute
@@ -630,7 +630,7 @@ configuration profile — one flag flips every ownership path together:
 ```shell
 aicr recipe --service aks --accelerator h100 --os ubuntu --intent training \
   --profile gpuStack=operator-managed -o recipe.yaml
-# AKS requires a keyed accelerated-node toleration; add
+# AKS requires a keyed accelerated-node toleration.
 # --dra-eviction-node-label opts in; dra-node-labeler labels the GPU nodes.
 aicr bundle -r recipe.yaml -o ./bundles \
   --accelerated-node-toleration nvidia.com/gpu:NoSchedule \

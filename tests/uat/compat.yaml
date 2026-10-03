@@ -1,0 +1,61 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Harness-compat floors for UAT release cells (#2860).
+#
+# Release cells of the nightly version matrix run a RELEASED aicr against
+# MAIN's tests/uat/** fixtures and harness. When a change here needs a newer
+# binary (a new config field, a new runtime, a phase calling a new CLI flag),
+# add or raise a floor IN THE SAME COMMIT. Release cells below the floor are
+# skipped (with a notice) for that lane and intent; main always runs.
+#
+# Floor = the first stable release containing the breaking commit, which is
+# the NEXT release (vX.Y.Z+1, vX.Y+1.0, or vX+1.0.0) while it is unreleased.
+# `uat-broker compat check` blames each min-release line and rejects an
+# over-high floor, both at PR time and nightly; an under-low floor shows up
+# as a red cell. Delete a row once no scheduled window reaches below it.
+#
+# Fields (strict: unknown keys fail the parse):
+#   lane         a reservation `cloud` (aws | gcp | azure | kind), which is
+#                also the tests/uat/<lane>/ fixture directory
+#   intents      non-empty subset of [training, inference]; each
+#                (lane, intent) pair may appear in at most one row
+#   min-release  stable semver release tag with the `v` prefix
+#   reason       required; names the breaking mechanism and is printed in
+#                the skip notice (single-lined, truncated to 200 chars)
+floors:
+  - lane: gcp
+    intents: [training]
+    min-release: v0.22.0
+    reason: >-
+      #2705: main's training config sets spec.recipe.configuration.gke.tcpxoInterfaces
+      (unknown field pre-v0.22.0) and needs the torch-distributed-tcpxo runtime
+  - lane: azure
+    intents: [training]
+    min-release: v0.18.0
+    reason: >-
+      main's AKS cluster-config sets gpuDriverInstall: true; pre-v0.18.0 embeds the
+      GPU-Operator-managed driver profile and deploys a second driver stack
+  - lane: azure
+    intents: [inference]
+    min-release: v0.18.0
+    reason: >-
+      AKS ND H100 v5 inference-perf fix (nvidia-tuned 0.3.2, #1767); older releases
+      pin 0.3.1 and fail inference-perf
+  - lane: kind
+    intents: [training, inference]
+    min-release: v0.18.0
+    reason: >-
+      nvkind lane and the os-agnostic coordinate fix (#1851) postdate v0.17.0, which
+      rejects os: any in CoordinateFor and emits no ingestable evidence

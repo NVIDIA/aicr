@@ -7,8 +7,9 @@ KWOK (Kubernetes WithOut Kubelet) tests AICR bundles against simulated GPU clust
 Versions are pinned in `.settings.yaml`. **Docker Desktop must be running** — Kind uses it to create the local cluster.
 
 ```bash
-# Kind, lifecycle, bundle deployment, build
-brew install kind tilt-dev/tap/ctlptl helm yq goreleaser
+# Kind, ctlptl, helm, yq, goreleaser, and the rest of the toolchain
+# (then run make tools-check to confirm the .settings.yaml pins)
+make tools-setup
 ```
 
 The `kwok`/`kwokctl` binaries are not required — `make kwok-cluster` installs the KWOK controller into the cluster via `kubectl apply`.
@@ -188,7 +189,7 @@ lanes).
 A recipe is auto-discovered for KWOK testing if it has `spec.criteria.service` defined. Create `recipes/overlays/your-recipe.yaml`:
 
 ```yaml
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
   name: your-recipe-name
@@ -252,9 +253,19 @@ gh workflow run kwok-recipes.yaml -f recipe=your-recipe-name
 
 ### Public image cache
 
-The lanes need two images from public registries — the in-cluster OCI registry and, for the `*-git` deployers, Gitea. Both are pinned in `.settings.yaml` under `testing_tools`.
+The lanes need three images from public registries, all pinned in `.settings.yaml` under `testing_tools`:
+
+| Image | Needed by | Pin |
+|---|---|---|
+| In-cluster OCI registry | every lane | `registry_image` |
+| Gitea | the `*-git` deployers | `gitea_image` |
+| Argo CD's Redis | the `argocd-*` deployers | `argocd_redis_image` |
+
+The Redis one is not a component AICR installs. It is rendered by the Argo CD chart, so its pin is whatever `argocd_chart` resolves to and it carries no `renovate:` annotation — a bot bumping it independently would cache an image the chart never pulls. Re-derive it on a chart bump (`helm template argo/argo-cd --version <chart> | grep -oE 'image: .*redis.*'`); if it drifts, a failed Argo CD install reports the mismatch by name. The chart's other images (quay.io, ghcr.io) are left to the kubelet, neither having been observed shedding a pull.
 
 A full Tier 3 run fans out to well over a hundred concurrent jobs, and a job that pulls these itself competes with every sibling for the same per-IP quota at the registry: 127 jobs pulling at once reliably gets one or two shed, which reddens the run with nothing wrong in the repo (#2483). So CI pulls each image exactly once, in the `prime-images` job, and carries it to the matrix as a tarball in `actions/cache`. Each test job loads from that tarball, and `preload_image` then finds the image already in the host Docker cache and never contacts the registry.
+
+Each lane restores only what it needs: Gitea for `*-git`, Redis for `argocd-*`, so the other lanes skip a restore they would never use.
 
 `kwok/scripts/lib/image-cache.sh` owns both ends, so the priming job and the test jobs derive the cache key from the same code:
 

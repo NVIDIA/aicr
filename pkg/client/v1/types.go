@@ -260,12 +260,12 @@ type AgentConfig struct {
 // where 0 plays that role. A non-empty string that the registry does not
 // recognize is rejected at resolve time with ErrCodeInvalidRequest.
 type Criteria struct {
-	Service     string
-	Accelerator string
-	Intent      string
-	OS          string
-	Platform    string
-	Nodes       int
+	Service     string `json:"service,omitempty"     yaml:"service,omitempty"`
+	Accelerator string `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
+	Intent      string `json:"intent,omitempty"      yaml:"intent,omitempty"`
+	OS          string `json:"os,omitempty"          yaml:"os,omitempty"`
+	Platform    string `json:"platform,omitempty"    yaml:"platform,omitempty"`
+	Nodes       int    `json:"nodes,omitempty"       yaml:"nodes,omitempty"`
 }
 
 // AllowLists fences which criteria values the resolve path accepts on a
@@ -378,8 +378,9 @@ type RecipeRequest struct {
 	AccountingMode string
 
 	// InheritFrom is a prior recipe file or bundle directory whose resolved
-	// namespaces this resolution preserves. Empty means resolve from the
-	// registry alone. A cm:// URI is rejected: not supported yet (#2830).
+	// namespace, chart, source, path, manifest files and pre-manifest files this
+	// resolution preserves. Empty means resolve from the registry alone. A cm://
+	// URI is rejected because it is not supported yet.
 	InheritFrom string
 
 	// PinnedName reserves space for future pinned-recipe support.
@@ -438,8 +439,9 @@ func WithProfile(profile string) RecipeResolveOption {
 }
 
 // WithInheritFrom names a prior recipe file or bundle directory whose resolved
-// namespaces this resolve keeps, so a moved registry default does not relocate
-// a component that is already running. A component the prior artifact does not
+// namespace, chart, source, path, manifest files and pre-manifest files this
+// resolve keeps, so a moved registry default does not relocate or replace a
+// component that is already running. A component the prior artifact does not
 // name keeps its registry default. Empty resolves from the registry alone.
 //
 // The reference is read when the resolve runs: a cm:// URI, an unreadable
@@ -467,10 +469,12 @@ func WithAccountingMode(mode string) RecipeResolveOption {
 }
 
 // WithRuntimeInventoryMode selects whether the runtime AI inventory component
-// is installed by a criteria- or snapshot-based resolve call. It is valid only
-// when the resolved recipe declares that component; an empty or invalid mode is
-// rejected when the resolve call runs. Omit this option to keep the recipe's
-// own declaration.
+// is installed by a criteria- or snapshot-based resolve call. "enabled" confirms
+// the selection when the resolved recipe declares the component and grants it
+// (GKE recipes only, #2962) when the recipe neither declares nor declines it; a
+// recipe that explicitly declines the component rejects the option on any
+// service. An empty or invalid mode is rejected when the resolve call runs.
+// Omit this option to keep the recipe's own declaration.
 //
 // Unlike a bundle-time value override, the selection is recorded in the emitted
 // recipe and removes the component's health check along with the component,

@@ -84,8 +84,8 @@ in `merge-gate.yaml`.
 - The read SA's impersonation is repository-scoped (the shared
   `github-actions-pool` provider, owned by `infra/gcp-shared`, maps only
   the repository attribute). It is least-privilege on the resource side
-  (`objectViewer` on one bucket); GP3's `infra/evidence-dashboard` may tighten
-  the subject condition further.
+  (`objectViewer` on one bucket). Tightening the subject condition further
+  was part of GP3 (#1403), which was closed as not planned.
 - The build passes `-allowlist recipes/evidence/allowlist.yaml` to the
   generator, re-deriving each source's class from its verified signer against
   the in-tree GP1 allowlist — defense in depth on top of the class GP2 baked

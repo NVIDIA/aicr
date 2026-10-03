@@ -203,6 +203,10 @@ type Latest struct {
 	// AICRVer is the AICR version from the bundle predicate (a facet axis).
 	AICRVer string `json:"aicrVer"`
 
+	// AICRCommit is the build commit from the bundle predicate, or omitted
+	// when the run carries none. Display only, never a consensus key.
+	AICRCommit string `json:"aicrCommit,omitempty"`
+
 	// K8sVer is the observed Kubernetes major.minor (a facet axis).
 	K8sVer string `json:"k8sVer"`
 
@@ -253,6 +257,7 @@ type SeriesRow struct {
 type SeriesBuild struct {
 	ID          string `json:"id"`
 	AICRVer     string `json:"aicrVer"`
+	AICRCommit  string `json:"aicrCommit,omitempty"`
 	K8sVer      string `json:"k8sVer"`
 	When        string `json:"when"`
 	Newest      bool   `json:"newest"`

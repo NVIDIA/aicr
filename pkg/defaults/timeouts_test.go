@@ -411,3 +411,18 @@ func TestOCIRecipeResourceLimitInvariants(t *testing.T) {
 			MaxOCIRecipeRetryTrafficBytes, wantTraffic)
 	}
 }
+
+// TestUpgradeCheckClusterBudgetCoversItsReads pins the assumption
+// CLIUpgradeCheckClusterTimeout is summed on: it counts the Helm reader's
+// budget as the longer of the two readers, so an Argo budget that grew past it
+// would leave a run expiring before the read it is waiting on.
+func TestUpgradeCheckClusterBudgetCoversItsReads(t *testing.T) {
+	if ArgoInventoryTimeout > HelmInventoryTimeout {
+		t.Errorf("ArgoInventoryTimeout (%v) exceeds HelmInventoryTimeout (%v), which "+
+			"CLIUpgradeCheckClusterTimeout budgets as the longer reader", ArgoInventoryTimeout, HelmInventoryTimeout)
+	}
+	if CLIUpgradeCheckClusterTimeout <= CLIUpgradeCheckTimeout+AtRiskScanTimeout {
+		t.Errorf("CLIUpgradeCheckClusterTimeout (%v) leaves no room for the inventory read",
+			CLIUpgradeCheckClusterTimeout)
+	}
+}

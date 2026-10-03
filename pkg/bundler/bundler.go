@@ -51,6 +51,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/netutil"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
+	"github.com/NVIDIA/aicr/pkg/upgrade"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -230,23 +231,27 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 // generates Argo CD Application manifests.
 //
 // Every deployer writes recipe.yaml at the bundle root: the resolved recipe the
-// bundle was generated from.
+// bundle was generated from. When a pinned version lands inside a manual or
+// blocked transition record, it also writes upgrade.GuideFile there with the
+// steps for the configured deployer, and points to it from README.md and the
+// first deployment note.
 //
 // For Helm per-component output:
 //   - README.md: Root deployment guide with ordered steps
 //   - deploy.sh: Automation script (0755)
-//   - <component>/values.yaml: Helm values per component
-//   - <component>/README.md: Component install/upgrade/uninstall
-//   - <component>/manifests/: Optional manifest files
+//   - NNN-<component>/values.yaml: Helm values per component
+//   - NNN-<component>/install.sh: Component install/upgrade script
 //   - checksums.txt: SHA256 checksums of generated files
 //
 // For Argo CD output:
 //   - app-of-apps.yaml: Parent Argo CD Application
-//   - <component>/application.yaml: Argo CD Application per component
-//   - <component>/values.yaml: Values for each component
+//   - NNN-<component>/application.yaml: Argo CD Application per component
+//   - NNN-<component>/values.yaml: Values for each component
 //   - README.md: Deployment instructions
 //
 // Returns a result.Output summarizing the generation results.
+//
+//nolint:funlen // linear gate sequence; every check must precede the first filesystem write.
 func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeResult, dir string) (*result.Output, error) {
 	start := time.Now()
 
@@ -295,24 +300,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, err
 	}
 
-	enabledRefs, filteredOrder, excludedReasons, filterErr := b.filterEnabledComponents(recipeResult)
-	if filterErr != nil {
-		return nil, filterErr
+	recipeResult, err := b.filterAndValidateRecipe(recipeResult)
+	if err != nil {
+		return nil, err
 	}
-
-	// A --set / --set-json / --set-file naming a component that is not in
-	// the generated bundle cannot take effect. Reject it rather than drop
-	// it on the floor. Runs immediately after filtering, so the "present"
-	// set is exactly what will be rendered.
-	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, enabledRefs, excludedReasons); overrideErr != nil {
-		return nil, overrideErr
-	}
-
-	// Work on a shallow copy so the caller's RecipeResult is not mutated
-	filtered := *recipeResult
-	filtered.ComponentRefs = enabledRefs
-	filtered.DeploymentOrder = filteredOrder
-	recipeResult = &filtered
 
 	// Bundle-time override policy for GPU allocation-policy keys (#1327):
 	// reject --dynamic declarations, warn on static overrides. Runs after
@@ -388,6 +379,11 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, componentValidationError(validationErr)
 	}
 
+	upgradeNotes, upgradeNotice, err := b.selectUpgradeNotes(ctx, recipeResult)
+	if err != nil {
+		return nil, err
+	}
+
 	// No filesystem output is created until the final candidate has passed the
 	// profile state and mutability invariant above.
 	if dir == "" {
@@ -416,11 +412,11 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	}
 
 	// Build the deployer and run it
-	d, err := b.buildDeployer(ctx, recipeResult, componentValues, dataFiles)
+	d, err := b.buildDeployer(ctx, recipeResult, componentValues, dataFiles, upgradeNotice)
 	if err != nil {
 		return nil, err
 	}
-	return b.runDeployer(ctx, d, recipeResult, dir, dataFiles, start)
+	return b.runDeployer(ctx, d, recipeResult, dir, dataFiles, upgradeNotes, start)
 }
 
 // ValidateAccountingValues verifies that resolved component values preserve
@@ -743,9 +739,53 @@ func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvid
 	return nil
 }
 
+// selectUpgradeNotes loads the recipe-bound transition records, selects the
+// guidance for the versions this bundle pins, and renders the README notice
+// for it, which is empty when nothing qualifies.
+//
+// Bundling renders records and never fails on them: checking records is the
+// job of aicr upgrade-check and make lint, and a --data pin override outside a
+// record's coverage is the user's deliberate choice. A record that cannot be
+// read drops all guidance with a warning; one that loads but is ill-formed
+// renders what it can, since BundleNotes leaves unparseable ranges inert.
+func (b *DefaultBundler) selectUpgradeNotes(ctx context.Context, rr *recipe.RecipeResult) ([]upgrade.BundleNote, string, error) {
+	set, _, err := recipe.LoadUpgradeRecords(ctx, rr.DataProvider())
+	if err != nil {
+		// Cancellation is the caller stopping the bundle, not a record fault.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, "", errors.Wrap(errors.ErrCodeTimeout, "context cancelled during upgrade record loading", ctxErr)
+		}
+		warning := fmt.Sprintf("upgrade guidance was not added to this bundle; run aicr upgrade-check "+
+			"to review upgrade steps. A transition record could not be read: %v", err)
+		slog.Warn(warning)
+		b.appendWarning(warning)
+		return nil, "", nil
+	}
+	refs := deployer.SortComponentRefsByDeploymentOrder(rr.ComponentRefs, rr.DeploymentOrder)
+	pins := make([]upgrade.BundlePin, 0, len(refs))
+	for _, ref := range refs {
+		v := ref.Version
+		if v == "" {
+			v = ref.Tag
+		}
+		pins = append(pins, upgrade.BundlePin{Component: ref.Name, Version: v})
+	}
+	notes := upgrade.BundleNotes(set, pins)
+	if len(notes) == 0 {
+		return nil, "", nil
+	}
+	var sb strings.Builder
+	if err := upgrade.WriteNotice(&sb, notes, string(b.Config.Deployer())); err != nil {
+		return nil, "", err
+	}
+	return notes, sb.String(), nil
+}
+
 // buildDeployer constructs the appropriate deployer.Deployer based on config.
 // It handles deployer-specific pre-flight validation and data collection.
-func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dataFiles []string) (deployer.Deployer, error) {
+//
+//nolint:funlen // one generator literal per deployer; splitting them scatters the shared field wiring.
+func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dataFiles []string, upgradeNotice string) (deployer.Deployer, error) {
 	dynamicValues, err := b.buildDynamicValuesMap(recipeResult.DataProvider())
 	if err != nil {
 		return nil, err
@@ -823,6 +863,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPostManifests: componentPostManifests,
 			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
+			UpgradeNotice:          upgradeNotice,
 			Serial:                 b.Config.Serial(),
 			ChartName:              b.Config.BundleChartName(),
 			BundleChartVersion:     b.Config.BundleChartVersion(),
@@ -866,6 +907,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPostManifests: componentPostManifests,
 			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
+			UpgradeNotice:          upgradeNotice,
 			Serial:                 b.Config.Serial(),
 			AppName:                b.Config.AppName(),
 			NamePrefix:             argoOpts.NamePrefix,
@@ -905,6 +947,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DataFiles:              dataFiles,
 			DynamicValues:          dynamicValues,
 			VendorCharts:           b.Config.VendorCharts(),
+			UpgradeNotice:          upgradeNotice,
 		}, nil
 
 	case config.DeployerFlux:
@@ -932,6 +975,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			Namespace:             b.Config.FluxNamespace(),
 			OCISourceName:         b.Config.OCISourceName(),
 			VendorCharts:          b.Config.VendorCharts(),
+			UpgradeNotice:         upgradeNotice,
 			Serial:                b.Config.Serial(),
 		}, nil
 
@@ -956,6 +1000,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DataFiles:              dataFiles,
 			DynamicValues:          dynamicValues,
 			VendorCharts:           b.Config.VendorCharts(),
+			UpgradeNotice:          upgradeNotice,
 			Serial:                 b.Config.Serial(),
 		}, nil
 
@@ -997,13 +1042,21 @@ func (b *DefaultBundler) argoDeployerOptions() (*config.ArgoDeployerOptions, err
 
 // runDeployer executes a deployer and builds the result output.
 // dataFiles is the list of external data file paths already copied by Make().
-func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, start time.Time) (*result.Output, error) {
+func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, upgradeNotes []upgrade.BundleNote, start time.Time) (*result.Output, error) {
 	output, err := d.Generate(ctx, dir)
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
+	}
+	if len(upgradeNotes) > 0 {
+		guidePath, guideSize, guideErr := b.writeUpgradeGuide(dir, upgradeNotes)
+		if guideErr != nil {
+			return nil, guideErr
+		}
+		output.Files = append(output.Files, guidePath)
+		output.TotalSize += guideSize
 	}
 	recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
 	if writeErr != nil {
@@ -1083,7 +1136,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	resultOutput.Results = append(resultOutput.Results, bundleResult)
 
 	// Deployment info
-	var notes []string
+	notes := upgrade.NoteLines(upgradeNotes)
 	if len(output.DeploymentNotes) > 0 {
 		notes = append(notes, output.DeploymentNotes...)
 	}
@@ -1369,6 +1422,31 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 	return mergeOverridesAcrossKeys(allOverrides, b.componentOverrideKeys(componentName, provider))
 }
 
+func (b *DefaultBundler) filterAndValidateRecipe(recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, error) {
+	enabledRefs, filteredOrder, excludedReasons, filterErr := b.filterEnabledComponents(recipeResult)
+	if filterErr != nil {
+		return nil, filterErr
+	}
+
+	// A --set / --set-json / --set-file naming a component that is not in
+	// the generated bundle cannot take effect. Reject it rather than drop
+	// it on the floor. Runs immediately after filtering, so the "present"
+	// set is exactly what will be rendered.
+	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, enabledRefs, excludedReasons); overrideErr != nil {
+		return nil, overrideErr
+	}
+
+	// Work on a shallow copy so the caller's RecipeResult is not mutated
+	filtered := *recipeResult
+	filtered.ComponentRefs = enabledRefs
+	filtered.DeploymentOrder = filteredOrder
+	spec := recipe.RecipeMetadataSpec{ComponentRefs: filtered.ComponentRefs}
+	if err := spec.ValidateDependencies(); err != nil {
+		return nil, err
+	}
+	return &filtered, nil
+}
+
 // filterEnabledComponents resolves the set of components to bundle by applying
 // recipe-level overrides.enabled, bundle-time --set enabled toggles, and the
 // positive bundlers component-name filter (config.WithBundlers, #1531), then
@@ -1493,8 +1571,8 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 	// removed above. After filtering, such a dependency is no longer present in
 	// the ref slice, so a deployer that recomputes ordering from these refs
 	// (e.g. helmfile via ComponentRefsTopologicalLevels) would otherwise treat
-	// the dangling edge as an undeclared dependency and fail with a false
-	// circular-dependency error. The dependency is assumed satisfied externally
+	// the dangling edge as an undeclared dependency and report it as missing.
+	// The dependency is assumed satisfied externally
 	// (the reason it was disabled). An edge to a genuinely undeclared component
 	// is left intact so topology validation still errors on a malformed recipe.
 	for i := range enabledRefs {
@@ -2870,6 +2948,24 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 	return int64(len(recipeData)), nil
 }
 
+// writeUpgradeGuide writes upgrade.GuideFile at the bundle root and returns its
+// path and size. The caller skips it for no notes: an empty guide would read
+// as guidance that says nothing.
+func (b *DefaultBundler) writeUpgradeGuide(dir string, notes []upgrade.BundleNote) (string, int64, error) {
+	var sb strings.Builder
+	if err := upgrade.WriteGuide(&sb, notes, string(b.Config.Deployer())); err != nil {
+		return "", 0, err
+	}
+	guidePath, joinErr := deployer.SafeJoin(dir, upgrade.GuideFile)
+	if joinErr != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "unsafe upgrade guide path", joinErr)
+	}
+	if err := os.WriteFile(guidePath, []byte(sb.String()), 0600); err != nil { //nolint:gosec // path validated by SafeJoin
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write upgrade guide", err)
+	}
+	return guidePath, int64(sb.Len()), nil
+}
+
 // buildBundleInfo assembles the bundle's build record from the resolved
 // configuration, the recipe, and the layout the deployer just reported.
 //
@@ -3728,7 +3824,7 @@ func mergeDRAEvictionNodeSelector(componentName string, values map[string]any, l
 	case map[string]any:
 		nodeSelector = current
 	case map[string]string:
-		nodeSelector = make(map[string]any, len(current)+1)
+		nodeSelector = make(map[string]any, len(current))
 		for key, value := range current {
 			nodeSelector[key] = value
 		}
@@ -3780,7 +3876,7 @@ func upsertGPUOperatorDRAEvictionEnv(componentName string, values map[string]any
 			return invalidDRAEvictionManagedValue(componentName, gpuOperatorDRAEvictionEnvPath, "an array", rawEnv)
 		}
 	}
-	env := make([]any, 0, len(existingEnv)+1)
+	env := make([]any, 0, len(existingEnv))
 	found := false
 	for _, entry := range existingEnv {
 		envMap, ok := entry.(map[string]any)

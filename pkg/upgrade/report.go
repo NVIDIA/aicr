@@ -25,6 +25,35 @@ type ReportOptions struct {
 	From     string
 	To       string
 	Deployer string
+
+	// Source is where the `from` table was read when it came from a cluster,
+	// and nil for an artifact comparison. NewReport copies it rather than
+	// retaining the pointer, so the report keeps the ownership contract the
+	// rest of its fields hold.
+	Source *ReportSource
+
+	// AtRisk is the advisory scan's answer, and nil for a run that did not
+	// scan. NewReport then fills the report's own section with NotScannedOffline
+	// rather than leaving it zero, so silence is never publishable as an
+	// all-clear. Copied for the reason Source is.
+	AtRisk *AtRiskReport
+
+	// ObjectNamesCompared says the object-name axis was assessed, and
+	// ObjectNamesSkipped says why it was not.
+	//
+	// Stated rather than derived from the other being empty, because the zero
+	// value has to mean "not compared": Match and every other versions-only
+	// caller sets neither, and defaulting those to compared would claim an
+	// axis was checked that nothing looked at.
+	//
+	// They are report-level rather than per-row because an unread axis is one
+	// fact about the run, not one fact per component; a row each would bury
+	// the rows that did find something. Saying nothing at all is not an
+	// option: a source artifact that cannot state its object names is
+	// indistinguishable from one whose names held, and reporting the second
+	// when the first is true is the failure this axis exists to prevent.
+	ObjectNamesCompared bool
+	ObjectNamesSkipped  string
 }
 
 // Report is the presentable form of a match: one row per component whose
@@ -35,11 +64,116 @@ type ReportOptions struct {
 // everything it carries, renders each semver distance as the phrase a reader
 // sees, and names its fields for JSON and YAML consumers.
 type Report struct {
-	From       string            `json:"from,omitempty" yaml:"from,omitempty"`
-	To         string            `json:"to,omitempty" yaml:"to,omitempty"`
-	Deployer   string            `json:"deployer,omitempty" yaml:"deployer,omitempty"`
+	From     string `json:"from,omitempty" yaml:"from,omitempty"`
+	To       string `json:"to,omitempty" yaml:"to,omitempty"`
+	Deployer string `json:"deployer,omitempty" yaml:"deployer,omitempty"`
+
+	// Source names where the `from` table was read when it came from a
+	// cluster. Nil for an artifact comparison, which needs no such statement.
+	Source *ReportSource `json:"source,omitempty" yaml:"source,omitempty"`
+
+	// ObjectNamesCompared reports whether the object-name axis was assessed at
+	// all. False means no row can be read as evidence that object names held:
+	// they were never looked at. ObjectNamesSkipped says why.
+	ObjectNamesCompared bool   `json:"objectNamesCompared" yaml:"objectNamesCompared"`
+	ObjectNamesSkipped  string `json:"objectNamesSkipped,omitempty" yaml:"objectNamesSkipped,omitempty"`
+
 	Components []ReportComponent `json:"components" yaml:"components"`
 	Summary    ReportSummary     `json:"summary" yaml:"summary"`
+
+	// AtRisk is always present, never omitted. A run that did not scan says
+	// so: an absent warning reads as an all-clear, and the resources this
+	// section covers are exactly the ones AICR cannot fix if it is wrong.
+	//
+	// It is not part of Summary and never reaches FailsRun, per ADR-021
+	// Decision 3: AICR blocking an upgrade over resources it does not own is a
+	// claim it has not earned.
+	AtRisk AtRiskReport `json:"atRisk" yaml:"atRisk"`
+}
+
+// ReportSource accounts for a cluster read: which cluster was read, how much
+// of it the two readers examined, and how much of that became a `from` entry.
+//
+// It restates pkg/inventory's SourceInfo rather than embedding it, for the
+// reason Component does: this package must not import pkg/inventory. The
+// caller that holds both adapts.
+//
+// The readers are accounted for in two types that share no field name, and
+// their counts must never be summed. The Helm side counts storage records, so
+// one release with ten retained revisions contributes ten; the Argo side
+// counts Applications, of which a component has one. A single total over the
+// two reads fine and means nothing, and separate types are what leave no `+`
+// to write by accident.
+type ReportSource struct {
+	// Kubeconfig is the file the read resolved to and Context the context
+	// within it. Either can be empty: an in-cluster run has no file, a merged
+	// multi-file KUBECONFIG has no single path, and the cluster read does not
+	// yet report the context at all. WriteTable renders the gap rather than
+	// dropping the line, so an unknown reads as unknown rather than as a line
+	// the renderer skipped.
+	Kubeconfig string `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty"`
+	Context    string `json:"context,omitempty" yaml:"context,omitempty"`
+
+	// Matched is how many components the read resolved to an installed
+	// version. It is carried rather than derived from Components, which cannot
+	// answer it: a component installed at the target version produces no row
+	// at all, so the rows do not distinguish "found, unchanged" from "never
+	// found".
+	Matched int `json:"matched" yaml:"matched"`
+
+	Helm ReportSourceHelm `json:"helm" yaml:"helm"`
+	Argo ReportSourceArgo `json:"argo" yaml:"argo"`
+}
+
+// ReportSourceHelm accounts for the Helm storage records a read examined.
+type ReportSourceHelm struct {
+	// Read reports whether the deployer installs through Helm releases and
+	// the read therefore listed them. The counts are zero when it did not.
+	Read bool `json:"read" yaml:"read"`
+
+	// Records is every storage object examined, including the ones belonging
+	// to no component. It is the denominator the other counts read against.
+	Records int `json:"records" yaml:"records"`
+
+	// Unattributed is records carrying no release name.
+	Unattributed int `json:"unattributed" yaml:"unattributed"`
+
+	// Unreadable is releases whose records could not be read.
+	Unreadable int `json:"unreadable" yaml:"unreadable"`
+
+	// Uninstalled is releases excluded because `helm uninstall
+	// --keep-history` left the record behind.
+	Uninstalled int `json:"uninstalled" yaml:"uninstalled"`
+
+	// StampedUnmatched is records carrying an AICR stamp that matched no
+	// component. Anything above zero means the release-name mapping is broken
+	// rather than that the cluster is bare: AICR wrote those records and no
+	// longer recognizes them.
+	StampedUnmatched int `json:"stampedUnmatched" yaml:"stampedUnmatched"`
+}
+
+// ReportSourceArgo accounts for the Argo CD Applications a read examined.
+//
+// There is deliberately no StampedUnmatched counterpart, and WriteTable says
+// so rather than printing a zero. The generated Application carries no AICR
+// stamp — it lives in the wrapper Chart.yaml the Application points at, which
+// the reader never opens — so a zero would report a mapping verified against
+// something nothing looked for.
+type ReportSourceArgo struct {
+	// Read reports whether the deployer installs through Argo CD and the read
+	// therefore listed its Applications. The counts are zero when it did not.
+	Read bool `json:"read" yaml:"read"`
+
+	// Applications is every Application examined, including the ones belonging
+	// to no component.
+	Applications int `json:"applications" yaml:"applications"`
+
+	Unattributed int `json:"unattributed" yaml:"unattributed"`
+	Unreadable   int `json:"unreadable" yaml:"unreadable"`
+
+	// Remote is Applications matching a component that deploy to another
+	// cluster, excluded so a remote install is never this cluster's baseline.
+	Remote int `json:"remote" yaml:"remote"`
 }
 
 // ReportComponent is one row.
@@ -103,6 +237,10 @@ type ReportComponent struct {
 
 // ReportIdentityChange is one move on the identity axis, restated with JSON
 // names.
+//
+// Field is one of namespace, type, chart, source, path, manifestFiles or
+// preManifestFiles. For the two file sets From and To are the whole sorted sets
+// joined by commas.
 type ReportIdentityChange struct {
 	Field string `json:"field" yaml:"field"`
 	From  string `json:"from" yaml:"from"`
@@ -125,9 +263,30 @@ type ReportSummary struct {
 	Failing int `json:"failing" yaml:"failing"`
 }
 
-// FailsRun reports whether any row stops a strict run.
+// FailsRun reports whether the report stops a strict run: a row that does, or
+// a cluster read whose name mapping is shown broken.
+//
+// The second has no row to carry it. A record AICR stamped that matched no
+// component is one this build no longer recognizes as its own, and the
+// component it belongs to has dropped out of the `from` table, where it reads
+// as newly installed and fails nothing. Left to the count alone, a broken
+// mapping exits zero.
 func (r *Report) FailsRun() bool {
-	return r != nil && r.Summary.Failing > 0
+	if r == nil {
+		return false
+	}
+
+	return r.Summary.Failing > 0 || r.UnmatchedStamps() > 0
+}
+
+// UnmatchedStamps is the AICR-stamped records a cluster read matched to no
+// component, zero for an artifact comparison.
+func (r *Report) UnmatchedStamps() int {
+	if r == nil || r.Source == nil {
+		return 0
+	}
+
+	return r.Source.Helm.StampedUnmatched
 }
 
 // RequiresDeployer reports whether rendering these results would print steps,
@@ -164,10 +323,20 @@ func RequiresDeployer(results []ComponentResult) bool {
 // the Set the results point into.
 func NewReport(results []ComponentResult, opts ReportOptions) *Report {
 	rep := &Report{
-		From:       opts.From,
-		To:         opts.To,
-		Deployer:   opts.Deployer,
-		Components: make([]ReportComponent, 0, len(results)),
+		From:                opts.From,
+		To:                  opts.To,
+		Deployer:            opts.Deployer,
+		ObjectNamesCompared: opts.ObjectNamesCompared,
+		ObjectNamesSkipped:  opts.ObjectNamesSkipped,
+		Components:          make([]ReportComponent, 0, len(results)),
+	}
+	if opts.Source != nil {
+		source := *opts.Source
+		rep.Source = &source
+	}
+	rep.AtRisk = AtRiskReport{Reason: NotScannedOffline}
+	if opts.AtRisk != nil {
+		rep.AtRisk = opts.AtRisk.clone()
 	}
 	for _, r := range results {
 		rep.Components = append(rep.Components, reportComponent(r, opts.Deployer))
@@ -247,7 +416,7 @@ func reportIdentityChanges(changes []IdentityChange) []ReportIdentityChange {
 	}
 	out := make([]ReportIdentityChange, len(changes))
 	for i, c := range changes {
-		out[i] = ReportIdentityChange(c)
+		out[i] = ReportIdentityChange{Field: c.Field, From: c.From, To: c.To}
 	}
 	return out
 }
@@ -289,14 +458,15 @@ func notes(r ComponentResult, c ReportComponent) string {
 		}
 		return strings.Join(parts, ", ")
 	case ChangeIdentity:
-		// The FROM and TO columns carry the relocation on this row, so the
-		// version they displaced is stated here. No coverage gap is named
-		// alongside it: none can be closed, because the record vocabulary
-		// describes version boundaries and this row crossed none.
-		if r.From == "" {
-			return "version unchanged, no record covers a relocation"
+		// The FROM and TO columns carry the move on this row, so the version
+		// they displaced is stated here. No coverage gap is named alongside
+		// it: none can be closed, because the record vocabulary describes
+		// version boundaries and this row crossed none.
+		version := r.From
+		if version == "" {
+			version = "version"
 		}
-		return r.From + " unchanged, no record covers a relocation"
+		return version + " unchanged, no record covers " + identityNoun(c.IdentityChanges)
 	case ChangeVersion:
 		// Composed below: a version change is the only kind whose notes
 		// depend on the verdict.
@@ -365,9 +535,49 @@ func notes(r ComponentResult, c ReportComponent) string {
 func movedFieldsPhrase(changes []ReportIdentityChange) string {
 	parts := make([]string, len(changes))
 	for i, c := range changes {
-		parts[i] = fmt.Sprintf("%s %s -> %s", c.Field, c.From, c.To)
+		parts[i] = fmt.Sprintf("%s %s -> %s", c.Field, identityValue(c.Field, c.From), identityValue(c.Field, c.To))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// identityValue renders one side of an identity move for the table and the
+// notes. An object name that appeared or disappeared, or a manifest set that
+// emptied, has an empty side, and printing nothing there leaves a dangling
+// "fullnameOverride=" on the row where that is the whole finding. A set reads
+// "(none)" rather than "(unset)": listing no manifests is a statement.
+func identityValue(field, v string) string {
+	if v != "" {
+		return v
+	}
+	if field == fieldManifestFiles || field == fieldPreManifestFiles {
+		return "(none)"
+	}
+	return "(unset)"
+}
+
+// identityNoun names the kind of move a row carries, so the notes do not call
+// a rename a relocation or either one a chart swap. The remedies differ, and
+// the notes cell is the only thing many readers see.
+func identityNoun(changes []ReportIdentityChange) string {
+	var relocated, renamed, other bool
+	for _, c := range changes {
+		switch {
+		case c.Field == fieldNamespace:
+			relocated = true
+		case isObjectNameField(c.Field):
+			renamed = true
+		default:
+			other = true
+		}
+	}
+	switch {
+	case relocated && !renamed && !other:
+		return "a relocation"
+	case renamed && !relocated && !other:
+		return "a rename"
+	default:
+		return "a change of identity"
+	}
 }
 
 // spanPhrase names a semver distance at the one level it is measured on.
