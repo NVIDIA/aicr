@@ -119,12 +119,12 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # Covers the sum of the sequential step budgets (tools 10 + bootstrap 25 +
+    # Covers the sum of the sequential step budgets (tools 10 + bootstrap 30 +
     # binary 20 + images 25 + prep 20 + install 90 + readiness 5 + topology 10 +
-    # conformance 45 + verify 5 + debug 8 = 263) plus headroom, and stays under
-    # the 360-minute cap GitHub imposes on hosted runners: a job-level value
-    # above that cap is silently clamped and the budget written here would be
-    # fiction.
+    # gpu health 20 + conformance 45 + verify 5 + debug 8 = 288) plus headroom,
+    # and stays under the 360-minute cap GitHub imposes on hosted runners: a
+    # job-level value above that cap is silently clamped and the budget written
+    # here would be fiction.
     timeout-minutes: 300
     permissions:
       contents: read
@@ -212,7 +212,10 @@ jobs:
       # GPU-free.
       - name: Bootstrap simulated four-worker cluster
         id: bootstrap
-        timeout-minutes: 25
+        # 30, not 25: the waits inside bootstrap-cluster.sh total 27.5 minutes
+        # at worst (node Ready 300s, device plugin rollout 300s, DCGM rollout
+        # 900s, capacity 150s), and the step must outlive them to report why.
+        timeout-minutes: 30
         run: ./tests/uat/kind/bootstrap-cluster.sh "${KIND_CLUSTER_NAME}"
 
       - name: Footprint - after cluster and GPU simulation
@@ -350,9 +353,34 @@ jobs:
         timeout-minutes: 10
         run: ./tests/uat/kind/verify-topology.sh "${KIND_CLUSTER_NAME}"
 
+      # Gates the other half of what the simulated GPUs buy: NVSentinel's GPU
+      # health monitor running and reporting with no GPU hardware. It is a lane
+      # step rather than a recipe health check because the shared check has to
+      # stay tolerant of desiredNumberScheduled 0, which is correct on every
+      # lane that supplies no DCGM host engine. See the script's header.
+      #
+      # After topology, so a failure here is attributable to the DCGM hop alone
+      # and not confused with a Topograph problem; before conformance, so the
+      # monitors are proven up before a signed evidence bundle claims them.
+      #
+      # 20 minutes, not the script's 900s MONITOR_TIMEOUT: the kubectl reads
+      # that finish after that deadline need room to report which wait failed.
+      # verify-gpu-health-monitors_test.sh pins the step above that worst case.
+      - name: UAT - verify NVSentinel GPU health monitors
+        id: gpu_health
+        if: steps.topology.outcome == 'success'
+        timeout-minutes: 20
+        run: ./tests/uat/kind/verify-gpu-health-monitors.sh "${KIND_CLUSTER_NAME}"
+
       - name: UAT - validate (conformance phase) + emit signed evidence
         id: conformance
-        if: steps.topology.outcome == 'success'
+        # Both gates, named explicitly rather than relying on the chain. The
+        # gpu_health step already depends on topology, so requiring only the
+        # former would hold transitively, but the invariant this lane states is
+        # that conformance must not publish evidence for a wrong topology, and
+        # an invariant that survives only by transitivity is one a later edit
+        # can drop without noticing.
+        if: steps.topology.outcome == 'success' && steps.gpu_health.outcome == 'success'
         timeout-minutes: 45
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -452,6 +480,7 @@ jobs:
             echo "| Footprint - after bundle install | ${{ steps.footprint_install.outcome }} |"
             echo "| Readiness gate (skipped: VALIDATE_PHASES=conformance) | ${{ steps.readiness.outcome }} |"
             echo "| Topology (#2358 acceptance gate) | ${{ steps.topology.outcome }} |"
+            echo "| NVSentinel GPU health monitors | ${{ steps.gpu_health.outcome }} |"
             echo "| Validate (phases: conformance) | ${{ steps.conformance.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
             echo ""
