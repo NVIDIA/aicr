@@ -438,7 +438,7 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 		wantNotContains []string
 	}{
 		{
-			name: "operator-managed driver blocks restart until gate is observable",
+			name: "operator-managed driver with neither signal observable skips wait like host-managed",
 			componentValues: map[string]map[string]any{
 				"gpu-operator": {
 					"driver": map[string]any{"enabled": true},
@@ -447,18 +447,18 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			},
 			wantContains: []string{
 				`SKIP_RESTART="false"`,
-				`blocking the DRA plugin restart until the driver rollout is detectable`,
+				`driver DaemonSet not present and no nodes labeled nvidia.com/gpu.deploy.driver=true; skipping migration wait`,
 				`SKIP_RESTART=true`,
 				`if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then`,
 				`no nodes labeled nvidia.com/gpu.deploy.driver=true yet; skipping migration wait and DRA restart`,
 				`blocking the DRA plugin restart until the migration completes`,
 			},
 			wantNotContains: []string{
-				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
+				`blocking the DRA plugin restart until the driver rollout is detectable`,
 			},
 		},
 		{
-			name: "host-managed driver still skips the wait without blocking restart",
+			name: "host-managed driver also skips the wait without blocking restart",
 			componentValues: map[string]map[string]any{
 				"gpu-operator": {
 					"driver": map[string]any{"enabled": false},
@@ -466,7 +466,7 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 				"nvidia-dra-driver-gpu": {},
 			},
 			wantContains: []string{
-				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
+				`driver DaemonSet not present and no nodes labeled nvidia.com/gpu.deploy.driver=true; skipping migration wait`,
 				`blocking the DRA plugin restart until the migration completes`,
 			},
 			wantNotContains: []string{
@@ -474,7 +474,7 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			},
 		},
 		{
-			name:            "OCP DRA component renders its own guard and is gated by gpu-operator-ocp's driver.enabled",
+			name:            "OCP DRA component renders its own guard and skips the wait the same way when neither signal is observable",
 			recipeResultOCP: true,
 			componentValues: map[string]map[string]any{
 				"gpu-operator-ocp": {
@@ -485,13 +485,13 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			wantContains: []string{
 				`if [[ "${name}" == "nvidia-dra-driver-gpu-ocp" ]]; then`,
 				`SKIP_RESTART="false"`,
-				`blocking the DRA plugin restart until the driver rollout is detectable`,
+				`driver DaemonSet not present and no nodes labeled nvidia.com/gpu.deploy.driver=true; skipping migration wait`,
 				`SKIP_RESTART=true`,
 				`blocking the DRA plugin restart until the migration completes`,
 			},
 			wantNotContains: []string{
 				`if [[ "${name}" == "nvidia-dra-driver-gpu" ]]; then`,
-				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
+				`blocking the DRA plugin restart until the driver rollout is detectable`,
 			},
 		},
 	}
