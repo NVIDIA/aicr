@@ -234,6 +234,15 @@ Slinky NodeSet reserves every GPU on a node for its `slurmd` pod and Slurm
 GRES/cgroups isolate access, so the check's Kubernetes per-pod probe could
 either never schedule or attest the wrong access path (#2724).
 
+`slinky-slurm-gpu-access` verifies that path instead (#2756). From the login pod
+it runs an `srun --gpus=1` job, which must list exactly one GPU and open exactly
+one GPU minor device, then a job with no GPU request pinned with `--nodelist` to
+the same Slurm node, which must open none. The probe shell only reports facts
+(`KEY=value` lines: node, `nvidia-smi` UUIDs, the errno of a read-only open of
+each `/dev/nvidiaN`); `parseSlurmGPUProbe` and the two evaluate functions decide.
+It never lists `/dev/nvidia*` to infer isolation: the cgroup device controller
+leaves the nodes visible and refuses `open()` with EPERM.
+
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
 **exclusive** — combining `all` with any other phase is rejected.
