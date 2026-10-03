@@ -676,19 +676,22 @@ func TestDriverAbsentRemedyBranches(t *testing.T) {
 		os       recipe.CriteriaOSType
 		profiled bool
 		want     string
+		notWant  string // optional: substring that must NOT appear; skipped when empty
 	}{
 		{"aks legacy keeps the four-flag tuple", recipe.CriteriaServiceAKS, recipe.CriteriaOSUbuntu, false,
-			"bundle in GPU-Operator-managed mode"},
+			"bundle in GPU-Operator-managed mode", ""},
 		{"aks profiled points at --profile", recipe.CriteriaServiceAKS, recipe.CriteriaOSUbuntu, true,
-			"--profile gpuStack=operator-managed"},
+			"--profile gpuStack=operator-managed", ""},
 		{"gke cos forbids operator install", recipe.CriteriaServiceGKE, recipe.CriteriaOSCOS, false,
-			"GPU Operator cannot install the driver"},
+			"GPU Operator cannot install the driver", ""},
 		{"gke ubuntu allows operator mode", recipe.CriteriaServiceGKE, recipe.CriteriaOSUbuntu, false,
-			"GKE Ubuntu node images the GPU Operator can manage"},
+			"GKE Ubuntu node images the GPU Operator can manage", ""},
 		{"gke unknown os presents both paths", recipe.CriteriaServiceGKE, recipe.CriteriaOSAny, false,
-			"those may bundle in GPU-Operator-managed mode"},
+			"those may bundle in GPU-Operator-managed mode", ""},
 		{"generic service gets the platform wording", recipe.CriteriaServiceEKS, recipe.CriteriaOSUbuntu, false,
-			"reprovision the GPU nodes with a platform-installed"},
+			"reprovision the GPU nodes with a platform-installed", ""},
+		{"ocp uses the ocp-aliased override keys", recipe.CriteriaServiceOCP, recipe.CriteriaOSAny, false,
+			"gpuoperatorocp:driver.enabled=true", "gpuoperator:"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -696,6 +699,10 @@ func TestDriverAbsentRemedyBranches(t *testing.T) {
 			if !strings.Contains(got, tt.want) {
 				t.Errorf("driverAbsentRemedy(%s,%s,%v) = %q, want substring %q",
 					tt.service, tt.os, tt.profiled, got, tt.want)
+			}
+			if tt.notWant != "" && strings.Contains(got, tt.notWant) {
+				t.Errorf("driverAbsentRemedy(%s,%s,%v) = %q, unexpectedly contains %q",
+					tt.service, tt.os, tt.profiled, got, tt.notWant)
 			}
 		})
 	}
