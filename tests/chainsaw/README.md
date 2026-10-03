@@ -84,7 +84,8 @@ tests/chainsaw/
     ├── upgrade-check/
     ├── validate-agent-flags/
     ├── validate-chainsaw-healthcheck/
-    └── validate-phases/
+    ├── validate-phases/
+    └── validate-skip-checks/
 ```
 
 ## References

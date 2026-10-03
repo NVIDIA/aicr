@@ -1,0 +1,12 @@
+## Before You Upgrade
+
+Upgrading an existing installation? The components below need action before
+this bundle is applied over them. [UPGRADING.md](UPGRADING.md) has the steps
+for the `argocd` deployer. A fresh install can skip this.
+
+| Component | Verdict | Applies when upgrading from |
+|-----------|---------|-----------------------------|
+| gamma-operator | manual | `<2.0.0` |
+| delta-operator | blocked | `<3.0.0` |
+| epsilon-operator | manual | `<0.5.0` |
+

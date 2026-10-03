@@ -41,7 +41,7 @@ The dashboard shares its first four CSP-first addressing levels with the
 | **Group** | service (the CSP) | `eks` |
 | **Dashboard** | accelerator + OS | `h100-ubuntu` |
 | **Tab** | intent, optionally with platform | `training-kubeflow` |
-| **Row** | validation `<phase>/<check>` | `conformance/gpu-operator-ready` |
+| **Row** | validation `<phase>/<check>` | `conformance/gpu-operator-health` |
 | **Source column** | one signer | one allowlisted party (or a verified-but-unknown reported signer) |
 
 The overview defaults to service cards. Switch **Overview layout** to

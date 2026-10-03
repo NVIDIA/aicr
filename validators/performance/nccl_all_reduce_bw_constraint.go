@@ -123,8 +123,9 @@ var (
 		Resource: "trainingruntimes",
 	}
 
-	// computeDomainGVR is the NVIDIA DRA driver's ComputeDomain CR, used only
-	// by the NVLS variant to provision an IMEX domain across worker nodes.
+	// computeDomainGVR is the NVIDIA DRA driver's ComputeDomain CR, used by the
+	// NVLS variant (and a recipe-supplied runtime referencing
+	// ncclIMEXClaimTemplateName) to provision an IMEX domain across worker nodes.
 	// The CR causes the DRA driver to auto-generate a ResourceClaimTemplate
 	// (name matching channel.resourceClaimTemplate.name below) that worker
 	// pods reference via resourceClaims to get /dev/nvidia-caps-imex-channels
@@ -141,7 +142,9 @@ const (
 
 	// ncclIMEXClaimTemplateName must match the resourceClaimTemplateName
 	// field in runtime-nvls.yaml templates — the DRA driver uses
-	// this name when auto-generating the RCT from the ComputeDomain CR.
+	// this name when auto-generating the RCT from the ComputeDomain CR. A
+	// recipe-supplied runtime opts into validator-managed IMEX by referencing
+	// it, so it is part of the nccl-benchmark-runtime contract.
 	ncclIMEXClaimTemplateName = "nccl-all-reduce-imex"
 )
 
@@ -433,7 +436,8 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// criteria, so the compiled applicability gate (which governs only the
 	// criteria/profile → embedded-template paths) is bypassed. The supplied
 	// runtime owns its fabric wiring, so service-specific NIC discovery,
-	// preflights, and NVLS/IMEX provisioning are skipped further below.
+	// preflights, and NVLS/IMEX provisioning are skipped further below —
+	// except IMEX for a runtime that references ncclIMEXClaimTemplateName.
 	if customRuntime != "" {
 		slog.Info("Recipe supplies its own NCCL benchmark runtime — bypassing compiled applicability and service-specific fabric plumbing",
 			"criteriaService", service, "criteriaAccelerator", accelerator, "variant", string(variant))
@@ -1479,10 +1483,11 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// auto-create a ResourceClaimTemplate that runtime-nvls.yaml references;
 	// without this, the NVL72 fabric is visible to NCCL but /dev/nvidia-caps-
 	// imex-channels isn't mounted into the workers and MNNVL aborts with
-	// "Cuda failure 800 'operation not permitted'". Skipped for a recipe-supplied
-	// runtime: IMEX/ComputeDomain wiring is part of the fabric contract the
-	// runtime owns, so it must declare any ComputeDomain/ResourceClaim it needs.
-	if customRuntime == "" && variant == variantNVLS {
+	// "Cuda failure 800 'operation not permitted'". A recipe-supplied runtime
+	// gets the same provisioning, on any variant, only when it references
+	// ncclIMEXClaimTemplateName (plan.managesIMEX); it cannot ship its own
+	// ComputeDomain, and the per-run namespace rules out pre-creating one.
+	if (customRuntime == "" && variant == variantNVLS) || plan.managesIMEX() {
 		if err = applyNCCLComputeDomain(ctx.Ctx, dynamicClient, config.Namespace); err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply ComputeDomain", err)
 		}

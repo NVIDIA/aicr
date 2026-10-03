@@ -1,0 +1,16 @@
+# Stand-in for an embedded overlay that declares a profile. The patch tests
+# extend it through patch.tmpl.
+apiVersion: aicr.run/v1beta2
+kind: RecipeMetadata
+metadata:
+  name: fam
+spec:
+  criteria:
+    service: gke
+  profile:
+    name: p
+    description: embedded description
+    default: a
+    values:
+      a: {componentRefs: [{name: c, overrides: {x: 1}}]}
+      b: {componentRefs: [{name: c, overrides: {x: 2}}]}

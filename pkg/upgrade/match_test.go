@@ -1329,6 +1329,31 @@ func TestMatchIdentitiesIdentityAxis(t *testing.T) {
 			to:       Identity{Version: "1.0.0"},
 			wantRows: 0,
 		},
+		{
+			// The version axis ignores a leading "v", so this hop held its
+			// version however the two sides spelled it. The row has to be the
+			// relocation it is: a version row here would print the two
+			// spellings in FROM and TO and read as a bump nobody made.
+			name:         "a respelled version that relocates is still only a relocation",
+			set:          safeHop,
+			from:         Identity{Version: "v1.0.0", Namespace: "gpu-operator"},
+			to:           Identity{Version: "1.0.0", Namespace: "nvidia"},
+			wantRows:     1,
+			change:       ChangeIdentity,
+			wantFrom:     "v1.0.0",
+			wantTo:       "1.0.0",
+			verdict:      VerdictUnknown,
+			reason:       ReasonIdentityChanged,
+			moved:        nsMove,
+			explainNames: []string{"v1.0.0", "gpu-operator", "nvidia"},
+		},
+		{
+			name:     "a respelled version that stays put emits no row",
+			set:      safeHop,
+			from:     Identity{Version: "v1.0.0", Namespace: "gpu-operator"},
+			to:       Identity{Version: "1.0.0", Namespace: "gpu-operator"},
+			wantRows: 0,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1375,6 +1400,104 @@ func TestMatchIdentitiesIdentityAxis(t *testing.T) {
 	}
 }
 
+func TestMatchIdentitiesRegistryDerivedFields(t *testing.T) {
+	base := Identity{
+		Version: "1.0.0", Namespace: "ns", Chart: "old-chart", Source: "https://old.example",
+		Path: "deploy/a", Type: "Helm", ManifestFiles: []string{"a.yaml", "b.yaml"},
+		PreManifestFiles: []string{"pre-a.yaml", "pre-b.yaml"},
+	}
+	with := func(mutate func(*Identity)) Identity {
+		id := base
+		id.ManifestFiles = append([]string(nil), base.ManifestFiles...)
+		id.PreManifestFiles = append([]string(nil), base.PreManifestFiles...)
+		mutate(&id)
+		return id
+	}
+
+	tests := []struct {
+		name string
+		to   Identity
+		want []IdentityChange
+	}{
+		{"chart", with(func(i *Identity) { i.Chart = "new-chart" }),
+			[]IdentityChange{{Field: "chart", From: "old-chart", To: "new-chart"}}},
+		{"source", with(func(i *Identity) { i.Source = "https://new.example" }),
+			[]IdentityChange{{Field: "source", From: "https://old.example", To: "https://new.example"}}},
+		{"path", with(func(i *Identity) { i.Path = "deploy/b" }),
+			[]IdentityChange{{Field: "path", From: "deploy/a", To: "deploy/b"}}},
+		{"type", with(func(i *Identity) { i.Type = "Kustomize" }),
+			[]IdentityChange{{Field: "type", From: "Helm", To: "Kustomize"}}},
+		{"a dropped manifest file", with(func(i *Identity) { i.ManifestFiles = []string{"a.yaml"} }),
+			[]IdentityChange{{Field: "manifestFiles", From: "a.yaml,b.yaml", To: "a.yaml", Removed: []string{"b.yaml"}}}},
+		{"an added manifest file", with(func(i *Identity) { i.ManifestFiles = []string{"a.yaml", "b.yaml", "c.yaml"} }),
+			[]IdentityChange{{Field: "manifestFiles", From: "a.yaml,b.yaml", To: "a.yaml,b.yaml,c.yaml", Added: []string{"c.yaml"}}}},
+		{"an emptied manifest set", with(func(i *Identity) { i.ManifestFiles = nil }),
+			[]IdentityChange{{Field: "manifestFiles", From: "a.yaml,b.yaml", To: "", Removed: []string{"a.yaml", "b.yaml"}}}},
+		{"a dropped pre-manifest file", with(func(i *Identity) { i.PreManifestFiles = []string{"pre-a.yaml"} }),
+			[]IdentityChange{{Field: "preManifestFiles", From: "pre-a.yaml,pre-b.yaml", To: "pre-a.yaml",
+				Removed: []string{"pre-b.yaml"}}}},
+		{"an added pre-manifest file", with(func(i *Identity) {
+			i.PreManifestFiles = []string{"pre-a.yaml", "pre-b.yaml", "pre-c.yaml"}
+		}),
+			[]IdentityChange{{Field: "preManifestFiles", From: "pre-a.yaml,pre-b.yaml",
+				To: "pre-a.yaml,pre-b.yaml,pre-c.yaml", Added: []string{"pre-c.yaml"}}}},
+		{"an emptied pre-manifest set", with(func(i *Identity) { i.PreManifestFiles = nil }),
+			[]IdentityChange{{Field: "preManifestFiles", From: "pre-a.yaml,pre-b.yaml", To: "",
+				Removed: []string{"pre-a.yaml", "pre-b.yaml"}}}},
+		{"a reordered pre-manifest set is not a move",
+			with(func(i *Identity) { i.PreManifestFiles = []string{"pre-b.yaml", "pre-a.yaml"} }), nil},
+		{"a reordered manifest set is not a move", with(func(i *Identity) { i.ManifestFiles = []string{"b.yaml", "a.yaml"} }), nil},
+		{"an unstated chart is not a move", with(func(i *Identity) { i.Chart = "" }), nil},
+		{"an unstated source is not a move", with(func(i *Identity) { i.Source = "" }), nil},
+		{"an unstated path is not a move", with(func(i *Identity) { i.Path = "" }), nil},
+		{"an unstated type is not a move", with(func(i *Identity) { i.Type = "" }), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchIdentities(Set{}, map[string]Identity{"c": base}, map[string]Identity{"c": tt.to})
+			if tt.want == nil {
+				if len(got) != 0 {
+					t.Fatalf("MatchIdentities() = %+v, want no rows", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].Change != ChangeIdentity {
+				t.Fatalf("MatchIdentities() = %+v, want one identity row", got)
+			}
+			if !reflect.DeepEqual(got[0].IdentityChanges, tt.want) {
+				t.Errorf("identityChanges = %+v, want %+v", got[0].IdentityChanges, tt.want)
+			}
+			if got[0].Verdict != VerdictUnknown || !got[0].FailsRun() {
+				t.Errorf("verdict = %q, FailsRun = %v, want unknown and failing", got[0].Verdict, got[0].FailsRun())
+			}
+		})
+	}
+}
+
+func TestMatchIdentitiesManifestMoveIsNamedInExplanation(t *testing.T) {
+	got := MatchIdentities(Set{},
+		map[string]Identity{"c": {Version: "1.0.0", ManifestFiles: []string{"a.yaml", "b.yaml"}}},
+		map[string]Identity{"c": {Version: "1.0.0", ManifestFiles: []string{"a.yaml", "c.yaml"}}})
+	if len(got) != 1 {
+		t.Fatalf("MatchIdentities() returned %d rows, want 1", len(got))
+	}
+	if want := "its manifestFiles drop b.yaml and add c.yaml"; !strings.Contains(got[0].Explanation, want) {
+		t.Errorf("explanation %q does not contain %q", got[0].Explanation, want)
+	}
+}
+
+func TestMatchIdentitiesPreManifestMoveIsNamedInExplanation(t *testing.T) {
+	got := MatchIdentities(Set{},
+		map[string]Identity{"c": {Version: "1.0.0", PreManifestFiles: []string{"rbac.yaml"}}},
+		map[string]Identity{"c": {Version: "1.0.0", PreManifestFiles: []string{"rbac.yaml", "scc.yaml"}}})
+	if len(got) != 1 {
+		t.Fatalf("MatchIdentities() returned %d rows, want 1", len(got))
+	}
+	if want := "its preManifestFiles add scc.yaml"; !strings.Contains(got[0].Explanation, want) {
+		t.Errorf("explanation %q does not contain %q", got[0].Explanation, want)
+	}
+}
+
 func TestMatchIdentitiesDoesNotSplitAComponentAcrossAxes(t *testing.T) {
 	got := MatchIdentities(Set{},
 		map[string]Identity{"c": {Version: "1.0.0", Namespace: "gpu-operator"}},
@@ -1400,5 +1523,251 @@ func TestMatchIsMatchIdentitiesWithoutTheIdentityAxis(t *testing.T) {
 		if r.IdentityChanges != nil {
 			t.Errorf("%s carries identity changes, but a version table states no identity to move", r.Component)
 		}
+	}
+}
+
+// TestMatchLeadingVPrefixIsNotAChange pins the one normalization the
+// same-version check applies, and its two limits.
+//
+// The prefix is not cosmetic in practice: the Argo CD deployer writes
+// targetRevision through deployer.NormalizeVersion for an HTTPS chart repo, so
+// a recipe pinning "v26.7.0" produces a cluster that reads back "26.7.0". A
+// string comparison there reports every such component as changed and then
+// resolves it to unknown, failing a run against a cluster already at the
+// target.
+func TestMatchLeadingVPrefixIsNotAChange(t *testing.T) {
+	tests := []struct {
+		name     string
+		from     string
+		to       string
+		wantRows int
+	}{
+		{
+			name:     "a v prefix on the target alone is not a change",
+			from:     "26.7.0",
+			to:       "v26.7.0",
+			wantRows: 0,
+		},
+		{
+			name:     "a v prefix on the source alone is not a change",
+			from:     "v26.7.0",
+			to:       "26.7.0",
+			wantRows: 0,
+		},
+		{
+			name:     "a real version change still reports",
+			from:     "26.7.0",
+			to:       "v26.8.0",
+			wantRows: 1,
+		},
+		{
+			// semver orders build metadata as equal, so semver.Equal would
+			// silence this pair. Silence reads as safe, and a pin that moved
+			// is not a pin that did not.
+			name:     "a build-metadata-only difference still reports",
+			from:     "1.2.3+build.1",
+			to:       "1.2.3+build.2",
+			wantRows: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Match(oneComponent(blockA), map[string]string{"c": tt.from}, map[string]string{"c": tt.to})
+			if len(got) != tt.wantRows {
+				t.Fatalf("Match() returned %d rows, want %d: %+v", len(got), tt.wantRows, got)
+			}
+			if tt.wantRows == 0 {
+				return
+			}
+			// The versions are reported as each side wrote them, so an
+			// operator reads the real strings rather than a normalized form
+			// neither artifact contains.
+			if got[0].From != tt.from || got[0].To != tt.to {
+				t.Errorf("From/To = %q/%q, want %q/%q as written", got[0].From, got[0].To, tt.from, tt.to)
+			}
+		})
+	}
+}
+
+// TestIdentityChangesObjectNames covers the object-name axis directly rather
+// than through MatchIdentities, because its asymmetry with namespace is the
+// point and it lives here: an absent namespace is a fact the artifact did not
+// record, while an absent object name is a fact it did.
+func TestIdentityChangesObjectNames(t *testing.T) {
+	tests := []struct {
+		name string
+		from Identity
+		to   Identity
+		want []IdentityChange
+	}{
+		{
+			name: "object name dropped",
+			from: Identity{Version: "v0.19.0", ObjectNames: map[string]string{"fullnameOverride": "op"}},
+			to:   Identity{Version: "v0.19.0", ObjectNames: map[string]string{}},
+			want: []IdentityChange{{Field: "fullnameOverride", From: "op", To: ""}},
+		},
+		{
+			name: "object name added",
+			from: Identity{Version: "v0.19.0", ObjectNames: map[string]string{}},
+			to:   Identity{Version: "v0.19.0", ObjectNames: map[string]string{"fullnameOverride": "op"}},
+			want: []IdentityChange{{Field: "fullnameOverride", From: "", To: "op"}},
+		},
+		{
+			name: "object name changed",
+			from: Identity{ObjectNames: map[string]string{"fullnameOverride": "old"}},
+			to:   Identity{ObjectNames: map[string]string{"fullnameOverride": "new"}},
+			want: []IdentityChange{{Field: "fullnameOverride", From: "old", To: "new"}},
+		},
+		{
+			name: "an unchanged object name records nothing",
+			from: Identity{ObjectNames: map[string]string{"fullnameOverride": "same"}},
+			to:   Identity{ObjectNames: map[string]string{"fullnameOverride": "same"}},
+			want: nil,
+		},
+		{
+			name: "nil on both sides records nothing",
+			from: Identity{Version: "v1"},
+			to:   Identity{Version: "v1"},
+			want: nil,
+		},
+		{
+			name: "namespace leads, object names follow in path order",
+			from: Identity{
+				Namespace:   "skyhook",
+				ObjectNames: map[string]string{"grafana.fullnameOverride": "g1", "fullnameOverride": "f1"},
+			},
+			to: Identity{
+				Namespace:   "nodewright",
+				ObjectNames: map[string]string{"grafana.fullnameOverride": "g2", "fullnameOverride": "f2"},
+			},
+			want: []IdentityChange{
+				{Field: "namespace", From: "skyhook", To: "nodewright"},
+				{Field: "fullnameOverride", From: "f1", To: "f2"},
+				{Field: "grafana.fullnameOverride", From: "g1", To: "g2"},
+			},
+		},
+		{
+			name: "only the paths that moved are reported",
+			from: Identity{ObjectNames: map[string]string{"a.fullnameOverride": "x", "b.nameOverride": "y"}},
+			to:   Identity{ObjectNames: map[string]string{"a.fullnameOverride": "x", "b.nameOverride": "z"}},
+			want: []IdentityChange{{Field: "b.nameOverride", From: "y", To: "z"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := identityChanges(tt.from, tt.to)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("identityChanges() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIdentityAdviceMatchesAxis pins the advice to the axis that earned it.
+// The two consequences differ, and this prose is what an operator reads at the
+// moment they decide whether to upgrade: a namespace move leaves a second copy
+// running, a rename is applied as delete-and-recreate.
+func TestIdentityAdviceMatchesAxis(t *testing.T) {
+	nsOnly := []IdentityChange{{Field: "namespace", From: "skyhook", To: "nodewright"}}
+	nameOnly := []IdentityChange{{Field: "fullnameOverride", From: "skyhook-operator", To: ""}}
+	both := []IdentityChange{nsOnly[0], nameOnly[0]}
+
+	tests := []struct {
+		name       string
+		moved      []IdentityChange
+		wantSubstr []string
+		wantAbsent []string
+	}{
+		{
+			name:       "namespace only names the duplicate install",
+			moved:      nsOnly,
+			wantSubstr: []string{"second copy"},
+			wantAbsent: []string{"delete-and-recreate", "spec.selector"},
+		},
+		{
+			name:       "object name only names the recreate",
+			moved:      nameOnly,
+			wantSubstr: []string{"delete-and-recreate", "spec.selector"},
+			wantAbsent: []string{"second copy"},
+		},
+		{
+			name:       "both axes name both",
+			moved:      both,
+			wantSubstr: []string{"second copy", "delete-and-recreate"},
+		},
+		{
+			// Every Identity field but namespace used to read as an object
+			// name, so a chart swap was told it was a rename.
+			name:       "a chart move names different objects, not a rename",
+			moved:      []IdentityChange{{Field: "chart", From: "skyhook", To: "nodewright"}},
+			wantSubstr: []string{"different objects"},
+			wantAbsent: []string{"delete-and-recreate", "spec.selector", "second copy", "GitOps prune"},
+		},
+		{
+			name: "a dropped manifest names the prune, not a rename",
+			moved: []IdentityChange{{
+				Field: "manifestFiles", From: "a.yaml,b.yaml", To: "a.yaml", Removed: []string{"b.yaml"},
+			}},
+			wantSubstr: []string{"GitOps prune"},
+			wantAbsent: []string{"delete-and-recreate", "different objects"},
+		},
+		{
+			name: "an added manifest names new objects, not a prune",
+			moved: []IdentityChange{{
+				Field: "manifestFiles", From: "a.yaml", To: "a.yaml,b.yaml", Added: []string{"b.yaml"},
+			}},
+			wantSubstr: []string{"different objects"},
+			wantAbsent: []string{"GitOps prune", "delete-and-recreate"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := relocation("nodewright-operator", "v0.19.0", "v0.19.0", tt.moved).Explanation
+			for _, want := range tt.wantSubstr {
+				if !strings.Contains(got, want) {
+					t.Errorf("explanation %q is missing %q", got, want)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(got, absent) {
+					t.Errorf("explanation %q should not mention %q", got, absent)
+				}
+			}
+		})
+	}
+}
+
+// TestMovedPhraseNamesAnAppearingOrDisappearingName keeps the prose readable
+// where one side is empty. "moves from skyhook-operator to" names nothing, on
+// the row where the rename is the whole finding.
+func TestMovedPhraseNamesAnAppearingOrDisappearingName(t *testing.T) {
+	tests := []struct {
+		name  string
+		moved []IdentityChange
+		want  string
+	}{
+		{
+			name:  "dropped",
+			moved: []IdentityChange{{Field: "fullnameOverride", From: "skyhook-operator", To: ""}},
+			want:  "its fullnameOverride is no longer set, dropping skyhook-operator",
+		},
+		{
+			name:  "added",
+			moved: []IdentityChange{{Field: "fullnameOverride", From: "", To: "nodewright"}},
+			want:  "its fullnameOverride is now set to nodewright",
+		},
+		{
+			name:  "changed",
+			moved: []IdentityChange{{Field: "namespace", From: "skyhook", To: "nodewright"}},
+			want:  "its namespace moves from skyhook to nodewright",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := movedPhrase(tt.moved); got != tt.want {
+				t.Errorf("movedPhrase() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

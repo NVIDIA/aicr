@@ -43,74 +43,7 @@ if ! command -v kubectl >/dev/null 2>&1; then
   exit 1
 fi
 
-# KUBECONFIG_FLAG holds helm's spelling of the connection options, because every
-# other consumer forwards it unexamined into `helm upgrade`.
-# kubectl spells one of them differently -- helm's --kube-context is kubectl's
-# --context -- so the value is translated here rather than forwarded.
-#
-# An option this step does not translate is refused. Forwarding it aborts the
-# deploy on an unknown flag, and dropping it is worse: the reads and the CRD
-# force-apply below would then land on whatever cluster the ambient context
-# names, which is the wrong-cluster write this script must never make.
-KUBECTL_CONN=()
-if [[ -n "${KUBECONFIG_FLAG:-}" ]]; then
-  # Deliberate word-split: this slot holds a flag list, not a single word.
-  # shellcheck disable=SC2206
-  helm_conn=(${KUBECONFIG_FLAG})
-  while (( ${#helm_conn[@]} > 0 )); do
-    case "${helm_conn[0]}" in
-      --kube-context|--kubeconfig)
-        # An option-looking value is a malformed list, not a context named
-        # "--kubeconfig". Accepting it consumes the next real option as this
-        # one's argument, which silently discards a connection option the
-        # operator did set.
-        if (( ${#helm_conn[@]} < 2 )) || [[ "${helm_conn[1]}" == --* ]]; then
-          echo "ERROR: KUBECONFIG_FLAG gives ${helm_conn[0]} no usable value." >&2
-          exit 1
-        fi
-        if [[ "${helm_conn[0]}" == "--kube-context" ]]; then
-          KUBECTL_CONN+=(--context "${helm_conn[1]}")
-        else
-          KUBECTL_CONN+=(--kubeconfig "${helm_conn[1]}")
-        fi
-        helm_conn=("${helm_conn[@]:2}")
-        ;;
-      # An empty joined value is refused rather than forwarded. Both helm and
-      # kubectl read an empty --context as "use the current context", so
-      # passing it through turns a stated target into the ambient one without
-      # saying so -- the silent retarget this step exists to prevent.
-      --kube-context=|--kubeconfig=)
-        echo "ERROR: KUBECONFIG_FLAG gives ${helm_conn[0]%=} an empty value." >&2
-        exit 1
-        ;;
-      --kube-context=*)
-        KUBECTL_CONN+=(--context "${helm_conn[0]#*=}")
-        helm_conn=("${helm_conn[@]:1}")
-        ;;
-      --kubeconfig=*)
-        KUBECTL_CONN+=("${helm_conn[0]}")
-        helm_conn=("${helm_conn[@]:1}")
-        ;;
-      # Names the option, never its argument. helm's --kube-token carries a
-      # bearer token in the joined form, and deploy.sh runs install.sh with its
-      # output attached to the terminal and to CI logs, then retries it. kubectl
-      # reports an unknown flag by name alone, so echoing the whole token here
-      # would disclose what the unpatched path did not.
-      #
-      # The rejected options do have kubectl equivalents -- --kube-token is
-      # --token, --kube-apiserver is --server -- so this is a scope boundary,
-      # not an unknown mapping.
-      *)
-        echo "ERROR: KUBECONFIG_FLAG carries '${helm_conn[0]%%=*}', which this" >&2
-        echo "       ${RELEASE} CRD step does not support; it translates only" >&2
-        echo "       --kube-context and --kubeconfig. It stops here rather than" >&2
-        echo "       read and apply CRDs against an unintended cluster." >&2
-        exit 1
-        ;;
-    esac
-  done
-fi
-
+{{ kubeConn }}
 # Every helm and kubectl call below runs through run_bounded. This script runs
 # inside the deploy path, where a command that never returns hangs the whole
 # rollout rather than failing it: deploy.sh retries a component that exits
@@ -263,7 +196,7 @@ collect_crds() { # $1 = chart .tgz, $2 = destination directory
 # set an upgrade would act on, so one spelling works against either binary.
 if ! capture_bounded helm list --namespace "${NAMESPACE}" \
   --filter "${RELEASE_FILTER}" --short --deployed --failed --pending \
-  ${KUBECONFIG_FLAG:-}; then
+  ${HELM_CONN[@]+"${HELM_CONN[@]}"}; then
   existing="$(cat "${BOUNDED_OUT}")"
   echo "ERROR: cannot determine whether release ${RELEASE} exists; refusing to" >&2
   echo "       skip the CRD step and risk leaving the previous schema in place: ${existing}" >&2

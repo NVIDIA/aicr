@@ -403,6 +403,15 @@ criteria-subsumption analysis is complex and the runtime guard is
 complete on its own. This lets `aks` or `gke-cos` declare the profile
 once, inherited by accelerator/intent leaves.
 
+**External catalogs extend the declaration and never redeclare it.** A
+`--data` overlay at the path of the declaring overlay that carries only
+`spec.profile` adds values to that declaration when the catalog loads, so
+the composition still sees exactly one declaration and the algorithm below
+is unchanged. The patch is additive and fail-closed. It may not redeclare
+a value, set `default` or `description`, or name another profile, and union
+totality is evaluated over the merged values, so an added value must own
+the same path set as the declared ones.
+
 ### Optionality and naming
 
 - The `profile` block is **optional**. The field is deliberately
@@ -1477,6 +1486,25 @@ recurrence — the shape the Problem section expects.
    deployment-phase validation, not proven at generation. Qualifying
    installer readiness directly (DaemonSet presence, pool mode) is
    tracked as follow-up work.
+
+   *Amended 2026-09-22:* the pool-mode half of that follow-up work
+   landed for `bundle-installer` (`driver-installer`'s successor, per
+   the rename amendment above). A second, corroborating constraint on
+   `K8s.gke-gpu-pools.gpu-driver-installation` verifies each GPU pool
+   was actually created with `gpu-driver-version=disabled`, closing the
+   gap where the opt-out label alone proves only device-plugin
+   ownership, not pool-creation mode. A pool GKE still finalizes the
+   managed driver install on can carry the label while GKE's own
+   driver-installer DaemonSet stays active underneath, racing the
+   bundle's `gcp-driver-installer`. The reading is supplied by a new
+   provider pool projection (`aicr snapshot --gke-gpu-pools` /
+   `aicr validate --gke-gpu-pools`, mirroring the AKS Deferred Decision
+   3 pattern), fed by a `gcloud container node-pools list --format=json`
+   dump. `gke-default` declares no constraint on this reading. It
+   remains the zero-setup default and never requires the projection.
+   The DaemonSet-presence half of the follow-up (verifying the
+   installer's DaemonSet itself, rather than the pool's creation-time
+   intent) remains open.
 
    The `operator-selfdriver` value additionally requires the
    `gcp-driver-installer` component (values-gated chart, new public

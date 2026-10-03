@@ -13,6 +13,8 @@ alias aicrup='curl -sfL https://get.aicr.run | bash -s -- -d ~/.local/bin'
 
 ```bash
 # 1. Clone and setup
+#    Without write access to NVIDIA/aicr, fork it on GitHub, clone your fork
+#    instead, then: git remote add upstream https://github.com/NVIDIA/aicr.git
 git clone https://github.com/NVIDIA/aicr.git && cd aicr
 make tools-setup    # Install all required tools (first-time)
 make tools-update   # Upgrade existing tools to versions in .settings.yaml
@@ -37,7 +39,7 @@ make qualify        # Full check: test-coverage + lint + tuning-check + coverage
 | **make** | Build automation | Pre-installed on macOS; `apt install make` on Ubuntu/Debian |
 | **git** | Version control | Pre-installed on most systems |
 | **Docker** | Container builds | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
-| **yq** | YAML processing | Required for `make tools-setup/check`. See [github.com/mikefarah/yq](https://github.com/mikefarah/yq) |
+| **yq** | YAML processing | Installed by `make tools-setup`: the pinned version on Linux, via Homebrew on macOS. `make tools-check` needs it |
 
 ### Development Tools (installed by `make tools-setup`)
 
@@ -70,11 +72,9 @@ On Ubuntu 24.04+ and other systems using PEP 668, system-wide pip installs are b
 sudo apt-get install -y make git curl pipx
 pipx ensurepath
 pipx install yamllint
-
-# Install yq
-sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-sudo chmod +x /usr/local/bin/yq
 ```
+
+`make tools-setup` installs yq itself, at the version pinned in `.settings.yaml`, checksum-verified. It keeps a yq that is already on `PATH`, so run `make tools-update` to replace a hand-installed one.
 
 ## Development Setup
 
@@ -218,7 +218,8 @@ make test-coverage
 ### 4. Lint Your Code
 
 ```bash
-# Run all linters (Go, YAML, license headers, agents sync, docs gates, chart-version pins)
+# Run all linters (Go, YAML, license headers, agents sync, docs gates, chart-version pins,
+# vendored Go proxy action digests, upgrade records)
 make lint
 
 # Or run individually for a faster loop (all of these already run as part of `make lint`)
@@ -322,7 +323,7 @@ make tilt-up
 The Tilt UI at http://localhost:10350 shows:
 - Build status for `aicrd`
 - Pod logs and status
-- Port forwards (API: 8080, Metrics: 9090)
+- Port forward (API and metrics: 8080)
 
 #### 3. Develop with Hot Reload
 
@@ -345,7 +346,7 @@ curl http://localhost:8080/ready
 curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100&intent=training"
 
 # View metrics
-curl http://localhost:9090/metrics
+curl http://localhost:8080/metrics
 ```
 
 #### 5. View Logs
@@ -435,8 +436,7 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100&int
 │       │                                                 │
 │       │ Port Forwards                                   │
 │       ▼                                                 │
-│  localhost:8080 (API)                                   │
-│  localhost:9090 (Metrics)                               │
+│  localhost:8080 (API and /metrics)                      │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -476,7 +476,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make qualify` | Full qualification (test-coverage, lint, tuning-check, coverage-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
-| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, and chart-version pins |
+| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, and upgrade records |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
 | `make e2e` | CLI end-to-end tests |
@@ -564,7 +564,6 @@ Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
 |--------|-------------|
 | `make info` | Print project info (version, commit, tools) |
 | `make docs` | Serve Go documentation on localhost:6060 |
-| `make demos` | Create demo GIFs (requires vhs) |
 | `make clean` | Clean build artifacts |
 | `make clean-all` | Deep clean including module cache |
 | `make cleanup` | Clean up AICR Kubernetes resources |
@@ -655,7 +654,7 @@ make server
 make cluster-status
 
 # View Tilt logs
-tilt logs -f tilt/Tiltfile
+tilt logs -f
 
 # Reset everything
 make dev-reset
@@ -845,12 +844,12 @@ For detailed information on adding validation checks and constraint validators, 
 **[docs/contributor/validator.md](docs/contributor/validator.md)**
 
 This comprehensive guide covers:
-- Architecture overview (Job-based validation, test registration framework)
-- Quick start with code generator: `make generate-validator`
-- How-to guides for adding checks and constraint validators
-- Testing patterns (unit tests vs integration tests)
-- Enforcement mechanisms (automated registration validation)
-- Troubleshooting common issues
+- Declarative constraints and the constraint evaluation algorithm
+- Quick start for adding a container-per-validator check
+- The container contract and the `validators.Context` API
+- Component validations (bundle-time)
+- Chainsaw health checks
+- Testing checklist and common pitfalls
 
 ## Additional Resources
 
@@ -858,7 +857,7 @@ This comprehensive guide covers:
 - [Architecture Overview](docs/contributor/index.md) - System design and components
 - [CLI Architecture](docs/contributor/cli.md) - CLI command structure
 - [Data Architecture](docs/contributor/recipe.md) - Recipe data model
-- [Components](docs/contributor/component.md) - Creating new bundlers
+- [Components](docs/contributor/component.md) - Adding components to the registry
 
 ### External Resources
 - [Go Documentation](https://golang.org/doc/)

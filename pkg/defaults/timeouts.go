@@ -73,6 +73,12 @@ const (
 	// (`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`); the dump is a
 	// short per-cluster add-on list, so 1 MiB is generous.
 	MaxOKEAddonsBytes = int64(1 << 20) // 1 MiB
+
+	// MaxGKEGPUPoolsBytes caps the size of a --gke-gpu-pools JSON file
+	// (the `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump) read into memory via io.LimitReader. A real
+	// pool list is a few KiB.
+	MaxGKEGPUPoolsBytes = int64(1 << 20) // 1 MiB
 )
 
 // Handler timeouts for HTTP request processing.
@@ -365,6 +371,14 @@ const (
 	// ceiling is derived from the operation it repeats rather than picked.
 	CLIUpgradeCheckTimeout = 3 * RecipeOperationTimeout
 
+	// CLIUpgradeCheckClusterTimeout bounds an `aicr upgrade-check` run that
+	// reads the cluster: CLIUpgradeCheckTimeout's artifact work, plus the
+	// longer of the two inventory readers (one runs per deployer), plus the
+	// at-risk scan. Summing them lets every inner budget be reached before the
+	// run's own expires, so a slow scan times out on its own budget and leaves
+	// a report rather than taking the run down with it.
+	CLIUpgradeCheckClusterTimeout = CLIUpgradeCheckTimeout + HelmInventoryTimeout + AtRiskScanTimeout
+
 	// OIDCAuthTimeout is the maximum time to wait for a user to complete
 	// any interactive OIDC authentication flow — browser callback or
 	// device-code (RFC 8628). Prevents indefinite blocking if the flow is
@@ -575,6 +589,14 @@ const (
 	// helm never preempts the gate, small enough to still surface a genuinely
 	// hung gate process shortly after its own deadline.
 	ReadinessGateHelmTimeoutBuffer = 5 * time.Minute
+
+	// ReadinessGateActiveDeadlineBuffer is added to ReadinessGateMaxWait to
+	// derive the gate Job's activeDeadlineSeconds, which bounds the Job even
+	// when its pod never schedules or never starts, so the gate's own deadline
+	// never runs. Argo CD has no other bound on the sync. It must stay below
+	// ReadinessGateHelmTimeoutBuffer so the Job, not helm --timeout, reports
+	// the failure under the Helm deployer.
+	ReadinessGateActiveDeadlineBuffer = 3 * time.Minute
 
 	// ReadinessGateBackoffLimit is the Kubernetes Job backoffLimit for the gate
 	// Job. The gate CLI handles its own retry loop internally; this limit
@@ -943,6 +965,13 @@ const (
 	// for parity across bundle-root metadata reads.
 	MaxBundleInfoBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
+	// MaxBundleValuesBytes caps a single rendered per-release values file read
+	// back out of a bundle. The largest the shipped registry produces is the
+	// gpu-operator's, at roughly 6 KiB; 1 MiB matches MaxBundleInfoBytes for
+	// parity across bundle reads. The bound matters because the file arrives
+	// from an OCI registry or a GitOps clone alongside the record naming it.
+	MaxBundleValuesBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxManifestFileBytes caps the size of an in-bundle manifest.json
 	// file read by the verifier. A manifest entry is ~150 bytes (path +
 	// size + sha256); 1 MiB allows ~6k entries — well above any realistic
@@ -1089,7 +1118,7 @@ const (
 	EnvHelmRepositoryPassword = "HELM_REPOSITORY_PASSWORD"
 )
 
-// Server-side bundle-signing configuration (see docs/plans/2026-07-20-server-bundle-attestation-design.md).
+// Server-side bundle-signing configuration (see "Server-Side Signing" in docs/user/api-reference.md).
 const (
 	// EnvSigningKey selects KMS-backed (Mode A) signing. Value is a cosign
 	// KMS URI (awskms:// | gcpkms:// | azurekms:// | hashivault://).
@@ -1426,6 +1455,75 @@ const HelmTemplateTimeout = 90 * time.Second
 // preventing a malicious or buggy chart from exhausting memory.
 const HelmTemplateOutputLimit int64 = 100 * 1024 * 1024 // 100 MiB
 
+// HelmReleaseDecodeLimit caps the decompressed size of a single Helm release
+// record. The encoded record embeds the release's full rendered manifest and
+// every hook, none of which this project reads, so the cap bounds work the
+// decoder is obliged to do rather than data it wants. Exceeding it is an
+// error: a release whose metadata cannot be read must not go silently missing
+// from an upgrade comparison, where it would render as a new component.
+//
+// 32 MiB is derived, not a round number. A record has to fit one Kubernetes
+// Secret (~1 MiB serialized, so ~768 KiB of gzipped payload once base64
+// expansion is taken out), and measured gzip ratios on real content in this
+// repo run ~7x for dense CRD YAML
+// (recipes/components/agentgateway-crds/manifests/gateway-api-crds.yaml) and
+// ~32x for the most repetitive YAML in the tree. A maximal Secret holding
+// worst-case-compressible content therefore inflates to roughly 24 MiB, which
+// this clears without letting an arbitrary ratio through.
+const HelmReleaseDecodeLimit int64 = 32 * 1024 * 1024 // 32 MiB
+
+// HelmReleaseListPageSize caps how many Helm storage records one List pulls
+// while reading the installed inventory. The owner=helm selector matches every
+// retained revision, not only the current one, and each record carries the
+// release's full rendered manifest as base64(gzip(...)) up to the ~1 MiB
+// ceiling a Secret can hold: 300 releases at Helm's default 10 retained
+// revisions would materialize gigabytes in a single response. Paging bounds
+// the peak to one page, because the reduction to the newest revision per
+// release runs per page and keeps only the winners.
+//
+// 100 holds a worst-case page (every record at the ceiling) near
+// HelmTemplateOutputLimit, the largest single buffer this project already
+// tolerates, while a realistic page of tens-of-KiB records is a few MiB and
+// the round trips stay few. Paging bounds the page, not the peak: the winning
+// revision of every release is held until the walk finishes, so the high-water
+// mark is one page plus one record per release across both drivers.
+const HelmReleaseListPageSize int64 = 100
+
+// HelmInventoryTimeout bounds the whole read of the installed inventory: a
+// paged cluster-wide List per storage driver, plus decoding the newest
+// revision of each release. Longer than CollectorTopologyTimeout, whose
+// paginated node walk it otherwise resembles, because it makes that walk twice
+// over objects that carry rendered manifests rather than node metadata.
+//
+// It is also the backstop on a server that never stops paging: the per-page
+// continue-token check refuses a token it has already been handed, but only a
+// deadline bounds one that cycles.
+const HelmInventoryTimeout = 2 * time.Minute
+
+// ArgoApplicationListPageSize caps how many Argo CD Applications one List
+// pulls while reading the installed inventory. One Application exists per
+// deployed component, not one per revision, so the object count is small; the
+// objects are not. An Application's status carries an entry for every resource
+// it manages, which for a chart the size of gpu-operator or
+// kube-prometheus-stack is hundreds of entries, so a management cluster's
+// Applications add up to tens of megabytes in a single unpaged response.
+//
+// Larger than HelmReleaseListPageSize because no Application approaches the
+// ~1 MiB ceiling that sizes the Helm page, and the reduction there that keeps
+// only the newest revision has no counterpart here: every Application is
+// retained, so paging bounds the response rather than the peak.
+const ArgoApplicationListPageSize int64 = 200
+
+// ArgoInventoryTimeout bounds the whole read of the Applications Argo CD
+// deploys: one paged cluster-wide List, plus the projection of each item.
+// Shorter than HelmInventoryTimeout, which makes two such walks over objects
+// carrying rendered manifests and decompresses one record per release.
+//
+// It is also the backstop on a server that never stops paging, for the reason
+// HelmInventoryTimeout is: the per-page continue-token check refuses a token
+// it has already been handed, but only a deadline bounds one that cycles.
+const ArgoInventoryTimeout = 60 * time.Second
+
 // Helm chart-pull timeouts for the bundle-time --vendor-charts path.
 // Sized for one chart pull from a remote Helm or OCI registry, including
 // repo index fetch (HTTPS) or registry resolution (OCI), tarball download,
@@ -1574,3 +1672,24 @@ const (
 	// MaxOCIRecipeFiles caps all materialized filesystem nodes.
 	MaxOCIRecipeFiles = 4096
 )
+
+// AtRiskListPageSize caps how many objects one List pulls while scanning for
+// resources an upgrade could disturb. Sized between the two inventory page
+// sizes: the objects are ordinary custom resources rather than Helm storage
+// records carrying rendered manifests, but a tenant's CR can hold an arbitrary
+// spec, so the page stays well under the Argo ceiling.
+//
+// Nothing is retained across pages beyond the objects found at risk, which on
+// a healthy cluster is none, so the page bounds the peak as well as the
+// response.
+const AtRiskListPageSize int64 = 200
+
+// AtRiskScanTimeout bounds the whole advisory at-risk scan: one discovery
+// mapping and one paged cluster-wide List per affected kind. Shorter than
+// ArgoInventoryTimeout per kind is not expressible here, so the budget covers
+// the handful of kinds a single upgrade's records name.
+//
+// The scan is advisory and never changes the exit code, so it is bounded
+// tightly on purpose: an operator waiting on a warning has already been given
+// the verdict.
+const AtRiskScanTimeout = 60 * time.Second

@@ -231,10 +231,10 @@ ENTRYPOINT ["/check.sh"]
 **Catalog entry:**
 
 ```yaml
-- name: gpu-driver-version
+- name: gpu-sku-allowed
   phase: deployment
-  description: "Verify GPU driver meets minimum version"
-  image: my-registry.example.com/gpu-driver-check:v1.0.0
+  description: "Verify the detected GPU SKU is in the allowed set"
+  image: my-registry.example.com/gpu-sku-check:v1.0.0
   timeout: 1m
   args: []
   env: []
@@ -242,7 +242,7 @@ ENTRYPOINT ["/check.sh"]
 
 ## Image Requirements
 
-- Must run as non-root (validator Jobs use `runAsNonRoot: true`)
+- Should run as non-root (the validator Job sets no `securityContext`, so the image's own `USER` applies)
 - Must handle the mounted data paths (`/data/snapshot/`, `/data/validation/`)
 - **Must** self-terminate within the catalog `timeout` (published as `AICR_CHECK_TIMEOUT`) rather than rely on the Job — the Job's `activeDeadlineSeconds` is set to the catalog entry plus a fixed headroom, as a backstop for a check that never exits on its own. Self-termination is what preserves the logs: a pod that exited on its own is no longer *active*, so the Job controller's `deleteActivePods` leaves it in place as `Failed` for the orchestrator to read, whereas a pod still running when the backstop fires is deleted along with its verdict
 - Should write meaningful evidence to stdout for the CTRF report

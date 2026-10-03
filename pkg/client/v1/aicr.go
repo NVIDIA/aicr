@@ -155,11 +155,13 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"github.com/NVIDIA/aicr/pkg/inventory"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/ocisource"
@@ -256,6 +258,14 @@ type clientDependencies struct {
 		context.Context,
 		*snapshotter.AgentConfig,
 	) (*snapshotter.Snapshot, []byte, error)
+
+	// readInventory and scanAtRisk are the two cluster reads UpgradeCheck
+	// makes. They are seams for the reason deployAndCollect is: what the
+	// facade decides about each call, namely the deployer the release names
+	// are mapped under and that the scan looks only for the kinds the match
+	// actually crossed, is otherwise observable only from a live apiserver.
+	readInventory func(context.Context, inventory.Options) (inventory.Result, error)
+	scanAtRisk    func(context.Context, inventory.AtRiskOptions) (inventory.AtRiskResult, error)
 }
 
 func defaultClientDependencies() clientDependencies {
@@ -269,6 +279,8 @@ func defaultClientDependencies() clientDependencies {
 			return ocisource.New(ctx, embedded, config)
 		},
 		deployAndCollect: snapshotter.DeployAndCollect,
+		readInventory:    inventory.Read,
+		scanAtRisk:       inventory.ScanAtRisk,
 	}
 }
 
@@ -874,9 +886,10 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	return result, nil
 }
 
-// inheritIdentity overwrites resolved's namespaces with the ones a prior
-// recipe or bundle already deployed into, so a moved registry default does not
-// relocate a running component when the recipe is regenerated.
+// inheritIdentity overwrites resolved's component identity (namespace, chart,
+// source, kustomize path and manifest sets) with the one a prior recipe or
+// bundle already deployed, so a moved registry default does not relocate or
+// replace a running component when the recipe is regenerated.
 //
 // No kubeconfig is threaded through: inheritedRecipePath rejects the only
 // artifact form that would need one.
@@ -896,7 +909,7 @@ func (c *Client) inheritIdentity(
 	}
 	// Checked before loading, because the loader auto-hydrates a RecipeMetadata
 	// overlay against the CURRENT data provider. That hydration would succeed
-	// and hand back namespaces derived from the registry this binary ships,
+	// and hand back identity derived from the registry this binary ships,
 	// which are the values inheritance exists to override, so the flag would
 	// silently do the opposite of what it promises.
 	if kindErr := requireHydratedRecipe(path, inheritFrom); kindErr != nil {
@@ -912,13 +925,108 @@ func (c *Client) inheritIdentity(
 	// Empty is the reachable half of this guard, not nil: nothing on the load
 	// path rejects a recipe whose componentRefs list is empty, and
 	// ApplyInheritedIdentity returns immediately for one. Letting that through
-	// would re-derive every namespace from the current registry while reporting
+	// would re-derive every identity from the current registry while reporting
 	// success, which is the relocation this flag exists to prevent.
 	if priorInternal == nil || len(priorInternal.ComponentRefs) == 0 {
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"inherit-from %s carries no components to inherit namespaces from", inheritFrom))
+			"inherit-from %s carries no components to inherit identity from", inheritFrom))
 	}
-	return recipe.ApplyInheritedIdentity(resolved.ComponentRefs, priorInternal.ComponentRefs)
+	if criteriaErr := checkInheritCriteria(resolved.Criteria, priorInternal.Criteria, inheritFrom); criteriaErr != nil {
+		return criteriaErr
+	}
+	if applyErr := recipe.ApplyInheritedIdentity(resolved.ComponentRefs, priorInternal.ComponentRefs); applyErr != nil {
+		return applyErr
+	}
+	if namesErr := c.inheritObjectNames(ctx, inheritFrom, resolved); namesErr != nil {
+		return namesErr
+	}
+	// The inherited fields land after the resolved recipe was last validated,
+	// and a prior artifact can carry a combination the current registry's
+	// shape rejects, so check again before anything is emitted or bundled.
+	// Object-name pins are written into Overrides above, so this sees them too.
+	return resolved.ValidateCoherence()
+}
+
+// checkInheritCriteria rejects a prior artifact resolved for a different
+// service, accelerator, intent or OS. Same-named components differ across
+// those, so inheriting their manifest sets and charts would import another
+// environment's deployment. A dimension either side leaves unset or "any" does
+// not count, and neither do platform and nodes, which grow a deployment rather
+// than relocate it.
+func checkInheritCriteria(resolved, prior *recipe.Criteria, inheritFrom string) error {
+	if resolved == nil || prior == nil {
+		return nil
+	}
+	for _, d := range []struct{ name, now, was string }{
+		{"service", string(resolved.Service), string(prior.Service)},
+		{"accelerator", string(resolved.Accelerator), string(prior.Accelerator)},
+		{"intent", string(resolved.Intent), string(prior.Intent)},
+		{"os", string(resolved.OS), string(prior.OS)},
+	} {
+		unset := func(v string) bool { return v == "" || v == "any" }
+		if unset(d.now) || unset(d.was) || d.now == d.was {
+			continue
+		}
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"inherit-from %s was resolved for %s %q but this recipe resolves for %q, "+
+				"so its component identity does not describe this deployment",
+			inheritFrom, d.name, d.was, d.now))
+	}
+	return nil
+}
+
+// inheritObjectNames pins the object names the prior bundle deployed with, so
+// a values-file edit that drops a fullnameOverride does not rename a running
+// release's objects on the next regenerate.
+//
+// Only a bundle can answer. A resolved recipe records valuesFile as a path
+// resolved against whichever binary reads it, so re-reading a prior recipe's
+// values would yield the values THIS binary ships — the very ones inheritance
+// is meant to override. That is reported rather than silently skipped, and it
+// is a warning rather than an error because the namespace half of the flag
+// still did its job.
+func (c *Client) inheritObjectNames(
+	ctx context.Context, inheritFrom string, resolved *recipe.RecipeResult,
+) error {
+
+	dir, isBundle := bundleDirectory(inheritFrom)
+	if !isBundle {
+		slog.Warn("inherit-from cannot pin object names from a recipe file",
+			"inheritFrom", inheritFrom,
+			"reason", "a recipe records its values by reference, so it does not state the object "+
+				"names it deployed with",
+			"remedy", "pass the bundle directory that was deployed")
+		return nil
+	}
+
+	values, err := bundleinfo.ReadReleaseValues(ctx, dir)
+	if err != nil {
+		if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			slog.Warn("inherit-from cannot pin object names from this bundle",
+				"inheritFrom", inheritFrom,
+				"reason", "it has no "+bundleinfo.FileName+", so it predates build-record stamping")
+			return nil
+		}
+		// A well-formed bundle whose names are not all stated where they can
+		// be read. Like the case above, and unlike an incomplete bundle, the
+		// namespace half still holds, so this warns rather than refusing.
+		if stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+			slog.Warn("inherit-from cannot pin object names from this bundle",
+				"inheritFrom", inheritFrom, "reason", err.Error())
+			return nil
+		}
+		return err
+	}
+
+	prior, err := projectObjectNames(values)
+	if err != nil {
+		return err
+	}
+	current, err := internalObjectNames(ctx, resolved)
+	if err != nil {
+		return err
+	}
+	return recipe.ApplyInheritedObjectNames(resolved.ComponentRefs, prior, current)
 }
 
 // requireHydratedRecipe rejects an inheritance source that is not already a
@@ -950,7 +1058,7 @@ func requireHydratedRecipe(path, ref string) error {
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"inherit-from %s is a %s; it must be a resolved %s (a recipe generated by "+
 				"aicr recipe, or the recipe.yaml at a bundle root). An overlay would be "+
-				"hydrated against the current registry, producing the namespaces inheritance "+
+				"hydrated against the current registry, producing the identity inheritance "+
 				"is meant to override", ref, probe.Kind, recipe.RecipeResultKind))
 	}
 	return nil
@@ -2174,6 +2282,96 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 // failed phase (useful for skipping expensive checks like inference-perf
 // when deployment already failed). Callers wanting per-phase control can
 // reach into pkg/validator.ValidatePhase directly.
+// PreflightSkipChecks runs ValidateState's skip-list guard on its own, without
+// running any validation, so a caller that does cluster work of its own before
+// ValidateState can reject an unusable skip list first.
+//
+// The CLI is that caller: `aicr validate` with neither --snapshot nor
+// --no-cluster deploys a snapshot-capture agent before it has a Snapshot to
+// hand ValidateState, so without this the guard fired only after a
+// ServiceAccount, a Role and a Job existed, while the --skip-check help text
+// promised rejection "before any validation resource is created".
+//
+// Pass the same options ValidateState will get. WithValidationSkipChecks
+// supplies the list under test and WithValidationPhases the phase set it is
+// judged against; WithValidationCommit also matters, because the catalog load
+// resolves validator images against that commit. The remaining validation
+// options reach the validator but nothing on this path consults them. recipe
+// must come from a prior call on this Client, as for ValidateState. No
+// Kubernetes call is made, so it is safe on a caller with no cluster access.
+//
+// It does not replace the guard inside ValidateState, which stays for callers
+// that reach ValidateState directly. Running both is idempotent.
+//
+// Returns nil immediately when no skip list was passed, so the default path
+// pays no catalog load. The Client and recipe guards still run first, so a
+// closed Client is reported as such either way.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client or recipe is nil, when recipe
+//     lacks internal state, when the Client has been Closed, or when an entry
+//     names no validator in the catalog (or would empty a requested phase).
+//   - The catalog loader's own structured code when the catalog cannot be
+//     loaded; ErrCodeInternal only when that failure carries no code.
+func (c *Client) PreflightSkipChecks(
+	ctx context.Context,
+	recipe *RecipeResult,
+	opts ...ValidateOption,
+) error {
+
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if recipe == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "nil RecipeResult")
+	}
+	if recipe.internal == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"RecipeResult has no internal recipe state: call Client.ResolveRecipe to obtain a validatable RecipeResult")
+	}
+	if err := c.assertOwns(recipe); err != nil {
+		return err
+	}
+
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	dp := c.dp
+	clientVersion := c.version
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	// After the Client guards, not before, so a closed Client is reported as
+	// such whether or not there is a list to check: a caller must not learn
+	// that its Client is unusable only on the next call. The catalog load and
+	// the validator below are what the empty list actually skips.
+	cfg := buildValidateConfig(opts)
+	if len(cfg.skipChecks) == 0 {
+		return nil
+	}
+
+	valOpts := append(validateOptionsFromConfig(cfg),
+		validator.WithDataProvider(dp),
+		validator.WithVersion(clientVersion))
+	v := validator.New(valOpts...)
+
+	internalPhases := make([]validator.Phase, len(cfg.phases))
+	for i, p := range cfg.phases {
+		internalPhases[i] = validator.Phase(p)
+	}
+	validationInput, err := validatorv1.ToValidationInputWithContext(ctx, recipe.internal)
+	if err != nil {
+		return err
+	}
+	return v.PreflightSkipChecks(ctx, internalPhases, validationInput)
+}
+
 func (c *Client) ValidateState(
 	ctx context.Context,
 	recipe *RecipeResult,

@@ -65,7 +65,9 @@ data:
 
 - Kubernetes cluster with GPU nodes
 - aicr CLI installed
-- GPU Operator installed (or appropriate namespace configured via `--namespace`)
+- No GPU Operator required: capture the snapshot that feeds `aicr recipe`
+  before deploying the GPU Operator (see
+  [GPU Operator Driver Auto-Detect](component-catalog.md#gpu-operator-driver-auto-detect))
 - Permission to create and delete the run's Job and RBAC in the target
   namespace, plus the cluster-scoped `ClusterRole`/`ClusterRoleBinding` the
   agent needs. Every run starts by verifying this and stops before touching
@@ -110,10 +112,12 @@ kubectl get configmap aicr-snapshot -n gpu-operator -o jsonpath='{.data.snapshot
 
 ### 3. Customize Deployment
 
-Target specific nodes and configure scheduling:
+Without `--node-selector`, the agent already targets GPU nodes when the cluster
+has them labeled (see [GPU Node Auto-Targeting](#gpu-node-auto-targeting)).
+Pass a selector to choose the nodes yourself:
 
 ```shell
-# Target GPU nodes with specific label
+# Target GPU nodes with a specific label (overrides auto-targeting)
 aicr snapshot \
   --node-selector accelerator=nvidia-h100
 
@@ -125,7 +129,6 @@ aicr snapshot \
 # Full customization
 aicr snapshot \
   --namespace gpu-operator \
-  --image ghcr.io/nvidia/aicr:v0.19.0 \
   --node-selector accelerator=nvidia-h100 \
   --toleration nvidia.com/gpu:NoSchedule \
   --timeout 10m \
@@ -135,7 +138,7 @@ aicr snapshot \
 **Available flags:**
 - `--kubeconfig`: Custom kubeconfig path (default: `~/.kube/config` or `$KUBECONFIG`)
 - `--namespace`: Deployment namespace (default: `default`)
-- `--image`: Container image (default: matches the CLI version, e.g. `ghcr.io/nvidia/aicr:v0.19.0`; dev and snapshot builds use `:latest`)
+- `--image`: Container image (default: `ghcr.io/nvidia/aicr` tagged with the CLI's own version; dev and snapshot builds use `:latest`)
 - `--image-pull-secret`: Secret name for pulling the agent image from a private registry (repeatable)
 - `--job-name`: Job name prefix (default: `aicr`); the run ID is always appended (`<prefix>-<run-id>`)
 - `--service-account-name`: ServiceAccount the agent pod runs as. **Exact-if-exists** — an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the run creates no RBAC; otherwise it is a name prefix (default: `aicr`) and the run ID is appended (`<prefix>-<run-id>`). See [Using an existing ServiceAccount](#using-an-existing-serviceaccount-irsa-and-workload-identity)
@@ -143,15 +146,16 @@ aicr snapshot \
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
-- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the run-scoped `aicr-node-reader-<run-id>` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, and official MariaDB CRs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
+- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the run-scoped `aicr-node-reader-<run-id>` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, DaemonSets, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, and official MariaDB CRs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
 - `--privileged`: Run agent in privileged mode (default: enabled; required for GPU/SystemD collectors). Set to `false` for PSS-restricted namespaces.
-- `--require-gpu`: Fail the snapshot if no GPU is found. In agent mode also requests an `nvidia.com/gpu` resource for the pod (required in CDI environments).
+- `--require-gpu`: In privileged mode (the default), requests an `nvidia.com/gpu` resource for the agent pod (required in CDI environments). With `--privileged=false` it adds no GPU request, but still disables automatic GPU-node selection; pass `--node-selector` to target GPU nodes.
 - `--runtime-class`: Set `runtimeClassName` on the agent pod for `nvidia-smi` access without consuming a GPU. Use with `--node-selector` to target GPU nodes.
 - `--os`: Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`). Selects the per-OS pod configuration and service collector backend.
 - `--requests` / `--limits`: Override agent container resource requests/limits (comma-separated `name=quantity` pairs).
 - `--cluster-config`: Path to a pre-existing k8s-launch-kit cluster-config.yaml to ingest network topology (local agent mode only).
 - `--oke-addons`: Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump, projected into the `K8s.oke-addons.nvidia-gpu-plugin` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
 - `--aks-gpu-pools`: Path to an `az aks nodepool list -o json` dump, projected into the `K8s.aks-gpu-pools.gpu-driver` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
+- `--gke-gpu-pools`: Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump, projected into the `K8s.gke-gpu-pools.gpu-driver-installation` reading (required only to resolve the GKE `bundle-installer` gpuStack value from a snapshot). Controller-side: works in agent Job mode too. The file never enters the pod. The CLI merges the projection into the returned snapshot.
 - `--discover-network`: Enable live l8k discovery to populate the NetworkTopology measurement. **Not read-only** — writes `nvidia.kubernetes-launch-kit.*` node labels and may patch `NicClusterPolicy`.
 
 ### 4. Check Agent Logs (Debugging)
@@ -168,6 +172,30 @@ kubectl logs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/co
 # Describe Job for events
 kubectl describe job -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 ```
+
+## GPU Node Auto-Targeting
+
+The agent Job tolerates all taints, so without a selector it can land on a
+non-GPU node and return a snapshot with no GPU data. `aicr snapshot` guards
+against that in two ways:
+
+- **Auto-targeting.** When `--node-selector`, `--require-gpu`, and
+  `--runtime-class` (and their `--config` equivalents) are all unset, and the
+  cluster has a node labeled `nvidia.com/gpu.present=true`, the CLI injects that
+  selector and logs `auto-targeting GPU nodes`. Setting any of the three
+  disables it. The node lookup is presence-only, bounded by a 5-second timeout,
+  and fails open: an API error logs a warning and the Job runs without a
+  selector. If the Job then fails, the error names the injected selector.
+- **Placement-mismatch warning.** If the snapshot has no GPU data but its node
+  topology shows `nvidia.com/gpu.*` labels, the CLI warns `snapshot has no GPU
+  data but cluster topology shows GPU-capable nodes` and lists the fixes:
+  `--node-selector`, `--require-gpu` (needs the device plugin), or
+  `--runtime-class nvidia`.
+
+Both rely on Node Feature Discovery / GPU Feature Discovery labels, which the
+GPU Operator installs. Before it is deployed, GPU nodes usually carry no such
+label, so pass `--node-selector` with a node pool or provider label (see
+[Node Selection](#node-selection)) or `kubernetes.io/hostname` of a GPU node.
 
 ## Customization
 
@@ -202,11 +230,16 @@ By default, the agent Job tolerates **all taints** using the universal toleratio
 
 ### Image Version
 
-Pin to a specific version:
+The default image already matches the CLI version. To pin it explicitly, for
+example when mirroring images, set the tag to the CLI's own release:
 
 ```shell
-aicr snapshot --image ghcr.io/nvidia/aicr:v0.19.0
+AICR_VERSION=vX.Y.Z  # release tag; `aicr --version` prints it without the leading v
+aicr snapshot --image "ghcr.io/nvidia/aicr:${AICR_VERSION}"
 ```
+
+Keep the agent image at the CLI's version: an agent from an older release can
+write a snapshot `apiVersion` that the current CLI no longer accepts.
 
 **Finding versions:**
 - [GitHub Releases](https://github.com/NVIDIA/aicr/releases)
@@ -382,12 +415,15 @@ aicr bundle --recipe recipe.yaml --output ./bundles
 ## Complete Workflow
 
 ```shell
-# Step 1: Capture snapshot to ConfigMap (deployment namespace must match the cm:// namespace)
-aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
+# Step 1: Capture snapshot to ConfigMap before deploying the GPU Operator.
+# Uses the default namespace; the cm:// namespace must match --namespace.
+# GPU Feature Discovery labels don't exist yet, so pin the agent to the GPU
+# node pool yourself (replace nodeGroup=gpu-worker with your pool's label).
+aicr snapshot --node-selector nodeGroup=gpu-worker --output cm://default/aicr-snapshot
 
 # Step 2: Generate recipe from ConfigMap
 aicr recipe \
-  --snapshot cm://gpu-operator/aicr-snapshot \
+  --snapshot cm://default/aicr-snapshot \
   --intent training \
   --platform kubeflow \
   --output recipe.yaml
@@ -645,7 +681,7 @@ kubectl get cm -n gpu-operator aicr-agent-snapshot-<run-id> -o yaml
 ### RBAC Permissions
 
 The agent requires these permissions (created automatically by the CLI):
-- **ClusterRole** (`aicr-node-reader-<run-id>`, run-scoped): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); and cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`)
+- **ClusterRole** (`aicr-node-reader-<run-id>`, run-scoped): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`); and `get`/`list` access to DaemonSets (`apps`, for OKE legacy device-plugin detection)
 - **Role** (`aicr-<run-id>`, run-scoped): Create/update ConfigMaps and list pods in the deployment namespace
 
 The baseline ClusterRole above is read-only (`get`/`list` only). Slinky
@@ -740,8 +776,8 @@ checked separately with `SubjectAccessReview` naming
 derived from the same rule set the run-scoped `Role` and `ClusterRole` grant
 (and that `--add-roles-to-service-account` renders), so the gate cannot fall
 behind what the agent needs: namespaced `configmaps` and `pods` access, plus
-cluster-scoped `nodes`, `pods`, `nvidia.com` ClusterPolicies, the Slinky CRs
-and the MariaDB CRs — widened to the full mutating set when
+cluster-scoped `nodes`, `pods`, `apps` DaemonSets, `nvidia.com` ClusterPolicies,
+the Slinky CRs and the MariaDB CRs — widened to the full mutating set when
 `--discover-network` is passed.
 
 This check runs **in exact-ServiceAccount mode only**. In prefix mode the
@@ -761,7 +797,7 @@ agent will still fail visibly in-pod if a rule is missing:
 WARN could not verify the agent ServiceAccount's own permissions; continuing,
 but a missing rule will surface as an in-pod failure minutes from now instead
 of here serviceAccount=irsa-snapshotter namespace=gpu-operator
-uncheckedRules=18 remedy="grant the caller 'create
+uncheckedRules=20 remedy="grant the caller 'create
 subjectaccessreviews.authorization.k8s.io', or verify by hand with: kubectl
 auth can-i --list --as system:serviceaccount:gpu-operator:irsa-snapshotter"
 ```

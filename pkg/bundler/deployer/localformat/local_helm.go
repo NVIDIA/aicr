@@ -58,6 +58,7 @@ var localHelmTemplates embed.FS
 var (
 	localHelmInstallTmpl = template.Must(
 		template.New("install-local-helm.sh.tmpl").
+			Funcs(deployer.TemplateFuncs).
 			Funcs(shellFuncs).
 			ParseFS(localHelmTemplates, "templates/install-local-helm.sh.tmpl"),
 	)

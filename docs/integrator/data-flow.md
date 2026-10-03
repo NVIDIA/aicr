@@ -42,6 +42,9 @@ Each stage transforms input data into a different format:
   projection of associated NodeSet, LoginSet, RestApi, and Accounting CRs
 - **mariadb-operator**: Official `k8s.mariadb.com/mariadbs` API conflict
   evidence (not database availability or health)
+- **oke-legacy-plugin**: OKE's legacy addon-manager `nvidia-gpu-device-plugin`
+  DaemonSet in `kube-system` (device-plugin conflict evidence: `none`,
+  `active`, or `unknown`)
 - **aks-gpu-pools**: Orchestration-layer projection, not a collector —
   produced from the explicit operator-supplied pool dump passed to
   `aicr snapshot --aks-gpu-pools <file>` (per-pool `gpu-driver` install
@@ -57,6 +60,11 @@ Each stage transforms input data into a different format:
   `aicr snapshot --oke-addons <file>` (the `NvidiaGpuPlugin` add-on's
   control-plane state). Same up-front validation and attach/merge flow
   as `aks-gpu-pools`
+- **gke-gpu-pools**: Orchestration-layer projection, not a collector.
+  Produced from the explicit operator-supplied pool dump passed to
+  `aicr snapshot --gke-gpu-pools <file>` (per-pool
+  `gpuDriverInstallationConfig.gpuDriverVersion` install modes). Same
+  up-front validation and attach/merge flow as `aks-gpu-pools`
 
 **GPU Hardware:**
 - Source: NFD/PCI enumeration via sysfs (driver-free; no `nvidia-smi`)
@@ -84,9 +92,11 @@ Each stage transforms input data into a different format:
 │   │                                                     │
 │   ├─ K8s                                                │
 │   │   └─ subtypes: [server, image, policy, node,        │
-│   │                 slinky-slurm, mariadb-operator,      │
-│   │                 aks-gpu-pools (with --aks-gpu-pools),│
-│   │                 oke-addons (with --oke-addons)]      │
+│   │                 slinky-slurm, mariadb-operator,     │
+│   │                 oke-legacy-plugin,                  │
+│   │                 aks-gpu-pools (--aks-gpu-pools),    │
+│   │                 oke-addons (--oke-addons),          │
+│   │                 gke-gpu-pools (--gke-gpu-pools)]    │
 │   │       ├─ data: map[string]Reading                   │
 │   │       └─ slinky-slurm.items: []ItemEntry            │
 │   │             (allowlisted resource context + data)   │
@@ -181,9 +191,9 @@ type Reading interface {
   cancel-on-error collector is supported, but today per-collector errors
   are swallowed.)
 - Provider projections follow the opposite failure policy: the
-  `aks-gpu-pools` and `oke-addons` projections are explicit operator
-  input, so a malformed pool or add-on file ABORTS the snapshot before
-  any collector runs
+  `aks-gpu-pools`, `oke-addons`, and `gke-gpu-pools` projections are
+  explicit operator input, so a malformed pool or add-on file ABORTS
+  the snapshot before any collector runs
   (`pkg/snapshotter/snapshot.go`) — it must never ride the
   degrade-to-warning path and masquerade as a snapshot whose reading is
   merely unavailable.
@@ -265,8 +275,10 @@ When a query matches a leaf recipe with a `spec.base` reference, the builder:
 
 1. **Matches overlays by criteria.** An overlay matches when every field it
    specifies equals the query; omitted fields act as wildcards (e.g. an overlay
-   that omits `os` matches any OS). The `any` sentinel is its own value — a
-   query `any` only matches a recipe `any`.
+   that omits `os` matches any OS). A recipe value of `any` behaves like an
+   omitted field and matches every query. The reverse does not hold: a query
+   of `any` (or an omitted query field) matches only overlays that also leave
+   that field `any` or omit it.
 2. **Resolves the inheritance chain** for each match by following `spec.base`
    to the implicit `base`, producing a root-to-leaf ordering such as
    `base → eks → eks-training → gb200-eks-training → gb200-eks-ubuntu-training`.
@@ -445,8 +457,10 @@ RecipeResult
        argocd/argocd-helm/flux/helmfile differ):
          - static values       -> <NNN-component>/values.yaml
          - dynamic/per-cluster -> <NNN-component>/cluster-values.yaml
-         - component manifests -> <NNN-component>/   (e.g. ClusterPolicy or a
-                                   CR, for components that ship one)
+         - component manifests -> (NNN+1)-<component>-post/ (a local chart
+                                   deployed after the upstream chart), or
+                                   <NNN-component>/ for a manifest-only
+                                   component
          - go:embed templates  -> per-component install.sh, and the root
                                    README.md + deploy.sh
   -> write canonical recipe.yaml (Helm deployer only)
@@ -474,7 +488,10 @@ Bundlers receive `RecipeResult` with component references and values maps:
 ```go
 // Get component reference and values from RecipeResult
 component := input.GetComponentRef("gpu-operator")
-values := input.GetValuesForComponent("gpu-operator")
+values, err := input.GetValuesForComponent("gpu-operator")
+if err != nil {
+    return err // gpu-operator is not in the recipe
+}
 
 // Values map contains nested configuration
 // {
@@ -561,7 +578,7 @@ Ordering follows each component's declared `dependencyRefs`, not its linear posi
 │         ┌────────────────┴────────────────┐             │
 │         ▼                                 ▼             │
 │  ┌────────────┐                    ┌────────────┐       │
-│  │    Helm    │                    │  Argo CD    │       │
+│  │    Helm    │                    │  Argo CD   │       │
 │  │  Deployer  │                    │  Deployer  │       │
 │  │ (default)  │                    │            │       │
 │  └──────┬─────┘                    └──────┬─────┘       │
@@ -617,7 +634,6 @@ bundle-output/
 │   └── application.yaml      # With sync-wave annotation
 ├── 002-gpu-operator/
 │   ├── values.yaml
-│   ├── manifests/
 │   └── application.yaml      # With sync-wave annotation
 ├── 003-network-operator/
 │   ├── values.yaml
@@ -641,7 +657,7 @@ spec:
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
-      targetRevision: v26.7.0
+      targetRevision: v26.7.1
       chart: gpu-operator
       helm:
         valueFiles:
@@ -650,10 +666,8 @@ spec:
     - repoURL: <YOUR_GIT_REPO>
       targetRevision: main
       ref: values
-    # Additional manifests (if present)
-    - repoURL: <YOUR_GIT_REPO>
-      targetRevision: main
-      path: 002-gpu-operator/manifests
+  # Raw manifests are not a source here: they ship as a separate
+  # NNN-<component>-post/ Application ordered after this one.
 ```
 
 ### Deployer Data Flow
@@ -679,9 +693,9 @@ spec:
 │                                                              │
 │  4. Run deployer (argocd) → numbered NNN-<name>/ folders     │
 │     (argocd shares localformat with helm; flux does not)     │
-│     ├─ 001-cert-manager/application.yaml (wave: 1)          │
-│     ├─ 002-gpu-operator/application.yaml (wave: 5)          │
-│     └─ 003-network-operator/application.yaml (wave: 9)      │
+│     ├─ 001-cert-manager/application.yaml (wave: 1)           │
+│     ├─ 002-gpu-operator/application.yaml (wave: 5)           │
+│     ├─ 003-network-operator/application.yaml (wave: 9)       │
 │     └─ app-of-apps.yaml (bundle root, uses --repo URL)       │
 │                                                              │
 │  5. Finalize closed-world inventory                          │
@@ -712,14 +726,17 @@ measurements:
     subtypes: [...]
 ```
 
-**Table (Human-readable):**
+**Table (Human-readable):** the typed snapshot flattened into `FIELD` /
+`VALUE` rows, with each subtype's readings as one compact JSON value
+(abridged):
 ```
-TYPE    SUBTYPE      KEY                    VALUE
-K8s     image        gpu-operator           v25.3.3
-K8s     image        driver                 580.82.07
-GPU     hardware     gpu-present            true
-GPU     hardware     gpu-count              8
-GPU     hardware     model                  H100
+FIELD                                  VALUE
+-----                                  -----
+Header.APIVersion                      aicr.run/v1
+Header.Kind                            Snapshot
+Measurements.[1].Subtypes.[0].Data     {"gpu-count":8,"gpu-present":true,"model":"h100"}
+Measurements.[1].Subtypes.[0].Name     hardware
+Measurements.[1].Type                  GPU
 ```
 
 ### Serialization Pipeline

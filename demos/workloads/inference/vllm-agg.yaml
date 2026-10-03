@@ -13,34 +13,19 @@
 # limitations under the License.
 
 # Prerequisites:
-#   - KAI Scheduler installed (provides default-parent-queue)
-#   - Dynamo platform deployed (dynamo-crds + dynamo-platform)
+#   - KAI Scheduler installed
+#   - Dynamo platform deployed (dynamo-platform, which bundles its CRDs)
+#   - Node pools labeled nodeGroup=cpu-worker (Frontend) and
+#     nodeGroup=gpu-worker (decode worker)
+#
+# No KAI Queue here: the dynamo-platform chart creates the dynamo /
+# dynamo-default queues this graph submits to, and a cluster-scoped Queue
+# applied from this file would repoint the platform's queue in a way that
+# deleting the namespace cannot undo.
 #
 # GPUs are requested as scalar nvidia.com/gpu limits — the device-plugin
 # production default (#1327). The experimental DRA-only opt-in needs a
 # ResourceClaim form instead; see docs/integrator/aks-gpu-setup.md.
-
----
-# KAI Scheduler queue for Dynamo workloads
-apiVersion: scheduling.run.ai/v2
-kind: Queue
-metadata:
-  name: dynamo
-spec:
-  parentQueue: default-parent-queue
-  resources:
-    gpu:
-      limit: -1
-      overQuotaWeight: 1
-      quota: 0
-    cpu:
-      limit: -1
-      overQuotaWeight: 1
-      quota: 0
-    memory:
-      limit: -1
-      overQuotaWeight: 1
-      quota: 0
 
 ---
 apiVersion: v1

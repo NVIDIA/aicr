@@ -240,8 +240,44 @@ image_cache_load() {
 }
 
 # The public images the KWOK lanes preload. Must match what install-infra.sh
-# actually installs -- it reads these same two settings.
-IMAGE_CACHE_IMAGES=(registry gitea)
+# actually installs -- it reads these same settings.
+#
+# `kind_node` is the Kind node image, hosted on Docker Hub, which throttles
+# unauthenticated pulls. `kind create cluster --image` uses a host-present
+# image without pulling.
+#
+# `argocd_redis` is not a component AICR installs directly: it is the one image
+# inside the Argo CD chart hosted on the same throttled ECR Public namespace as
+# `registry` (#2501). The chart's other images (quay.io, ghcr.io) are left to
+# the kubelet because neither has been observed shedding a pull.
+#
+# Adding a name here does not wire it up: the `prime-images` matrix in
+# .github/workflows/kwok-recipes.yaml fills the cache, and a restore step, an
+# env var, and a load call in .github/actions/kwok-test/action.yml drain it. A
+# name present here but missing from either file caches nothing and only warns.
+#
+# Each entry is `<name>=<yq path of its pin in .settings.yaml>`, so the name
+# list and the pin paths are declared together.
+IMAGE_CACHE_PINS=(
+    registry=.testing_tools.registry_image
+    gitea=.testing_tools.gitea_image
+    argocd_redis=.testing_tools.argocd_redis_image
+    kind_node=.testing.kind_node_image
+)
+IMAGE_CACHE_IMAGES=("${IMAGE_CACHE_PINS[@]%%=*}")
+
+# image_cache_pin_path prints the yq path of NAME's pin, or fails for a name
+# not in IMAGE_CACHE_PINS.
+image_cache_pin_path() {
+    local entry
+    for entry in "${IMAGE_CACHE_PINS[@]}"; do
+        if [[ "${entry%%=*}" == "$1" ]]; then
+            printf '%s' "${entry#*=}"
+            return 0
+        fi
+    done
+    return 1
+}
 
 # image_cache_settings reads the pinned image refs out of SETTINGS_FILE and
 # prints `<name>_image=` / `<name>_key=` lines, ready to append to
@@ -255,7 +291,7 @@ IMAGE_CACHE_IMAGES=(registry gitea)
 # yield an empty image ref, a key over the empty string, and a cache that
 # reports success while holding nothing.
 image_cache_settings() {
-    local file="$1" name image
+    local file="$1" name image pin_path
 
     if ! command -v yq &>/dev/null; then
         log_error "yq is required to read image pins from ${file}"
@@ -267,9 +303,10 @@ image_cache_settings() {
     fi
 
     for name in "${IMAGE_CACHE_IMAGES[@]}"; do
-        image="$(yq eval ".testing_tools.${name}_image" "${file}")"
+        pin_path="$(image_cache_pin_path "${name}")"
+        image="$(yq eval "${pin_path}" "${file}")"
         if [[ -z "${image}" || "${image}" == "null" ]]; then
-            log_error "testing_tools.${name}_image is missing from ${file}"
+            log_error "${pin_path#.} is missing from ${file}"
             return 1
         fi
         # These lines are appended to $GITHUB_OUTPUT, which is line-oriented
@@ -278,7 +315,7 @@ image_cache_settings() {
         # something else entirely. Reject it here, where the message names the
         # setting, rather than downstream where it looks like a cache bug.
         if [[ "${image}" =~ [[:space:]] ]]; then
-            log_error "testing_tools.${name}_image in ${file} contains whitespace: '${image}'"
+            log_error "${pin_path#.} in ${file} contains whitespace: '${image}'"
             return 1
         fi
         printf '%s_image=%s\n' "${name}" "${image}"

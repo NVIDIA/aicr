@@ -15,7 +15,8 @@
 name: Bug Report
 description: Report a bug or unexpected behavior
 title: "[Bug]: "
-labels: ["bug", "needs-triage"]
+labels: ["needs-triage"]
+type: Bug
 
 body:
   - type: checkboxes
@@ -59,7 +60,7 @@ body:
         - CLI (aicr)
         - API server (aicrd)
         - Recipe engine / data
-        - Bundlers (gpu-operator, network-operator, etc.)
+        - Bundler and deployers (helm, argocd, flux, etc.)
         - Collectors / snapshotter
         - Validator
         - Docs / examples

@@ -80,6 +80,8 @@
 #                       cells first if the budget is exceeded (tune previous_n /
 #                       deadline_offset_hours). Entries must be recognized and
 #                       unique. Not one-per-cloud (unlike daytime-intent).
+#                       RELEASE cells are further gated per cloud by the
+#                       harness-compat floors in tests/uat/compat.yaml (#2860).
 #   daytime-intent      (optional) opts this reservation into the daytime
 #                       human-access rotation (#1281, DC8) and picks the
 #                       flavor stood up during the working day: training |
@@ -99,11 +101,10 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/aws/cluster-config.yaml
     test-config-dir: tests/uat/aws/tests
-    nightly-intents: [training, inference]
-    # No daytime-intent: it moved to aws-h100-ct-1, whose reservation has room
-    # for a daytime hold and a nightly cell at the same time (this one is 2
-    # instances total, so it could only ever do one or the other). This row
-    # keeps running nightly as a second AWS lane until it is retired.
+    # Opted out of the nightly batch: this shared reservation has no free
+    # capacity. AWS nightly runs on aws-h100-ct-2. No daytime-intent either;
+    # it moved to aws-h100-ct-1.
+    nightly-intents: []
   # CT-account H100 SLOTS.
   #
   # Two rows over ONE physical reservation (same reservation-id, same
@@ -133,13 +134,6 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/aws/cluster-config-ct.yaml
     test-config-dir: tests/uat/aws/tests
-    # Bring-up mode: manually dispatchable through uat-run.yaml, skipped by the
-    # nightly batch. This is what makes these rows safe to land on main — they
-    # add lanes without adding nightly cells. Flip to [training, inference] once
-    # a manual dispatch is green on this capacity, the way azure-h100 and
-    # kind-h100 were onboarded; that enrollment is also the prerequisite for
-    # retiring the dev-account aws-h100 row above, since removing it before
-    # then would leave AWS with no nightly coverage.
     # Slot 1 is the DAYTIME slot: it hosts the held human-access cluster and is
     # kept out of the nightly batch, so the batch never queues behind a daytime
     # hold. Moved here from aws-h100 below, because only one reservation per
@@ -154,18 +148,10 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/aws/cluster-config-ct.yaml
     test-config-dir: tests/uat/aws/tests
-    # Slot 2 is the future NIGHTLY slot, but stays opted out for now: nightly
-    # continues to run on aws-h100 above, so merging this changes nothing that
-    # runs on a schedule. Until it is enrolled, slot 2's 2 instances are free
-    # for manual dispatch, which is what makes all 4 CT instances available for
-    # daytime and ad-hoc use.
-    #
-    # Enrolling it is the deliberate edit that makes a daytime cluster and the
-    # nightly batch concurrent — the shape is already in place (separate
-    # leases, separate (slug, slot)-scoped guard prefixes, 2 nodes each), so it
-    # is a one-line change once a green run exists on this capacity for each
-    # intent it would list. Only training has one today.
-    nightly-intents: []
+    # Slot 2 is the NIGHTLY slot. It runs concurrently with the daytime cluster
+    # on slot 1: separate leases, separate (slug, slot)-scoped guard prefixes,
+    # 2 nodes each.
+    nightly-intents: [training, inference]
   - name: gcp-h100
     slug: gh1
     cloud: gcp
@@ -175,18 +161,6 @@ reservations:
     cluster-config-path: tests/uat/gcp/cluster-config.yaml
     test-config-dir: tests/uat/gcp/tests
     nightly-intents: [training, inference]
-    # #2705 shipped the torch-distributed-tcpxo runtime and, in the same
-    # commit, gave the training config a
-    # `spec.recipe.configuration.gke.tcpxoInterfaces` block. Release cells run
-    # main's test config against the released binary, so a pre-#2705 aicr
-    # rejects that config outright (unknown field in
-    # config.RecipeConfigurationSpec) and would fail the training phase on a
-    # missing runtime even if it parsed — a permanently-red compatibility
-    # cell, not a regression signal. v0.22.0 is the first release expected to
-    # carry #2705; until it ships, training runs on main only. Bump this if
-    # the actual first-fixed tag differs. (Same mechanism azure-h100 uses.)
-    nightly-intent-min-versions:
-      training: v0.22.0
     daytime-intent: inference
   - name: azure-h100
     slug: zh1
@@ -205,25 +179,6 @@ reservations:
     # joined after a green manual intent=inference dispatch, matching the
     # AWS/GCP rows which run both.
     nightly-intents: [training, inference]
-    # The AKS ND H100 v5 inference perf fix (nvidia-tuned 0.3.2, #1767) is on
-    # main but not in any release tag yet — v0.17.0 and older pin 0.3.1 and
-    # fail inference-perf. Gate release inference cells to the first release
-    # that will carry the fix, so today only `main` runs Azure inference
-    # nightly (green); older releases are skipped instead of running red, and
-    # the gated release enrolls automatically once it ships. Bump this when the
-    # actual first-fixed tag differs.
-    #
-    # Training is gated to the same release for a different reason: the AKS
-    # azure-managed default flip changed cluster-config.yaml to
-    # gpuDriverInstall: true, and release cells provision from main's config
-    # while running the released binary. v0.17.0 and older embed the
-    # pre-flip AKS profile (GPU-Operator-managed driver + toolkit), so on a
-    # pool with the Azure-managed driver they would deploy a second driver
-    # stack on top — an invalid compatibility cell, not a real regression
-    # signal. v0.18.0 is the first release that carries the flipped profile.
-    nightly-intent-min-versions:
-      inference: v0.18.0
-      training: v0.18.0
   - name: kind-h100
     slug: kh1
     cloud: kind
@@ -250,13 +205,3 @@ reservations:
     # verified. (An earlier inference run failed on a degraded runner instance;
     # the build-on-GPU-runner variance behind that is tracked in #1869.)
     nightly-intents: [training, inference]
-    # Gate release cells to v0.18.0: the uat-kind lane and the os-agnostic
-    # coordinate mapping (#1851, which lets a service:kind recipe — os=any —
-    # produce a valid dashboard coordinate) landed AFTER v0.17.0. A release cell
-    # running a v0.17.0 aicr would reject `os: any` in CoordinateFor and emit no
-    # ingestable evidence, so today only `main` runs nvkind nightly; the release
-    # cells auto-enroll once v0.18.0 ships with the fix. Bump this if the actual
-    # first-fixed tag differs. (Same mechanism azure-h100 uses.)
-    nightly-intent-min-versions:
-      training: v0.18.0
-      inference: v0.18.0

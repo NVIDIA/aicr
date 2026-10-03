@@ -82,9 +82,10 @@ bash install.sh
 > install and never touches it again, so a chart bump whose CRDs changed would
 > otherwise run the new controller against the old schema. Folders that also
 > contain an `apply-crds.sh` have `install.sh` run it first. It pulls the
-> pinned chart once, reads the CRDs out of that archive, and creates or
-> replaces each one, so a field the new chart removes actually disappears;
-> server-side apply would leave fields Helm still owns in place. Only
+> pinned chart once, reads the CRDs out of that archive, and server-side
+> applies each one under `--field-manager=helm`, so a field the new chart
+> removes actually disappears; a plain server-side apply under the default
+> `kubectl` manager would leave fields Helm still owns in place. Only
 > components audited as the sole owner of every CRD they ship get this, and
 > only while the ref matches the registry's pinned source, chart, and version.
 > Those folders need `kubectl` and `timeout` (GNU coreutils) on `$PATH` in
@@ -93,18 +94,20 @@ bash install.sh
 > Every helm and kubectl call it makes is bounded, 30s by default and
 > overridable with `AICR_CRD_STEP_TIMEOUT`. The bound is per call and
 > `deploy.sh` retries a failing component, so the budget it consumes is a
-> multiple of that. `KUBECONFIG_FLAG` reaches this step as well, but only
-> `--kube-context` and `--kubeconfig` are supported there; any other helm
-> connection flag stops the step rather than apply CRDs to an unintended
-> cluster. The error names the option only, never its argument, so a flag
-> carrying a credential does not reach the log. The step is
+> multiple of that. This step reads the same connection environment as
+> `deploy.sh` (`KUBE_CONTEXT`, `KUBECONFIG`, and the deprecated
+> `KUBECONFIG_FLAG`) and renders `kubectl`'s own spelling of it. Only
+> `--kube-context` and `--kubeconfig` are translated; any other helm connection
+> flag stops the step rather than apply CRDs to an unintended cluster. The error
+> names the option only, never its argument, so a flag carrying a credential
+> does not reach the log. The step is
 > skipped when `DRY_RUN_FLAG` is set, and when
 > neither the release nor any of the chart's CRDs exist yet, since only then
 > does `helm install` create them. A release that was uninstalled leaves its
 > CRDs behind, so a reinstall still applies them. Only components audited as
-> the sole owner of every CRD they ship get the script; for the rest, replacing
-> CRDs is unsafe because another component's release ships the same CRD with a
-> different schema.
+> the sole owner of every CRD they ship get the script; for the rest, applying
+> CRDs under Helm's field manager is unsafe because another component's
+> release ships the same CRD with a different schema.
 
 ## Uninstall
 

@@ -407,6 +407,58 @@ func TestPythonLicensesSanitizesProseLicense(t *testing.T) {
 	}
 }
 
+// TestPythonLicensesArchMarkerGuard pins the single-architecture collection
+// guard to what a marker evaluates to on linux/amd64 and linux/arm64, not to
+// whether it names an architecture. aiperf 0.13.0 tripped the pattern-matching
+// predecessor with a Windows-only dev extra.
+func TestPythonLicensesArchMarkerGuard(t *testing.T) {
+	tests := []struct {
+		name        string
+		requirement string
+		wantErr     bool
+	}{
+		{"no marker", "plain>=1", false},
+		{"windows-only extra naming ARM64", "hypothesis<6.156,>=6.0.0; (platform_system == 'Windows' and platform_machine == 'ARM64') and extra == 'dev'", false},
+		{"inequality true on both linux architectures", `datasets>=3.0; platform_system != "Windows" or platform_machine != "ARM64"`, false},
+		{"inclusive list of both architectures", `greenlet>=1; platform_machine == "x86_64" or platform_machine == "aarch64"`, false},
+		{"arm64 only", `crick; platform_machine == "aarch64"`, true},
+		{"excludes arm64", `uvloop; platform_machine != "aarch64"`, true},
+		{"amd64 only behind an extra", `cuda-bindings; platform_machine == "x86_64" and extra == "gpu"`, true},
+		{"unparseable marker fails closed", `broken; platform_machine ==`, true},
+		{"unpinned patch version fails closed", `patchgated; platform_machine == "aarch64" and python_full_version >= "3.13.1"`, true},
+		// No marker literal activates this; only the declared "gpu" extra does,
+		// because `in` matches by substring.
+		{"split reachable only through a declared extra", `dep; platform_machine == "x86_64" and extra in "cuda,gpu" and extra in "gpu,tpu" and extra != ""`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wheelsDir := t.TempDir()
+			wheel{
+				name:    "gated",
+				version: "1.0.0",
+				metadata: strings.Join([]string{
+					"Metadata-Version: 2.1",
+					"Name: gated",
+					"Version: 1.0.0",
+					"License: MIT",
+					"Provides-Extra: gpu",
+					"Requires-Dist: " + tt.requirement,
+					"",
+				}, "\n"),
+			}.write(t, wheelsDir)
+
+			outPath := filepath.Join(t.TempDir(), "python-notices.md")
+			output, err := runGenerator(t, wheelsDir, outPath)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("generator error = %v, wantErr %v\n%s", err, tt.wantErr, output)
+			}
+			if tt.wantErr && !strings.Contains(output, "gated: "+tt.requirement) {
+				t.Errorf("error does not name the offending requirement %q:\n%s", tt.requirement, output)
+			}
+		})
+	}
+}
+
 func repositoryPath(t *testing.T, relative string) string {
 	t.Helper()
 	_, current, _, ok := runtime.Caller(0)

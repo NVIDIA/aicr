@@ -63,7 +63,7 @@ The `dynamic` list takes `component:path` entries (the `component` is the value-
 aicr recipe --config aicr-config.yaml
 ```
 
-Writes `recipe.yaml` per `spec.recipe.output.path` (14 components for this criteria).
+Writes `recipe.yaml` per `spec.recipe.output.path`.
 
 ## 3. Build the bundle
 
@@ -104,8 +104,8 @@ cat ./bundle/010-gpu-operator/cluster-values.yaml
 And `install.sh` applies it after the baked values, so it wins:
 
 ```shell
-grep -n 'cluster-values.yaml' ./bundle/010-gpu-operator/install.sh
-# 39:  -f values.yaml -f cluster-values.yaml \
+grep 'cluster-values.yaml' ./bundle/010-gpu-operator/install.sh
+#   -f values.yaml -f cluster-values.yaml \
 ```
 
 `-f values.yaml -f cluster-values.yaml` is ordered: Helm's last `-f` wins, so whatever sits in `cluster-values.yaml` overrides the baked default.

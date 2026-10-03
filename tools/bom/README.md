@@ -48,7 +48,7 @@ Flags:
 | `-out-dir` | `dist/bom` | Output directory |
 | `-aicr-version` | `dev` | AICR version embedded in the BOM |
 | `-skip-helm` | `false` | Skip `helm template` rendering |
-| `-strict` | `false` | Fail on unpinned charts or render errors |
+| `-strict` | `false` | Fail on unpinned charts, render errors, or a Helm chart that renders no images and is not in `expectedNoImages` |
 | `-deterministic` | `false` | Suppress per-run metadata (timestamps, version churn) in Markdown for committable artifacts |
 | `-no-title` | `false` | Omit the H1 title so the body can be embedded as a section |
 
@@ -73,7 +73,14 @@ supply-chain dashboards without conversion.
 
 - Charts that fail to render (missing required values, network unreachable)
   emit a warning property on the component and contribute zero images. Use
-  `-strict` to make these fatal.
+  `-strict` to make these fatal. `make bom-docs` always runs strict. Render
+  failures are retried up to three times before they count.
+- A Helm chart that legitimately renders no images (CRD-only charts) must be
+  listed in `expectedNoImages` in `main.go`, with a reason. Under `-strict`,
+  an unlisted chart with zero images fails, and a listed chart that starts
+  rendering images fails, so a failed pull cannot look like an empty chart.
+- `make bom-docs` requires the helm version pinned in `.settings.yaml`, and
+  re-runs the committed-BOM freshness test so a dropped component row fails.
 - Image extraction recognizes scalar `image:` values and mapping-valued
   `image:` or `scalingPodImage:` descriptors using the `name`, `repository`,
   and `tag` fields. A present field must be a non-null, non-empty scalar.

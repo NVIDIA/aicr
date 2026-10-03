@@ -235,12 +235,12 @@ await_workload_exists() {
 install_nvsentinel() {
   msg "Installing prometheus-operator-crds (nvsentinel's CRD dependency)..."
   (cd "${CRDS_DIR}" && chmod +x install.sh &&
-    KUBECONFIG_FLAG="--kube-context ${KUBE_CONTEXT}" ./install.sh) ||
+    KUBE_CONTEXT="${KUBE_CONTEXT}" ./install.sh) ||
     err "prometheus-operator-crds install failed"
 
   msg "Installing nvsentinel (with nvsentinel-object-monitor mixin values)..."
   (cd "${BUNDLE_DIR}" && chmod +x install.sh &&
-    KUBECONFIG_FLAG="--kube-context ${KUBE_CONTEXT}" ./install.sh) ||
+    KUBE_CONTEXT="${KUBE_CONTEXT}" ./install.sh) ||
     err "nvsentinel install failed"
 
   # install.sh runs `helm upgrade --install` without --wait, so it returns

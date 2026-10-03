@@ -729,6 +729,110 @@ func TestCheckReadinessEvaluatesReadinessPhaseConstraints(t *testing.T) {
 	}
 }
 
+// gkeBundleInstallerConstraints returns the two constraints
+// recipes/overlays/gke-cos.yaml declares on the bundle-installer profile
+// value: the opt-out node label and the corroborating pool-creation
+// reading.
+func gkeBundleInstallerConstraints() []recipe.Constraint {
+	return []recipe.Constraint{
+		{
+			Name:        "NodeTopology.gpu-nodes.label",
+			Value:       "gke-no-default-nvidia-gpu-device-plugin=true",
+			Remediation: "label every GPU node pool at creation",
+		},
+		{
+			Name:        "K8s.gke-gpu-pools.gpu-driver-installation",
+			Value:       "Disabled",
+			Remediation: "create every GPU node pool with gpu-driver-version=disabled",
+		},
+	}
+}
+
+// gkeBundleInstallerSnapshot builds a snapshot carrying the opt-out label on
+// every GPU node and, when poolDriverMode is non-empty, a
+// K8s.gke-gpu-pools.gpu-driver-installation reading of that value. An empty
+// poolDriverMode omits the reading, the shape ProjectGKEGPUPools produces
+// when no pool dump was supplied.
+func gkeBundleInstallerSnapshot(poolDriverMode string) *snapshotter.Snapshot {
+	k8sSubtypes := []measurement.Subtype{
+		{Name: "node", Data: map[string]measurement.Reading{"provider": measurement.Str("gke")}},
+	}
+	if poolDriverMode != "" {
+		k8sSubtypes = append(k8sSubtypes, measurement.Subtype{
+			Name: "gke-gpu-pools",
+			Data: map[string]measurement.Reading{"gpu-driver-installation": measurement.Str(poolDriverMode)},
+		})
+	}
+	return &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{Type: measurement.TypeK8s, Subtypes: k8sSubtypes},
+			{
+				Type: measurement.TypeNodeTopology,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "label",
+						Data: map[string]measurement.Reading{
+							"cloud.google.com/gke-accelerator":        measurement.Str("nvidia-h100-80gb|gpu-a"),
+							"gke-no-default-nvidia-gpu-device-plugin": measurement.Str("true|gpu-a"),
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestCheckReadinessGKEBundleInstallerRequiresPoolCreationEvidence proves
+// the opt-out label alone is not sufficient evidence for bundle-installer.
+// A pool GKE still finalizes its own managed driver install on can carry
+// the label while the driver-installer DaemonSet races the bundle's
+// gcp-driver-installer underneath. checkReadiness (the engine behind
+// `aicr validate`) must fail closed whenever the label is present but the
+// pool's own creation-time driver-installation reading disagrees or is
+// unavailable, and only pass when both agree.
+func TestCheckReadinessGKEBundleInstallerRequiresPoolCreationEvidence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		poolDriverMode string
+		wantErr        bool
+		wantIn         string
+	}{
+		{
+			name:           "label present and pool created with the driver disabled passes",
+			poolDriverMode: "Disabled",
+		},
+		{
+			name:           "label present but pool still runs GKE's managed driver install fails closed",
+			poolDriverMode: "Installed",
+			wantErr:        true,
+			wantIn:         "gpu-driver-version=disabled",
+		},
+		{
+			name:           "label present but no pool dump was supplied fails closed",
+			poolDriverMode: "",
+			wantErr:        true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := &recipe.RecipeResult{Constraints: gkeBundleInstallerConstraints()}
+			vi := v1.ToValidationInput(rec)
+			snap := gkeBundleInstallerSnapshot(tt.poolDriverMode)
+
+			err := checkReadiness(vi, snap)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkReadiness() = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantIn != "" && !strings.Contains(err.Error(), tt.wantIn) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantIn)
+			}
+		})
+	}
+}
+
 func TestPhaseOrder(t *testing.T) {
 	// performance runs last: its benchmark saturates all node GPUs and releases
 	// DRA claims asynchronously, which would otherwise starve conformance's

@@ -122,6 +122,7 @@ workspace paths. Use local file paths only when explicitly requested.
 | `pkg/errors` | Structured error handling with codes | Yes |
 | `pkg/manifest` | Shared Helm-compatible manifest rendering | Yes |
 | `pkg/upgrade` | ADR-021 component upgrade transition records: schema, fail-closed loader, well-formedness rules | Yes |
+| `pkg/inventory` | Installed component inventory read from a live cluster (Helm release records, Argo CD Applications) and the advisory at-risk scan, for `upgrade-check --from cluster` | Yes |
 | `pkg/evidence` | Conformance evidence capture and formatting | Yes |
 | `pkg/collector/topology` | Cluster-wide node taint/label topology collection | Yes |
 | `pkg/snapshotter` | System state snapshot orchestration | Yes |
@@ -151,7 +152,7 @@ return errors.WrapWithContext(errors.ErrCodeTimeout, "operation timed out", ctx.
     map[string]interface{}{"component": "gpu-collector", "timeout": "10s"})
 ```
 
-**Error Codes:** `ErrCodeNotFound`, `ErrCodeUnauthorized`, `ErrCodeTimeout`, `ErrCodeInternal`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`, `ErrCodeMethodNotAllowed`, `ErrCodeRateLimitExceeded`, `ErrCodeConflict` (resource state conflict, e.g., already exists / version mismatch — distinct from `ErrCodeInvalidRequest` because the request itself is well-formed; maps to HTTP 409).
+**Error Codes:** `ErrCodeNotFound`, `ErrCodeUnauthorized`, `ErrCodeTimeout`, `ErrCodeInternal`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`, `ErrCodeMethodNotAllowed`, `ErrCodeRateLimitExceeded`, `ErrCodeConflict` (resource state conflict, e.g., already exists / version mismatch — distinct from `ErrCodeInvalidRequest` because the request itself is well-formed; maps to HTTP 409), `ErrCodeCanceled` (the caller or operator aborted the operation, e.g. Ctrl-C — distinct from `ErrCodeTimeout` because nothing should be retried; use `errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, msg)` to classify a dead context).
 
 **Code-based matching with `errors.Is`:** `*StructuredError.Is` reports a match when the target is a `*StructuredError` with the same `Code`. Prefer this over `errors.As` + manual code comparison.
 
@@ -279,6 +280,8 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 ```
 
 **Note:** A component must have either `helm` OR `kustomize` configuration, not both.
+
+**Note:** A Helm chart that renders no container images (a CRD-only chart) also needs an entry in `expectedNoImages` in `tools/bom/main.go`, or `make bom-docs` and the scheduled BOM refresh fail. No PR-time check renders charts, so run `make bom-docs` to catch it.
 
 **After any change to `recipes/registry.yaml`, a component's values file, or a chart version pin (in registry, overlay, or mixin):** run `make bom-docs` and commit the regenerated `docs/user/container-images.md` in the same PR. The BOM is rendered fresh from each Helm chart's actual templates, so an unbumped pin can still pick up upstream image drift — running it locally is the only reliable way to know whether the doc needs an update. The BOM's **version column and component set are gated**: `TestCommittedBOMVersionsMatchRegistry` (run by `make test` → `make qualify`, and by the `bom-freshness` merge-gate job on docs-only PRs) fails CI when a pinned version or the component set drifts from the registry, so a version change that forgets `make bom-docs` is caught. Not gated at PR time is *rendered-image drift* — an unbumped pin picking up a new image inside a chart's templates; `make bom-check` (a full re-render comparison) is its **opt-in** blocking check and is not wired into `make qualify`, `make lint`, or the merge gate, while the scheduled BOM-refresh workflow (`.github/workflows/bom-refresh.yaml`) auto-detects that drift weekly and opens a PR. So still run `make bom-docs` on any chart-touching change.
 
@@ -493,11 +496,11 @@ if apierrors.IsAlreadyExists(err) {
 // Use for Job completion
 err := pod.WaitForJobCompletion(ctx, client, namespace, jobName, timeout)
 
-// Use for pod logs
-logs, err := pod.GetPodLogs(ctx, client, namespace, podName)
+// Use for pod logs (empty containerName selects the pod's first container)
+logs, err := pod.GetPodLogs(ctx, client, namespace, podName, containerName)
 
 // Use for streaming logs
-err := pod.StreamLogs(ctx, client, namespace, podName, os.Stdout)
+err := pod.StreamLogs(ctx, client, namespace, podName, containerName, os.Stdout)
 
 // Use for ConfigMap URI parsing
 namespace, name, err := pod.ParseConfigMapURI("cm://gpu-operator/aicr-snapshot")
@@ -586,7 +589,7 @@ Process and unique findings below; the rule sections above (Error Wrapping, Cont
 
 ## Pull Request Requirements
 
-**Pre-push checklist:** Always run `make qualify` before pushing. This is the CI-equivalent gate that covers coverage-gated tests, linting (golangci-lint + yamllint + license headers, agents sync, docs filename/MDX gates, chart-version pins), tuning-check, e2e, vulnerability scan, license allowlist check, API compatibility (api-diff), and REST contract compatibility (openapi-diff). Do not substitute a subset of commands — `make qualify` is the closest local equivalent of the CI gate. A few checks run only in CI (e.g. the lychee docs link check on `docs/**` PRs, CodeQL, and the GPU test lanes), so a green local `qualify` does not guarantee every CI job passes.
+**Pre-push checklist:** Always run `make qualify` before pushing. This is the CI-equivalent gate that covers coverage-gated tests, linting (golangci-lint + yamllint + license headers, agents sync, docs filename/MDX/YAML gates, chart-version pins, vendored Go proxy action digests, upgrade records), tuning-check, e2e, vulnerability scan, license allowlist check, API compatibility (api-diff), and REST contract compatibility (openapi-diff). Do not substitute a subset of commands — `make qualify` is the closest local equivalent of the CI gate. A few checks run only in CI (e.g. the lychee docs link check on `docs/**` PRs, CodeQL, and the GPU test lanes), so a green local `qualify` does not guarantee every CI job passes.
 
 **After any change to `.settings.yaml` or a `tools/update-*-checksums` script:** run `make check-settings-checksums`. It re-derives every pinned tool's SHA256 from upstream and fails when a version pin and its checksum pin disagree — the failure mode that ships a version bump with the previous release's digest. It is deliberately **not** part of `make qualify` (it needs network), but it *is* wired into the required merge gate, so skipping it locally means finding out on the PR. A digest that drifts under an *unchanged* version pin is reported separately and must not be "fixed" by re-running the refresher: that would overwrite a reviewed value with whatever upstream now serves.
 
@@ -634,9 +637,10 @@ Before pushing a PR that changes Go source, check coverage on affected packages.
 CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-comment.yaml`); this gate catches regressions before push.
 
 **PR policy:**
+- Link an issue assigned to the PR's human author (`Fixes:` or `Related:`, one line per issue); PRs an agent opens count toward that author's cap of 3 open PRs, drafts included. See `CONTRIBUTING.md` (Start with an issue, Claiming an Issue)
 - Do NOT add `Co-Authored-By` lines (organization policy)
 - Do NOT add "Generated with Claude Code", "Created by Codex", or similar attribution
-- Add a `theme/*` label matching the PR's primary concern: `theme/recipes`, `theme/validation`, `theme/deployer`, `theme/ci-dx`, `theme/community`, `theme/supply-chain`. Use `dependencies` for dependency bumps. (There are no `enhancement`/`bug`/`documentation` repo labels — those names are org-level *issue types*, which apply to issues, not PRs.)
+- Add a `theme/*` label matching the PR's primary concern: `theme/recipes`, `theme/validation`, `theme/deployer`, `theme/ci-dx`, `theme/community`, `theme/supply-chain`, `theme/resilience` (GPU resilience, mainly NVSentinel). Use `dependencies` for dependency bumps. (Bug/enhancement/documentation is an org-level *issue type*, which applies to issues, not PRs. There are no `bug` or `documentation` repo labels; an `enhancement` label exists but does not set the type. `gh pr create` aborts on a nonexistent `--label`, so check `gh label list` first.)
 - Area labels are auto-assigned by `.github/labeler.yml` based on changed file paths (e.g., `area/recipes`, `area/ci`, `area/api`, `area/cli`, `area/bundler`, `area/collector`, `area/validator`, `area/docs`, `area/infra`, `area/tests`). You may also add them manually when the auto-labeler wouldn't match (e.g., issue-only PRs or cross-cutting changes).
 - Do NOT add a priority label (`P0`, `P1`, `P2`) to PRs. Priority is a field on the AICR Project board (see **Issue policy** below), not a repo label, and the PR Label Guard workflow (`.github/workflows/pr-label-guard.yaml`) strips any `P<number>` label from a pull request
 - Do NOT add `size/*` labels (auto-assigned by bot)
@@ -647,7 +651,7 @@ CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-co
 - Set an **org issue type** on new issues. This is a GitHub-native field (shown in the standard issue view, distinct from repo `area/*`/`theme/*` labels) that categorizes the issue. Valid types: `Task`, `Bug`, `Enhancement`, `Epic`, `Initiative`, `Documentation`.
   - Prefer `gh issue create --type Bug ...` (requires `gh` v2.94.0+); use `gh issue edit <n> --type Bug` for existing issues.
   - With older `gh` versions, use the web UI or automation with the needed permissions. Current REST Issues create/edit endpoints also accept `type` for users with push access, but avoid stale ad hoc `gh api` examples because older clients or API versions may reject or silently drop the field.
-- Match the type to intent (a feature request → `Enhancement`, a docs gap → `Documentation`); the issue templates pre-fill a sensible default, so only override when the template's choice is wrong.
+- Match the type to intent (a feature request → `Enhancement`, a docs gap → `Documentation`); the issue forms in `.github/ISSUE_TEMPLATE/` set a default type (`Bug`, `Enhancement`, `Documentation`), so only override when the template's choice is wrong.
 - The AICR Project board also has its own `Type` and `Priority` (P0–P2) fields — those are set on the *project board*, not the issue, and need a `project`-scoped token. Leave them to maintainers/automation unless explicitly asked.
 
 ## Key Files
@@ -711,6 +715,11 @@ aicr snapshot --output snapshot.yaml
 # generation / validate readiness fails closed (gpuStack profile):
 #   oci ce cluster list-addons --cluster-id <ocid> --all --output json > addons.json
 #   aicr snapshot --oke-addons addons.json --output snapshot.yaml
+# GKE bundle-installer only: include the pool projection or snapshot-qualified
+# recipe generation / validate readiness fails closed (gpuStack profile):
+#   gcloud container node-pools list --cluster <cluster> --format=json > pools.json
+#   aicr snapshot --gke-gpu-pools pools.json --output snapshot.yaml
+# The default gke-default value needs no pool dump.
 
 # Generate recipe from snapshot
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml

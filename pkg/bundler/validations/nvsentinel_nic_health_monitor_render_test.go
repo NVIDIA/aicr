@@ -29,8 +29,11 @@ import (
 // against its base values only, so it cannot see a mixin-gated subchart --
 // these assertions are what keep that note honest.
 const (
-	nicHealthMonitorImage     = "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.20.0"
-	nicHealthMonitorInitImage = "docker.io/bitnamilegacy/os-shell:12-debian-12-r30"
+	nicHealthMonitorImage = "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.25.0"
+	// Asserting this also pins the override that displaces the chart's
+	// frozen bitnamilegacy default; a dropped override renders the chart
+	// value and fails here rather than shipping quietly.
+	nicHealthMonitorInitImage = "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 )
 
 // nicHealthMonitorMixinName is the mixin the aks and oke-ol overlays compose.

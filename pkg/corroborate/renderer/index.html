@@ -630,6 +630,7 @@
   table.tsgrid th.ts-build.dimcol,table.tsgrid td.ts-cell.dimcol{opacity:.25}
   .bh-id{display:none}  /* long run id lives on the th title tooltip; keep the header compact */
   .bh-ver{font-size:8.5px;color:var(--single);white-space:normal;word-break:break-all;line-height:1.2}
+  .bh-commit{font-size:8px;color:var(--ink-soft);white-space:normal;word-break:break-all;line-height:1.2}
   .bh-k8s{font-size:8px;color:var(--ink-faint);white-space:normal;word-break:break-all;line-height:1.2}
   .bh-when{font-size:8px;color:var(--ink-faint);margin-top:2px;white-space:normal;word-break:break-all;line-height:1.2}
   .bh-newest{font-size:7.5px;color:var(--green);letter-spacing:.5px;text-transform:uppercase;margin-top:3px}
@@ -778,6 +779,7 @@
   .tooltip .tt-k{color:var(--ink-faint);min-width:64px}
   .tt-pass{color:var(--pass)}.tt-fail{color:var(--fail)}.tt-notrun{color:var(--notrun)}.tt-reported{color:var(--reported)}
   .tooltip a.tt-ev{color:var(--single);pointer-events:auto;display:inline-block;padding:3px 0}
+  .tooltip a.tt-commit{color:var(--single);pointer-events:auto}
   .tooltip .tt-close{position:absolute;top:8px;right:9px;background:none;border:1px solid transparent;border-radius:4px;color:var(--ink-faint);font-size:18px;line-height:1;cursor:pointer;display:none}
   .tooltip.pinned .tt-close{display:block}
   .tooltip .tt-close:hover{color:var(--ink-strong);border-color:var(--line-hi)}
@@ -1039,6 +1041,7 @@
     table.tsgrid th.ts-build{min-width:0;padding:5px 2px;overflow:hidden}
     table.tsgrid th.ts-build .bh-id{display:none}
     table.tsgrid th.ts-build .bh-ver,
+    table.tsgrid th.ts-build .bh-commit,
     table.tsgrid th.ts-build .bh-k8s,
     table.tsgrid th.ts-build .bh-when{white-space:normal;word-break:break-all;line-height:1.2}
     table.tsgrid tr.ts-row td{height:26px}
@@ -1303,7 +1306,7 @@ const PHASE_PRIORITY = ["CONTESTED","FAILING","UNTESTED","SINGLE","CONFIRMED"];
      SOURCES[src]   = { id, class, label, allowlisted }
      SRC_META[src]  = { aicrVer, k8sVer, when }   (latest run, per source — best-effort)
      DATA.recipes[] = { coord, name, tests:[{ phase, name, runs:[[src,res]…],
-                                              _consensus, _reported, _runMeta:{src:{build,aicrVer,k8sVer,when}} }] }
+                                              _consensus, _reported, _runMeta:{src:{build,aicrVer,aicrCommit,k8sVer,when}} }] }
      TREE           = [{ name, dashboards:[{ ao, tabs:[{ tab, idx }] }], count }]
      CRITERIA_VALUES= { service:[…], … }
    ------------------------------------------------------------ */
@@ -2752,7 +2755,7 @@ function renderMatrix(recipe){
         td.dataset.tip = JSON.stringify({
           id: meta ? meta.id : src, label: meta ? meta.label : src, cls: meta ? meta.class : "—",
           allow: meta ? meta.allowlisted : false, res: res === null ? "not-run-here" : res,
-          aicr: rm.aicrVer || "—", k8s: rm.k8sVer || "—", when: rm.when || "—",
+          aicr: rm.aicrVer || "—", commit: rm.aicrCommit || "", k8s: rm.k8sVer || "—", when: rm.when || "—",
           build: rm.build || "—", buildWhen: rm.when || "—", evidenceRef: rm.evidenceRef || "",
         });
         if (dimmed) td.classList.add("dimcell");
@@ -2937,11 +2940,13 @@ async function openTimeSeries(recipe, src, focusTest, focusHeading = false){
       th.className = "ts-build" + (b === 0 ? " newest" : "") + (dimCol[b] ? " dimcol" : "");
       // Header is truncated to a compact tile column; expose the full build
       // identity on hover since the run id is hidden in the tile-grid layout.
-      th.title = [bm.id, bm.aicrVer, bm.k8sVer ? "k8s " + bm.k8sVer : "", bm.when]
+      const commit = isCommit(bm.aicrCommit) ? bm.aicrCommit : "";
+      th.title = [bm.id, bm.aicrVer, commit, bm.k8sVer ? "k8s " + bm.k8sVer : "", bm.when]
         .filter(Boolean).join("  ·  ");
       th.innerHTML =
         `<div class="bh-id">${esc(bm.id || "")}</div>` +
         `<div class="bh-ver">${esc(bm.aicrVer || "")}</div>` +
+        (commit ? `<div class="bh-commit">${esc(commit.slice(0, 7))}</div>` : ``) +
         `<div class="bh-k8s">k8s ${esc(bm.k8sVer || "")}</div>` +
         `<div class="bh-when">${esc(bm.when || "")}</div>` +
         (b === 0 ? `<div class="bh-newest">newest</div>` : ``);
@@ -3030,7 +3035,7 @@ async function openTimeSeries(recipe, src, focusTest, focusHeading = false){
           td.className = "ts-cell" + (dimCol[b] ? " dimcol" : "");
           td.appendChild(tileEl(res));
           td.dataset.tipBuild = JSON.stringify({
-            test: test.name, build: bm.id || "—", res, aicr: bm.aicrVer || "—", k8s: bm.k8sVer || "—", when: bm.when || "—",
+            test: test.name, build: bm.id || "—", res, aicr: bm.aicrVer || "—", commit: bm.aicrCommit || "", k8s: bm.k8sVer || "—", when: bm.when || "—",
             label: meta ? meta.label : src, ev: bm.evidenceRef || "",
           });
           td.setAttribute("aria-label",
@@ -3195,6 +3200,14 @@ function evidenceRows(ref){
       `<button class="tt-copy" data-copy-key="cmd" title="copy verify command" aria-label="copy verify command">⧉</button></div>`
   );
 }
+// The commit becomes an href, so it must be a bare lowercase hex SHA.
+const AICR_COMMIT_URL = "https://github.com/NVIDIA/aicr/commit/";
+function isCommit(c){ return typeof c === "string" && /^[0-9a-f]{7,40}$/.test(c); }
+function commitRow(c){
+  if (!isCommit(c)) return "";
+  return `<div class="tt-row"><span class="tt-k">commit</span>` +
+    `<a class="tt-commit mono" href="${AICR_COMMIT_URL}${c}" target="_blank" rel="noopener noreferrer" title="${c}">${c.slice(0, 7)}</a></div>`;
+}
 function renderTip(el){
   tooltip._copy = null;
   if (el.dataset.tip){
@@ -3207,6 +3220,7 @@ function renderTip(el){
       `<div class="tt-row"><span class="tt-k">signer</span><span style="word-break:break-all">${esc(d.id)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">result</span><span class="${tipResultClass(d.res)}">${esc(d.res)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">aicr</span><span>${esc(d.aicr)}</span></div>` +
+      commitRow(d.commit) +
       `<div class="tt-row"><span class="tt-k">k8s</span><span>${esc(d.k8s)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">build</span><span>${esc(d.build)} · ${esc(d.buildWhen)}</span></div>` +
       repLine +
@@ -3240,6 +3254,7 @@ function renderTip(el){
       `<div class="tt-row"><span class="tt-k">test</span><span>${esc(d.test)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">result</span><span class="${tipResultClass(d.res)}">${esc(d.res)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">aicr</span><span>${esc(d.aicr)}</span></div>` +
+      commitRow(d.commit) +
       `<div class="tt-row"><span class="tt-k">k8s</span><span>${esc(d.k8s)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">when</span><span>${esc(d.when)}</span></div>` +
       evidenceRows(d.ev);
@@ -3650,7 +3665,7 @@ function buildModelFromIndex(index){
           const sig = t.signers || [];
           const runs = sig.map(r => [r.src, r.result]);
           const runMeta = {};
-          sig.forEach(r => { runMeta[r.src] = { build: r.build, aicrVer: r.aicrVer, k8sVer: r.k8sVer, when: r.when, evidenceRef: r.evidenceRef }; });
+          sig.forEach(r => { runMeta[r.src] = { build: r.build, aicrVer: r.aicrVer, aicrCommit: r.aicrCommit, k8sVer: r.k8sVer, when: r.when, evidenceRef: r.evidenceRef }; });
           return { phase: t.phase, name: t.name, runs, _consensus: t.consensus, _reported: t.reported, _runMeta: runMeta };
         });
         const versions = (tab.versions || []).map(v => ({

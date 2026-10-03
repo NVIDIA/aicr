@@ -344,6 +344,69 @@ and fails closed rather than guessing an ownership mode.
 The constraint path is `K8s.oke-addons.nvidia-gpu-plugin` in profile value
 constraints; `K8s.oke-addons.addon-count` uses the same non-item path form.
 
+## K8s gke-gpu-pools shape
+
+`K8s.gke-gpu-pools` projects each GKE GPU node pool's driver-installation
+mode for `gpuStack` profile qualification on the GKE family. Like
+`aks-gpu-pools` and `oke-addons`, it is not produced by a cluster collector:
+the projection is attached at the snapshot orchestration layer from the
+operator-supplied dump
+(`gcloud container node-pools list --cluster <cluster> --format=json`) passed
+to `aicr snapshot --gke-gpu-pools` (merged controller-side in both agent Job
+mode and local mode). A missing, truncated, or malformed dump fails the
+command. A file error is never degraded into a "reading unavailable"
+measurement.
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: gke-gpu-pools
+    data:
+      gpu-driver-installation: Disabled
+      gpu-pool-count: 2
+      gpu-pools: gpupool1=Disabled,gpupool2=Disabled
+```
+
+The fields are:
+
+- `gpu-driver-installation` (`string`): the aggregated driver-installation
+  mode across all GPU pools (a pool with at least one entry under
+  `config.accelerators`). When every pool agrees, the shared mode is
+  emitted: `Disabled` (`gpuDriverInstallationConfig.gpuDriverVersion` is
+  `INSTALLATION_DISABLED`) or `Installed` (`DEFAULT` or `LATEST`). An
+  absent, empty, or `GPU_DRIVER_VERSION_UNSPECIFIED` value resolves against
+  the pool's own `version` and auto-provisioning flag, per GKE's
+  documented version-gated default for an omitted value, and is likewise
+  emitted as `Disabled` or `Installed` depending on which side of that
+  default the pool falls on. `NotConfigured` (config absent) or
+  `NotInstalled` (empty or unspecified) is emitted instead only when the
+  pool's `version` can't be parsed, so that resolution can't run. An
+  unrecognized `gpuDriverVersion` string is emitted as `Unknown(value)`,
+  namespaced so it can never collide with a normalized state.
+  Disagreeing accelerators within a pool, or disagreeing pools, aggregate
+  to `Mixed`. The key is **omitted entirely** when the dump contains no GPU
+  pools.
+- `gpu-pool-count` (`int`): the number of GPU pools. Always emitted,
+  including `0`.
+- `gpu-pools` (`string`): a sorted, comma-joined `name=mode` roster of the
+  GPU pools. Emitted only when at least one GPU pool exists.
+
+Interpretation is fail-closed: `Disabled` is the only value a declared
+`gpuStack` profile constraint accepts. `Installed`, `NotConfigured`,
+`NotInstalled`, `Mixed`, and `Unknown(value)` all match no constraint, so
+profile-qualified resolution fails closed with the observed value as the
+actual. Only the `bundle-installer` value declares a
+constraint on this reading. The default `gke-default` value resolves from
+the `NodeTopology.gpu-nodes.label` opt-out label alone and never requires
+this projection. When `bundle-installer` is selected and the subtype or the
+`gpu-driver-installation` key is absent (no `--gke-gpu-pools` dump, or a
+dump with no GPU pools), constraint evaluation reports the reading
+unavailable and fails closed rather than guessing a mode.
+
+The constraint path is `K8s.gke-gpu-pools.gpu-driver-installation` in
+profile value constraints. `K8s.gke-gpu-pools.gpu-pool-count` and
+`K8s.gke-gpu-pools.gpu-pools` use the same non-item path form.
+
 ## K8s oke-legacy-plugin shape
 
 `K8s.oke-legacy-plugin` records in-cluster conflict evidence for OKE's
@@ -366,23 +429,26 @@ subtypes:
 The fields are:
 
 - `nvidia-gpu-device-plugin` (`string`) — the collapsed constraint reading:
-  `none` (the DaemonSet is absent, present without the
-  `addonmanager.kubernetes.io/mode: Reconcile` label, or present with
+  `none` (the DaemonSet is absent, or carries the
+  `addonmanager.kubernetes.io/mode: Reconcile` label with
   `desiredNumberScheduled: 0`), `active` (the labeled DaemonSet targets at
-  least one node), or `unknown` (the API could not be consulted — including
-  a snapshot taken without cluster access). Always emitted.
+  least one node), or `unknown` (the API could not be consulted, including
+  a snapshot taken without cluster access, or the DaemonSet is present
+  without the `Reconcile` label). Always emitted.
 - `daemonset` (`string`) — the uncollapsed detail: `absent`, `unlabeled`,
   `disabled`, `active`, or `unknown`. Always emitted.
 
 Interpretation is fail-closed: `none` is the only value the `gpuStack`
 `operator-managed` constraint accepts — `active` means Oracle's legacy
 plugin would double-advertise `nvidia.com/gpu` alongside the GPU Operator's,
-and `unknown` means "could not look", which must never read as "not
-present". The `oci-managed` value deliberately carries no constraint on this
-reading: when the managed add-on is installed it reconciles the same
-DaemonSet name. When the subtype is absent entirely (a snapshot from an
-older aicr), constraint evaluation reports the reading unavailable and fails
-closed.
+and `unknown` means the reading cannot be trusted, which must never read as
+"not present". That covers both "could not look" (API failure or a snapshot
+taken without cluster access) and a same-named DaemonSet without the
+`Reconcile` label, whose owner cannot be established. The `oci-managed`
+value deliberately carries no constraint on this reading: when the managed
+add-on is installed it reconciles the same DaemonSet name. When the subtype
+is absent entirely (a snapshot from an older aicr), constraint evaluation
+reports the reading unavailable and fails closed.
 
 The constraint path is `K8s.oke-legacy-plugin.nvidia-gpu-device-plugin`.
 
@@ -471,13 +537,13 @@ fall back to `data` only for older snapshots — `topology.LabelReadings` /
 subtype carries. Adding `items` beside `data` is additive-only, so the snapshot
 `apiVersion` is unchanged ([ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md) §2).
 
-`data` cannot be slimmed within `v1alpha2`: binaries predating `items` read it
-directly, and ADR-011 requires its encoding and semantics to stay as published.
-That is why membership is cross-referenced rather than dropped. The next
-snapshot `apiVersion` removes `data`, at which point items become
-self-contained and `node-list-ref` is no longer emitted — the decoder kept
-reading it while `v1alpha2` snapshots were accepted. v1.0.0 retired that input
-(ADR-022 N+2), so the compatibility path can be revisited.
+`data` cannot be slimmed within a published snapshot `apiVersion`: ADR-011
+requires its encoding and semantics to stay as published. That is why
+membership is cross-referenced rather than dropped. The `aicr.run/v1` snapshot
+kept `data` unchanged, so the topology collector still emits both `data` and
+`node-list-ref`, and the decoder still resolves references. Removing `data`
+would take a new snapshot `apiVersion`; items would then be self-contained and
+`node-list-ref` would no longer be needed.
 
 Minimal evidence keeps `NodeTopology.summary` and drops `taint` and `label`;
 redaction never carries `items` across the publication boundary.

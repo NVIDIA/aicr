@@ -369,7 +369,7 @@ signer hashes to.
 > the signature pinned to the claimed signer and cross-checks the certificate
 > before any result is counted — so a pointer that lied about its signer passes
 > the gate but fails ingest. See
-> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007. (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).)
+> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007.
 
 Consumers discover a recipe's evidence by glob —
 `recipes/evidence/<recipe>/*/*.yaml` — and aggregate across sources; nothing is
@@ -450,13 +450,17 @@ non-zero exit would otherwise propagate through the pipeline and abort the scrip
 before the `case` runs. The `|| true` keeps that exit from tripping `set -e`:
 
 ```shell
+rm -f result.json
 aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json || true
+if [ ! -s result.json ]; then
+  echo "verifier wrote no result — treat as a failure"; exit 1
+fi
 case "$(jq '.exit' result.json)" in
   0) echo "evidence valid" ;;
-  1) echo "validator phases failed" ;;
-  2) echo "bundle invalid" ;;
-  3) echo "no verdict reached (infrastructure fault or aborted) — do not reject" ;;
-  *) echo "unrecognized verdict — treat as a failure" ;;
+  1) echo "validator phases failed"; exit 1 ;;
+  2) echo "bundle invalid"; exit 1 ;;
+  3) echo "no verdict reached (infrastructure fault or aborted) — retry, do not reject"; exit 3 ;;
+  *) echo "unrecognized verdict — treat as a failure"; exit 1 ;;
 esac
 ```
 

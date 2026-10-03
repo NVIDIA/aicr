@@ -19,6 +19,7 @@ cd "${SCRIPT_DIR}"
 # shellcheck source=/dev/null
 source ./upstream.env
 
+{{ kubeConn }}
 # Helm 4 uses server-side apply by default; --force-conflicts lets the
 # upgrade overwrite fields that operators (cert-manager, gpu-operator,
 # nvsentinel, ...) own on rotated webhook cert Secrets. Helm 3 uses
@@ -61,4 +62,4 @@ helm upgrade --install ${FORCE_CONFLICTS_FLAG} {{ .Name | shq }} "${CHART_REF}" 
   ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
   --namespace {{ .Namespace | shq }} --create-namespace \
   -f values.yaml -f cluster-values.yaml \
-  ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}
+  ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${HELM_CONN[@]+"${HELM_CONN[@]}"} ${HELM_DEBUG_FLAG:-}

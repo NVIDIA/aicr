@@ -10,14 +10,16 @@ You may obtain a copy of the License at
 
 # AICR TestGrid
 
-The AICR TestGrid is the **live validation-posture** board: it shows the actual pass/fail of AICR recipes from real validation runs against real clusters, organized so you can navigate straight from a cloud service provider down to a single check. It answers *"is this recipe passing right now, against which Kubernetes version, and who signed the result?"*
+The AICR TestGrid is the planned **live validation-posture** board: it will show the actual pass/fail of AICR recipes from real validation runs against real clusters, organized so you can navigate straight from a cloud service provider down to a single check. It will answer *"is this recipe passing right now, against which Kubernetes version, and who signed the result?"*
+
+The board has not shipped yet, and there is no public TestGrid URL. Until it ships, the [interim evidence dashboard](#interim-evidence-dashboard) at [`https://validation.aicr.run`](https://validation.aicr.run) publishes the same evidence and already addresses recipes with the coordinate scheme described below.
 
 It is the live complement to two **offline, structural** surfaces:
 
 - [Recipe Health](./recipe-health.md) — the catalog-wide structural state of every recipe, computed hermetically with no cluster.
 - [Recipe & CLI Coverage Matrix](./coverage-matrix.md) — which journeys and CLI verbs are exercised in-repo, and how often.
 
-Neither of those reports live pass/fail; the TestGrid does. The three surfaces coexist and never duplicate each other — see [How it relates to recipe health](#how-it-relates-to-recipe-health) below. The full design contract is recorded in [ADR-012](https://github.com/NVIDIA/aicr/blob/main/docs/design/012-recipe-coordinate-mapping.md).
+Neither of those reports live pass/fail; the TestGrid will. The three surfaces coexist and never duplicate each other — see [How it relates to recipe health](#how-it-relates-to-recipe-health) below. The full design contract is recorded in [ADR-012](https://github.com/NVIDIA/aicr/blob/main/docs/design/012-recipe-coordinate-mapping.md).
 
 ## How to read it — CSP-first navigation
 
@@ -28,7 +30,7 @@ The board is a five-level addressing space. You navigate it the way you reason a
 | **Group** | service (the CSP) | `eks` |
 | **Dashboard** | accelerator + OS | `h100-ubuntu` |
 | **Tab** | intent, optionally with platform | `training-kubeflow` |
-| **Row** | validation `<phase>/<check>` | `conformance/gpu-operator-ready` |
+| **Row** | validation `<phase>/<check>` | `conformance/gpu-operator-health` |
 | **Column** | one build | one validation run |
 
 The first three levels (group, dashboard, tab) come from the **recipe** — they identify *which cell* a result belongs in. The last two (row, column) come from the **validation run** — they describe *what is in that cell*: which checks ran, in which build. A recipe never decides its own rows or columns.

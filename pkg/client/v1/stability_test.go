@@ -214,6 +214,14 @@ func TestStability_UpgradeCheck(t *testing.T) {
 	_ = req.To
 	_ = req.Deployer
 	_ = req.Kubeconfig
+	// Pinned as a pointer, not merely as present: a bool cannot express
+	// "do not scan" against the scan FromCluster implies, and widening
+	// the field after v1 ships is a break api-diff would refuse.
+	requireType[*bool](req.ScanAtRisk)
+
+	// The cluster source is a From value rather than a flag of its own, so the
+	// constant naming it is part of the request contract.
+	_ = aicr.FromCluster
 }
 
 func requireSignature[T any](_ T) {}
@@ -337,6 +345,7 @@ func TestStability_Validate(t *testing.T) {
 	t.Parallel()
 
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, ...aicr.ValidateOption) ([]*aicr.PhaseResult, error)]((*aicr.Client).ValidateState)
+	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, ...aicr.ValidateOption) error]((*aicr.Client).PreflightSkipChecks)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationKubeconfig)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationNamespace)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationRunID)
@@ -351,6 +360,7 @@ func TestStability_Validate(t *testing.T) {
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationImageRegistryOverride)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationImageTagOverride)
 	requireSignature[func(bool) aicr.ValidateOption](aicr.WithValidationFailFast)
+	requireSignature[func(...string) aicr.ValidateOption](aicr.WithValidationSkipChecks)
 
 	_ = []aicr.ValidateOption{
 		aicr.WithValidationKubeconfig("/path/to/kubeconfig"),
@@ -367,6 +377,7 @@ func TestStability_Validate(t *testing.T) {
 		aicr.WithValidationImageRegistryOverride("reg"),
 		aicr.WithValidationImageTagOverride("tag"),
 		aicr.WithValidationFailFast(true),
+		aicr.WithValidationSkipChecks("gpu-operator-health"),
 	}
 }
 
