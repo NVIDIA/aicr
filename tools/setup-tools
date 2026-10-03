@@ -754,7 +754,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     # install.sh is fetched from the grype tag in .settings.yaml, so this hash is
     # version-specific: re-pin it whenever security_tools.grype is bumped.
     #   curl -fsSL "https://raw.githubusercontent.com/anchore/grype/$(yq '.security_tools.grype' .settings.yaml)/install.sh" | shasum -a 256
-    GRYPE_INSTALL_SHA256=${GRYPE_INSTALL_SHA256:-"8646f06a90b10ca64992c1809b4aa00c44e30b4f551f63c309b0b0ab66873556"}
+    GRYPE_INSTALL_SHA256=${GRYPE_INSTALL_SHA256:-"4bc8e844d1ca0b74082cb51e1587d58c35150756954660db3d3078e57c81cbfd"}
     # install.sh is fetched from the golangci-lint tag in .settings.yaml, so this
     # hash is version-specific: re-pin it whenever linting.golangci_lint is bumped.
     #   curl -fsSL "https://raw.githubusercontent.com/golangci/golangci-lint/$(yq '.linting.golangci_lint' .settings.yaml)/install.sh" | shasum -a 256

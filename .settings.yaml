@@ -84,7 +84,7 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.119.0'
+  grype: 'v0.120.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.3'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
@@ -141,7 +141,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
   ctlptl: '0.9.6'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
-  tilt: '0.37.7'
+  tilt: '0.37.8'
   # Keep in step with sigs.k8s.io/controller-runtime in go.mod: setup-envtest is
   # released from that repo under the tools/setup-envtest/vX.Y.Z tag series, and
   # the envtest control-plane binaries it fetches are matched to the
@@ -180,14 +180,14 @@ testing_tools:
     darwin_amd64: '214d890745b45679400442552ad4554fb4df622b92d031931536eff85bdb46c2'
     darwin_arm64: 'af2834052ba32fe8006a44a31db16cad30baf1c46f6b59160b092974578d7798'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.8.0'
+  helmfile: 'v1.8.1'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
-    linux_amd64: '35d5d39fc608342b23fc7ce1dd0c3bf0c96cc07ec3796507ab6894a5d172bf20'
-    linux_arm64: '01037dc187840a778ec65eae66b549b63d619a853540c8983f90d73ccbce5033'
-    darwin_amd64: 'd367d72d035985b69863f0e0a6e1815c23a546a1bcdae3cdbb9c17893303e6f3'
-    darwin_arm64: 'b377e295940018fb0e49ca9e0aabdabb00fc612af3d9e12003f01635dc87e1ef'
+    linux_amd64: 'ccabbe75dddbc25008d055fe92a44f95a184342211e7244d32b870409239c7a3'
+    linux_arm64: '2217788de9fb42cd0b3d84f1ee99c63617e19dea7af4995a59e45e4952c86ec4'
+    darwin_amd64: 'b7a44505f1cf09e8e42db4e5914d46bd6f3abae95d226d16ea182d56954eb3bd'
+    darwin_arm64: '62a6b086bdd7a934ff4a36d4974446d7271566b88db200b3956053a9b388fed8'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.8.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
@@ -274,7 +274,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v2.1.1'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
-  zarf: 'v0.86.0'
+  zarf: 'v0.87.0'
 # Quality Thresholds
 quality:
   coverage_threshold: '83'
