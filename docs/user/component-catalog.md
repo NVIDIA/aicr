@@ -1619,11 +1619,11 @@ upstream's `26.10.1` guide applies only when coming from before `26.10.x`, and
 `26.6.0` or earlier, set the flag **before** the operator moves, then upgrade
 CRDs first and the operator second:
 
-1. Enable data-plane auto-update on every **HA** MariaDB the operator manages.
-   AICR's own accounting database is `mariadb` in namespace `slurm` and is not
-   HA, so this is a no-op for it:
+1. Enable data-plane auto-update on every **HA** MariaDB the operator manages,
+   substituting each one's name and namespace. AICR's own accounting database
+   (`mariadb` in namespace `slurm`) is not HA, so it needs no patch:
    ```bash
-   kubectl patch mariadb mariadb -n slurm --type merge \
+   kubectl patch mariadb <name> -n <namespace> --type merge \
      -p '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
    ```
    With Argo CD or Flux, do not patch the live resource. Set
@@ -1636,21 +1636,26 @@ CRDs first and the operator second:
    the operator's Galera and replication defaulting keep the old init and
    agent images: the data-plane upgrade is skipped and the waits in step 4
    time out. Keep `true` in git until step 4 passes.
-2. Upgrade `mariadb-operator-crds` to `26.10.1` **in place**. Confirm which
-   namespace the existing release is in first, because Helm scopes a release
-   by namespace: without `--namespace` the request lands in whatever namespace
-   the kubeconfig context points at, `--install` does not find the existing
-   release, and Helm installs a second one that then fights the first for
-   ownership of the cluster-scoped CRDs. `mariadb-system` is the registry
-   default and no overlay overrides it, but an inherited bundle may differ.
+2. Upgrade `mariadb-operator-crds` to `26.10.1` **in place**. With Helm or
+   helmfile, confirm which namespace the existing release is in first, because
+   Helm scopes a release by namespace: without `--namespace` the request lands
+   in whatever namespace the kubeconfig context points at and `--install` does
+   not find the existing release. The install it attempts instead fails Helm's
+   ownership check, because the existing CRDs carry the original release's
+   `meta.helm.sh/release-namespace` annotation. `mariadb-system` is the
+   registry default and no overlay overrides it, but an inherited bundle may
+   differ.
    ```bash
+   # Helm and helmfile only.
    helm list -A | grep mariadb-operator-crds
    helm upgrade --install mariadb-operator-crds \
      oci://ghcr.io/mariadb-operator/charts/mariadb-operator-crds \
      --version 26.10.1 --namespace mariadb-system
    ```
-   Never `helm uninstall` the CRD chart: that deletes the CRDs and
-   cascade-deletes every `MariaDB`, `User`, `Database` and `Grant` with them.
+   With Argo CD or Flux, sync the `mariadb-operator-crds` application or
+   HelmRelease to `26.10.1` before the operator instead. Never `helm uninstall`,
+   prune or delete the CRD release: that deletes the CRDs and cascade-deletes
+   every `MariaDB`, `User`, `Database` and `Grant` with them.
 3. Upgrade `mariadb-operator` to `26.10.1` (re-run `install.sh`, `helmfile
    apply`, or sync the release).
 4. For each HA MariaDB patched in step 1, wait until the `26.10.1` data plane
@@ -1691,8 +1696,8 @@ CRDs first and the operator second:
    because before the new template exists they already equal the replica
    count for the old revision. Skip non-HA instances: they have no init or
    agent container, so these waits run to their timeout.
-5. Return the flag to `false` so a later operator bump does not update the data
-   plane unattended. With Argo CD or Flux, set it back to `false` in the
+5. Return the flag to `false` on every instance patched in step 1, so a later
+   operator bump does not update the data plane unattended. With Argo CD or Flux, set it back to `false` in the
    desired configuration, commit it, and sync, only after step 4 passes.
 
 `26.10.0` also changes the operator's default server image to
