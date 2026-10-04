@@ -705,6 +705,11 @@ echo "  - NVIDIA DRA kubelet plugin registration"
 echo
 echo "See: https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh"
 
+# A hard component failure outranks the retry signal: re-running the
+# deploy won't fix a broken component, so don't report it as "retry".
+if [[ -n "${FAILED_COMPONENTS}" && -n "${NEEDS_RETRY}" ]]; then
+  exit 1
+fi
 if [[ -n "${NEEDS_RETRY}" ]]; then
   exit 2
 fi
