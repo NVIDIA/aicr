@@ -592,6 +592,13 @@ phase_prep() {
       exit 1
       ;;
   esac
+  # Every deployer writes the post-filter recipe at the bundle root; the
+  # readiness gate and the conformance run validate against it (#2848).
+  test -f bundle/recipe.yaml || {
+    echo "expected bundle/recipe.yaml (written by every deployer) — got:" >&2
+    ls -la bundle >&2 || true
+    exit 1
+  }
   echo "::endgroup::"
 }
 
@@ -1198,6 +1205,12 @@ install_readiness_gate() {
   # gate never emits/pushes an evidence bundle -- that is the conformance phase's
   # job (phase_conformance, `--phase all`).
   #
+  # Validate the bundle's recipe.yaml, not the config's input recipe: the bundle
+  # records the component set it deployed -- components the bundler dropped are
+  # absent, bundle-time derivations such as the dra-node-labeler opt-in are
+  # persisted -- so it is the inventory the deployed cluster must satisfy
+  # (#2848). The CLI flag overrides spec.validate.input.recipe.
+  #
   # All scratch files live in one mktemp dir, removed on every return/exit path
   # below. gate_report is each attempt's CTRF report (validate always writes CTRF
   # JSON to --output), from which failing validators' output is extracted.
@@ -1266,7 +1279,7 @@ install_readiness_gate() {
     # cannot be diagnosed from stale data.
     rm -f "${gate_report}"
     attempt_extract="" attempt_names=""
-    if timeout "${remaining}" "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output "${gate_report}" > "${gate_log}" 2>&1; then
+    if timeout "${remaining}" "${AICR_BIN}" validate --config "${gate_config}" --recipe bundle/recipe.yaml --phase deployment --output "${gate_report}" > "${gate_log}" 2>&1; then
       # Validate passed -> the CURRENTLY PRESENT nodes converged. Fold in the
       # GPU-node census (#2096): a late-joining GPU node that Skyhook just
       # cordoned+tuned re-opens convergence WITHOUT failing this attempt (it was
@@ -1432,7 +1445,11 @@ phase_conformance() {
   # registry — so that lane opts out explicitly. Every cloud lane resolves
   # :uat-<run_id> or a release tag and must keep failing closed, which is why
   # this is an opt-in per lane rather than a default.
-  local -a validate_args=(--config "${config}" --phase "${VALIDATE_PHASES}" --output report.json)
+  # --recipe reads the bundle's recipe.yaml, the deployed set (see
+  # install_readiness_gate). The emitted evidence binds predicate.recipe.digest
+  # to that file, so recipe-evidence-check.sh reports these rows as stale
+  # against the overlay digest until the comparison follows (#2848 follow-up).
+  local -a validate_args=(--config "${config}" --recipe bundle/recipe.yaml --phase "${VALIDATE_PHASES}" --output report.json)
   if [[ "${UAT_ALLOW_MUTABLE_VALIDATOR_TAGS:-}" == "true" ]]; then
     validate_args+=(--allow-mutable-validator-tags)
   fi

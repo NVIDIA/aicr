@@ -174,11 +174,12 @@ spec:
   # GPUDirect TCPXO plugin already deployed by the parent leaf via
   # gke-nccl-tcpxo. Deployment checks are inherited unchanged. Conformance
   # keeps the inherited parent checks and appends the Slurm-specific health
-  # check below.
+  # and GPU access checks below.
   validation:
     conformance:
       checks:
         - slinky-slurm-health
+        - slinky-slurm-gpu-access
     performance:
       checks: []
       constraints: []

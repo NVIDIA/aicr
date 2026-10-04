@@ -509,6 +509,13 @@ func TestCheckSecureAcceleratorAccess_SkipsForSlinkySlurm(t *testing.T) {
 				if !strings.Contains(err.Error(), "slinky-slurm") {
 					t.Errorf("expected skip reason to mention slinky-slurm, got: %v", err)
 				}
+				wantReason := "Slurm-managed GPU allocation (slinky-slurm in recipe) is not mediated by the Kubernetes scheduler; on GPU-backed Slinky recipes slinky-slurm-gpu-access verifies Slurm's GPU access and isolation path instead"
+				if !strings.Contains(err.Error(), wantReason) {
+					t.Errorf("skip reason = %v, want containing %q", err, wantReason)
+				}
+				if strings.Contains(err.Error(), "slinky-slurm-health") {
+					t.Errorf("skip reason = %v, must not name slinky-slurm-health", err)
+				}
 				return
 			}
 

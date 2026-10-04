@@ -18,9 +18,10 @@
 #   AICR_UPDATE_GOLDEN=1 go test ./validators/deployment/ -run '^TestChartContractsMatchPinnedCharts$' -count=1
 
 nodewright-operator:
-  bundleDeployment: skyhook-operator-controller-manager
   bundleValuesSHA256: sha256:7456a758ef4b79cf20e43430528e2685934216c7ba289ee360735a9e37e8b6d1
-  defaultDeployment: nodewright-controller-manager
+  controllerLabels:
+    app.kubernetes.io/component: manager
+    control-plane: controller-manager
   runtimeRequiredTaint: nodewright.nvidia.com=runtime-required:NoSchedule
   servedResources:
   - nodewright.nvidia.com/v1alpha1/deploymentpolicies

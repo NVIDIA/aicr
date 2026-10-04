@@ -60,6 +60,25 @@ Recipe files in `recipes/` are embedded at compile time. Integrators can extend 
 
 For query matching and overlay merging internals, see [Data Architecture](../contributor/recipe.md).
 
+### Recipe stewardship and composition
+
+A resolved recipe is not a standalone, independently owned configuration file.
+It is materialized from a directed acyclic graph of registry defaults, overlays,
+mixins, [configuration profiles](#configuration-profiles), and any external
+configuration supplied via `--data`. AICR deliberately attaches no NCP, ISV, or
+NVIDIA owner to that output: AICR maintainers are accountable for the catalog
+accepted into the project, and the AICR community collectively owns and evolves
+it. See
+[Areas of Ownership](https://github.com/NVIDIA/aicr/blob/main/GOVERNANCE.md#areas-of-ownership).
+
+`metadata.appliedOverlays` records the order in which overlays were merged into a
+result. It is deliberately not an attribution ledger: once configuration is
+loaded into the graph, resolution materializes the effective configuration rather
+than preserving authorship for every contributing value. Repository history
+identifies who contributed a given source file — an overlay, a mixin, a values
+file — but that describes the layer, not the resolved recipe. See
+[Observable RecipeResult Surfaces](../contributor/recipe.md#observable-reciperesult-surfaces).
+
 ## Recipe Structure
 
 ### Multi-Level Inheritance

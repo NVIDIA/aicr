@@ -156,6 +156,7 @@ identical input. Fields fall into five provenance classes:
 | `signer.class` / `signer.allowlisted` | allowlist-derived | classification (below) |
 | `runId` | caller-supplied (default content-verified) | `--run-id` when passed; else derived as `run-<attestedAt:YYYYMMDDThhmm>` |
 | `aicrVersion` | content-verified | predicate `aicrVersion` |
+| `aicrCommit` | content-verified | predicate `aicrCommit`, the commit the `aicr` binary was built from (omitted when the predicate carries none). The dashboard shows it as a short SHA linking to the commit on GitHub, so runs that share an `aicrVersion` such as `main` stay distinguishable. Display only, never a consensus key |
 | `k8sVersion` | content-verified | predicate `fingerprint.k8sVersion.value` |
 | `k8sConstraint` | content-verified | the recipe's `K8s.server.version` constraint |
 | `bundleDigest` | content-verified | predicate `manifest.digest` |
