@@ -128,7 +128,7 @@ compute:
       system:
         instanceType: m7i.xlarge
         capacity:
-          desired: 3
+          desired: 4
         labels:
           nodeGroup: system-worker
           dedicated: system-workload
