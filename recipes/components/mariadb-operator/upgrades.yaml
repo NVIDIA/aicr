@@ -261,6 +261,7 @@ transitions:
               bump does not update the data plane unattended. Do it in git: a
               live patch alone is undone by the next sync.
     references:
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#mariadb-operator-2660-or-earlier-to-26101
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.0.md
       - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.0
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
