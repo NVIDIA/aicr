@@ -28,6 +28,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -939,15 +940,19 @@ func ParseResourceList(spec string) (corev1.ResourceList, error) {
 	return result, nil
 }
 
-// ParseNodeSelectors parses node selector strings in format "key=value".
+// ParseNodeSelectors parses key=value selectors into a map. It returns an error
+// for a pair that is not a valid Kubernetes node label.
 func ParseNodeSelectors(selectors []string) (map[string]string, error) {
 	result := make(map[string]string)
 	for _, s := range selectors {
-		parts := strings.SplitN(s, "=", 2)
-		if len(parts) != 2 {
+		key, value, ok := strings.Cut(s, "=")
+		if !ok {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, expected key=value", s))
 		}
-		result[parts[0]] = parts[1]
+		if err := (bundlercfg.NodeLabel{Key: key, Value: value}).Validate(); err != nil {
+			return nil, err
+		}
+		result[key] = value
 	}
 	return result, nil
 }
@@ -971,21 +976,9 @@ func effectiveAgentTolerations(tolerations []corev1.Toleration) []corev1.Tolerat
 	return tolerations
 }
 
-func validateTaintEffect(effect corev1.TaintEffect) error {
-	switch effect {
-	case corev1.TaintEffectNoSchedule:
-		return nil
-	case corev1.TaintEffectPreferNoSchedule:
-		return nil
-	case corev1.TaintEffectNoExecute:
-		return nil
-	default:
-		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid taint effect %q, expected %s, %s, or %s", effect, corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute))
-	}
-}
-
-// ParseTolerations parses toleration strings in format "key=value:effect" or "key:effect".
-// If no tolerations are provided, returns DefaultTolerations() which accepts all taints.
+// ParseTolerations parses key=value:effect and key:effect tolerations. It
+// returns an error for a toleration the API server would reject. Empty input
+// returns DefaultTolerations, which tolerates all taints.
 func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 	// Return default "tolerate all" if no custom tolerations specified
 	if len(tolerations) == 0 {
@@ -1019,7 +1012,7 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 			// No value means Exists operator
 		}
 
-		if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+		if err := bundlercfg.ValidateTaintEffect(corev1.TaintEffect(effect)); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
 		}
 
@@ -1036,6 +1029,9 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 		}
 
 		result = append(result, toleration)
+	}
+	if err := bundlercfg.ValidateTolerations(result); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -1082,7 +1078,7 @@ func ParseTaint(taintStr string) (*corev1.Taint, error) {
 			fmt.Sprintf("invalid taint value %q: %s", value, strings.Join(errs, "; ")))
 	}
 
-	if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+	if err := bundlercfg.ValidateTaintEffect(corev1.TaintEffect(effect)); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
 	}
 
