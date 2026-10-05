@@ -38,6 +38,8 @@ import (
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"gopkg.in/yaml.v3"
+
 	"github.com/NVIDIA/aicr/pkg/bom"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
@@ -66,6 +68,11 @@ var (
 
 const (
 	renderAttempts = 3
+
+	// Keys labeling structured error context.
+	componentContextKey = "component"
+	pathContextKey      = "path"
+
 	// Component kinds reference the shared pkg/bom identifiers so the tool and
 	// the BOM renderer cannot drift on the string values.
 	kindHelm      = bom.TypeHelm
@@ -478,6 +485,14 @@ func surveyComponent(
 		}
 	}
 
+	closureImages, err := readWorkloadClosure(repoRoot, c.Name)
+	if err != nil {
+		return res, err
+	}
+	for _, i := range closureImages {
+		images[i] = struct{}{}
+	}
+
 	res.Images = make([]string, 0, len(images))
 	for i := range images {
 		res.Images = append(res.Images, i)
@@ -486,8 +501,56 @@ func surveyComponent(
 	return res, nil
 }
 
+// workloadClosure is the generated inventory of images a component pulls that
+// rendering its chart cannot reveal. NVCRE is the case it exists for: its
+// benchmark catalog is go:embed-compiled into the manager, so the chart renders
+// the controller image and nothing the benchmarks actually run.
+type workloadClosure struct {
+	Images []struct {
+		Image  string `yaml:"image"`
+		Digest string `yaml:"digest"`
+	} `yaml:"images"`
+}
+
+// readWorkloadClosure returns the component's declared non-rendered images. An
+// absent file is normal — only NVCRE has one. A present but unreadable or
+// malformed file is fatal: degrading to a warning would emit a BOM that looks
+// complete while silently omitting the images a mirror has to carry.
+func readWorkloadClosure(repoRoot, componentName string) ([]string, error) {
+	path := filepath.Join(repoRoot, "recipes", "components", componentName, "workload-images.yaml")
+	data, err := os.ReadFile(path) //nolint:gosec // path is derived from a registry component name under the repo root
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, errors.WrapWithContext(errors.ErrCodeInternal, "read workload closure", err,
+			map[string]any{componentContextKey: componentName, pathContextKey: path})
+	}
+
+	var doc workloadClosure
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "parse workload closure", err,
+			map[string]any{componentContextKey: componentName, pathContextKey: path})
+	}
+
+	out := make([]string, 0, len(doc.Images))
+	for _, i := range doc.Images {
+		if i.Image == "" {
+			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+				"workload closure entry has no image reference", nil,
+				map[string]any{componentContextKey: componentName, pathContextKey: path})
+		}
+		ref := i.Image
+		if i.Digest != "" {
+			ref = i.Image + "@" + i.Digest
+		}
+		out = append(out, ref)
+	}
+	return out, nil
+}
+
 func wrapInvalidDescriptorSurveyError(err error, componentName, manifestPath string) error {
-	errContext := map[string]any{"component": componentName}
+	errContext := map[string]any{componentContextKey: componentName}
 	message := fmt.Sprintf(
 		"invalid structured image descriptor in component %q rendered chart",
 		componentName,
