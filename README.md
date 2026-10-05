@@ -136,7 +136,7 @@ For contributors:
 - **[Security](SECURITY.md)** — Supply chain security, vulnerability reporting, and verification
 - **[Releases](https://github.com/NVIDIA/aicr/releases)** — Binaries, SBOMs, and attestations
 - **[Support](SUPPORT.md)** — Where to ask questions, report bugs, and report vulnerabilities
-- **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs and feature requests
+- **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs and scoped feature requests
 - **Slack** — [#aicr](https://kubernetes.slack.com/messages/aicr) on Kubernetes Slack for questions (visit [slack.k8s.io](https://slack.k8s.io/) for a workspace invitation)
 
 ## Contributing
