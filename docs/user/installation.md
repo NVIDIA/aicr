@@ -210,5 +210,6 @@ rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/aicr.fish"
 ## Getting Help
 
 - **Documentation**: [User Documentation](https://github.com/NVIDIA/aicr/blob/main/docs/user/index.md)
-- **Issues**: [GitHub Issues](https://github.com/NVIDIA/aicr/issues)
+- **Support**: [Where to ask questions](https://github.com/NVIDIA/aicr/blob/main/SUPPORT.md)
+- **Bugs and feature requests**: [GitHub Issues](https://github.com/NVIDIA/aicr/issues)
 - **API Server**: See [Kubernetes Deployment](../integrator/kubernetes-deployment.md)

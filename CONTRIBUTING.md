@@ -479,7 +479,7 @@ warning.
 ### Getting Help
 
 - **Questions**: See [SUPPORT.md](SUPPORT.md) for where to ask
-- **Existing Issues**: Search for similar questions first
+- **Existing Issues**: Search for similar problems first
 - **Recent PRs**: Look at merged PRs for examples
 
 ## Additional Resources
