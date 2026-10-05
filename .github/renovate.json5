@@ -524,6 +524,25 @@
       allowedVersions: "<0.32.0",
     },
 
+    // ---- Accounting MariaDB server is capped below 12 ----
+    // recipes/components/slurm-accounting-mariadb/values.yaml sets the server
+    // image as one inline string under `mariadb.image`, not as a
+    // repository/tag pair. The helm-values manager extracts any string under
+    // a key ending in `image`, so this pin is tracked, and without the cap
+    // Renovate proposes the newest major. slurmdbd's supported MariaDB matrix
+    // has not been checked against 12.x or later, so a major bump here would
+    // move every fresh slurm_acct_db install onto an unverified server.
+    // Updates below 12, including digest rotations under the same tag, still
+    // flow.
+    //
+    // Lift this together with the major move and its UAT, not before.
+    {
+      matchManagers: ["helm-values"],
+      matchFileNames: ["recipes/components/slurm-accounting-mariadb/values.yaml"],
+      matchDepNames: ["mariadb"],
+      allowedVersions: "<12",
+    },
+
     // ---- Registry chart pins are extracted, never PR'd ----
     {
       // Report-only. Each run relies on exactly one config-level guard here:
