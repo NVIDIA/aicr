@@ -493,7 +493,9 @@ Two methods produce CNCF AI Conformance evidence, matching
 
 - `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
   submission requirement, plus `index.md`, from a CTRF report such as the one
-  `MergeReports` returns. Skipped checks are omitted.
+  `MergeReports` returns. Skipped checks are omitted, so a report from a run
+  that used `WithValidationSkipChecks` is refused with
+  `ErrCodeInvalidRequest`.
 - `CollectCNCFEvidence(ctx, recipe, opts)` deploys GPU test workloads and
   captures behavioral evidence under `opts.Dir`. It needs `bash` and
   `kubectl` on `PATH` and runs for up to 20 minutes. `recipe` is optional.

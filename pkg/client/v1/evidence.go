@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	evattest "github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
+	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
@@ -220,9 +221,12 @@ func CNCFEvidenceFeatures() []string {
 // per submission requirement, plus index.md) to dir from a CTRF report,
 // typically the one MergeReports returns. Skipped checks are omitted, and a
 // report with no submission-required checks writes nothing and returns nil.
+// A report from a run that used WithValidationSkipChecks is refused, because
+// the omitted requirements would leave the evidence reading as complete.
 //
 // Errors:
-//   - ErrCodeInvalidRequest when the Client or ctx is nil, or dir is empty.
+//   - ErrCodeInvalidRequest when the Client or ctx is nil, dir is empty, or
+//     the report contains a check withheld by WithValidationSkipChecks.
 //   - ErrCodeTimeout when rendering exceeds defaults.EvidenceRenderTimeout.
 //   - ErrCodeInternal when a file cannot be written.
 func (c *Client) RenderCNCFEvidence(ctx context.Context, report *ctrf.Report, dir string) error {
@@ -234,6 +238,15 @@ func (c *Client) RenderCNCFEvidence(ctx context.Context, report *ctrf.Report, di
 	}
 	if dir == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "CNCF evidence directory is required")
+	}
+	if report != nil {
+		for _, t := range report.Results.Tests {
+			if t.Status == ctrf.StatusSkipped && t.Extra["skipReason"] == validator.SkipCheckReasonCode {
+				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"check %q was withheld by WithValidationSkipChecks: the CNCF evidence renderer omits skipped "+
+						"checks, so the rendered evidence would read as a complete submission", t.Name))
+			}
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, defaults.EvidenceRenderTimeout)

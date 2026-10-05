@@ -26,6 +26,7 @@ import (
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
@@ -73,6 +74,21 @@ func TestRenderCNCFEvidence(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(dir, "gang-scheduling.md")); !os.IsNotExist(err) {
 			t.Errorf("gang-scheduling.md written for a skipped check (stat err = %v)", err)
+		}
+	})
+
+	t.Run("refuses a report with a withheld check", func(t *testing.T) {
+		t.Parallel()
+		withheld := &ctrf.Report{}
+		withheld.Results.Tests = []ctrf.TestResult{
+			{Name: "dra-support", Status: ctrf.StatusPassed, Duration: 1000},
+			{Name: "gang-scheduling", Status: ctrf.StatusSkipped,
+				Extra: map[string]string{"skipReason": validator.SkipCheckReasonCode}},
+		}
+		dir := t.TempDir()
+		requireCode(t, (&Client{}).RenderCNCFEvidence(context.Background(), withheld, dir), aicrerrors.ErrCodeInvalidRequest)
+		if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+			t.Errorf("evidence dir = %v (err %v), want it left empty", entries, err)
 		}
 	})
 
