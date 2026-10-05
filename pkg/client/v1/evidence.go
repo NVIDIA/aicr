@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -191,6 +192,8 @@ func (c *Client) EmitRecipeEvidence(
 // CNCFCollectOptions configures Client.CollectCNCFEvidence.
 type CNCFCollectOptions struct {
 	// Dir is the directory the behavioral evidence is written to. Required.
+	// A relative path, like a relative Kubeconfig, resolves against the
+	// caller's working directory.
 	Dir string
 
 	// Features restricts collection to the named features or their aliases
@@ -315,18 +318,31 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 		}
 	}
 
+	// The collector runs its script from a temporary working directory, so a
+	// relative path would resolve there and be deleted with it.
+	dir, err := filepath.Abs(opts.Dir)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to resolve CNCF evidence directory", err)
+	}
+	kubeconfig := opts.Kubeconfig
+	if kubeconfig != "" {
+		if kubeconfig, err = filepath.Abs(kubeconfig); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to resolve kubeconfig path", err)
+		}
+	}
+
 	slog.Info("starting CNCF submission evidence collection",
-		"evidenceDir", opts.Dir, "features", opts.Features, "gpuAllocationPolicy", policy)
+		"evidenceDir", dir, "features", opts.Features, "gpuAllocationPolicy", policy)
 
 	collectorOpts := []cncf.CollectorOption{
 		cncf.WithFeatures(opts.Features),
-		cncf.WithKubeconfig(opts.Kubeconfig),
+		cncf.WithKubeconfig(kubeconfig),
 		cncf.WithNoCluster(opts.NoCluster),
 	}
 	if policy != "" {
 		collectorOpts = append(collectorOpts, cncf.WithAllocationPolicy(policy))
 	}
-	if err := cncf.NewCollector(opts.Dir, collectorOpts...).Run(ctx); err != nil {
+	if err := cncf.NewCollector(dir, collectorOpts...).Run(ctx); err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF evidence collection failed")
 	}
 	return nil

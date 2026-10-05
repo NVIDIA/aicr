@@ -18,8 +18,10 @@ import (
 	"context"
 	stderrors "errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -174,6 +176,60 @@ func TestCollectCNCFEvidence(t *testing.T) {
 			}
 			requireCode(t, err, tt.wantCode)
 		})
+	}
+}
+
+// TestCollectCNCFEvidence_RelativePaths runs the real collector script against
+// a stub kubectl that reports no cluster resources, so the
+// cluster-autoscaling section records a skip into its evidence file.
+func TestCollectCNCFEvidence_RelativePaths(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+
+	stubDir := t.TempDir()
+	kubeconfigLog := filepath.Join(stubDir, "kubeconfig.log")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$KUBECONFIG\" >> '" + kubeconfigLog + "'\n"
+	if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(stub), 0o700); err != nil { //nolint:gosec // stub must be executable
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Chdir(t.TempDir())
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	err = client.CollectCNCFEvidence(context.Background(), nil, CNCFCollectOptions{
+		Dir:        "evidence",
+		Kubeconfig: "kubeconfig",
+		Features:   []string{"cluster-autoscaling"},
+	})
+	if err != nil {
+		t.Fatalf("CollectCNCFEvidence: %v", err)
+	}
+
+	if _, err = os.Stat(filepath.Join("evidence", "cluster-autoscaling.md")); err != nil {
+		t.Errorf("evidence not written under the caller's working directory: %v", err)
+	}
+	wantKubeconfig, err := filepath.Abs("kubeconfig")
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+	logged, err := os.ReadFile(kubeconfigLog)
+	if err != nil {
+		t.Fatalf("read kubeconfig log: %v", err)
+	}
+	seen := strings.Fields(string(logged))
+	if len(seen) == 0 {
+		t.Fatal("kubectl stub was never invoked")
+	}
+	for _, got := range seen {
+		if got != wantKubeconfig {
+			t.Fatalf("kubectl saw KUBECONFIG=%q, want %q", got, wantKubeconfig)
+		}
 	}
 }
 
