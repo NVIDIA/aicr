@@ -509,6 +509,12 @@ func TestParseTolerations(t *testing.T) {
 			wantErr:     true,
 		},
 		{
+			name:        "empty key with an explicit empty value",
+			tolerations: []string{"=:NoSchedule"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
 			name:        "invalid key - contains whitespace",
 			tolerations: []string{"bad key=v:NoSchedule"},
 			wantLen:     0,
@@ -561,6 +567,14 @@ func TestParseTolerationsOperator(t *testing.T) {
 			wantKey:      "nvidia.com/gpu",
 			wantValue:    "",
 			wantEffect:   corev1.TaintEffectNoExecute,
+		},
+		{
+			name:         "explicit empty value uses Equal operator",
+			toleration:   "dedicated=:NoSchedule",
+			wantOperator: corev1.TolerationOpEqual,
+			wantKey:      "dedicated",
+			wantValue:    "",
+			wantEffect:   corev1.TaintEffectNoSchedule,
 		},
 		{
 			name:         "wildcard toleration produces Exists with empty key",

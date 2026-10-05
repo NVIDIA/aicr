@@ -993,24 +993,12 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 		}
 
 		// Format: key=value:effect or key:effect (for exists operator)
-		var key, value, effect string
-
-		// Split by colon to get effect
 		parts := strings.Split(t, ":")
 		if len(parts) != 2 {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, expected key=value:effect or key:effect", t))
 		}
-		effect = parts[1]
-
-		// Parse key and value
-		if strings.Contains(parts[0], "=") {
-			kvParts := strings.SplitN(parts[0], "=", 2)
-			key = kvParts[0]
-			value = kvParts[1]
-		} else {
-			key = parts[0]
-			// No value means Exists operator
-		}
+		effect := parts[1]
+		key, value, hasValue := strings.Cut(parts[0], "=")
 
 		if err := bundlercfg.ValidateTaintEffect(corev1.TaintEffect(effect)); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
@@ -1021,7 +1009,7 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 			Effect: corev1.TaintEffect(effect),
 		}
 
-		if value != "" {
+		if hasValue {
 			toleration.Operator = corev1.TolerationOpEqual
 			toleration.Value = value
 		} else {
