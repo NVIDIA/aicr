@@ -1610,7 +1610,7 @@ below are inert for it: the field is accepted and does nothing. They matter for
 any HA `MariaDB` the same operator manages. List what you have with:
 
 ```bash
-kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,IMAGE:.spec.image,GALERA:.spec.galera.enabled,REPLICATION:.spec.replication.enabled
+kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,GALERA:.spec.galera.enabled,REPLICATION:.spec.replication.enabled
 ```
 
 Fresh installs are unaffected, and so is a cluster already on `26.10.0`:
@@ -1710,16 +1710,24 @@ digest changes that resource's `spec.image` string, so the operator restarts the
 database pod once and slurmdbd loses its database for the length of that
 restart. Plan the bundle upgrade for a quiet window. The pod then runs the build
 the digest names, which can be a newer rebuild of `11.8.8` than the one it last
-pulled. Any `MariaDB` that omits
-`spec.image` takes the operator default and will move to a new MariaDB major
-version on its next reconcile. Check with:
+pulled.
+
+Existing `MariaDB` resources keep their image. The operator writes its default
+into `spec.image` the first time it reconciles a resource, so every resource it
+already manages carries an image, and upgrading the operator does not change
+it. Only a `MariaDB` created after the upgrade from a manifest that omits
+`spec.image` comes up on `12.3.3`, such as one re-created on a rebuilt cluster.
+Live objects cannot show that exposure, so check the manifests they are created
+from instead: every `MariaDB` in your Helm values, Kustomize trees and GitOps
+repositories should set `spec.image`. For one a Helm release creates, print the
+manifest as rendered, before the operator filled anything in:
 
 ```bash
-kubectl get mariadb -A \
-  -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,IMAGE:.spec.image
+helm get manifest <release> -n <namespace>
 ```
 
-A blank `IMAGE` column means that cluster takes the default.
+A `kind: MariaDB` document there with no `image:` under `spec` comes up on
+`12.3.3` the next time it is created.
 
 ### `agentgateway`: upgrading across breaking releases
 

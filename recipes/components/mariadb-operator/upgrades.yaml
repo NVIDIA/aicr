@@ -40,22 +40,29 @@ transitions:
       containers left at the prior version. 26.10.0 also changes the
       operator's default server image to mariadb:12.3.3; AICR pins
       mariadb:11.8.8 in the slurm-accounting-mariadb values, so a cluster
-      bundled from this recipe is unaffected, but any MariaDB CR that omits
-      spec.image will come up on a new MariaDB major version. That pin now
-      carries a digest, which changes the accounting MariaDB's spec.image
-      string, so a running accounting database restarts once. The init
-      container and agent are the HA data plane, so they
-      exist only where Galera or replication is enabled; the data-plane steps
+      bundled from this recipe is unaffected. Existing MariaDB CRs keep the
+      image the operator already wrote into spec.image, but one created
+      afterwards from a manifest that omits spec.image comes up on a new
+      MariaDB major version. The accounting pin now carries a digest, which
+      changes the accounting MariaDB's spec.image string, so a running
+      accounting database restarts once. The init container and agent are
+      the HA data plane, so they exist only where Galera or replication is
+      enabled; the data-plane steps
       below are inert on a single-instance non-HA MariaDB, which is what the
       accounting database AICR ships is by default.
     precondition: >-
-      Know which MariaDB resources the operator manages and whether any omits
-      spec.image. Check with
-      `kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,IMAGE:.spec.image,GALERA:.spec.galera.enabled,REPLICATION:.spec.replication.enabled`;
-      a blank IMAGE column means that cluster takes the operator default and
-      will move to mariadb:12.3.3 on its next reconcile. Rows where both
-      GALERA and REPLICATION are absent or false have no data plane, so only
-      the CRD and operator upgrades apply to them.
+      Know which MariaDB resources the operator manages and which are HA.
+      List them with
+      `kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,GALERA:.spec.galera.enabled,REPLICATION:.spec.replication.enabled`;
+      rows where both GALERA and REPLICATION are absent or false have no data
+      plane, so only the CRD and operator upgrades apply to them. Then check
+      the manifests MariaDB resources are created from, not the live objects:
+      the operator writes its default into spec.image on reconcile, so a CR
+      it has reconciled never shows it blank. Every source manifest (Helm
+      values, Kustomize, GitOps) should set spec.image; a MariaDB later
+      created from one that does not comes up on mariadb:12.3.3. For a Helm
+      release, `helm get manifest <release> -n <namespace>` shows the
+      MariaDB as rendered.
     affectedResources:
       - group: k8s.mariadb.com
         kinds:
