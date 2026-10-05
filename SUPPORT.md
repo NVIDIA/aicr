@@ -6,7 +6,7 @@ Where to go depends on what you need.
 |------|-------|
 | A question, or help using AICR | `#aicr` on Kubernetes Slack: [get an invite](https://slack.k8s.io/), then [open the channel](https://kubernetes.slack.com/archives/C0AQMPP1BK7) |
 | A bug or a scoped feature request | [GitHub Issues](https://github.com/NVIDIA/aicr/issues/new/choose) |
-| A security vulnerability | [SECURITY.md](SECURITY.md). Do not report it through GitHub |
+| A security vulnerability | Follow [SECURITY.md](SECURITY.md); do not report it through GitHub |
 
 ## Before You Ask
 
@@ -15,7 +15,7 @@ Where to go depends on what you need.
 
 ## What to Include
 
-Redact credentials, tokens, and other sensitive values from everything you share. Commands, their output, recipes, and snapshots can all contain them, for example a registry password passed as an environment variable.
+Redact credentials, tokens, and other sensitive values from everything you share. Commands, their output, recipes, and snapshots can all contain them. For example, a command may pass a registry password as an environment variable.
 
 - The `aicr --version` output.
 - The command you ran and its full output.
