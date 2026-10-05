@@ -25,6 +25,9 @@ spec:
   # `aicr bundle ... --set slinkyslurm:...` or a valuesFile.
   base: h100-gke-cos-training
 
+  mixins:
+    - nvsentinel-slurm-drain-monitor
+
   # Machine type: qualified on a3-megagpu-8g only, same as the parent.
   #
   # Two different things carry over from `base`, and only one of them is
@@ -75,6 +78,16 @@ spec:
   # Accelerated nodeSelector/tolerations on slurmd are injected via the
   # registry's nodesets.slinky.podSpec.{nodeSelector,tolerations} paths.
   componentRefs:
+    # The nvsentinel-slurm-drain-monitor mixin enables the monitor, but a mixin
+    # cannot carry expectedResources, so normal deployment validation verifies
+    # the Deployment from here. To opt out, remove this entry together with the
+    # mixin; removing only the mixin fails deployment validation.
+    - name: nvsentinel
+      type: Helm
+      expectedResources:
+        - kind: Deployment
+          namespace: nvsentinel
+          name: slurm-drain-monitor
     - name: mariadb-operator-crds
       type: Helm
       valuesFile: components/mariadb-operator-crds/values.yaml
