@@ -573,9 +573,9 @@ type ValidateSettings struct {
 //   - EvidenceAttestation configures the recipe-evidence bundle.
 //     EvidenceAttestationOptions derives it; it is not folded in here because
 //     it targets Client.EmitRecipeEvidence rather than ValidateState.
-//   - EvidenceCNCF configures the CNCF AI Conformance markdown path, which has
-//     no facade emission method to receive it. See EvidenceAttestationOptions
-//     for why that half stays un-projected.
+//   - EvidenceCNCF configures CNCF AI Conformance evidence.
+//     CNCFEvidenceOptions derives it for Client.RenderCNCFEvidence and
+//     Client.CollectCNCFEvidence rather than ValidateState.
 //
 // # Two mappings that are not pass-throughs
 //
