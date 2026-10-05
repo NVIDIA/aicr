@@ -137,7 +137,7 @@ For contributors:
 - **[Releases](https://github.com/NVIDIA/aicr/releases)** — Binaries, SBOMs, and attestations
 - **[Support](SUPPORT.md)** — Where to ask questions, report bugs, and report vulnerabilities
 - **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs and feature requests
-- **Slack** — [Get a Kubernetes Slack invite](https://slack.k8s.io/), then join the [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) channel for questions
+- **Slack** — [#aicr](https://kubernetes.slack.com/messages/aicr) on Kubernetes Slack for questions (visit [slack.k8s.io](https://slack.k8s.io/) for a workspace invitation)
 
 ## Contributing
 

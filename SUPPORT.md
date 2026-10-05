@@ -4,7 +4,7 @@ Where to go depends on what you need.
 
 | Need | Where |
 |------|-------|
-| A question, or help using AICR | `#aicr` on Kubernetes Slack: [get an invite](https://slack.k8s.io/), then [open the channel](https://kubernetes.slack.com/archives/C0AQMPP1BK7) |
+| A question, or help using AICR | [#aicr](https://kubernetes.slack.com/messages/aicr) on Kubernetes Slack (visit [slack.k8s.io](https://slack.k8s.io/) for a workspace invitation) |
 | A bug or a scoped feature request | [GitHub Issues](https://github.com/NVIDIA/aicr/issues/new/choose) |
 | A security vulnerability | Follow [SECURITY.md](SECURITY.md); do not report it through GitHub |
 
