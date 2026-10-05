@@ -112,4 +112,4 @@ Reference for the terms used across the docs site.
 
 - [GitHub](https://github.com/NVIDIA/aicr) · [Releases](https://github.com/NVIDIA/aicr/releases) · [Issues](https://github.com/NVIDIA/aicr/issues)
 - [Contributing](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) · [Security](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md) · [Roadmap](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md)
-- Slack: [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) on Kubernetes Slack
+- [Support](https://github.com/NVIDIA/aicr/blob/main/SUPPORT.md) · Slack: [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) on Kubernetes Slack ([invite](https://slack.k8s.io/))

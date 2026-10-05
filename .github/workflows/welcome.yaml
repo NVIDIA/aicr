@@ -56,6 +56,7 @@ jobs:
                   'A maintainer will triage this shortly. In the meantime:',
                   `- Check the [Contributing Guide](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CONTRIBUTING.md) for project conventions`,
                   `- Browse existing [labels](https://github.com/${context.repo.owner}/${context.repo.repo}/labels) for related topics`,
+                  `- For usage questions, see [SUPPORT.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/SUPPORT.md)`,
                 ].join('\n'),
               });
             }

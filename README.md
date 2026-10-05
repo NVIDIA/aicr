@@ -135,8 +135,9 @@ For contributors:
 - **[Adopters](ADOPTERS.md)** — Organizations and projects using or building on AICR
 - **[Security](SECURITY.md)** — Supply chain security, vulnerability reporting, and verification
 - **[Releases](https://github.com/NVIDIA/aicr/releases)** — Binaries, SBOMs, and attestations
-- **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs, feature requests, and questions
-- **Slack** — Join [Kubernetes Slack](https://kubernetes.slack.com) and visit the [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) channel
+- **[Support](SUPPORT.md)** — Where to ask questions, report bugs, and report vulnerabilities
+- **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs and feature requests
+- **Slack** — [Get a Kubernetes Slack invite](https://slack.k8s.io/), then join the [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) channel for questions
 
 ## Contributing
 

@@ -478,7 +478,7 @@ warning.
 
 ### Getting Help
 
-- **Questions**: Browse [issues labelled `question`](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+label%3Aquestion), also linked as **Questions** on the [new issue page](https://github.com/NVIDIA/aicr/issues/new/choose)
+- **Questions**: See [SUPPORT.md](SUPPORT.md) for where to ask
 - **Existing Issues**: Search for similar questions first
 - **Recent PRs**: Look at merged PRs for examples
 
