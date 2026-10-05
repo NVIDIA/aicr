@@ -1701,10 +1701,16 @@ CRDs first and the operator second:
    desired configuration, commit it, and sync, only after step 4 passes.
 
 `26.10.0` also changes the operator's default server image to
-`mariadb:12.3.3`, and `26.10.1` keeps it. AICR pins `mariadb:11.8.8` in
-`recipes/components/slurm-accounting-mariadb/values.yaml`, so a cluster bundled
-from this recipe stays on `11.8.8`; the pin also puts the server image into the
-rendered `MariaDB` resource, where the BOM records it. Any `MariaDB` that omits
+`mariadb:12.3.3`, and `26.10.1` keeps it. AICR pins `mariadb:11.8.8` by tag
+and index digest in `recipes/components/slurm-accounting-mariadb/values.yaml`,
+so a cluster bundled from this recipe stays on `11.8.8`; the pin also puts the
+server image into the rendered `MariaDB` resource, where the BOM records it.
+Where the accounting database already runs, the first bundle that carries the
+digest changes that resource's `spec.image` string, so the operator restarts the
+database pod once and slurmdbd loses its database for the length of that
+restart. Plan the bundle upgrade for a quiet window. The pod then runs the build
+the digest names, which can be a newer rebuild of `11.8.8` than the one it last
+pulled. Any `MariaDB` that omits
 `spec.image` takes the operator default and will move to a new MariaDB major
 version on its next reconcile. Check with:
 

@@ -368,7 +368,7 @@ _No images extracted._
 
 ### slurm-accounting-mariadb
 
-- `mariadb:11.8.8`
+- `mariadb:11.8.8@sha256:24e76fcec8c003a0362d0dd53f4806e7e79458d7fdeaf47437760e19496f5a9c`
 
 ### kube-prometheus-stack@83.7.0 (variant)
 

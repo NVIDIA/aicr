@@ -21,7 +21,13 @@ mariadb:
   # into the rendered CR, where the BOM can see it: the operator's own
   # default lives in its runtime config block and is invisible to a
   # render-based BOM. Moving to 12.3 is its own change, with its own UAT.
-  image: mariadb:11.8.8
+  #
+  # Tag plus index digest, per ADR-006: the digest is what resolves, so a
+  # rebuild of the 11.8.8 tag cannot change the server under an unchanged
+  # pin. Keep the tag: the operator picks the server's entrypoint script by
+  # the version in the tag, and a digest-only reference falls back to its
+  # default version, 12.3.
+  image: mariadb:11.8.8@sha256:24e76fcec8c003a0362d0dd53f4806e7e79458d7fdeaf47437760e19496f5a9c
   rootPasswordSecretKeyRef:
     name: mariadb-root-password
     key: root

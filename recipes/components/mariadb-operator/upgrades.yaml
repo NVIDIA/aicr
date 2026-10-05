@@ -41,7 +41,9 @@ transitions:
       operator's default server image to mariadb:12.3.3; AICR pins
       mariadb:11.8.8 in the slurm-accounting-mariadb values, so a cluster
       bundled from this recipe is unaffected, but any MariaDB CR that omits
-      spec.image will come up on a new MariaDB major version. The init
+      spec.image will come up on a new MariaDB major version. That pin now
+      carries a digest, which changes the accounting MariaDB's spec.image
+      string, so a running accounting database restarts once. The init
       container and agent are the HA data plane, so they
       exist only where Galera or replication is enabled; the data-plane steps
       below are inert on a single-instance non-HA MariaDB, which is what the
