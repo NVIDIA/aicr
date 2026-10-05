@@ -245,7 +245,8 @@ constrained:
       StructureHealth: type
   pkg/mirror:
     reason: >-
-      Mirror-inventory listing and rendering (`aicr mirror list`) has no
+      Client.MirrorInventory discovers a recipe's images and charts, but the
+      `aicr mirror list` output schema and its format rendering have no
       facade equivalent. This is the epic's named open exception.
     tracking: "#2025"
     symbols:
