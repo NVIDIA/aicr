@@ -1992,7 +1992,19 @@ crash-loops. Seven sub-gates default on and each requires TAS
 `TASRecomputeAssignmentWithinSchedulingCycle`), and `TASProfileMixed`, on by
 default since 0.15, fails on its own with `cannot use a TAS profile with TAS
 disabled`. The manager reached `1/1 Running` only with all nine set false
-together. AICR sets no feature gates for kueue, so a default install is
+together.
+
+AICR now pins 0.19.6, which adds a tenth: `TASPartialSlices` is new in 0.19.6,
+defaults on, and requires TAS, so at 0.19.6 the nine above still fail with
+`TASPartialSlices requires TopologyAwareScheduling to be enabled`. Checked
+against 0.19.6 by running kueue's own feature-gate validation:
+`TopologyAwareScheduling=false` alone fails with nine causes, the nine gates
+above fail with that one, and all ten set false together pass. Releases before
+0.19.6 do not know the gate and reject it with
+`unrecognized feature gate: TASPartialSlices`, so set the tenth in the same
+change that moves kueue to 0.19.6, not ahead of it. `TASGroupedPodSetSlicing`
+also requires TAS from 0.19.6 but defaults off, so it matters only if you turned
+it on. AICR sets no feature gates for kueue, so a default install is
 unaffected and stays unaffected. This reaches only a cluster that disabled TAS
 through an override on the `kueue` component, in either
 `controllerManager.featureGates` or a `featureGates:` block inside
