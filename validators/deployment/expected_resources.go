@@ -40,6 +40,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 )
@@ -84,21 +85,19 @@ const (
 	nicClusterPolicyManifestMarker = "nic-cluster-policy"
 )
 
-// The nodewright operator's controller-manager Deployment (name fixed by
-// fullnameOverride in recipes/components/nodewright-operator/values.yaml) and
-// the container env carrying its configured workload-gate taint.
+// The nodewright operator component and the container env carrying its
+// workload-gate taint.
 const (
 	nodewrightOperatorComponent = "nodewright-operator"
-	// nodewrightOperatorDeployment is the name a bundle renders, via
-	// components/nodewright-operator/values.yaml's fullnameOverride.
-	nodewrightOperatorDeployment = "skyhook-operator-controller-manager"
-	// nodewrightOperatorDeploymentOutOfBand is the chart's own default name,
-	// which an install that sets no fullnameOverride renders. The VR reference
-	// clusters are installed that way (NVIDIA/aicr#1828), so both names are
-	// live and the gate cannot assume either one.
-	nodewrightOperatorDeploymentOutOfBand = "nodewright-controller-manager"
-	runtimeRequiredTaintEnv               = "RUNTIME_REQUIRED_TAINT"
+	runtimeRequiredTaintEnv     = "RUNTIME_REQUIRED_TAINT"
 )
+
+// nodewrightControllerLabels select the operator's controller-manager
+// Deployment whatever name or nameOverride the install renders.
+var nodewrightControllerLabels = labels.Set{
+	"app.kubernetes.io/component": "manager",
+	"control-plane":               "controller-manager",
+}
 
 // nodewrightRenameVersion is the first nodewright-operator release that serves
 // nodewright.nvidia.com and writes status only there.
@@ -311,6 +310,13 @@ func checkExpectedResources(ctx *validators.Context) error {
 			if suppressed {
 				fmt.Printf("  [chainsaw] %s: skipped — %s\n", ref.Name, reason)
 			} else {
+				if ref.Name == nodewrightOperatorComponent {
+					// The health check matches by label and passes on any one
+					// available match, so require exactly one here.
+					if err := requireOneNodewrightController(ctx, ref.Namespace); err != nil {
+						failures = append(failures, fmt.Sprintf("[chainsaw] %s: %s", ref.Name, err))
+					}
+				}
 				chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
 					Name:       ref.Name,
 					AssertYAML: ref.HealthCheckAsserts,
@@ -960,20 +966,54 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 	return ""
 }
 
+// nodewrightController returns the operator's controller-manager Deployment in
+// namespace and whether one exists. It returns an error when the list fails or
+// more than one Deployment matches.
+func nodewrightController(ctx *validators.Context, namespace string) (appsv1.Deployment, bool, error) {
+	getCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	defer cancel()
+
+	list, err := ctx.Clientset.AppsV1().Deployments(namespace).List(getCtx,
+		metav1.ListOptions{LabelSelector: nodewrightControllerLabels.String()})
+	if err != nil {
+		return appsv1.Deployment{}, false, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to list nodewright controller-manager Deployments in namespace %s", namespace), err)
+	}
+	switch len(list.Items) {
+	case 0:
+		return appsv1.Deployment{}, false, nil
+	case 1:
+		return list.Items[0], true, nil
+	}
+	// Neither match can be shown to own the operator's config.
+	return appsv1.Deployment{}, false, errors.New(errors.ErrCodeConflict,
+		fmt.Sprintf("%d Deployments match %s in namespace %s, so the operator is ambiguous",
+			len(list.Items), nodewrightControllerLabels, namespace))
+}
+
+// requireOneNodewrightController returns an error unless namespace holds at
+// most one controller-manager Deployment. An empty namespace is an error, since
+// the lookup would span every namespace.
+func requireOneNodewrightController(ctx *validators.Context, namespace string) error {
+	if namespace == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "operator component has no namespace to check for a single controller")
+	}
+	_, _, err := nodewrightController(ctx, namespace)
+	return err
+}
+
 // runtimeRequiredTaints returns the workload-gate taints the deployment gate
-// waits to see cleared: the operator's configured taint, read from the
-// runtimeRequiredTaintEnv on its controller-manager Deployment, plus
-// legacyRuntimeRequiredTaint. Reading the live Deployment is what lets a
-// --workload-gate value reach the gate: the bundler writes it into the
-// operator's values, never into the recipe the validator Job is handed. The
-// Deployment is looked up in the nodewright-operator component's namespace
-// when the recipe carries that component, else in fallbackNamespace.
+// waits to see cleared: the taint configured on the operator's
+// controller-manager Deployment, plus legacyRuntimeRequiredTaint. The
+// Deployment is looked up in the namespace of the nodewright-operator
+// component in refs, else in fallbackNamespace.
 //
-// When the Deployment or the env is absent the gate falls back to
-// defaultRuntimeRequiredTaint and legacyRuntimeRequiredTaint. Any other Get
-// error fails closed: "could not read the operator's config" must never be
-// read as "no taint to wait for".
+// It returns defaultRuntimeRequiredTaint and legacyRuntimeRequiredTaint when
+// the Deployment or its env is absent, and an error when the list fails, more
+// than one Deployment matches, or the taint is unusable.
 func runtimeRequiredTaints(ctx *validators.Context, refs []recipe.ComponentRef, fallbackNamespace string) ([]corev1.Taint, error) {
+	// The bundler writes --workload-gate into the operator's values, not the
+	// recipe, so the live Deployment is the only source.
 	namespace := fallbackNamespace
 	if opRef, ok := findEnabledComponent(refs, nodewrightOperatorComponent); ok && opRef.Namespace != "" {
 		namespace = opRef.Namespace
@@ -984,43 +1024,16 @@ func runtimeRequiredTaints(ctx *validators.Context, refs []recipe.ComponentRef, 
 		return gate
 	}
 
-	getCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
-	defer cancel()
-
-	// Both supported install paths are probed rather than assuming the bundle
-	// rendered the name: an out-of-band install sets no fullnameOverride and
-	// renders the chart default, and reading the wrong one falls back to chart
-	// defaults while the live operator is gating on a taint nobody configured
-	// here. A non-NotFound read fails closed, as before.
-	var (
-		found     *appsv1.Deployment
-		deployRef string
-	)
-	for _, name := range []string{nodewrightOperatorDeployment, nodewrightOperatorDeploymentOutOfBand} {
-		ref := namespace + "/" + name
-		deploy, err := ctx.Clientset.AppsV1().Deployments(namespace).Get(getCtx, name, metav1.GetOptions{})
-		if err != nil {
-			if !apierrors.IsNotFound(err) {
-				return nil, errors.Wrap(errors.ErrCodeInternal,
-					fmt.Sprintf("failed to read Deployment %s for the nodewright runtime-required taint gate", ref), err)
-			}
-			continue
-		}
-		if found != nil {
-			// Two operators in one namespace: neither can be shown to own the
-			// taint the nodes carry, and picking one would gate on a value the
-			// other never applies.
-			return nil, errors.New(errors.ErrCodeConflict,
-				fmt.Sprintf("both %s and %s exist in namespace %s; cannot tell which operator governs the runtime-required taint",
-					nodewrightOperatorDeployment, nodewrightOperatorDeploymentOutOfBand, namespace))
-		}
-		found, deployRef = deploy, ref
+	deploy, found, err := nodewrightController(ctx, namespace)
+	if err != nil {
+		// Fail closed so an unreadable config is not read as no taint.
+		return nil, err
 	}
-	if found == nil {
-		return chartDefaults(fmt.Sprintf("no %s or %s Deployment in namespace %s",
-			nodewrightOperatorDeployment, nodewrightOperatorDeploymentOutOfBand, namespace)), nil
+	if !found {
+		return chartDefaults(fmt.Sprintf("no Deployment matching %s in namespace %s",
+			nodewrightControllerLabels, namespace)), nil
 	}
-	deploy := found
+	deployRef := namespace + "/" + deploy.Name
 
 	for i := range deploy.Spec.Template.Spec.Containers {
 		for _, env := range deploy.Spec.Template.Spec.Containers[i].Env {
@@ -1158,17 +1171,17 @@ func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef
 		return suppressed, "effective values gate the component off (installer.enabled=false); it renders no objects", err
 	case draNodeLabelerComponent:
 		// dra-node-labeler is opt-in: base.yaml declares it on every recipe so the
-		// dependency graph is authored once, but the bundler renders it only when
+		// dependency graph is authored once, but the bundler keeps it only when
 		// the DRA eviction contract is opted into (--dra-eviction-node-label /
-		// scheduling.draEvictionNodeLabel), flipping the manifest's default-off
-		// enabled gate. The validator resolves the recipe's effective values
-		// WITHOUT that bundle-time flag, so on the default path (which no UAT
-		// config opts into) the manifest renders no objects and asserting its
-		// DaemonSet would fail NOT_FOUND against a bundle that never deployed it
-		// (issue #2846). Suppress exactly when the render is empty — same
-		// render-aware, fail-closed shape as gcp-driver-installer.
+		// scheduling.draEvictionNodeLabel). On that path it persists
+		// enabled=true onto the labeler's ref, so the recipe.yaml written into
+		// the bundle renders the labeler and this check runs (#2848). The
+		// original recipe carries the default-off gate, so validating it on
+		// the default path renders no objects; suppress exactly then instead of
+		// failing NOT_FOUND on a DaemonSet the bundle never carried (#2846) —
+		// same render-aware, fail-closed shape as gcp-driver-installer.
 		suppressed, err := emptyRenderHealthCheckSuppressed(ctx.Ctx, ref)
-		return suppressed, "DRA eviction is not opted in, so the labeler renders no objects (enabled=false); the bundler did not deploy it", err
+		return suppressed, "effective values gate the labeler off (enabled=false): this recipe does not carry the DRA eviction opt-in, so it renders no objects; validate the bundle's recipe.yaml to check the deployed set", err
 	default:
 		return false, "", nil
 	}

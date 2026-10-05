@@ -124,11 +124,12 @@ spec:
   # InfiniBand path already present on the parent AKS leaf via
   # network-operator. Deployment checks are inherited unchanged.
   # Conformance keeps the inherited parent checks and appends the
-  # Slurm-specific health check below.
+  # Slurm-specific health and GPU access checks below.
   validation:
     conformance:
       checks:
         - slinky-slurm-health
+        - slinky-slurm-gpu-access
     performance:
       checks: []
       constraints: []

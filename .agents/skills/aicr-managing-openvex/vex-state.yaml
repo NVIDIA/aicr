@@ -82,41 +82,44 @@ deferred_verifications:
       references remain. What is unverified is only whether the CI scan step
       accepts the tag-plus-digest matrix value, not whether the override
       works.
-  - id: aiperf-0.13.0-image-scans-clean-in-ci
-    opened: 2026-09-29
+  - id: distroless-python-3.13-v4.1.5-release-scan-clean
+    opened: 2026-10-05
     check: >-
-      The aiperf 0.13.0 bump retired the 10 pillow statements and
-      GHSA-cq5v-8q36-5273 (0.13.0 resolves pillow 12.3.0 and aiohttp 3.14.3,
-      the fixed versions) and rewrote the CVE-2026-82049 evidence for the
-      0.13.0 closure. Read the aiperf-bench scan-result artifact of the first
-      `Weekly Image Vulnerability Scan` run on main after that PR merged.
+      The v1.0.0-rc1 release scan (run 37335020699) failed on aiperf-bench for
+      both arches: CVE-2026-54873, CVE-2026-72897, CVE-2026-84782 and
+      CVE-2026-84784 (High) on libssl3t64 and openssl-provider-fips
+      3.5.7-1~deb13u2 from the 3.13-v4.1.4 base. The runtime base was bumped
+      to 3.13-v4.1.5, which ships 3.5.7-1~deb13u3. Read the
+      `anchore-image-aiperf-bench-amd64` and `-arm64` Image Vuln Scan jobs of
+      the first On Tag Release run cut from a commit carrying that bump.
     resolves_when: >-
-      that run's aiperf-bench line reports 0 critical, 0 high and exactly
-      1 VEX-suppressed row (CVE-2026-82049 on python 3.13.15)
+      both of that run's aiperf-bench Image Vuln Scan jobs pass, with no
+      open HIGH+ code-scanning alert in either aiperf-bench category on that
+      tag's ref
     caveat: >-
-      Measured on a local linux/amd64 build of the branch with grype v0.118.0
-      (the version scan-action v7.4.2 pins), `--fail-on high --only-fixed -c
-      .grype.yaml --vex .openvex.json`, against the 2026-09-29 grype DB. A newer DB in CI can add
-      findings this run could not see; triage those as new, not as a
-      regression of the retirement.
+      Verified on the base image directly (grype 0.120.0, `--only-fixed`,
+      both platforms: the only HIGH+ left is CVE-2026-82049) and on a local
+      linux/arm64 rebuild of aiperf-bench with `--vex .openvex.json`. The
+      release job runs grype v0.118.0 and scans the amd64 leg too, so the
+      amd64 result is an inference from the base scan until that run reads it.
 
 known_negatives:
   - id: no-fixed-cpython-3.13-for-cve-2026-82049
-    checked: 2026-09-29
+    checked: 2026-10-05
     finding: >-
       CVE-2026-82049 (tarfile extraction filters) cannot be remediated by any
       bump available to this image. 3.13.15 is the newest CPython 3.13 release
       (2026-08-05); the advisory published 2026-09-14 and the 3.13 backport
       landed after that release, so grype records the sole fixed version as
       `3.14.0b1` -- which is why `--only-fixed` does not withhold it.
-      nvcr.io/nvidia/distroless/python publishes a 3.14-v4.1.4 tag, but aiperf
+      nvcr.io/nvidia/distroless/python publishes a 3.14-v4.1.5 tag, but aiperf
       0.13.0 still declares `Requires-Python: <3.14,>=3.11`, so building the
       venv on 3.14 fails pip resolution instead of producing a fixed image.
     also: >-
       The finding is on the base image's interpreter (pkg:generic/python@3.13.15
       at /usr/local/bin/python), not a pip package, so no requirements.txt change
       can touch it either. Do not re-derive this by bumping the distroless pin:
-      3.13-v4.1.4 is already the newest 3.13 tag.
+      3.13-v4.1.5 is the newest 3.13 tag and still ships CPython 3.13.15.
     invalidated_by: >-
       a CPython 3.13.16+ release carrying the backport (then bump the distroless
       3.13 pin and delete the statement), or an aiperf release whose

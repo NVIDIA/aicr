@@ -234,6 +234,15 @@ Slinky NodeSet reserves every GPU on a node for its `slurmd` pod and Slurm
 GRES/cgroups isolate access, so the check's Kubernetes per-pod probe could
 either never schedule or attest the wrong access path (#2724).
 
+`slinky-slurm-gpu-access` verifies that path instead (#2756). From the login pod
+it runs an `srun --gpus=1` job, which must list exactly one GPU and open exactly
+one GPU minor device, then a job with no GPU request pinned with `--nodelist` to
+the same Slurm node, which must open none. The probe shell only reports facts
+(`KEY=value` lines: node, `nvidia-smi` UUIDs, the errno of a read-only open of
+each `/dev/nvidiaN`); `parseSlurmGPUProbe` and the two evaluate functions decide.
+It never lists `/dev/nvidia*` to infer isolation: the cgroup device controller
+leaves the nodes visible and refuses `open()` with EPERM.
+
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
 **exclusive** — combining `all` with any other phase is rejected.
@@ -1503,18 +1512,27 @@ into the validator image):
   transient bundle flag. (`aicr recipe` likewise has no value `--set`, so the
   overlay/inline override is the only channel.) `Overrides` resolved from a
   `--data` overlay *are* honored, because recipe resolution runs CLI-side and
-  bakes them into the serialized recipe before the Job receives it.
+  bakes them into the serialized recipe before the Job receives it. The one
+  bundle-time flag that *is* persisted is `--dra-eviction-node-label`: the
+  bundler writes `enabled: true` onto the `dra-node-labeler` ref in the
+  `recipe.yaml` at the bundle root, which is why post-deployment validation
+  (the UAT readiness gate and conformance run, and the documented user
+  workflows) reads that file rather than the original recipe (#2848).
 - **`--workload-gate` is the exception, honored via the cluster.** The bundler
   writes the taint into the nodewright-operator values
   (`controllerManager.manager.env.runtimeRequiredTaint`), which the chart
-  renders as the `RUNTIME_REQUIRED_TAINT` env on the
-  `skyhook-operator-controller-manager` Deployment. The Go readiness check
-  reads that env from the live Deployment (`runtimeRequiredTaints`) and gates
+  renders as the `RUNTIME_REQUIRED_TAINT` env on the controller-manager
+  Deployment. The Go readiness check finds that Deployment by its
+  `app.kubernetes.io/component=manager,control-plane=controller-manager`
+  labels, so neither `fullnameOverride` nor `nameOverride` matters, reads the
+  env from it
+  (`runtimeRequiredTaints`), and gates
   on exactly that taint plus the legacy `skyhook.nvidia.com=runtime-required:NoSchedule`
   the operator still removes during its deprecation window, so an arbitrary
   key, value, or effect passed at bundle time is what the validator waits to
   see cleared. When the Deployment or env is absent it falls back to the two
-  chart defaults; any other read error fails closed.
+  chart defaults. A list error or more than one matching Deployment fails
+  closed, and the same cardinality check fails the operator's health check.
 - **`--data`-external files referenced by path are not readable in the Job.**
   A component whose `manifestFiles` or base `valuesFile` exist only in an
   external `--data` directory cannot be read by the embedded-only validator
@@ -1527,7 +1545,7 @@ into the validator image):
 checks hardcode facts that upstream charts define, not AICR:
 - the `NodeWright` CR's group, version, and resource;
 - the chart's default runtime-required taint;
-- the operator Deployment's name with and without AICR's `fullnameOverride`;
+- the operator controller-manager Deployment's selector labels;
 - the DRA driver's `-kubelet-plugin` DaemonSet suffix.
 
 `validators/deployment/testdata/chart_contracts.yaml` records what the pinned

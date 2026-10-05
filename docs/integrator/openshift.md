@@ -271,7 +271,10 @@ aicr snapshot --output snapshot.yaml
 
 ### 7. Validate Deployment
 
-Validate the deployed components against the recipe and snapshot:
+Validate the deployed components against the bundle's recipe (the component
+set it deployed) and the snapshot. The shell is still inside `ocp-bundle/`
+from step 3, so `recipe.yaml` here is the bundle's recipe and `snapshot.yaml`
+is the file step 6 wrote there:
 
 ```bash
 aicr validate \

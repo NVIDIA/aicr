@@ -17,12 +17,18 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"maps"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/bundler"
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -42,6 +48,7 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/dynamic"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
 )
 
@@ -1251,10 +1258,10 @@ func TestRunGPUReadinessProbesOverlap(t *testing.T) {
 	}
 }
 
-// TestRuntimeRequiredTaints pins the gate derivation: the operator Deployment's
-// RUNTIME_REQUIRED_TAINT env plus the legacy default; the chart defaults when
-// the Deployment or env is absent; fail closed on any other read error or an
-// unparseable value.
+// TestRuntimeRequiredTaints verifies runtimeRequiredTaints returns the
+// configured taint plus the legacy default, falls back to the chart defaults
+// when the Deployment or env is absent, and fails on a list error, several
+// matches, or an invalid taint.
 func TestRuntimeRequiredTaints(t *testing.T) {
 	t.Parallel()
 
@@ -1266,7 +1273,7 @@ func TestRuntimeRequiredTaints(t *testing.T) {
 		name       string
 		objects    []runtime.Object
 		refs       []recipe.ComponentRef
-		getErr     error
+		listErr    error
 		want       []corev1.Taint
 		wantErrSub string
 	}{
@@ -1337,33 +1344,51 @@ func TestRuntimeRequiredTaints(t *testing.T) {
 			wantErrSub: "valueFrom",
 		},
 		{
-			// The VR reference clusters install nodewright out of band with no
-			// fullnameOverride, so the chart's own Deployment name is what is
-			// live. Reading only the bundle name would fall back to chart
-			// defaults and gate on a taint this operator never applies.
-			name: "out-of-band Deployment name is honored",
+			name: "Deployment is found by label whatever its name",
 			objects: []runtime.Object{nodewrightOperatorDeploymentNamed(ns,
-				nodewrightOperatorDeploymentOutOfBand, "custom.io/gate=true:NoExecute")},
+				"nodewright-controller-manager", "custom.io/gate=true:NoExecute")},
 			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
 			want: dedupeTaints(custom, legacyRuntimeRequiredTaint),
 		},
 		{
+			// nameOverride changes the name and part-of labels only.
+			name: "Deployment is found with both nameOverride and fullnameOverride set",
+			objects: []runtime.Object{func() *appsv1.Deployment {
+				d := nodewrightOperatorDeploymentWithEnv(ns, custom.ToString())
+				d.Labels["app.kubernetes.io/name"] = "custom"
+				d.Labels["app.kubernetes.io/part-of"] = "custom"
+				return d
+			}()},
+			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want: dedupeTaints(custom, legacyRuntimeRequiredTaint),
+		},
+		{
+			name: "Deployment without the controller labels is ignored",
+			objects: []runtime.Object{func() *appsv1.Deployment {
+				d := nodewrightOperatorDeploymentWithEnv(ns, custom.ToString())
+				d.Labels = map[string]string{"control-plane": "controller-manager"}
+				return d
+			}()},
+			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want: defaultsGate,
+		},
+		{
 			// Neither can be shown to own the taint the nodes carry, and
 			// picking one would gate on a value the other never applies.
-			name: "both Deployment names present fails closed",
+			name: "more than one matching Deployment fails closed",
 			objects: []runtime.Object{
 				nodewrightOperatorDeploymentWithEnv(ns, "custom.io/gate=true:NoExecute"),
-				nodewrightOperatorDeploymentNamed(ns, nodewrightOperatorDeploymentOutOfBand,
+				nodewrightOperatorDeploymentNamed(ns, "nodewright-controller-manager",
 					"other.io/gate=true:NoSchedule"),
 			},
 			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
-			wantErrSub: "cannot tell which operator governs",
+			wantErrSub: "operator is ambiguous",
 		},
 		{
-			name:       "non-NotFound read error fails closed",
-			getErr:     apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, nodewrightOperatorDeployment, stderrors.New("forbidden")),
+			name:       "list error fails closed",
+			listErr:    apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "", stderrors.New("forbidden")),
 			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
-			wantErrSub: "failed to read Deployment",
+			wantErrSub: "failed to list nodewright controller-manager Deployments",
 		},
 	}
 
@@ -1372,9 +1397,9 @@ func TestRuntimeRequiredTaints(t *testing.T) {
 			t.Parallel()
 
 			clientset := k8sfake.NewClientset(tt.objects...)
-			if tt.getErr != nil {
-				clientset.PrependReactor("get", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
-					return true, nil, tt.getErr
+			if tt.listErr != nil {
+				clientset.PrependReactor("list", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.listErr
 				})
 			}
 			ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
@@ -1465,6 +1490,110 @@ func TestCheckExpectedResources_GatesOnConfiguredTaint(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.wantErrSub) {
 				t.Fatalf("checkExpectedResources() error = %v, want substring %q", err, tt.wantErrSub)
+			}
+		})
+	}
+}
+
+// TestCheckExpectedResources_OperatorHealthCheckRequiresOneController verifies
+// checkExpectedResources fails the operator health check when more than one
+// controller-manager Deployment matches.
+func TestCheckExpectedResources_OperatorHealthCheckRequiresOneController(t *testing.T) {
+	t.Parallel()
+
+	const assertYAML = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nodewright-operator-health-check
+spec:
+  steps:
+    - name: validate-deployment-exists
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                namespace: skyhook
+                labels:
+                  control-plane: controller-manager
+`
+	// Serves just enough API discovery for the chainsaw fetcher to resolve
+	// Deployments. The dynamic fake holds one matching Deployment, so the assert
+	// passes whatever the controller count and only the cardinality check varies.
+	discovery := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api":
+			_, _ = w.Write([]byte(`{"kind":"APIVersions","versions":["v1"]}`))
+		case "/apis":
+			_, _ = w.Write([]byte(`{"kind":"APIGroupList","groups":[{"name":"apps","versions":[` +
+				`{"groupVersion":"apps/v1","version":"v1"}],"preferredVersion":{"groupVersion":"apps/v1","version":"v1"}}]}`))
+		case "/apis/apps/v1":
+			_, _ = w.Write([]byte(`{"kind":"APIResourceList","groupVersion":"apps/v1","resources":[` +
+				`{"name":"deployments","namespaced":true,"kind":"Deployment","verbs":["list"]}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure","code":404}`))
+		}
+	}))
+	t.Cleanup(discovery.Close)
+
+	tests := []struct {
+		name      string
+		namespace string
+		objects   []runtime.Object
+		wantErr   string
+	}{
+		{
+			name:      "one controller Deployment",
+			namespace: "skyhook",
+			objects:   []runtime.Object{nodewrightOperatorDeploymentWithEnv("skyhook", "")},
+		},
+		{
+			name:      "two controller Deployments",
+			namespace: "skyhook",
+			objects: []runtime.Object{
+				nodewrightOperatorDeploymentWithEnv("skyhook", ""),
+				nodewrightOperatorDeploymentNamed("skyhook", "nodewright-controller-manager", ""),
+			},
+			wantErr: "operator is ambiguous",
+		},
+		{
+			name:    "no namespace on the component",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv("skyhook", "")},
+			wantErr: "no namespace",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			live := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]any{
+					"name": "d", "namespace": "skyhook",
+					"labels": map[string]any{"control-plane": "controller-manager"},
+				},
+			}}
+			refs := []recipe.ComponentRef{{
+				Name: nodewrightOperatorComponent, Namespace: tt.namespace, HealthCheckAsserts: assertYAML,
+			}}
+			ctx := newDeploymentTestContext(t, append([]runtime.Object{activeNamespace("skyhook")}, tt.objects...),
+				[]runtime.Object{live}, refs)
+			ctx.RESTConfig = &rest.Config{Host: discovery.URL}
+
+			err := checkExpectedResources(ctx)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("checkExpectedResources() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("checkExpectedResources() error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
 	}
@@ -2167,7 +2296,8 @@ func nodewrightOperatorDeploymentNamed(namespace, name, taintStr string) *appsv1
 }
 
 func nodewrightOperatorDeploymentWithEnv(namespace, taintStr string) *appsv1.Deployment {
-	d := readyDeployment(namespace, nodewrightOperatorDeployment)
+	d := readyDeployment(namespace, "skyhook-operator-controller-manager")
+	d.Labels = maps.Clone(nodewrightControllerLabels)
 	container := corev1.Container{Name: "manager"}
 	if taintStr != "" {
 		container.Env = []corev1.EnvVar{{Name: runtimeRequiredTaintEnv, Value: taintStr}}
@@ -2181,7 +2311,8 @@ func nodewrightOperatorDeploymentWithEnv(namespace, taintStr string) *appsv1.Dep
 // shapes nodewrightOperatorDeploymentWithEnv cannot: present but empty, and
 // sourced from valueFrom. Both are distinct from the env being absent.
 func nodewrightOperatorDeploymentWithEnvVar(namespace string, env corev1.EnvVar) *appsv1.Deployment {
-	d := readyDeployment(namespace, nodewrightOperatorDeployment)
+	d := readyDeployment(namespace, "skyhook-operator-controller-manager")
+	d.Labels = maps.Clone(nodewrightControllerLabels)
 	d.Spec.Template.Spec.Containers = []corev1.Container{{Name: "manager", Env: []corev1.EnvVar{env}}}
 	return d
 }
@@ -2491,20 +2622,10 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 			},
 			wantSuppressed: true,
 		},
-		{
-			// The bundler flips enabled=true in the --dra-eviction-node-label
-			// opt-in path that keeps the component in the bundle; then the
-			// labeler renders objects and its health check must run.
-			name: "dra-node-labeler opted in (enabled=true) keeps the assert",
-			ref: recipe.ComponentRef{
-				Name:          "dra-node-labeler",
-				Type:          recipe.ComponentTypeHelm,
-				ValuesFile:    "components/dra-node-labeler/values.yaml",
-				ManifestFiles: []string{"components/dra-node-labeler/manifests/dra-node-labeler.yaml"},
-				Overrides:     map[string]any{"enabled": true},
-			},
-			wantSuppressed: false,
-		},
+		// The opted-in shape is covered by
+		// TestGatedHealthCheckSuppressed_DRANodeLabelerBundleRecipe, which reads
+		// the ref back from a recipe.yaml the bundler actually wrote rather than
+		// hand-writing the override.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2832,4 +2953,89 @@ func TestMarkUndispatched(t *testing.T) {
 			t.Errorf("failures %q names a component that carries no unevaluated work", got)
 		}
 	}
+}
+
+// TestGatedHealthCheckSuppressed_DRANodeLabelerBundleRecipe exercises the real
+// bundle-to-validation path for the labeler (#2848): the recipe.yaml the
+// bundler writes at the bundle root is what post-deployment validation reads.
+// Opted in (--dra-eviction-node-label), the bundler persists enabled: true on
+// the labeler ref, so the manifest renders and the health check stays queued.
+// Not opted in, the bundler drops the ref, so there is nothing to suppress.
+func TestGatedHealthCheckSuppressed_DRANodeLabelerBundleRecipe(t *testing.T) {
+	t.Parallel()
+
+	recipeInput := func() *recipe.RecipeResult {
+		return &recipe.RecipeResult{
+			APIVersion: recipe.RecipeResultAPIVersion,
+			Kind:       recipe.RecipeResultKind,
+			Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Version: "v26.4.0", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia"},
+				{
+					Name:           draNodeLabelerComponent,
+					Type:           recipe.ComponentTypeHelm,
+					ValuesFile:     "components/dra-node-labeler/values.yaml",
+					ManifestFiles:  []string{"components/dra-node-labeler/manifests/dra-node-labeler.yaml"},
+					DependencyRefs: []string{"gpu-operator"},
+				},
+				{
+					Name: draDriverComponent, Version: "25.12.0", Type: recipe.ComponentTypeHelm,
+					Source:         "https://helm.ngc.nvidia.com/nvidia",
+					Overrides:      map[string]any{"nvidiaDriverRoot": "/run/nvidia/driver"},
+					DependencyRefs: []string{"gpu-operator", draNodeLabelerComponent},
+				},
+			},
+			DeploymentOrder: []string{"gpu-operator", draNodeLabelerComponent, draDriverComponent},
+		}
+	}
+	bundleRecipeRefs := func(t *testing.T, opts ...bundlercfg.Option) []recipe.ComponentRef {
+		t.Helper()
+		b, err := bundler.New(bundler.WithConfig(bundlercfg.NewConfig(opts...)))
+		if err != nil {
+			t.Fatalf("bundler.New() error = %v", err)
+		}
+		dir := t.TempDir()
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		if _, makeErr := b.Make(ctx, recipeInput(), dir); makeErr != nil {
+			t.Fatalf("Make() error = %v", makeErr)
+		}
+		loaded, err := recipe.LoadFromFileWithProvider(ctx, filepath.Join(dir, bundler.RecipeFileName), "", "test", nil)
+		if err != nil {
+			t.Fatalf("load bundle %s: %v", bundler.RecipeFileName, err)
+		}
+		return loaded.ComponentRefs
+	}
+	findLabeler := func(refs []recipe.ComponentRef) *recipe.ComponentRef {
+		for i := range refs {
+			if refs[i].Name == draNodeLabelerComponent {
+				return &refs[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("opted-in bundle recipe keeps the assert", func(t *testing.T) {
+		t.Parallel()
+		refs := bundleRecipeRefs(t, bundlercfg.WithDRAEvictionNodeLabel(bundlercfg.DefaultDRAEvictionNodeLabel()))
+		ref := findLabeler(refs)
+		if ref == nil {
+			t.Fatalf("opted-in bundle recipe lacks %s", draNodeLabelerComponent)
+		}
+		suppressed, reason, err := gatedHealthCheckSuppressed(
+			&validators.Context{Ctx: t.Context(), Clientset: k8sfake.NewClientset()}, *ref)
+		if err != nil {
+			t.Fatalf("gatedHealthCheckSuppressed() error = %v", err)
+		}
+		if suppressed {
+			t.Fatalf("deployed labeler's health check suppressed: %s", reason)
+		}
+	})
+
+	t.Run("default-path bundle recipe carries no labeler", func(t *testing.T) {
+		t.Parallel()
+		if ref := findLabeler(bundleRecipeRefs(t)); ref != nil {
+			t.Fatalf("bundle recipe carries %s without the eviction opt-in: %+v", draNodeLabelerComponent, ref)
+		}
+	})
 }

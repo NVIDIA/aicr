@@ -1222,9 +1222,10 @@ aicr validate \
   --snapshot cm://gpu-operator/aicr-snapshot \
   --output validation-results.json
 
-# Validate deployment phase after components are installed
+# Validate deployment phase after components are installed; the bundle's
+# recipe.yaml records the component set it deployed
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe ./bundles/recipe.yaml \
   --snapshot snapshot.yaml \
   --phase deployment
 
@@ -3179,6 +3180,15 @@ The deploy script retries failed `helm upgrade --install` and `kubectl apply` op
 
 Use `--retries 0` to disable retries (fail-fast behavior). When `--best-effort` is also set, retries are exhausted first before falling through to best-effort handling.
 
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | All components installed. With `--best-effort`, the run finished; check the `✗` and warning lines for components that failed. |
+| `1` | A component failed (without `--best-effort`), the arguments were invalid, or a `--best-effort` run had component failures and also needs a retry. |
+| `2` | All components installed, but the DRA kubelet plugin restart was withheld because a GPU driver migration was in progress. Re-run `deploy.sh` once the GPU Operator has converged (driver DaemonSet present and nodes labeled `nvidia.com/gpu.deploy.driver=true`). |
+| `130` | Interrupted (SIGINT or SIGTERM). |
+
 **Pre-install manifests and CRD ordering:**
 
 `deploy.sh` does not `kubectl apply` component manifests itself. A component's pre-install manifests (`preManifestFiles`) are wrapped in an injected `NNN-<name>-pre/` local chart that installs just before the component's chart, and its raw manifests (`manifestFiles`) in an injected `NNN-<name>-post/` local chart that installs just after it, so the chart's CRDs are registered before the custom resources that use them. Both are ordinary folders in the install loop, installed by their own `install.sh` with `helm upgrade --install`.
@@ -3190,6 +3200,8 @@ Components that use operator patterns with custom resources that reconcile async
 ##### DRA kubelet plugin registration
 
 After installing `nvidia-dra-driver-gpu`, the script automatically restarts the DRA kubelet plugin DaemonSet. This is a best-effort mitigation for a known issue: after uninstall/reinstall, the kubelet's plugin watcher (`fsnotify`) may not detect new registration sockets, causing `DRA driver gpu.nvidia.com is not registered` errors.
+
+If the GPU Operator is still migrating the driver when this step runs, the script withholds the restart rather than restart the plugin against a driver that is changing underneath it, and exits `2` (see [Exit codes](#deploy-script-behavior-deploysh) above). Re-run `deploy.sh` once the migration finishes.
 
 If DRA pods fail with this error after redeployment, the DaemonSet restart alone may not be sufficient — a **node reboot** is required to reset the kubelet's plugin registration state. To reboot GPU nodes:
 

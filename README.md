@@ -40,7 +40,8 @@ aicr recipe --service eks --accelerator h100 --os ubuntu \
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
 # After deploying the bundle, validate the running cluster against the recipe
-aicr validate --recipe recipe.yaml
+# the bundle deployed (every bundle records it at its root)
+aicr validate --recipe ./bundles/recipe.yaml
 
 # Select hydrated config value (e.g., the resolved GPU driver version)
 aicr query --service eks --accelerator h100 --os ubuntu \
@@ -134,8 +135,9 @@ For contributors:
 - **[Adopters](ADOPTERS.md)** — Organizations and projects using or building on AICR
 - **[Security](SECURITY.md)** — Supply chain security, vulnerability reporting, and verification
 - **[Releases](https://github.com/NVIDIA/aicr/releases)** — Binaries, SBOMs, and attestations
-- **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs, feature requests, and questions
-- **Slack** — Join [Kubernetes Slack](https://kubernetes.slack.com) and visit the [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) channel
+- **[Support](SUPPORT.md)** — Where to ask questions, report bugs, and report vulnerabilities
+- **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs and scoped feature requests
+- **Slack** — [#aicr](https://kubernetes.slack.com/messages/aicr) on Kubernetes Slack for questions (visit [slack.k8s.io](https://slack.k8s.io/) for a workspace invitation)
 
 ## Contributing
 

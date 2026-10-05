@@ -66,7 +66,7 @@
   ┌────────────────────────────────────────────────────────────────────────┐
   │ 3. DEPLOY — Install to cluster                                         │
   │                                                                        │
-  │  $ cd bundle && aicr verify . && ./deploy.sh                           │
+  │  $ (cd bundle && aicr verify . && ./deploy.sh)                         │
   │                                                                        │
   │  selected components in deployment order (post-folders &               │
   │  some steps omitted): agentgateway-crds ──▶ ... ──▶ cert-manager       │
@@ -84,7 +84,7 @@
   ┌────────────────────────────────────────────────────────────────────────┐
   │ 4. VALIDATE — Verify conformance                                       │
   │                                                                        │
-  │  $ aicr validate --recipe recipe.yaml \                                │
+  │  $ aicr validate --recipe bundle/recipe.yaml \                         │
   │      --phase deployment --phase conformance                            │
   │                                                                        │
   │  ┌──────────────────────────────────────────────────────────────┐      │

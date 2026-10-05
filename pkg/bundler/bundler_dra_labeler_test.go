@@ -249,6 +249,19 @@ func TestInjectDRAEvictionLabel_SetsLabelerPair(t *testing.T) {
 	if got := dig(values[draComponentName], "kubeletPlugin", "nodeSelector", label.Key); got != label.Value {
 		t.Errorf("kubelet plugin selector = %v, want %s", got, label.Value)
 	}
+	if got := values[draNodeLabelerComponentName][draNodeLabelerEnabledPath]; got != true {
+		t.Errorf("labeler %s = %v, want true", draNodeLabelerEnabledPath, got)
+	}
+	// The gate must also land on the ref, which is what recipe.yaml serializes.
+	var labelerRef *recipe.ComponentRef
+	for i := range rr.ComponentRefs {
+		if rr.ComponentRefs[i].Name == draNodeLabelerComponentName {
+			labelerRef = &rr.ComponentRefs[i]
+		}
+	}
+	if labelerRef == nil || labelerRef.Overrides[draNodeLabelerEnabledPath] != true {
+		t.Errorf("labeler ref overrides = %v, want %s: true", labelerRef, draNodeLabelerEnabledPath)
+	}
 
 	var derived, provisioned bool
 	for _, w := range b.warnings {
@@ -425,6 +438,82 @@ func TestMake_DRANodeLabelerRendered(t *testing.T) {
 		// labeler is dropped, and its selector carries no eviction label.
 		if _, err := os.Stat(filepath.Join(outputDir, "002-"+draComponentName)); err != nil {
 			t.Errorf("expected 002-%s in the bundle: %v (entries: %v)", draComponentName, err, entries)
+		}
+	})
+}
+
+// TestMake_DRANodeLabelerRecipePersistsGate pins what the bundle's recipe.yaml
+// says about the labeler, because that file -- not the bundler's in-memory
+// values -- is what post-deployment validation reads (#2848). Opted in, the
+// labeler ref carries enabled: true so the validator renders and checks it;
+// not opted in, the ref is absent. The caller's RecipeResult is never touched.
+func TestMake_DRANodeLabelerRecipePersistsGate(t *testing.T) {
+	label := config.NodeLabel{Key: "example.com/dra-ready", Value: "enabled"}
+
+	labelerRef := func(t *testing.T, outputDir string) *recipe.ComponentRef {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), draBundleMakeTimeout)
+		defer cancel()
+		loaded, err := recipe.LoadFromFileWithProvider(ctx, filepath.Join(outputDir, RecipeFileName), "", "test", nil)
+		if err != nil {
+			t.Fatalf("load %s: %v", RecipeFileName, err)
+		}
+		for i := range loaded.ComponentRefs {
+			if loaded.ComponentRefs[i].Name == draNodeLabelerComponentName {
+				return &loaded.ComponentRefs[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("opted in persists enabled=true on the labeler ref", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig(config.WithDRAEvictionNodeLabel(label))))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		input := testDRANodeLabelerRecipeResult()
+		input.Kind = recipe.RecipeResultKind
+		input.APIVersion = recipe.RecipeResultAPIVersion
+		outputDir := t.TempDir()
+		ctx, cancel := context.WithTimeout(context.Background(), draBundleMakeTimeout)
+		defer cancel()
+		if _, err := b.Make(ctx, input, outputDir); err != nil {
+			t.Fatalf("Make() error = %v", err)
+		}
+
+		ref := labelerRef(t, outputDir)
+		if ref == nil {
+			t.Fatalf("%s lacks the %s ref after opting in", RecipeFileName, draNodeLabelerComponentName)
+		}
+		if got := ref.Overrides[draNodeLabelerEnabledPath]; got != true {
+			t.Errorf("%s ref overrides.%s = %v, want true", draNodeLabelerComponentName, draNodeLabelerEnabledPath, got)
+		}
+		if !ref.IsEnabled() {
+			t.Errorf("persisted gate must keep the ref enabled")
+		}
+		for _, in := range input.ComponentRefs {
+			if in.Name == draNodeLabelerComponentName && in.Overrides != nil {
+				t.Errorf("caller's labeler ref overrides mutated: %v", in.Overrides)
+			}
+		}
+	})
+
+	t.Run("not opted in leaves the labeler out of the recipe", func(t *testing.T) {
+		b, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		input := testDRANodeLabelerRecipeResult()
+		input.Kind = recipe.RecipeResultKind
+		input.APIVersion = recipe.RecipeResultAPIVersion
+		outputDir := t.TempDir()
+		ctx, cancel := context.WithTimeout(context.Background(), draBundleMakeTimeout)
+		defer cancel()
+		if _, err := b.Make(ctx, input, outputDir); err != nil {
+			t.Fatalf("Make() error = %v", err)
+		}
+		if ref := labelerRef(t, outputDir); ref != nil {
+			t.Errorf("%s carries %s without the eviction flag: %+v", RecipeFileName, draNodeLabelerComponentName, ref)
 		}
 	})
 }
