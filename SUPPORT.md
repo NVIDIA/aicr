@@ -15,9 +15,11 @@ Where to go depends on what you need.
 
 ## What to Include
 
+Redact credentials, tokens, and other sensitive values from everything you share. Commands, their output, recipes, and snapshots can all contain them, for example a registry password passed as an environment variable.
+
 - The `aicr --version` output.
 - The command you ran and its full output.
 - Your recipe criteria (service, accelerator, OS, intent, platform), or the recipe file itself.
-- A cluster snapshot (`aicr snapshot`) when the problem depends on cluster state. Remove anything sensitive first.
+- A cluster snapshot (`aicr snapshot`) when the problem depends on cluster state.
 
 Contributing code or docs? See [CONTRIBUTING.md](CONTRIBUTING.md).
