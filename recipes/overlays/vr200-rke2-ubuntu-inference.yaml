@@ -81,8 +81,8 @@ spec:
         # See vr200-rke2-ubuntu-training for the metadata-collector NRI-mode
         # host-mount rationale (NVIDIA/NVSentinel#1742, released in v1.22.0).
         # Path picks Ubuntu 26.04 arm64 driver libs — same reference image
-        # as the training leaf, which also explains why only
-        # libnvidia-ml.so.1 is mounted rather than the whole directory.
+        # as the training leaf. Only libnvidia-ml.so.1 is mounted because of
+        # the host/container glibc mismatch explained in the training leaf.
         metadata-collector:
           runtimeClassName: ""
           extraEnv:
