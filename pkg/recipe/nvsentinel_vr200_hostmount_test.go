@@ -27,11 +27,13 @@ import (
 // label is applied without a driver pod (#2175), metadata-collector's
 // runtimeClassName EXPLICITLY empty so the chart omits the field from
 // the pod spec (no `nvidia` RuntimeClass exists on NRI-mode clusters
-// and admission would otherwise reject every pod), and the host driver
-// libraries mounted read-only under /usr/local/nvidia/lib with
-// LD_LIBRARY_PATH pointing at that path. The hostPath source is
-// /usr/lib/aarch64-linux-gnu because the Vera Rubin reference image
-// ships Ubuntu 26.04 arm64.
+// and admission would otherwise reject every pod), and the host's
+// libnvidia-ml.so.1 mounted read-only into /usr/local/nvidia/lib with
+// LD_LIBRARY_PATH pointing at that directory. The hostPath source is
+// under /usr/lib/aarch64-linux-gnu because the Vera Rubin reference
+// image ships Ubuntu 26.04 arm64; only the NVML file is mounted, because
+// that directory also holds the host glibc, which the collector image's
+// older loader cannot use.
 //
 // The catalog and stock-render goldens catch that SOMETHING changed on
 // these leaves, but as opaque digests they cannot say which field
@@ -152,30 +154,37 @@ func TestVR200NVSentinelNRIHostMountReenable(t *testing.T) {
 				t.Fatalf("metadata-collector.extraEnv missing LD_LIBRARY_PATH=/usr/local/nvidia/lib. Without it libnvidia-ml.so is on disk but unlinked. Got: %v", extraEnv)
 			}
 
-			// additionalVolumeMounts must include the driver-libs
-			// mount at /usr/local/nvidia/lib, read-only. The path
-			// matches LD_LIBRARY_PATH above; readOnly matters because
-			// the container runs privileged and a writable mount
-			// invites the container to mutate host driver files.
+			// additionalVolumeMounts must place libnvidia-ml.so.1 inside
+			// the LD_LIBRARY_PATH directory above, read-only. readOnly
+			// matters because the container runs privileged and a
+			// writable mount invites it to mutate host driver files.
 			mounts, ok := collector["additionalVolumeMounts"].([]any)
 			if !ok {
-				t.Fatalf("metadata-collector.additionalVolumeMounts = %T %v, want a list containing the nvidia-driver-libs mount.", collector["additionalVolumeMounts"], collector["additionalVolumeMounts"])
+				t.Fatalf("metadata-collector.additionalVolumeMounts = %T %v, want a list containing the nvidia-ml mount.", collector["additionalVolumeMounts"], collector["additionalVolumeMounts"])
 			}
-			if !hasVolumeMount(mounts, "nvidia-driver-libs", "/usr/local/nvidia/lib", true) {
-				t.Fatalf("metadata-collector.additionalVolumeMounts missing name=nvidia-driver-libs mountPath=/usr/local/nvidia/lib readOnly=true. Got: %v", mounts)
+			if !hasVolumeMount(mounts, "nvidia-ml", "/usr/local/nvidia/lib/libnvidia-ml.so.1", true) {
+				t.Fatalf("metadata-collector.additionalVolumeMounts missing name=nvidia-ml mountPath=/usr/local/nvidia/lib/libnvidia-ml.so.1 readOnly=true. Got: %v", mounts)
 			}
 
-			// additionalHostVolumes must supply the driver-libs
-			// volume from /usr/lib/aarch64-linux-gnu — the Vera Rubin
-			// reference image is Ubuntu 26.04 arm64, so a
-			// x86_64-linux-gnu path here would mount an empty
-			// directory and NVML would still fail to load.
+			// additionalHostVolumes must supply only the NVML file from
+			// /usr/lib/aarch64-linux-gnu — the Vera Rubin reference
+			// image is Ubuntu 26.04 arm64. Mounting the whole directory
+			// puts the host glibc (2.43) on LD_LIBRARY_PATH and the
+			// collector (glibc 2.35 image) exits 127 on a symbol lookup
+			// error before NVML is ever loaded.
 			volumes, ok := collector["additionalHostVolumes"].([]any)
 			if !ok {
-				t.Fatalf("metadata-collector.additionalHostVolumes = %T %v, want a list containing the nvidia-driver-libs hostPath.", collector["additionalHostVolumes"], collector["additionalHostVolumes"])
+				t.Fatalf("metadata-collector.additionalHostVolumes = %T %v, want a list containing the nvidia-ml hostPath.", collector["additionalHostVolumes"], collector["additionalHostVolumes"])
 			}
-			if !hasHostPathVolume(volumes, "nvidia-driver-libs", "/usr/lib/aarch64-linux-gnu", "Directory") {
-				t.Fatalf("metadata-collector.additionalHostVolumes missing name=nvidia-driver-libs hostPath.path=/usr/lib/aarch64-linux-gnu hostPath.type=Directory. Got: %v", volumes)
+			if !hasHostPathVolume(volumes, "nvidia-ml", "/usr/lib/aarch64-linux-gnu/libnvidia-ml.so.1", "File") {
+				t.Fatalf("metadata-collector.additionalHostVolumes missing name=nvidia-ml hostPath.path=/usr/lib/aarch64-linux-gnu/libnvidia-ml.so.1 hostPath.type=File. Got: %v", volumes)
+			}
+			for _, v := range volumes {
+				vol, _ := v.(map[string]any)
+				hp, _ := vol["hostPath"].(map[string]any)
+				if hp["path"] == "/usr/lib/aarch64-linux-gnu" {
+					t.Fatalf("metadata-collector mounts the whole /usr/lib/aarch64-linux-gnu, which puts the host glibc on LD_LIBRARY_PATH. Mount libnvidia-ml.so.1 only. Got: %v", volumes)
+				}
 			}
 		})
 	}
