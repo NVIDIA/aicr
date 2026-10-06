@@ -1091,3 +1091,97 @@ func TestExpectedNoImagesNamesRegistryHelmComponents(t *testing.T) {
 		}
 	}
 }
+
+// TestReadWorkloadClosureFailsClosed pins the review follow-up on #3087: the
+// closure records sourceVersion and the survey never read it back, so a chart
+// bump landing before the closure was regenerated republished the previous
+// version's workload images under the new pin. An absent or empty file was
+// also indistinguishable from a component that legitimately has no closure,
+// which narrowed the BOM without an error. The check is offline and inside
+// the survey so `make bom-docs` and the committed-BOM test gate it.
+func TestReadWorkloadClosureFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	const pinned = "v0.2.0"
+	tests := []struct {
+		name      string
+		component string
+		// file is written to workload-images.yaml; empty means write nothing.
+		file     string
+		wantErr  bool
+		wantRefs []string
+	}{
+		{
+			name:      "required component, closure absent",
+			component: "nvcre",
+			wantErr:   true,
+		},
+		{
+			name:      "optional component, closure absent",
+			component: "gpu-operator",
+			wantRefs:  nil,
+		},
+		{
+			name:      "required component, closure lists no images",
+			component: "nvcre",
+			file:      "sourceVersion: v0.2.0\nimages: []\n",
+			wantErr:   true,
+		},
+		{
+			// The bump Mark described: defaultVersion moves, the closure
+			// does not, and the BOM would carry v0.1.0's images under v0.2.0.
+			name:      "sourceVersion behind the pinned chart version",
+			component: "nvcre",
+			file:      "sourceVersion: v0.1.0\nimages:\n  - image: ghcr.io/x/y\n    digest: sha256:abc\n",
+			wantErr:   true,
+		},
+		{
+			// Absent is not a free pass: a closure that declares no version
+			// cannot vouch for the one it was generated from.
+			name:      "sourceVersion absent",
+			component: "nvcre",
+			file:      "images:\n  - image: ghcr.io/x/y\n",
+			wantErr:   true,
+		},
+		{
+			name:      "sourceVersion matches the pin",
+			component: "nvcre",
+			file:      "sourceVersion: v0.2.0\nimages:\n  - image: ghcr.io/x/y\n    digest: sha256:abc\n",
+			wantRefs:  []string{"ghcr.io/x/y@sha256:abc"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			dir := filepath.Join(root, "recipes", "components", tt.component)
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			if tt.file != "" {
+				path := filepath.Join(dir, "workload-images.yaml")
+				if err := os.WriteFile(path, []byte(tt.file), 0o600); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			}
+
+			refs, err := readWorkloadClosure(root, tt.component, pinned)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("readWorkloadClosure error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if len(refs) != len(tt.wantRefs) {
+				t.Fatalf("refs = %v, want %v", refs, tt.wantRefs)
+			}
+			for i := range refs {
+				if refs[i] != tt.wantRefs[i] {
+					t.Errorf("refs[%d] = %q, want %q", i, refs[i], tt.wantRefs[i])
+				}
+			}
+		})
+	}
+}
