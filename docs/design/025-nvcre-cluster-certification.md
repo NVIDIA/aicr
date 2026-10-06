@@ -290,7 +290,7 @@ Supply chain — upstream release-workflow changes, not AICR work:
    reports none — no signature, SBOM, or provenance. The chart is published by
    a `helm push` with no signing step.
 
-#### Both supply-chain gaps close at the shipped pin
+#### Gap 1 closes at the shipped pin and gap 2 partly
 
 The findings above are v0.1.0. Rechecked at the pin AICR ships:
 
@@ -316,6 +316,11 @@ Two details make the recheck non-obvious:
 - SBOMs bind the per-platform children, not the index. `cosign tree` on the
   index shows only the signature and provenance; the CycloneDX attestation is on
   `linux/amd64` and `linux/arm64` individually.
+
+Gap 2 therefore closes only in part. The release-and-supply-chain gate above
+asks for signature, SBOM, **and** provenance on both artifacts; the chart has
+the first and third and no SBOM at all, so that gate still does not pass and
+follow-up 2 stays open.
 
 Execution safety — these live in the `Certification` API, so driving
 `Certification` rather than `WorkloadRun` does not close them:
@@ -376,10 +381,11 @@ not available to stock recipes yet.
    the release workflow and meeting a stated SLSA build level.~~ Closed at
    v0.2.0 — SLSA v1.0 provenance verifies against the release workflow
    identity.
-2. ~~Upstream: sign the Helm chart and publish chart SBOM and provenance.~~
-   Signature and SLSA v1.0 provenance are present at v0.2.0 and bind the chart
-   digest. A chart **SBOM** is still absent: the CycloneDX attestation covers
-   the image's per-platform children only.
+2. Upstream: publish a chart SBOM. ~~Sign the Helm chart and publish chart
+   provenance.~~ Signature and SLSA v1.0 provenance are present at v0.2.0 and
+   bind the chart digest; the **SBOM** is still absent, because the CycloneDX
+   attestation covers the image's per-platform children only. Open, so
+   item 6 is not yet reached.
 3. Upstream: add a run-level cap on the node footprint, so a `Certification`
    cannot span every matched node without an explicit `target.nodeNames`.
 4. Upstream: add a total run deadline to `CertificationSpec`, and make
