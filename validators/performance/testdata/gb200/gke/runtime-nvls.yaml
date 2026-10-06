@@ -49,8 +49,95 @@ spec:
         enableDNSHostnames: true
         publishNotReadyAddresses: true
       replicatedJobs:
+      - name: node
+        template:
+          spec:
+            template:
+              metadata:
+                annotations:
+                  networking.gke.io/default-interface: eth0
+                  networking.gke.io/interfaces: '[{"interfaceName":"eth0","network":"default"},{"interfaceName":"eth1","network":"gvnic-1"},{"interfaceName":"eth2","network":"rdma-0"},{"interfaceName":"eth3","network":"rdma-1"},{"interfaceName":"eth4","network":"rdma-2"},{"interfaceName":"eth5","network":"rdma-3"}]'
+              spec:
+                # IMEX channel claim: the DRA driver auto-generated this
+                # ResourceClaimTemplate (name matches ncclIMEXClaimTemplateName
+                # in the validator Go code) when the ComputeDomain CR was
+                # reconciled. Without this block, /dev/nvidia-caps-imex-channels
+                # would not be mounted and NCCL would fail with
+                # "Cuda failure 800 'operation not permitted'" at MNNVL init.
+                resourceClaims:
+                - name: imex-channel
+                  resourceClaimTemplateName: nccl-all-reduce-imex
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command: ["sh", "-c"]
+                  args:
+                  # sshd is installed at runtime. HTTPS and the main component
+                  # only (35 MB of indexes down to ~6 MB): plain-HTTP fetches
+                  # from ports.ubuntu.com were observed to stall for minutes
+                  # (#3109). ca-certificates ships in the image.
+                  - |
+                    set -x &&
+                    sed -i -e 's|http://ports.ubuntu.com|https://ports.ubuntu.com|g' \
+                           -e 's|^Components:.*|Components: main|' /etc/apt/sources.list.d/ubuntu.sources &&
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    chmod 700 /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 600 /root/.ssh/id_rsa &&
+                    chmod 644 /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys &&
+                    export LD_LIBRARY_PATH=/home/kubernetes/bin/nvidia/lib64:/home/kubernetes/bin/gib:${LD_LIBRARY_PATH} &&
+                    export NCCL_NET=gIB &&
+                    if [ -f /home/kubernetes/bin/gib/scripts/set_nccl_env.sh ]; then . /home/kubernetes/bin/gib/scripts/set_nccl_env.sh; fi &&
+                    env | grep -E '^NCCL_|^CUDA_|^LD_LIBRARY_PATH' > /root/.ssh/environment &&
+                    echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config &&
+                    /usr/sbin/sshd -De
+                  # Ready only once sshd listens; the launcher's dependsOn
+                  # waits on it, so mpirun never races the install.
+                  readinessProbe:
+                    tcpSocket:
+                      port: 22
+                    periodSeconds: 5
+                    failureThreshold: 120
+                  resources:
+                    claims:
+                    - name: imex-channel
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: dshm
+                    mountPath: /dev/shm
+                  - name: nvidia-host
+                    mountPath: /home/kubernetes/bin/nvidia
+                    readOnly: true
+                  - name: gib-host
+                    mountPath: /home/kubernetes/bin/gib
+                    readOnly: true
+                volumes:
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+                - name: nvidia-host
+                  hostPath:
+                    path: /home/kubernetes/bin/nvidia
+                - name: gib-host
+                  hostPath:
+                    path: /home/kubernetes/bin/gib
+      # Listed after "node": JobSet requires a dependsOn target to precede
+      # the job that depends on it.
       - name: launcher
         replicas: 1
+        dependsOn:
+        - name: node
+          status: Ready
         template:
           spec:
             template:
@@ -148,75 +235,6 @@ spec:
                 volumes:
                 - name: ssh-config
                   emptyDir: {}
-      - name: node
-        template:
-          spec:
-            template:
-              metadata:
-                annotations:
-                  networking.gke.io/default-interface: eth0
-                  networking.gke.io/interfaces: '[{"interfaceName":"eth0","network":"default"},{"interfaceName":"eth1","network":"gvnic-1"},{"interfaceName":"eth2","network":"rdma-0"},{"interfaceName":"eth3","network":"rdma-1"},{"interfaceName":"eth4","network":"rdma-2"},{"interfaceName":"eth5","network":"rdma-3"}]'
-              spec:
-                # IMEX channel claim: the DRA driver auto-generated this
-                # ResourceClaimTemplate (name matches ncclIMEXClaimTemplateName
-                # in the validator Go code) when the ComputeDomain CR was
-                # reconciled. Without this block, /dev/nvidia-caps-imex-channels
-                # would not be mounted and NCCL would fail with
-                # "Cuda failure 800 'operation not permitted'" at MNNVL init.
-                resourceClaims:
-                - name: imex-channel
-                  resourceClaimTemplateName: nccl-all-reduce-imex
-                containers:
-                - name: node
-                  image: nvcr.io/nvidia/pytorch:25.06-py3
-                  command: ["sh", "-c"]
-                  args:
-                  - |
-                    set -x &&
-                    apt-get update &&
-                    apt-get install -y --no-install-recommends openssh-server &&
-                    mkdir -p /var/run/sshd &&
-                    chmod 0755 /var/run/sshd &&
-                    mkdir -p /root/.ssh &&
-                    chmod 700 /root/.ssh &&
-                    cp /tmp/mpi-keys/* /root/.ssh/ &&
-                    chmod 600 /root/.ssh/id_rsa &&
-                    chmod 644 /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys &&
-                    export LD_LIBRARY_PATH=/home/kubernetes/bin/nvidia/lib64:/home/kubernetes/bin/gib:${LD_LIBRARY_PATH} &&
-                    export NCCL_NET=gIB &&
-                    if [ -f /home/kubernetes/bin/gib/scripts/set_nccl_env.sh ]; then . /home/kubernetes/bin/gib/scripts/set_nccl_env.sh; fi &&
-                    env | grep -E '^NCCL_|^CUDA_|^LD_LIBRARY_PATH' > /root/.ssh/environment &&
-                    echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config &&
-                    /usr/sbin/sshd -De
-                  resources:
-                    claims:
-                    - name: imex-channel
-                    limits:
-                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
-                    requests:
-                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
-                  securityContext:
-                    capabilities:
-                      add: ["IPC_LOCK"]
-                  volumeMounts:
-                  - name: dshm
-                    mountPath: /dev/shm
-                  - name: nvidia-host
-                    mountPath: /home/kubernetes/bin/nvidia
-                    readOnly: true
-                  - name: gib-host
-                    mountPath: /home/kubernetes/bin/gib
-                    readOnly: true
-                volumes:
-                - name: dshm
-                  emptyDir:
-                    medium: Memory
-                - name: nvidia-host
-                  hostPath:
-                    path: /home/kubernetes/bin/nvidia
-                - name: gib-host
-                  hostPath:
-                    path: /home/kubernetes/bin/gib
       successPolicy:
         operator: All
         targetReplicatedJobs:
