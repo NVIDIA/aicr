@@ -357,9 +357,10 @@ components:
       # in_progress without bound. Both boundaries carry transition records.
       # v0.20.0 removes the legacy skyhook.nvidia.com group outright and is not
       # reachable until the CRs shipped under nodewright-customizations are
-      # renamed (#2594).
+      # renamed (#2594). v0.19.1 raises the interrupt pod's memory to 256Mi so
+      # the agent is not OOM-killed mid-reboot on 64K-page arm64 nodes (#3101).
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
-      defaultVersion: v0.19.0
+      defaultVersion: v0.19.1
       defaultNamespace: nodewright
     nodeScheduling:
       nodeCountPaths:
