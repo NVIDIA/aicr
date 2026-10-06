@@ -489,6 +489,47 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			},
 		},
 		{
+			// The chart defaults driver.enabled to true, so values that
+			// never mention the driver still install one. Defaulting the
+			// other way would skip the migration wait on a rollout that
+			// is actually happening, which is the #973 failure the gate
+			// exists to prevent — the opposite and worse direction than
+			// the #3115 stall. No in-tree recipe omits the key; this
+			// pins the derivation, not a shipped configuration.
+			name: "driver section absent defaults to operator-managed and renders the probe",
+			componentValues: map[string]map[string]any{
+				"gpu-operator":          {},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`gpu-driver-upgrade-state`,
+				`--timeout=15m`,
+				`NEEDS_RETRY="${NEEDS_RETRY} nvidia-dra-driver-gpu"`,
+			},
+			wantNotContains: []string{
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+			},
+		},
+		{
+			name: "driver.enabled key absent defaults to operator-managed and renders the probe",
+			componentValues: map[string]map[string]any{
+				"gpu-operator": {
+					"driver": map[string]any{},
+				},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`gpu-driver-upgrade-state`,
+				`--timeout=15m`,
+				`NEEDS_RETRY="${NEEDS_RETRY} nvidia-dra-driver-gpu"`,
+			},
+			wantNotContains: []string{
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+			},
+		},
+		{
 			name:            "OCP DRA component renders its own guard and skips the wait the same way when neither signal is observable",
 			recipeResultOCP: true,
 			componentValues: map[string]map[string]any{

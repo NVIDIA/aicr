@@ -64,12 +64,14 @@ type ComponentData struct {
 	Path       string // Path within the repository to the kustomization
 
 	// DriverOperatorManaged is true when the bundle's effective values
-	// select an operator-managed NVIDIA driver — gpu-operator's or
-	// gpu-operator-ocp's driver.enabled is true. deploy.sh's DRA
-	// migration-wait block (see #2135, #973) uses this to tell "driver
-	// is host-managed" apart from "driver is operator-managed but the
-	// DaemonSet/node-label migration signal isn't observable yet",
-	// which live cluster state alone cannot distinguish.
+	// select an operator-managed NVIDIA driver — a gpu-operator or
+	// gpu-operator-ocp component is present and has not disabled its
+	// driver, which includes leaving driver.enabled at the chart's
+	// default of true. deploy.sh's DRA migration-wait block (see #2135,
+	// #973) uses this to tell "driver is host-managed" apart from
+	// "driver is operator-managed but the DaemonSet/node-label
+	// migration signal isn't observable yet", which live cluster state
+	// alone cannot distinguish.
 	DriverOperatorManaged bool
 }
 
@@ -297,11 +299,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // buildComponentDataList builds a sorted list of ComponentData from the recipe.
 // It validates that all component names are safe for use as directory names.
 // driverOperatorManaged reports whether this bundle's effective values
-// select an operator-managed NVIDIA driver: gpu-operator's or
-// gpu-operator-ocp's driver.enabled is true. Checks both component names
-// since only one is ever enabled in a given recipe (see
-// pkg/bundler/bundler.go's gpuOperatorComponentNames for the canonical
-// list this mirrors).
+// select an operator-managed NVIDIA driver: a gpu-operator or
+// gpu-operator-ocp component is present and its driver.enabled does not
+// disable the operator's driver. Checks both component names since only
+// one is ever enabled in a given recipe (see pkg/bundler/bundler.go's
+// gpuOperatorComponentNames for the canonical list this mirrors).
 // gpuOperatorComponentName and gpuOperatorOCPComponentName are this
 // package's copy of the canonical/OCP gpu-operator component names (a
 // 4th duplicate alongside pkg/bundler/bundler.go, pkg/bundler/validations
@@ -321,15 +323,28 @@ func (g *Generator) driverOperatorManaged() bool {
 		if !ok {
 			continue
 		}
-		driver, ok := values["driver"].(map[string]any)
-		if !ok {
-			continue
-		}
-		if enabled, ok := driver["enabled"].(bool); ok && enabled {
+		if driverEnabled(values) {
 			return true
 		}
 	}
 	return false
+}
+
+// driverEnabled reports whether one gpu-operator component's effective
+// values select an operator-installed driver. Only a bare boolean false
+// does not: the chart defaults driver.enabled to true, so an absent
+// section or key still leaves the operator owning the driver, and every
+// other spelling is rejected before bundling by
+// CheckDriverOwnershipCoherence (registered severity error on
+// gpu-operator) because the chart interpolates the value unquoted into
+// the ClusterPolicy and YAML re-types it at install time.
+func driverEnabled(values map[string]any) bool {
+	driver, isMap := values["driver"].(map[string]any)
+	if !isMap {
+		return true
+	}
+	enabled, isBool := driver["enabled"].(bool)
+	return !isBool || enabled
 }
 
 // Only the fields consumed by the orchestration templates are populated.
