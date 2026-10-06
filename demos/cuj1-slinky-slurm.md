@@ -26,7 +26,7 @@ CLI reference.
 1. **Generate recipe** — direct criteria or snapshot-derived infrastructure criteria plus `--platform slurm` resolve a Slurm leaf overlay to `recipe.yaml`.
 2. **Generate bundle** — apply `--system-*` / `--accelerated-*` scheduling and optional `--set` / `--set-json` / `--set-file` on `slinkyslurm`.
 3. **Install** — run `deploy.sh`; cert-manager and Slinky operator come up, then the cluster chart in `slurm`.
-4. **Validate** — run `deployment` (Chainsaw component health) and `conformance` (the AI conformance checks the leaf inherits, plus `slinky-slurm-health` from the login pod, including a conditional `sacct` probe when accounting is enabled, and on cloud leaves `slinky-slurm-gpu-access` for Slurm GPU access and isolation). **Performance validation is not supported yet** on slurm leaves.
+4. **Validate** — run `deployment` (Chainsaw component health) and `conformance`: the AI conformance checks the leaf inherits, plus `slinky-slurm-health` from the login pod (including a conditional `sacct` probe when accounting is enabled) and, on cloud leaves, `slinky-slurm-gpu-access` for Slurm GPU access and isolation. **Performance validation is not supported yet** on slurm leaves.
 5. **Smoke job** — `kubectl exec` into the login pod and run `srun` to confirm scheduling.
 
 ## Generate Recipe
