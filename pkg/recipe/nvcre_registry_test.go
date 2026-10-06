@@ -161,15 +161,41 @@ func TestNVCREValuesPinControllerImageByDigest(t *testing.T) {
 	digest, _ := image["digest"].(string)
 	tag, _ := image["tag"].(string)
 	pinned := digest
+	version := ""
+	taggedPin := false
 	if pinned == "" {
-		if _, suffix, found := strings.Cut(tag, "@"); found {
-			pinned = suffix
+		if prefix, suffix, found := strings.Cut(tag, "@"); found {
+			pinned, version, taggedPin = suffix, prefix, true
 		}
 	}
 	if !sha256DigestPattern.MatchString(pinned) {
 		t.Errorf("%s: controller image is not digest-pinned (manager.image.tag=%q, manager.image.digest=%q); "+
 			"re-resolve with `crane digest ghcr.io/nvidia/cluster-readiness-engine/manager:<version>`",
 			nvcreValuesFile, tag, digest)
+	}
+	if !taggedPin {
+		return
+	}
+
+	// Pinning by digest severs the link the chart relied on: an unset tag falls
+	// back to .Chart.AppVersion, so the controller used to follow the chart
+	// automatically. A hard-coded tag does not, and the digest alone says
+	// nothing about which version it names. Without this, bumping
+	// defaultVersion installs the new chart's CRDs and args against the old
+	// controller with every test still green.
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+	comp := registry.Get("nvcre")
+	if comp == nil {
+		t.Fatal("nvcre is missing from recipes/registry.yaml")
+	}
+	if version != comp.Helm.DefaultVersion {
+		t.Errorf("%s: manager.image.tag pins version %q but the registry installs chart %q; "+
+			"the digest must name the controller that ships with defaultVersion. Re-resolve with "+
+			"`crane digest ghcr.io/nvidia/cluster-readiness-engine/manager:%s`",
+			nvcreValuesFile, version, comp.Helm.DefaultVersion, comp.Helm.DefaultVersion)
 	}
 }
 

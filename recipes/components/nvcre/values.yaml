@@ -41,9 +41,12 @@ manager:
     # Digest of the v0.2.0 multi-arch index, so the qualified bytes are the
     # installed bytes even if the tag is repointed. The chart also exposes a
     # `manager.image.digest` field, but that branch renders repository@digest
-    # and drops the version; the tag@digest form used here matches how every
-    # other pinned image in recipes/components/ is written and keeps v0.2.0
-    # legible in the BOM. Re-resolve on a defaultVersion bump:
+    # and drops the version; the tag@digest form used here keeps v0.2.0
+    # legible in the BOM. The chart's unset-tag default falls back to
+    # .Chart.AppVersion, so hard-coding a tag severs the link that kept the
+    # controller following the chart: a defaultVersion bump must move this
+    # version and digest together, which
+    # TestNVCREValuesPinControllerImageByDigest enforces. Re-resolve with:
     #   crane digest ghcr.io/nvidia/cluster-readiness-engine/manager:<version>
     tag: v0.2.0@sha256:b7f7a71a75353f6b87eccd21cf6ae75963b82939956d5c037f0a1da944b1a4ee
 
