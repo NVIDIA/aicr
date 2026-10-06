@@ -337,7 +337,8 @@ the mapping on the deployed `ClusterTrainingRuntime` exactly and in order, and
 every network that mapping selects must exist on the cluster. It then derives
 the benchmark runtime from the deployed one — copying the worker pod template
 wholesale (metadata and spec), re-applying only the benchmark's own worker
-`image`, `command`, `args`, `resources`, and `terminationMessagePolicy`, and
+`image`, `command`, `args`, `resources`, `terminationMessagePolicy`, and
+`readinessProbe`, and
 merging volumes and mounts additively, so the workers run under the shipped
 NCCL environment rather than the fixture's — and labels the result
 `runtimeSource: delivered-artifact`. A mismatch in either comparison fails the
