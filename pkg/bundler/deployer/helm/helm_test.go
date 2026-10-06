@@ -389,17 +389,17 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	}
 }
 
-// TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged pins the
+// TestGenerate_DeployScript_DRARestartGatedOnDriverOwnership pins the
 // fix for #2135's review follow-up: live cluster state alone (absent
 // DaemonSet + no labeled node) cannot tell "driver is host-managed" apart
 // from "driver is operator-managed but the migration gate hasn't converged
 // yet" — the latter must block the DRA kubelet-plugin restart rather than
 // running it unguarded, or it reproduces the invalid-CDI/ContainerCreating
-// failure (#973). DriverOperatorManaged is derived at bundle time from
+// failure (#973). DriverOwnership is derived at bundle time from
 // gpu-operator's/gpu-operator-ocp's effective driver.enabled and threaded
 // into the rendered script, so this only needs to check the generated
 // text — no live cluster required.
-func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing.T) {
+func TestGenerate_DeployScript_DRARestartGatedOnDriverOwnership(t *testing.T) {
 	recipeResult := func() *recipe.RecipeResult {
 		return &recipe.RecipeResult{
 			Kind:       "RecipeResult",
@@ -431,8 +431,11 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 	}
 
 	tests := []struct {
-		name            string
-		recipeResultOCP bool // when true, uses OCP component names throughout instead of canonical
+		name string
+		// variant selects the recipe shape: "" canonical, "ocp" OCP
+		// component names throughout, "dra-only" a bundle carrying no
+		// gpu-operator component at all.
+		variant         string
 		componentValues map[string]map[string]any
 		wantContains    []string
 		wantNotContains []string
@@ -447,6 +450,7 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			},
 			wantContains: []string{
 				`SKIP_RESTART="false"`,
+				`DRIVER_OWNERSHIP="operator"`,
 				`driver DaemonSet not present and no nodes labeled nvidia.com/gpu.deploy.driver=true; skipping migration wait`,
 				`SKIP_RESTART=true`,
 				`if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then`,
@@ -458,7 +462,13 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			},
 		},
 		{
-			name: "host-managed driver also skips the wait without blocking restart",
+			// A host-managed driver renders no probe at all. Both gates read
+			// live state that cannot distinguish "no migration is possible"
+			// from "a migration has not become observable yet": the operator
+			// creates no DaemonSet, yet still labels the nodes it tracks, so
+			// a rendered wait stalls for its full timeout and then fails
+			// closed on a migration that can never run (#3115).
+			name: "host-managed driver renders no migration probe and cannot stall",
 			componentValues: map[string]map[string]any{
 				"gpu-operator": {
 					"driver": map[string]any{"enabled": false},
@@ -466,16 +476,94 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 				"nvidia-dra-driver-gpu": {},
 			},
 			wantContains: []string{
-				`driver DaemonSet not present and no nodes labeled nvidia.com/gpu.deploy.driver=true; skipping migration wait`,
-				`blocking the DRA plugin restart until the migration completes`,
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+				`SKIP_RESTART="false"`,
+				`if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then`,
 			},
 			wantNotContains: []string{
 				`blocking the DRA plugin restart until the driver rollout is detectable`,
+				// No probe, no wait, and nothing that can set the retry
+				// signal for this component. The label name still appears
+				// in the gate preamble and the global retry hint, so match
+				// the probe and the wait rather than the label alone.
+				`DRIVER_OWNERSHIP=`,
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`gpu-driver-upgrade-state`,
+				`--timeout=15m`,
+				`NEEDS_RETRY="${NEEDS_RETRY} nvidia-dra-driver-gpu"`,
 			},
 		},
 		{
-			name:            "OCP DRA component renders its own guard and skips the wait the same way when neither signal is observable",
-			recipeResultOCP: true,
+			// The chart defaults driver.enabled to true, so values that
+			// never mention the driver still install one. Defaulting the
+			// other way would skip the migration wait on a rollout that
+			// is actually happening, which is the #973 failure the gate
+			// exists to prevent — the opposite and worse direction than
+			// the #3115 stall. No in-tree recipe omits the key; this
+			// pins the derivation, not a shipped configuration.
+			name: "driver section absent defaults to operator-managed and renders the probe",
+			componentValues: map[string]map[string]any{
+				"gpu-operator":          {},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`DRIVER_OWNERSHIP="operator"`,
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`gpu-driver-upgrade-state`,
+				`--timeout=15m`,
+				`NEEDS_RETRY="${NEEDS_RETRY} nvidia-dra-driver-gpu"`,
+			},
+			wantNotContains: []string{
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+			},
+		},
+		{
+			name: "driver.enabled key absent defaults to operator-managed and renders the probe",
+			componentValues: map[string]map[string]any{
+				"gpu-operator": {
+					"driver": map[string]any{},
+				},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`DRIVER_OWNERSHIP="operator"`,
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`gpu-driver-upgrade-state`,
+				`--timeout=15m`,
+				`NEEDS_RETRY="${NEEDS_RETRY} nvidia-dra-driver-gpu"`,
+			},
+			wantNotContains: []string{
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+			},
+		},
+		{
+			// A bundle with no gpu-operator component says nothing about
+			// who installs the driver, so it must not be read as
+			// host-managed: the driver may be externally managed and
+			// mid-rollout, and skipping the wait there is the #973
+			// failure. The node label is not usable evidence either,
+			// because nothing in this bundle applies it — only an
+			// observed DaemonSet is.
+			name:    "DRA-only bundle falls back to live state instead of assuming host-managed",
+			variant: "dra-only",
+			componentValues: map[string]map[string]any{
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`DRIVER_OWNERSHIP="unknown"`,
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`driver ownership is external, skipping migration wait`,
+				`gpu-driver-upgrade-state`,
+			},
+			wantNotContains: []string{
+				// The host-managed message would claim an explicit
+				// driver.enabled=false this bundle never expressed.
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+			},
+		},
+		{
+			name:    "OCP DRA component renders its own guard and skips the wait the same way when neither signal is observable",
+			variant: "ocp",
 			componentValues: map[string]map[string]any{
 				"gpu-operator-ocp": {
 					"driver": map[string]any{"enabled": true},
@@ -502,7 +590,29 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			outputDir := t.TempDir()
 
 			rr := recipeResult()
-			if tt.recipeResultOCP {
+			switch tt.variant {
+			case "dra-only":
+				rr = &recipe.RecipeResult{
+					Kind:       "RecipeResult",
+					APIVersion: "aicr.run/v1alpha2",
+					Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+					Criteria: &recipe.Criteria{
+						Service:     "eks",
+						Accelerator: "h100",
+						Intent:      "training",
+					},
+					ComponentRefs: []recipe.ComponentRef{
+						{
+							Name:      "nvidia-dra-driver-gpu",
+							Namespace: "nvidia-dra-driver",
+							Chart:     "nvidia-dra-driver-gpu",
+							Version:   "0.4.1",
+							Source:    "https://helm.ngc.nvidia.com/nvidia",
+						},
+					},
+					DeploymentOrder: []string{"nvidia-dra-driver-gpu"},
+				}
+			case "ocp":
 				rr = &recipe.RecipeResult{
 					Kind:       "RecipeResult",
 					APIVersion: "aicr.run/v1alpha2",
