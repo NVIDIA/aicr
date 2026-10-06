@@ -536,13 +536,23 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     # Wait for the migration to settle on every managed node before
     # touching the plugin. See issue #973.
     #
-    # Two gates skip this wait safely:
-    #   1. The gpu-operator nvidia-driver-daemonset is absent — host-
-    #      managed-driver recipes (GKE COS, OKE, Kind, etc.) run
-    #      gpu-operator with driver.enabled=false, so the DaemonSet is
-    #      never created. Look it up by name across all namespaces so
-    #      we discover it whichever namespace the operator runs in
-    #      (e.g. os-talos moves it to "privileged-gpu-operator").
+    # Who owns the driver is settled at bundle time, before any of the
+    # live-state gates below: an explicit gpu-operator
+    # driver.enabled: false means no migration can ever happen, so this
+    # block renders nothing at all for host-managed recipes (GKE COS,
+    # OKE, Kind, etc.). Deciding that from live state instead is what
+    # stalled those recipes for the full 15-min timeout — the DaemonSet
+    # is never created, yet the operator still labels the nodes it
+    # tracks, so the gates below saw a migration that could not happen.
+    # See #3115.
+    #
+    # The two gates below therefore scope to a driver this bundle may
+    # actually be migrating, and skip the wait safely when:
+    #   1. The gpu-operator nvidia-driver-daemonset is absent — the
+    #      rollout has not started yet (a fresh install, or a
+    #      simulated/KWOK cluster). Look it up by name across all
+    #      namespaces so we discover it whichever namespace the operator
+    #      runs in (e.g. os-talos moves it to "privileged-gpu-operator").
     #   2. No nodes carry nvidia.com/gpu.deploy.driver=true — the
     #      operator's reconciler sets that label on the nodes where it
     #      deploys the driver, driven by its own GFD/NFD GPU detection.
@@ -557,20 +567,20 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     # (driver.enabled: true). Node-label presence (gate 2) is checked
     # unconditionally and takes priority over the DaemonSet lookup for
     # the same reason: the operator applies that label itself, so it
-    # is a naming-agnostic signal of who owns the driver.
-    #
-    # Both gates read live cluster state, and neither is meaningful when
-    # gpu-operator installs no driver at all: the DaemonSet is never
-    # created, yet the operator still labels the nodes it tracks, so the
-    # wait below blocks for its full timeout on a migration that cannot
-    # happen. Driver ownership is already known at bundle time from the
-    # effective gpu-operator values, so probe only when it owns the
-    # driver. See #3115.
+    # is a naming-agnostic signal of who owns the driver — except under
+    # unknown ownership, where no gpu-operator is present to apply it.
     SKIP_RESTART="false"
-{{- if .DriverOperatorManaged }}
+{{- if ne .DriverOwnership "host" }}
+    # "operator" or "unknown" — see ComponentData.DriverOwnership. Under
+    # "unknown" the bundle carries no gpu-operator component at all, so
+    # the node label proves nothing about who owns the driver (nothing in
+    # this bundle applies it) and only an observed DaemonSet does.
+    DRIVER_OWNERSHIP="{{ .DriverOwnership }}"
     DRIVER_DS_NS=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get daemonset -A --no-headers 2>/dev/null | awk '$2 ~ /^nvidia-driver-daemonset(-|$)/ {print $1; exit}')
     MANAGED_NODES=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>/dev/null | wc -l | tr -d ' ')
-    if [[ -z "${DRIVER_DS_NS}" && "${MANAGED_NODES}" -eq 0 ]]; then
+    if [[ "${DRIVER_OWNERSHIP}" == "unknown" && -z "${DRIVER_DS_NS}" ]]; then
+      echo "  no gpu-operator component in this bundle and no gpu-operator driver DaemonSet present (${MANAGED_NODES} node(s) labeled nvidia.com/gpu.deploy.driver=true); driver ownership is external, skipping migration wait"
+    elif [[ -z "${DRIVER_DS_NS}" && "${MANAGED_NODES}" -eq 0 ]]; then
       # Neither signal is observable: either the driver is genuinely
       # host-managed, or the operator hasn't started its rollout yet (e.g.
       # a fresh install, or any cluster where gpu-operator's driver
