@@ -74,10 +74,13 @@ spec:
                   # sshd is installed at runtime. HTTPS and the main component
                   # only (35 MB of indexes down to ~6 MB): plain-HTTP fetches
                   # from ports.ubuntu.com were observed to stall for minutes
-                  # (#3109). ca-certificates ships in the image.
+                  # (#3109). ca-certificates ships in the image. Skipped for an
+                  # AICR_NCCL_RUNTIME_IMAGE override without a deb822 sources file.
                   - |
-                    sed -i -e 's|http://ports.ubuntu.com|https://ports.ubuntu.com|g' \
-                           -e 's|^Components:.*|Components: main|' /etc/apt/sources.list.d/ubuntu.sources &&
+                    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                      sed -i -e 's|http://ports.ubuntu.com|https://ports.ubuntu.com|g' \
+                             -e 's|^Components:.*|Components: main|' /etc/apt/sources.list.d/ubuntu.sources
+                    fi &&
                     apt-get update &&
                     apt-get install -y --no-install-recommends openssh-server &&
                     mkdir -p /var/run/sshd &&
