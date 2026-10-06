@@ -17,7 +17,6 @@ package recipe
 import (
 	"bytes"
 	"context"
-	stderrors "errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -25,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1447,7 +1448,7 @@ func TestLoadComponentRegistry_ReleaseNHeaders(t *testing.T) {
 				if err == nil {
 					t.Fatal("GetComponentRegistryFor() error = nil, want header rejection")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1614,7 +1615,7 @@ func TestLoadRegistry_RejectsKustomizeManifestFiles(t *testing.T) {
 	// mirroring the coherence-check precedent in
 	// componentref_coherence_test.go. Asserting only the message would stay
 	// green if the guard's code silently regressed to ErrCodeInternal.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 }

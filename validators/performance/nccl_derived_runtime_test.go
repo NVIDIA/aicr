@@ -31,6 +31,8 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -289,7 +291,7 @@ func TestDeriveBenchmarkRuntimeBaselineCoversEveryOverriddenPath(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("want InvalidRequest containing %q, got %v", tt.wantErr, err)
 			}
 		})
@@ -398,26 +400,26 @@ func TestResolveBenchmarkRuntimeSource(t *testing.T) {
                     - name: imex-channel
                       resourceClaimName: precreated-imex`, false)
 		_, err := resolve(newCtx(nil), carrier)
-		if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
 		}
 	})
 	t.Run("supplied runtime + delivered runtime is rejected", func(t *testing.T) {
 		_, err := resolve(newCtx(tcpxoRefs(m)), validBenchmarkRuntime)
-		if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) || !strings.Contains(err.Error(), "two owners") {
+		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), "two owners") {
 			t.Fatalf("want ErrCodeInvalidRequest exclusivity, got %v", err)
 		}
 	})
 	t.Run("benchmark profile + delivered runtime is rejected", func(t *testing.T) {
 		_, err := resolveBenchmarkRuntimeSource(newCtx(tcpxoRefs(m)), "", true,
 			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricEFA)
-		if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) || !strings.Contains(err.Error(), perfConstraintNCCLBenchmarkProfile) {
+		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), perfConstraintNCCLBenchmarkProfile) {
 			t.Fatalf("want ErrCodeInvalidRequest profile exclusivity, got %v", err)
 		}
 	})
 	t.Run("delivered but not deployed -> NotFound, no fixture fallback", func(t *testing.T) {
 		_, err := resolve(newCtx(tcpxoRefs(m), nets...), "")
-		if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 			t.Fatalf("want ErrCodeNotFound, got %v", err)
 		}
 	})
@@ -433,7 +435,7 @@ func TestResolveBenchmarkRuntimeSource(t *testing.T) {
 	t.Run("deployed network missing on cluster fails", func(t *testing.T) {
 		objs := append([]runtime.Object{shippedTCPXORuntime(m)}, nets[:7]...)
 		_, err := resolve(newCtx(tcpxoRefs(m), objs...), "")
-		if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) || !strings.Contains(err.Error(), "do not exist on this cluster") {
+		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeNotFound || !strings.Contains(err.Error(), "do not exist on this cluster") {
 			t.Fatalf("want deployed-vs-cluster NotFound, got %v", err)
 		}
 	})
@@ -690,7 +692,7 @@ func TestRuntimeSourceEmittedBeforeDeliveredVerification(t *testing.T) {
 	out := captureStdout(t, func() {
 		_, err = resolveBenchmarkRuntimeSource(ctx, "", false, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricEFA)
 	})
-	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Fatalf("control: want NotFound from the delivered verification, got %v", err)
 	}
 	want := ctrf.ExtraLinePrefix + `{"runtimeSource":"delivered-artifact"}`
@@ -775,7 +777,7 @@ func TestDerivedRuntimeRejectsShippedGPUCountMismatch(t *testing.T) {
 	data["GPU_COUNT_PER_NODE"] = "4" // fixture ships nvidia.com/gpu: "8"
 	_, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
 		variantDefault, fabricEFA, "ns", data, plan)
-	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) || !strings.Contains(err.Error(), "carry 4 GPUs") {
+	if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), "carry 4 GPUs") {
 		t.Fatalf("want InvalidRequest GPU-count mismatch, got %v", err)
 	}
 	if _, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,

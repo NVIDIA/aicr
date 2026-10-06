@@ -43,6 +43,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
@@ -273,7 +275,7 @@ func TestDependencyValidationConsistency(t *testing.T) {
 						}
 						return
 					}
-					if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 						t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 					}
 					var structured *errors.StructuredError
@@ -391,7 +393,7 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 				return
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("TopologicalSort() error = %v, want ErrCodeInvalidRequest", err)
 				}
 				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
@@ -3117,7 +3119,7 @@ func TestRecipeResultNormalizeKind(t *testing.T) {
 			if r.Kind != tt.wantKind {
 				t.Errorf("Kind = %q, want %q", r.Kind, tt.wantKind)
 			}
-			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %v", err, errors.ErrCodeInvalidRequest)
 			}
 		})

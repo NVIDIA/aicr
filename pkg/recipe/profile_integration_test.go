@@ -15,12 +15,13 @@
 package recipe
 
 import (
-	stderrors "errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // The embedded catalog declares no profile, so the unit tests around
@@ -240,7 +241,7 @@ func TestProfileResolutionFailsClosed(t *testing.T) {
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})

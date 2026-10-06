@@ -33,6 +33,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 )
 
@@ -545,7 +546,7 @@ func TestInstalledVersions(t *testing.T) {
 				t.Fatalf("installedVersions() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 					t.Errorf("installedVersions() error code = %v, want CONFLICT", err)
 				}
 				return
@@ -643,7 +644,7 @@ func TestReadOptionsValidation(t *testing.T) {
 			if err == nil {
 				t.Fatal("validate() = nil, want an error")
 			}
-			if !stderrors.Is(err, errors.New(tt.code, "")) {
+			if errorstest.ReportedCode(err) != tt.code {
 				t.Errorf("validate() error = %v, want code %v", err, tt.code)
 			}
 		})
@@ -665,7 +666,7 @@ func TestReadRefusesBeforeContactingAnyCluster(t *testing.T) {
 	if err == nil {
 		t.Fatal("Read() with no deployer = nil, want an error")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("Read() error = %v, want INVALID_REQUEST", err)
 	}
 }
@@ -848,7 +849,7 @@ func TestCombineSurfacesAmbiguityFromEitherReader(t *testing.T) {
 			if err == nil {
 				t.Fatal("combine() = nil, want an error")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 				t.Errorf("combine() error = %v, want CONFLICT", err)
 			}
 			for _, want := range tt.wantErrContains {

@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -230,7 +232,7 @@ func TestCleanupRBACClusterRoleBindingDeleteFailureSurfaced(t *testing.T) {
 	if err == nil {
 		t.Fatal("CleanupRBAC() error = nil, want error when ClusterRoleBinding delete fails")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("CleanupRBAC() error = %v, want ErrCodeInternal", err)
 	}
 	if !stderrors.Is(err, wantCause) {

@@ -15,12 +15,12 @@
 package aicr_test
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // Mirror inventory closes the last SDK parity gap (#2025). Rendering stays in
@@ -36,7 +36,7 @@ func TestMirrorInventory_RejectsNilRecipe(t *testing.T) {
 	if got != nil {
 		t.Errorf("inventory = %+v, want nil on error", got)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -54,7 +54,7 @@ func TestMirrorInventory_RejectsUnresolvedRecipe(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error, got %+v", got)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -75,7 +75,7 @@ func TestMirrorInventory_ToleratesNilOptions(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the nil-recipe error")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -120,7 +120,7 @@ func TestClientBoundary_NilContextIsRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("MirrorInventory accepted a nil context")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "context") {

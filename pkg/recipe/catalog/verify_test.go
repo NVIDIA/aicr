@@ -16,12 +16,13 @@ package catalog_test
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe/catalog"
 )
 
@@ -33,7 +34,7 @@ func TestVerify_BundleNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing bundle, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 }
@@ -70,7 +71,7 @@ func TestVerify_RejectsOverlyBroadIdentityPattern(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for overly broad identity pattern, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }

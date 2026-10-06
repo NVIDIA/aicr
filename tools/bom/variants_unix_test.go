@@ -18,7 +18,6 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +26,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestLoadRecipeSourcesRejectsSymlinkToNonRegularFile(t *testing.T) {
@@ -56,7 +57,7 @@ func TestLoadRecipeSourcesRejectsSymlinkToNonRegularFile(t *testing.T) {
 		if err == nil {
 			t.Fatal("loadRecipeSources read a symlinked FIFO as a recipe source")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want %v", err, errors.ErrCodeInvalidRequest)
 		}
 		if !strings.Contains(err.Error(), "non-regular") {

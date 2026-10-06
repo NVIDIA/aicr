@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -184,7 +186,7 @@ func TestResolveCRDOwners_ContextCancelled(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ResolveCRDOwners on a cancelled context returned no error (owners=%v)", owners)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error code = %v, want ErrCodeTimeout", err)
 	}
 	if owners != nil {

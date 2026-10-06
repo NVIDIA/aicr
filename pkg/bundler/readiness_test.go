@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -198,7 +199,7 @@ func TestCollectComponentReadiness(t *testing.T) {
 			t.Fatalf("New: %v", err)
 		}
 		_, err = b.collectComponentReadiness(context.Background(), rr)
-		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("collectComponentReadiness error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if !strings.Contains(err.Error(), "--system-node-toleration") {

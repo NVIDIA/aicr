@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -429,7 +431,7 @@ func TestCheckSecureAcceleratorAccess_NeitherUsable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure when neither DRA nor device plugin is usable")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 		t.Errorf("error code = %v, want ErrCodeUnavailable", err)
 	}
 	if !strings.Contains(err.Error(), "no usable GPU allocation mechanism") {
@@ -527,7 +529,7 @@ func TestCheckSecureAcceleratorAccess_SkipsForSlinkySlurm(t *testing.T) {
 			if validators.IsSkip(err) {
 				t.Errorf("expected a non-skip error, got skip: %v", err)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -556,7 +558,7 @@ func TestCheckSecureAcceleratorAccess_FailsFastWhenDeadlineTooShortForCleanup(t 
 	if err == nil {
 		t.Fatal("expected fail-fast when the deadline cannot fit the cleanup reserve")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error code = %v, want ErrCodeTimeout", err)
 	}
 	if !strings.Contains(err.Error(), "too short to guarantee cleanup") {
@@ -1684,7 +1686,7 @@ func TestCheckSecureAcceleratorAccess_ForeignNamespaceCollision(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure on a foreign-namespace name collision")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 		t.Errorf("error code = %v, want ErrCodeConflict", err)
 	}
 	if !strings.Contains(err.Error(), "refusing to reuse or delete a foreign namespace") {
@@ -1883,7 +1885,7 @@ func TestCreatePodWhenSAReady(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected timeout when the default SA never appears")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 		if !strings.Contains(err.Error(), "ServiceAccount was not provisioned") {
@@ -1926,7 +1928,7 @@ func TestCreatePodWhenSAReady(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected the expired retry window to fail")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 		if !strings.Contains(err.Error(), "timed out waiting on namespace provisioning") {
@@ -1953,7 +1955,7 @@ func TestCreatePodWhenSAReady(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected the expired retry window to fail")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 		if !strings.Contains(err.Error(), "ServiceAccount was not provisioned") {

@@ -45,6 +45,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -239,7 +240,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		_, err := b.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if attester.called != 0 {
@@ -292,7 +293,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		_, err := newBundler(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -302,7 +303,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		cancel()
 		_, err := newBundler(t).runDeployer(
 			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("runDeployer() error = %v, want ErrCodeTimeout", err)
 		}
 	})
@@ -333,7 +334,7 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 		cancel()
 		attester := &closedWorldTestAttester{}
 		files, err := newBundler(attester).attestBundle(ctx, dir, nil, closedWorldRecipeResult())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
 		}
 		if len(files) != 0 {
@@ -350,7 +351,7 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 		}
 		files, err := newBundler(attester).attestBundle(
 			context.Background(), dir, nil, closedWorldRecipeResult())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
 		}
 		if len(files) != 0 {
@@ -371,7 +372,7 @@ func TestAttestBundle_RequiresChecksums(t *testing.T) {
 
 	files, err := b.attestBundle(
 		context.Background(), t.TempDir(), nil, closedWorldRecipeResult())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("attestBundle() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if len(files) != 0 {
@@ -416,7 +417,7 @@ func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 			_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if _, statErr := os.Stat(filepath.Join(dir, "README.md")); !stderrors.Is(statErr, os.ErrNotExist) {
@@ -435,7 +436,7 @@ func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
 			t.Fatalf("New() error = %v", err)
 		}
 		_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if _, statErr := os.Stat(filepath.Join(dir, "README.md")); statErr != nil {
@@ -1148,7 +1149,7 @@ func TestMake_NilConfigFailsClosed(t *testing.T) {
 	}
 
 	_, err := bundler.Make(t.Context(), recipeResult, t.TempDir())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "construct the bundler with New") {
@@ -1167,7 +1168,7 @@ func TestMake_InvalidConfigFailsClosed(t *testing.T) {
 	}
 
 	_, err := bundler.Make(t.Context(), recipeResult, t.TempDir())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "invalid node label key") {
@@ -1589,7 +1590,7 @@ func TestMake_UndeclaredDependencyErrors(t *testing.T) {
 					original := recipeResult.DeepCopy()
 					outputDir := filepath.Join(t.TempDir(), "bundle")
 					_, err = bundler.Make(t.Context(), recipeResult, outputDir)
-					if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 						t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 					}
 					const missing = `component "a" depends on "phantom", which is not present in this recipe`
@@ -1692,7 +1693,7 @@ func TestMake_BundlersFilter(t *testing.T) {
 				if makeErr == nil {
 					t.Fatal("Make() expected error, got nil")
 				}
-				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(makeErr) != errors.ErrCodeInvalidRequest {
 					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
 				}
 				if !strings.Contains(makeErr.Error(), tt.wantErrText) {
@@ -1971,7 +1972,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 				}
 				// Pin the structured code: both the re-enable rejection and the
 				// unparseable --set value are invalid-request errors.
-				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(makeErr) != errors.ErrCodeInvalidRequest {
 					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
 				}
 				return
@@ -4193,7 +4194,7 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 				t.Fatalf("resolveAgentgatewayExposure() error = %v, wantErr %v", gotErr, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(gotErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(gotErr) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", gotErr)
 				}
 			}
@@ -4330,7 +4331,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for missing manifest path")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		msg := err.Error()
@@ -4365,7 +4366,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for missing manifest path")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		msg := err.Error()
@@ -4709,7 +4710,7 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	if makeErr == nil {
 		t.Fatal("Make() = nil error, want the absent-component --dynamic rejection")
 	}
-	if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(makeErr) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", makeErr)
 	}
 	for _, want := range []string{
@@ -5134,7 +5135,7 @@ func TestExtractComponentValues_FailsClosedOnValueReadError(t *testing.T) {
 	}}}
 
 	_, err = bundler.extractComponentValues(context.Background(), recipeResult)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("extractComponentValues() error = %v, want ErrCodeInternal", err)
 	}
 }
@@ -5168,7 +5169,7 @@ func TestComponentValidationError_PreservesStructuredCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := componentValidationError(tt.input)
-			if !stderrors.Is(got, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(got) != tt.wantCode {
 				t.Fatalf("componentValidationError() = %v, want code %s", got, tt.wantCode)
 			}
 		})

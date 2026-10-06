@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/urfave/cli/v3"
 )
 
@@ -326,7 +326,7 @@ func TestBundleVerifyCmd_IgnoreTLogRequiresKey(t *testing.T) {
 
 			err := cmd.Run(context.Background(), tt.args(dir))
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("Run() error = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), "--insecure-ignore-tlog requires --key") {

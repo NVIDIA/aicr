@@ -15,11 +15,12 @@
 package recipe
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // A nil DataProvider resolves against the embedded catalog, so the cases below
@@ -104,7 +105,7 @@ func TestEnsureDirectOverlayMixinsApplied(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			// An error that does not name the dropped mixins cannot be acted on.
