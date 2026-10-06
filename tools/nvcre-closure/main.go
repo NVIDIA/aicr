@@ -300,7 +300,11 @@ func resolveEntry(entriesDir, entry, platform, arch string) ([]string, []runtime
 			continue
 		}
 		images = append(images, scanImages(b.body)...)
-		fetches = append(fetches, scanRuntimeFetches(b.body)...)
+		blockFetches, err := scanRuntimeFetches(b.body)
+		if err != nil {
+			return nil, nil, err
+		}
+		fetches = append(fetches, blockFetches...)
 
 		for _, ref := range b.libRefs {
 			libImages, libFetches, libErr := readLib(entriesDir, ref)
@@ -329,7 +333,11 @@ func readLib(entriesDir, ref string) ([]string, []runtimeFetch, error) {
 		return nil, nil, errors.WrapWithContext(errors.ErrCodeNotFound, "read lib fragment", err,
 			map[string]interface{}{"ref": ref})
 	}
-	return scanImages(string(data)), scanRuntimeFetches(string(data)), nil
+	fetches, err := scanRuntimeFetches(string(data))
+	if err != nil {
+		return nil, nil, err
+	}
+	return scanImages(string(data)), fetches, nil
 }
 
 // resolveDigest resolves a tag reference to the digest a mirror must copy.

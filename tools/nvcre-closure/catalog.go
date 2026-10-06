@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // Catalog entry files are Go templates, not YAML: `{{ lib "..." }}` directives
@@ -30,15 +32,15 @@ var (
 	// Runtime fetches defeat digest pinning: the bytes arrive at pod start from
 	// outside the image, so a mirrored registry is not sufficient to run the
 	// path disconnected.
-	// Matched in two steps rather than one: requiring the branch flag ahead of
-	// the URL dropped `git clone <url> <dir>` and `git clone <url> -b <ref>`
-	// silently, and an unrecorded fetch makes the closure claim a path runs
-	// disconnected when it does not. A clone with no https remote (an SSH or
-	// local one) is still not recorded; neither is mirrorable by a registry,
-	// so it would be a different finding than this inventory reports.
+	// Matched in steps rather than as one pattern: requiring the branch flag
+	// ahead of the URL dropped `git clone <url> <dir>` and
+	// `git clone <url> -b <ref>` silently, and an unrecorded fetch makes the
+	// closure claim a path runs disconnected when it does not.
 	gitClonePattern = regexp.MustCompile(`git\s+clone\b[^|&;\n]*`)
 	cloneURLPattern = regexp.MustCompile(`https://\S+?\.git\b`)
 	cloneRefPattern = regexp.MustCompile(`(?:-b|--branch)\s+(\S+)`)
+	cloneVarPattern = regexp.MustCompile(`\$\{?(\w+)\}?`)
+	shellAssignment = regexp.MustCompile(`(?m)^\s*(\w+)=(.*)$`)
 	fetchPattern    = regexp.MustCompile(`\b(?:curl|wget)\s+[^|&;]*?(https://\S+)`)
 )
 
@@ -220,15 +222,15 @@ func scanImages(body string) []string {
 }
 
 // scanRuntimeFetches returns the network fetches body performs at pod start.
-func scanRuntimeFetches(body string) []runtimeFetch {
+func scanRuntimeFetches(body string) ([]runtimeFetch, error) {
 	clones := gitClonePattern.FindAllString(body, -1)
 	downloads := fetchPattern.FindAllStringSubmatch(body, -1)
 
 	out := make([]runtimeFetch, 0, len(clones)+len(downloads))
 	for _, c := range clones {
-		url := cloneURLPattern.FindString(c)
-		if url == "" {
-			continue
+		url, err := cloneRemote(c, body)
+		if err != nil {
+			return nil, err
 		}
 		fetch := runtimeFetch{URL: url}
 		if m := cloneRefPattern.FindStringSubmatch(c); m != nil {
@@ -239,7 +241,40 @@ func scanRuntimeFetches(body string) []runtimeFetch {
 	for _, m := range downloads {
 		out = append(out, runtimeFetch{URL: strings.TrimRight(m[1], `"'`)})
 	}
-	return out
+	return out, nil
+}
+
+// cloneRemote resolves the remote a clone command fetches from. A literal URL
+// in the command is read directly; NVCRE v0.6.0 moved it behind a shell
+// variable assigned earlier in the same block, so a variable reference is
+// followed to its assignment and the URL read from there — including out of
+// the `{{ if .SourceRepo }}…{{ else }}<default>{{ end }}` template that makes
+// the remote overridable, since the default is what a run fetches unless the
+// caller overrides it.
+//
+// An unresolvable remote is an error rather than an omission. Dropping the
+// clone would leave the closure stating that the path needs no network at pod
+// start, which is the single question it exists to answer, and a wrong answer
+// there reads as an air-gap clearance the path has not earned.
+func cloneRemote(clone, body string) (string, error) {
+	if url := cloneURLPattern.FindString(clone); url != "" {
+		return url, nil
+	}
+
+	assigned := map[string]string{}
+	for _, m := range shellAssignment.FindAllStringSubmatch(body, -1) {
+		assigned[m[1]] = m[2]
+	}
+	for _, ref := range cloneVarPattern.FindAllStringSubmatch(clone, -1) {
+		if url := cloneURLPattern.FindString(assigned[ref[1]]); url != "" {
+			return url, nil
+		}
+	}
+
+	return "", errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+		"cannot resolve the remote of a git clone performed at pod start; "+
+			"the closure would otherwise omit it and imply the path runs disconnected", nil,
+		map[string]interface{}{"clone": strings.TrimSpace(clone)})
 }
 
 func sortedUnique(in []string) []string {

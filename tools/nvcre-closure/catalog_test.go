@@ -173,13 +173,27 @@ func TestScanRuntimeFetchesCloneForms(t *testing.T) {
 			wantURL: "https://github.com/o/r.git",
 			wantRef: "main",
 		},
+		{
+			// NVCRE v0.6.0's shape. The remote moved into a variable assigned
+			// from a template that makes it overridable, and the clone
+			// references only the variable. Unresolved, this recorded no
+			// fetch at all and the closure read as air-gap clean.
+			name: "remote behind a shell variable assigned from a template",
+			body: `repo="{{ if .SourceRepo }}{{ .SourceRepo }}{{ else }}https://github.com/NVIDIA/Megatron-LM.git{{ end }}"
+git clone --depth 1 -b core_v0.15.2 "$repo" "$tmp"`,
+			wantURL: "https://github.com/NVIDIA/Megatron-LM.git",
+			wantRef: "core_v0.15.2",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := scanRuntimeFetches(tt.body)
+			got, err := scanRuntimeFetches(tt.body)
+			if err != nil {
+				t.Fatalf("scanRuntimeFetches(%q): %v", tt.body, err)
+			}
 			if len(got) != 1 {
 				t.Fatalf("scanRuntimeFetches(%q) = %+v, want exactly one fetch", tt.body, got)
 			}
@@ -188,6 +202,43 @@ func TestScanRuntimeFetchesCloneForms(t *testing.T) {
 			}
 			if got[0].Ref != tt.wantRef {
 				t.Errorf("Ref = %q, want %q", got[0].Ref, tt.wantRef)
+			}
+		})
+	}
+}
+
+// TestScanRuntimeFetchesRejectsUnresolvableClone pins the fail-closed half:
+// a clone whose remote cannot be resolved must stop the derivation rather
+// than drop out of the inventory. An omitted clone is not a smaller closure,
+// it is a closure that says the path needs no network at pod start.
+func TestScanRuntimeFetchesRejectsUnresolvableClone(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "remote in an unassigned variable",
+			body: `git clone --depth 1 "$repo" /src`,
+		},
+		{
+			name: "variable assigned something that is not a git url",
+			body: "repo=/mnt/local/mirror\ngit clone --depth 1 \"$repo\" /src",
+		},
+		{
+			name: "ssh remote",
+			body: "git clone git@github.com:o/r.git /src",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := scanRuntimeFetches(tt.body)
+			if err == nil {
+				t.Fatalf("scanRuntimeFetches(%q) = %+v, want an error", tt.body, got)
 			}
 		})
 	}
