@@ -150,3 +150,51 @@ func TestSortedUnique(t *testing.T) {
 		}
 	}
 }
+
+// TestNormalizeEntries pins the review follow-up on #3087: trimming happened
+// inside the resolution loop, so the scope recorded in the committed closure
+// kept whatever the flag was given.
+func TestNormalizeEntries(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{
+			// The flag value CodeRabbit named: a space after the comma and a
+			// trailing one wrote " b" and "" into the file, and " b" sorted
+			// ahead of "a".
+			name:  "trailing and interior whitespace",
+			input: []string{"training/b", " communication/a", ""},
+			want:  []string{"communication/a", "training/b"},
+		},
+		{
+			name:  "already normalized",
+			input: []string{"communication/a", "training/b"},
+			want:  []string{"communication/a", "training/b"},
+		},
+		{
+			name:  "all empty",
+			input: []string{"", "  "},
+			want:  []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := normalizeEntries(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("normalizeEntries(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("entry %d = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}

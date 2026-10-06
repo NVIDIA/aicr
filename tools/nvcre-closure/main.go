@@ -226,28 +226,40 @@ func cloneEntries(ctx context.Context, tag string) (string, func(), error) {
 	return filepath.Join(dir, entriesPath), cleanup, nil
 }
 
+// normalizeEntries returns the sorted, trimmed, non-empty entry scope. It runs
+// before the scope is recorded rather than during resolution: the closure
+// otherwise keeps the raw flag value, so `-entries "a, b,"` writes " b" and ""
+// into the committed file and the leading space reorders it. Copying also keeps
+// the sort off the caller's slice.
+func normalizeEntries(entries []string) []string {
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			out = append(out, entry)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // derive resolves the in-scope entries against the platform and architecture
 // selectors and digest-resolves every image the resulting blocks reference.
 func derive(ctx context.Context, entriesDir, version, platform, arch string,
 	entries []string,
 ) (*closure, error) {
 
-	sort.Strings(entries)
+	scope := normalizeEntries(entries)
 	doc := &closure{
 		Component:     "nvcre",
 		SourceVersion: version,
 		Platform:      platform,
 		Architecture:  arch,
-		Entries:       entries,
+		Entries:       scope,
 	}
 
 	var images []string
 	var fetches []runtimeFetch
-	for _, entry := range entries {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
+	for _, entry := range scope {
 		imgs, fs, err := resolveEntry(entriesDir, entry, platform, arch)
 		if err != nil {
 			return nil, err
