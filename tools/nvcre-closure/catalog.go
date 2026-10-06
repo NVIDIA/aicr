@@ -252,6 +252,11 @@ func scanRuntimeFetches(body string) ([]runtimeFetch, error) {
 // the remote overridable, since the default is what a run fetches unless the
 // caller overrides it.
 //
+// Only that default is ever recorded. The scan reads catalog templates, never
+// a rendered object, so an operator's sourceRepo override cannot reach the
+// committed closure — which matters because upstream documents that the
+// override may carry credentials in the URL.
+//
 // An unresolvable remote is an error rather than an omission. Dropping the
 // clone would leave the closure stating that the path needs no network at pod
 // start, which is the single question it exists to answer, and a wrong answer
