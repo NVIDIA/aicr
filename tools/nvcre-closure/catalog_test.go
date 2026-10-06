@@ -136,3 +136,59 @@ func TestResolveEntryMissingEntryIsAnError(t *testing.T) {
 		t.Error("resolveEntry on a missing entry = nil error, want failure")
 	}
 }
+
+// TestScanRuntimeFetchesCloneForms pins the review follow-up on #3087: the
+// single-regex form required the branch flag ahead of the URL, so the two
+// other common spellings recorded no fetch at all and the closure implied the
+// path could run from a mirrored registry alone.
+func TestScanRuntimeFetchesCloneForms(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		body    string
+		wantURL string
+		wantRef string
+	}{
+		{
+			name:    "branch flag before the url",
+			body:    "git clone -b v1.2.3 https://github.com/o/r.git /src",
+			wantURL: "https://github.com/o/r.git",
+			wantRef: "v1.2.3",
+		},
+		{
+			name:    "branch flag after the url",
+			body:    "git clone https://github.com/o/r.git -b v1.2.3",
+			wantURL: "https://github.com/o/r.git",
+			wantRef: "v1.2.3",
+		},
+		{
+			name:    "url with a target directory and no ref",
+			body:    "git clone https://github.com/o/r.git /src",
+			wantURL: "https://github.com/o/r.git",
+		},
+		{
+			name:    "long branch flag after the url",
+			body:    "git clone --depth 1 https://github.com/o/r.git --branch main",
+			wantURL: "https://github.com/o/r.git",
+			wantRef: "main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := scanRuntimeFetches(tt.body)
+			if len(got) != 1 {
+				t.Fatalf("scanRuntimeFetches(%q) = %+v, want exactly one fetch", tt.body, got)
+			}
+			if got[0].URL != tt.wantURL {
+				t.Errorf("URL = %q, want %q", got[0].URL, tt.wantURL)
+			}
+			if got[0].Ref != tt.wantRef {
+				t.Errorf("Ref = %q, want %q", got[0].Ref, tt.wantRef)
+			}
+		})
+	}
+}

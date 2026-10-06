@@ -30,7 +30,15 @@ var (
 	// Runtime fetches defeat digest pinning: the bytes arrive at pod start from
 	// outside the image, so a mirrored registry is not sufficient to run the
 	// path disconnected.
-	gitClonePattern = regexp.MustCompile(`git\s+clone\b[^|&;]*?(?:-b|--branch)\s+(\S+)[^|&;]*?(https://\S+?\.git)`)
+	// Matched in two steps rather than one: requiring the branch flag ahead of
+	// the URL dropped `git clone <url> <dir>` and `git clone <url> -b <ref>`
+	// silently, and an unrecorded fetch makes the closure claim a path runs
+	// disconnected when it does not. A clone with no https remote (an SSH or
+	// local one) is still not recorded; neither is mirrorable by a registry,
+	// so it would be a different finding than this inventory reports.
+	gitClonePattern = regexp.MustCompile(`git\s+clone\b[^|&;\n]*`)
+	cloneURLPattern = regexp.MustCompile(`https://\S+?\.git\b`)
+	cloneRefPattern = regexp.MustCompile(`(?:-b|--branch)\s+(\S+)`)
 	fetchPattern    = regexp.MustCompile(`\b(?:curl|wget)\s+[^|&;]*?(https://\S+)`)
 )
 
@@ -213,12 +221,20 @@ func scanImages(body string) []string {
 
 // scanRuntimeFetches returns the network fetches body performs at pod start.
 func scanRuntimeFetches(body string) []runtimeFetch {
-	clones := gitClonePattern.FindAllStringSubmatch(body, -1)
+	clones := gitClonePattern.FindAllString(body, -1)
 	downloads := fetchPattern.FindAllStringSubmatch(body, -1)
 
 	out := make([]runtimeFetch, 0, len(clones)+len(downloads))
-	for _, m := range clones {
-		out = append(out, runtimeFetch{URL: m[2], Ref: m[1]})
+	for _, c := range clones {
+		url := cloneURLPattern.FindString(c)
+		if url == "" {
+			continue
+		}
+		fetch := runtimeFetch{URL: url}
+		if m := cloneRefPattern.FindStringSubmatch(c); m != nil {
+			fetch.Ref = m[1]
+		}
+		out = append(out, fetch)
 	}
 	for _, m := range downloads {
 		out = append(out, runtimeFetch{URL: strings.TrimRight(m[1], `"'`)})
