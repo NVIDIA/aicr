@@ -165,13 +165,17 @@ AICR_CHECK_NS_PREFIXES=(
 # CRD API groups owned by AICR components. Matched exactly against the group
 # of each CRD (`<plural>.<group>`), never as a substring or suffix: other
 # vendors also publish `*.nvidia.com` groups, and deleting a CRD cascades to
-# every CR of that kind (#3097). Each subgroup a chart installs must be listed
-# on its own. New component groups should be added here.
+# every CR of that kind (#3097). Each subgroup must be listed on its own,
+# including groups an operator applies at runtime from its image rather than
+# shipping in its chart (network-operator: nv-ipam, configuration.net). New
+# component groups should be added here.
 AICR_CRD_GROUPS=(
     nfd.k8s-sigs.io
     nvidia.com
     resource.nvidia.com
     maintenance.nvidia.com
+    nv-ipam.nvidia.com
+    configuration.net.nvidia.com
     nvcre.nvidia.com
     mellanox.com
     cert-manager.io

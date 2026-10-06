@@ -54,6 +54,7 @@ if [[ "$1" == "get" ]]; then
             printf '%s\n' \
                 "customresourcedefinition.apiextensions.k8s.io/clusterpolicies.nvidia.com" \
                 "customresourcedefinition.apiextensions.k8s.io/computedomains.resource.nvidia.com" \
+                "customresourcedefinition.apiextensions.k8s.io/ippools.nv-ipam.nvidia.com" \
                 "customresourcedefinition.apiextensions.k8s.io/workloadruns.excalibur.nvidia.com" \
                 "customresourcedefinition.apiextensions.k8s.io/notebooks.kubeflow.org" \
                 "customresourcedefinition.apiextensions.k8s.io/jobsets.jobset.x-k8s.io" \
@@ -186,6 +187,7 @@ rm -f "${KLOG}" "${HLOG}"
 # is never touched, and unowned groups never match (#3097).
 has     "live-crd-nonexcluded-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/clusterpolicies.nvidia.com"
 has     "live-crd-owned-subgroup-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/computedomains.resource.nvidia.com"
+has     "live-crd-operator-applied-group-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/ippools.nv-ipam.nvidia.com"
 has_not "live-crd-unowned-nvidia-group-untouched" "${klog}" "excalibur"
 has_not "live-crd-unowned-kubeflow-group-untouched" "${klog}" "notebooks.kubeflow.org"
 has     "live-crd-jobset-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/jobsets.jobset.x-k8s.io"
