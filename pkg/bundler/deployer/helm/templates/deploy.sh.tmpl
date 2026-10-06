@@ -558,9 +558,18 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     # unconditionally and takes priority over the DaemonSet lookup for
     # the same reason: the operator applies that label itself, so it
     # is a naming-agnostic signal of who owns the driver.
+    #
+    # Both gates read live cluster state, and neither is meaningful when
+    # gpu-operator installs no driver at all: the DaemonSet is never
+    # created, yet the operator still labels the nodes it tracks, so the
+    # wait below blocks for its full timeout on a migration that cannot
+    # happen. Driver ownership is already known at bundle time from the
+    # effective gpu-operator values, so probe only when it owns the
+    # driver. See #3115.
+    SKIP_RESTART="false"
+{{- if .DriverOperatorManaged }}
     DRIVER_DS_NS=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get daemonset -A --no-headers 2>/dev/null | awk '$2 ~ /^nvidia-driver-daemonset(-|$)/ {print $1; exit}')
     MANAGED_NODES=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>/dev/null | wc -l | tr -d ' ')
-    SKIP_RESTART="false"
     if [[ -z "${DRIVER_DS_NS}" && "${MANAGED_NODES}" -eq 0 ]]; then
       # Neither signal is observable: either the driver is genuinely
       # host-managed, or the operator hasn't started its rollout yet (e.g.
@@ -595,6 +604,9 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
       SKIP_RESTART="true"
       NEEDS_RETRY="${NEEDS_RETRY} {{ .Name }}"
     fi
+{{- else }}
+    echo "  gpu-operator manages no driver (driver.enabled=false); skipping migration wait"
+{{- end }}
     # Best-effort mitigation for kubelet DRA plugin registration drift.
     # After uninstall/reinstall, kubelet's fsnotify watcher may not detect new
     # registration sockets. Restarting the plugin DS forces fresh socket creation.

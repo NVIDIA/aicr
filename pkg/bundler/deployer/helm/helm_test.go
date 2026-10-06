@@ -458,7 +458,13 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			},
 		},
 		{
-			name: "host-managed driver also skips the wait without blocking restart",
+			// A host-managed driver renders no probe at all. Both gates read
+			// live state that cannot distinguish "no migration is possible"
+			// from "a migration has not become observable yet": the operator
+			// creates no DaemonSet, yet still labels the nodes it tracks, so
+			// a rendered wait stalls for its full timeout and then fails
+			// closed on a migration that can never run (#3115).
+			name: "host-managed driver renders no migration probe and cannot stall",
 			componentValues: map[string]map[string]any{
 				"gpu-operator": {
 					"driver": map[string]any{"enabled": false},
@@ -466,11 +472,20 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 				"nvidia-dra-driver-gpu": {},
 			},
 			wantContains: []string{
-				`driver DaemonSet not present and no nodes labeled nvidia.com/gpu.deploy.driver=true; skipping migration wait`,
-				`blocking the DRA plugin restart until the migration completes`,
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+				`SKIP_RESTART="false"`,
+				`if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then`,
 			},
 			wantNotContains: []string{
 				`blocking the DRA plugin restart until the driver rollout is detectable`,
+				// No probe, no wait, and nothing that can set the retry
+				// signal for this component. The label name still appears
+				// in the gate preamble and the global retry hint, so match
+				// the probe and the wait rather than the label alone.
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`gpu-driver-upgrade-state`,
+				`--timeout=15m`,
+				`NEEDS_RETRY="${NEEDS_RETRY} nvidia-dra-driver-gpu"`,
 			},
 		},
 		{
