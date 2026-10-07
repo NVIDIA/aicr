@@ -18,11 +18,12 @@
 # driver.
 #
 # WHY THIS IS NOT IN THE RECIPE'S HEALTH CHECK. recipes/checks/nvsentinel
-# asserts these DaemonSets tolerantly, because desiredNumberScheduled is
-# legitimately 0 on any lane that supplies no DCGM host engine. The upstream
+# omits these DaemonSets: it excludes the 3.x one by name and never lists the
+# 4.x one, because both legitimately sit at desiredNumberScheduled 0 on any
+# lane that supplies no DCGM host engine. The upstream
 # gpu-operator chart ships its standalone host engine off (dcgm.enabled: false);
 # AICR's values turn it on (recipes/components/gpu-operator/values.yaml:46-47)
-# and recipes/overlays/kind.yaml turns it off again. Tightening the
+# and recipes/overlays/kind.yaml turns it off again. Asserting them in the
 # shared check would fail those lanes for being correctly configured. This lane
 # SUPPLIES the host engine, so it can demand that the monitor is Ready and
 # connected to it. Same split, and the same reason, as verify-topology.sh.
@@ -38,21 +39,18 @@ source "${SCRIPT_DIR}/setup-gpu-sim.sh"
 
 NVSENTINEL_NAMESPACE="nvsentinel"
 DCGM_VERSION_LABEL="nvsentinel.dgxc.nvidia.com/dcgm.version"
-# The monitor image is pulled after the host engine's and is the larger of the
-# two: its linux/amd64 manifest carries 2,699,785,123 bytes of compressed
-# layers (summed from `regctl manifest get` on 2026-10-06). 196MB of that is
-# layers it shares with the host engine image, already on the node, which
-# leaves 2.5GB. At the 2.7MB/s that DCGM_ROLLOUT_TIMEOUT in setup-gpu-sim.sh
-# also assumes, that is some 935s cold, so the host engine's 900s would fail
-# the lane for being slow rather than wrong. 1200s keeps the margin the host
-# engine's budget has over its own cold pull.
+# No image pull happens in this budget. The monitor image is 2.5GB beyond what
+# it shares with the host engine, and its pull cannot wait for this gate: the
+# labeler stamps the label during install, so the pull would land inside
+# nvsentinel's 600s helm --wait. setup-gpu-sim.sh pre-pulls it in bootstrap
+# under MONITOR_PREPULL_TIMEOUT instead, so by the time install schedules the
+# monitor, the node already has the image.
 #
-# The 2.7MB/s is not a host engine pull. It is one measurement: a 905MB image
-# took 338s on a cold node in a two-node local arm64 kind cluster, and over 16
-# minutes while another large pull was in flight on that node. Four workers
-# pulling at once on one runner, as this lane does, is unmeasured (no run of
-# this lane yet).
-MONITOR_TIMEOUT="${MONITOR_TIMEOUT:-1200}"
+# What is left: the label (normally written during install), scheduling and
+# starting the container from the node's own store, and the first connect one
+# 15s poll later, with room for the kubelet's first four restart back-offs
+# (10s, 20s, 40s, 80s) if a monitor started before its host engine answered.
+MONITOR_TIMEOUT="${MONITOR_TIMEOUT:-300}"
 MONITOR_INTERVAL=10
 # Long enough for the first health check after any init line a read has seen
 # to be logged, even when it hangs. At v1.25.0 it starts one 15s poll after
