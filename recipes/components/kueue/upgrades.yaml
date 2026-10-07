@@ -16,17 +16,21 @@ apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: kueue
 transitions:
-  # from starts at 0.19.0: the 0.18.x to 0.19.x move has its own catalog
-  # note (WaitForPodsReady on by default, the reserved pods name, the
-  # sub-gates of TAS) that no record carries, so those origins resolve to
-  # blocked rather than borrowing this verdict.
+  # from starts at 0.19.3, the release AICR pinned before 0.19.6 and the only
+  # origin assessed. Earlier 0.19.x releases still face the 0.19.1 and 0.19.3
+  # action-required items (LWSImmutableGroupSize, stricter Workload slice-size
+  # validation, the reserved pods resource name), which these steps do not
+  # cover, and 0.18.x has its own catalog note; all of those resolve to
+  # blocked. From 0.19.3 none of the three changes at 0.19.6: their gates
+  # (LWSImmutableGroupSize, TASValidateWorkloadSliceSize,
+  # ReservedResourceNameValidation) have the same defaults at both releases.
   #
   # verdict is manual even though a default install needs nothing: a
   # verdict cannot depend on values, and a cluster whose override disables
   # topology-aware scheduling crash-loops at 0.19.6 without the step below.
   # No UAT lane or KWOK run has exercised this transition, so there is no
   # verifiedBy.
-  - from: ">=0.19.0 <0.19.6"
+  - from: ">=0.19.3 <0.19.6"
     to: "0.19.6"
     verdict: manual
     summary: >-
