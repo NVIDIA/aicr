@@ -68,7 +68,7 @@ Two gaps block a safe split today:
   attested, or published. In v1 the bundle set is the provenance and
   verification unit; class directories can be invoked separately after
   predecessor-class requirements are satisfied, but are not independently
-  *published*. A standalone class artifact with an externally-satisfied
+  *published*. A standalone class artifact with an externally satisfied
   profile-lock contract is follow-up work.
 - Cross-version compatibility between sub-bundles. AICR emits the set and
   its ordering contract; verifying that an ops bundle from one generation
@@ -142,7 +142,7 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   `ops`. The class set is a **closed enumeration in Go**, not
   registry-defined strings: an unenumerated class cannot be pre-validated
   against the catalog, so new classes are added only in code, at a
-  release — cheap to extend, but the constraints are kept.
+  release — cheap to extend, without giving up pre-validation.
 - Omitted means `core`. This default is **availability-safe, not
   classification-safe**: an unclassified component lands in the bundle
   that must always be installed, but a component that *should* be `ops`
@@ -204,7 +204,7 @@ Direction is the floor, not the goal: classification should also
 models exist where no ordering between bundles can be enforced at all. In
 the DGXC Runtime, for example, the runtime and operations stacks deploy as
 separate Argo CD app-of-apps with no enforceable ordering between them.
-The install-core-first contract therefore binds only the sequential helm
+The install-core-first contract therefore binds only the sequential Helm
 `deploy.sh` path. In an externally managed, reconciliation-based model,
 each class converges independently and cut edges are not enforced — but
 convergence is not free: a sync that races a missing prerequisite (such
@@ -218,7 +218,7 @@ supported operating model **given such a retry policy**; note
 this describes externally managed deployments — v1's own generated
 output rejects the Argo/Flux deployers until their class-derived
 identities land (see the support matrix). The v1 bridge for such models:
-operators consume the helm-local bundle set with their own per-class
+operators consume the Helm-local bundle set with their own per-class
 Application/Kustomization wrappers; AICR-generated Argo/Flux split output
 is the deferred follow-up.
 
@@ -230,7 +230,7 @@ compatibility; a live set-identity or preflight protocol remains
 deferred.
 
 The existing catalog violates the rule, and fixing it is a prerequisite.
-Three core components declare dependencyRefs on `kube-prometheus-stack`
+Three core components declare `dependencyRefs` on `kube-prometheus-stack`
 (declared to guarantee the ServiceMonitor CRDs exist before their monitors
 are applied; the prerequisite PR verifies each edge's actual purpose
 before repointing it): `gpu-operator` in 26 declarations (including
@@ -271,8 +271,8 @@ tests.
 
 ### Configurable classes
 
-Operators may disagree with the shipped classification. The design keeps
-the per-component assignment configurable and fixes everything else:
+Operators may disagree with the shipped classification. In v1 the
+per-component assignment is configurable and everything else is fixed:
 
 - **Assignment is configurable through the registry.** `class` is an
   ordinary registry field, so an external `--data` registry can classify
@@ -281,8 +281,8 @@ the per-component assignment configurable and fixes everything else:
   supported way to change the shipped defaults, and it needs no public
   change. A `--data` catalog never runs through AICR's CI, but partition
   validation runs on the resolved recipe at every `--split`, so a custom
-  cut gets the same direction, cohesion, and completeness checks as the
-  embedded one.
+  cut gets the same direction, cycle, cohesion, and all-disabled checks
+  as the embedded one.
 - **Per-invocation cuts are rejected.** A bundle-time flag or
   caller-supplied list that changes class would let two invocations
   against the same catalog place one component in different bundles —
@@ -300,7 +300,9 @@ the per-component assignment configurable and fixes everything else:
 The dependency graph bounds how far any reassignment can go. Because
 `core` must be dependency-closed, moving a component to `ops` forces every
 `core` component that depends on it, directly or transitively, to move
-too. A leaf such as `kube-prometheus-stack` moves freely. Moving
+too; moving one to `core` likewise pulls in its dependencies (see Open
+Questions). A component at the edge of the graph, such as
+`kube-prometheus-stack`, can move without forcing anything else. Moving
 `gpu-operator` to `ops` would drag `nvsentinel` and the rest of the GPU
 stack with it, leaving a `core` too small to mean "runtime". Reassignment
 is practical at narrow points in the graph — the shipped cut is one, made
@@ -311,8 +313,8 @@ label one component at the cut and let every dependent inherit its class.
 This ADR keeps the field explicit. Under derivation, adding a dependency
 edge could silently move a component into another bundle and change its
 owner; with an explicit field, the same edge fails the direction guard
-and the ownership change goes through review. The guard's diagnostic
-should name the components that would have to move, which keeps the
+and the ownership change goes through review. The guard's failure
+names the components that would have to move, which keeps the
 convenience of derivation without its implicitness.
 
 ### Bundle generation with `--split`
@@ -458,8 +460,8 @@ ops). `recipeDigest` plus the class map identify the **resolved recipe and
 its partition**, not the rendered payload: bundle-time inputs (`--set`,
 typed overrides, scheduling settings) land in the extracted component
 values, not in `recipe.yaml`, so two invocations can share a
-`recipeDigest` yet render different class directories. The rendered payload is
-identified by the digest of the root `checksums.txt` — which remains the
+`recipeDigest` yet render different class directories. The rendered
+payload is identified by the digest of the root `checksums.txt` — which remains the
 bundle attestation's in-toto subject, exactly as today; the split changes
 neither contract. The `split.yaml` schema, defined with the
 implementation, restates this scope note alongside the `recipeDigest`
@@ -616,9 +618,8 @@ as a **standalone** deployable rather than one member of a co-deployed set.
 Such an artifact would have to prove that every profile-required component
 it omits is supplied by a compatible sibling bundle — today's whole-union
 validation gives that for free, and a standalone artifact would not. That
-proof obligation,
-not a registry property, is the thing to design against if standalone class
-artifacts are ever pursued.
+proof obligation, not a registry property, is the thing to design against
+if standalone class artifacts are ever pursued.
 
 ## Alternatives Considered
 
@@ -678,7 +679,8 @@ artifacts are ever pursued.
 1. Catalog prerequisite: repoint all core-component
    `kube-prometheus-stack` dependency declarations (overlays and mixins)
    to `prometheus-operator-crds`; add the resolved-graph
-   dependency-direction guard test. After this lands, a targeted
+   dependency-direction guard test, whose failure names the components
+   that would have to move with the offending edge. After this lands, a targeted
    non-split parity regression test pins that the class field and split
    plumbing leave ordinary output byte-identical.
 2. Registry: `class` field, validation of known class names, initial `ops`
@@ -700,8 +702,8 @@ artifacts are ever pursued.
 5. Docs and examples as listed above.
 
 Deferred (explicitly out of the first version): additional classes,
-per-shape class reassignment, standalone verified per-class artifacts
+user-defined class names, per-shape class reassignment, standalone verified per-class artifacts
 (with a class-subset selector such as `--classes`, once the
-externally-satisfied profile-lock contract exists), OCI split output, a
+externally satisfied profile-lock contract exists), OCI split output, a
 deploy-time compatibility protocol, multi-instance components, and a
 registry-level `conflictsWith` declaration.
