@@ -825,8 +825,6 @@ components:
     hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/kai-scheduler/health-check.yaml
-    upgrades:
-      file: components/kai-scheduler/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/kai-scheduler/kai-scheduler
       defaultChart: kai-scheduler
