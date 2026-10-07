@@ -1661,7 +1661,7 @@ the operator moves, then upgrade CRDs first and the operator second:
    every `MariaDB`, `User`, `Database` and `Grant` with them.
 3. Upgrade `mariadb-operator` to `26.10.1` (re-run `install.sh`, `helmfile
    apply`, or sync the release).
-4. For each HA MariaDB patched in step 1, wait until the `26.10.1` data plane
+4. For each HA MariaDB enabled in step 1, wait until the `26.10.1` data plane
    is running before continuing. The `Updated` and `Ready` conditions cannot
    show this: the operator computes both against whatever StatefulSet exists,
    so they are already `True` before `26.10.1` first reconciles the resource,
@@ -1699,7 +1699,7 @@ the operator moves, then upgrade CRDs first and the operator second:
    because before the new template exists they already equal the replica
    count for the old revision. Skip non-HA instances: they have no init or
    agent container, so these waits run to their timeout.
-5. Return the flag to `false` on every instance patched in step 1, so a later
+5. Return the flag to `false` on every instance enabled in step 1, so a later
    operator bump does not update the data plane unattended. With Argo CD or Flux, set it back to `false` in the
    desired configuration, commit it, and sync, only after step 4 passes.
 

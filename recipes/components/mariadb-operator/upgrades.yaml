@@ -205,9 +205,10 @@ transitions:
               Established.
           - id: await-dataplane-template
             description: >-
-              For each HA MariaDB patched in the first step, set
-              IMG=ghcr.io/mariadb-operator/mariadb-operator:26.10.1 and wait
-              until its StatefulSet renders both data-plane containers from it:
+              For each HA MariaDB whose flag was set in git in the first
+              step, set IMG=ghcr.io/mariadb-operator/mariadb-operator:26.10.1
+              and wait until its StatefulSet renders both data-plane
+              containers from it:
               `kubectl wait sts <name> -n <namespace> --timeout=10m
               --for=jsonpath='{.spec.template.spec.initContainers[?(@.name=="init")].image}'=$IMG`,
               then the same with
