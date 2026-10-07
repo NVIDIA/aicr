@@ -38,17 +38,17 @@ fullnameOverride: nvcre
 
 manager:
   image:
-    # Digest of the v0.2.0 multi-arch index, so the qualified bytes are the
+    # Digest of the v0.6.0 multi-arch index, so the qualified bytes are the
     # installed bytes even if the tag is repointed. The chart also exposes a
     # `manager.image.digest` field, but that branch renders repository@digest
-    # and drops the version; the tag@digest form used here keeps v0.2.0
+    # and drops the version; the tag@digest form used here keeps v0.6.0
     # legible in the BOM. The chart's unset-tag default falls back to
     # .Chart.AppVersion, so hard-coding a tag severs the link that kept the
     # controller following the chart: a defaultVersion bump must move this
     # version and digest together, which
     # TestNVCREValuesPinControllerImageByDigest enforces. Re-resolve with:
     #   crane digest ghcr.io/nvidia/cluster-readiness-engine/manager:<version>
-    tag: v0.2.0@sha256:b7f7a71a75353f6b87eccd21cf6ae75963b82939956d5c037f0a1da944b1a4ee
+    tag: v0.6.0@sha256:8008c6f9f7e19b317caf0f91afab06b88027c14d7dd03e4173bd49cd1f3cd27a
 
 # Chart default is true and requires prometheus-operator CRDs. NVCRE is not
 # on any shipped overlay, so keep the monitor off until a recipe that already

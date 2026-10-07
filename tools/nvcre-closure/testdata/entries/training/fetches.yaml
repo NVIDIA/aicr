@@ -1,0 +1,14 @@
+dependencies:
+- apiVersion: trainer.kubeflow.org/v1alpha1
+  kind: TrainingRuntime
+  spec:
+    template:
+      spec:
+        containers:
+        - image: example.invalid/torch:v3
+          name: trainer
+          command:
+          - sh
+          - -c
+          - |
+            git clone --depth 1 -b core_v9.9.9 https://example.invalid/Megatron-LM.git /mnt/w
