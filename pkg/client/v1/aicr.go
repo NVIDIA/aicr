@@ -61,6 +61,9 @@
 //     records, for CI gates detecting stale evidence.
 //   - EmitRecipeEvidence / PublishEvidence — build, then sign and push, a
 //     recipe-evidence bundle.
+//   - RenderCNCFEvidence writes CNCF AI Conformance evidence markdown from a
+//     CTRF report. CollectCNCFEvidence collects behavioral submission
+//     evidence from a live cluster.
 //   - VerifyBinaryAttestation — package-level; prove an aicr binary was
 //     built by NVIDIA CI.
 //
