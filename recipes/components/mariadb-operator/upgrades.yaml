@@ -16,10 +16,12 @@ apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: mariadb-operator
 transitions:
-  # from opens below 26.10.0 rather than at 26.6.0: upstream uses CalVer and
-  # the only 26.x releases below 26.10.0 are 26.3.0 and 26.6.0, so an operator
-  # arriving from either crosses the same boundary. Naming 26.6.0 as the floor
-  # would leave every earlier pin matching nothing.
+  # from opens at 26.3.0 rather than at 26.6.0: upstream uses CalVer, the only
+  # 26.x releases below 26.10.0 are 26.3.0 and 26.6.0, and upstream's 26.3.0
+  # and 26.6.0 guides prescribe this same procedure. It stops there because
+  # 25.x and earlier need what these steps do not cover: UPGRADE_25.10.0.md
+  # runs a replication migration script, and it and UPGRADE_25.08.0.md forbid
+  # skipping intermediate versions. Those origins resolve to blocked.
   #
   # to reaches 26.10.1 because upstream's 26.10.1 guide takes an operator
   # from before 26.10.x straight to 26.10.1 with this same procedure; a
@@ -28,7 +30,7 @@ transitions:
   # verdict is manual, not safe, and carries no verifiedBy: no UAT lane or
   # KWOK run has exercised this transition. The procedure below is transcribed
   # from upstream's own upgrade guide, not vouched for by a run here.
-  - from: "<26.10.0"
+  - from: ">=26.3.0 <26.10.0"
     to: ">=26.10.0 <=26.10.1"
     verdict: manual
     summary: >-
@@ -261,7 +263,7 @@ transitions:
               bump does not update the data plane unattended. Do it in git: a
               live patch alone is undone by the next sync.
     references:
-      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#mariadb-operator-2660-or-earlier-to-26101
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#mariadb-operator-2630-or-2660-to-26101
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.0.md
       - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.0
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md

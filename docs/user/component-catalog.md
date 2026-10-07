@@ -1594,7 +1594,7 @@ also installs `computedomains` from its chart. This pairing has not yet been
 verified on a live OpenShift cluster; see
 [NVIDIA/aicr#2969](https://github.com/NVIDIA/aicr/issues/2969).
 
-### `mariadb-operator`: `26.6.0` (or earlier) to `26.10.1`
+### `mariadb-operator`: `26.3.0` or `26.6.0` to `26.10.1`
 
 `26.10.0` changes the replication configuration rendered by the MariaDB init
 container and the replication liveness probe served by the agent, so the data
@@ -1615,9 +1615,12 @@ kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.n
 
 Fresh installs are unaffected, and so is a cluster already on `26.10.0`:
 upstream's `26.10.1` guide applies only when coming from before `26.10.x`, and
-`26.10.1` adds only optional CRD fields. To migrate an existing cluster from
-`26.6.0` or earlier, set the flag **before** the operator moves, then upgrade
-CRDs first and the operator second:
+`26.10.1` adds only optional CRD fields. A cluster on a `25.x` release or
+earlier is not covered by the steps below: upstream's `25.10.0` guide runs a
+replication migration script, and it and the `25.08.0` guide forbid skipping
+intermediate versions, so follow upstream's guides up to `26.3.0` first. To
+migrate an existing cluster from `26.3.0` or `26.6.0`, set the flag **before**
+the operator moves, then upgrade CRDs first and the operator second:
 
 1. Enable data-plane auto-update on every **HA** MariaDB the operator manages,
    substituting each one's name and namespace. AICR's own accounting database
