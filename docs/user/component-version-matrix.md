@@ -61,7 +61,7 @@ A jump of three or more major or minor versions is also flagged, because the fur
 | `slinky-slurm` | 1.1.0 | **1.2.0** | 1.2.0 | 1.2.0 | 1.2.0 | 1.2.0 | 1.2.0 | 1.2.0 |
 | `slinky-slurm-operator` | 1.1.0 | **1.2.0** | 1.2.0 | 1.2.0 | 1.2.0 | 1.2.0 | 1.2.0 | 1.2.0 |
 | `slinky-slurm-operator-crds` | 1.1.0 | **1.2.0** | 1.2.0 | 1.2.0 | 1.2.0 | 1.2.0 | 1.2.0 | 1.2.0 |
-| `slinky-topograph` | – | – | 0.5.0 | 0.5.0 | **1.0.0** | 1.0.0 | 1.0.0 | 1.0.0 |
+| `slinky-topograph` | – | – | 0.5.0 | 0.5.0 | **1.0.0** | 1.0.0 | 1.0.0 | **1.0.0** |
 | `slurm-accounting-mariadb` | – | – | – | 26.6.0 | 26.6.0 | 26.6.0 | 26.6.0 | 26.6.0 |
 
 **bold** = changed from the previous release. 35 components across 8 releases.
