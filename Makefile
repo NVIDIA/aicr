@@ -639,6 +639,14 @@ bom-pinning-check: ## Verifies every Helm component in the registry has a pinned
 	  -strict \
 	  -skip-helm
 
+.PHONY: nvcre-closure
+nvcre-closure: ## Regenerates the NVCRE workload runtime closure from the registry's pinned chart version
+	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure
+
+.PHONY: nvcre-closure-check
+nvcre-closure-check: ## Verifies the committed NVCRE workload closure matches the pinned chart version
+	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure -check
+
 .PHONY: registry-inventory
 registry-inventory: ## Extracts the build/CI registry & package egress inventory (YAML + Markdown) from structured sources
 	@GOFLAGS="-mod=readonly" go run ./tools/registry-inventory \

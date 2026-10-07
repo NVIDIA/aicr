@@ -1,0 +1,163 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVCRE entered the registry pinned at v0.2.0 and that was the only version
+# AICR shipped before this one, so from is written as the open "<0.6.0" rather
+# than a floor at 0.2.0: nothing below the pin should match no transition, and
+# there is no earlier boundary this record would be claiming to have examined.
+#
+# verdict is manual, and the reason is not the size of the schema change — that
+# is additive and stays on v1alpha1 throughout. It is that NVCRE is an ownsCRDs
+# component whose v0.6.0 behavior change lives entirely in CRD-level CEL, so on
+# a deployer that does not update CRDs the upgrade reports success with the new
+# admission rules absent. That is a step, and safe must not carry steps.
+#
+# No live-cluster evidence exists for this boundary and verifiedBy does not
+# imply any: NVCRE is on no overlay or mixin, so no UAT lane or KWOK run
+# exercises it. The evidence below is offline schema and values comparison plus
+# upstream release notes, which is what this verdict rests on.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: nvcre
+transitions:
+  - from: "<0.6.0"
+    to: "0.6.0"
+    verdict: manual
+    verifiedBy: >-
+      CRD schema diff (helm show crds oci://ghcr.io/nvidia/cluster-readiness-engine
+      --version v0.2.0 vs --version v0.6.0): 624 lines added, 10 removed, and
+      every removed line is description prose on the nodeNames field rather
+      than schema. All seven CRDs are present in both charts, and each keeps a
+      single v1alpha1 version that is both served and storage, so no API
+      version is added, retired, or restaged and no stored object needs
+      conversion. x-kubernetes-validations blocks rise from 46 to 63, of which
+      the transition rules matching has(self.X) == has(oldSelf.X) are 4 on
+      jobs.nvcre.nvidia.com and 5 on workflows.nvcre.nvidia.com and 0 before.
+      Chart values diff (helm show values, same two versions) is purely
+      additive: a pdb block defaulting to enabled false, and honorLabels,
+      labels, interval, and scrapeTimeout under metrics.serviceMonitor. No key
+      AICR sets in recipes/components/nvcre/values.yaml changed meaning.
+      Supply chain rechecked at the new pin: chart
+      sha256:af20cf1d7827a35e60a539ef9f7fc8445e0def61f345e8bdb030afc76f01f6cf
+      and controller index
+      sha256:8008c6f9f7e19b317caf0f91afab06b88027c14d7dd03e4173bd49cd1f3cd27a
+      each carry a cosign signature and SLSA v1.0 provenance verifying against
+      the release workflow identity at refs/tags/v0.6.0; the chart still
+      publishes no SBOM, unchanged from v0.2.0. The workload closure re-derived
+      at v0.6.0 resolves to the same three images at the same digests and the
+      same Megatron-LM fetch as v0.2.0. Upstream release notes for v0.4.0 and
+      v0.6.0 are in references.
+    summary: >-
+      Four minor releases of behavior change, all of it additive in schema, and
+      the part that bites is where it takes effect rather than what it says.
+      v0.6.0 adds CEL transition rules that make nodeHealthMonitor,
+      goodputMeasurement, bandwidthMeasurement, and workloadMetadata immutable
+      in presence as well as in value on Job and Workflow: a patch that adds
+      one of those fields to a live object, or drops it, is rejected at
+      admission where it previously succeeded. Objects already stored are
+      untouched until something updates them. New CEL rules also constrain
+      user-supplied label keys, rejecting the kubernetes.io/ and k8s.io/
+      prefixes along with app.kubernetes.io/managed-by and
+      nvcre.nvidia.com/, so a CR carrying one of those fails its next update
+      rather than at upgrade time. Because all of this is CRD-level CEL on an
+      ownsCRDs component, a deployer that leaves the v0.2.0 CRDs in place
+      finishes the upgrade with the controller running v0.6.0 and none of the
+      new admission behavior present — deployed, Ready, and not actually
+      upgraded. Two further changes are inert on an AICR install rather than
+      absent: the ServiceMonitor now defaults honorLabels to true, which breaks
+      a dashboard built on exported_namespace or exported_job, and the NCCL
+      gauges are renamed to nvcre_nccl_algbw_gbs and nvcre_nccl_busbw_gbs. AICR
+      ships metrics.serviceMonitor.enabled false, so neither reaches an
+      operator who has not opted in, and the old gauge names remain
+      dual-registered at v0.6.0 and are removed in the following minor.
+    reversible: false
+    affectedResources:
+      - group: nvcre.nvidia.com
+        kinds:
+          - Job
+          - Workflow
+          - Certification
+          - WorkloadRun
+    stepsByDeployer:
+      - deployers: [helmfile]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Before upgrading the release, apply the v0.6.0 CRDs directly
+              using the CRD-apply command under "Upgrade, uninstall, and
+              troubleshooting" in docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/cluster-readiness-engine and
+              VERSION=v0.6.0.
+            reason: >-
+              helmfile has no automated CRD-update path for ownsCRDs
+              components, and the whole of this release's admission change is
+              CRD-level CEL. Skipping this leaves the v0.2.0 CRDs in place, so
+              the controller advances to v0.6.0 while the new transition rules
+              never exist — the upgrade is reported successful and the
+              behavior it was for is absent.
+          - id: verify-crd-rules-landed
+            description: >-
+              Confirm the new rules are present by querying for one of them:
+              kubectl get crd jobs.nvcre.nvidia.com -o
+              jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.x-kubernetes-validations[*].rule}'
+              and expect a rule containing
+              has(self.bandwidthMeasurement) == has(oldSelf.bandwidthMeasurement).
+              An empty result, or one with no has(...) == has(oldSelf...)
+              clause, means the v0.2.0 schema is still installed.
+            reason: >-
+              Neither release status nor controller health distinguishes the
+              two states. The version is v1alpha1 and served and storage in
+              both charts, so storedVersions is identical before and after and
+              cannot be used as the signal either. The rule text is the only
+              thing that differs.
+      - steps:
+          - id: verify-crd-rules-landed
+            description: >-
+              After the deployer's own CRD update (flux's spec.upgrade.crds
+              CreateReplace, helm's generated apply-crds.sh, or Argo CD
+              applying the chart's crds/ as ordinary manifests on sync),
+              confirm the new rules actually landed: kubectl get crd
+              jobs.nvcre.nvidia.com -o
+              jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.x-kubernetes-validations[*].rule}'
+              and expect a rule containing
+              has(self.bandwidthMeasurement) == has(oldSelf.bandwidthMeasurement).
+            reason: >-
+              Every deployer here has a CRD path, but each is conditional on
+              configuration that a recipe can switch off, and the failure is
+              silent when it does: the release reports deployed and the
+              controller reports Ready on the v0.6.0 image with the v0.2.0
+              admission rules still in force. Since the API version and its
+              served and storage flags are unchanged, the rule text is the
+              only observable difference.
+          - id: check-live-objects-for-rejected-patches
+            description: >-
+              Before upgrading, list any Job or Workflow that automation
+              patches in place, and confirm nothing adds or removes
+              nodeHealthMonitor, goodputMeasurement, bandwidthMeasurement, or
+              workloadMetadata on an existing object. Move that automation to
+              create-and-replace, or set the field at creation time.
+            reason: >-
+              These four fields were already immutable once set; v0.6.0 closes
+              the absent-to-present and present-to-absent gap. A controller or
+              script that has been toggling one of them on a live object keeps
+              working right up to the CRD update and then starts failing at
+              admission, which surfaces as a rejected patch rather than as
+              anything attributable to the upgrade.
+    references:
+      - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.6.0
+      - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.4.0
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/402
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/412
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/413
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#enabling-nvcre

@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **49**
-- Unique images: **113**
+- Unique images: **116**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -68,7 +68,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 7 |
 | nodewright-operator | helm | nodewright | v0.19.1 | 2 |
-| nvcre | helm | cluster-readiness-engine | v0.2.0 | 1 |
+| nvcre | helm | cluster-readiness-engine | v0.6.0 | 4 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.25.0 | 6 |
@@ -311,7 +311,10 @@ _No images extracted._
 
 ### nvcre
 
-- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.2.0@sha256:b7f7a71a75353f6b87eccd21cf6ae75963b82939956d5c037f0a1da944b1a4ee`
+- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.6.0@sha256:8008c6f9f7e19b317caf0f91afab06b88027c14d7dd03e4173bd49cd1f3cd27a`
+- `nvcr.io/nvidia/pytorch:25.08-py3@sha256:ace9a848c0ae543317e3c4763b6b4248961c47902625abfe3c77a0fb931c50fb`
+- `nvcr.io/nvidia/pytorch:26.01-py3@sha256:38ed2ecb2c16d10677006d73fb0a150855d6ec81db8fc66e800b5ae92741007e`
+- `public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9@sha256:6cabd2c0c37bfa09921912919b747d3b804298966e28e301dbfefc5c7dd3bfe2`
 
 ### nvidia-dra-driver-gpu
 
