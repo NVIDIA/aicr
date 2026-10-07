@@ -203,7 +203,7 @@ func isCountValue(v string) bool { return ctrfCountValue.MatchString(v) }
 // low-cardinality identifier like "customer-prod-cluster". Only codes minted by
 // a check (see validators/deployment/nvidia_smi.go's skipReason* constants) are
 // listed, plus the one pkg/validator mints for a caller-declared skip
-// (skipCheckReasonCode); any other value, including a well-formed but unlisted code, is dropped
+// (SkipCheckReasonCode); any other value, including a well-formed but unlisted code, is dropped
 // fail-closed. A new skip code must be added here in the same change that emits
 // it — same discipline as the key allowlist.
 var ctrfSkipReasons = map[string]struct{}{
