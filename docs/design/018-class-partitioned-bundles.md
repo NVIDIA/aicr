@@ -269,6 +269,52 @@ raw overlay/mixin YAML — and fails on any `core` → `ops` edge or
 class-level cycle, in the spirit of the existing deployment-order guard
 tests.
 
+### Configurable classes
+
+Operators may disagree with the shipped classification. The design keeps
+the per-component assignment configurable and fixes everything else:
+
+- **Assignment is configurable through the registry.** `class` is an
+  ordinary registry field, so an external `--data` registry can classify
+  its own components and reclassify an embedded one by replacing its
+  entry (wholesale, per the external-entry rules above). This is the
+  supported way to change the shipped defaults, and it needs no public
+  change. A `--data` catalog never runs through AICR's CI, but partition
+  validation runs on the resolved recipe at every `--split`, so a custom
+  cut gets the same direction, cohesion, and completeness checks as the
+  embedded one.
+- **Per-invocation cuts are rejected.** A bundle-time flag or
+  caller-supplied list that changes class would let two invocations
+  against the same catalog place one component in different bundles —
+  the cross-call collision this design exists to prevent (see
+  Alternatives Considered). Fixing the assignment per catalog keeps
+  ownership stable.
+- **Overlay-level reassignment is not in v1**, for the same reason;
+  per-shape needs are follow-up work with an explicit migration story.
+- **Class names are closed.** A new name requires extending the Go enum.
+  User-defined names would also need a user-declared ordering between
+  classes, because the only ordering contract today is `core` before
+  `ops`. That is follow-up work once a consumer needs a class AICR does
+  not ship.
+
+The dependency graph bounds how far any reassignment can go. Because
+`core` must be dependency-closed, moving a component to `ops` forces every
+`core` component that depends on it, directly or transitively, to move
+too. A leaf such as `kube-prometheus-stack` moves freely. Moving
+`gpu-operator` to `ops` would drag `nvsentinel` and the rest of the GPU
+stack with it, leaving a `core` too small to mean "runtime". Reassignment
+is practical at narrow points in the graph — the shipped cut is one, made
+narrow by the `prometheus-operator-crds` repoint — not at its foundation.
+
+That narrowness suggests deriving classes instead of declaring them:
+label one component at the cut and let every dependent inherit its class.
+This ADR keeps the field explicit. Under derivation, adding a dependency
+edge could silently move a component into another bundle and change its
+owner; with an explicit field, the same edge fails the direction guard
+and the ownership change goes through review. The guard's diagnostic
+should name the components that would have to move, which keeps the
+convenience of derivation without its implicitness.
+
 ### Bundle generation with `--split`
 
 `aicr bundle` gains a boolean `--split` flag:
