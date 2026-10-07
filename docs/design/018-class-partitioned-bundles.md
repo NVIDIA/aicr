@@ -75,11 +75,13 @@ Two gaps block a safe split today:
   is compatible with a core bundle deployed from another is
   operator-managed, and a deploy-time compatibility protocol is explicit
   follow-up work.
-- Moving installed components between bundles. When a class change moves
-  a component on a cluster with a deployed split, handing its live
-  release from one owner to the other is operator-managed. AICR records
-  the class map in `split.yaml` so the change is auditable, but does not
-  plan, sequence, or perform the handoff.
+- In-place migration of installed components between bundles. When a
+  class change moves a component on a cluster with a deployed split, the
+  supported path is **redeployment** from the newly generated set, not a
+  live handoff of the release from one owner to the other. Redeploying
+  core components can disrupt running workloads, so the operator
+  schedules it. `split.yaml` records the class map so the change stays
+  auditable.
 - OCI output for split generation. Multi-artifact naming and
   partial-publish recovery are undefined; `--split` with OCI output is
   rejected in v1.
@@ -159,8 +161,8 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   v1 (see Configurable classes), and it is not recorded in the resolved
   `RecipeResult` — so `recipe.yaml`, checksums, and attestations of
   ordinary bundles are unchanged. Moving a component between classes is a
-  registry change; the handoff on clusters with a deployed split is
-  operator-managed (see Non-Goals).
+  registry change; clusters with a deployed split pick it up by
+  redeployment (see Non-Goals).
 - The default applies uniformly to **external registry entries** too: an
   external `registry.yaml` entry replaces the embedded entry wholesale, so
   a replacement for an `ops` component that omits `class` lands in `core`.
@@ -690,8 +692,8 @@ if standalone class artifacts are ever pursued.
 - Docs gain the class concept: component catalog (per-component class),
   bundling guide (`--split`, set layout, ordering contract, deployer
   support matrix), and contributor recipe docs (class field, direction
-  rule, and a note that moving an installed component between classes is
-  operator-managed).
+  rule, and a note that a class change on a deployed cluster is applied
+  by redeployment).
 
 ## Implementation Plan
 
