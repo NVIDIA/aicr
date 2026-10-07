@@ -254,8 +254,12 @@ AKS ships `managed-csi` as the default StorageClass; omit `--storage-class` unle
 The Kind leaf runs Topograph with the `dra` provider, which builds Slurm blocks from each node's `nvidia.com/gpu.clique` label and drops nodes that have none. A stock Kind cluster has neither GPUs nor that label, so build the cluster the way the gated [`uat-kind-sim`](../.github/workflows/uat-kind-sim.yaml) lane does, with the lane's own files. Run these from the root of a checkout of this repository:
 
 ```shell
-# Four workers with simulated H100s (mocked NVML plus the NVIDIA device plugin)
-# in two nvidia.com/gpu.clique cliques of two; the control plane stays GPU-free.
+# Four workers with simulated H100s (mocked NVML, the NVIDIA device plugin, and
+# a real DCGM host engine reading the mock) in two nvidia.com/gpu.clique cliques
+# of two; the control plane stays GPU-free. Expect large pulls: the host engine
+# image is 1.9GB (up to 900s to roll out), and the script also pre-pulls
+# NVSentinel's 2.5GB GPU health monitor image (up to 1200s), so that the
+# helmfile apply below does not hit nvsentinel's 600s wait.
 # Needs kind, kubectl, helm 4, and yq (.settings.yaml pins the lane's versions).
 tests/uat/kind/bootstrap-cluster.sh
 kubectl config use-context kind-aicr-uat-slurm
@@ -274,14 +278,17 @@ The config's `spec.bundle.deployment.set` fits the bundle to this cluster; its h
 - `slinkyslurm:nodesets.slinky.replicas=4`: one slurmd pod per worker, so the leaf's `blockSizes: [2]` fills two blocks. The leaf itself ships one replica.
 - `gpuoperator:enabled=false` and `dradriver:enabled=false`: gpu-operator needs the `nvidia` container runtime and the DRA driver needs a driver root on the node, and `kindest/node` has neither, so neither would become ready. `aicr bundle` prints a deprecation notice for these two keys, which the config header explains.
 
-Install the bundle and check the topology, in place of the `deploy.sh` step under [Install Bundle](#install-bundle):
+Install the bundle and check the topology and the GPU health monitors, in place of the `deploy.sh` step under [Install Bundle](#install-bundle):
 
 ```shell
 (cd bundle && helmfile apply --skip-diff-on-install)   # prerequisites: bundle/README.md
 tests/uat/kind/verify-topology.sh
+tests/uat/kind/verify-gpu-health-monitors.sh
 ```
 
 `verify-topology.sh` derives the expected blocks from where the slurmd pods landed and each node's clique label, and compares them with the `topology.conf` Topograph writes, retrying for up to five minutes while Topograph syncs.
+
+`verify-gpu-health-monitors.sh` is the lane's `gpu_health` gate. It fails unless NVSentinel's labeler has stamped `dcgm.version` on every worker and the GPU health monitor is Ready on each and connected to that worker's host engine. It fails rather than skips when the monitors sit at zero pods, because zero pods is what a missing host engine looks like.
 
 Validate the conformance phase only:
 

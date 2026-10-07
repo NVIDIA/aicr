@@ -503,9 +503,11 @@ must equal the deployed runtime's exactly and in order; every selected network
 must exist, as a set comparison), then derives the benchmark runtime: the
 shipped `node` PodTemplateSpec is copied **wholesale — metadata and spec** —
 and only the paths in `benchmarkOwnedNodePaths` (worker `image`, `command`,
-`args`, `resources`, `terminationMessagePolicy`) are re-applied from the MPI
-skeleton (the skeleton's worker sets no `terminationMessagePolicy`, so that
-override clears a shipped value), with volumes and mounts merged additively.
+`args`, `resources`, `terminationMessagePolicy`, `readinessProbe`) are
+re-applied from the MPI skeleton (the skeleton's worker sets no
+`terminationMessagePolicy`, so that override clears a shipped value; its
+`readinessProbe` on sshd port 22 is what the launcher's `dependsOn` waits on),
+with volumes and mounts merged additively.
 An override-path guard
 fails the run if the derived template differs from the shipped one anywhere
 else, and a baseline precondition covers every overridden path — the shipped
@@ -515,7 +517,7 @@ activation), must declare the NCCL fabric env, must request `nvidia.com/gpu`
 with a quantity equal to the target nodes' per-node GPU count (checked at
 apply time, where that count is known, so a deployed runtime whose GPU request
 was removed or changed is failed rather than silently repaired by the
-skeleton's), and must set no `terminationMessagePolicy`; `image` is the one override with no precondition,
+skeleton's), and must set no `terminationMessagePolicy` or `readinessProbe`; `image` is the one override with no precondition,
 since the benchmark binary lives only in the fixture image and the fabric
 plugin is mounted from the host.
 
