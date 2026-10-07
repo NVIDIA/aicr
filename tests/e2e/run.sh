@@ -2152,22 +2152,22 @@ test_oci_bundle() {
   # push (#3108). A failure here is a real failure now.
   msg "--- Test: Bundle as OCI image ---"
   local digest_file="${oci_dir}/.digest"
+  rm -f "$digest_file"
   local bundle_output
+  local bundle_rc=0
   bundle_output=$("${AICR_BIN}" bundle \
     --recipe "$recipe_file" \
     --output "oci://localhost:5001/aicr-e2e-bundle" \
     --deployer helm \
     --plain-http \
-    --image-refs "$digest_file" 2>&1) || true
+    --image-refs "$digest_file" 2>&1) || bundle_rc=$?
 
-  if [ -f "$digest_file" ]; then
+  if [ "$bundle_rc" -eq 0 ] && [ -s "$digest_file" ]; then
     pass "bundle/oci-push"
     msg "Bundle pushed: $(cat "$digest_file")"
-  elif curl -sf http://localhost:5001/v2/aicr-e2e-bundle/tags/list 2>/dev/null | grep -q "dev\|latest"; then
-    pass "bundle/oci-push"
   else
     msg "${bundle_output}"
-    fail "bundle/oci-push" "OCI push to localhost:5001 failed"
+    fail "bundle/oci-push" "OCI push to localhost:5001 failed (exit ${bundle_rc}, digest missing or empty)"
   fi
 }
 
