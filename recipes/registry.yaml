@@ -1150,6 +1150,8 @@ components:
       - mariadboperatorcrds
     healthCheck:
       assertFile: checks/mariadb-operator-crds/health-check.yaml
+    upgrades:
+      file: components/mariadb-operator-crds/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator-crds
