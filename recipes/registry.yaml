@@ -1197,6 +1197,8 @@ components:
       - slurmaccountingmariadb
     healthCheck:
       assertFile: checks/slurm-accounting-mariadb/health-check.yaml
+    upgrades:
+      file: components/slurm-accounting-mariadb/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-cluster

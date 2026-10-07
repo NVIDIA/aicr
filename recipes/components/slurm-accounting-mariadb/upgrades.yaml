@@ -1,0 +1,99 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The accounting-database half of the mariadb-operator record, which owns the
+# procedure. The loader binds a record to one component, so the ordering and
+# the restart that procedure describes are restated here.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: slurm-accounting-mariadb
+transitions:
+  # from starts at 26.3.0 to match the mariadb-operator record, whose 25.x
+  # origins resolve to blocked. It reaches past 26.10.0 because the restart
+  # comes from AICR's digest pin, not from the chart: under AICR's values the
+  # mariadb-cluster chart renders the same MariaDB from 26.6.0 through 26.10.1
+  # apart from its chart label.
+  #
+  # verdict is manual and carries no verifiedBy: no UAT lane or KWOK run has
+  # exercised this transition.
+  - from: ">=26.3.0 <26.10.1"
+    to: "26.10.1"
+    verdict: manual
+    summary: >-
+      The mariadb-cluster chart renders the same MariaDB apart from its chart
+      label, but AICR now pins the accounting server image by digest
+      (mariadb:11.8.8@sha256:...), so the rendered MariaDB's spec.image
+      string changes and the operator
+      restarts the accounting database pod once; slurmdbd loses its database
+      for the length of that restart. The MariaDB resource has to move after
+      the CRDs and the operator reach 26.10.1, which mariadb-operator's
+      steps sequence.
+    precondition: >-
+      A quiet window for Slurm accounting. mariadb-operator's CRD and
+      operator steps are done, or are run first. The commands below
+      assume AICR's defaults, a MariaDB named mariadb in namespace slurm;
+      substitute yours if an override changed them.
+    affectedResources:
+      - group: k8s.mariadb.com
+        kinds:
+          - MariaDB
+    stepsByDeployer:
+      - deployers: [helm, helmfile]
+        steps:
+          - id: upgrade-after-operator
+            description: >-
+              Once mariadb-operator-crds and mariadb-operator are at 26.10.1,
+              re-run this component's install.sh (helm) or helmfile apply
+              (helmfile).
+            reason: >-
+              Renders spec.image with the digest-pinned 11.8.8 image. The
+              engine version does not change, only the image reference, but
+              the operator rolls the pod for any spec.image change.
+          - id: await-accounting-restart
+            description: >-
+              Wait for the pod to run the pinned image, then for it to be
+              ready: `kubectl wait pod mariadb-0 -n slurm --timeout=10m
+              --for=jsonpath='{.spec.containers[?(@.name=="mariadb")].image}'=mariadb:11.8.8@sha256:24e76fcec8c003a0362d0dd53f4806e7e79458d7fdeaf47437760e19496f5a9c`,
+              then `kubectl wait pod mariadb-0 -n slurm --timeout=10m
+              --for=condition=Ready`.
+            reason: >-
+              The operator deletes and recreates mariadb-0 to change its
+              image, so a wait that starts while the pod is gone fails with
+              not found; rerun it. Ready on the new pod is when slurmdbd can
+              reach its database again.
+      - steps:
+          - id: sync-after-operator
+            description: >-
+              Sync or reconcile the slurm-accounting-mariadb release after the
+              mariadb-operator-crds and mariadb-operator releases reach
+              26.10.1.
+            reason: >-
+              Renders spec.image with the digest-pinned 11.8.8 image. The
+              engine version does not change, only the image reference, but
+              the operator rolls the pod for any spec.image change.
+          - id: await-accounting-restart
+            description: >-
+              Wait for the pod to run the pinned image, then for it to be
+              ready: `kubectl wait pod mariadb-0 -n slurm --timeout=10m
+              --for=jsonpath='{.spec.containers[?(@.name=="mariadb")].image}'=mariadb:11.8.8@sha256:24e76fcec8c003a0362d0dd53f4806e7e79458d7fdeaf47437760e19496f5a9c`,
+              then `kubectl wait pod mariadb-0 -n slurm --timeout=10m
+              --for=condition=Ready`.
+            reason: >-
+              The operator deletes and recreates mariadb-0 to change its
+              image, so a wait that starts while the pod is gone fails with
+              not found; rerun it. Ready on the new pod is when slurmdbd can
+              reach its database again.
+    references:
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#mariadb-operator-2630-or-2660-to-26101
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
