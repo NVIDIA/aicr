@@ -486,6 +486,35 @@ will pass to `ValidateState`; it returns nil at once when no skip list is set.
 `ValidateState` run into one `*ctrf.Report` (`pkg/validator/ctrf`) stamped
 with the Client's version, the same combined document `aicr validate` writes.
 
+### CNCF AI Conformance evidence
+
+Two methods produce CNCF AI Conformance evidence, matching
+`aicr validate --evidence-dir` and `aicr validate --cncf-submission`:
+
+- `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
+  submission requirement, plus `index.md`, from a CTRF report such as the one
+  `MergeReports` returns. Skipped checks are omitted, so a report from a run
+  that used `WithValidationSkipChecks` is refused with
+  `ErrCodeInvalidRequest`.
+- `CollectCNCFEvidence(ctx, recipe, opts)` deploys GPU test workloads and
+  captures behavioral evidence under `opts.Dir`. It needs `bash` and
+  `kubectl` on `PATH` and runs for up to 20 minutes. `recipe` is optional.
+  When set, its GPU allocation policy selects the mechanism the DRA and
+  secure-access sections exercise, and an unresolvable policy fails the call.
+  When nil, the collector detects the mechanism from the cluster.
+  `opts.Features` restricts collection, and `CNCFEvidenceFeatures()` lists
+  the accepted names. `opts.NoCluster` reports every section as skipped without
+  touching a cluster.
+
+```go
+err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
+	Dir:      "./cncf-evidence",
+	Features: []string{"dra-support", "gang-scheduling"},
+})
+```
+
+Neither method is in v0.22.0 or earlier.
+
 ## Recipe sources
 
 AICR exposes three production recipe sources; pick one via
@@ -1048,12 +1077,8 @@ derive step rather than the load step.
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
 All five spec sections have a derivation, and every one of them has a
-destination — including `spec.validate.evidence.cncf`, which
-`CNCFEvidenceOptions()` carries even though no `Client` method consumes CNCF
-AI Conformance evidence directly; the caller does (the CLI's
-`validateFlagCombinations`, `cncf.New`, and `runCNCFSubmission`). That mirrors
-`SnapshotOutputOptions()`, which projects `spec.snapshot.output` for the same
-reason: `Client.CollectSnapshot` does not consume it either, but the caller
+destination. `SnapshotOutputOptions()` projects `spec.snapshot.output` even
+though `Client.CollectSnapshot` does not consume it, because the caller
 performing delivery does. Needing `Unwrap()` anywhere is worth reporting — it
 means a derivation is missing, and `pkg/config` carries no stability
 guarantee.
@@ -1254,7 +1279,7 @@ The rest of the section has other homes, and knowing which saves a search:
 | `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState` — `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. The CLI reads them directly to build the validator's own agent Job. |
 | `spec.validate.input.recipe`, `.snapshot`, `spec.validate.execution.failOnError` | `ValidateInputOptions()`, which targets the CALLER rather than `ValidateState` — see below. |
 | `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
-| `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which targets the CALLER — there is no `Client.Emit*` for CNCF AI Conformance evidence — see below. |
+| `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which the caller reads to choose between `RenderCNCFEvidence` and `CollectCNCFEvidence`. See below. |
 
 One inversion worth knowing: config says `noCleanup`, the field says
 `Cleanup`. `ValidateSettings()` flips it, so `noCleanup: true` becomes
@@ -1373,13 +1398,12 @@ if err != nil {
 evidenceDir := cncfOpts.Dir // caller applies its own flag-over-config precedence
 ```
 
-Unlike `EvidenceAttestationOptions()`, this one has no `Client.Emit*`
-counterpart at all: there is no `Client.EmitCNCFEvidence` for
-`CNCFEvidenceOptions()` to feed. The caller — the CLI's
-`validateFlagCombinations`, `cncf.New`, and `runCNCFSubmission` — consumes the
-three fields (`Dir`, `CNCFSubmission`, `Features`) directly, applying its own
-flag-over-config precedence the same way `SnapshotOutputOptions()` and
-`ValidateInputOptions()` already do for their own caller-consumed fields.
+Unlike `EvidenceAttestationOptions()`, it does not map onto one method's
+options. The caller applies its own flag-over-config precedence, the same way
+`SnapshotOutputOptions()` and `ValidateInputOptions()` do, then branches on
+`CNCFSubmission`. When true, it passes `Dir` and `Features` to
+`CollectCNCFEvidence` in `CNCFCollectOptions` and skips `ValidateState`. When
+false, a non-empty `Dir` goes to `RenderCNCFEvidence` after `ValidateState`.
 `CNCFEvidenceOptions()` returns the zero value (never an error) for an absent
 section, and an error only when `spec.validate` is present but malformed.
 

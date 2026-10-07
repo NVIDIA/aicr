@@ -122,7 +122,7 @@ The two gates are deliberately separate: `uat-run.yaml`'s answers "can this lane
 
 `platform=slurm` needs **four schedulable nodes**, and the reservation-bound kind lane has one. A Slurm topology block groups *slurmd pods*, the Slinky operator attaches a hard per-hostname `podAntiAffinity` to every NodeSet pod, so four replicas need four nodes; on single-node nvkind one pod would run and three would stay `Pending`. That is why the leased lane refuses the dispatch outright rather than accepting one it could only fail.
 
-`.github/workflows/uat-kind-sim.yaml` is that lane. Four real kind workers whose GPU capacity is **simulated** (a mocked NVML driver tree plus a device plugin pointed at it), on `ubuntu-latest`:
+`.github/workflows/uat-kind-sim.yaml` is that lane. Four real kind workers whose GPU capacity is **simulated** (a mocked NVML driver tree, a device plugin pointed at it, and a real DCGM host engine reading it), on `ubuntu-latest`:
 
 ```bash
 # Simulated four-worker Slurm lane (issue #2358): no hardware, no lease
@@ -130,6 +130,8 @@ gh workflow run uat-kind-sim.yaml --repo NVIDIA/aicr --ref main
 ```
 
 It is dispatched directly, **not** through `uat-run.yaml`: it holds no lease and consumes no GPU capacity, because simulated devices need no hardware. It stands its cluster up through `tests/uat/kind/bootstrap-cluster.sh`, the same committed script a local reproduction calls, so the CI cluster and the local one cannot drift apart; `tests/uat/kind/bootstrap-cluster_test.sh` fails if a second copy of `kind create cluster` appears in a workflow or under `tests/uat/`. The phases come from the shared `tests/uat/lib/phases.sh` through the `tests/uat/kind/run-sim` shim, which differs from `tests/uat/kind/run` only in what the cluster is: the GPU-node census is enforced (four labelled workers) instead of skipped. No CUJ phase runs, because a Slurm recipe has none.
+
+**It gates NVSentinel's GPU health monitors.** The host engine is what the simulated devices add for NVSentinel: its labeler stamps `dcgm.version` only on nodes with a Ready DCGM pod, and the GPU health monitor DaemonSets select on that label. The lane's `gpu_health` step runs `tests/uat/kind/verify-gpu-health-monitors.sh` after the topology check, and fails unless the monitor is Ready on all four workers and has connected to the host engine; conformance runs only when it passes. It is a lane step rather than a recipe health check because `recipes/checks/nvsentinel` omits the monitor DaemonSets, which legitimately sit at zero pods on any lane with no host engine. Both images are large, and `bootstrap-cluster.sh` pulls both in a local run as in CI. The host engine is a 1.9GB pull from nvcr.io, with up to 900s (`DCGM_ROLLOUT_TIMEOUT` in `tests/uat/kind/setup-gpu-sim.sh`) to roll out. The monitor image adds another 2.5GB, pre-pulled on every worker under `MONITOR_PREPULL_TIMEOUT` (1200s). Bootstrap pulls the monitor image because the labeler stamps the label as soon as it starts, so otherwise the pull would land inside nvsentinel's 600s `helm --wait` during install.
 
 **Its evidence is not corroboration evidence.** The run signs a bundle with its own workflow identity and verifies against it, but that identity is absent from `recipes/evidence/allowlist.yaml` and from `evidence-ingest.yaml`'s `FIRST_PARTY_IDENTITY` (both pin `uat-(aws|gcp|azure|kind).yaml`), so a bundle attesting to simulated devices cannot reach `validation.aicr.run` even by accident.
 

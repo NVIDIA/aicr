@@ -479,6 +479,16 @@ func TestStability_HealthAndEvidence(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria) (*health.Report, error)]((*aicr.Client).ComputeHealth)
 	requireSignature[func(*aicr.Client, []*aicr.PhaseResult) *ctrf.Report]((*aicr.Client).MergeReports)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, []*aicr.PhaseResult, aicr.EvidenceOptions) error]((*aicr.Client).EmitRecipeEvidence)
+	requireSignature[func(*aicr.Client, context.Context, *ctrf.Report, string) error]((*aicr.Client).RenderCNCFEvidence)
+	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, aicr.CNCFCollectOptions) error]((*aicr.Client).CollectCNCFEvidence)
+	requireSignature[func() []string](aicr.CNCFEvidenceFeatures)
+
+	_ = aicr.CNCFCollectOptions{
+		Dir:        "",
+		Features:   []string(nil),
+		Kubeconfig: "",
+		NoCluster:  false,
+	}
 }
 
 // TestStability_Verification pins the consumer-side verification surface: the

@@ -26,7 +26,7 @@ CLI reference.
 1. **Generate recipe** — direct criteria or snapshot-derived infrastructure criteria plus `--platform slurm` resolve a Slurm leaf overlay to `recipe.yaml`.
 2. **Generate bundle** — apply `--system-*` / `--accelerated-*` scheduling and optional `--set` / `--set-json` / `--set-file` on `slinkyslurm`.
 3. **Install** — run `deploy.sh`; cert-manager and Slinky operator come up, then the cluster chart in `slurm`.
-4. **Validate** — run `deployment` (Chainsaw component health) and `conformance` (the AI conformance checks the leaf inherits, plus `slinky-slurm-health` from the login pod, including a conditional `sacct` probe when accounting is enabled). **Performance validation is not supported yet** on slurm leaves.
+4. **Validate** — run `deployment` (Chainsaw component health) and `conformance`: the AI conformance checks the leaf inherits, plus `slinky-slurm-health` from the login pod (including a conditional `sacct` probe when accounting is enabled) and, on cloud leaves, `slinky-slurm-gpu-access` for Slurm GPU access and isolation. **Performance validation is not supported yet** on slurm leaves.
 5. **Smoke job** — `kubectl exec` into the login pod and run `srun` to confirm scheduling.
 
 ## Generate Recipe
@@ -254,8 +254,12 @@ AKS ships `managed-csi` as the default StorageClass; omit `--storage-class` unle
 The Kind leaf runs Topograph with the `dra` provider, which builds Slurm blocks from each node's `nvidia.com/gpu.clique` label and drops nodes that have none. A stock Kind cluster has neither GPUs nor that label, so build the cluster the way the gated [`uat-kind-sim`](../.github/workflows/uat-kind-sim.yaml) lane does, with the lane's own files. Run these from the root of a checkout of this repository:
 
 ```shell
-# Four workers with simulated H100s (mocked NVML plus the NVIDIA device plugin)
-# in two nvidia.com/gpu.clique cliques of two; the control plane stays GPU-free.
+# Four workers with simulated H100s (mocked NVML, the NVIDIA device plugin, and
+# a real DCGM host engine reading the mock) in two nvidia.com/gpu.clique cliques
+# of two; the control plane stays GPU-free. Expect large pulls: the host engine
+# image is 1.9GB (up to 900s to roll out), and the script also pre-pulls
+# NVSentinel's 2.5GB GPU health monitor image (up to 1200s), so that the
+# helmfile apply below does not hit nvsentinel's 600s wait.
 # Needs kind, kubectl, helm 4, and yq (.settings.yaml pins the lane's versions).
 tests/uat/kind/bootstrap-cluster.sh
 kubectl config use-context kind-aicr-uat-slurm
@@ -274,14 +278,17 @@ The config's `spec.bundle.deployment.set` fits the bundle to this cluster; its h
 - `slinkyslurm:nodesets.slinky.replicas=4`: one slurmd pod per worker, so the leaf's `blockSizes: [2]` fills two blocks. The leaf itself ships one replica.
 - `gpuoperator:enabled=false` and `dradriver:enabled=false`: gpu-operator needs the `nvidia` container runtime and the DRA driver needs a driver root on the node, and `kindest/node` has neither, so neither would become ready. `aicr bundle` prints a deprecation notice for these two keys, which the config header explains.
 
-Install the bundle and check the topology, in place of the `deploy.sh` step under [Install Bundle](#install-bundle):
+Install the bundle and check the topology and the GPU health monitors, in place of the `deploy.sh` step under [Install Bundle](#install-bundle):
 
 ```shell
 (cd bundle && helmfile apply --skip-diff-on-install)   # prerequisites: bundle/README.md
 tests/uat/kind/verify-topology.sh
+tests/uat/kind/verify-gpu-health-monitors.sh
 ```
 
 `verify-topology.sh` derives the expected blocks from where the slurmd pods landed and each node's clique label, and compares them with the `topology.conf` Topograph writes, retrying for up to five minutes while Topograph syncs.
+
+`verify-gpu-health-monitors.sh` is the lane's `gpu_health` gate. It fails unless NVSentinel's labeler has stamped `dcgm.version` on every worker and the GPU health monitor is Ready on each and connected to that worker's host engine. It fails rather than skips when the monitors sit at zero pods, because zero pods is what a missing host engine looks like.
 
 Validate the conformance phase only:
 
@@ -334,7 +341,7 @@ Use **deployment** and **conformance**. Performance validation is **not supporte
 | Phase         | What it checks                                                                                                         |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `deployment`  | Component Chainsaw health (CRs, Deployments, DaemonSets ready), including `slinky-slurm` readiness (long retry budget) |
-| `conformance` | The inherited AI conformance checks (`platform-health`, `gpu-operator-health`, `dra-support`, `gang-scheduling`, `secure-accelerator-access`, and the rest; run `yq .validation.conformance.checks recipe.yaml` for the leaf's list) plus `slinky-slurm-health`: controller and node health, bounded `srun`, and completed-job persistence through `sacct` when accounting is enabled. The GB200 and GB300 leaves add `slinky-slurm-imex-channel` |
+| `conformance` | The inherited AI conformance checks (`platform-health`, `gpu-operator-health`, `dra-support`, `gang-scheduling`, and the rest; run `yq .validation.conformance.checks recipe.yaml` for the leaf's list) plus `slinky-slurm-health`: controller and node health, bounded `srun`, and completed-job persistence through `sacct` when accounting is enabled. The cloud leaves add `slinky-slurm-gpu-access`: in a one-GPU Slurm job, `nvidia-smi` lists exactly one GPU and exactly one GPU device node opens; in a job with no GPU allocation on the same node, `nvidia-smi` lists no GPU and no GPU device node opens. `secure-accelerator-access` is inherited but skips on slurm leaves; `slinky-slurm-gpu-access` produces the GPU access and isolation evidence instead. The GB200 and GB300 leaves add `slinky-slurm-imex-channel` |
 | `performance` | **Not supported yet** on slurm leaves                                                                                  |
 | `all`         | Runs deployment → conformance → performance in sequence; the performance step has nothing to run on slurm leaves       |
 

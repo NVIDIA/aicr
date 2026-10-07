@@ -173,6 +173,33 @@ DCGM_PORT=5555
 # a bounded time when the image genuinely cannot be fetched.
 DCGM_ROLLOUT_TIMEOUT="${DCGM_ROLLOUT_TIMEOUT:-900s}"
 
+# NVSentinel's GPU health monitor image, pre-pulled on the workers so that its
+# pull is budgeted here rather than inside nvsentinel's helm --wait. With the
+# host engine Ready from this script, the labeler stamps dcgm.version=4.x as
+# soon as it starts (reconcileAllNodes in labeler/pkg/labeler/labeler.go at
+# v1.25.0), the 4.x monitor DaemonSet schedules on every worker, and helm 4's
+# watcher waits on it with the release's 600s (helmDefaults in
+# pkg/bundler/deployer/helmfile/releases.go). A cold pull does not fit that.
+#
+# A TAG, NOT A DIGEST, deliberately. kubelet's IfNotPresent matches the
+# reference the pod asks for, and the chart renders
+# <repository>:<appVersion>-dcgm-4.x, so a digest-only pull would leave the
+# monitor's own pull still to happen. setup-gpu-sim_test.sh pins this to the
+# nvsentinel section of docs/user/container-images.md, which make bom-docs
+# re-renders from the chart on every nvsentinel bump.
+MONITOR_PREPULL_IMAGE="ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.25.0-dcgm-4.x"
+MONITOR_PREPULL_NAME="gpu-health-monitor-prepull"
+MONITOR_PREPULL_NAMESPACE="kube-system"
+# The linux/amd64 manifest carries 2,699,785,123 bytes of compressed layers
+# (regctl, 2026-10-06), 195,763,288 of them in seven layers shared with the
+# host engine image, which is already on the node by the time this runs. That
+# leaves 2.5GB, some 927s at the 2.7MB/s DCGM_ROLLOUT_TIMEOUT assumes. 1200s
+# keeps the margin the host
+# engine's budget has over its own cold pull. It runs after the host engine
+# rollout, not beside it, so the two pulls do not split the bandwidth the
+# host engine's 900s was sized on.
+MONITOR_PREPULL_TIMEOUT="${MONITOR_PREPULL_TIMEOUT:-1200s}"
+
 # The label the DEVICE PLUGIN selects on. The mock itself does not: chart
 # 0.3.0 ships an empty nodeSelector and runs on every node. Keeping the label
 # off the control plane is what leaves it GPU-free.
@@ -428,6 +455,43 @@ spec:
 MANIFEST
 }
 
+# monitor_prepull_manifest
+#
+# Prints a DaemonSet that holds the monitor image on every worker until its
+# rollout completes. It runs the image's own coreutils sleep (Ubuntu 24.04
+# base, /usr/bin/sleep in its first layer), so the pre-pull needs no second
+# image to pin.
+monitor_prepull_manifest() {
+    cat <<MANIFEST
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ${MONITOR_PREPULL_NAME}
+  namespace: ${MONITOR_PREPULL_NAMESPACE}
+spec:
+  selector:
+    matchLabels:
+      name: ${MONITOR_PREPULL_NAME}
+  template:
+    metadata:
+      labels:
+        name: ${MONITOR_PREPULL_NAME}
+    spec:
+      nodeSelector:
+        ${MOKKA_NODE_TYPE_LABEL}: ${MOKKA_NODE_TYPE}
+      tolerations:
+        - operator: Exists
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: prepull
+          image: ${MONITOR_PREPULL_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/bin/sleep
+            - infinity
+MANIFEST
+}
+
 # --- cluster actions --------------------------------------------------------
 
 # label_workers <context> <cluster>
@@ -502,6 +566,22 @@ install_dcgm() {
         kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" apply -f -
 }
 
+# prepull_monitor_image <context>
+#
+# Pulls the monitor image onto every worker, then removes the DaemonSet. The
+# image stays in each node's containerd store for the chart's IfNotPresent.
+prepull_monitor_image() {
+    local context="$1"
+    echo "pre-pulling the GPU health monitor image ${MONITOR_PREPULL_IMAGE}"
+    monitor_prepull_manifest |
+        kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" apply -f - || return 1
+    kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
+        rollout status "daemonset/${MONITOR_PREPULL_NAME}" \
+        -n "${MONITOR_PREPULL_NAMESPACE}" --timeout="${MONITOR_PREPULL_TIMEOUT}" || return 1
+    kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
+        delete "daemonset/${MONITOR_PREPULL_NAME}" -n "${MONITOR_PREPULL_NAMESPACE}" --wait=false
+}
+
 # verify_capacity <context> <cluster>
 #
 # Fails unless every mapped worker advertises exactly GPUS_PER_WORKER devices.
@@ -568,6 +648,8 @@ main() {
     kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
         rollout status "daemonset/${DCGM_NAME}" \
         -n "${DCGM_NAMESPACE}" --timeout="${DCGM_ROLLOUT_TIMEOUT}" || return 1
+
+    prepull_monitor_image "${context}" || return 1
 
     wait_for_capacity "${context}" "${cluster}" || return 1
     verify_capacity "${context}" "${cluster}"

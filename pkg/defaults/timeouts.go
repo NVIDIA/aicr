@@ -739,7 +739,10 @@ const (
 	NCCLExecutionLockStaleAge = 20 * time.Minute
 
 	// NCCLLauncherPodTimeout is the maximum time to wait for the NCCL launcher pod to be created.
-	NCCLLauncherPodTimeout = 5 * time.Minute
+	// A runtime whose launcher declares a JobSet dependsOn on the workers creates
+	// it only once every worker is Ready, so this also covers worker image pull
+	// and any runtime sshd install. Kept under NCCLExecutionLockStaleAge.
+	NCCLLauncherPodTimeout = 15 * time.Minute
 
 	// NCCLTrainerArchiveDownloadTimeout is the timeout for downloading the Kubeflow Trainer
 	// source archive from GitHub. The archive is several MB, so a longer timeout than the
