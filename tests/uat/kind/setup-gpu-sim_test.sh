@@ -300,7 +300,8 @@ check "the host engine release is the one gpu-operator ships" \
     "${DCGM_VERSION}"
 
 # 2. The pod label is the labeler's selector (--dcgm-app-label, default
-#    nvidia-dcgm). Rename it and the labeler sees no DCGM pod at all.
+#    nvidia-dcgm,nvidia-dcgm-dra at v1.25.0). Rename it and the labeler sees
+#    no DCGM pod at all.
 check "the DaemonSet carries the app label the labeler selects on" "1" \
     "$(dcgm_manifest | grep -cE '^        app: nvidia-dcgm$' | tr -d ' ')"
 
@@ -341,5 +342,35 @@ check "the host engine has its own rollout budget" "own" \
     "$([[ "${DCGM_ROLLOUT_TIMEOUT}" != "${ROLLOUT_TIMEOUT}" ]] && echo own || echo "shared:${DCGM_ROLLOUT_TIMEOUT}")"
 check "the host engine budget exceeds the shared one" "larger" \
     "$([[ "${DCGM_ROLLOUT_TIMEOUT%s}" -gt "${ROLLOUT_TIMEOUT%s}" ]] && echo larger || echo "not-larger:${DCGM_ROLLOUT_TIMEOUT}")"
+
+# --- the GPU health monitor pre-pull ----------------------------------------
+#
+# The pre-pull exists so that the 2.5GB monitor pull happens here and not
+# inside nvsentinel's 600s helm --wait. It only does that if kubelet later
+# finds the image under the exact reference the nvsentinel chart renders, and
+# the chart renders a tag that moves with every nvsentinel bump. The BOM is
+# rendered from that chart (make bom-docs, gated against the registry pin), so
+# a bump that forgets the pre-pull fails here instead of silently pulling a
+# stale image while the real one lands back inside install.
+dcgm_major="${DCGM_VERSION%%.*}"
+bom_monitors="$(sed -n '/^### nvsentinel$/,/^### /p' "${bom}" |
+    sed -nE "s|^- \`(ghcr\.io/nvidia/nvsentinel/gpu-health-monitor:[^\`@]*-dcgm-${dcgm_major}\.x)\`$|\1|p")"
+check "the BOM lists one nvsentinel monitor image for DCGM ${dcgm_major}.x" "1" \
+    "$(grep -c . <<<"${bom_monitors}" | tr -d ' ')"
+check "the pre-pulled image is the one the nvsentinel chart renders" "${bom_monitors}" \
+    "${MONITOR_PREPULL_IMAGE:-unset}"
+check "the pre-pull DaemonSet runs that image" "${MONITOR_PREPULL_IMAGE:-unset}" \
+    "$(monitor_prepull_manifest 2>/dev/null | yq -r '.spec.template.spec.containers[0].image')"
+# Always would re-pull at install and defeat the pre-pull.
+check "the pre-pull leaves the image for IfNotPresent to find" "IfNotPresent" \
+    "$(monitor_prepull_manifest 2>/dev/null | yq -r '.spec.template.spec.containers[0].imagePullPolicy')"
+check "the pre-pull lands on the simulated-GPU workers only" "${MOKKA_NODE_TYPE}" \
+    "$(monitor_prepull_manifest 2>/dev/null | yq -r ".spec.template.spec.nodeSelector[\"${MOKKA_NODE_TYPE_LABEL}\"]")"
+# Same reasoning as the host engine's budget: a 2.5GB cold pull cannot share
+# the device plugin's 300s.
+check "the pre-pull has a budget larger than the shared one" "larger" \
+    "$([[ "${MONITOR_PREPULL_TIMEOUT:-}" =~ ^[0-9]+s$ ]] &&
+        ((${MONITOR_PREPULL_TIMEOUT%s} > ${ROLLOUT_TIMEOUT%s})) &&
+        echo larger || echo "not-larger:${MONITOR_PREPULL_TIMEOUT:-unset}")"
 
 exit "${fail}"
