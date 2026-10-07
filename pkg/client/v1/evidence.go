@@ -16,12 +16,22 @@ package aicr
 
 import (
 	"context"
+	stderrors "errors"
+	"fmt"
+	"log/slog"
+	"path/filepath"
+	"slices"
+	"strings"
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	evattest "github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
+	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // OIDCResolveOptions configures keyless-signing OIDC token resolution for a
@@ -178,4 +188,175 @@ func (c *Client) EmitRecipeEvidence(
 		OIDCResolve:  opts.OIDCResolve,
 	})
 	return err
+}
+
+// CNCFCollectOptions configures Client.CollectCNCFEvidence.
+type CNCFCollectOptions struct {
+	// Dir is the directory the behavioral evidence is written to. Required.
+	// A relative path, like a relative Kubeconfig, resolves against the
+	// caller's working directory.
+	Dir string
+
+	// Features restricts collection to the named features or their aliases
+	// (see CNCFEvidenceFeatures). Empty, or "all", collects every feature.
+	Features []string
+
+	// Kubeconfig is the kubeconfig path the collector's kubectl calls use.
+	// Empty uses kubectl's own resolution (KUBECONFIG, then ~/.kube/config).
+	Kubeconfig string
+
+	// NoCluster runs in test mode. Every section is reported as skipped and
+	// nothing is executed against a cluster.
+	NoCluster bool
+}
+
+// CNCFEvidenceFeatures returns the canonical feature names
+// CNCFCollectOptions.Features accepts, in collection order. Short aliases
+// and "all" are accepted too but not listed. The returned slice is a copy.
+func CNCFEvidenceFeatures() []string {
+	return slices.Clone(cncf.ValidFeatures)
+}
+
+// RenderCNCFEvidence writes CNCF AI Conformance evidence markdown (one file
+// per submission requirement, plus index.md) to dir from a CTRF report,
+// typically the one MergeReports returns. Skipped checks are omitted, and a
+// report with no submission-required checks writes nothing and returns nil.
+// A report from a run that used WithValidationSkipChecks is refused, because
+// the omitted requirements would leave the evidence reading as complete.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client or ctx is nil, dir is empty, or
+//     the report contains a check withheld by WithValidationSkipChecks.
+//   - ErrCodeTimeout when rendering exceeds defaults.EvidenceRenderTimeout.
+//   - ErrCodeInternal when a file cannot be written.
+func (c *Client) RenderCNCFEvidence(ctx context.Context, report *ctrf.Report, dir string) error {
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if dir == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "CNCF evidence directory is required")
+	}
+	if report != nil {
+		for _, t := range report.Results.Tests {
+			if t.Status == ctrf.StatusSkipped && t.Extra["skipReason"] == validator.SkipCheckReasonCode {
+				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"check %q was withheld by WithValidationSkipChecks: the CNCF evidence renderer omits skipped "+
+						"checks, so the rendered evidence would read as a complete submission", t.Name))
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.EvidenceRenderTimeout)
+	defer cancel()
+
+	if err := cncf.New(cncf.WithOutputDir(dir)).Render(ctx, report); err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF evidence rendering failed")
+	}
+	return nil
+}
+
+// CollectCNCFEvidence collects behavioral CNCF AI Conformance submission
+// evidence by deploying GPU test workloads to the cluster and capturing
+// their results under opts.Dir. It runs for up to
+// defaults.CNCFSubmissionTimeout.
+//
+// rec is optional. When non-nil, it must come from this Client, and the GPU
+// allocation policy it configures selects the mechanism the dra-support and
+// secure-access sections exercise. A policy that cannot be resolved fails
+// the call rather than collecting evidence for the wrong mechanism. When
+// nil, the collector detects the mechanism from cluster capabilities.
+//
+// A real run needs bash and kubectl on PATH.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client or ctx is nil, the Client is
+//     closed, opts.Dir is empty, a feature name is unknown, or rec is
+//     unresolved or owned by another Client.
+//   - ErrCodeUnavailable when bash or kubectl is not on PATH.
+//   - ErrCodeTimeout when collection exceeds its deadline.
+//   - ErrCodeCanceled when ctx is canceled during policy resolution.
+//   - The policy resolver's own code when rec's allocation policy is invalid.
+//   - ErrCodeInternal when one or more sections fail.
+func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opts CNCFCollectOptions) error {
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if opts.Dir == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "CNCF evidence directory is required")
+	}
+	for _, f := range opts.Features {
+		if !cncf.IsValidFeature(f) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("unknown feature %q; valid features: %s",
+					f, strings.Join(cncf.ValidFeatures, ", ")))
+		}
+	}
+	if rec != nil {
+		if rec.internal == nil {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"RecipeResult has no internal recipe state: call Client.ResolveRecipe or Client.LoadRecipe to obtain one")
+		}
+		if err := c.assertOwns(rec); err != nil {
+			return err
+		}
+	}
+
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.CNCFSubmissionTimeout)
+	defer cancel()
+
+	var policy string
+	if rec != nil {
+		var err error
+		if policy, err = validatorv1.ResolveGPUAllocationPolicy(ctx, rec.internal); err != nil {
+			const msg = "failed to resolve the GPU allocation policy for CNCF evidence collection"
+			if stderrors.Is(err, context.DeadlineExceeded) || stderrors.Is(err, context.Canceled) {
+				return errors.WrapCtxErr(err, errors.ErrCodeTimeout, msg)
+			}
+			return errors.PropagateOrWrap(err, errors.ErrCodeInternal, msg)
+		}
+	}
+
+	// The collector runs its script from a temporary working directory, so a
+	// relative path would resolve there and be deleted with it.
+	dir, err := filepath.Abs(opts.Dir)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to resolve CNCF evidence directory", err)
+	}
+	kubeconfig := opts.Kubeconfig
+	if kubeconfig != "" {
+		if kubeconfig, err = filepath.Abs(kubeconfig); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to resolve kubeconfig path", err)
+		}
+	}
+
+	slog.Info("starting CNCF submission evidence collection",
+		"evidenceDir", dir, "features", opts.Features, "gpuAllocationPolicy", policy)
+
+	collectorOpts := []cncf.CollectorOption{
+		cncf.WithFeatures(opts.Features),
+		cncf.WithKubeconfig(kubeconfig),
+		cncf.WithNoCluster(opts.NoCluster),
+	}
+	if policy != "" {
+		collectorOpts = append(collectorOpts, cncf.WithAllocationPolicy(policy))
+	}
+	if err := cncf.NewCollector(dir, collectorOpts...).Run(ctx); err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF evidence collection failed")
+	}
+	return nil
 }

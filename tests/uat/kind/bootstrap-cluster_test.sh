@@ -323,10 +323,11 @@ unset -f to_seconds log_budget record_budget kind kubectl helm sleep
 
 # Proves the harness reached every wait, so the comparison below cannot pass
 # on a run that stopped early: kind's create wait, the node Ready wait, the
-# nvml-mock install, the two rollouts, then the capacity poll (its sleeps
-# folded into one entry).
+# nvml-mock install, the device plugin and host engine rollouts, the GPU
+# health monitor pre-pull, then the capacity poll (its sleeps folded into one
+# entry).
 check "the harness observed every bootstrap wait in order" \
-    "kind kubectl helm kubectl kubectl sleep" \
+    "kind kubectl helm kubectl kubectl kubectl sleep" \
     "$(awk '$1 == "sleep" && prev == "sleep" { next } { print $1; prev = $1 }' "${WAIT_LOG}" |
         tr '\n' ' ' | sed 's/ $//')"
 unparsed="$(awk '$2 ~ /^UNPARSED:/ { printf "%s%s %s", sep, $1, substr($2, 10); sep = ", " }' "${WAIT_LOG}")"
