@@ -34,7 +34,7 @@ postCleanup:
 # (validators/conformance/gang_scheduling_check.go), so that queue is a hard
 # dependency of the check, not an optional extra. Workloads are unaffected —
 # Dynamo, for instance, uses the `dynamo` queue created by its own chart.
-# These are the chart's own defaults at v0.17.2; pinning them makes the
+# These are the chart's own defaults at v0.16.9; pinning them makes the
 # dependency visible here instead of relying on an upstream default that
 # could change under a version bump.
 #
