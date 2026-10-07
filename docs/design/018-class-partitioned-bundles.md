@@ -82,9 +82,9 @@ Two gaps block a safe split today:
   initial `ops` components but disable them all, so a split has nothing
   to offer OCP until the `-ocp` monitoring variants are classified;
   `--split` rejects all-disabled classes (see Partition validation).
-- Reassigning a component's class per recipe shape. Class is registry-only
-  and stable; moving a component between classes is a coordinated
-  migration, not a recipe-authoring decision.
+- Reassigning a component's class per recipe shape in v1. Class is
+  registry-only and stable; per-shape reassignment is possible follow-up
+  work (see Configurable classes).
 - Changing recipe resolution, overlay matching, or mixin composition. The
   class is read at bundle time only.
 - A generic dependency solver or per-class release tooling.
@@ -150,8 +150,9 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   signal beyond the external-replacement warning below.
 - The field is named `class`, not `type`, because `componentRefs[].type`
   already means Helm-vs-Kustomize.
-- Class is **registry-only and stable**. Overlays cannot reassign it, and
-  it is not recorded in the resolved `RecipeResult` — so `recipe.yaml`,
+- Class is **registry-only and stable**. Overlays cannot reassign it in
+  v1 (see Configurable classes), and it is not recorded in the resolved
+  `RecipeResult` — so `recipe.yaml`,
   checksums, and attestations of ordinary bundles are unchanged. Moving a
   component between classes is a registry change treated as a coordinated
   migration for clusters with a deployed split.
@@ -289,8 +290,11 @@ per-component assignment is configurable and everything else is fixed:
   the cross-call collision this design exists to prevent (see
   Alternatives Considered). Fixing the assignment per catalog keeps
   ownership stable.
-- **Overlay-level reassignment is not in v1**, for the same reason;
-  per-shape needs are follow-up work with an explicit migration story.
+- **Overlay-level reassignment is deferred, not rejected.** It does not
+  reintroduce the cross-call collision: the class would still be decided
+  by the resolved recipe, so a given recipe always yields the same
+  partition. Its costs are complexity and migration instead (see
+  Alternatives Considered), and no consumer needs it yet.
 - **Class names are closed.** A new name requires extending the Go enum.
   User-defined names would also need a user-declared ordering between
   classes, because the only ordering contract today is `core` before
@@ -643,13 +647,25 @@ if standalone class artifacts are ever pursued.
   classes; override-induced cases are enforced at bundle time) before
   any user runs `bundle`. The class field makes the partition a
   reviewed, stable contract maintained once by component authors.
-- **Per-class emission and overlay-level class reassignment.** Considered
-  and dropped: emitting a single class, or letting overlays reassign class
-  per shape, lets two generation calls disagree about which bundle owns a
-  component — reintroducing across calls the collision that single
-  resolution prevents within one. Atomic complete generation and a
-  registry-only stable class close that hole; per-shape needs, if they
-  materialize, are follow-up work with an explicit migration story.
+- **Per-class emission.** Rejected: emitting a single class lets two
+  generation calls disagree about which bundle owns a component —
+  reintroducing across calls the collision that single resolution
+  prevents within one. Atomic complete generation closes that hole.
+- **Overlay-level class reassignment.** Deferred, not rejected. A given
+  recipe would still always yield the same partition, so the cross-call
+  collision does not arise. The costs are elsewhere:
+  - class would become part of resolution — merged through overlays and
+    mixins and recorded in `recipe.yaml` to stay auditable — undoing the
+    "class is not a criteria axis" simplicity;
+  - regenerating a cluster under different criteria (for example, adding
+    a `platform`) could move a component between bundles, the same
+    coordinated migration as a registry class change; and
+  - no consumer needs it yet: OCP's monitoring split is handled by the
+    separate `-ocp` component variants, each of which carries its own
+    registry class.
+
+  Per-shape needs, if they materialize, are follow-up work with an
+  explicit migration story.
 
 ## Consequences
 
@@ -702,8 +718,9 @@ if standalone class artifacts are ever pursued.
 5. Docs and examples as listed above.
 
 Deferred (explicitly out of the first version): additional classes,
-user-defined class names, per-shape class reassignment, standalone verified per-class artifacts
-(with a class-subset selector such as `--classes`, once the
-externally satisfied profile-lock contract exists), OCI split output, a
-deploy-time compatibility protocol, multi-instance components, and a
-registry-level `conflictsWith` declaration.
+user-defined class names, per-shape (overlay-level) class reassignment,
+standalone verified per-class artifacts (with a class-subset selector
+such as `--classes`, once the externally satisfied profile-lock contract
+exists), OCI split output, a deploy-time compatibility protocol,
+multi-instance components, and a registry-level `conflictsWith`
+declaration.
