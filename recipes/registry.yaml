@@ -1228,6 +1228,8 @@ components:
       - slurm
     healthCheck:
       assertFile: checks/slinky-slurm-operator/health-check.yaml
+    upgrades:
+      file: components/slinky-slurm-operator/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator

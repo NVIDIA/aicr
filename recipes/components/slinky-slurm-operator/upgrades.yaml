@@ -1,0 +1,44 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: slinky-slurm-operator
+transitions:
+  # from starts at 1.2.0, the release AICR pinned before 1.2.2 and the only
+  # one assessed here; an origin below it resolves to blocked.
+  - from: ">=1.2.0 <1.2.2"
+    to: "1.2.2"
+    verdict: safe
+    verifiedBy: >-
+      Upstream changelog CHANGELOG-1.2.md (SlinkyProject/slurm-operator) at
+      v1.2.2: the v1.2.1 and v1.2.2 entries are fixes, one added Chart
+      annotation and a dependency update, with no CRD change and no action
+      required. helm template of 1.2.0 and 1.2.2 with AICR's values differs
+      only in the operator and webhook image tags, the version labels,
+      opt-in metricsSecure plumbing that renders nothing at its false
+      default, an explicit --metrics-addr "0" on the webhook that matches the
+      webhook binary's own 1.2.0 default, added token-review,
+      subject-access-review and secrets/finalizers grants, the webhook
+      ClusterRole and ClusterRoleBinding renamed to the release-scoped
+      slinky-slurm-operator-webhook, and the pods/binding webhook's
+      sideEffects moving from None to NoneOnDryRun.
+    summary: >-
+      Patch releases of fixes. The webhook's ClusterRole and ClusterRoleBinding
+      are replaced under the release-scoped name slinky-slurm-operator-webhook,
+      which Helm and Flux do in place; an Argo CD application without pruning
+      leaves the old slurm-operator-webhook pair behind, unused. Nothing to
+      change on upgrade.
+    references:
+      - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.2/CHANGELOG/CHANGELOG-1.2.md
