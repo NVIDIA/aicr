@@ -97,6 +97,9 @@ STUB
 
 chmod +x "${STUB_DIR}/kubectl" "${STUB_DIR}/helm" "${STUB_DIR}/sleep"
 export PATH="${STUB_DIR}:${PATH}"
+# An inherited (exported) function would shadow a stub here and in the cleanup
+# subshell, and a spoofed `command` would fool the gate below.
+unset -f command kubectl helm sleep
 
 # Hermeticity gate. If the stubs do not shadow the real binaries (mktemp or a
 # stub write failed, e.g. an unwritable temp dir), the live --yes case below
