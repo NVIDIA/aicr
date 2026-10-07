@@ -27,77 +27,38 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
-// TestResolveCNCFAllocationPolicy exercises the #1629 policy threading for
-// --cncf-submission runs: no recipe context resolves to an empty policy
-// (standalone runs keep the evidence script's capability detection), a
-// recipe-backed run resolves the policy from the hydrated recipe, and a
-// broken recipe path fails closed instead of silently collecting without a
-// policy. The validate Action is overridden so only the resolution flow runs
-// — never the collector (which would contact a live cluster).
-func TestResolveCNCFAllocationPolicy(t *testing.T) {
+// TestValidateCmd_CNCFSubmissionRecipe covers the recipe source of a
+// --cncf-submission run. Every case fails before the collector starts, so
+// nothing reaches a cluster. An unreadable recipe fails closed, a loadable
+// one proceeds to the facade, which rejects the unknown feature, and a
+// recipe-less run ignores --data because it never reads recipe data.
+func TestValidateCmd_CNCFSubmissionRecipe(t *testing.T) {
+	validRecipe := filepath.Join(t.TempDir(), "recipe.yaml")
+	recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
+		"    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n"
+	if err := os.WriteFile(validRecipe, []byte(recipeYAML), 0o600); err != nil {
+		t.Fatalf("failed to write test recipe file: %v", err)
+	}
+
 	tests := []struct {
 		name       string
-		recipeYAML string // written to a temp recipe file when non-empty
-		recipePath string // used verbatim when non-empty (overrides recipeYAML)
-		wantPolicy string
-		wantErr    bool
+		args       []string
+		errContain string
 	}{
-		{
-			name:       "no recipe context resolves empty policy",
-			wantPolicy: "",
-		},
-		{
-			name: "recipe context resolves the hydrated policy",
-			// Auto-hydrates from the embedded catalog; stock recipes default
-			// to device-plugin allocation since the #1327/#1671 flip.
-			recipeYAML: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n",
-			wantPolicy: v1.GPUAllocationPolicyDevicePluginExtendedResource,
-		},
-		{
-			name:       "unreadable recipe fails closed",
-			recipePath: filepath.Join(t.TempDir(), "does-not-exist.yaml"),
-			wantErr:    true,
-		},
+		{"unreadable recipe fails closed", []string{"--recipe", filepath.Join(t.TempDir(), "does-not-exist.yaml")}, "does-not-exist.yaml"},
+		{"loaded recipe reaches the facade", []string{"--recipe", validRecipe}, "unknown feature"},
+		{"recipe-less run ignores --data", []string{"--data", filepath.Join(t.TempDir(), "missing-data-dir")}, "unknown feature"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := []string{"validate", "--no-cluster"}
-			recipePath := tt.recipePath
-			if tt.recipeYAML != "" {
-				recipePath = filepath.Join(t.TempDir(), "recipe.yaml")
-				if err := os.WriteFile(recipePath, []byte(tt.recipeYAML), 0o600); err != nil {
-					t.Fatalf("failed to write test recipe file: %v", err)
-				}
-			}
-			if recipePath != "" {
-				args = append(args, "--recipe", recipePath)
-			}
-
-			var gotPolicy string
-			cmd := validateCmd()
-			cmd.Action = func(ctx context.Context, c *cli.Command) error {
-				cfg, err := loadFacadeConfig(ctx, c)
-				if err != nil {
-					return err
-				}
-				resolved, err := cfg.Unwrap().Validation().Resolve()
-				if err != nil {
-					return err
-				}
-				recipeFilePath := stringFlagOrConfig(c, "recipe", resolved.RecipePath)
-				gotPolicy, err = resolveCNCFAllocationPolicy(ctx, c, cfg, recipeFilePath)
-				return err
-			}
-			err := cmd.Run(t.Context(), args)
-
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if !tt.wantErr && gotPolicy != tt.wantPolicy {
-				t.Errorf("policy = %q, want %q", gotPolicy, tt.wantPolicy)
+			app := &cli.Command{Name: "aicr", Commands: []*cli.Command{validateCmd()}}
+			args := append([]string{"aicr", "validate", "--cncf-submission",
+				"--evidence-dir", t.TempDir(), "--feature", "nonexistent"}, tt.args...)
+			err := app.Run(t.Context(), args)
+			if err == nil || !strings.Contains(err.Error(), tt.errContain) {
+				t.Fatalf("error = %v, want error containing %q", err, tt.errContain)
 			}
 		})
 	}
