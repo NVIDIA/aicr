@@ -511,8 +511,8 @@ func TestParseTolerations(t *testing.T) {
 		{
 			name:        "empty key with an explicit empty value",
 			tolerations: []string{"=:NoSchedule"},
-			wantLen:     0,
-			wantErr:     true,
+			wantLen:     1,
+			wantErr:     false,
 		},
 		{
 			name:        "invalid key - contains whitespace",
@@ -569,9 +569,9 @@ func TestParseTolerationsOperator(t *testing.T) {
 			wantEffect:   corev1.TaintEffectNoExecute,
 		},
 		{
-			name:         "explicit empty value uses Equal operator",
+			name:         "explicit empty value uses Exists operator",
 			toleration:   "dedicated=:NoSchedule",
-			wantOperator: corev1.TolerationOpEqual,
+			wantOperator: corev1.TolerationOpExists,
 			wantKey:      "dedicated",
 			wantValue:    "",
 			wantEffect:   corev1.TaintEffectNoSchedule,

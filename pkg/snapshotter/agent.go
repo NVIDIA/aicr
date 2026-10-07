@@ -998,7 +998,7 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, expected key=value:effect or key:effect", t))
 		}
 		effect := parts[1]
-		key, value, hasValue := strings.Cut(parts[0], "=")
+		key, value, _ := strings.Cut(parts[0], "=")
 
 		if err := bundlercfg.ValidateTaintEffect(corev1.TaintEffect(effect)); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
@@ -1009,7 +1009,7 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 			Effect: corev1.TaintEffect(effect),
 		}
 
-		if hasValue {
+		if value != "" {
 			toleration.Operator = corev1.TolerationOpEqual
 			toleration.Value = value
 		} else {
