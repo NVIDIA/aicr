@@ -1131,6 +1131,8 @@ components:
       - slurmoperatorcrds
     healthCheck:
       assertFile: checks/slinky-slurm-operator-crds/health-check.yaml
+    upgrades:
+      file: components/slinky-slurm-operator-crds/upgrades.yaml
     # CRDs-only chart; slinky-slurm-operator consumes the kinds it
     # registers via its templates, so slinky-slurm-operator must
     # declare this chart as a DependencyRef for the DAG-stratified
