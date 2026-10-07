@@ -161,7 +161,7 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:26.04@sha256:3595d7fc4286a33fad0fd853a4063e654287a9c3787437d7937c94ca3f7a804e`
+- `ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
@@ -311,7 +311,7 @@ _No images extracted._
 
 ### nvcre
 
-- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.2.0`
+- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.2.0@sha256:b7f7a71a75353f6b87eccd21cf6ae75963b82939956d5c037f0a1da944b1a4ee`
 
 ### nvidia-dra-driver-gpu
 
@@ -392,15 +392,16 @@ Air-gapped OpenShift deployments must separately mirror the relevant Red Hat cer
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
 
-**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Four known cases, none counted in the `nvsentinel` row's image count above. Three set a `global.*` toggle:
+**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Five known cases, none counted in the `nvsentinel` row's image count above. Four set a `global.*` toggle:
 
 - The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e`) to the `platform-connectors` DaemonSet and `labeler` Deployment. The chart's own default for this init container is `docker.io/bitnamilegacy/os-shell:12-debian-12-r30`, which sits in Bitnami's frozen archive and will never be patched; AICR overrides `global.initContainerImage` in `recipes/components/nvsentinel/values.yaml` to the same digest-pinned busybox it already ships in the `network-operator` and `gpu-operator` manifests.
 - The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.25.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
-- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.25.0`. Its `chown` init container reuses `docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e` — the same overridden `global.initContainerImage` the observability mixin above already pulls in, not a second one. Unlike the other two, this mixin is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not.
+- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.25.0`. Its `chown` init container reuses `docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e` — the same overridden `global.initContainerImage` the observability mixin above already pulls in, not a second one. Unlike the others, this mixin is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not.
+- The [`nvsentinel-slurm-drain-monitor` mixin](component-catalog.md#slurm-drain-monitor) sets `global.slurmDrainMonitor.enabled`, turning on the chart's `slurm-drain-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.25.0`. Every `platform: slurm` recipe composes it, so those recipes deploy this image and the others do not; it is in AICR's weekly image scan for the same reason as the object monitor's.
 
 A recipe composing any of these mixins **with `nvsentinel` still enabled** adds that mixin's images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship none of them.
 
-The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the fourth case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
+The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the fifth case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
 
 | Image | Role |
 |---|---|

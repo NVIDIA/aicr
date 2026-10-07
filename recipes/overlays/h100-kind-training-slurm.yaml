@@ -25,6 +25,9 @@ spec:
   # tests/uat/kind/bootstrap-cluster.sh builds one with simulated GPUs.
   base: h100-kind-training
 
+  mixins:
+    - nvsentinel-slurm-drain-monitor
+
   criteria:
     service: kind
     accelerator: h100
@@ -50,6 +53,16 @@ spec:
   # exist only at the Kubernetes layer (capacity and clique labels from
   # tests/uat/kind/setup-gpu-sim.sh), so Slurm jobs cannot request them.
   componentRefs:
+    # The nvsentinel-slurm-drain-monitor mixin enables the monitor, but a mixin
+    # cannot carry expectedResources, so normal deployment validation verifies
+    # the Deployment from here. To opt out, remove this entry together with the
+    # mixin; removing only the mixin fails deployment validation.
+    - name: nvsentinel
+      type: Helm
+      expectedResources:
+        - kind: Deployment
+          namespace: nvsentinel
+          name: slurm-drain-monitor
     - name: mariadb-operator-crds
       type: Helm
       valuesFile: components/mariadb-operator-crds/values.yaml

@@ -541,6 +541,42 @@ Upstream's validated-platform list covers DGX and OCI hardware and does **not** 
 
 **Escalation needs the datastore.** The "three events in one hour escalates" behavior lives in the Health Events Analyzer, which needs MongoDB. Without it ([#1014](https://github.com/NVIDIA/aicr/issues/1014)) only fatal events surface.
 
+### Slurm Drain Monitor
+
+When a Slurm health check drains a node, that fact stays inside Slurm: Kubernetes, NVSentinel and AICR's health checks all keep reporting the node as fine. `slurmDrainMonitor` closes that gap on Slinky clusters. The Slinky NodeSet controller mirrors each Slurm node's state onto its worker pod as a `SlurmNodeStateDrain` pod condition, whose message is the Slurm drain reason; the monitor reads it and turns a matching reason into an NVSentinel health event.
+
+**It is on for every `platform: slurm` recipe.** Each `platform: slurm` leaf composes the `nvsentinel-slurm-drain-monitor` mixin (`recipes/mixins/nvsentinel-slurm-drain-monitor.yaml`), and no other leaf does; `TestSlurmDrainMonitorScopedToSlurmLeaves` keeps it that way. A generated Slurm recipe carries `global.slurmDrainMonitor.enabled: true` on its `nvsentinel` componentRef, and lists the monitor's Deployment in that componentRef's `expectedResources` (see below).
+
+**Opting out.** Supply a copy of the Slurm leaf through `--data` with both the `nvsentinel-slurm-drain-monitor` entry removed from `spec.mixins` and the `nvsentinel` `componentRefs` entry removed (it carries only the `expectedResources` line), and use the same `--data` directory for `aicr recipe`, `aicr bundle` and `aicr validate`. A bundle-time `--set nv-sentinel:global.slurmDrainMonitor.enabled=false` on its own is **not** a supported opt-out: it stops the monitor from rendering, but `aicr validate` resolves values from the recipe rather than the bundle, so deployment validation still requires the `slurm-drain-monitor` Deployment and fails. `TestSlurmDrainMonitorOptOutLeaf` covers the supported path.
+
+**It requires `slinky-slurm`.** The monitor watches worker pods in the namespace `slinky-slurm` deploys to (`slurm`), and only `slinky-slurm` creates them. `CheckNVSentinelSlurmDrainMonitorRequiresSlinky` blocks the bundle when the mixin is used on a recipe without `slinky-slurm`, with it disabled, or with the two namespaces out of step, because each of those deploys a monitor that runs and never sees a pod.
+
+**What it reads.** Worker pods are selected with `app.kubernetes.io/name=slurmd,app.kubernetes.io/component=worker`, the labels the Slinky slurm-operator's NodeSet controller sets. Those labels, the condition name, and the `.Message` field were verified against the slurm-operator v1.2.0 source this repo pins; `TestSlurmDrainMonitorSelectorPinnedToVerifiedSlinkyVersion` fails when `slinky-slurm-operator` is bumped, so the next version is re-checked rather than assumed. A reason that carries several causes (`a; b`) is split on `; `, and each part is matched on its own.
+
+| Drain reason | Result |
+|---|---|
+| Starts with `[HC]` (a Slurm health check) | Health event `SlurmHealthCheck`, `isFatal: false`, recommended action `CONTACT_SUPPORT` |
+| Starts with `slurm-operator:` (Slinky's own drains) | Ignored, so routine operator activity creates no noise |
+| Anything else | Ignored |
+| The drain clears, or the pod is deleted | Recovery (healthy) event |
+
+**Events are `STORE_ONLY`, and today that means you will not see them in Kubernetes.** NVSentinel's platform connector creates no node condition and no Kubernetes Event for a `STORE_ONLY` event, and AICR deploys no NVSentinel datastore to keep it. The only trace is the platform connector's log:
+
+```shell
+kubectl -n nvsentinel logs daemonset/platform-connectors --all-containers | \
+  grep '"agent":"slurm-drain-monitor"'
+```
+
+This is deliberate while pattern coverage is validated: the chart's default, `EXECUTE_REMEDIATION`, would surface each drain as a node Event (the pattern is non-fatal, so not a node condition), and would also hand it to any remediation a recipe enables later. Nothing remediates today (see [Enabling Remediation](#enabling-remediation)), but that coupling is why the step is left to you. To change it, pass `--set nv-sentinel:slurm-drain-monitor.processingStrategy=EXECUTE_REMEDIATION` at bundle time; the mixin owns that path, so setting it in a leaf overlay is rejected as a collision.
+
+**Privileges.** The chart grants a ClusterRole with `pods: get, list, watch` and nothing else; the monitor cannot cordon, evict, label or delete anything. The grant is cluster-wide, but the monitor limits its own watch to the `slurm` namespace. It runs as a single-replica Deployment on a system node and publishes through the platform-connector socket, which exists on every node because `platform-connectors` tolerates every taint.
+
+**Failure behavior.** The monitor keeps no state beyond memory. If it restarts while a node is drained, it publishes the drain again; if a drain clears while it is down, no recovery event is sent. A platform connector that rejects an event (an unauthenticated service account, for example) is logged and not retried.
+
+**Deployment validation checks it.** Each `platform: slurm` leaf lists the `slurm-drain-monitor` Deployment in `nvsentinel`'s `expectedResources`, so `aicr validate --phase deployment` fails when the monitor is missing or not ready, alongside the registry's `nvsentinel` check. A deeper check, which also asserts that the monitor's RBAC is read-only, runs on demand with `make check-health COMPONENT=nvsentinel-slurm-drain-monitor`; it is not registry-linked, because the registry's `nvsentinel` check runs on every recipe and the monitor exists only on Slurm ones.
+
+**Qualification.** `make nvsentinel-slurm-drain-monitor-e2e` bundles the `h100-kind-training-slurm` recipe, installs NVSentinel on Kind, and drives the drain condition on pods carrying Slinky's worker labels: an `[HC]` drain reaches the platform connector as `STORE_ONLY` with no node condition or Event, the undrain publishes the recovery, and `slurm-operator:` and unmatched drains publish nothing. It simulates Slinky's condition write rather than running slurmctld. The real path was also exercised by hand, with `scontrol update NodeName=<node> State=DRAIN Reason="..."` and `State=RESUME` against a full bundle: on Kind with simulated H100s from the `uat-kind-sim` setup, and on EKS with two `p5.48xlarge` nodes, where Slurm reported `gpu:h100:8`. In both, `[HC]` and compound `[HC]` reasons published and recovered, unmatched reasons published nothing, and Slinky itself immediately reverted a `slurm-operator:` drain it had not issued. A drain raised by a Slurm health-check program reacting to a real GPU fault has not been exercised.
+
 ### Enabling Remediation
 
 **AICR does not support enabling remediation today, and this page does not carry a recipe for it.** [#1014](https://github.com/NVIDIA/aicr/issues/1014) tracks adding a qualified opt-in path.
