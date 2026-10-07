@@ -184,6 +184,20 @@ git clone --depth 1 -b core_v0.15.2 "$repo" "$tmp"`,
 			wantURL: "https://github.com/NVIDIA/Megatron-LM.git",
 			wantRef: "core_v0.15.2",
 		},
+		{
+			// git accepts an https remote with no .git suffix. Before the
+			// fallback pattern this resolved to nothing, and since an
+			// unresolvable remote fails closed, a valid clone halted the
+			// derivation instead of being recorded.
+			name:    "remote without a .git suffix",
+			body:    "git clone https://github.com/o/r /src",
+			wantURL: "https://github.com/o/r",
+		},
+		{
+			name:    "suffixless remote behind a variable",
+			body:    "repo=https://github.com/o/r\ngit clone \"$repo\" /src",
+			wantURL: "https://github.com/o/r",
+		},
 	}
 
 	for _, tt := range tests {
@@ -241,5 +255,35 @@ func TestScanRuntimeFetchesRejectsUnresolvableClone(t *testing.T) {
 				t.Fatalf("scanRuntimeFetches(%q) = %+v, want an error", tt.body, got)
 			}
 		})
+	}
+}
+
+// TestScanRuntimeFetchesReassignedRemote pins the second half of the
+// preceding-assignments rule: a block that reassigns the remote between two
+// clones must record both repositories. Resolving against the whole body gave
+// each clone the last assignment, and because the refs then matched too,
+// dedupeFetches collapsed the pair and the first repository left no trace.
+func TestScanRuntimeFetchesReassignedRemote(t *testing.T) {
+	t.Parallel()
+
+	body := `repo=https://github.com/o/first.git
+git clone --depth 1 -b v1 "$repo" /src/first
+repo=https://github.com/o/second.git
+git clone --depth 1 -b v1 "$repo" /src/second`
+
+	got, err := scanRuntimeFetches(body)
+	if err != nil {
+		t.Fatalf("scanRuntimeFetches: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d fetches (%+v), want 2", len(got), got)
+	}
+	for i, want := range []string{
+		"https://github.com/o/first.git",
+		"https://github.com/o/second.git",
+	} {
+		if got[i].URL != want {
+			t.Errorf("fetch %d URL = %q, want %q", i, got[i].URL, want)
+		}
 	}
 }

@@ -37,11 +37,18 @@ var (
 	// `git clone <url> -b <ref>` silently, and an unrecorded fetch makes the
 	// closure claim a path runs disconnected when it does not.
 	gitClonePattern = regexp.MustCompile(`git\s+clone\b[^|&;\n]*`)
-	cloneURLPattern = regexp.MustCompile(`https://\S+?\.git\b`)
-	cloneRefPattern = regexp.MustCompile(`(?:-b|--branch)\s+(\S+)`)
-	cloneVarPattern = regexp.MustCompile(`\$\{?(\w+)\}?`)
-	shellAssignment = regexp.MustCompile(`(?m)^\s*(\w+)=(.*)$`)
-	fetchPattern    = regexp.MustCompile(`\b(?:curl|wget)\s+[^|&;]*?(https://\S+)`)
+	// Two URL patterns, tried in this order. The .git form is matched first and
+	// non-greedily because the remote is often immediately followed by template
+	// syntax with no separator (`…Megatron-LM.git{{ end }}"`), which a
+	// token-greedy match would swallow. git also accepts an https remote with
+	// no .git suffix, so the fallback takes the whole token, stopping at the
+	// quote and brace characters that delimit it in catalog sources.
+	cloneGitURLPattern = regexp.MustCompile(`https://\S+?\.git\b`)
+	cloneAnyURLPattern = regexp.MustCompile(`https://[^\s"'{}]+`)
+	cloneRefPattern    = regexp.MustCompile(`(?:-b|--branch)\s+(\S+)`)
+	cloneVarPattern    = regexp.MustCompile(`\$\{?(\w+)\}?`)
+	shellAssignment    = regexp.MustCompile(`(?m)^\s*(\w+)=(.*)$`)
+	fetchPattern       = regexp.MustCompile(`\b(?:curl|wget)\s+[^|&;]*?(https://\S+)`)
 )
 
 // Constraint fields a `when:` clause can scope a block by.
@@ -223,12 +230,18 @@ func scanImages(body string) []string {
 
 // scanRuntimeFetches returns the network fetches body performs at pod start.
 func scanRuntimeFetches(body string) ([]runtimeFetch, error) {
-	clones := gitClonePattern.FindAllString(body, -1)
+	clones := gitClonePattern.FindAllStringIndex(body, -1)
 	downloads := fetchPattern.FindAllStringSubmatch(body, -1)
 
 	out := make([]runtimeFetch, 0, len(clones)+len(downloads))
-	for _, c := range clones {
-		url, err := cloneRemote(c, body)
+	for _, loc := range clones {
+		c := body[loc[0]:loc[1]]
+		// Only what precedes this clone can have assigned its variables. Given
+		// the whole body, two clones in a block that reassigns the remote
+		// between them both resolve to the last assignment, so the earlier
+		// repository drops out of the closure — and silently, because
+		// dedupeFetches then collapses the pair.
+		url, err := cloneRemote(c, body[:loc[0]])
 		if err != nil {
 			return nil, err
 		}
@@ -261,17 +274,19 @@ func scanRuntimeFetches(body string) ([]runtimeFetch, error) {
 // clone would leave the closure stating that the path needs no network at pod
 // start, which is the single question it exists to answer, and a wrong answer
 // there reads as an air-gap clearance the path has not earned.
-func cloneRemote(clone, body string) (string, error) {
-	if url := cloneURLPattern.FindString(clone); url != "" {
+func cloneRemote(clone, preceding string) (string, error) {
+	if url := httpsRemote(clone); url != "" {
 		return url, nil
 	}
 
+	// Last assignment wins, matching the shell: the map is built in source
+	// order over the text before this clone.
 	assigned := map[string]string{}
-	for _, m := range shellAssignment.FindAllStringSubmatch(body, -1) {
+	for _, m := range shellAssignment.FindAllStringSubmatch(preceding, -1) {
 		assigned[m[1]] = m[2]
 	}
 	for _, ref := range cloneVarPattern.FindAllStringSubmatch(clone, -1) {
-		if url := cloneURLPattern.FindString(assigned[ref[1]]); url != "" {
+		if url := httpsRemote(assigned[ref[1]]); url != "" {
 			return url, nil
 		}
 	}
@@ -280,6 +295,14 @@ func cloneRemote(clone, body string) (string, error) {
 		"cannot resolve the remote of a git clone performed at pod start; "+
 			"the closure would otherwise omit it and imply the path runs disconnected", nil,
 		map[string]interface{}{"clone": strings.TrimSpace(clone)})
+}
+
+// httpsRemote returns the https remote in s, preferring a .git-suffixed match.
+func httpsRemote(s string) string {
+	if url := cloneGitURLPattern.FindString(s); url != "" {
+		return url
+	}
+	return cloneAnyURLPattern.FindString(s)
 }
 
 func sortedUnique(in []string) []string {
