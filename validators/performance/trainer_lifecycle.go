@@ -1879,7 +1879,7 @@ func isCRDEstablished(obj *unstructured.Unstructured) bool {
 		if !ok {
 			continue
 		}
-		if condition["type"] == "Established" && condition["status"] == "True" {
+		if condition["type"] == "Established" && condition["status"] == conditionStatusTrue {
 			return true
 		}
 	}
