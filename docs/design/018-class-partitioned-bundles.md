@@ -75,6 +75,11 @@ Two gaps block a safe split today:
   is compatible with a core bundle deployed from another is
   operator-managed, and a deploy-time compatibility protocol is explicit
   follow-up work.
+- Moving installed components between bundles. When a class change moves
+  a component on a cluster with a deployed split, handing its live
+  release from one owner to the other is operator-managed. AICR records
+  the class map in `split.yaml` so the change is auditable, but does not
+  plan, sequence, or perform the handoff.
 - OCI output for split generation. Multi-artifact naming and
   partial-publish recovery are undefined; `--split` with OCI output is
   rejected in v1.
@@ -152,10 +157,10 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   already means Helm-vs-Kustomize.
 - Class is **registry-only and stable**. Overlays cannot reassign it in
   v1 (see Configurable classes), and it is not recorded in the resolved
-  `RecipeResult` — so `recipe.yaml`,
-  checksums, and attestations of ordinary bundles are unchanged. Moving a
-  component between classes is a registry change treated as a coordinated
-  migration for clusters with a deployed split.
+  `RecipeResult` — so `recipe.yaml`, checksums, and attestations of
+  ordinary bundles are unchanged. Moving a component between classes is a
+  registry change; the handoff on clusters with a deployed split is
+  operator-managed (see Non-Goals).
 - The default applies uniformly to **external registry entries** too: an
   external `registry.yaml` entry replaces the embedded entry wholesale, so
   a replacement for an `ops` component that omits `class` lands in `core`.
@@ -294,8 +299,8 @@ per-component assignment is configurable and everything else is fixed:
 - **Overlay-level reassignment is deferred, not rejected.** It does not
   reintroduce the cross-call collision: the class would still be decided
   by the resolved recipe, so a given recipe always yields the same
-  partition. Its costs are complexity and migration instead (see
-  Alternatives Considered), and no consumer needs it yet.
+  partition. Its cost is complexity instead (see Alternatives
+  Considered), and no consumer needs it yet.
 - **Class names are closed.** A new name requires extending the Go enum.
   User-defined names would also need a user-declared ordering between
   classes, because the only ordering contract today is `core` before
@@ -475,7 +480,7 @@ field.
 Because class lives only in the registry, the same `recipeDigest` can
 partition differently after a registry classification change. The
 per-component class map in `split.yaml` is deliberately the record that
-disambiguates, and a set generated before a class migration stays
+disambiguates, and a set generated before a class change stays
 auditable through its recorded map.
 
 `split.yaml` lets an operator answer "which recipe and partition produced
@@ -654,19 +659,15 @@ if standalone class artifacts are ever pursued.
   prevents within one. Atomic complete generation closes that hole.
 - **Overlay-level class reassignment.** Deferred, not rejected. A given
   recipe would still always yield the same partition, so the cross-call
-  collision does not arise. The costs are elsewhere:
+  collision does not arise. The reasons to wait are elsewhere:
   - class would become part of resolution — merged through overlays and
     mixins and recorded in `recipe.yaml` to stay auditable — undoing the
-    "class is not a criteria axis" simplicity;
-  - regenerating a cluster under different criteria (for example, adding
-    a `platform`) could move a component between bundles, the same
-    coordinated migration as a registry class change; and
+    "class is not a criteria axis" simplicity; and
   - no consumer needs it yet: the closest candidate, OCP's monitoring
     stack, already uses separate `-ocp` component variants, which can
     carry their own registry class.
 
-  Per-shape needs, if they materialize, are follow-up work with an
-  explicit migration story.
+  Per-shape needs, if they materialize, are follow-up work.
 
 ## Consequences
 
@@ -689,7 +690,8 @@ if standalone class artifacts are ever pursued.
 - Docs gain the class concept: component catalog (per-component class),
   bundling guide (`--split`, set layout, ordering contract, deployer
   support matrix), and contributor recipe docs (class field, direction
-  rule, migration note for class moves).
+  rule, and a note that moving an installed component between classes is
+  operator-managed).
 
 ## Implementation Plan
 
