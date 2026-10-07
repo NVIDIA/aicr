@@ -1,0 +1,105 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: kueue
+transitions:
+  # from starts at 0.19.0: the 0.18.x to 0.19.x move has its own catalog
+  # note (WaitForPodsReady on by default, the reserved pods name, the
+  # sub-gates of TAS) that no record carries, so those origins resolve to
+  # blocked rather than borrowing this verdict.
+  #
+  # verdict is manual even though a default install needs nothing: a
+  # verdict cannot depend on values, and a cluster whose override disables
+  # topology-aware scheduling crash-loops at 0.19.6 without the step below.
+  # No UAT lane or KWOK run has exercised this transition, so there is no
+  # verifiedBy.
+  - from: ">=0.19.0 <0.19.6"
+    to: "0.19.6"
+    verdict: manual
+    summary: >-
+      0.19.6 adds the TASPartialSlices feature gate, on by default, which
+      requires TopologyAwareScheduling. A cluster whose kueue override sets
+      TopologyAwareScheduling=false therefore fails kueue's feature-gate
+      validation at startup and the controller crash-loops, unless the
+      override also sets TASPartialSlices=false. Releases before 0.19.6
+      reject that gate name, so it has to land in the same change as the
+      bump. AICR sets no kueue feature gates, so a default install needs
+      nothing.
+    precondition: >-
+      Know whether your kueue override disables topology-aware scheduling.
+      Check both places it can live:
+      `kubectl get deploy kueue-controller-manager -n kueue-system -o jsonpath='{.spec.template.spec.containers[?(@.name=="manager")].args}'`
+      for --feature-gates, and
+      `kubectl get configmap kueue-manager-config -n kueue-system -o jsonpath='{.data.controller_manager_config\.yaml}'`
+      for a featureGates block. If neither sets TopologyAwareScheduling to
+      false, the disable-tas-subgates step does not apply.
+    stepsByDeployer:
+      - deployers: [helm, helmfile]
+        steps:
+          - id: disable-tas-subgates
+            description: >-
+              Only if the override sets TopologyAwareScheduling=false: make
+              the same list, in controllerManager.featureGates or the
+              featureGates block of managerConfig.controllerManagerConfigYaml,
+              set all nine of TASHandleOverlappingFlavors,
+              TASFailedNodeReplacement, TASFailedNodeReplacementFailFast,
+              TASReplaceNodeOnPodTermination, TASReplaceNodeOnNodeTaints,
+              TASMultiLayerTopology,
+              TASRecomputeAssignmentWithinSchedulingCycle, TASProfileMixed and
+              TASPartialSlices to false, and regenerate the 0.19.6 bundle
+              with it.
+            reason: >-
+              Each of the nine defaults on and requires topology-aware
+              scheduling, so leaving any one on fails kueue's feature-gate
+              validation at startup. TASPartialSlices is the one 0.19.6 adds;
+              a bundle before 0.19.6 rejects it as an unrecognized feature
+              gate.
+          - id: upgrade-kueue
+            description: >-
+              Re-run install.sh (helm) or helmfile apply (helmfile).
+            reason: >-
+              Moves kueue to 0.19.6 with the gate list it validates at
+              startup.
+      - steps:
+          - id: disable-tas-subgates
+            description: >-
+              Only if the override sets TopologyAwareScheduling=false: make
+              the same list, in controllerManager.featureGates or the
+              featureGates block of managerConfig.controllerManagerConfigYaml,
+              set all nine of TASHandleOverlappingFlavors,
+              TASFailedNodeReplacement, TASFailedNodeReplacementFailFast,
+              TASReplaceNodeOnPodTermination, TASReplaceNodeOnNodeTaints,
+              TASMultiLayerTopology,
+              TASRecomputeAssignmentWithinSchedulingCycle, TASProfileMixed and
+              TASPartialSlices to false, in the same commit that moves the
+              kueue release to 0.19.6.
+            reason: >-
+              Each of the nine defaults on and requires topology-aware
+              scheduling, so leaving any one on fails kueue's feature-gate
+              validation at startup. TASPartialSlices is the one 0.19.6 adds;
+              committed ahead of the bump, a 0.19.x controller rejects it as
+              an unrecognized feature gate.
+          - id: sync-kueue
+            description: >-
+              Sync or reconcile the kueue release.
+            reason: >-
+              Moves kueue to 0.19.6 with the gate list it validates at
+              startup.
+    references:
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#kueue-018x-to-019x
+      - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.6
+      - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.5
+      - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.4
