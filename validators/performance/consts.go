@@ -24,7 +24,14 @@ const (
 	versionV1beta1           = "v1beta1"
 	keyName                  = "name"
 	keyOperator              = "operator"
+	keyAPIVersion            = "apiVersion"
+	keyKind                  = "kind"
+	keyMetadata              = "metadata"
+	keyNamespace             = "namespace"
+	keySpec                  = "spec"
+	keyValue                 = "value"
 	checkNameNCCLAllReduceBW = "nccl-all-reduce-bw"
+	conditionStatusTrue      = "True"
 
 	// nodeJobName is the name of both the NCCL worker replicatedJob and its
 	// primary container in testdata/{accelerator}/{service}/runtime.yaml.
