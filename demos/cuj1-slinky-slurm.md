@@ -26,7 +26,7 @@ CLI reference.
 1. **Generate recipe** — direct criteria or snapshot-derived infrastructure criteria plus `--platform slurm` resolve a Slurm leaf overlay to `recipe.yaml`.
 2. **Generate bundle** — apply `--system-*` / `--accelerated-*` scheduling and optional `--set` / `--set-json` / `--set-file` on `slinkyslurm`.
 3. **Install** — run `deploy.sh`; cert-manager and Slinky operator come up, then the cluster chart in `slurm`.
-4. **Validate** — run `deployment` (Chainsaw component health) and `conformance` (the AI conformance checks the leaf inherits, plus `slinky-slurm-health` from the login pod, including a conditional `sacct` probe when accounting is enabled). **Performance validation is not supported yet** on slurm leaves.
+4. **Validate** — run `deployment` (Chainsaw component health) and `conformance`: the AI conformance checks the leaf inherits, plus `slinky-slurm-health` from the login pod (including a conditional `sacct` probe when accounting is enabled) and, on cloud leaves, `slinky-slurm-gpu-access` for Slurm GPU access and isolation. **Performance validation is not supported yet** on slurm leaves.
 5. **Smoke job** — `kubectl exec` into the login pod and run `srun` to confirm scheduling.
 
 ## Generate Recipe
@@ -334,7 +334,7 @@ Use **deployment** and **conformance**. Performance validation is **not supporte
 | Phase         | What it checks                                                                                                         |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `deployment`  | Component Chainsaw health (CRs, Deployments, DaemonSets ready), including `slinky-slurm` readiness (long retry budget) |
-| `conformance` | The inherited AI conformance checks (`platform-health`, `gpu-operator-health`, `dra-support`, `gang-scheduling`, `secure-accelerator-access`, and the rest; run `yq .validation.conformance.checks recipe.yaml` for the leaf's list) plus `slinky-slurm-health`: controller and node health, bounded `srun`, and completed-job persistence through `sacct` when accounting is enabled. The GB200 and GB300 leaves add `slinky-slurm-imex-channel` |
+| `conformance` | The inherited AI conformance checks (`platform-health`, `gpu-operator-health`, `dra-support`, `gang-scheduling`, and the rest; run `yq .validation.conformance.checks recipe.yaml` for the leaf's list) plus `slinky-slurm-health`: controller and node health, bounded `srun`, and completed-job persistence through `sacct` when accounting is enabled. The cloud leaves add `slinky-slurm-gpu-access`: in a one-GPU Slurm job, `nvidia-smi` lists exactly one GPU and exactly one GPU device node opens; in a job with no GPU allocation on the same node, `nvidia-smi` lists no GPU and no GPU device node opens. `secure-accelerator-access` is inherited but skips on slurm leaves; `slinky-slurm-gpu-access` produces the GPU access and isolation evidence instead. The GB200 and GB300 leaves add `slinky-slurm-imex-channel` |
 | `performance` | **Not supported yet** on slurm leaves                                                                                  |
 | `all`         | Runs deployment → conformance → performance in sequence; the performance step has nothing to run on slurm leaves       |
 
