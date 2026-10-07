@@ -63,14 +63,18 @@ type ComponentData struct {
 	Tag        string // Git ref for Kustomize-typed components (tag/branch/commit)
 	Path       string // Path within the repository to the kustomization
 
-	// DriverOperatorManaged is true when the bundle's effective values
-	// select an operator-managed NVIDIA driver — gpu-operator's or
-	// gpu-operator-ocp's driver.enabled is true. deploy.sh's DRA
-	// migration-wait block (see #2135, #973) uses this to tell "driver
-	// is host-managed" apart from "driver is operator-managed but the
-	// DaemonSet/node-label migration signal isn't observable yet",
-	// which live cluster state alone cannot distinguish.
-	DriverOperatorManaged bool
+	// DriverOwnership records who installs the NVIDIA driver for this
+	// bundle: driverOwnershipOperator when a gpu-operator or
+	// gpu-operator-ocp component has not disabled its driver (which
+	// includes leaving driver.enabled at the chart default of true),
+	// driverOwnershipHost on an explicit driver.enabled: false, and
+	// driverOwnershipUnknown when the bundle carries no gpu-operator
+	// component at all. deploy.sh's DRA migration-wait block (see
+	// #2135, #973) uses this to tell "no migration is possible" apart
+	// from "a migration is underway but not yet observable", which live
+	// cluster state alone cannot distinguish. Unknown has no
+	// bundle-time answer and falls back to that live state.
+	DriverOwnership string
 }
 
 // compile-time interface check
@@ -296,12 +300,16 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 // buildComponentDataList builds a sorted list of ComponentData from the recipe.
 // It validates that all component names are safe for use as directory names.
-// driverOperatorManaged reports whether this bundle's effective values
-// select an operator-managed NVIDIA driver: gpu-operator's or
-// gpu-operator-ocp's driver.enabled is true. Checks both component names
-// since only one is ever enabled in a given recipe (see
-// pkg/bundler/bundler.go's gpuOperatorComponentNames for the canonical
-// list this mirrors).
+// driverOwnership reports who installs the NVIDIA driver for this
+// bundle. Checks both gpu-operator component names since only one is
+// ever enabled in a given recipe (see pkg/bundler/bundler.go's
+// gpuOperatorComponentNames for the canonical list this mirrors).
+//
+// Unknown is a distinct state, not a synonym for host-managed: a bundle
+// carrying no gpu-operator component at all (a bundlers filter, or
+// --set gpuoperator:enabled=false) says nothing about who owns the
+// driver, and calling that host-managed would skip the migration wait
+// against an externally managed one.
 // gpuOperatorComponentName and gpuOperatorOCPComponentName are this
 // package's copy of the canonical/OCP gpu-operator component names (a
 // 4th duplicate alongside pkg/bundler/bundler.go, pkg/bundler/validations
@@ -315,21 +323,53 @@ const (
 	gpuOperatorOCPComponentName = "gpu-operator-ocp"
 )
 
-func (g *Generator) driverOperatorManaged() bool {
+// Values of ComponentData.DriverOwnership. deploy.sh.tmpl compares
+// against these spellings, so they are pinned by
+// TestGenerate_DeployScript_DRARestartGatedOnDriverOwnership rather than
+// shared with the template.
+const (
+	driverOwnershipOperator = "operator"
+	driverOwnershipHost     = "host"
+	driverOwnershipUnknown  = "unknown"
+)
+
+func (g *Generator) driverOwnership() string {
+	operatorPresent := false
 	for _, name := range []string{gpuOperatorComponentName, gpuOperatorOCPComponentName} {
 		values, ok := g.ComponentValues[name]
 		if !ok {
 			continue
 		}
-		driver, ok := values["driver"].(map[string]any)
-		if !ok {
-			continue
-		}
-		if enabled, ok := driver["enabled"].(bool); ok && enabled {
-			return true
+		operatorPresent = true
+		if gpuOperatorDriverEnabled(values) {
+			return driverOwnershipOperator
 		}
 	}
-	return false
+	if operatorPresent {
+		return driverOwnershipHost
+	}
+	return driverOwnershipUnknown
+}
+
+// gpuOperatorDriverEnabled reports whether one gpu-operator component's
+// effective values select an operator-installed driver. Only a bare
+// boolean false does not: the chart defaults driver.enabled to true, so
+// an absent section or key still leaves the operator owning the driver,
+// and every other spelling is rejected before bundling by
+// CheckDriverOwnershipCoherence (registered severity error on
+// gpu-operator) because the chart interpolates the value unquoted into
+// the ClusterPolicy and YAML re-types it at install time.
+//
+// Duplicates pkg/bundler/bundler.go's identically named function, for
+// the same dependency-cycle reason as the component-name constants
+// above.
+func gpuOperatorDriverEnabled(values map[string]any) bool {
+	driver, isMap := values["driver"].(map[string]any)
+	if !isMap {
+		return true
+	}
+	enabled, isBool := driver["enabled"].(bool)
+	return !isBool || enabled
 }
 
 // Only the fields consumed by the orchestration templates are populated.
@@ -340,7 +380,7 @@ func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 		g.RecipeResult.DeploymentOrder,
 	)
 
-	driverOperatorManaged := g.driverOperatorManaged()
+	driverOwnership := g.driverOwnership()
 
 	components := make([]ComponentData, 0, len(sorted))
 	for _, ref := range sorted {
@@ -352,15 +392,15 @@ func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 		chartName := ref.EffectiveChart()
 
 		components = append(components, ComponentData{
-			Name:                  ref.Name,
-			Namespace:             ref.Namespace,
-			Repository:            ref.Source,
-			ChartName:             chartName,
-			Version:               ref.Version,
-			IsOCI:                 strings.HasPrefix(ref.Source, "oci://"),
-			Tag:                   ref.Tag,
-			Path:                  ref.Path,
-			DriverOperatorManaged: driverOperatorManaged,
+			Name:            ref.Name,
+			Namespace:       ref.Namespace,
+			Repository:      ref.Source,
+			ChartName:       chartName,
+			Version:         ref.Version,
+			IsOCI:           strings.HasPrefix(ref.Source, "oci://"),
+			Tag:             ref.Tag,
+			Path:            ref.Path,
+			DriverOwnership: driverOwnership,
 		})
 	}
 
