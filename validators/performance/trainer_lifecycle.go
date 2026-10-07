@@ -58,9 +58,6 @@ import (
 )
 
 const (
-	// trainerArchiveURL is the GitHub tar.gz archive for Kubeflow Trainer v2.2.0.
-	trainerArchiveURL = "https://github.com/kubeflow/trainer/archive/refs/tags/v2.2.0.tar.gz"
-
 	// trainerKustomizePath is the path within the extracted archive to the manager overlay.
 	trainerKustomizePath = "manifests/overlays/manager"
 
@@ -157,8 +154,8 @@ const (
 	// maxExtractedFileSize caps individual file sizes during tar extraction (50 MB).
 	maxExtractedFileSize = 50 * 1024 * 1024
 
-	// jobSetStagingImageRepo is the JobSet controller image repository referenced by the
-	// upstream Kubeflow Trainer v2.2.0 manifests. It points at the Kubernetes staging
+	// jobSetStagingImageRepo is the JobSet controller image repository referenced by
+	// upstream Kubeflow Trainer manifests. It points at the Kubernetes staging
 	// registry, whose tags are garbage-collected (MANIFEST_UNKNOWN/404), so jobset-controller-manager
 	// lands in ImagePullBackOff and its admission webhook has no endpoints.
 	jobSetStagingImageRepo = "us-central1-docker.pkg.dev/k8s-staging-images/jobset/jobset"
@@ -220,7 +217,7 @@ func cloneControllerTolerateAll() []any {
 // declares tolerations. Scoped to those two names so an unrelated Deployment
 // in the manifest set never gets a blanket toleration it didn't ask for.
 func applyControllerTolerations(obj *unstructured.Unstructured) error {
-	if gvk := obj.GroupVersionKind(); gvk.Kind != "Deployment" || gvk.Group != apiGroupApps {
+	if gvk := obj.GroupVersionKind(); gvk.Kind != kindDeployment || gvk.Group != apiGroupApps {
 		return nil
 	}
 	switch obj.GetName() {
@@ -589,8 +586,12 @@ func trainerResourceClient(dynamicClient dynamic.Interface,
 // happens to be on the cluster. Execution still differs across the undeclared rows —
 // a pre-existing Trainer is reused, an absent one is installed — which is why the
 // earlier "behaves identically regardless of live state" wording was withdrawn.
+//
+// resolveVersion is called only when a self-install is needed, so an invalid
+// version never fails a run that uses an existing Trainer.
 func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
-	discoveryClient discovery.DiscoveryInterface, recipeDeclaresTrainer bool) ([]trainerResourceRef, error) {
+	discoveryClient discovery.DiscoveryInterface, recipeDeclaresTrainer bool,
+	resolveVersion func() (string, error)) ([]trainerResourceRef, error) {
 
 	install, installed, err := isTrainerInstalled(ctx, dynamicClient)
 	if err != nil {
@@ -643,10 +644,15 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 				live.Namespace, trainerNamespace))
 		}
 
-		slog.Info("Kubeflow Trainer not found or incomplete, installing...")
+		version, versionErr := resolveVersion()
+		if versionErr != nil {
+			return nil, versionErr
+		}
+
+		slog.Info("Kubeflow Trainer not found or incomplete, installing...", "version", version)
 		// installTrainer rolls back its own resources on failure, so there is
 		// nothing to clean up on the error path.
-		created, installErr := installTrainer(ctx, dynamicClient, clientset, discoveryClient)
+		created, installErr := installTrainer(ctx, dynamicClient, clientset, discoveryClient, version)
 		if installErr != nil {
 			return nil, aicrErrors.PropagateOrWrap(installErr, aicrErrors.ErrCodeInternal,
 				"failed to install Kubeflow Trainer")
@@ -843,25 +849,29 @@ func foldCleanupError(benchErr, cleanupErr error, fallbackMsg string) error {
 	return aicrErrors.PropagateOrWrap(cleanupErr, aicrErrors.ErrCodeInternal, fallbackMsg)
 }
 
-// installTrainer downloads the Kubeflow Trainer v2.2.0 archive from GitHub, builds the
-// kustomize manager overlay entirely in Go (no CLI), and applies every resource to the
-// cluster via the dynamic client.
+// installTrainer downloads the given Kubeflow Trainer release archive from GitHub, builds
+// the kustomize manager overlay entirely in Go (no CLI), and applies every resource to
+// the cluster via the dynamic client. version must come from resolveTrainerVersion.
 //
 // Installation is transactional: on success it returns the resources it created so
 // the caller can defer deleteTrainer for cleanup; on any failure it rolls those
 // resources back itself and returns none.
 func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
-	discoveryClient discovery.DiscoveryInterface) ([]trainerResourceRef, error) {
+	discoveryClient discovery.DiscoveryInterface, version string) ([]trainerResourceRef, error) {
 
-	slog.Info("Downloading Kubeflow Trainer archive", "url", trainerArchiveURL)
+	archiveURL := fmt.Sprintf(trainerArchiveURLFormat, version)
+	slog.Info("Downloading Kubeflow Trainer archive", "version", version, "url", archiveURL)
 
-	extractedDir, cleanup, err := downloadAndExtractGitHubArchive(ctx, trainerArchiveURL)
+	extractedDir, cleanup, err := downloadAndExtractGitHubArchive(ctx, archiveURL)
 	if err != nil {
-		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to download Trainer archive", err)
+		return nil, aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal, "failed to download Trainer archive")
 	}
 	defer cleanup()
 
 	kustomizePath := filepath.Join(extractedDir, trainerKustomizePath)
+	if overlayErr := checkTrainerOverlay(kustomizePath, version); overlayErr != nil {
+		return nil, overlayErr
+	}
 	slog.Info("Building Trainer kustomize manifests", "path", kustomizePath)
 
 	// LoadRestrictionsNone lets krusty follow the ../../base references in the overlay.
@@ -879,6 +889,9 @@ func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, client
 	objs, err := decodeTrainerObjects(resMap.Resources())
 	if err != nil {
 		return nil, err
+	}
+	if compatErr := checkTrainerManifestsSupported(objs, version); compatErr != nil {
+		return nil, compatErr
 	}
 
 	// Build a REST mapper from live discovery so we can resolve GVK → GVR for each resource.
@@ -918,7 +931,7 @@ func decodeTrainerObjects(resources []*resource.Resource) ([]*unstructured.Unstr
 		// controller name "seen" without actually receiving the toleration,
 		// or it would suppress the warning for the exact silent-miss below
 		// that the warning exists to catch.
-		if gvk := obj.GroupVersionKind(); gvk.Kind == "Deployment" && gvk.Group == apiGroupApps {
+		if gvk := obj.GroupVersionKind(); gvk.Kind == kindDeployment && gvk.Group == apiGroupApps {
 			seenControllers[obj.GetName()] = true
 		}
 		objs = append(objs, obj)
@@ -1480,7 +1493,7 @@ func updateExistingTrainerResource(ctx context.Context, client dynamic.ResourceI
 
 		updated := obj.DeepCopy()
 		updated.SetResourceVersion(existing.GetResourceVersion())
-		if updated.GetKind() == "Service" {
+		if updated.GetKind() == kindService {
 			preserveServiceClusterIPs(existing, updated)
 		}
 
@@ -1587,7 +1600,7 @@ func webhookServiceNamespace(obj *unstructured.Unstructured) string {
 // isAdmissionConfigKind reports whether kind is one of the generically-named
 // admission configurations another operator on the cluster could own.
 func isAdmissionConfigKind(kind string) bool {
-	return kind == "ValidatingWebhookConfiguration" || kind == "MutatingWebhookConfiguration"
+	return kind == kindValidatingWebhook || kind == kindMutatingWebhook
 }
 
 // hasTrainerWebhookEntry reports whether an admission configuration carries at
@@ -1647,11 +1660,10 @@ func rollbackTrainer(dynamicClient dynamic.Interface, created []trainerResourceR
 
 // rewriteJobSetStagingImage rewrites any reference to the garbage-collected JobSet
 // staging-registry image repository onto the promoted production registry, preserving
-// the tag/digest. The Kubeflow Trainer v2.2.0 manifests pin the JobSet controller image
-// to the Kubernetes staging registry, whose tags have been garbage-collected; left as-is
-// the jobset-controller-manager enters ImagePullBackOff and its admission webhook has no
-// endpoints, so the NCCL TrainJob cannot create pods (issue #1430). The replacement is a
-// repo-prefix swap only, so it is tag-agnostic and a no-op when the staging repo is absent.
+// the tag/digest. Left on the staging registry, the jobset-controller-manager enters
+// ImagePullBackOff and its admission webhook has no endpoints, so the NCCL TrainJob cannot
+// create pods. The replacement is a repo-prefix swap only, so it is tag-agnostic and a
+// no-op when the staging repo is absent.
 func rewriteJobSetStagingImage(yamlBytes []byte) []byte {
 	if !bytes.Contains(yamlBytes, []byte(jobSetStagingImageRepo)) {
 		return yamlBytes
@@ -1897,12 +1909,16 @@ func downloadAndExtractGitHubArchive(ctx context.Context, archiveURL string) (st
 
 	// Use a bounded HTTP client — http.DefaultClient has no timeout.
 	client := defaults.NewHTTPClient(defaults.NCCLTrainerArchiveDownloadTimeout)
-	resp, err := client.Do(req) //nolint:gosec // archiveURL is a compile-time constant, not user input
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to download archive from %s", archiveURL), err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("no archive at %s: the requested release does not exist", archiveURL))
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("unexpected HTTP %d downloading %s", resp.StatusCode, archiveURL))
 	}
