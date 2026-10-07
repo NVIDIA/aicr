@@ -81,7 +81,10 @@ Two gaps block a safe split today:
   live handoff of the release from one owner to the other. Redeploying
   core components can disrupt running workloads, so the operator
   schedules it. `split.yaml` records the class map so the change stays
-  auditable.
+  auditable. Keeping a deployed split across an AICR upgrade that
+  reclassifies a component — `aicr recipe --inherit-from` reading the
+  prior set's class map, as it already keeps namespaces — is follow-up
+  work, gated as described under the registry class rules.
 - OCI output for split generation. Multi-artifact naming and
   partial-publish recovery are undefined; `--split` with OCI output is
   rejected in v1.
@@ -163,6 +166,14 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   ordinary bundles are unchanged. Moving a component between classes is a
   registry change; clusters with a deployed split pick it up by
   redeployment (see Non-Goals).
+- v1 introduces the classes, so no deployed split predates them. The
+  first release that changes a **built-in** component's class ships only
+  once `aicr recipe --inherit-from` keeps the class recorded in the prior
+  set's `split.yaml` and `aicr upgrade-check` reports the class move as an
+  identity change. Until then the embedded classification stays fixed,
+  so an AICR upgrade never moves a running component between bundles.
+  Reclassification in an operator's own `--data` registry is the
+  operator's change and is applied by redeployment.
 - The default applies uniformly to **external registry entries** too: an
   external `registry.yaml` entry replaces the embedded entry wholesale, so
   a replacement for an `ops` component that omits `class` lands in `core`.
@@ -325,9 +336,9 @@ label one component at the cut and let every dependent inherit its class.
 This ADR keeps the field explicit. Under derivation, adding a dependency
 edge could silently move a component into another bundle and change its
 owner; with an explicit field, the same edge fails the direction guard
-and the ownership change goes through review. The guard's failure
-names the components that would have to move, which keeps the
-convenience of derivation without its implicitness.
+and the ownership change goes through review. A follow-up can have the
+guard's failure name the components that would have to move, which keeps
+the convenience of derivation without its implicitness.
 
 ### Bundle generation with `--split`
 
@@ -483,7 +494,9 @@ Because class lives only in the registry, the same `recipeDigest` can
 partition differently after a registry classification change. The
 per-component class map in `split.yaml` is deliberately the record that
 disambiguates, and a set generated before a class change stays
-auditable through its recorded map.
+auditable through its recorded map. It is also the record that
+class-aware `--inherit-from` (follow-up) reads, so its class map is a
+stable, versioned part of the `split.yaml` schema.
 
 `split.yaml` lets an operator answer "which recipe and partition produced
 what is deployed here" — it is not a deploy-time enforcement mechanism,
@@ -700,8 +713,7 @@ if standalone class artifacts are ever pursued.
 1. Catalog prerequisite: repoint all core-component
    `kube-prometheus-stack` dependency declarations (overlays and mixins)
    to `prometheus-operator-crds`; add the resolved-graph
-   dependency-direction guard test, whose failure names the components
-   that would have to move with the offending edge. After this lands, a targeted
+   dependency-direction guard test. After this lands, a targeted
    non-split parity regression test pins that the class field and split
    plumbing leave ordinary output byte-identical.
 2. Registry: `class` field, validation of known class names, initial `ops`
@@ -727,5 +739,8 @@ user-defined class names, per-shape (overlay-level) class reassignment,
 standalone verified per-class artifacts (with a class-subset selector
 such as `--classes`, once the externally satisfied profile-lock contract
 exists), OCI split output, a deploy-time compatibility protocol,
-multi-instance components, and a registry-level `conflictsWith`
-declaration.
+multi-instance components, a registry-level `conflictsWith`
+declaration, class inheritance in `aicr recipe --inherit-from` with
+class-move reporting in `aicr upgrade-check` (a prerequisite for any
+built-in reclassification), and a direction-guard diagnostic that names
+the components a reassignment would also move.
