@@ -165,8 +165,9 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
 - External entries carry `class` like embedded ones, so an internal or
   third-party catalog can classify its own components into the existing
   classes **without any public change**. Only a brand-new class *name*
-  requires extending the Go enum — a one-value, release-time addition
-  made when a concrete consumer needs it.
+  requires extending the Go enum — a release-time addition, made when a
+  concrete consumer needs it, that also defines the new class's place in
+  the class ordering (see Configurable classes).
 
 Initial classification: `kube-prometheus-stack`, `prometheus-adapter`, and
 `k8s-ephemeral-storage-metrics` are `ops`; everything else, including
@@ -660,9 +661,9 @@ if standalone class artifacts are ever pursued.
   - regenerating a cluster under different criteria (for example, adding
     a `platform`) could move a component between bundles, the same
     coordinated migration as a registry class change; and
-  - no consumer needs it yet: OCP's monitoring split is handled by the
-    separate `-ocp` component variants, each of which carries its own
-    registry class.
+  - no consumer needs it yet: the closest candidate, OCP's monitoring
+    stack, already uses separate `-ocp` component variants, which can
+    carry their own registry class.
 
   Per-shape needs, if they materialize, are follow-up work with an
   explicit migration story.
