@@ -1134,7 +1134,8 @@ func resolveRecipeConfig(opts ...RecipeResolveOption) (*recipeResolveConfig, err
 		return nil, cfg.optErr
 	}
 	if cfg.inheritMode != nil && cfg.inheritFrom == "" {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "--inherit requires --inherit-from")
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"inherit selection (--inherit / Inherit) requires --inherit-from (InheritFrom)")
 	}
 	return cfg, nil
 }
