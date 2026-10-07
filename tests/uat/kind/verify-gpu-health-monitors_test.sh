@@ -466,10 +466,12 @@ check "and is named as not ready" "1" \
 
 # --- the lane must actually run this, and gate on it -----------------------
 #
-# A guard nobody runs is not a guard. The same reasoning topology-golden_test.sh
-# applies to verify-topology.sh applies here: a step whose failure nothing
-# depends on lets the run publish signed evidence claiming GPU health coverage
-# the lane never demonstrated.
+# A guard nobody runs is not a guard, and a step whose failure nothing depends
+# on lets a run go green without it. Gating conformance on this step is lane
+# policy: a run that failed a gate emits no signed evidence. It does not
+# protect what the evidence attests, which is only the conformance checks
+# that run on this lane (gang-scheduling, cluster-autoscaling,
+# slinky-slurm-health), none of which reads the monitors.
 WORKFLOW="${SCRIPT_DIR}/../../../.github/workflows/uat-kind-sim.yaml"
 check "the CI lane calls verify-gpu-health-monitors.sh" "1" \
     "$(grep -c 'tests/uat/kind/verify-gpu-health-monitors\.sh' "${WORKFLOW}" | tr -d ' ')"
