@@ -391,6 +391,12 @@ nvsentinel-object-monitor-e2e: ## Live Kind test: nvsentinel-object-monitor mixi
 	echo "Running nvsentinel-object-monitor mixin e2e test..."; \
 	tests/e2e/nvsentinel-object-monitor/run.sh
 
+.PHONY: nvsentinel-slurm-drain-monitor-e2e
+nvsentinel-slurm-drain-monitor-e2e: ## Live Kind test: nvsentinel-slurm-drain-monitor mixin turns an [HC] Slurm drain into a STORE_ONLY health event (#2611)
+	@set -e; \
+	echo "Running nvsentinel-slurm-drain-monitor mixin e2e test..."; \
+	tests/e2e/nvsentinel-slurm-drain-monitor/run.sh
+
 .PHONY: nvsentinel-preflight-e2e
 nvsentinel-preflight-e2e: ## Live Kind test: nvsentinel-preflight mixin injects node checks into opted-in GPU pods (#2610)
 	@set -e; \

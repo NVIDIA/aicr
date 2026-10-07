@@ -467,9 +467,10 @@ components:
         tolerationPaths:
           - global.systemNodeTolerations
     # Opt-in surface for the nvsentinel-observability (#2617),
-    # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610) and
-    # nvsentinel-nic-health-monitor mixins: the exact leaf paths a mixin may
-    # set on this already-base-chained component. global.tracing.endpoint is
+    # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610),
+    # nvsentinel-nic-health-monitor and nvsentinel-slurm-drain-monitor (#2611)
+    # mixins: the exact leaf paths a mixin may set on this
+    # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
     # recipe's own override, or an operator --set), never from a mixin, so
     # CheckNVSentinelTracingEndpointRequired always has a real value to
@@ -510,6 +511,11 @@ components:
       - preflight.initContainers
       - global.nicHealthMonitor.enabled
       - nic-health-monitor.processingStrategy
+      - global.slurmDrainMonitor.enabled
+      - slurm-drain-monitor.namespace
+      - slurm-drain-monitor.labelSelector
+      - slurm-drain-monitor.processingStrategy
+      - slurm-drain-monitor.patterns
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -579,6 +585,14 @@ components:
       # nothing, invisible to `aicr bundle`/`aicr validate`. A no-op for
       # every recipe that doesn't set global.nicHealthMonitor.enabled.
       - function: CheckNVSentinelNicHealthMonitorRequiresMetadataCollector
+        severity: error
+      # Blocking: slurm-drain-monitor watches worker pods in one namespace,
+      # and only slinky-slurm creates them there. Enabled on a recipe without
+      # slinky-slurm, or watching a namespace slinky-slurm does not deploy to,
+      # the Deployment renders, runs, and never sees a pod -- with nothing in
+      # `aicr bundle`/`aicr validate` to show it. A no-op for every recipe that
+      # doesn't set global.slurmDrainMonitor.enabled.
+      - function: CheckNVSentinelSlurmDrainMonitorRequiresSlinky
         severity: error
 
   - name: nvidia-dra-driver-gpu

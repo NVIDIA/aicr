@@ -97,6 +97,19 @@ STUB
 
 chmod +x "${STUB_DIR}/kubectl" "${STUB_DIR}/helm" "${STUB_DIR}/sleep"
 export PATH="${STUB_DIR}:${PATH}"
+# An inherited (exported) function would shadow a stub here and in the cleanup
+# subshell, and a spoofed `command` would fool the gate below.
+unset -f command kubectl helm sleep
+
+# Hermeticity gate. If the stubs do not shadow the real binaries (mktemp or a
+# stub write failed, e.g. an unwritable temp dir), the live --yes case below
+# would run cleanup against the current kube-context. Abort instead.
+for bin in kubectl helm sleep; do
+    if [[ -z "${STUB_DIR}" || "$(command -v "${bin}")" != "${STUB_DIR}/${bin}" ]]; then
+        echo "FATAL: ${bin} does not resolve to the test stub ($(command -v "${bin}" || echo none)); refusing to run" >&2
+        exit 1
+    fi
+done
 
 # run <args...>: capture combined stdout+stderr into $OUT and exit code into $RC.
 OUT=""
