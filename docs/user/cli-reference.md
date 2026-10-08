@@ -1838,10 +1838,11 @@ toleration takes no value, and the effect must be `NoSchedule`,
 
 Go SDK callers passing tolerations through `config.WithSystemNodeTolerations`
 or `config.WithAcceleratedNodeTolerations` get the same checks in
-`bundler.New`, plus the API server's rule that `tolerationSeconds` requires
-`NoExecute`. AICR also rejects the `Lt` and `Gt` operators, which the API
-server accepts only behind a feature gate AICR cannot verify. Flags and config
-keys cannot express either.
+`bundler.New`, except that an empty effect is accepted and matches every taint
+effect. Two more rules apply there, because flags and config keys cannot
+express them. `tolerationSeconds` requires `NoExecute`, as the API server
+requires. AICR also rejects the `Lt` and `Gt` operators, which the API server
+accepts only behind a feature gate AICR cannot verify.
 
 `--image-refs` writes the published digest through a mode-`0600` temporary
 file and an anchored same-directory rename. Its target may be absent or an
