@@ -307,8 +307,9 @@ func run(ctx context.Context, cfg runConfig) error {
 }
 
 // runURLPath matches a GitHub Actions run, optionally pinned to one attempt.
+// Owner and repo need a non-dot character, so "." and ".." cannot pass.
 // Kept in step with the run_url check in .github/workflows/testgrid-publish.yml.
-var runURLPath = regexp.MustCompile(`^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+(/attempts/[0-9]+)?$`)
+var runURLPath = regexp.MustCompile(`^/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*/actions/runs/[0-9]+(/attempts/[0-9]+)?$`)
 
 // validateRunURL accepts an empty value or a GitHub Actions run URL. The
 // value is published permanently as the build's run link, so anything else

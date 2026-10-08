@@ -199,7 +199,10 @@ jobs:
           RUN_URL: ${{ inputs.run_url }}
         run: |
           set -euo pipefail
-          if [[ -n "${RUN_URL}" && ! "${RUN_URL}" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+(/attempts/[0-9]+)?$ ]]; then
+          # Owner and repo need a non-dot character, so "." and ".." cannot pass.
+          seg='[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*'
+          run_re="^https://github\.com/${seg}/${seg}/actions/runs/[0-9]+(/attempts/[0-9]+)?$"
+          if [[ -n "${RUN_URL}" && ! "${RUN_URL}" =~ ${run_re} ]]; then
             echo "::error::run_url must be https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>]"
             exit 1
           fi
