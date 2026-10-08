@@ -81,7 +81,8 @@ func nvcreWiringProblems(ctx context.Context, result *RecipeResult) []string {
 		return append(problems, "cannot resolve nvcre values: "+err.Error())
 	}
 	if nvcreServiceMonitorEnabled(values) && !slices.Contains(ref.DependencyRefs, nvcrePrometheusCRDs) {
-		problems = append(problems, "metrics.serviceMonitor.enabled is true, so componentRef nvcre must "+
+		problems = append(problems, "the chart's ServiceMonitor is left on (metrics.serviceMonitor.enabled "+
+			"is not explicitly false), so componentRef nvcre must "+
 			"list "+nvcrePrometheusCRDs+" in dependencyRefs (got "+
 			orNone(strings.Join(ref.DependencyRefs, ", "))+"); the ServiceMonitor kind does not exist "+
 			"without them and install fails rendering it")
@@ -89,20 +90,23 @@ func nvcreWiringProblems(ctx context.Context, result *RecipeResult) []string {
 	return problems
 }
 
-// nvcreServiceMonitorEnabled reports whether resolved values turn the chart's
-// ServiceMonitor on. An absent key means the values file was not applied at
-// all, which the valuesFile check already reports; it is not read as enabled
-// here so that one mistake does not produce two problems.
+// nvcreServiceMonitorEnabled reports whether resolved values leave the chart's
+// ServiceMonitor on. The chart defaults it to true, so only an explicit false
+// counts as off: values that drop the setting render the monitor just as surely
+// as values that ask for it, and need the same CRDs present to install.
 func nvcreServiceMonitorEnabled(values map[string]any) bool {
 	metrics, ok := values["metrics"].(map[string]any)
 	if !ok {
-		return false
+		return true
 	}
 	serviceMonitor, ok := metrics["serviceMonitor"].(map[string]any)
 	if !ok {
-		return false
+		return true
 	}
-	enabled, _ := serviceMonitor["enabled"].(bool)
+	enabled, ok := serviceMonitor["enabled"].(bool)
+	if !ok {
+		return true
+	}
 	return enabled
 }
 
@@ -191,6 +195,38 @@ func TestNVCREWiringGuardNamesTheMissingPiece(t *testing.T) {
 			}
 			if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, tt.wantMsg) }) {
 				t.Errorf("no problem mentioned %q; got:\n  - %s", tt.wantMsg, strings.Join(problems, "\n  - "))
+			}
+		})
+	}
+}
+
+// The chart turns the ServiceMonitor on by default, so every way of not saying
+// "false" has to read as on. Reading an absent setting as off would let a
+// values file that quietly drops it satisfy the guard while the cluster still
+// renders a ServiceMonitor whose CRDs were never required.
+func TestNVCREServiceMonitorDefaultsToEnabled(t *testing.T) {
+	tests := []struct {
+		name   string
+		values map[string]any
+		want   bool
+	}{
+		{"explicitly disabled", map[string]any{"metrics": map[string]any{
+			"serviceMonitor": map[string]any{"enabled": false}}}, false},
+		{"explicitly enabled", map[string]any{"metrics": map[string]any{
+			"serviceMonitor": map[string]any{"enabled": true}}}, true},
+		{"enabled key dropped", map[string]any{"metrics": map[string]any{
+			"serviceMonitor": map[string]any{}}}, true},
+		{"serviceMonitor block dropped", map[string]any{"metrics": map[string]any{}}, true},
+		{"metrics block dropped", map[string]any{}, true},
+		{"values never applied", nil, true},
+		{"enabled is not a bool", map[string]any{"metrics": map[string]any{
+			"serviceMonitor": map[string]any{"enabled": "false"}}}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := nvcreServiceMonitorEnabled(tt.values); got != tt.want {
+				t.Errorf("nvcreServiceMonitorEnabled() = %v, want %v", got, tt.want)
 			}
 		})
 	}
