@@ -33,7 +33,7 @@ const (
 	slurmDrainMonitorSelector = "app.kubernetes.io/name=slurmd,app.kubernetes.io/component=worker"
 	// slurmDrainMonitorSelectorVerifiedAt is the slinky-slurm-operator version
 	// the selector and the SlurmNodeStateDrain condition were verified against.
-	slurmDrainMonitorSelectorVerifiedAt = "1.2.0"
+	slurmDrainMonitorSelectorVerifiedAt = "1.2.2"
 )
 
 // slurmDrainMonitorDeployment is the workload every platform: slurm leaf asks
