@@ -111,11 +111,14 @@ validators:
     image: ghcr.io/nvidia/aicr-validators/performance:latest
     timeout: 30m
     args: ["nccl-all-reduce-bw"]
-    # Kubeflow Trainer self-install knob (optional, honored by all three NCCL checks).
+    # Kubeflow Trainer self-install knob (optional). Each NCCL check reads only its
+    # own env, so set it on every NCCL entry that runs, including
+    # nccl-all-reduce-bw-net and nccl-all-reduce-bw-nvls.
     # Applies only when the cluster has no Trainer and the recipe does not enable
     # kubeflow-trainer. Resolution precedence is the recipe's kubeflow-trainer
     # version > catalog env (below) > compiled default (the kubeflow-trainer
-    # registry pin).
+    # registry pin). A resolved recipe with any kubeflow-trainer ref carries a
+    # version, so the env applies only when the recipe has no such ref.
     #   AICR_NCCL_TRAINER_VERSION  (Trainer release, with or without a leading v. A
     #     malformed version, a tag with no release, or a release whose manifests lack
     #     what the installer needs aborts the check with ErrCodeInvalidRequest before
