@@ -44,7 +44,7 @@
 // overlay (eks, gke-cos, aks, ...).
 //
 // The tests below enforce that rule for the current RTX PRO 6000 family and
-// constrain where future floors may be declared.
+// GB300 on GKE COS, and constrain where future floors may be declared.
 
 package recipe
 
@@ -64,6 +64,16 @@ const gpuDriverFloorConstraint = "Deployment.gpu-driver.version"
 // https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/platform-support.html
 const rtxProDriverFloor = ">= 575.57.08"
 
+// gb300GKEDriverFloor is the GB300 (A4X Max) host driver minimum on GKE COS,
+// where GKE installs the driver and the GPU Operator's driver is disabled.
+// Source: Google Cloud, "Create an AI-optimized GKE cluster that uses A4X
+// Max", Requirements: "R580.95.05, the minimum GPU driver version for A4X
+// Max". The gb300-gke-cos-* overlays are exported from the GKE Version Vector
+// registry, which declares the same minimum. docs/contributor/recipe.md and
+// validators/deployment/nvidia_smi.go cite it as the motivating case.
+// https://docs.cloud.google.com/ai-hypercomputer/docs/create/gke-ai-hypercompute-custom-a4x-max#requirements
+const gb300GKEDriverFloor = ">= 580.95.05"
+
 // resolvedDriverFloor returns the effective Deployment.gpu-driver.version
 // value for criteria under the given profile selection, and whether one was
 // declared at all. It goes through the production resolver so the assertion
@@ -77,7 +87,9 @@ const rtxProDriverFloor = ">= 575.57.08"
 // aks.yaml and gke-cos.yaml do anywhere in the catalog), and selecting a
 // profile against a composition that declares none is rejected at resolution.
 // There is therefore no alternate-profile dimension to exercise for these
-// leaves rather than an untested one.
+// leaves rather than an untested one. The GB300 GKE COS chains do inherit
+// gke-cos.yaml's gpuStack declaration: "" resolves its default value, and, as
+// noted below, no value of it can change the floor.
 //
 // Note also that a profile could not downgrade this floor even where one does
 // exist: ProfileValue.constraints are validated as measurement paths at catalog
@@ -130,9 +142,10 @@ func deploymentHasCheck(deployment *ValidationPhase, name string) bool {
 // TestGPUDriverFloorEffectiveValue asserts the final effective host driver
 // floor for every resolved query affected by a declared floor.
 //
-// Coverage lists the 11 current RTX PRO 6000 Server Edition resolutions: the
-// four service x intent leaves that carry the constraint and every deeper OS
-// and platform leaf that must inherit it.
+// Coverage lists the 11 current RTX PRO 6000 Server Edition resolutions and
+// the 4 GB300 GKE COS resolutions: the service x intent leaves that carry the
+// constraint (four RTX PRO 6000, two GB300) and every deeper OS and platform
+// leaf that must inherit it.
 func TestGPUDriverFloorEffectiveValue(t *testing.T) {
 	t.Parallel()
 
@@ -234,6 +247,42 @@ func TestGPUDriverFloorEffectiveValue(t *testing.T) {
 				OS: CriteriaOSUbuntu, Intent: CriteriaIntentInference,
 			},
 			want: rtxProDriverFloor,
+		},
+		// GKE COS: the two GB300 overlays that declare the floor, plus the
+		// platform leaves that must inherit it.
+		{
+			name: "gb300 gke cos training declares the floor",
+			criteria: &Criteria{
+				Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorGB300,
+				OS: CriteriaOSCOS, Intent: CriteriaIntentTraining,
+			},
+			want: gb300GKEDriverFloor,
+		},
+		{
+			name: "gb300 gke cos inference declares the floor",
+			criteria: &Criteria{
+				Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorGB300,
+				OS: CriteriaOSCOS, Intent: CriteriaIntentInference,
+			},
+			want: gb300GKEDriverFloor,
+		},
+		{
+			name: "gb300 gke cos training kubeflow inherits the floor",
+			criteria: &Criteria{
+				Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorGB300,
+				OS: CriteriaOSCOS, Intent: CriteriaIntentTraining,
+				Platform: CriteriaPlatformKubeflow,
+			},
+			want: gb300GKEDriverFloor,
+		},
+		{
+			name: "gb300 gke cos inference dynamo inherits the floor",
+			criteria: &Criteria{
+				Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorGB300,
+				OS: CriteriaOSCOS, Intent: CriteriaIntentInference,
+				Platform: CriteriaPlatformDynamo,
+			},
+			want: gb300GKEDriverFloor,
 		},
 	}
 
