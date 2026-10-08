@@ -413,12 +413,12 @@ func assertScanned(t *testing.T, image, tag string) {
 // remediationThirdPartyImages are the Percona datastore images the steps
 // add, pinned by AICR in recipes/components/{psmdb-operator,nvsentinel-mongodb}.
 var remediationThirdPartyImages = map[string]string{
-	"docker.io/percona/percona-server-mongodb-operator": "1.21.2@sha256:4f8be902b46ae8375e852aa37e384d0f68dcc9f00c0ebde0485d59d535b408d3",
-	"docker.io/percona/percona-server-mongodb":          "8.0.17-6@sha256:8698ffa8c0a3cb1902160e75599adb9d8b2e448e922a145fcf55915ef2fd556a",
+	"docker.io/percona/percona-server-mongodb-operator": "1.23.0@sha256:feaff989e25346716d85be9ea918593f89ad7481d30e033df21e0a764a6a484e",
+	"docker.io/percona/percona-server-mongodb":          "8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c",
 	"docker.io/percona/mongodb_exporter":                "0.40.0@sha256:d66daa6aff0513860d1577cee3b55ab82fde43394f8319d7b4674411b9153cce",
-	"docker.io/percona/percona-backup-mongodb":          "2.11.0@sha256:4e3156800f08b8cfab8086cc41667a697afeb3166db242b3fe6317c8b2288da9",
-	"docker.io/percona/fluentbit":                       "4.0.1@sha256:dd584776ba987d77c5d1848ad98d31ae807c3781bc78b305ffc4088a4575fbae",
-	"docker.io/percona/pmm-client":                      "3.5.0@sha256:82b36789edc633ea97a0f2433dd9ef472e11811d1798de01fb700b78455059e1",
+	"docker.io/percona/percona-backup-mongodb":          "2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5",
+	"docker.io/percona/fluentbit":                       "5.0.9-1@sha256:030e3faf454e93c19d9cfa1ec85ba6943fe293f5bd29fb04533a1b3de8c78bd6",
+	"docker.io/percona/pmm-client":                      "3.8.1@sha256:ea4061a6d9bd59d9c7aecbe75b91989bbddad55208b898d75064ac436014ca16",
 }
 
 // TestRemediationRebootImageIsInitContainerImage pins the generic reboot Job's

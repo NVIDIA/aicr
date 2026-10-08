@@ -88,17 +88,19 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -uo pipefail
-          tests='TestNVSentinelRemediationChartRender
-          TestNVSentinelRemediationAbsentWithoutMixin
-          TestNVSentinelMongoDBChartRender'
-          pattern="^($(echo $tests | tr ' ' '|'))$"
+          tests=(
+            TestNVSentinelRemediationChartRender
+            TestNVSentinelRemediationAbsentWithoutMixin
+            TestNVSentinelMongoDBChartRender
+          )
+          pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?
           echo "$out"
           if [ "$rc" -ne 0 ]; then
             exit "$rc"
           fi
-          for t in $tests; do
-            if ! grep -q "^--- PASS: $t" <<<"$out"; then
+          for t in "${tests[@]}"; do
+            if ! grep -qE "^--- PASS: ${t} \(" <<<"$out"; then
               echo "::error::$t did not execute (renamed or removed?); update this job to match."
               exit 1
             fi

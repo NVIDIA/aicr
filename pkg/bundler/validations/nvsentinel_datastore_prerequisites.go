@@ -152,7 +152,8 @@ func nvsentinelPerconaFinding(componentName, state string) (string, error) {
 			componentName))
 	case recipe.PerconaOperatorStateOperatorDetected:
 		return "", aicrerrors.New(aicrerrors.ErrCodeConflict, fmt.Sprintf(
-			"%s: the snapshot found a Percona Operator for MongoDB running outside the nvsentinel namespace. "+
+			"%s: the snapshot found a Percona Operator for MongoDB that AICR did not install (outside the "+
+				"nvsentinel namespace, or in it under another Helm release). "+
 				"psmdb-operator would replace the psmdb.percona.com CRDs it depends on. Remove the other "+
 				"operator, or leave the nvsentinel remediation step mixins out of the recipe",
 			componentName))

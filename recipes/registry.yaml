@@ -463,7 +463,7 @@ components:
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: nvsentinel
       # renovate: datasource=docker depName=ghcr.io/nvidia/nvsentinel
-      defaultVersion: v1.25.0
+      defaultVersion: v1.26.0
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
@@ -654,7 +654,7 @@ components:
       defaultRepository: https://percona.github.io/percona-helm-charts/
       defaultChart: psmdb-operator
       # renovate: datasource=helm depName=psmdb-operator registryUrl=https://percona.github.io/percona-helm-charts/
-      defaultVersion: "1.21.3"
+      defaultVersion: "1.23.1"
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
@@ -673,7 +673,7 @@ components:
       defaultRepository: https://percona.github.io/percona-helm-charts/
       defaultChart: psmdb-db
       # renovate: datasource=helm depName=psmdb-db registryUrl=https://percona.github.io/percona-helm-charts/
-      defaultVersion: "1.21.2"
+      defaultVersion: "1.23.3"
       defaultNamespace: nvsentinel
     manifestFiles:
       - components/nvsentinel-mongodb/manifests/client-certificate.yaml

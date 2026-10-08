@@ -74,7 +74,8 @@
 //   - psmdb.percona.com API-group and exact-resource availability
 //   - Presence of PerconaServerMongoDB custom resources other than AICR's own
 //     nvsentinel/nvsentinel-mongodb
-//   - Percona operator pods outside the nvsentinel namespace
+//   - Percona operator pods AICR did not install: outside the nvsentinel
+//     namespace, or inside it under another Helm release
 //   - No database availability or operator health inference
 //
 // # Usage

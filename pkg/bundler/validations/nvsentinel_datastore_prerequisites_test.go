@@ -125,7 +125,7 @@ func TestCheckNVSentinelDatastorePrerequisites(t *testing.T) {
 		{
 			name:     "foreign Percona operator blocks",
 			rr:       result(present, recipe.PerconaOperatorStateOperatorDetected, nil),
-			wantErrs: []string{"running outside the nvsentinel namespace"},
+			wantErrs: []string{"that AICR did not install"},
 			wantCode: aicrerrors.ErrCodeConflict,
 		},
 		{

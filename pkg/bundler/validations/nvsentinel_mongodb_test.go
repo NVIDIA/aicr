@@ -84,6 +84,23 @@ func TestCheckNVSentinelMongoDBCoherent(t *testing.T) {
 		{name: "component absent", rr: &recipe.RecipeResult{}},
 		{name: "coherent", rr: result(good())},
 		{
+			name: "bundlers subset renders only the datastore",
+			rr: func() *recipe.RecipeResult {
+				full := result(good())
+				filtered := &recipe.RecipeResult{ComponentRefs: full.ComponentRefs[:1]}
+				return filtered.WithDeclaredComponents(full.ComponentRefs)
+			}(),
+		},
+		{
+			name: "bundlers subset with the operator declared but disabled",
+			rr: func() *recipe.RecipeResult {
+				full := result(good(), operator("1.21.2", map[string]any{"enabled": false}), recipe.ComponentRef{Name: nvsentinelComponent})
+				filtered := &recipe.RecipeResult{ComponentRefs: full.ComponentRefs[:1]}
+				return filtered.WithDeclaredComponents(full.ComponentRefs)
+			}(),
+			want: []string{"psmdb-operator is not deployed"},
+		},
+		{
 			name: "no NVSentinel to consume it",
 			rr:   result(good(), operator("1.21.2", nil)),
 			want: []string{"NVSentinel is not deployed"},

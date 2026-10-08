@@ -1896,7 +1896,7 @@ func CheckNVSentinelDriverLabelDetectable(ctx context.Context, componentName str
 // defaultRuntimeClassName is the shared chart default: the gpu-operator
 // chart ships operator.runtimeClass: nvidia (v26.7.0, verified against
 // the pinned chart values), and nvsentinel's metadata-collector subchart
-// ships runtimeClassName: "nvidia" (v1.25.0, charts/metadata-collector/
+// ships runtimeClassName: "nvidia" (v1.26.0, charts/metadata-collector/
 // values.yaml:35). Either side left unset therefore resolves to this
 // name.
 const defaultRuntimeClassName = "nvidia"
@@ -2338,7 +2338,7 @@ func nicInclusionOverrideUsable(override string) bool {
 // `{{ if }}` -- helmTruthy is the wrong reader here. Helm resolves the
 // path and, on anything that is not a Go bool, logs "returned non-bool
 // value", ignores the condition, and renders the subchart anyway
-// (verified against chart v1.25.0: `--set global.nicHealthMonitor.enabled=0`
+// (verified against chart v1.26.0: `--set global.nicHealthMonitor.enabled=0`
 // still renders nic-health-monitor, while `=false` does not). So only the
 // literal false switches a subchart off, and only a well-formed table can
 // carry it. An absent key reports false: every subchart this reads defaults
@@ -2481,7 +2481,7 @@ func CheckNVSentinelNicHealthMonitorRequiresMetadataCollector(ctx context.Contex
 
 // Paths and names CheckNVSentinelSlurmDrainMonitorRequiresSlinky reads.
 // slurmDrainMonitorChartNamespace is the subchart's default for
-// slurm-drain-monitor.namespace (NVSentinel chart v1.25.0); it also stands in
+// slurm-drain-monitor.namespace (NVSentinel chart v1.26.0); it also stands in
 // for slinky-slurm's namespace on a ref that does not carry one, which recipe
 // resolution otherwise fills from the registry's defaultNamespace, also slurm.
 const (
@@ -3278,7 +3278,10 @@ func CheckNVSentinelMongoDBCoherent(ctx context.Context, componentName string, r
 			fmt.Sprintf("component %q: ", componentName)+fmt.Sprintf(format, args...)))
 	}
 
-	sentinelRef := recipeResult.GetComponentRef(nvsentinelComponentName)
+	// Dependencies are read from the declared union so a bundle filtered
+	// to this component alone still sees the NVSentinel and operator refs.
+	declared := declaredUnionView(recipeResult)
+	sentinelRef := declared.GetComponentRef(nvsentinelComponentName)
 	if sentinelRef == nil || componentDisabled(sentinelRef, bundlerConfig, componentOverrideKeys(nvsentinelComponentName, provider)) {
 		fail("NVSentinel is not deployed, so nothing uses this datastore -- it is added only by the nvsentinel remediation step mixins")
 	}
@@ -3315,13 +3318,13 @@ func CheckNVSentinelMongoDBCoherent(ctx context.Context, componentName string, r
 		}
 	}
 
-	operatorRef := recipeResult.GetComponentRef(psmdbOperatorComponent)
+	operatorRef := declared.GetComponentRef(psmdbOperatorComponent)
 	if operatorRef == nil || componentDisabled(operatorRef, bundlerConfig, operatorKeys) {
 		fail("psmdb-operator is not deployed, so nothing reconciles the PerconaServerMongoDB cluster -- it is " +
 			"added by the same nvsentinel remediation step mixins")
 		return nil, errs
 	}
-	operatorValues, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, psmdbOperatorComponent, operatorKeys, "NVSentinel MongoDB coherence")
+	operatorValues, err := effectiveComponentValues(ctx, declared, bundlerConfig, psmdbOperatorComponent, operatorKeys, "NVSentinel MongoDB coherence")
 	if err != nil {
 		return nil, []error{err}
 	}

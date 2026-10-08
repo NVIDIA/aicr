@@ -12,17 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Written at pin 1.21.3, describing the next minor above it. from starts at
-# 1.21.0 because AICR has shipped no earlier Percona release. The <1.23.0
-# ceiling is Percona's one-minor-at-a-time rule: a jump over two minors lands
-# beyond it and is reported blocked. Transcribed from Percona's upgrade docs,
-# which remain the authoritative account.
+# Written at chart pin 1.23.1 (operator 1.23.0), describing the next minor
+# above it. from starts at 1.23.0 because AICR has shipped no earlier Percona
+# release. The <1.25.0 ceiling is Percona's one-minor-at-a-time rule: a jump
+# over two minors lands beyond it and is reported blocked. 1.24 is unreleased;
+# the steps are transcribed from Percona's upgrade docs, which remain the
+# authoritative account, and are re-read against the 1.24 release notes
+# before the bump.
 apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: psmdb-operator
 transitions:
-  - from: ">=1.21.0 <1.22.0"
-    to: ">=1.22.0 <1.23.0"
+  - from: ">=1.23.0 <1.24.0"
+    to: ">=1.24.0 <1.25.0"
     verdict: manual
     summary: >-
       Percona moves the operator one minor at a time, CRDs before the operator.

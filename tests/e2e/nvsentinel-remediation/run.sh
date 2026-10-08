@@ -216,7 +216,7 @@ install_component() {
 
 install_bundle() {
   msg "Installing cert-manager, prometheus-operator-crds, the Percona datastore and nvsentinel from the bundle..."
-  local dir d deadline
+  local dir d deadline remaining
   for dir in "${CERT_MANAGER_DIR}" "${CRDS_DIR}"; do
     install_component "${dir}"
   done
@@ -231,11 +231,15 @@ install_bundle() {
   wait_rollout deployment psmdb-operator nvsentinel "${deadline}"
   install_component "${MONGODB_DIR}"
   install_component "${MONGODB_POST_DIR}"
+  remaining=$((deadline - SECONDS))
+  ((remaining > 0)) || err "nvsentinel-mongodb never became ready"
   kc -n nvsentinel wait --for=jsonpath='{.status.state}'=ready \
-    perconaservermongodb/nvsentinel-mongodb --timeout="$((deadline - SECONDS))s" ||
+    perconaservermongodb/nvsentinel-mongodb --timeout="${remaining}s" ||
     err "nvsentinel-mongodb never became ready"
+  remaining=$((deadline - SECONDS))
+  ((remaining > 0)) || err "nvsentinel's MongoDB client certificate was never issued"
   kc -n nvsentinel wait --for=condition=Ready certificate/nvsentinel-mongodb-app-client \
-    --timeout="$((deadline - SECONDS))s" || err "nvsentinel's MongoDB client certificate was never issued"
+    --timeout="${remaining}s" || err "nvsentinel's MongoDB client certificate was never issued"
 
   install_component "${BUNDLE_DIR}"
 

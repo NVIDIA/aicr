@@ -939,7 +939,7 @@ generate_bundle() {
         printf '%s\n' 'kind: ComponentRegistry' 'apiVersion: aicr.run/v1beta1' \
             'metadata:' '  name: kwok-mixins' 'components: []' >"${data_dir}/registry.yaml"
         if ! MIXINS="$KWOK_MIXINS" yq eval \
-                '.spec.mixins = ((.spec.mixins // []) + (strenv(MIXINS) | split(",")))' \
+                '.spec.mixins = ((.spec.mixins // []) + (strenv(MIXINS) | split(",") | map(trim) | map(select(. != ""))))' \
                 "$recipe_overlay" >"${data_dir}/overlays/${recipe}.yaml"; then
             log_error "Failed to compose KWOK_MIXINS=${KWOK_MIXINS} onto ${recipe}"
             return 1

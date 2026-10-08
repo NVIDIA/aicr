@@ -189,11 +189,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Which components may have their CRDs applied ahead of `helm upgrade`.
 	// Helm never updates a chart's crds/ directory on upgrade, so without
 	// this the bundle pairs a bumped chart with its day-one CRD schema.
-	crdOwners, err := deployer.ResolveCRDOwners(ctx, g.RecipeResult.DataProvider(), g.RecipeResult.ComponentRefs)
-	if err != nil {
-		return nil, err
-	}
-	crdExclusions, err := deployer.ResolveCRDExclusions(g.RecipeResult.DataProvider(), crdOwners)
+	crdOwners, crdExclusions, err := deployer.ResolveCRDPolicy(ctx, g.RecipeResult.DataProvider(), g.RecipeResult.ComponentRefs)
 	if err != nil {
 		return nil, err
 	}

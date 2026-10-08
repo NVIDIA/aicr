@@ -67,7 +67,7 @@ spec:
             setupJob:
               image:
                 repository: docker.io/percona/percona-server-mongodb
-                tag: "8.0.17-6@sha256:8698ffa8c0a3cb1902160e75599adb9d8b2e448e922a145fcf55915ef2fd556a"
+                tag: "8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c"
           faultQuarantine:
             enabled: true
           nodeDrainer:
