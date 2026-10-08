@@ -652,7 +652,7 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 		slog.Info("Kubeflow Trainer not found or incomplete, installing...", "version", version)
 		// installTrainer rolls back its own resources on failure, so there is
 		// nothing to clean up on the error path.
-		created, installErr := installTrainer(ctx, dynamicClient, clientset, discoveryClient, version)
+		created, installErr := installTrainerFunc(ctx, dynamicClient, clientset, discoveryClient, version)
 		if installErr != nil {
 			return nil, aicrErrors.PropagateOrWrap(installErr, aicrErrors.ErrCodeInternal,
 				"failed to install Kubeflow Trainer")
@@ -848,6 +848,10 @@ func foldCleanupError(benchErr, cleanupErr error, fallbackMsg string) error {
 	}
 	return aicrErrors.PropagateOrWrap(cleanupErr, aicrErrors.ErrCodeInternal, fallbackMsg)
 }
+
+// installTrainerFunc is a variable rather than a direct call only so tests can
+// exercise the self-install path without downloading a release from GitHub.
+var installTrainerFunc = installTrainer
 
 // installTrainer downloads the given Kubeflow Trainer release archive from GitHub, builds
 // the kustomize manager overlay entirely in Go (no CLI), and applies every resource to

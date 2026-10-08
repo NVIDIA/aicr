@@ -27,6 +27,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -77,6 +80,40 @@ func TestEnsureTrainerInstalled_VersionResolvedOnlyForSelfInstall(t *testing.T) 
 				t.Fatalf("err = %v, want the resolver's ErrCodeInvalidRequest", err)
 			}
 		})
+	}
+}
+
+// TestEnsureTrainerInstalled_SelfInstallUsesResolvedVersion pins that the
+// self-install installs exactly the release the resolver returned and claims
+// what the installer created for cleanup.
+func TestEnsureTrainerInstalled_SelfInstallUsesResolvedVersion(t *testing.T) {
+	t.Setenv(trainerVersionEnv, "")
+	resolvedVersion, err := resolveTrainerVersion(nil)
+	if err != nil {
+		t.Fatalf("resolveTrainerVersion: %v", err)
+	}
+	created := []trainerResourceRef{{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment}}
+
+	var installedVersion string
+	oldInstall := installTrainerFunc
+	installTrainerFunc = func(_ context.Context, _ dynamic.Interface, _ kubernetes.Interface,
+		_ discovery.DiscoveryInterface, version string) ([]trainerResourceRef, error) {
+
+		installedVersion = version
+		return created, nil
+	}
+	defer func() { installTrainerFunc = oldInstall }()
+
+	resolve := func() (string, error) { return resolveTrainerVersion(nil) }
+	refs, err := ensureTrainerInstalled(context.Background(), newTrainerFakeClient(), fake.NewClientset(), nil, false, resolve)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if installedVersion != resolvedVersion {
+		t.Errorf("installTrainer got version %q, want the resolved %q", installedVersion, resolvedVersion)
+	}
+	if len(refs) != len(created) {
+		t.Errorf("refs = %d, want the %d resource(s) the installer created", len(refs), len(created))
 	}
 }
 
@@ -300,7 +337,7 @@ func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 //
 // The not-declared + missing row is deliberately absent rather than overlooked: it
 // reaches installTrainer, which downloads and kustomize-builds the upstream release
-// archive, so it is covered by e2e rather than being unit-testable here.
+// archive, so it needs installTrainerFunc stubbed, which this table does not do.
 func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 	tests := []struct {
 		name            string
