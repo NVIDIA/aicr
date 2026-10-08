@@ -71,6 +71,48 @@ func busBWStatus(values ...any) map[string]any {
 // A certification reruns on nodes that may still carry measurements from an
 // earlier run, so listMaxBusBandwidth has to attribute by owning Workflow and
 // by creation time, and report the peak of what is left.
+// The workflow name is the key every later lookup is scoped by, so a status
+// that does not carry one has to fail here. A missing or null name must not
+// travel on as a name: the measurement and pod lookups would then fail against
+// a workflow that never existed, reporting no results rather than no workflow.
+func TestCertificationWorkflowName(t *testing.T) {
+	certification := func(ref any) *unstructured.Unstructured {
+		status := map[string]any{"domain": "communication", "variant": "nccl-all-reduce"}
+		if ref != nil {
+			status["workflowRef"] = ref
+		}
+		return &unstructured.Unstructured{Object: map[string]any{
+			"status": map[string]any{"categoryStatuses": []any{status}},
+		}}
+	}
+
+	tests := []struct {
+		name    string
+		ref     any
+		want    string
+		wantErr bool
+	}{
+		{"name present", map[string]any{"name": creTestWorkflow}, creTestWorkflow, false},
+		{"name empty", map[string]any{"name": ""}, "", true},
+		{"name null", map[string]any{"name": nil}, "", true},
+		{"name absent", map[string]any{}, "", true},
+		{"name not a string", map[string]any{"name": int64(7)}, "", true},
+		{"workflowRef absent", nil, "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := certificationWorkflowName(certification(tt.ref), "communication", "nccl-all-reduce")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("workflow name = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestListMaxBusBandwidth(t *testing.T) {
 	createdAt := metav1.NewTime(time.Now())
 

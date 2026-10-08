@@ -164,28 +164,6 @@ func TestUnstructuredConditionTrue(t *testing.T) {
 	}
 }
 
-func TestCertificationWorkflowName(t *testing.T) {
-	obj := buildCRENCCLCertification(t, "ns", twoNodeGPUConfig())
-	obj.Object["status"] = map[string]any{
-		"categoryStatuses": []any{
-			map[string]any{
-				"domain":  "communication",
-				"variant": "nccl-all-reduce",
-				"workflowRef": map[string]any{
-					"name": "aicr-cre-nccl-abcde",
-				},
-			},
-		},
-	}
-	got, err := certificationWorkflowName(obj, creNCCLDomain, creNCCLVariant)
-	if err != nil {
-		t.Fatalf("certificationWorkflowName() error = %v", err)
-	}
-	if got != "aicr-cre-nccl-abcde" {
-		t.Errorf("workflow name = %q", got)
-	}
-}
-
 func TestYoungestLivePodSince(t *testing.T) {
 	cutoff := metav1.NewTime(time.Unix(50, 0))
 	older := corev1.Pod{

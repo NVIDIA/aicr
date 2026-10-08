@@ -49,12 +49,16 @@ func certificationWorkflowName(obj *unstructured.Unstructured, domain, variant s
 			continue
 		}
 
-		ref, ok := status["workflowRef"].(map[string]any)
-		if !ok || fmt.Sprint(ref["name"]) == "" {
+		// Type-asserted rather than formatted: fmt.Sprint renders both an
+		// absent key and an explicit null as "<nil>", which passes an
+		// emptiness check and then travels on as a workflow name.
+		ref, _ := status["workflowRef"].(map[string]any)
+		name, _ := ref["name"].(string)
+		if name == "" {
 			return "", aicrErrors.New(aicrErrors.ErrCodeNotFound,
 				fmt.Sprintf("Certification %s/%s workflow reference is empty", domain, variant))
 		}
-		return fmt.Sprint(ref["name"]), nil
+		return name, nil
 	}
 	return "", aicrErrors.New(aicrErrors.ErrCodeNotFound,
 		fmt.Sprintf("Certification %s/%s category status not found", domain, variant))
