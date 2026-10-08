@@ -277,6 +277,7 @@ func setNodeSelectorAtPath(values map[string]any, nodeSelector map[string]string
 // ApplyTolerationsOverrides applies toleration overrides to a values map.
 // If tolerations is non-empty, it sets or replaces the existing tolerations field.
 // The function applies to the specified paths in the values map (e.g., "tolerations", "webhook.tolerations").
+// Duplicate entries in tolerations are written once.
 func ApplyTolerationsOverrides(values map[string]any, tolerations []corev1.Toleration, paths ...string) {
 	if len(tolerations) == 0 || values == nil {
 		return
@@ -304,7 +305,8 @@ func ApplyTolerationsOverrides(values map[string]any, tolerations []corev1.Toler
 //
 // If the path is absent or holds an empty/non-slice value, the behavior is
 // identical to ApplyTolerationsOverrides (CLI tolerations become the full
-// list at the path).
+// list at the path). An entry already present at the path is not appended
+// again.
 func AppendTolerationsOverrides(values map[string]any, tolerations []corev1.Toleration, paths ...string) {
 	if len(tolerations) == 0 || values == nil {
 		return
@@ -325,29 +327,58 @@ func AppendTolerationsOverrides(values map[string]any, tolerations []corev1.Tole
 func appendTolerationsAtPath(values map[string]any, tolerations []map[string]any, path string) {
 	parent, key, _ := getOrCreateNestedMap(values, path, false)
 
-	newEntries := make([]any, len(tolerations))
-	for i, t := range tolerations {
-		newEntries[i] = t
-	}
-
-	existing, ok := parent[key].([]any)
-	if !ok {
-		parent[key] = newEntries
-		return
-	}
-	parent[key] = append(existing, newEntries...)
+	existing, _ := parent[key].([]any)
+	parent[key] = dedupTolerationEntries(existing, tolerations)
 }
 
 // setTolerationsAtPath sets the tolerations at the specified dot-notation path.
 func setTolerationsAtPath(values map[string]any, tolerations []map[string]any, path string) {
 	parent, key, _ := getOrCreateNestedMap(values, path, false)
+	parent[key] = dedupTolerationEntries(nil, tolerations)
+}
 
-	// Convert to []any for proper YAML serialization
-	tolInterface := make([]any, len(tolerations))
-	for i, t := range tolerations {
-		tolInterface[i] = t
+// dedupTolerationEntries returns existing followed by the additions whose
+// identity is not already present in existing or earlier in additions.
+// Existing entries are never removed or reordered. The result is a fresh
+// []any so each value path gets its own list.
+func dedupTolerationEntries(existing []any, additions []map[string]any) []any {
+	seen := make(map[string]struct{}, len(existing)+len(additions))
+	for _, e := range existing {
+		if k := tolerationEntryKey(e); k != "" {
+			seen[k] = struct{}{}
+		}
 	}
-	parent[key] = tolInterface
+	out := make([]any, 0, len(existing)+len(additions))
+	out = append(out, existing...)
+	for _, a := range additions {
+		k := tolerationEntryKey(a)
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, a)
+	}
+	return out
+}
+
+// tolerationEntryKey returns a canonical identity for a toleration entry so
+// equal tolerations compare equal whether they came from TolerationsToPodSpec
+// (map[string]any, int64 seconds) or a YAML decode (map[any]any, float64
+// seconds). Non-map entries get "" and are never deduplicated.
+func tolerationEntryKey(entry any) string {
+	var m map[string]any
+	switch x := entry.(type) {
+	case map[string]any:
+		m = x
+	case map[any]any:
+		m = make(map[string]any, len(x))
+		for k, v := range x {
+			m[fmt.Sprint(k)] = v
+		}
+	default:
+		return ""
+	}
+	return fmt.Sprintf("%v|%v|%v|%v|%v", m["key"], m["operator"], m["value"], m["effect"], m["tolerationSeconds"])
 }
 
 // TolerationsToPodSpec converts a slice of corev1.Toleration to a YAML-friendly format.

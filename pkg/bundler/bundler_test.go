@@ -3021,6 +3021,19 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 			},
 			description: "component default values file value is overwritten by --accelerated-node-toleration",
 		},
+		{
+			name:    "repeated CLI toleration is written once",
+			initial: map[string]any{},
+			policy:  schedulingPathPolicy{},
+			cliTols: []corev1.Toleration{
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule},
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule},
+			},
+			wantValue: []any{
+				map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+			},
+			description: "--accelerated-node-toleration passed twice with the same value renders a single entry",
+		},
 	}
 
 	for _, tt := range tests {
@@ -3046,6 +3059,251 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 				t.Errorf("%s:\n  got  = %#v\n  want = %#v", tt.description, gotList, wantList)
 			}
 		})
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_NFDWorkerGetsSystemAndAcceleratedTolerations
+// pins #3135. The registry declares nfd's worker.tolerations and
+// topologyUpdater.tolerations under BOTH the system and accelerated tiers
+// because those DaemonSets must run on every node; the rendered value must be
+// the union of both flags, not whichever pass ran last.
+func TestApplyNodeSchedulingOverrides_NFDWorkerGetsSystemAndAcceleratedTolerations(t *testing.T) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	nfd := registry.Get("nfd")
+	if nfd == nil {
+		t.Fatalf("registry missing nfd component")
+	}
+	sharedPaths := []string{"worker.tolerations", "topologyUpdater.tolerations"}
+	for _, p := range sharedPaths {
+		if !slices.Contains(nfd.GetSystemTolerationPaths(), p) || !slices.Contains(nfd.GetAcceleratedTolerationPaths(), p) {
+			t.Fatalf("nfd %q must be declared under both system and accelerated tolerationPaths; system=%v accelerated=%v",
+				p, nfd.GetSystemTolerationPaths(), nfd.GetAcceleratedTolerationPaths())
+		}
+	}
+
+	systemTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	acceleratedTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithSystemNodeTolerations([]corev1.Toleration{systemTol}),
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{acceleratedTol}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	values := map[string]any{}
+	b.applyNodeSchedulingOverrides("nfd", values, nil, schedulingPathPolicy{})
+
+	want := []any{
+		map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"},
+		map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+	}
+	for _, p := range sharedPaths {
+		got, ok := component.GetValueByPath(values, p)
+		if !ok {
+			t.Fatalf("%s not present after injection", p)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("nfd %s must tolerate both system and accelerated taints; got accelerated only or wrong order (#3135)\n  got  = %#v\n  want = %#v", p, got, want)
+		}
+	}
+
+	// A system-only path is unaffected by the shared-path union.
+	got, ok := component.GetValueByPath(values, "master.tolerations")
+	if !ok {
+		t.Fatalf("master.tolerations not present after injection")
+	}
+	if wantMaster := want[:1]; !reflect.DeepEqual(got, wantMaster) {
+		t.Errorf("nfd master.tolerations must carry only the system toleration\n  got  = %#v\n  want = %#v", got, wantMaster)
+	}
+}
+
+func TestSharedTolerationPaths(t *testing.T) {
+	tests := []struct {
+		name        string
+		system      []string
+		accelerated []string
+		want        []string
+	}{
+		{name: "both nil", want: nil},
+		{name: "accelerated nil", system: []string{"a"}, want: nil},
+		{name: "no overlap", system: []string{"a", "b"}, accelerated: []string{"c"}, want: nil},
+		{name: "overlap keeps system order", system: []string{"a", "b", "c"}, accelerated: []string{"c", "a"}, want: []string{"a", "c"}},
+		{name: "repeats collapse", system: []string{"a", "a"}, accelerated: []string{"a"}, want: []string{"a"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sharedTolerationPaths(tt.system, tt.accelerated); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("sharedTolerationPaths(%v, %v) = %v, want %v", tt.system, tt.accelerated, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKeyedTolerations(t *testing.T) {
+	keyed := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists}
+	keyless := corev1.Toleration{Operator: corev1.TolerationOpExists}
+	got := keyedTolerations([]corev1.Toleration{keyless, keyed, keyless})
+	if want := []corev1.Toleration{keyed}; !reflect.DeepEqual(got, want) {
+		t.Errorf("keyedTolerations() = %v, want %v", got, want)
+	}
+	if got := keyedTolerations(nil); got != nil {
+		t.Errorf("keyedTolerations(nil) = %v, want nil", got)
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_SharedPathUnion covers the shared-path
+// rules around the #3135 fix: keyless system entries are not carried, the
+// union is deduplicated, and opt-out / append-mode / values-file-default
+// handling matches non-shared paths.
+func TestApplyNodeSchedulingOverrides_SharedPathUnion(t *testing.T) {
+	const workerPath = "worker.tolerations"
+	const masterPath = "master.tolerations"
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	keyless := corev1.Toleration{Operator: corev1.TolerationOpExists}
+	sysMap := map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"}
+	accMap := map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"}
+	keylessMap := map[string]any{"operator": "Exists"}
+	exampleMap := map[string]any{"key": "example.com/dedicated", "operator": "Exists", "effect": "NoSchedule"}
+
+	tests := []struct {
+		name       string
+		initial    map[string]any
+		policy     schedulingPathPolicy
+		sys        []corev1.Toleration
+		acc        []corev1.Toleration
+		wantWorker []any
+		wantMaster []any // nil = don't check
+	}{
+		{
+			name:       "flags-only overlap is written once",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{sysTol, accTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, accMap},
+			wantMaster: []any{sysMap, accMap},
+		},
+		{
+			name:       "keyless system default is not carried onto the shared path",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{accMap},
+			wantMaster: []any{keylessMap},
+		},
+		{
+			name:       "keyed system entries are carried, keyless dropped",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless, sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, accMap},
+		},
+		{
+			name: "append mode keeps overlay entries and does not repeat the system one",
+			initial: map[string]any{
+				"worker": map[string]any{"tolerations": []any{sysMap, exampleMap}},
+			},
+			policy:     schedulingPathPolicy{appendMode: map[string]struct{}{workerPath: {}}},
+			sys:        []corev1.Toleration{sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, exampleMap, accMap},
+		},
+		{
+			name: "opt-out empty list is preserved",
+			initial: map[string]any{
+				"worker": map[string]any{"tolerations": []any{}},
+			},
+			policy:     schedulingPathPolicy{optOut: map[string]struct{}{workerPath: {}}},
+			sys:        []corev1.Toleration{sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{},
+		},
+		{
+			name: "values-file default is replaced when only accelerated is set",
+			initial: map[string]any{
+				"worker": map[string]any{"tolerations": []any{keylessMap}},
+			},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{accMap},
+		},
+		{
+			name:       "system-only path never receives accelerated entries",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, accMap},
+			wantMaster: []any{sysMap},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithSystemNodeTolerations(tt.sys),
+				config.WithAcceleratedNodeTolerations(tt.acc),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			b.applyNodeSchedulingOverrides("nfd", tt.initial, nil, tt.policy)
+
+			got, ok := component.GetValueByPath(tt.initial, workerPath)
+			if !ok {
+				t.Fatalf("%s not present after injection", workerPath)
+			}
+			if !reflect.DeepEqual(got, tt.wantWorker) {
+				t.Errorf("%s:\n  got  = %#v\n  want = %#v", workerPath, got, tt.wantWorker)
+			}
+			if tt.wantMaster != nil {
+				gotMaster, ok := component.GetValueByPath(tt.initial, masterPath)
+				if !ok {
+					t.Fatalf("%s not present after injection", masterPath)
+				}
+				if !reflect.DeepEqual(gotMaster, tt.wantMaster) {
+					t.Errorf("%s:\n  got  = %#v\n  want = %#v", masterPath, gotMaster, tt.wantMaster)
+				}
+			}
+		})
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_SharedPathDynamicOptOut: a --dynamic path
+// is skipped by the shared-path union too; the other shared path still gets it.
+func TestApplyNodeSchedulingOverrides_SharedPathDynamicOptOut(t *testing.T) {
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithSystemNodeTolerations([]corev1.Toleration{sysTol}),
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{accTol}),
+		config.WithDynamicValues(map[string][]string{"nfd": {"worker.tolerations"}}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values := map[string]any{}
+	policy := b.computeSchedulingPathPolicy(&recipe.ComponentRef{Name: "nfd"}, nil, nil)
+	for path := range b.dynamicPathSetFor("nfd", nil) {
+		policy.optOut[path] = struct{}{}
+	}
+	b.applyNodeSchedulingOverrides("nfd", values, nil, policy)
+
+	if val, ok := component.GetValueByPath(values, "worker.tolerations"); ok {
+		t.Errorf("worker.tolerations should not be baked in when declared dynamic, got: %v", val)
+	}
+	want := []any{
+		map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"},
+		map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+	}
+	got, ok := component.GetValueByPath(values, "topologyUpdater.tolerations")
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Errorf("topologyUpdater.tolerations:\n  got  = %#v\n  want = %#v", got, want)
 	}
 }
 
