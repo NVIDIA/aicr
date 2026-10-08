@@ -150,7 +150,7 @@ check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 	@./tools/check-docs-filenames
 
 .PHONY: check-upgrade-records
-check-upgrade-records: ## Verifies committed ComponentUpgrades records are well-formed (ADR-021)
+check-upgrade-records: ## Verifies ComponentUpgrades records are well-formed and cover pins moved since the merge base (ADR-021; needs upstream/main or origin/main fetched)
 	@./tools/check-upgrade-records
 
 # Deliberately NOT in `lint` or `qualify`: it re-downloads each pinned tool's
