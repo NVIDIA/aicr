@@ -183,7 +183,7 @@ This schema is **specified here and enforced by TG2 (#1267)** — the emitter �
 referenced by **TG3's `Header.extra`**; no Go constant or struct pins these names
 today, so TG2 must lock the key names, order, and count (e.g. in a shared
 constant + a round-trip test) when it lands, rather than relying on this prose.
-The contract is **7 keys**, in this order. The strings below are the canonical
+The contract is **8 keys**, in this order. The strings below are the canonical
 `snake_case` key names; consumers use them verbatim.
 
 | # | Key | Source | Example | Notes |
@@ -195,6 +195,7 @@ The contract is **7 keys**, in this order. The strings below are the canonical
 | 5 | `signer_issuer` | attestation | `https://token.actions.githubusercontent.com` | Signer OIDC issuer — pairs with identity to scope the latest-per-signer default. |
 | 6 | `source_class` | provenance | `ci` | Source class (e.g. `ci` vs. ad-hoc / local), so a reader can weigh trust. |
 | 7 | `evidence_digest` | evidence | `sha256:…` | Digest of the underlying evidence artifact — the verifiable anchor for the result. |
+| 8 | `aicr_run_url` | publisher input | `https://github.com/NVIDIA/aicr/actions/runs/…` | The GitHub Actions run that produced the bundle, rendered as the build's run link. Empty when the publisher was not given one (e.g. community backfills). |
 
 Notes:
 
@@ -204,7 +205,7 @@ Notes:
   the recipe.
 - `signer_identity` + `signer_issuer` together key the **latest-per-signer**
   default scope referenced in the k8s-in-column countermeasure.
-- The key strings and their count (7) are the contract: TG2 emits exactly these;
+- The key strings and their count (8) are the contract: TG2 emits exactly these;
   TG3 reads exactly these. Adding a key is a change to this table.
 
 ## Reconciliation with ADR-009 — coexist, not identity

@@ -293,11 +293,15 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # On the UAT workflow_call path this run is the UAT run that produced
+          # the bundle; the dispatched publish is a new run and cannot see it.
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           for attempt in 1 2 3; do
             if gh workflow run testgrid-publish.yml \
               --repo "${REPO}" --ref main \
               -f bundle_ref="${BUNDLE_REF}" \
-              -f environment=prod; then
+              -f environment=prod \
+              -f run_url="${RUN_URL}"; then
               echo "dispatched TestGrid Publish on main"
               exit 0
             fi

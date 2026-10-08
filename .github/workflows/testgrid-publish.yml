@@ -72,6 +72,11 @@ on:
         options:
           - prod
           - staging
+      run_url:
+        description: "https://github.com URL of the run that produced the bundle (optional; shown as the build's run link)"
+        type: string
+        required: false
+        default: ""
 
 concurrency:
   # Serialize publishes for the same environment and bundle while one is in
@@ -333,9 +338,11 @@ jobs:
           BUNDLE_REF: ${{ steps.bundle.outputs.bundle_ref }}
           TG_BUCKET: ${{ steps.gcp.outputs.bucket }}
           TG_SOURCE_CLASS: ${{ steps.source.outputs.source_class }}
+          TG_RUN_URL: ${{ inputs.run_url }}
         run: |
           set -euo pipefail
           /tmp/testgrid-publish \
             --bundle "${BUNDLE_REF}" \
             --bucket "${TG_BUCKET}" \
-            --source-class "${TG_SOURCE_CLASS}"
+            --source-class "${TG_SOURCE_CLASS}" \
+            --run-url "${TG_RUN_URL}"

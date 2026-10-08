@@ -17,12 +17,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
@@ -383,5 +385,106 @@ func TestLocalBundleDigest(t *testing.T) {
 	placeholder, err := localBundleDigest(t.TempDir(), true)
 	if err != nil || placeholder != "local" {
 		t.Fatalf("dry-run fallback = (%q, %v), want (local, nil)", placeholder, err)
+	}
+}
+
+func TestValidateRunURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{"empty", "", false},
+		{"github run", "https://github.com/NVIDIA/aicr/actions/runs/123", false},
+		{"http", "http://github.com/NVIDIA/aicr/actions/runs/123", true},
+		{"other host", "https://evil.example/NVIDIA/aicr/actions/runs/123", true},
+		{"lookalike host", "https://github.com.evil.example/runs/1", true},
+		{"userinfo", "https://user@github.com/NVIDIA/aicr/actions/runs/123", true},
+		{"javascript", "javascript:alert(1)", true},
+		{"unparseable", "https://github.com/%zz", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRunURL(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateRunURL(%q) error = %v, wantErr %v", tt.raw, err, tt.wantErr)
+			}
+			if err != nil && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("validateRunURL(%q) error code = %v, want ErrCodeInvalidRequest", tt.raw, err)
+			}
+		})
+	}
+}
+
+// TestRunDryRunRunURL verifies --run-url reaches the emitted metadata.
+func TestRunDryRunRunURL(t *testing.T) {
+	dir := t.TempDir()
+	recipe := `
+apiVersion: aicr.run/v1
+kind: RecipeResult
+criteria:
+  service: eks
+  accelerator: h100
+  os: ubuntu
+  intent: training
+`
+	if err := os.WriteFile(filepath.Join(dir, attestation.RecipeFilename), []byte(recipe), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(makeReport("deployment", []ctrf.TestResult{
+		{Name: "health-check", Status: ctrf.StatusPassed, Duration: 1000},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrfDir := filepath.Join(dir, ctrfDirName)
+	if mkErr := os.MkdirAll(ctrfDir, 0o700); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	if wErr := os.WriteFile(filepath.Join(ctrfDir, "deployment.json"), data, 0o600); wErr != nil {
+		t.Fatal(wErr)
+	}
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	const runURL = "https://github.com/NVIDIA/aicr/actions/runs/123"
+	runErr := run(context.Background(), runConfig{
+		bundleDir:   dir,
+		bucket:      "test-bucket",
+		sourceClass: sourceClassUAT,
+		runURL:      runURL,
+		dryRun:      true,
+	})
+	_ = w.Close()
+	outBytes, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runErr != nil {
+		t.Fatalf("run() error = %v", runErr)
+	}
+	if want := metaKeyAICRRunURL; !strings.Contains(string(outBytes), want) || !strings.Contains(string(outBytes), runURL) {
+		t.Errorf("dry-run output missing %s = %s:\n%s", want, runURL, outBytes)
+	}
+}
+
+// TestRunRejectsInvalidRunURL verifies run() refuses a non-GitHub run URL
+// before touching the bundle.
+func TestRunRejectsInvalidRunURL(t *testing.T) {
+	err := run(context.Background(), runConfig{
+		bundleDir:   t.TempDir(),
+		bucket:      "test-bucket",
+		sourceClass: sourceClassUAT,
+		runURL:      "https://evil.example/runs/1",
+		dryRun:      true,
+	})
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("run() error = %v, want ErrCodeInvalidRequest", err)
 	}
 }

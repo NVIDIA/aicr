@@ -38,7 +38,8 @@
 //	testgrid-publish --bundle <oci-ref> --bucket <gcs-bucket>
 //	testgrid-publish --bundle ghcr.io/nvidia/aicr-evidence:sha256-abc123 \
 //	                 --bucket aicr-testgrid-staging \
-//	                 --source-class uat
+//	                 --source-class uat \
+//	                 --run-url https://github.com/NVIDIA/aicr/actions/runs/123
 package main
 
 import (
@@ -48,6 +49,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -65,6 +67,7 @@ func main() {
 		bundleDir   string
 		bucket      string
 		sourceClass string
+		runURL      string
 		plainHTTP   bool
 		insecureTLS bool
 		dryRun      bool
@@ -73,6 +76,7 @@ func main() {
 	flag.StringVar(&bundleDir, "bundle-dir", "", "pre-materialized bundle directory (alternative to --bundle)")
 	flag.StringVar(&bucket, "bucket", "", "GCS bucket to publish to (required)")
 	flag.StringVar(&sourceClass, "source-class", sourceClassUAT, "bundle origin: "+sourceClassUAT+" or "+sourceClassCommunity)
+	flag.StringVar(&runURL, "run-url", "", "https://github.com URL of the run that produced the bundle (optional)")
 	flag.BoolVar(&plainHTTP, "plain-http", false, "use plain HTTP for OCI registry (dev only)")
 	flag.BoolVar(&insecureTLS, "insecure-tls", false, "skip TLS verification for OCI registry (dev only)")
 	flag.BoolVar(&dryRun, "dry-run", false, "print output paths and started.json without writing to GCS")
@@ -100,6 +104,7 @@ func main() {
 		bundleDir:   bundleDir,
 		bucket:      bucket,
 		sourceClass: sourceClass,
+		runURL:      runURL,
 		plainHTTP:   plainHTTP,
 		insecureTLS: insecureTLS,
 		dryRun:      dryRun,
@@ -114,6 +119,7 @@ type runConfig struct {
 	bundleDir   string // pre-materialized (alternative to bundleRef)
 	bucket      string
 	sourceClass string
+	runURL      string // optional; empty when the caller has no run to link
 	plainHTTP   bool
 	insecureTLS bool
 	dryRun      bool
@@ -143,6 +149,10 @@ func localBundleDigest(dir string, dryRun bool) (string, error) {
 }
 
 func run(ctx context.Context, cfg runConfig) error {
+	if err := validateRunURL(cfg.runURL); err != nil {
+		return err
+	}
+
 	var dir, digest string
 	var cleanup func()
 
@@ -257,6 +267,7 @@ func run(ctx context.Context, cfg runConfig) error {
 			metaKeySignerIssuer:   signerIssuer,
 			metaKeySourceClass:    cfg.sourceClass,
 			metaKeyEvidenceDigest: digest,
+			metaKeyAICRRunURL:     cfg.runURL,
 		},
 	}
 
@@ -291,6 +302,22 @@ func run(ctx context.Context, cfg runConfig) error {
 		"coord", coord.String(),
 		"passed", allPassed,
 	)
+	return nil
+}
+
+// validateRunURL accepts an empty value or an https://github.com URL. The
+// TestGrid UI renders it as a link, so other schemes and hosts are rejected.
+func validateRunURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "--run-url is not a valid URL", err)
+	}
+	if u.Scheme != "https" || u.Host != "github.com" || u.User != nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "--run-url must be an https://github.com URL")
+	}
 	return nil
 }
 

@@ -31,7 +31,7 @@ func TestMetaKeys(t *testing.T) {
 	keys := MetaKeys()
 
 	// Verify length matches the declared constants.
-	const wantLen = 7
+	const wantLen = 8
 	if len(keys) != wantLen {
 		t.Errorf("MetaKeys() length = %d, want %d", len(keys), wantLen)
 	}
@@ -45,6 +45,7 @@ func TestMetaKeys(t *testing.T) {
 		metaKeySignerIssuer:   false,
 		metaKeySourceClass:    false,
 		metaKeyEvidenceDigest: false,
+		metaKeyAICRRunURL:     false,
 	}
 	seen := make(map[string]bool)
 	for _, k := range keys {

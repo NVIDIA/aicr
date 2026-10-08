@@ -84,7 +84,8 @@ evidence:
 - [`evidence-dashboard-publish.yaml`](evidence-dashboard-publish.md), to
   re-render the static evidence dashboard.
 - `testgrid-publish.yml` (TG5), passing the same verified, digest-pinned
-  `bundle_ref` this ingest consumed — but only for the first-party UAT path
+  `bundle_ref` this ingest consumed, plus this run's URL as `run_url` so the
+  TestGrid build links back to the UAT run — but only for the first-party UAT path
   (`bundle_ref` set) on `main` or a `release/*` ref. A feature-branch UAT or a
   push-triggered community/partner ingest does not dispatch TestGrid
   automatically; an allowlisted external bundle can be backfilled manually.
