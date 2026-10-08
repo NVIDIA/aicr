@@ -95,12 +95,17 @@ type creCatalogEntry struct {
 // buildCRECertification renders the Certification for one catalog entry,
 // bounded to the nodes the combination was qualified at.
 //
-// It refuses an empty node list rather than rendering a Certification without
-// spec.target.nodeNames. Nothing else in the spec bounds the footprint:
-// nodesPerJob sizes a single job and partitioning chunks whatever node list
-// matched, and execution.maxConcurrent defaults to unlimited. An untargeted
-// Certification therefore matches every node CRE can see, so the empty list
-// has to fail here rather than reach the cluster.
+// It refuses an empty node list rather than rendering a Certification with no
+// target. Nothing else in the spec bounds the footprint: nodesPerJob sizes a
+// single job, partitioning chunks whatever node list matched, and
+// execution.maxConcurrent defaults to unlimited, which leaves
+// target.nodeNames as the only cap on a run's total size.
+//
+// The CRD requires spec.target, so the object an empty list would produce is
+// rejected at admission anyway; refusing here names the bound that was not met
+// instead of surfacing a schema error. It does not require nodeNames inside
+// target, so a target carrying only selectors is admitted and matches every
+// node CRE can see — which is the shape this guard exists to keep unreachable.
 func buildCRECertification(
 	namespace, name string,
 	gpuConfig *gpuConfiguration,
