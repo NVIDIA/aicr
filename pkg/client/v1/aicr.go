@@ -847,6 +847,12 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	}
 
 	var resolveOpts []RecipeResolveOption
+	if req.InheritFrom != "" {
+		resolveOpts = append(resolveOpts, WithInheritFrom(req.InheritFrom))
+	}
+	if req.Inherit != "" {
+		resolveOpts = append(resolveOpts, WithInherit(req.Inherit))
+	}
 	if req.Profile != "" {
 		resolveOpts = append(resolveOpts, WithProfile(req.Profile))
 	}
@@ -855,6 +861,10 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	}
 	if req.GKETCPXOInterfaces != "" {
 		resolveOpts = append(resolveOpts, WithGKETCPXOInterfaces(req.GKETCPXOInterfaces))
+	}
+	resolveCfg, err := resolveRecipeConfig(resolveOpts...)
+	if err != nil {
+		return nil, err
 	}
 	internal, err := c.resolveCriteria(ctx, builder, criteria, resolveOpts...)
 	if err != nil {
@@ -872,7 +882,7 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	// emitted recipe, the Components view and anything bundled from them all
 	// name the namespace the prior artifact deployed into.
 	if req.InheritFrom != "" {
-		if inheritErr := c.inheritIdentity(ctx, req.InheritFrom, builder.DataProvider(), internal); inheritErr != nil {
+		if inheritErr := c.inheritIdentity(ctx, req.InheritFrom, resolveCfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
 	}
@@ -889,8 +899,8 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	return result, nil
 }
 
-// inheritIdentity overwrites resolved's component identity (namespace, chart,
-// source, kustomize path and manifest sets) with the one a prior recipe or
+// inheritIdentity overwrites the selected parts of resolved's component
+// identity with the ones a prior recipe or
 // bundle already deployed, so a moved registry default does not relocate or
 // replace a running component when the recipe is regenerated.
 //
@@ -903,7 +913,7 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 // nested load with "already closed" while Close itself is still waiting on that
 // same call's inflight count to drain.
 func (c *Client) inheritIdentity(
-	ctx context.Context, inheritFrom string, dp recipe.DataProvider, resolved *recipe.RecipeResult,
+	ctx context.Context, inheritFrom string, selection *recipe.InheritMode, dp recipe.DataProvider, resolved *recipe.RecipeResult,
 ) error {
 
 	path, err := inheritedRecipePath(inheritFrom)
@@ -937,11 +947,17 @@ func (c *Client) inheritIdentity(
 	if criteriaErr := checkInheritCriteria(resolved.Criteria, priorInternal.Criteria, inheritFrom); criteriaErr != nil {
 		return criteriaErr
 	}
-	if applyErr := recipe.ApplyInheritedIdentity(resolved.ComponentRefs, priorInternal.ComponentRefs); applyErr != nil {
+	mode := recipe.InheritAll
+	if selection != nil {
+		mode = *selection
+	}
+	if applyErr := recipe.ApplyInheritedIdentityWithMode(resolved.ComponentRefs, priorInternal.ComponentRefs, mode); applyErr != nil {
 		return applyErr
 	}
-	if namesErr := c.inheritObjectNames(ctx, inheritFrom, resolved); namesErr != nil {
-		return namesErr
+	if mode == recipe.InheritAll {
+		if namesErr := c.inheritObjectNames(ctx, inheritFrom, resolved); namesErr != nil {
+			return namesErr
+		}
 	}
 	// The inherited fields land after the resolved recipe was last validated,
 	// and a prior artifact can carry a combination the current registry's
@@ -1120,6 +1136,10 @@ func resolveRecipeConfig(opts ...RecipeResolveOption) (*recipeResolveConfig, err
 	if cfg.optErr != nil {
 		return nil, cfg.optErr
 	}
+	if cfg.inheritMode != nil && cfg.inheritFrom == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"inherit selection (--inherit / Inherit) requires --inherit-from (InheritFrom)")
+	}
 	return cfg, nil
 }
 
@@ -1219,7 +1239,7 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 		return nil, err
 	}
 	if cfg.inheritFrom != "" {
-		if inheritErr := c.inheritIdentity(ctx, cfg.inheritFrom, builder.DataProvider(), internal); inheritErr != nil {
+		if inheritErr := c.inheritIdentity(ctx, cfg.inheritFrom, cfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
 	}
@@ -1424,7 +1444,7 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	// recipe and the Components view agree on where each component lives.
 	if resolveCfg.inheritFrom != "" {
 		if inheritErr := c.inheritIdentity(
-			ctx, resolveCfg.inheritFrom, builder.DataProvider(), internal); inheritErr != nil {
+			ctx, resolveCfg.inheritFrom, resolveCfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
 	}

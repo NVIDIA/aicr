@@ -511,6 +511,7 @@ Generate recipes using direct system parameters:
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--inherit-from` | | string | Prior recipe file, or bundle directory, whose component namespace, chart, source, path, manifest files and pre-manifest files the resolved recipe keeps instead of re-deriving them from the registry. When both artifacts state a deployment type and they differ, such as a Helm to Kustomize change, only the namespace is kept for that component and `aicr upgrade-check` reports the type move. Given a bundle directory it also keeps that bundle's `fullnameOverride` / `nameOverride` object names, writing an override only where one differs. Use on an AICR upgrade so a moved registry default does not relocate, replace or rename a component that is already running. See [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). A component the prior artifact does not name keeps the registry default. `cm://` locations are not supported yet |
+| `--inherit` | | string | Select what to keep from `--inherit-from`: `all` (default) preserves full component identity; `namespace` preserves only namespaces and rebinds health checks, leaving chart, source, path, manifest sets and object names as newly resolved. Both modes keep newly resolved versions and general configuration. Requires `--inherit-from` |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
@@ -952,7 +953,7 @@ aicr query --selector <path> [flags]
 
 **Flags:**
 
-All `aicr recipe` flags except `--output` are supported (query always prints to stdout), including `--profile` and `--inherit-from`, plus:
+All `aicr recipe` flags except `--output` are supported (query always prints to stdout), including `--profile`, `--inherit-from` and `--inherit`, plus:
 
 | Flag | Type | Description |
 |------|------|-------------|
@@ -3404,6 +3405,7 @@ aicr mirror list [flags]
 | `--platform` | | string | | Optional platform specialization (e.g., `kubeflow`). |
 | `--profile` | | string | | Profile selection in exact `name=value` form when resolving from criteria. Cannot be combined with `--recipe`. |
 | `--inherit-from` | | string | | Prior recipe file, or bundle directory, whose component namespace, chart, source, path, manifest files and pre-manifest files the resolved recipe keeps instead of re-deriving them from the registry; a bundle directory also supplies its object names. When both artifacts state a deployment type and they differ, such as a Helm to Kustomize change, only the namespace is kept for that component and `aicr upgrade-check` reports the type move. Applies to criteria-based resolution only, and cannot be combined with `--recipe`, because that file already records the identity it resolved to. See [Upgrading a Deployed Stack](upgrading.md#pinning-the-namespaces-you-already-deployed-into). |
+| `--inherit` | | string | `all` | Select what to keep from `--inherit-from`: `all` preserves full component identity; `namespace` preserves only namespaces and rebinds health checks, leaving chart, source, path, manifest sets and object names as newly resolved. Requires `--inherit-from`; cannot be combined with `--recipe`. |
 | `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
 | `--data` | | string | | External data directory to overlay on embedded data. Overlay-provided component values and manifests both feed image discovery (see [External Data](#external-data-directory)). |
 | `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |
