@@ -325,13 +325,9 @@ func TestCRECertificationTeardownTimeoutOutlastsCREDrainGrace(t *testing.T) {
 	}
 }
 
-// TestCRECertificationJobNamesWalksLabelChain covers the reason the walk exists:
-// CRE labels only Workflows with the Certification name, so the Job names that
-// identify the TrainJobs and pods are reachable one hop at a time. Objects
-// belonging to a different Certification must not be collected.
-// Teardown enumerates the workload chain before the delete removes it, then
-// confirms the workloads stopped. A pass here is the only outcome that lets a
-// check report success.
+// TestTeardownCRECertificationConfirmsWorkloadsStopped enumerates the workload
+// chain before the delete removes it, then confirms the workloads stopped. A
+// pass here is the only outcome that lets a check report success.
 func TestTeardownCRECertificationConfirmsWorkloadsStopped(t *testing.T) {
 	const ns = creTestNamespace
 	creAPI := creAPIGroup + "/" + versionV1alpha1
@@ -375,6 +371,10 @@ func TestTeardownCRECertificationFailsOnStrandedWorkload(t *testing.T) {
 	}
 }
 
+// TestCRECertificationJobNamesWalksLabelChain covers the reason the walk exists:
+// CRE labels only Workflows with the Certification name, so the Job names that
+// identify the TrainJobs and pods are reachable one hop at a time. Objects
+// belonging to a different Certification must not be collected.
 func TestCRECertificationJobNamesWalksLabelChain(t *testing.T) {
 	const ns = creTestNamespace
 	creAPI := creAPIGroup + "/" + versionV1alpha1
