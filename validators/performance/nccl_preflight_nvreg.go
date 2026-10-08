@@ -38,6 +38,12 @@ import (
 	"github.com/NVIDIA/aicr/validators"
 )
 
+// hostPathDirectory is the addressable HostPath type for the probe's
+// /proc/driver/nvidia mount. Directory, not DirectoryOrCreate: the path lives in
+// procfs, which cannot be created into, so "create if missing" has no meaning
+// here and a missing driver has to surface as a failed check instead.
+var hostPathDirectory = corev1.HostPathDirectory
+
 // grdmaPciTopoCheckOverrideRe matches the params line for
 // NVreg_GrdmaPciTopoCheckOverride=1. Multiline-anchored: params carries one
 // "Name: value" per line.
@@ -150,6 +156,22 @@ const (
 	// established.
 	nvregVersionOKMarker = "===AICR-NVREG-VERSION-OK==="
 	nvregParamsOKMarker  = "===AICR-NVREG-PARAMS-OK==="
+
+	// nvregMountFailureMarker is the stable prefix of the kubelet event raised
+	// when the probe's hostPath type check fails, i.e. /proc/driver/nvidia is
+	// not a directory on the node because no driver is loaded there.
+	nvregMountFailureMarker = "hostPath type check failed"
+
+	// nvregDriverAbsentHint is emitted when the kubelet refused to mount
+	// /proc/driver/nvidia. It is deliberately not the flag remediation: until a
+	// driver is loaded there is no module parameter to set, so sending the
+	// operator to ClusterPolicy or modprobe.d would be a dead end.
+	nvregDriverAbsentHint = `/proc/driver/nvidia does not exist on the node, so the NVIDIA kernel ` +
+		`module is not loaded and neither the driver version nor ` +
+		`NVreg_GrdmaPciTopoCheckOverride could be read. Install the driver or wait for ` +
+		`its rollout to finish (GPU Operator nvidia-driver DaemonSet Ready, or a node ` +
+		`image that ships the driver on OKE oci-managed), then re-run. See ` +
+		`docs/user/validation.md.`
 
 	// nvregDocsHint is emitted when the flag is missing on a pre-R595 driver.
 	// Covers both driver-ownership modes, and corrects the reload instruction:
@@ -412,6 +434,11 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 				VolumeSource: corev1.VolumeSource{
 					HostPath: &corev1.HostPathVolumeSource{
 						Path: "/proc/driver/nvidia",
+						// Type-checked by the kubelet BEFORE the mount, so a node with no
+						// loaded driver fails with a "hostPath type check failed" event
+						// that nvregProbeMountFailure can name. The unset default performs
+						// no check and leaves a missing path to runtime-specific handling.
+						Type: &hostPathDirectory,
 					},
 				},
 			}},
@@ -435,6 +462,19 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 
 	phase, err := waitForPreflightPodPhase(ctx, clientset, namespace, created.Name, defaults.DiagnosticTimeout)
 	if err != nil {
+		// A probe that never started because the kubelet could not mount
+		// /proc/driver/nvidia is a finding about the node (no driver loaded), not
+		// a fault in the wait. Name it: the deferred cleanup deletes the pod, and
+		// its events with it, so this is the only place the evidence survives.
+		//
+		// The wait error is deliberately NOT chained as the cause: it carries
+		// ErrCodeTimeout, and IsTransient would then report a deterministic
+		// driver-absent finding as retryable.
+		if kubeletMsg := nvregProbeMountFailure(ctx, clientset, namespace, created.Name); kubeletMsg != "" {
+			return nvregResult{}, aicrErrors.NewWithContext(aicrErrors.ErrCodeInvalidRequest,
+				"NVIDIA driver is not loaded on node "+nodeName+" (kubelet: "+kubeletMsg+"). "+nvregDriverAbsentHint,
+				map[string]any{"node": nodeName, "pod": created.Name})
+		}
 		return nvregResult{}, err
 	}
 
@@ -469,6 +509,33 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 
 	versionFile, paramsFile, paramsOK := splitNVregProbeOutput(logs)
 	return evaluateNVregPreflight(versionFile, paramsFile, paramsOK), nil
+}
+
+// nvregProbeMountFailure returns the kubelet's message when the probe pod's
+// hostPath type check failed, and "" otherwise. Best effort: an event read that
+// fails, or finds nothing, yields "" so the caller keeps the original wait error
+// rather than guessing a cause.
+func nvregProbeMountFailure(ctx context.Context, clientset kubernetes.Interface, namespace, podName string) string {
+	events, err := clientset.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: "involvedObject.name=" + podName,
+	})
+	if err != nil {
+		return ""
+	}
+	for _, ev := range events.Items {
+		// Filter again client-side: not every apiserver or fake honours the
+		// field selector, and an event for another pod must never be attributed
+		// to this one.
+		if ev.InvolvedObject.Name != podName || !strings.Contains(ev.Message, nvregMountFailureMarker) {
+			continue
+		}
+		msg := strings.TrimSpace(ev.Message)
+		if len(msg) > maxProbeErrorOutputBytes {
+			msg = msg[:maxProbeErrorOutputBytes] + "..."
+		}
+		return msg
+	}
+	return ""
 }
 
 // waitForPreflightPodPhase watches a pod until it reaches a terminal phase

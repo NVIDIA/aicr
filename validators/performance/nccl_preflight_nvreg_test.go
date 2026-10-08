@@ -19,10 +19,15 @@ import (
 	stderrors "errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -921,4 +926,546 @@ func TestDescribeNVregNodesHonoursBothBounds(t *testing.T) {
 			t.Errorf("omitted count missing: %s", out)
 		}
 	})
+}
+
+// requireErrCode asserts the OUTERMOST structured code, which is what verdict
+// consumers read. errors.Is would also match a code buried deeper in the chain,
+// so it cannot tell a propagated code from a re-assigned one.
+func requireErrCode(t *testing.T, err error, want aicrErrors.ErrorCode) *aicrErrors.StructuredError {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected a %s error, got nil", want)
+	}
+	se, ok := stderrors.AsType[*aicrErrors.StructuredError](err)
+	if !ok {
+		t.Fatalf("expected a StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != want {
+		t.Fatalf("outermost code = %s, want %s (err: %v)", se.Code, want, err)
+	}
+	return se
+}
+
+// preflightTestPod is a bare pod in the given phase, for seeding the fake
+// clientset that waitForPreflightPodPhase reads.
+func preflightTestPod(name string, phase corev1.PodPhase) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns"},
+		Status:     corev1.PodStatus{Phase: phase},
+	}
+}
+
+// preflightWaitClient returns a fake clientset whose pod watch is w. The pod is
+// seeded only when non-nil, so a not-yet-visible pod can be modeled.
+func preflightWaitClient(t *testing.T, pod *corev1.Pod, w watch.Interface) *fake.Clientset {
+	t.Helper()
+	c := fake.NewClientset()
+	if pod != nil {
+		if err := c.Tracker().Add(pod); err != nil {
+			t.Fatalf("seed pod: %v", err)
+		}
+	}
+	c.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+		return true, w, nil
+	})
+	return c
+}
+
+// podGetResult is one scripted answer to a pod Get.
+type podGetResult struct {
+	pod *corev1.Pod
+	err error
+}
+
+// scriptPodGets makes successive Gets of a pod return results in order,
+// repeating the last once exhausted. waitForPreflightPodPhase Gets three times
+// on the watch-close path (fast path, post-Watch re-check, post-close re-check),
+// and a fake tracker cannot move a pod between phases mid-call on its own.
+func scriptPodGets(c *fake.Clientset, results ...podGetResult) {
+	var calls atomic.Int32
+	c.PrependReactor("get", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if a.GetSubresource() != "" {
+			return false, nil, nil // pod logs are not part of the script
+		}
+		i := min(int(calls.Add(1))-1, len(results)-1)
+		if results[i].err != nil {
+			return true, nil, results[i].err
+		}
+		return true, results[i].pod.DeepCopy(), nil
+	})
+}
+
+// waitForPreflightPodPhase is shared by the NVreg and TCPXO preflights, and both
+// fail closed on its classification. A pod already in a terminal phase resolves
+// on the first Get, before any watch exists. Failed is a PHASE here, not an
+// error: the caller decides what a Failed probe means.
+func TestWaitForPreflightPodPhaseFastPath(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodSucceeded, corev1.PodFailed} {
+		t.Run(string(phase), func(t *testing.T) {
+			c := fake.NewClientset(preflightTestPod("p", phase))
+			got, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", time.Second)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != phase {
+				t.Errorf("phase = %q, want %q", got, phase)
+			}
+		})
+	}
+}
+
+// A terminal phase reached after the watch is established arrives as an event.
+// Non-pod objects on the channel are skipped rather than treated as a verdict.
+func TestWaitForPreflightPodPhaseWatchEvents(t *testing.T) {
+	running := preflightTestPod("p", corev1.PodRunning)
+	tests := []struct {
+		name   string
+		events func(w *watch.FakeWatcher)
+		want   corev1.PodPhase
+	}{
+		{
+			"Succeeded via modify event",
+			func(w *watch.FakeWatcher) {
+				w.Modify(running)
+				w.Modify(preflightTestPod("p", corev1.PodSucceeded))
+			},
+			corev1.PodSucceeded,
+		},
+		{
+			"Failed via modify event",
+			func(w *watch.FakeWatcher) { w.Modify(preflightTestPod("p", corev1.PodFailed)) },
+			corev1.PodFailed,
+		},
+		{
+			"Succeeded via add event",
+			func(w *watch.FakeWatcher) { w.Add(preflightTestPod("p", corev1.PodSucceeded)) },
+			corev1.PodSucceeded,
+		},
+		{
+			"non-pod object is skipped",
+			func(w *watch.FakeWatcher) {
+				w.Modify(&corev1.Node{})
+				w.Modify(preflightTestPod("p", corev1.PodSucceeded))
+			},
+			corev1.PodSucceeded,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := watch.NewFakeWithChanSize(8, false)
+			c := preflightWaitClient(t, running, w)
+			tt.events(w)
+			got, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", 5*time.Second)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("phase = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The pod can be invisible to the first Gets (not yet created, or a lagging
+// cache); that is not an error, the watch delivers it.
+func TestWaitForPreflightPodPhasePodNotYetVisible(t *testing.T) {
+	w := watch.NewFakeWithChanSize(1, false)
+	c := preflightWaitClient(t, nil, w)
+	w.Add(preflightTestPod("p", corev1.PodSucceeded))
+
+	got, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", 5*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != corev1.PodSucceeded {
+		t.Errorf("phase = %q, want %q", got, corev1.PodSucceeded)
+	}
+}
+
+// A pod deleted before it finished established nothing about the node: an
+// internal error, never a phase.
+func TestWaitForPreflightPodPhaseDeletedEventIsInternalError(t *testing.T) {
+	w := watch.NewFakeWithChanSize(1, false)
+	c := preflightWaitClient(t, preflightTestPod("p", corev1.PodRunning), w)
+	w.Delete(preflightTestPod("p", corev1.PodRunning))
+
+	_, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", 5*time.Second)
+	se := requireErrCode(t, err, aicrErrors.ErrCodeInternal)
+	if !strings.Contains(se.Message, "deleted before completion") {
+		t.Errorf("message = %q, want it to say the pod was deleted", se.Message)
+	}
+}
+
+// A pod that never terminates is a timeout, and a timeout is the one retryable
+// outcome: IsTransient must see it.
+func TestWaitForPreflightPodPhaseTimesOut(t *testing.T) {
+	c := preflightWaitClient(t, preflightTestPod("p", corev1.PodRunning), watch.NewFake())
+
+	_, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", 20*time.Millisecond)
+	se := requireErrCode(t, err, aicrErrors.ErrCodeTimeout)
+	if se.Context["pod"] != "p" {
+		t.Errorf("context pod = %v, want %q", se.Context["pod"], "p")
+	}
+	if !aicrErrors.IsTransient(err) {
+		t.Error("a wait timeout must be reported as transient")
+	}
+}
+
+// The watch channel can close without the context ending (apiserver restart,
+// idle-connection reaping). The pod may have finished in that window, so the
+// wait re-Gets before failing, and classifies whatever the re-Get says.
+func TestWaitForPreflightPodPhaseWatchChannelClosed(t *testing.T) {
+	running := podGetResult{pod: preflightTestPod("p", corev1.PodRunning)}
+	tests := []struct {
+		name      string
+		recheck   podGetResult
+		wantPhase corev1.PodPhase
+		wantCode  aicrErrors.ErrorCode
+		wantMsg   string
+	}{
+		{
+			name:      "re-Get finds Succeeded",
+			recheck:   podGetResult{pod: preflightTestPod("p", corev1.PodSucceeded)},
+			wantPhase: corev1.PodSucceeded,
+		},
+		{
+			name:      "re-Get finds Failed",
+			recheck:   podGetResult{pod: preflightTestPod("p", corev1.PodFailed)},
+			wantPhase: corev1.PodFailed,
+		},
+		{
+			name:     "re-Get finds the pod still running",
+			recheck:  running,
+			wantCode: aicrErrors.ErrCodeUnavailable,
+			wantMsg:  "closed before pod terminated",
+		},
+		{
+			name:     "re-Get finds the pod gone",
+			recheck:  podGetResult{err: apierrors.NewNotFound(corev1.Resource("pods"), "p")},
+			wantCode: aicrErrors.ErrCodeUnavailable,
+			wantMsg:  "not found on re-check",
+		},
+		{
+			name:     "re-Get times out",
+			recheck:  podGetResult{err: context.DeadlineExceeded},
+			wantCode: aicrErrors.ErrCodeTimeout,
+			wantMsg:  "re-check timed out",
+		},
+		{
+			name:     "re-Get fails for another reason",
+			recheck:  podGetResult{err: stderrors.New("apiserver unavailable")},
+			wantCode: aicrErrors.ErrCodeInternal,
+			wantMsg:  "re-check failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := watch.NewFake()
+			w.Stop() // closes the result channel without ending the context
+			c := preflightWaitClient(t, nil, w)
+			scriptPodGets(c, running, running, tt.recheck)
+
+			got, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", 5*time.Second)
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != tt.wantPhase {
+					t.Errorf("phase = %q, want %q", got, tt.wantPhase)
+				}
+				return
+			}
+			requireErrCode(t, err, tt.wantCode)
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error %q missing %q", err.Error(), tt.wantMsg)
+			}
+			if got != "" {
+				t.Errorf("phase = %q on error, want empty", got)
+			}
+		})
+	}
+}
+
+// Failures to read or watch the pod are infrastructure faults, not verdicts.
+func TestWaitForPreflightPodPhaseInfrastructureErrors(t *testing.T) {
+	t.Run("initial Get fails", func(t *testing.T) {
+		c := preflightWaitClient(t, nil, watch.NewFake())
+		scriptPodGets(c, podGetResult{err: stderrors.New("forbidden")})
+
+		_, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", time.Second)
+		se := requireErrCode(t, err, aicrErrors.ErrCodeInternal)
+		if !strings.Contains(se.Message, "failed to get preflight pod") {
+			t.Errorf("message = %q", se.Message)
+		}
+	})
+
+	t.Run("Get after Watch fails", func(t *testing.T) {
+		running := podGetResult{pod: preflightTestPod("p", corev1.PodRunning)}
+		c := preflightWaitClient(t, nil, watch.NewFake())
+		scriptPodGets(c, running, podGetResult{err: stderrors.New("forbidden")})
+
+		_, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", time.Second)
+		se := requireErrCode(t, err, aicrErrors.ErrCodeInternal)
+		if !strings.Contains(se.Message, "failed to get preflight pod") {
+			t.Errorf("message = %q", se.Message)
+		}
+	})
+
+	t.Run("Watch fails", func(t *testing.T) {
+		c := fake.NewClientset(preflightTestPod("p", corev1.PodRunning))
+		c.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+			return true, nil, stderrors.New("watch denied")
+		})
+
+		_, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", time.Second)
+		se := requireErrCode(t, err, aicrErrors.ErrCodeInternal)
+		if !strings.Contains(se.Message, "failed to watch preflight pod") {
+			t.Errorf("message = %q", se.Message)
+		}
+	})
+}
+
+// No probe pod means no examination of the node: creation failure is a hard
+// error, never a verdict.
+func TestCheckNVregOnNodeCreateFailureIsHardError(t *testing.T) {
+	c := fake.NewClientset()
+	c.PrependReactor("create", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("quota exceeded")
+	})
+
+	res, err := checkNVregOnNode(context.Background(), c, "ns", "n1")
+	se := requireErrCode(t, err, aicrErrors.ErrCodeInternal)
+	if !strings.Contains(se.Message, "failed to create NVreg preflight pod") {
+		t.Errorf("message = %q", se.Message)
+	}
+	if res.verdict == nvregOK {
+		t.Errorf("verdict on error must not be nvregOK, got %v", res.verdict)
+	}
+}
+
+// The probe pod is deleted whichever way the probe ends: it holds a hostPath on
+// the GPU node and must not outlive the preflight.
+func TestCheckNVregOnNodeDeletesProbePod(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodSucceeded, corev1.PodFailed} {
+		t.Run(string(phase), func(t *testing.T) {
+			c, _ := nvregProbeClient(t, phase)
+			_, _ = checkNVregOnNode(context.Background(), c, "ns", "n1")
+
+			pods, err := c.CoreV1().Pods("ns").List(context.Background(), metav1.ListOptions{})
+			if err != nil {
+				t.Fatalf("list pods: %v", err)
+			}
+			if n := len(pods.Items); n != 0 {
+				t.Errorf("%d probe pod(s) left behind", n)
+			}
+		})
+	}
+}
+
+// Cleanup is best effort: a failed delete is logged and must not replace the
+// result the probe already produced. An already-gone pod is not even a warning.
+func TestCheckNVregOnNodeCleanupFailureDoesNotChangeResult(t *testing.T) {
+	for name, deleteErr := range map[string]error{
+		"delete fails":     stderrors.New("apiserver unavailable"),
+		"pod already gone": apierrors.NewNotFound(corev1.Resource("pods"), "gone"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, _ := nvregProbeClient(t, corev1.PodSucceeded)
+			c.PrependReactor("delete", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, deleteErr
+			})
+
+			res, err := checkNVregOnNode(context.Background(), c, "ns", "n1")
+			if err != nil {
+				t.Fatalf("cleanup failure must not surface, got: %v", err)
+			}
+			// The fake clientset's canned log has no sentinel, so this is the
+			// fail-closed verdict, unchanged by the cleanup failure.
+			if res.verdict != nvregUndetermined {
+				t.Errorf("verdict = %v, want nvregUndetermined", res.verdict)
+			}
+		})
+	}
+}
+
+// The hostPath is type-checked, so a node with no /proc/driver/nvidia is refused
+// by the kubelet with an event that can be named, instead of being left to
+// runtime-specific handling of a missing source path.
+func TestCheckNVregOnNodeHostPathIsTypeChecked(t *testing.T) {
+	c, captured := nvregProbeClient(t, corev1.PodSucceeded)
+	if _, err := checkNVregOnNode(context.Background(), c, "ns", "n1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	p := captured()
+	if p == nil || len(p.Spec.Volumes) != 1 || p.Spec.Volumes[0].HostPath == nil {
+		t.Fatalf("expected one hostPath volume, got %+v", p)
+	}
+	hp := p.Spec.Volumes[0].HostPath
+	if hp.Type == nil {
+		t.Fatalf("hostPath type is unset, want %q", corev1.HostPathDirectory)
+	}
+	if *hp.Type != corev1.HostPathDirectory {
+		t.Errorf("hostPath type = %q, want %q", *hp.Type, corev1.HostPathDirectory)
+	}
+}
+
+// nvregProbeEvent builds the Warning event the kubelet raises against a pod.
+func nvregProbeEvent(name, pod, reason, message string) *corev1.Event {
+	return &corev1.Event{
+		ObjectMeta:     metav1.ObjectMeta{Name: name, Namespace: "ns"},
+		InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: pod, Namespace: "ns"},
+		Type:           corev1.EventTypeWarning,
+		Reason:         reason,
+		Message:        message,
+	}
+}
+
+const nvregTypeCheckMessage = `MountVolume.SetUp failed for volume "proc-nvidia" : ` +
+	`hostPath type check failed: /proc/driver/nvidia is not a directory`
+
+func TestNvregProbeMountFailure(t *testing.T) {
+	const pod = "probe-pod"
+	tests := []struct {
+		name    string
+		events  []*corev1.Event
+		listErr error
+		want    string // substring; empty means no mount failure is reported
+	}{
+		{
+			name:   "kubelet type-check failure is reported",
+			events: []*corev1.Event{nvregProbeEvent("e1", pod, "FailedMount", nvregTypeCheckMessage)},
+			want:   "hostPath type check failed",
+		},
+		{
+			name: "no events",
+		},
+		{
+			name:   "another pod's failure is not attributed to this one",
+			events: []*corev1.Event{nvregProbeEvent("e1", "other-pod", "FailedMount", nvregTypeCheckMessage)},
+		},
+		{
+			name:   "unrelated warning is ignored",
+			events: []*corev1.Event{nvregProbeEvent("e1", pod, "FailedScheduling", "0/3 nodes are available")},
+		},
+		{
+			name:    "event read failure yields no claim",
+			events:  []*corev1.Event{nvregProbeEvent("e1", pod, "FailedMount", nvregTypeCheckMessage)},
+			listErr: stderrors.New("events forbidden"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := fake.NewClientset()
+			for _, ev := range tt.events {
+				if _, err := c.CoreV1().Events("ns").Create(context.Background(), ev, metav1.CreateOptions{}); err != nil {
+					t.Fatalf("seed event: %v", err)
+				}
+			}
+			if tt.listErr != nil {
+				c.PrependReactor("list", "events", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.listErr
+				})
+			}
+
+			got := nvregProbeMountFailure(context.Background(), c, "ns", pod)
+			if tt.want == "" {
+				if got != "" {
+					t.Errorf("got %q, want no mount failure", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("got %q, want it to contain %q", got, tt.want)
+			}
+		})
+	}
+
+	// The message flows into a termination message capped at 4 KiB, so an
+	// oversized kubelet message is bounded like probe output is.
+	t.Run("oversized message is truncated", func(t *testing.T) {
+		c := fake.NewClientset()
+		long := nvregMountFailureMarker + strings.Repeat("x", 4*maxProbeErrorOutputBytes)
+		if _, err := c.CoreV1().Events("ns").Create(context.Background(),
+			nvregProbeEvent("e1", pod, "FailedMount", long), metav1.CreateOptions{}); err != nil {
+			t.Fatalf("seed event: %v", err)
+		}
+		got := nvregProbeMountFailure(context.Background(), c, "ns", pod)
+		if len(got) > maxProbeErrorOutputBytes+len("...") || !strings.HasSuffix(got, "...") {
+			t.Errorf("got %d bytes %q, want at most %d bytes ending in ...", len(got), got, maxProbeErrorOutputBytes+3)
+		}
+	})
+}
+
+// runStalledNVregProbe runs checkNVregOnNode against a probe pod that never
+// leaves Pending, as a pod does when the kubelet cannot mount its volume. The
+// short context deadline stands in for DiagnosticTimeout.
+func runStalledNVregProbe(t *testing.T, events ...*corev1.Event) error {
+	t.Helper()
+	c, _ := nvregProbeClient(t, corev1.PodPending)
+	for _, ev := range events {
+		if _, err := c.CoreV1().Events("ns").Create(context.Background(), ev, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("seed event: %v", err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := checkNVregOnNode(ctx, c, "ns", "n1")
+	return err
+}
+
+// nvregStalledPodName is the name nvregProbeClient stamps on the probe pod.
+const nvregStalledPodName = preflightPodNamePrefix + "stamped"
+
+// A node with no loaded driver must read as driver-absent: not as an opaque
+// timeout, and above all not as the "set the NVreg flag" remediation, which
+// cannot apply until a driver exists.
+func TestCheckNVregOnNodeDriverAbsentIsNamed(t *testing.T) {
+	err := runStalledNVregProbe(t,
+		nvregProbeEvent("e1", nvregStalledPodName, "FailedMount", nvregTypeCheckMessage))
+
+	se := requireErrCode(t, err, aicrErrors.ErrCodeInvalidRequest)
+	msg := se.Error()
+	for _, want := range []string{
+		"NVIDIA driver is not loaded on node n1",
+		"hostPath type check failed", // the kubelet's own words survive
+		"/proc/driver/nvidia",
+		"wait for its rollout",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message missing %q; got: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "missing on GPU nodes") || strings.Contains(msg, nvregDocsHint) {
+		t.Errorf("driver-absent must not carry the flag remediation; got: %s", msg)
+	}
+	// A deterministic finding, not a retryable wait fault: the timeout that
+	// revealed it must not stay in the cause chain.
+	if aicrErrors.IsTransient(err) {
+		t.Error("driver-absent must not be reported as transient")
+	}
+}
+
+// Without kubelet evidence a stalled probe stays the plain wait timeout: the
+// driver-absent claim is made only when the mount failure was actually seen.
+func TestCheckNVregOnNodeStallWithoutMountEventStaysTimeout(t *testing.T) {
+	for name, events := range map[string][]*corev1.Event{
+		"no events": nil,
+		"unrelated warning": {
+			nvregProbeEvent("e1", nvregStalledPodName, "FailedScheduling", "0/3 nodes are available"),
+		},
+		"mount failure on another pod": {
+			nvregProbeEvent("e1", "other-pod", "FailedMount", nvregTypeCheckMessage),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := runStalledNVregProbe(t, events...)
+			requireErrCode(t, err, aicrErrors.ErrCodeTimeout)
+			if strings.Contains(err.Error(), "driver is not loaded") {
+				t.Errorf("claimed driver-absent without evidence: %v", err)
+			}
+			if !aicrErrors.IsTransient(err) {
+				t.Error("a plain wait timeout must stay transient")
+			}
+		})
+	}
 }

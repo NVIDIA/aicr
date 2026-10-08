@@ -254,6 +254,17 @@ driver-container remount leaving the path empty, produces this. Changing the
 driver version does not address it — read the file on a target node to see
 whether it is unreadable or carries an unrecognised banner.
 
+**Driver not loaded** is a fourth outcome, reached before any file is read: when
+`/proc/driver/nvidia` does not exist on a target node, the kubelet refuses the
+probe pod's hostPath mount and the preflight names that node as driver-absent
+instead of reporting a bare timeout or sending you to set the flag. There is no
+parameter to set until a driver is loaded. Finish the driver rollout (GPU
+Operator `nvidia-driver` DaemonSet Ready, or a node image that ships the driver
+on OKE `oci-managed`) and re-run. The kubelet leaves the pod in
+`ContainerCreating`, so this surfaces after the probe's wait (up to two
+minutes), and it stops the check at the first such node rather than listing
+every affected node.
+
 ### Opting external recipes into a benchmark profile
 
 The default applicability above is keyed to service + accelerator pairs the
