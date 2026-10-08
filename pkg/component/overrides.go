@@ -342,13 +342,13 @@ func setTolerationsAtPath(values map[string]any, tolerations []map[string]any, p
 // Existing entries are never removed or reordered. The result is a fresh
 // []any so each value path gets its own list.
 func dedupTolerationEntries(existing []any, additions []map[string]any) []any {
-	seen := make(map[string]struct{}, len(existing)+len(additions))
+	seen := make(map[string]struct{}, len(additions))
 	for _, e := range existing {
 		if k := tolerationEntryKey(e); k != "" {
 			seen[k] = struct{}{}
 		}
 	}
-	out := make([]any, 0, len(existing)+len(additions))
+	out := make([]any, 0, len(existing))
 	out = append(out, existing...)
 	for _, a := range additions {
 		k := tolerationEntryKey(a)
