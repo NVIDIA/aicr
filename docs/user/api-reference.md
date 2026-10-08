@@ -105,9 +105,9 @@ curl "http://localhost:8080/"
 ```json
 {
   "service": "aicrd",
-  "version": "v0.14.0",
+  "version": "vX.Y.Z",
   "routes": [
-    "/v1/recipe", "/v1/query", "/v1/bundle"
+    "/v1/bundle", "/v1/query", "/v1/recipe"
   ]
 }
 ```
@@ -129,6 +129,9 @@ Generate an optimized configuration recipe based on environment parameters.
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `any` |
 | `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `runai`, `slurm`, `any` |
 | `nodes` | integer | 0 | GPU node count hint (0 = unspecified). Advisory metadata — does not select or filter overlays. |
+| `profile` | string | | Configuration profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed`). Omit to take the declaration's default. See [Profile and Slurm-accounting endpoints](#profile-and-slurm-accounting-endpoints). |
+| `slurmAccountingMode` | string | disabled | Slurm accounting database ownership: `disabled`, `customer-managed`, `aicr-provided`. Valid only with `platform=slurm`. |
+| `gkeTcpxoInterfaces` | string | | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships that runtime (`service=gke`, `accelerator=h100`, `platform=kubeflow`). |
 
 > **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
@@ -247,34 +250,21 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 }
 ```
 
-**Response:**
+**Response** (abbreviated: most `componentRefs` entries and fields, and the `validation` section, are omitted):
 
 ```json
 {
   "apiVersion": "aicr.run/v1",
   "kind": "RecipeResult",
   "metadata": {
-    "version": "v0.22.0",
+    "version": "vX.Y.Z",
     "appliedOverlays": [
       "base",
+      "monitoring-hpa",
+      "gb200-any",
       "eks",
       "eks-training",
       "gb200-eks-training"
-    ],
-    "excludedOverlays": [
-      {
-        "name": "h100-eks-ubuntu-training",
-        "reason": "mixin-constraint-failed"
-      }
-    ],
-    "constraintWarnings": [
-      {
-        "overlay": "h100-eks-ubuntu-training",
-        "constraint": "OS.sysctl./proc/sys/kernel/osrelease",
-        "expected": ">= 6.8",
-        "actual": "5.15.0",
-        "reason": "mixin-constraint-failed: expected >= 6.8, got 5.15.0"
-      }
     ]
   },
   "criteria": {
@@ -286,38 +276,36 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
   },
   "constraints": [
     {
-      "name": "GPU.driver.version",
-      "value": "580.82.07"
-    },
-    {
-      "name": "GPU.driver.cudaVersion",
-      "value": "13.1"
+      "name": "K8s.server.version",
+      "value": ">= 1.34"
     }
   ],
   "componentRefs": [
     {
       "name": "gpu-operator",
+      "namespace": "gpu-operator",
       "type": "Helm",
       "chart": "gpu-operator",
       "source": "https://helm.ngc.nvidia.com/nvidia",
-      "version": "v25.3.3"
+      "version": "vXX.Y.Z"
     },
     {
-      "name": "network-operator",
+      "name": "nvidia-dra-driver-gpu",
+      "namespace": "nvidia-dra-driver",
       "type": "Helm",
-      "chart": "network-operator",
-      "source": "https://helm.ngc.nvidia.com/nvidia",
-      "version": "v25.4.0"
+      "chart": "dra-driver-nvidia-gpu",
+      "source": "oci://registry.k8s.io/dra-driver-nvidia/charts",
+      "version": "X.Y.Z"
     }
   ],
   "deploymentOrder": [
     "gpu-operator",
-    "network-operator"
+    "nvidia-dra-driver-gpu"
   ]
 }
 ```
 
-`metadata.excludedOverlays` is optional. When present, each entry includes the overlay `name` and a machine-readable `reason` such as `constraint-failed` or `mixin-constraint-failed`.
+`metadata.excludedOverlays` is optional and appears only for snapshot-driven recipes. When present, each entry includes the overlay `name` and a machine-readable `reason` such as `constraint-failed` or `mixin-constraint-failed`.
 
 `metadata.gpuDriverState` is optional and appears only for snapshot-driven recipes. It records the NVIDIA kernel driver state observed on the sampled GPU node — `preinstalled` or `absent` — and is omitted when no snapshot was provided or the snapshot carried no usable driver-loaded reading. The bundle-time `CheckDriverOwnershipCoherence` validation consumes it: a recipe whose snapshot observed no driver (`absent`) is blocked from bundling with the preinstalled-driver assumption, since that would leave GPU nodes driverless.
 
@@ -546,6 +534,8 @@ Generate deployment bundles from a recipe.
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. |
 | `accelerated-node-toleration` | string[] | | Tolerations for GPU nodes (format: `key=value:effect`). Repeat for multiple. |
 | `dra-eviction-node-label` | string | _(none)_ | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`). Unset means AICR injects nothing and the plugin needs no extra node label. When set, and both components are enabled, the bundle also carries `dra-node-labeler`, which applies the label to every node GFD reports as `nvidia.com/gpu.present=true`. The labeler is omitted when a positive `bundlers` filter leaves it out, or when `dra-node-labeler:enabled=false` is set; a `bundlers` selection that names `dra-node-labeler` without the flag or without both prerequisites is rejected with `400 INVALID_REQUEST`. Manual node labeling is required only when both prerequisites remain in the bundle and the labeler is omitted or disabled; without both, no eviction configuration is rendered at all. OpenShift recipes are not wired for the labeler (#2828). |
+| `workload-gate` | string | | Taint for nodewright-operator runtime-required workload gating (format: `key=value:effect` or `key:effect`). Day 2 option; same as the CLI `--workload-gate`. |
+| `workload-selector` | string[] | | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: `key=value`). Repeat for multiple. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH`. **The server-side vendor path is opt-in and off by default** — the operator must set `AICR_ALLOW_VENDOR_CHARTS=true`, otherwise `vendor-charts=true` returns `400 vendor-charts is not enabled on this server`. Even when enabled, repository hosts that resolve to loopback, link-local, private, or cloud-metadata IPs are rejected with `400 INVALID_REQUEST`, and vendored artifacts are capped at 64 MiB. **Private HTTP(S) repository credentials:** the aicrd pre-check sends `HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` (as HTTP Basic auth) ONLY when `AICR_HELM_REPOSITORY_HOST` is set to that repository's exact host, the request scheme is `https`, and the request host matches (case-insensitive). All three conditions must hold — an operator setting only the username/password env vars will get no credentials attached, preventing a caller-supplied `Repository` URL from harvesting the operator's helm credentials. (Note: the upstream `helm pull --repo` subprocess does not itself read these env vars — private HTTP repos require a prior `helm repo add --username --password` in the aicrd image or an SDK-based puller.) OCI credentials flow through the standard docker config (`~/.docker/config.json` or `$DOCKER_CONFIG`), exactly like `helm pull oci://...`. If prerequisites are missing the request fails with a structured error code (`SERVICE_UNAVAILABLE` / HTTP 503 for missing helm). The index pre-check surfaces upstream HTTP status by class: `404` → `NOT_FOUND` / HTTP 404, `401`/`403` → `UNAUTHORIZED` / HTTP 401, `408`/`429` → `SERVICE_UNAVAILABLE` / HTTP 503 (retryable), other `4xx` → `INVALID_REQUEST` / HTTP 400, `5xx` → `SERVICE_UNAVAILABLE` / HTTP 503. |
 | `serial` | bool | false | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `deployer=argocd`, `argocd-helm`, `flux`, and `helmfile` (`helm` is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, and helmfile chains every release via `needs:` into one linear apply order. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. |
@@ -609,8 +599,12 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `cert-manager` | TLS certificate management |
 | `cert-manager-ocp` | cert-manager variant for OpenShift (OCP) |
 | `cert-manager-ocp-olm` | cert-manager for OpenShift via Operator Lifecycle Manager (OLM) |
+| `dra-node-labeler` | Applies the DRA eviction node label to GPU nodes; bundled only when `dra-eviction-node-label` is set |
+| `dranet` | DRA network driver for the ConnectX-9 RDMA fabric (VR200 RKE2) |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
 | `gatekeeper` | OPA Gatekeeper policy controller |
+| `gcp-driver-installer` | Google cos-gpu-installer DaemonSet; renders only under `gpuStack=bundle-installer` (GKE) |
+| `gke-gb200-rdma` | NCCL gIB (GPUDirect-RDMA over RoCE) plugin installer for GB200 (GKE) |
 | `gke-nccl-tcpxo` | NCCL TCPXO network plugin for optimized collective communication (GKE) |
 | `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
 | `gpu-operator-ocp` | GPU Operator variant for OpenShift (OCP) |
@@ -632,8 +626,10 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `nfd` | Node Feature Discovery — labels nodes with hardware features; publishes per-node `NodeResourceTopology` CRDs on production GPU recipes |
 | `nfd-ocp` | Node Feature Discovery variant for OpenShift (OCP) |
 | `nfd-ocp-olm` | Node Feature Discovery for OpenShift via Operator Lifecycle Manager (OLM) |
+| `node-problem-detector` | Publishes node-level faults as Node Conditions for NVSentinel (opt-in) |
 | `nodewright-customizations` | Environment-specific node tuning profiles |
 | `nodewright-operator` | OS-level node tuning and kernel configuration |
+| `nvcre` | NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification (not installed by default) |
 | `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
 | `nvidia-dra-driver-gpu-ocp` | DRA GPU driver variant for OpenShift (OCP) |
 | `nvsentinel` | GPU health monitoring; remediation components off by default |
@@ -723,12 +719,15 @@ curl -X POST "http://localhost:8080/v1/bundle" \
     "kind": "RecipeResult",
     "componentRefs": [
       {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.7.1", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
-      {"name": "network-operator", "type": "Helm", "chart": "network-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "26.1.1", "namespace": "nvidia-network-operator", "valuesFile": "components/network-operator/values.yaml"}
+      {"name": "network-operator", "type": "Helm", "chart": "network-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "26.4.1", "namespace": "nvidia-network-operator", "valuesFile": "components/network-operator/values.yaml"}
     ],
     "deploymentOrder": ["gpu-operator", "network-operator"]
   }' \
   -o bundles.zip
 ```
+
+The chart versions in the literal body are illustrative; take real ones from
+`aicr recipe` output or `recipes/registry.yaml`.
 
 **Response Headers:**
 
@@ -752,6 +751,7 @@ unverified entries are rejected rather than archived. `X-Bundle-Files` and
 bundles.zip
 ├── deploy.sh                    # root automation script (executable)
 ├── README.md                    # root deployment guide
+├── bundle-info.yaml             # deployer and generation metadata
 ├── checksums.txt                # SHA256 for every regular payload file in the archive
 ├── recipe.yaml                  # canonical post-resolution recipe (helm deployer)
 ├── 001-<component>/             # per-component folder (NNN-prefixed)
@@ -971,7 +971,8 @@ ls -la
 
 > `INVALID_REQUEST` is not always `400`: `POST /v1/query` and `POST /v1/recipe`
 > return it with HTTP **413 Request Entity Too Large** when the request body
-> exceeds the server's body-size limit (`MaxRecipePOSTBytes`).
+> exceeds the server's body-size limit (`MaxRecipePOSTBytes`), and `POST /v1/bundle`
+> does the same above `MaxBundlePOSTBytes`.
 
 ### Handling Rate Limits
 
@@ -1228,7 +1229,7 @@ openapi-generator-cli generate -i openapi.yaml -g typescript-fetch -o ./ts-clien
 curl "http://localhost:8080/v1/recipe?accelerator=h100"
 ```
 
-**"Recipe is required" error:**
+**"Recipe must contain at least one component reference" error:**
 ```shell
 # The body IS the RecipeResult itself — not wrapped in a {"recipe": ...} field.
 # Pass a fully-hydrated RecipeResult (e.g. from GET /v1/recipe) directly:

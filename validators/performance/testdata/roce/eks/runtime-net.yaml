@@ -54,8 +54,88 @@ spec:
         enableDNSHostnames: true
         publishNotReadyAddresses: true
       replicatedJobs:
+      - name: node
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                # Only stage the SSH keys into the shared ssh-config volume.
+                # openssh-server is installed by the main container (init and
+                # main containers don't share a root filesystem, so installing
+                # it here would be wasted) — sshd and /var/run/sshd are set up
+                # there. Mirrors the launcher's key-only init container.
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  command: ["sh", "-c"]
+                  args:
+                  - |
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys &&
+                    /usr/sbin/sshd -De
+                  # Ready only once sshd listens; the launcher's dependsOn
+                  # waits on it, so mpirun never races the install.
+                  readinessProbe:
+                    tcpSocket:
+                      port: 22
+                    periodSeconds: 5
+                    failureThreshold: 120
+                  resources:
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    claims:
+                    - name: roce
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                  - name: dshm
+                    mountPath: /dev/shm
+                resourceClaims:
+                - name: roce
+                  resourceClaimTemplateName: nccl-roce-rct
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+      # Listed after "node": JobSet requires a dependsOn target to precede
+      # the job that depends on it.
       - name: launcher
         replicas: 1
+        dependsOn:
+        - name: node
+          status: Ready
         template:
           spec:
             template:
@@ -94,10 +174,10 @@ spec:
                   - --allow-run-as-root
                   - --mca
                   - plm_rsh_args
-                  # ConnectionAttempts is generous because the worker pods install
-                  # openssh-server at runtime (the CUDA-13 pytorch image ships no
-                  # sshd) before starting it — the launcher must keep retrying the
-                  # rsh connection until that apt-get + sshd startup completes.
+                  # The worker pods install openssh-server at runtime (the CUDA-13
+                  # pytorch image ships no sshd). The launcher's dependsOn holds it
+                  # until every worker's sshd listens; the generous
+                  # ConnectionAttempts is only a backstop.
                   # Requires the GPU nodes to have apt egress; on an air-gapped /
                   # no-egress cluster the worker install never finishes and this
                   # validator fails (tracked for removal once a CUDA-13 image ships
@@ -163,74 +243,6 @@ spec:
                 volumes:
                 - name: ssh-config
                   emptyDir: {}
-      - name: node
-        template:
-          spec:
-            template:
-              spec:
-                tolerations:
-                - operator: Exists
-                initContainers:
-                # Only stage the SSH keys into the shared ssh-config volume.
-                # openssh-server is installed by the main container (init and
-                # main containers don't share a root filesystem, so installing
-                # it here would be wasted) — sshd and /var/run/sshd are set up
-                # there. Mirrors the launcher's key-only init container.
-                - name: fix-ssh-perms
-                  image: nvcr.io/nvidia/pytorch:26.01-py3
-                  command:
-                  - /bin/sh
-                  - -c
-                  - |
-                    mkdir -p /root/.ssh &&
-                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys &&
-                    chmod 700 /root/.ssh &&
-                    chmod 600 /root/.ssh/authorized_keys
-                  volumeMounts:
-                  - name: mpi-ssh-auth
-                    mountPath: /tmp/mpi-keys
-                    readOnly: true
-                  - name: ssh-config
-                    mountPath: /root/.ssh
-                containers:
-                - name: node
-                  image: nvcr.io/nvidia/pytorch:26.01-py3
-                  command: ["sh", "-c"]
-                  args:
-                  - |
-                    apt-get update &&
-                    apt-get install -y --no-install-recommends openssh-server &&
-                    mkdir -p /var/run/sshd &&
-                    chmod 0755 /var/run/sshd &&
-                    mkdir -p /root/.ssh &&
-                    cp /tmp/mpi-keys/* /root/.ssh/ &&
-                    chmod 700 /root/.ssh &&
-                    chmod 600 /root/.ssh/authorized_keys &&
-                    /usr/sbin/sshd -De
-                  resources:
-                    limits:
-                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
-                    requests:
-                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
-                    claims:
-                    - name: roce
-                  securityContext:
-                    capabilities:
-                      add: ["IPC_LOCK"]
-                  volumeMounts:
-                  - name: ssh-config
-                    mountPath: /root/.ssh
-                  - name: dshm
-                    mountPath: /dev/shm
-                resourceClaims:
-                - name: roce
-                  resourceClaimTemplateName: nccl-roce-rct
-                volumes:
-                - name: ssh-config
-                  emptyDir: {}
-                - name: dshm
-                  emptyDir:
-                    medium: Memory
       successPolicy:
         operator: All
         targetReplicatedJobs:

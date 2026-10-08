@@ -28,7 +28,7 @@
 # 3. Generates a recipe via query parameters, with the
 #    nvsentinel-object-monitor and nvsentinel-preflight mixins composed, so
 #    their mixin-gated images are asserted in every manifest format and the
-#    two small controller images are carried through the transfer
+#    three small controller images are carried through the transfer
 # 4. Runs `aicr mirror list` in all formats (validates the full pipeline)
 # 5. Trims Hauler/Zarf manifests to public images only (avoids NGC auth)
 # 6. Syncs trimmed manifest via Hauler into the local registry
@@ -96,19 +96,25 @@ NIC_HEALTH_MONITOR_IMAGES=(
     "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 )
 
+# The image the nvsentinel-slurm-drain-monitor mixin pulls in (#2611), from a
+# mixin-gated subchart like the object monitor's.
+SLURM_DRAIN_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.25.0"
+
 # Every mixin-gated image, asserted in all three `mirror list` formats.
 MIXIN_IMAGES=(
     "${OBJECT_MONITOR_IMAGE}"
     "${PREFLIGHT_IMAGES[@]}"
     "${NIC_HEALTH_MONITOR_IMAGES[@]}"
+    "${SLURM_DRAIN_MONITOR_IMAGE}"
 )
 
 # The subset carried through the Hauler sync, Zarf package and registry
-# verification. Both are small; the three preflight check images are excluded
+# verification. All three are small; the three preflight check images are excluded
 # by size, as explained above.
 TRANSFERRED_MIXIN_IMAGES=(
     "${OBJECT_MONITOR_IMAGE}"
     "${PREFLIGHT_CONTROLLER_IMAGE}"
+    "${SLURM_DRAIN_MONITOR_IMAGE}"
 )
 
 # Track which optional tools are available
@@ -201,7 +207,7 @@ generate_recipe() {
     # The recipe is generated through an external --data overlay that composes
     # both nvsentinel mixins, so every mixin-gated image is discovered by
     # `mirror list` and asserted in the generated Hauler and Zarf manifests.
-    # Only the two small controller images are carried through the sync,
+    # Only the three small controller images are carried through the sync,
     # package and registry verification -- the three preflight check images
     # are 1.7-9.9 GiB each and would exhaust the runner. None of these images
     # appears until a mixin overrides the component's values (and three are
@@ -226,7 +232,10 @@ REGISTRY_EOF
     # constraints and validation cannot drift out of sync with the real one;
     # the only difference is the composed mixin. An external overlay of the
     # same name replaces its embedded counterpart.
-    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor"]' \
+    # nvsentinel-slurm-drain-monitor is composed on a non-Slurm leaf here only
+    # because this lane never bundles: CheckNVSentinelSlurmDrainMonitorRequiresSlinky
+    # would reject it at `aicr bundle`, but `mirror list` runs no bundle gates.
+    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor"]' \
         "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
         > "${data_dir}/overlays/h100-kind-training.yaml"
 
@@ -259,6 +268,9 @@ REGISTRY_EOF
     fi
     if ! grep -q "nicHealthMonitor" "${WORK}/recipe.yaml"; then
         err "nvsentinel-nic-health-monitor mixin did not apply -- the recipe carries no nicHealthMonitor override"
+    fi
+    if ! grep -q "slurmDrainMonitor" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-slurm-drain-monitor mixin did not apply -- the recipe carries no slurmDrainMonitor override"
     fi
     msg "Recipe generated at ${WORK}/recipe.yaml"
 }
@@ -347,12 +359,12 @@ trim_to_public_images() {
     #     (https://github.com/hauler-dev/hauler/issues/259).
     #     Strip the @sha256:... suffix so Hauler pulls by tag only.
     # The multi-GiB preflight check images are filtered out before the cap;
-    # the two small controller images are appended after it, because
+    # the three small controller images are appended after it, because
     # alphabetical ordering puts them well past MAX_IMAGES and head() would
     # otherwise always drop them.
     public_images=$(echo "$all_images" \
         | grep -v '^nvcr\.io' \
-        | grep -Ev '/nvsentinel/(preflight(-[a-z-]+)?|kubernetes-object-monitor):' \
+        | grep -Ev '/nvsentinel/(preflight(-[a-z-]+)?|kubernetes-object-monitor|slurm-drain-monitor):' \
         | sed -E 's/(:[^@]*)@sha256:[a-f0-9]*/\1/' \
         | head -n "${MAX_IMAGES}" || true)
     local mixin_img

@@ -103,18 +103,7 @@ const (
 	// the image env var.
 	gpuAbsenceProbeScript = "if ls /dev/nvidia* 2>/dev/null; then echo 'FAIL: GPU visible without GPU allocation' && exit 1; else echo 'PASS: GPU isolated' && exit 0; fi"
 
-	// gpuExclusiveGrantProbeScript is the POSITIVE probe for the AUTHORIZED
-	// container: it must see exactly ONE usable GPU. A bare /dev/nvidia*
-	// listing would also pass for a container exposed to every GPU on the
-	// node (isolation broken) or to control devices only (/dev/nvidiactl,
-	// /dev/nvidia-uvm — no usable GPU), so the granted container counts GPUs
-	// via nvidia-smi (available in cudaTestImage) and emits the count and
-	// UUIDs to its logs as evidence. The success gate is a `case` matching
-	// the literal string "1" — fail closed: an empty or non-numeric count
-	// (e.g. a failed pipeline stage) lands in the FAIL branch instead of
-	// erroring inside a numeric `[ -ne ]` test and falling through to PASS.
-	//
-	// The prologue makes the probe advertiser-agnostic: under the GPU
+	// nvidiaUserlandPathPrologue makes the probe advertiser-agnostic: under the GPU
 	// Operator's toolkit flow, nvidia-smi and libnvidia-ml are injected at
 	// standard paths and the exports are no-ops; under GKE's managed device
 	// plugin (the gke-default gpuStack value), the driver tree is mounted
@@ -133,8 +122,20 @@ const (
 	// no nvidia-smi) rather than a shadow over image binaries — prepending
 	// a node path ahead of the image's PATH in a security probe would be
 	// the riskier ordering for no supported gain.
-	gpuExclusiveGrantProbeScript = `export PATH="${PATH:+${PATH}:}/usr/local/nvidia/bin"; ` +
-		`export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; ` +
+	nvidiaUserlandPathPrologue = `export PATH="${PATH:+${PATH}:}/usr/local/nvidia/bin"; ` +
+		`export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; `
+
+	// gpuExclusiveGrantProbeScript is the POSITIVE probe for the AUTHORIZED
+	// container: it must see exactly ONE usable GPU. A bare /dev/nvidia*
+	// listing would also pass for a container exposed to every GPU on the
+	// node (isolation broken) or to control devices only (/dev/nvidiactl,
+	// /dev/nvidia-uvm — no usable GPU), so the granted container counts GPUs
+	// via nvidia-smi (available in cudaTestImage) and emits the count and
+	// UUIDs to its logs as evidence. The success gate is a `case` matching
+	// the literal string "1" — fail closed: an empty or non-numeric count
+	// (e.g. a failed pipeline stage) lands in the FAIL branch instead of
+	// erroring inside a numeric `[ -ne ]` test and falling through to PASS.
+	gpuExclusiveGrantProbeScript = nvidiaUserlandPathPrologue +
 		`uuids="$(nvidia-smi --query-gpu=uuid --format=csv,noheader)" || { echo "FAIL: nvidia-smi cannot enumerate GPUs - no usable GPU granted"; exit 1; }; ` +
 		`count="$(printf '%s\n' "$uuids" | grep -c .)"; ` +
 		`echo "granted GPU count: ${count}"; echo "granted GPU UUIDs: ${uuids}"; ` +
@@ -323,7 +324,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	// no spare capacity, or pass using capacity elsewhere without exercising
 	// Slurm's own isolation.
 	if recipeHasComponent(ctx, "slinky-slurm") {
-		return validators.Skip("Slurm-managed GPU allocation (slinky-slurm in recipe) is not mediated by the Kubernetes scheduler. slinky-slurm-health and slinky-slurm-imex-channel validate Slurm's own GPU access path instead")
+		return validators.Skip("Slurm-managed GPU allocation (slinky-slurm in recipe) is not mediated by the Kubernetes scheduler; on GPU-backed Slinky recipes slinky-slurm-gpu-access verifies Slurm's GPU access and isolation path instead")
 	}
 
 	// Bound ALL work to the check-local budget so one bounded namespace

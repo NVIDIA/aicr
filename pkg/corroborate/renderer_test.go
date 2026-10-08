@@ -33,3 +33,17 @@ func TestRendererProfileRecipeNameEmphasis(t *testing.T) {
 		}
 	}
 }
+
+func TestRendererCommitLinkRequiresSHA(t *testing.T) {
+	html := string(rendererHTML)
+	wants := []string{
+		`function isCommit(c){ return typeof c === "string" && /^[0-9a-f]{7,40}$/.test(c); }`,
+		`if (!isCommit(c)) return "";`,
+		`const commit = isCommit(bm.aicrCommit) ? bm.aicrCommit : "";`,
+	}
+	for _, want := range wants {
+		if !strings.Contains(html, want) {
+			t.Errorf("renderer does not gate the commit link on a hex SHA: missing %q", want)
+		}
+	}
+}

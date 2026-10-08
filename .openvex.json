@@ -3,14 +3,14 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-09-29T00:00:00Z",
-  "version": 18,
+  "timestamp": "2026-10-05T00:00:00Z",
+  "version": 19,
   "tooling": "manual curation (.agents/skills/aicr-managing-openvex)",
   "statements": [
     {
       "vulnerability": {
         "name": "CVE-2026-82049",
-        "description": "CPython: the tarfile module's `data` and `tar` extraction filters (PEP 706) mishandle a crafted archive containing a hard link to a symbolic link, so extraction can alter the permissions or mtime of a file outside the destination directory, or expose that file's contents inside the extracted tree (CWE-59, High, CVSS 4.0 AV:L/AC:L/PR:N/UI:P). It arrives with the runtime base image's interpreter, not with any pip package: grype catalogs it as `pkg:generic/python@3.13.15` at /usr/local/bin/python{,3,3.13} and /usr/local/lib/libpython3.13.so, which is the CPython in nvcr.io/nvidia/distroless/python:3.13-v4.1.4. No bump reaches a fix. 3.13.15 is the newest 3.13 release (2026-08-05), the advisory published 2026-09-14, and the only fixed version grype records is `3.14.0b1` (fix.state=fixed, first-observed 2026-09-18) -- a 3.14 beta, which is why --only-fixed does not withhold it. nvcr.io/nvidia/distroless/python does publish a 3.14-v4.1.4 tag, but the installed aiperf 0.13.0 declares `Requires-Python: <3.14,>=3.11`, so building the venv on 3.14 would fail pip resolution rather than produce a fixed image. The 3.14 move is tracked in #1910."
+        "description": "CPython: the tarfile module's `data` and `tar` extraction filters (PEP 706) mishandle a crafted archive containing a hard link to a symbolic link, so extraction can alter the permissions or mtime of a file outside the destination directory, or expose that file's contents inside the extracted tree (CWE-59, High, CVSS 4.0 AV:L/AC:L/PR:N/UI:P). It arrives with the runtime base image's interpreter, not with any pip package: grype catalogs it as `pkg:generic/python@3.13.15` at /usr/local/bin/python{,3,3.13} and /usr/local/lib/libpython3.13.so, which is the CPython in nvcr.io/nvidia/distroless/python:3.13-v4.1.5. No bump reaches a fix. 3.13.15 is the newest 3.13 release (2026-08-05), the advisory published 2026-09-14, and the only fixed version grype records is `3.14.0b1` (fix.state=fixed, first-observed 2026-09-18) -- a 3.14 beta, which is why --only-fixed does not withhold it. nvcr.io/nvidia/distroless/python does publish a 3.14-v4.1.5 tag, but the installed aiperf 0.13.0 declares `Requires-Python: <3.14,>=3.11`, so building the venv on 3.14 would fail pip resolution rather than produce a fixed image. The 3.14 move is tracked in #1910."
       },
       "products": [
         {

@@ -7,8 +7,9 @@ KWOK (Kubernetes WithOut Kubelet) tests AICR bundles against simulated GPU clust
 Versions are pinned in `.settings.yaml`. **Docker Desktop must be running** — Kind uses it to create the local cluster.
 
 ```bash
-# Kind, lifecycle, bundle deployment, build
-brew install kind tilt-dev/tap/ctlptl helm yq goreleaser
+# Kind, ctlptl, helm, yq, goreleaser, and the rest of the toolchain
+# (then run make tools-check to confirm the .settings.yaml pins)
+make tools-setup
 ```
 
 The `kwok`/`kwokctl` binaries are not required — `make kwok-cluster` installs the KWOK controller into the cluster via `kubectl apply`.
@@ -123,6 +124,7 @@ Currently on disk:
 | eks | h100 | `eks/system-m7i.yaml` | `eks/p5-h100.yaml` |
 | eks | gb200 | `eks/system-m7i.yaml` | `eks/p6-gb200.yaml` |
 | eks | gb300 | `eks/system-m7i.yaml` | `eks/p6e-gb300.yaml` |
+| gke | gb300 | `gke/system-n2.yaml` | `gke/a4x-maxgpu-4g-metal.yaml` |
 | k0s | h200 | `k0s/system-generic.yaml` | `k0s/accelerated-h200.yaml` |
 | rke2 | vr200 | `rke2/system-generic.yaml` | `rke2/accelerated-vr200.yaml` |
 
@@ -188,7 +190,7 @@ lanes).
 A recipe is auto-discovered for KWOK testing if it has `spec.criteria.service` defined. Create `recipes/overlays/your-recipe.yaml`:
 
 ```yaml
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
   name: your-recipe-name

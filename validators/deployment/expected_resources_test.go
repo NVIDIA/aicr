@@ -17,12 +17,18 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"maps"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/bundler"
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -42,6 +48,7 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/dynamic"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
 )
 
@@ -203,10 +210,7 @@ func TestVerifyNodewrightReady_ListsClusterScoped(t *testing.T) {
 	}
 }
 
-// Issue #607 acceptance: Nodewright check must skip gracefully when the CRD is
-// not registered on the cluster, even when nodewright-customizations is declared
-// in the recipe's componentRefs.
-func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T) {
+func TestCheckExpectedResources_FailsNodewrightWhenCRDNeverRegistered(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContextWithUnregistered(t,
@@ -216,9 +220,60 @@ func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T
 		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
-	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil when Nodewright CRD is not registered", err)
-		return
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("checkExpectedResources() error = nil, want a failure when the recipe declares Nodewright CRs and no CRD is served")
+	}
+	if !strings.Contains(err.Error(), "serves its resource yet") {
+		t.Fatalf("error = %v, want the not-yet-served diagnostic", err)
+	}
+}
+
+// TestResolveNodewrightGVR_RequiresResourceNotJustGroupVersion simulates
+// deploymentpolicies establishing before nodewrights in the same group/version.
+func TestResolveNodewrightGVR_RequiresResourceNotJustGroupVersion(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, nil, nil, nil)
+	fakeDisc := ctx.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+	fakeDisc.Resources = append(fakeDisc.Resources, &metav1.APIResourceList{
+		GroupVersion: nodewrightGVR.GroupVersion().String(),
+		APIResources: []metav1.APIResource{{Name: "deploymentpolicies"}},
+	})
+
+	_, registered, err := resolveNodewrightGVR(ctx)
+	if err != nil {
+		t.Fatalf("resolveNodewrightGVR() error = %v", err)
+	}
+	if registered {
+		t.Fatal("registered = true, want false when the group lists only deploymentpolicies")
+	}
+}
+
+func TestVerifyNodewrightReady_PicksUpCRDEstablishedMidPoll(t *testing.T) {
+	t.Parallel()
+
+	ref := recipe.ComponentRef{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}
+	ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")},
+		[]runtime.Object{nodeWrightWithStatus("tuning", nodewrightCompleteState)}, []recipe.ComponentRef{ref})
+
+	fakeDisc := ctx.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+	established := fakeDisc.Resources
+	fakeDisc.Resources = nil
+	calls := 0
+	ctx.Clientset.(*k8sfake.Clientset).PrependReactor("get", "resource", func(clienttesting.Action) (bool, runtime.Object, error) {
+		calls++
+		if calls == 2 {
+			fakeDisc.Resources = established
+		}
+		return false, nil, nil
+	})
+
+	if err := verifyNodewrightReady(ctx, ref, []corev1.Taint{legacyRuntimeRequiredTaint}); err != nil {
+		t.Fatalf("verifyNodewrightReady() error = %v, want nil once the CRD is established mid-poll", err)
+	}
+	if calls < 2 {
+		t.Fatalf("discovery calls = %d, want the GVR re-resolved across polls", calls)
 	}
 }
 
@@ -252,8 +307,8 @@ func TestCheckExpectedResources_FailsWhenNodewrightCRMissing(t *testing.T) {
 // timeout), a Go-resident readiness check must NOT treat that as "CRD not
 // registered" and skip. Anything other than IsNotFound means we cannot
 // prove readiness, so the check must surface a failure. Exercised here via
-// the Nodewright discovery gate, which shares the fail-closed pattern with
-// the other GPU readiness signals.
+// Nodewright discovery, which shares the fail-closed pattern with the other
+// GPU readiness signals.
 func TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError(t *testing.T) {
 	t.Parallel()
 
@@ -1122,9 +1177,8 @@ func TestVerifyGPUReadinessSignalsPreservesOrderConcurrently(t *testing.T) {
 		{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
 		{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
 	}
-	// The Nodewright GroupVersion must be registered (extraRegistered) or the
-	// CRD-not-registered skip (#607) returns nil before the signal ever fails —
-	// this proves both signals report, not just that one CRD is absent.
+	// The canceled budget fails both signals on their first poll. Both must
+	// report.
 	ctx := newDeploymentTestContextWithDiscovery(t, nil, nil, []schema.GroupVersion{nodewrightGVR.GroupVersion()}, nil, refs)
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel() // force every probe's poll loop to exit on its first iteration
@@ -1204,10 +1258,10 @@ func TestRunGPUReadinessProbesOverlap(t *testing.T) {
 	}
 }
 
-// TestRuntimeRequiredTaints pins the gate derivation: the operator Deployment's
-// RUNTIME_REQUIRED_TAINT env plus the legacy default; the chart defaults when
-// the Deployment or env is absent; fail closed on any other read error or an
-// unparseable value.
+// TestRuntimeRequiredTaints verifies runtimeRequiredTaints returns the
+// configured taint plus the legacy default, falls back to the chart defaults
+// when the Deployment or env is absent, and fails on a list error, several
+// matches, or an invalid taint.
 func TestRuntimeRequiredTaints(t *testing.T) {
 	t.Parallel()
 
@@ -1219,7 +1273,7 @@ func TestRuntimeRequiredTaints(t *testing.T) {
 		name       string
 		objects    []runtime.Object
 		refs       []recipe.ComponentRef
-		getErr     error
+		listErr    error
 		want       []corev1.Taint
 		wantErrSub string
 	}{
@@ -1290,33 +1344,51 @@ func TestRuntimeRequiredTaints(t *testing.T) {
 			wantErrSub: "valueFrom",
 		},
 		{
-			// The VR reference clusters install nodewright out of band with no
-			// fullnameOverride, so the chart's own Deployment name is what is
-			// live. Reading only the bundle name would fall back to chart
-			// defaults and gate on a taint this operator never applies.
-			name: "out-of-band Deployment name is honored",
+			name: "Deployment is found by label whatever its name",
 			objects: []runtime.Object{nodewrightOperatorDeploymentNamed(ns,
-				nodewrightOperatorDeploymentOutOfBand, "custom.io/gate=true:NoExecute")},
+				"nodewright-controller-manager", "custom.io/gate=true:NoExecute")},
 			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
 			want: dedupeTaints(custom, legacyRuntimeRequiredTaint),
 		},
 		{
+			// nameOverride changes the name and part-of labels only.
+			name: "Deployment is found with both nameOverride and fullnameOverride set",
+			objects: []runtime.Object{func() *appsv1.Deployment {
+				d := nodewrightOperatorDeploymentWithEnv(ns, custom.ToString())
+				d.Labels["app.kubernetes.io/name"] = "custom"
+				d.Labels["app.kubernetes.io/part-of"] = "custom"
+				return d
+			}()},
+			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want: dedupeTaints(custom, legacyRuntimeRequiredTaint),
+		},
+		{
+			name: "Deployment without the controller labels is ignored",
+			objects: []runtime.Object{func() *appsv1.Deployment {
+				d := nodewrightOperatorDeploymentWithEnv(ns, custom.ToString())
+				d.Labels = map[string]string{"control-plane": "controller-manager"}
+				return d
+			}()},
+			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want: defaultsGate,
+		},
+		{
 			// Neither can be shown to own the taint the nodes carry, and
 			// picking one would gate on a value the other never applies.
-			name: "both Deployment names present fails closed",
+			name: "more than one matching Deployment fails closed",
 			objects: []runtime.Object{
 				nodewrightOperatorDeploymentWithEnv(ns, "custom.io/gate=true:NoExecute"),
-				nodewrightOperatorDeploymentNamed(ns, nodewrightOperatorDeploymentOutOfBand,
+				nodewrightOperatorDeploymentNamed(ns, "nodewright-controller-manager",
 					"other.io/gate=true:NoSchedule"),
 			},
 			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
-			wantErrSub: "cannot tell which operator governs",
+			wantErrSub: "operator is ambiguous",
 		},
 		{
-			name:       "non-NotFound read error fails closed",
-			getErr:     apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, nodewrightOperatorDeployment, stderrors.New("forbidden")),
+			name:       "list error fails closed",
+			listErr:    apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "", stderrors.New("forbidden")),
 			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
-			wantErrSub: "failed to read Deployment",
+			wantErrSub: "failed to list nodewright controller-manager Deployments",
 		},
 	}
 
@@ -1325,9 +1397,9 @@ func TestRuntimeRequiredTaints(t *testing.T) {
 			t.Parallel()
 
 			clientset := k8sfake.NewClientset(tt.objects...)
-			if tt.getErr != nil {
-				clientset.PrependReactor("get", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
-					return true, nil, tt.getErr
+			if tt.listErr != nil {
+				clientset.PrependReactor("list", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.listErr
 				})
 			}
 			ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
@@ -1423,6 +1495,110 @@ func TestCheckExpectedResources_GatesOnConfiguredTaint(t *testing.T) {
 	}
 }
 
+// TestCheckExpectedResources_OperatorHealthCheckRequiresOneController verifies
+// checkExpectedResources fails the operator health check when more than one
+// controller-manager Deployment matches.
+func TestCheckExpectedResources_OperatorHealthCheckRequiresOneController(t *testing.T) {
+	t.Parallel()
+
+	const assertYAML = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nodewright-operator-health-check
+spec:
+  steps:
+    - name: validate-deployment-exists
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                namespace: skyhook
+                labels:
+                  control-plane: controller-manager
+`
+	// Serves just enough API discovery for the chainsaw fetcher to resolve
+	// Deployments. The dynamic fake holds one matching Deployment, so the assert
+	// passes whatever the controller count and only the cardinality check varies.
+	discovery := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api":
+			_, _ = w.Write([]byte(`{"kind":"APIVersions","versions":["v1"]}`))
+		case "/apis":
+			_, _ = w.Write([]byte(`{"kind":"APIGroupList","groups":[{"name":"apps","versions":[` +
+				`{"groupVersion":"apps/v1","version":"v1"}],"preferredVersion":{"groupVersion":"apps/v1","version":"v1"}}]}`))
+		case "/apis/apps/v1":
+			_, _ = w.Write([]byte(`{"kind":"APIResourceList","groupVersion":"apps/v1","resources":[` +
+				`{"name":"deployments","namespaced":true,"kind":"Deployment","verbs":["list"]}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure","code":404}`))
+		}
+	}))
+	t.Cleanup(discovery.Close)
+
+	tests := []struct {
+		name      string
+		namespace string
+		objects   []runtime.Object
+		wantErr   string
+	}{
+		{
+			name:      "one controller Deployment",
+			namespace: "skyhook",
+			objects:   []runtime.Object{nodewrightOperatorDeploymentWithEnv("skyhook", "")},
+		},
+		{
+			name:      "two controller Deployments",
+			namespace: "skyhook",
+			objects: []runtime.Object{
+				nodewrightOperatorDeploymentWithEnv("skyhook", ""),
+				nodewrightOperatorDeploymentNamed("skyhook", "nodewright-controller-manager", ""),
+			},
+			wantErr: "operator is ambiguous",
+		},
+		{
+			name:    "no namespace on the component",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv("skyhook", "")},
+			wantErr: "no namespace",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			live := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]any{
+					"name": "d", "namespace": "skyhook",
+					"labels": map[string]any{"control-plane": "controller-manager"},
+				},
+			}}
+			refs := []recipe.ComponentRef{{
+				Name: nodewrightOperatorComponent, Namespace: tt.namespace, HealthCheckAsserts: assertYAML,
+			}}
+			ctx := newDeploymentTestContext(t, append([]runtime.Object{activeNamespace("skyhook")}, tt.objects...),
+				[]runtime.Object{live}, refs)
+			ctx.RESTConfig = &rest.Config{Host: discovery.URL}
+
+			err := checkExpectedResources(ctx)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("checkExpectedResources() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("checkExpectedResources() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // testNodewrightAssertYAML is the shape of the registry health check for
 // nodewright-customizations: a nameless assert on the NodeWright kind.
 const testNodewrightAssertYAML = `apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -1499,12 +1675,54 @@ func TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert(t *testing.T
 			[]runtime.Object{activeNamespace("skyhook")},
 			[]runtime.Object{nodeWrightWithStatus("tuning", nodewrightCompleteState)},
 			[]recipe.ComponentRef{ref})
-		suppressed, _, err := gatedHealthCheckSuppressed(ctx, ref)
+		asserts := []chainsaw.ComponentAssert{{Name: ref.Name, AssertYAML: ref.HealthCheckAsserts}}
+		kept, err := dropDiscoverySuppressedAsserts(ctx, asserts)
 		if err != nil {
-			t.Fatalf("gatedHealthCheckSuppressed() error = %v", err)
+			t.Fatalf("dropDiscoverySuppressedAsserts() error = %v", err)
 		}
-		if suppressed {
+		if len(kept) != 1 {
 			t.Fatal("assert must stay queued when the cluster serves nodewright.nvidia.com")
+		}
+	})
+
+	t.Run("legacy-only cluster drops the assert", func(t *testing.T) {
+		t.Parallel()
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{legacyOperator, ref})
+		asserts := []chainsaw.ComponentAssert{{Name: ref.Name, AssertYAML: ref.HealthCheckAsserts}}
+		kept, err := dropDiscoverySuppressedAsserts(ctx, asserts)
+		if err != nil {
+			t.Fatalf("dropDiscoverySuppressedAsserts() error = %v", err)
+		}
+		if len(kept) != 0 {
+			t.Fatalf("kept = %v, want the assert dropped on a legacy-only cluster", kept)
+		}
+	})
+
+	t.Run("discovery is read after readiness polling", func(t *testing.T) {
+		t.Parallel()
+		// The group is not served when the readiness poll starts and only the
+		// legacy group is established by the time it ends. The assert
+		// selection must reflect the later state.
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{legacyOperator, ref})
+		fakeDisc := ctx.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+		established := fakeDisc.Resources
+		fakeDisc.Resources = nil
+		calls := 0
+		ctx.Clientset.(*k8sfake.Clientset).PrependReactor("get", "resource", func(clienttesting.Action) (bool, runtime.Object, error) {
+			calls++
+			if calls == 3 {
+				fakeDisc.Resources = established
+			}
+			return false, nil, nil
+		})
+		if err := checkExpectedResources(ctx); err != nil {
+			t.Fatalf("checkExpectedResources() error = %v, want nil once the legacy group is served", err)
 		}
 	})
 
@@ -1519,25 +1737,24 @@ func TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert(t *testing.T
 		ctx.Clientset.(*k8sfake.Clientset).PrependReactor("get", "resource", func(clienttesting.Action) (bool, runtime.Object, error) {
 			return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: nodewrightGVR.Group}, "", stderrors.New("forbidden"))
 		})
-		if _, _, err := gatedHealthCheckSuppressed(ctx, ref); err == nil {
-			t.Fatal("gatedHealthCheckSuppressed() error = nil, want the discovery failure (must not skip)")
+		asserts := []chainsaw.ComponentAssert{
+			{Name: ref.Name, AssertYAML: ref.HealthCheckAsserts},
+			{Name: "other-component", AssertYAML: "x"},
+		}
+		kept, err := dropDiscoverySuppressedAsserts(ctx, asserts)
+		if err == nil {
+			t.Fatal("dropDiscoverySuppressedAsserts() error = nil, want the discovery failure (must not skip)")
+		}
+		if len(kept) != 1 || kept[0].Name != "other-component" {
+			t.Fatalf("kept = %v, want only the unaffected assert alongside the error", kept)
 		}
 	})
 }
 
-// TestResolveNodewrightGVR_VersionGate pins the fallback contract: the new
-// group always wins when served; the legacy group is read only when the recipe
-// pins nodewright-operator below the rename, or carries no usable pin at all;
-// a rename-or-later pin on a legacy-only cluster fails closed; neither group
-// served skips (#607).
-// resolveNodewrightGVR runs ahead of pollUntilStable, so a discovery call that
-// ignores the validator context would outlive both cancellation and the
-// readiness budget and hang until the Job is killed. client-go's
-// DiscoveryInterface.ServerResourcesForGroupVersion issues its request with
-// context.TODO() internally, which is why the probe goes through
-// helper.GroupVersionResources instead. The fake clientset exposes no
-// RESTClient, so this exercises that helper's guard rather than a real
-// in-flight cancellation, which is the reachable half here.
+// TestResolveNodewrightGVRHonorsCancellation verifies a canceled context
+// surfaces as ErrCodeTimeout. The fake clientset exposes no RESTClient, so this
+// covers the guard in helper.GroupVersionResources rather than an in-flight
+// cancellation.
 func TestResolveNodewrightGVRHonorsCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -1559,6 +1776,12 @@ func TestResolveNodewrightGVRHonorsCancellation(t *testing.T) {
 	}
 }
 
+// TestResolveNodewrightGVR_VersionGate verifies which group resolves.
+//   - NodeWright wins whenever it is served.
+//   - Skyhook is read only when nodewright-operator is pinned below the rename
+//     or has no usable pin.
+//   - A rename-or-later pin on a legacy-only cluster is an error.
+//   - Neither group served reports not registered.
 func TestResolveNodewrightGVR_VersionGate(t *testing.T) {
 	t.Parallel()
 
@@ -1758,23 +1981,34 @@ func configureFakeDiscovery(
 		unregSet[gvr.GroupVersion()] = true
 	}
 
-	gvSet := make(map[schema.GroupVersion]bool)
+	// gvSet maps each advertised GroupVersion to the resource names it lists.
+	// Nodewright resolution requires the resource name to be listed, so the
+	// Nodewright resources are listed explicitly.
+	gvSet := make(map[schema.GroupVersion][]string)
 	for _, object := range dynamicObjects {
 		u, ok := object.(*unstructured.Unstructured)
 		if !ok {
 			continue
 		}
-		gv := u.GroupVersionKind().GroupVersion()
+		gvk := u.GroupVersionKind()
+		gv := gvk.GroupVersion()
 		if unregSet[gv] {
 			continue
 		}
-		gvSet[gv] = true
+		gvSet[gv] = append(gvSet[gv], gvrForTestObject(gvk).Resource)
 	}
 	for _, gv := range extraRegistered {
 		if unregSet[gv] {
 			continue
 		}
-		gvSet[gv] = true
+		if _, ok := gvSet[gv]; !ok {
+			gvSet[gv] = nil
+		}
+		for _, gvr := range []schema.GroupVersionResource{nodewrightGVR, legacySkyhookGVR} {
+			if gvr.GroupVersion() == gv {
+				gvSet[gv] = append(gvSet[gv], gvr.Resource)
+			}
+		}
 	}
 
 	fakeDisc, ok := clientset.Discovery().(*fakediscovery.FakeDiscovery)
@@ -1782,10 +2016,16 @@ func configureFakeDiscovery(
 		t.Fatalf("expected *fakediscovery.FakeDiscovery, got %T", clientset.Discovery())
 		return
 	}
-	for gv := range gvSet {
-		fakeDisc.Resources = append(fakeDisc.Resources, &metav1.APIResourceList{
-			GroupVersion: gv.String(),
-		})
+	for gv, names := range gvSet {
+		list := &metav1.APIResourceList{GroupVersion: gv.String()}
+		seen := make(map[string]bool, len(names))
+		for _, name := range names {
+			if !seen[name] {
+				seen[name] = true
+				list.APIResources = append(list.APIResources, metav1.APIResource{Name: name})
+			}
+		}
+		fakeDisc.Resources = append(fakeDisc.Resources, list)
 	}
 }
 
@@ -2056,7 +2296,8 @@ func nodewrightOperatorDeploymentNamed(namespace, name, taintStr string) *appsv1
 }
 
 func nodewrightOperatorDeploymentWithEnv(namespace, taintStr string) *appsv1.Deployment {
-	d := readyDeployment(namespace, nodewrightOperatorDeployment)
+	d := readyDeployment(namespace, "skyhook-operator-controller-manager")
+	d.Labels = maps.Clone(nodewrightControllerLabels)
 	container := corev1.Container{Name: "manager"}
 	if taintStr != "" {
 		container.Env = []corev1.EnvVar{{Name: runtimeRequiredTaintEnv, Value: taintStr}}
@@ -2070,7 +2311,8 @@ func nodewrightOperatorDeploymentWithEnv(namespace, taintStr string) *appsv1.Dep
 // shapes nodewrightOperatorDeploymentWithEnv cannot: present but empty, and
 // sourced from valueFrom. Both are distinct from the env being absent.
 func nodewrightOperatorDeploymentWithEnvVar(namespace string, env corev1.EnvVar) *appsv1.Deployment {
-	d := readyDeployment(namespace, nodewrightOperatorDeployment)
+	d := readyDeployment(namespace, "skyhook-operator-controller-manager")
+	d.Labels = maps.Clone(nodewrightControllerLabels)
 	d.Spec.Template.Spec.Containers = []corev1.Container{{Name: "manager", Env: []corev1.EnvVar{env}}}
 	return d
 }
@@ -2380,20 +2622,10 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 			},
 			wantSuppressed: true,
 		},
-		{
-			// The bundler flips enabled=true in the --dra-eviction-node-label
-			// opt-in path that keeps the component in the bundle; then the
-			// labeler renders objects and its health check must run.
-			name: "dra-node-labeler opted in (enabled=true) keeps the assert",
-			ref: recipe.ComponentRef{
-				Name:          "dra-node-labeler",
-				Type:          recipe.ComponentTypeHelm,
-				ValuesFile:    "components/dra-node-labeler/values.yaml",
-				ManifestFiles: []string{"components/dra-node-labeler/manifests/dra-node-labeler.yaml"},
-				Overrides:     map[string]any{"enabled": true},
-			},
-			wantSuppressed: false,
-		},
+		// The opted-in shape is covered by
+		// TestGatedHealthCheckSuppressed_DRANodeLabelerBundleRecipe, which reads
+		// the ref back from a recipe.yaml the bundler actually wrote rather than
+		// hand-writing the override.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2721,4 +2953,89 @@ func TestMarkUndispatched(t *testing.T) {
 			t.Errorf("failures %q names a component that carries no unevaluated work", got)
 		}
 	}
+}
+
+// TestGatedHealthCheckSuppressed_DRANodeLabelerBundleRecipe exercises the real
+// bundle-to-validation path for the labeler (#2848): the recipe.yaml the
+// bundler writes at the bundle root is what post-deployment validation reads.
+// Opted in (--dra-eviction-node-label), the bundler persists enabled: true on
+// the labeler ref, so the manifest renders and the health check stays queued.
+// Not opted in, the bundler drops the ref, so there is nothing to suppress.
+func TestGatedHealthCheckSuppressed_DRANodeLabelerBundleRecipe(t *testing.T) {
+	t.Parallel()
+
+	recipeInput := func() *recipe.RecipeResult {
+		return &recipe.RecipeResult{
+			APIVersion: recipe.RecipeResultAPIVersion,
+			Kind:       recipe.RecipeResultKind,
+			Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Version: "v26.4.0", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia"},
+				{
+					Name:           draNodeLabelerComponent,
+					Type:           recipe.ComponentTypeHelm,
+					ValuesFile:     "components/dra-node-labeler/values.yaml",
+					ManifestFiles:  []string{"components/dra-node-labeler/manifests/dra-node-labeler.yaml"},
+					DependencyRefs: []string{"gpu-operator"},
+				},
+				{
+					Name: draDriverComponent, Version: "25.12.0", Type: recipe.ComponentTypeHelm,
+					Source:         "https://helm.ngc.nvidia.com/nvidia",
+					Overrides:      map[string]any{"nvidiaDriverRoot": "/run/nvidia/driver"},
+					DependencyRefs: []string{"gpu-operator", draNodeLabelerComponent},
+				},
+			},
+			DeploymentOrder: []string{"gpu-operator", draNodeLabelerComponent, draDriverComponent},
+		}
+	}
+	bundleRecipeRefs := func(t *testing.T, opts ...bundlercfg.Option) []recipe.ComponentRef {
+		t.Helper()
+		b, err := bundler.New(bundler.WithConfig(bundlercfg.NewConfig(opts...)))
+		if err != nil {
+			t.Fatalf("bundler.New() error = %v", err)
+		}
+		dir := t.TempDir()
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		if _, makeErr := b.Make(ctx, recipeInput(), dir); makeErr != nil {
+			t.Fatalf("Make() error = %v", makeErr)
+		}
+		loaded, err := recipe.LoadFromFileWithProvider(ctx, filepath.Join(dir, bundler.RecipeFileName), "", "test", nil)
+		if err != nil {
+			t.Fatalf("load bundle %s: %v", bundler.RecipeFileName, err)
+		}
+		return loaded.ComponentRefs
+	}
+	findLabeler := func(refs []recipe.ComponentRef) *recipe.ComponentRef {
+		for i := range refs {
+			if refs[i].Name == draNodeLabelerComponent {
+				return &refs[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("opted-in bundle recipe keeps the assert", func(t *testing.T) {
+		t.Parallel()
+		refs := bundleRecipeRefs(t, bundlercfg.WithDRAEvictionNodeLabel(bundlercfg.DefaultDRAEvictionNodeLabel()))
+		ref := findLabeler(refs)
+		if ref == nil {
+			t.Fatalf("opted-in bundle recipe lacks %s", draNodeLabelerComponent)
+		}
+		suppressed, reason, err := gatedHealthCheckSuppressed(
+			&validators.Context{Ctx: t.Context(), Clientset: k8sfake.NewClientset()}, *ref)
+		if err != nil {
+			t.Fatalf("gatedHealthCheckSuppressed() error = %v", err)
+		}
+		if suppressed {
+			t.Fatalf("deployed labeler's health check suppressed: %s", reason)
+		}
+	})
+
+	t.Run("default-path bundle recipe carries no labeler", func(t *testing.T) {
+		t.Parallel()
+		if ref := findLabeler(bundleRecipeRefs(t)); ref != nil {
+			t.Fatalf("bundle recipe carries %s without the eviction opt-in: %+v", draNodeLabelerComponent, ref)
+		}
+	})
 }

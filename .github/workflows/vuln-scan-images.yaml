@@ -329,9 +329,10 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/conformance
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
-          # AICR does not build the seven below. They ship only with the
+          # AICR does not build the eight below. They ship only with the
           # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
-          # (#2610) and nvsentinel-nic-health-monitor mixins, and the static
+          # (#2610), nvsentinel-nic-health-monitor and
+          # nvsentinel-slurm-drain-monitor (#2611) mixins, and the static
           # BOM cannot see a mixin-gated image, so nothing else would surface
           # a CVE in them. Because they are not built by this workflow they
           # carry the nvsentinel chart's own version rather than SCAN_TAG --
@@ -342,6 +343,7 @@ jobs:
           - ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
           - ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
           - ghcr.io/nvidia/nvsentinel/nic-health-monitor
+          - ghcr.io/nvidia/nvsentinel/slurm-drain-monitor
           # Third-party, and the only one here not published by NVIDIA:
           # global.initContainerImage, used by chown/permission init
           # containers in the nic-health-monitor and audit-logging paths.
@@ -352,8 +354,9 @@ jobs:
         include:
           # Keep in lockstep with nvsentinel's defaultVersion in
           # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere,
-          # TestPreflightImagesPinnedEverywhere and
-          # TestNICHealthMonitorImagePinnedEverywhere fail if these drift apart.
+          # TestPreflightImagesPinnedEverywhere,
+          # TestNICHealthMonitorImagePinnedEverywhere and
+          # TestSlurmDrainMonitorImagePinnedEverywhere fail if these drift apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
             tag: v1.25.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
@@ -365,6 +368,8 @@ jobs:
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
             tag: v1.25.0
           - image: ghcr.io/nvidia/nvsentinel/nic-health-monitor
+            tag: v1.25.0
+          - image: ghcr.io/nvidia/nvsentinel/slurm-drain-monitor
             tag: v1.25.0
           # Versioned independently of the nvsentinel chart -- this comes from
           # global.initContainerImage, not the chart's appVersion, so it does

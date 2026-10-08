@@ -87,6 +87,12 @@ var requirements = map[string]requirementMeta{
 		Description:   "Demonstrates that GPU access is mediated through a Kubernetes allocation mechanism — DRA ResourceClaims or device plugin resource limits — with no direct host device access or hostPath mounts.",
 		File:          "secure-accelerator-access.md",
 	},
+	"slinky-slurm-gpu-access": {
+		RequirementID: "secure_accelerator_access",
+		Title:         "Secure Accelerator Access (Slinky Slurm)",
+		Description:   "Demonstrates that GPU access for Slurm jobs is mediated by Slurm GRES allocation and cgroup device confinement on the GPUs the NodeSet pod holds through the Kubernetes device plugin: a job allocated one GPU can use exactly that GPU, and a job without a GPU allocation on the same node cannot open any GPU device.",
+		File:          "secure-accelerator-access.md",
+	},
 }
 
 // GetRequirement returns the requirement metadata for a validator name.

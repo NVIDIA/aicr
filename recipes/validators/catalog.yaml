@@ -77,6 +77,13 @@ validators:
     timeout: 2m
     args: ["gke-gpu-nic-networks"]
     env: []
+  - name: gke-gpu-nic-topology
+    phase: deployment
+    description: "Verify each a3 GPU node maps all 8 GPU NIC PCI slots to eth1-eth8 (no gVNIC displacement) for GPUDirect TCPXO (skipped unless the recipe declares gke-nccl-tcpxo)"
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    timeout: 2m
+    args: ["gke-gpu-nic-topology"]
+    env: []
   # Performance phase
   #
   # The NCCL checks (nccl-all-reduce-bw and the -net/-nvls variants at the
@@ -241,7 +248,7 @@ validators:
     env: []
   - name: secure-accelerator-access
     phase: conformance
-    description: "Verify secure GPU access via DRA or device plugin (no host device mounts); skips on Slinky Slurm recipes"
+    description: "Verify secure GPU access via DRA or device plugin (no host device mounts); skips on Slinky Slurm recipes, where on GPU-backed leaves slinky-slurm-gpu-access verifies the Slurm path"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 10m
     args: ["secure-accelerator-access"]
@@ -262,6 +269,13 @@ validators:
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 5m
     args: ["slinky-slurm-imex-channel"]
+    env: []
+  - name: slinky-slurm-gpu-access
+    phase: conformance
+    description: "Verify a Slinky Slurm job allocated one GPU can use exactly that GPU, and a job with no GPU allocation on the same node cannot open any GPU device"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    args: ["slinky-slurm-gpu-access"]
     env: []
   - name: gpu-operator-health
     phase: conformance

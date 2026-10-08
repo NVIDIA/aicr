@@ -14,11 +14,12 @@
 
 # Weekly live-render checks for the opt-in nvsentinel mixins.
 #
-# Both tests (pkg/bundler/validations) render the real, live-pulled nvsentinel
+# Each test (pkg/bundler/validations) renders the real, live-pulled nvsentinel
 # chart with a mixin's actual values: the observability one asserts the
 # audit-logging mount shape, the object-monitor one asserts both policies
 # reach the generated config with every namespace the catalog deploys the
-# watched components into. Both are gated on testing.Short() -- `make
+# watched components into, and the slurm-drain-monitor one asserts the
+# workload, its read-only RBAC and its config. All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
 # components are opt-in and off by default, so a transient upstream chart
@@ -70,3 +71,11 @@ jobs:
       - name: Render nvsentinel-object-monitor mixin
         if: ${{ !cancelled() }}
         run: go test ./pkg/bundler/validations/... -run '^TestNVSentinelObjectMonitorChartRender$' -v -count=1
+
+      # A -run pattern that matches nothing exits 0, so the PASS line is
+      # asserted: a renamed test must fail this step, not skip it.
+      - name: Render nvsentinel-slurm-drain-monitor mixin
+        if: ${{ !cancelled() }}
+        run: |
+          go test ./pkg/bundler/validations/... -run '^TestNVSentinelSlurmDrainMonitorChartRender$' -v -count=1 | tee "${RUNNER_TEMP}/sdm-render.log"
+          grep -q -- '--- PASS: TestNVSentinelSlurmDrainMonitorChartRender' "${RUNNER_TEMP}/sdm-render.log"

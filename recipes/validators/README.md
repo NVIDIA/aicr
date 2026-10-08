@@ -41,7 +41,8 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `expected-resources` | Verify expected Kubernetes resources exist and are healthy (runs ExpectedResources + Chainsaw assert paths side-by-side) | 8m |
 | `gpu-operator-version` | Validate GPU Operator version against recipe constraints | 2m |
 | `check-nvidia-smi` | Verify nvidia-smi works on all schedulable GPU nodes (cordoned nodes are disclosed, not silently skipped) | 10m |
-| `gke-gpu-nic-networks` | Verify the GKE cluster has the GPU NIC networks GPUDirect TCPXO requires (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
+| `gke-gpu-nic-networks` | Verify the GKE cluster has the GPU NIC networks GPUDirect TCPXO requires, and that each is Ready with an intact GKENetworkParamSet binding (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
+| `gke-gpu-nic-topology` | Verify each a3 GPU node maps all 8 GPU NIC PCI slots to eth1..eth8 with no gVNIC displacement (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
 
 ### Performance Phase
 
@@ -74,9 +75,10 @@ or, when its fabric matches no embedded template, with the
 | `pod-autoscaling` | Verify HPA-driven pod autoscaling with GPU metrics | 10m |
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify Dynamo operator controller and webhooks | 5m |
-| `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts); skips on Slinky Slurm recipes, whose GPUs the NodeSet reserves and Slurm allocates per job | 10m |
+| `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts); skips on Slinky Slurm recipes, where on GPU-backed leaves slinky-slurm-gpu-access verifies the Slurm path | 10m |
 | `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, job submission, GPU execution, and enabled accounting health | 8m |
 | `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |
+| `slinky-slurm-gpu-access` | Verify a Slinky Slurm job allocated one GPU can use exactly that GPU, and a job with no GPU allocation on the same node cannot open any GPU device | 5m |
 | `gpu-operator-health` | Verify GPU operator health (conformance diagnostic) | 2m |
 | `platform-health` | Verify platform component health (conformance diagnostic) | 5m |
 
@@ -97,6 +99,17 @@ initconf/logfile sidecars pin, so it is already covered by `aicr mirror list`
 via chart rendering. Mirroring alone does not redirect the dynamic `srun` pull,
 though — set `AICR_VALIDATOR_IMAGE_REGISTRY` so the runtime pull resolves from
 your mirror in air-gapped validation.
+
+`slinky-slurm-gpu-access` runs two bounded `srun` jobs from the login pod: one
+with `--gpus=1`, which must list exactly one GPU through `nvidia-smi` and open
+exactly one `/dev/nvidiaN`, and one with no GPU request pinned to the same Slurm
+node, which must open none. Slurm's cgroup device controller leaves every GPU
+node listed and refuses the open with EPERM, so the check classifies the errno of
+a read-only open; any other errno fails as inconclusive. It runs no container
+image, so it needs no mirror entry. It needs `perl` in the slurmd image (the
+pinned `slurmd-pyxis` image ships it) and fails with
+`PROBE_ERROR=perl not found`, never passes, on an image without it. It skips on
+`kind` recipes, which run without `task/cgroup`.
 
 ## Extending the Catalog
 

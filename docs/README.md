@@ -46,7 +46,7 @@ For pipelines and platforms that call AICR programmatically or host
 | Add or modify recipe metadata | [Recipe Development](integrator/recipe-development.md) |
 | Verify artifacts (SLSA, SBOM, attestations) | [Supply Chain Verification](integrator/supply-chain-verification.md) |
 | Ship custom validators via `--data` | [Validator Extension](integrator/validator-extension.md) |
-| Cloud-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [OKE](integrator/oke-gpu-setup.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE TCPXO networking](integrator/gke-tcpxo-networking.md), [GKE GB200 networking](integrator/gke-gb200-networking.md), [Talos](integrator/talos-integration.md) |
+| Cloud-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [OKE](integrator/oke-gpu-setup.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE TCPXO networking](integrator/gke-tcpxo-networking.md), [GKE GB200 networking](integrator/gke-gb200-networking.md), [GKE A4X Max networking](integrator/gke-a4x-max-networking.md), [Talos](integrator/talos-integration.md) |
 
 ### Contributor Guide
 
@@ -94,7 +94,7 @@ Reference for the terms used across the docs site.
 | **Overlay** | A recipe metadata file (`kind: RecipeMetadata`) under `recipes/overlays/` matched by criteria. Composes via single-parent inheritance (`spec.base`). |
 | **Mixin** | A composable fragment (`kind: RecipeMixin`) under `recipes/mixins/` carrying only `constraints` and `componentRefs`, referenced via `spec.mixins`. |
 | **Bundle** | Deployment artifacts emitted by `aicr bundle`: Helm values, manifests, install scripts, checksums. |
-| **Bundler** | A per-component generator that emits the bundle inputs (e.g., GPU Operator bundler). |
+| **Bundler** | The single, registry-driven generator (`pkg/bundler`) that turns each recipe component into bundle inputs (values, manifests) from its `recipes/registry.yaml` entry. There is no per-component bundler code. |
 | **Deployer** | An output adapter that serializes a bundle in a tool-specific format: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. |
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator). Lives in `recipes/registry.yaml`. |
 | **ComponentRef** | A reference to a component inside a recipe — version, source, values file, dependencies. |
@@ -112,4 +112,4 @@ Reference for the terms used across the docs site.
 
 - [GitHub](https://github.com/NVIDIA/aicr) · [Releases](https://github.com/NVIDIA/aicr/releases) · [Issues](https://github.com/NVIDIA/aicr/issues)
 - [Contributing](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) · [Security](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md) · [Roadmap](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md)
-- Slack: [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) on Kubernetes Slack
+- [Support](https://github.com/NVIDIA/aicr/blob/main/SUPPORT.md) · Slack: [#aicr](https://kubernetes.slack.com/messages/aicr) on Kubernetes Slack (visit [slack.k8s.io](https://slack.k8s.io/) for a workspace invitation)

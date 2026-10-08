@@ -239,15 +239,14 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 // For Helm per-component output:
 //   - README.md: Root deployment guide with ordered steps
 //   - deploy.sh: Automation script (0755)
-//   - <component>/values.yaml: Helm values per component
-//   - <component>/README.md: Component install/upgrade/uninstall
-//   - <component>/manifests/: Optional manifest files
+//   - NNN-<component>/values.yaml: Helm values per component
+//   - NNN-<component>/install.sh: Component install/upgrade script
 //   - checksums.txt: SHA256 checksums of generated files
 //
 // For Argo CD output:
 //   - app-of-apps.yaml: Parent Argo CD Application
-//   - <component>/application.yaml: Argo CD Application per component
-//   - <component>/values.yaml: Values for each component
+//   - NNN-<component>/application.yaml: Argo CD Application per component
+//   - NNN-<component>/values.yaml: Values for each component
 //   - README.md: Deployment instructions
 //
 // Returns a result.Output summarizing the generation results.
@@ -301,24 +300,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, err
 	}
 
-	enabledRefs, filteredOrder, excludedReasons, filterErr := b.filterEnabledComponents(recipeResult)
-	if filterErr != nil {
-		return nil, filterErr
+	recipeResult, err := b.filterAndValidateRecipe(recipeResult)
+	if err != nil {
+		return nil, err
 	}
-
-	// A --set / --set-json / --set-file naming a component that is not in
-	// the generated bundle cannot take effect. Reject it rather than drop
-	// it on the floor. Runs immediately after filtering, so the "present"
-	// set is exactly what will be rendered.
-	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, enabledRefs, excludedReasons); overrideErr != nil {
-		return nil, overrideErr
-	}
-
-	// Work on a shallow copy so the caller's RecipeResult is not mutated
-	filtered := *recipeResult
-	filtered.ComponentRefs = enabledRefs
-	filtered.DeploymentOrder = filteredOrder
-	recipeResult = &filtered
 
 	// Bundle-time override policy for GPU allocation-policy keys (#1327):
 	// reject --dynamic declarations, warn on static overrides. Runs after
@@ -1437,6 +1422,31 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 	return mergeOverridesAcrossKeys(allOverrides, b.componentOverrideKeys(componentName, provider))
 }
 
+func (b *DefaultBundler) filterAndValidateRecipe(recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, error) {
+	enabledRefs, filteredOrder, excludedReasons, filterErr := b.filterEnabledComponents(recipeResult)
+	if filterErr != nil {
+		return nil, filterErr
+	}
+
+	// A --set / --set-json / --set-file naming a component that is not in
+	// the generated bundle cannot take effect. Reject it rather than drop
+	// it on the floor. Runs immediately after filtering, so the "present"
+	// set is exactly what will be rendered.
+	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, enabledRefs, excludedReasons); overrideErr != nil {
+		return nil, overrideErr
+	}
+
+	// Work on a shallow copy so the caller's RecipeResult is not mutated
+	filtered := *recipeResult
+	filtered.ComponentRefs = enabledRefs
+	filtered.DeploymentOrder = filteredOrder
+	spec := recipe.RecipeMetadataSpec{ComponentRefs: filtered.ComponentRefs}
+	if err := spec.ValidateDependencies(); err != nil {
+		return nil, err
+	}
+	return &filtered, nil
+}
+
 // filterEnabledComponents resolves the set of components to bundle by applying
 // recipe-level overrides.enabled, bundle-time --set enabled toggles, and the
 // positive bundlers component-name filter (config.WithBundlers, #1531), then
@@ -1561,8 +1571,8 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 	// removed above. After filtering, such a dependency is no longer present in
 	// the ref slice, so a deployer that recomputes ordering from these refs
 	// (e.g. helmfile via ComponentRefsTopologicalLevels) would otherwise treat
-	// the dangling edge as an undeclared dependency and fail with a false
-	// circular-dependency error. The dependency is assumed satisfied externally
+	// the dangling edge as an undeclared dependency and report it as missing.
+	// The dependency is assumed satisfied externally
 	// (the reason it was disabled). An edge to a genuinely undeclared component
 	// is left intact so topology validation still errors on a malformed recipe.
 	for i := range enabledRefs {
@@ -3419,11 +3429,13 @@ const draChartVersionAnnotation = header.Domain + "/gpu-operator-chart-version"
 // filtered resolved recipe before derived values are written; recipes that
 // disable either remain untouched.
 const (
-	gpuOperatorComponentName      = "gpu-operator"
-	draComponentName              = "nvidia-dra-driver-gpu"
-	draEvictionEnvName            = "NODE_LABEL_FOR_GPU_POD_EVICTION"
-	draEvictionNodeSelectorPath   = "kubeletPlugin.nodeSelector"
-	gpuOperatorDRAEvictionEnvPath = "driver.manager.env"
+	gpuOperatorComponentName       = "gpu-operator"
+	gpuOperatorOCPComponentName    = "gpu-operator-ocp"
+	gpuOperatorOCPOLMComponentName = "gpu-operator-ocp-olm"
+	draComponentName               = "nvidia-dra-driver-gpu"
+	draEvictionEnvName             = "NODE_LABEL_FOR_GPU_POD_EVICTION"
+	draEvictionNodeSelectorPath    = "kubeletPlugin.nodeSelector"
+	gpuOperatorDRAEvictionEnvPath  = "driver.manager.env"
 
 	// draNodeLabelerComponentName is the manifest-only component that mirrors
 	// GFD's nvidia.com/gpu.present onto the eviction label, so the label is
@@ -3433,17 +3445,18 @@ const (
 	draNodeLabelerComponentName = "dra-node-labeler"
 	draNodeLabelerKeyPath       = "labelKey"
 	draNodeLabelerValuePath     = "labelValue"
-	// draNodeLabelerEnabledPath is the manifest's render gate. The manifest is
-	// default-off (values.yaml enabled: false) so the deployment validator,
-	// which resolves effective values without the bundle-time eviction flag,
-	// sees an empty render and suppresses the health check on the default path
-	// (issue #2846). The bundler flips it true here in the same opt-in path
-	// that keeps the component in the bundle, so bundle and gate never drift.
+	// draNodeLabelerEnabledPath is the manifest's render gate, default-off in
+	// values.yaml, and the same key as the ComponentRef `enabled` override
+	// IsEnabled reads: overrides merge into component values. On the opt-in
+	// path the bundler sets it true in the Helm values AND on the labeler's
+	// ref, so the recipe.yaml written into the bundle renders the labeler for
+	// the deployment validator (#2846, #2848). A recipe without the opt-in
+	// renders nothing and the validator suppresses the health check.
 	draNodeLabelerEnabledPath = "enabled"
 )
 
 var (
-	gpuOperatorComponentNames = []string{gpuOperatorComponentName, "gpu-operator-ocp"}
+	gpuOperatorComponentNames = []string{gpuOperatorComponentName, gpuOperatorOCPComponentName}
 	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
 )
 
@@ -3674,6 +3687,7 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		// the bundle only on this opt-in path, so this is where its objects
 		// must start rendering (issue #2846).
 		values[draNodeLabelerEnabledPath] = true
+		persistDRANodeLabelerGate(recipeResult)
 		b.warnDRAEvictionLabelDerived(draNames, label)
 		return nil
 	}
@@ -3681,6 +3695,24 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 	b.warnDRAEvictionNodeLabelRequired(draNames, label)
 
 	return nil
+}
+
+// persistDRANodeLabelerGate records the labeler's effective render gate on its
+// ComponentRef. componentValues never reach the recipe.yaml written into the
+// bundle; the deployment validator reads that file, so without this the
+// deployed labeler resolves enabled=false there and its health check is
+// suppressed (#2848). The Overrides map is copied first because the filtered
+// recipe still shares it with the caller's RecipeResult.
+func persistDRANodeLabelerGate(recipeResult *recipe.RecipeResult) {
+	for i := range recipeResult.ComponentRefs {
+		ref := &recipeResult.ComponentRefs[i]
+		if ref.Name != draNodeLabelerComponentName {
+			continue
+		}
+		overrides := serializer.DeepCopyAnyMap(ref.Overrides)
+		overrides[draNodeLabelerEnabledPath] = true
+		ref.Overrides = overrides
+	}
 }
 
 // warnDRAEvictionLabelDerived is the counterpart of
@@ -3972,6 +4004,31 @@ func (b *DefaultBundler) injectDRAChartVersionAnnotation(
 		// matches the "no chart pin, no rollout trigger" semantic and
 		// is exercised by the disabled-component unit tests.
 		return
+	}
+	if gpuOperatorComponentName == gpuOperatorOCPComponentName && gpuOperatorVersion == "" {
+		// gpu-operator-ocp is a ClusterPolicy CR, not a Helm chart, so
+		// ComponentRef.Version is never populated for it — the empty
+		// check below would always skip injection on OCP. Fall back to
+		// the OLM Subscription channel (gpu-operator-ocp-olm) as the
+		// rollout-trigger value instead.
+		//
+		// KNOWN LIMITATION: the channel pin (e.g. "v25.10") only
+		// changes on a channel re-pin, not on every operator update.
+		// With installPlanApproval: Automatic (the default —
+		// components/gpu-operator-ocp-olm/values.yaml), OLM can
+		// upgrade to newer CSVs inside the same channel — reloading
+		// the driver — without the channel string changing, so this
+		// annotation catches bundle-driven operator bumps (a recipe
+		// regenerated against a different channel) but NOT in-channel
+		// auto-upgrades. The stale-NVML gap this annotation exists to
+		// close (#973) remains open for that case on OCP. See #2135.
+		if olmValues, ok := componentValues[gpuOperatorOCPOLMComponentName]; ok {
+			if sub, ok := olmValues["subscription"].(map[string]any); ok {
+				if channel, ok := sub["channel"].(string); ok {
+					gpuOperatorVersion = channel
+				}
+			}
+		}
 	}
 	if gpuOperatorVersion == "" {
 		// gpu-operator is enabled but the resolver produced an empty

@@ -166,6 +166,19 @@ func TestDeriveBenchmarkRuntimeCarriesShippedWiringAndReappliesOverrides(t *test
 	if _, ok := worker["command"]; !ok {
 		t.Error("worker command (sshd bootstrap) not applied")
 	}
+	// The launcher's dependsOn is only as good as the worker's readiness: without
+	// the skeleton's sshd probe a derived worker is Ready at container start and
+	// mpirun races the sshd install again (#3109).
+	if port, _, _ := unstructured.NestedFieldNoCopy(worker, "readinessProbe", "tcpSocket", "port"); port != int64(22) {
+		t.Errorf("worker readinessProbe not re-applied from the skeleton: port = %v", port)
+	}
+	if first, _ := jobs[0].(map[string]any)["name"].(string); first != "node" {
+		t.Errorf("replicatedJobs[0] = %q, want node (a dependsOn target must precede its dependent)", first)
+	}
+	deps, _, _ := unstructured.NestedSlice(jobs[1].(map[string]any), "dependsOn")
+	if len(deps) != 1 || deps[0].(map[string]any)["name"] != "node" || deps[0].(map[string]any)["status"] != "Ready" {
+		t.Errorf("launcher dependsOn = %v, want [{name: node, status: Ready}]", deps)
+	}
 	// Volumes: shipped kept, skeleton's additional ones merged additively.
 	vols, _, _ := unstructured.NestedSlice(tmpl, "spec", "volumes")
 	names := map[string]bool{}
@@ -244,8 +257,8 @@ func TestDeriveBenchmarkRuntimeRefusesShippedWorkerEntrypoint(t *testing.T) {
 
 // TestDeriveBenchmarkRuntimeBaselineCoversEveryOverriddenPath pins the
 // acceptance criterion that every overridden source path has an explicit
-// precondition: a shipped change under resources or terminationMessagePolicy
-// must fail rather than vanish under the override, while the shipped shape as
+// precondition: a shipped change under resources, terminationMessagePolicy or
+// readinessProbe must fail rather than vanish under the override, while the shipped shape as
 // it is today passes.
 func TestDeriveBenchmarkRuntimeBaselineCoversEveryOverriddenPath(t *testing.T) {
 	skel := loadGKESkeleton(t)
@@ -273,6 +286,9 @@ func TestDeriveBenchmarkRuntimeBaselineCoversEveryOverriddenPath(t *testing.T) {
 		{"terminationMessagePolicy set", mutate(func(w map[string]any) {
 			w["terminationMessagePolicy"] = "FallbackToLogsOnError"
 		}), "sets terminationMessagePolicy"},
+		{"readinessProbe set", mutate(func(w map[string]any) {
+			w["readinessProbe"] = map[string]any{"httpGet": map[string]any{"path": "/healthz", "port": int64(8080)}}
+		}), "sets readinessProbe"},
 		{"GPU request removed from requests", mutate(func(w map[string]any) {
 			delete(w["resources"].(map[string]any)["requests"].(map[string]any), "nvidia.com/gpu")
 		}), "resources.requests do not request nvidia.com/gpu"},

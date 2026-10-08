@@ -15,8 +15,9 @@
 name: UAT - Kind (simulated GPUs)
 
 # The Slurm UAT lane (issue #2358). A four-worker kind cluster whose GPU
-# capacity is SIMULATED (a mocked NVML driver tree plus a device plugin
-# pointed at it, tests/uat/kind/setup-gpu-sim.sh), on a GitHub-hosted runner.
+# capacity is SIMULATED (a mocked NVML driver tree, a device plugin pointed at
+# it, and a real DCGM host engine reading it, tests/uat/kind/setup-gpu-sim.sh),
+# on a GitHub-hosted runner.
 #
 # WHY THIS IS NOT A CELL OF uat-kind.yaml. The two lanes need different
 # clusters, and neither can serve the other:
@@ -41,8 +42,10 @@ name: UAT - Kind (simulated GPUs)
 # libnvidia-ml.so.1 under the pinned driver root `/`, where the mocked driver
 # tree is not. Both need a real (or pre-baked) driver stack on the node, which
 # this lane deliberately does not build. It therefore validates the Slurm,
-# Slinky and topograph path and NOT the GPU stack, and a regression in either
-# excluded component will not be caught here.
+# Slinky and topograph path, plus NVSentinel's GPU health monitor connected to
+# the lane's own DCGM host engine (the gpu_health step below), and NOT the rest
+# of the GPU stack; a regression in either excluded component will not be
+# caught here.
 #
 # IT ALSO DOES NOT RUN THE DEPLOYMENT VALIDATION PHASE, which follows from those
 # exclusions: `aicr validate` validates the recipe rather than the deployed
@@ -119,13 +122,13 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # Covers the sum of the sequential step budgets (tools 10 + bootstrap 25 +
+    # Covers the sum of the sequential step budgets (tools 10 + bootstrap 65 +
     # binary 20 + images 25 + prep 20 + install 90 + readiness 5 + topology 10 +
-    # conformance 45 + verify 5 + debug 8 = 263) plus headroom, and stays under
-    # the 360-minute cap GitHub imposes on hosted runners: a job-level value
-    # above that cap is silently clamped and the budget written here would be
-    # fiction.
-    timeout-minutes: 300
+    # gpu health 15 + conformance 45 + verify 5 + debug 8 = 318) plus headroom,
+    # and stays under the 360-minute cap GitHub imposes on hosted runners: a
+    # job-level value above that cap is silently clamped and the budget written
+    # here would be fiction.
+    timeout-minutes: 325
     permissions:
       contents: read
       id-token: write  # Sigstore keyless signing (ambient GitHub Actions OIDC)
@@ -212,7 +215,16 @@ jobs:
       # GPU-free.
       - name: Bootstrap simulated four-worker cluster
         id: bootstrap
-        timeout-minutes: 25
+        # The waits inside bootstrap-cluster.sh total 3450s (57.5 minutes) at
+        # worst: kind --wait 300s, node Ready 300s, nvml-mock helm --wait 300s,
+        # device plugin rollout 300s, DCGM rollout 900s, GPU health monitor
+        # pre-pull 1200s, capacity poll 150s. The step must outlive them to
+        # report which one ran out. The other 7.5 minutes cover what no wait
+        # bounds: kind's node image pull and kubeadm bring-up before its wait
+        # starts, the chart pull, and the one-shot kubectl calls.
+        # bootstrap-cluster_test.sh derives the sum from the scripts and fails
+        # if this drops below it.
+        timeout-minutes: 65
         run: ./tests/uat/kind/bootstrap-cluster.sh "${KIND_CLUSTER_NAME}"
 
       - name: Footprint - after cluster and GPU simulation
@@ -350,9 +362,42 @@ jobs:
         timeout-minutes: 10
         run: ./tests/uat/kind/verify-topology.sh "${KIND_CLUSTER_NAME}"
 
+      # Gates the other half of what the simulated GPUs buy: NVSentinel's GPU
+      # health monitor running and reporting with no GPU hardware. It is a lane
+      # step rather than a recipe health check because the shared check omits
+      # the monitor DaemonSets, which legitimately sit at
+      # desiredNumberScheduled 0 on every lane that supplies no DCGM host
+      # engine. See the script's header.
+      #
+      # After topology, so a failure here is attributable to the DCGM hop alone
+      # and not confused with a Topograph problem; before conformance, because
+      # the lane's policy is that a run which failed a gate emits no signed
+      # evidence. That is policy, not protection of the bundle's content: the
+      # bundle attests only the conformance checks that run here
+      # (gang-scheduling, cluster-autoscaling, slinky-slurm-health), and none
+      # of them reads the monitors.
+      #
+      # 15 minutes, not the script's 300s MONITOR_TIMEOUT: the kubectl reads
+      # that finish after that deadline, and the 75s re-read that confirms a
+      # connection holds, need room to report which wait failed (805s at
+      # worst). No image pull is left for this step; bootstrap pre-pulls the
+      # monitor image. verify-gpu-health-monitors_test.sh pins the step above
+      # that worst case.
+      - name: UAT - verify NVSentinel GPU health monitors
+        id: gpu_health
+        if: steps.topology.outcome == 'success'
+        timeout-minutes: 15
+        run: ./tests/uat/kind/verify-gpu-health-monitors.sh "${KIND_CLUSTER_NAME}"
+
       - name: UAT - validate (conformance phase) + emit signed evidence
         id: conformance
-        if: steps.topology.outcome == 'success'
+        # Both gates, named explicitly rather than relying on the chain. The
+        # gpu_health step already depends on topology, so requiring only the
+        # former would hold transitively, but the invariant this lane states is
+        # that conformance must not publish evidence for a wrong topology, and
+        # an invariant that survives only by transitivity is one a later edit
+        # can drop without noticing.
+        if: steps.topology.outcome == 'success' && steps.gpu_health.outcome == 'success'
         timeout-minutes: 45
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -452,6 +497,7 @@ jobs:
             echo "| Footprint - after bundle install | ${{ steps.footprint_install.outcome }} |"
             echo "| Readiness gate (skipped: VALIDATE_PHASES=conformance) | ${{ steps.readiness.outcome }} |"
             echo "| Topology (#2358 acceptance gate) | ${{ steps.topology.outcome }} |"
+            echo "| NVSentinel GPU health monitors | ${{ steps.gpu_health.outcome }} |"
             echo "| Validate (phases: conformance) | ${{ steps.conformance.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
             echo ""

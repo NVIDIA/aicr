@@ -20,7 +20,7 @@ The phases are independently scheduled (cron edges), not chained: the per-reserv
 All UAT runs go through one entry point, `uat-run.yaml` — the shared dispatch surface that owns the reservation lease. To request a run, dispatch it with a reservation name from the registry:
 
 ```bash
-gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100
+gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100-ct-2
 ```
 
 `uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml`, `uat-gcp.yaml`, `uat-azure.yaml`, or — for the `service: kind` real-silicon lane — `uat-kind.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
@@ -32,15 +32,15 @@ Two further inputs shape the run (both default to the nightly-batch behavior, so
 ```bash
 # Inference intent, nightly provision→validate→teardown (serve CUJ wired, disabled pending #1644)
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f intent=inference
+  -f reservation=aws-h100-ct-2 -f intent=inference
 
 # On demand: stand up the daytime cluster and hold it (single reservation)
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f lifecycle=daytime-up
+  -f reservation=aws-h100-ct-1 -f lifecycle=daytime-up
 
 # Evening teardown of the held daytime cluster
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f lifecycle=daytime-down
+  -f reservation=aws-h100-ct-1 -f lifecycle=daytime-down
 ```
 
 The nightly batch and the daytime handoff/teardown call this *same* surface, so every run for a reservation contends on one lease.
@@ -54,7 +54,7 @@ Deploying the stack and certifying that it converged are two separate runner pha
 | Workflow step (`id`) | Runner phase | What it does | A failure means |
 |---|---|---|---|
 | `UAT - install (helmfile apply)` (`install`); `UAT - install (helmfile apply or argocd sync)` on AWS | `install` | Applies the bundle (helmfile, or the Argo CD app-of-apps), then dumps the post-install cluster state | The apply or sync itself failed: chart fetch, Helm error, Argo CD sync. Often infra; investigate if it recurs |
-| `UAT - readiness gate (validate --phase deployment)` (`readiness`) | `readiness` | Runs `aicr validate --phase deployment` until it passes the required number of consecutive attempts, or times out | A deployment-phase validator never converged. Product signal: the component behind the failing validator did not become ready |
+| `UAT - readiness gate (validate --phase deployment)` (`readiness`) | `readiness` | Runs `aicr validate --recipe bundle/recipe.yaml --phase deployment` (the recipe the bundle deployed, see #2848) until it passes the required number of consecutive attempts, or times out | A deployment-phase validator never converged. Product signal: the component behind the failing validator did not become ready |
 
 Both phases are invoked as `./tests/uat/<cloud>/run <phase> "${TEST_CONFIG}"`; `run all` runs prep, install, readiness, conformance, the CUJ, and verify in that order. On a gate failure the readiness phase emits an `::error title=UAT readiness gate failed::` annotation whose message lists the failing validators and a short reason, so the run summary names the owner without opening the logs.
 
@@ -79,41 +79,32 @@ The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both inte
 
 | Reservation | Cloud | `nightly-intents` | Nightly CUJs |
 |-------------|-------|-------------------|--------------|
-| `aws-h100` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
-| `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step live, #1644) |
-| `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); inference gated to `>= v0.18.0` via `nightly-intent-min-versions` (see **Cost / tuning** below) |
-| `kind-h100` | kind (nvkind) | `[training, inference]` | training → `phase_train`; inference runs **no `phase_serve`** — its evidence comes from the `--phase all` conformance step (vLLM is excluded from UAT, as on the cloud lanes; #1644). Single-GPU; both intents gated to `>= v0.18.0` via `nightly-intent-min-versions` (the lane + os-agnostic coordinate fix #1851 postdate v0.17.0), so only `main` runs nvkind nightly until v0.18.0 ships |
+| `aws-h100-ct-2` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
+| `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step live, #1644); training release cells gated to `>= v0.22.0` by the [harness-compat floor](#release-cells-and-the-harness-compat-floor) |
+| `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); release cells gated to `>= v0.18.0` by the [harness-compat floor](#release-cells-and-the-harness-compat-floor) |
+| `kind-h100` | kind (nvkind) | `[training, inference]` | training → `phase_train`; inference runs **no `phase_serve`** — its evidence comes from the `--phase all` conformance step (vLLM is excluded from UAT, as on the cloud lanes; #1644). Single-GPU; release cells gated to `>= v0.18.0` by the [harness-compat floor](#release-cells-and-the-harness-compat-floor) (the lane + os-agnostic coordinate fix #1851 postdate v0.17.0) |
 
 **How it stays contention-free — serialize, don't add a second cron.** The intents are folded into the existing [version matrix](#the-version-matrix) as extra cells rather than a second scheduled job. The controller's drive loop is **version outer / intent inner**: for each version it dispatches one intent's full provision→CUJ→teardown cell (an AWS or Azure inference cell currently runs provision→validate→teardown; its serve CUJ stays commented out pending #1644), waits for it (`gh run watch`), then dispatches the next — all through the *same* per-reservation lease. So the intents serialize naturally, and because `main` runs every intent before any release cell, a time-box drop only ever sheds the oldest *release* cells (never `main`'s inference). This is the deliberate DC3 cadence decision: **never schedule two daily crons against one reservation** — the lease is a single-slot queue (one in-progress + one pending), so a second cron plus an occasional human dispatch on the same reservation is a routine three-contender case whose loser is silently [superseded](#how-queuing-works-the-reservation-lease). One cron dispatching serialized cells sidesteps that entirely.
 
 **Cost / tuning.** Listing both intents roughly **doubles a reservation's nightly cell count** (each version now runs two full cluster lifecycles). If the batch [time-box](#the-version-matrix) is exceeded the oldest cells are dropped first, so `main`+freshest always land; tune `previous_n` (fewer release versions) or `deadline_offset_hours` to fit the window. A released version that predates a platform (e.g. `dynamo`) fails its inference cell's recipe resolution as a genuine regression signal — drop `previous_n` if that coverage is premature. Changing which intents a reservation runs is a registry edit — no workflow change; the `uatbroker` committed-registry test pins the launch set.
 
-**Gating an intent to a minimum release — `nightly-intent-min-versions`.** When an intent only became *supported* on a reservation at a particular release — a fix or platform that older releases lack — running it on the pre-support releases produces a permanently-red cell, not a regression signal. Express the floor per intent in the registry row:
-
-```yaml
-- name: azure-h100
-  nightly-intents: [training, inference]
-  nightly-intent-min-versions:
-    inference: v0.18.0   # first release that carries the AKS perf fix (#1767)
-```
-
-Semantics: **`main` is never gated** (it is built from source and carries the newest fixes, so it always runs every listed intent); a **release** cell drops any intent whose minimum version is newer than the tag (semver; a tag `>=` the minimum runs). The gate lives in the schedule (`uat-broker schedule` attaches each cell's eligible `intents`), so the controller simply never dispatches a gated `(version × intent)` — no per-version workflow logic. Pointing the floor at a **not-yet-tagged** release is intentional and self-resolving: until that release ships, the intent runs on **`main` only** (green, continuous coverage of the fix), and the release enrolls automatically once it exists. `Validate` rejects a floor for an intent the row does not run, or a non-semver value. Bump the floor if the real first-fixed tag differs — an over-low floor surfaces as a visible red (safe), an over-high floor silently skips a good release (bump down).
+**Gating an intent to a minimum release.** A release that cannot pass `main`'s fixtures or harness for an intent is gated by a floor in `tests/uat/compat.yaml`, not by the registry; see [Release cells and the harness-compat floor](#release-cells-and-the-harness-compat-floor).
 
 ## Selecting the deployer
 
-The `deployer` input picks which deployer variant of the intent's test config the pipeline consumes. Set to `helmfile` (the default), the pipeline resolves `tests/uat/<cloud>/tests/<accelerator>-<intent>-config.yaml` — the config every existing cell has always run against. Any other value (currently only `argocd`) resolves `<accelerator>-<intent>-<deployer>-config.yaml` — for example `deployer=argocd` on `aws-h100` training loads `tests/uat/aws/tests/h100-training-argocd-config.yaml`.
+The `deployer` input picks which deployer variant of the intent's test config the pipeline consumes. Set to `helmfile` (the default), the pipeline resolves `tests/uat/<cloud>/tests/<accelerator>-<intent>-config.yaml` — the config every existing cell has always run against. Any other value (currently only `argocd`) resolves `<accelerator>-<intent>-<deployer>-config.yaml` — for example `deployer=argocd` on `aws-h100-ct-2` training loads `tests/uat/aws/tests/h100-training-argocd-config.yaml`.
 
 ```bash
-# Argo CD variant of the aws-h100 training cell (issue #2194)
+# Argo CD variant of the AWS H100 training cell (issue #2194)
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f intent=training -f deployer=argocd
+  -f reservation=aws-h100-ct-2 -f intent=training -f deployer=argocd
 ```
 
 The AICRConfig field `spec.bundle.deployment.deployer` is the source of truth `phase_prep`/`phase_install` read; the workflow input is only how the correct config file is *selected*. `phases.sh:phase_install` dispatches to `install_helmfile` (helmfile lane, unchanged) or `install_argocd` (Argo CD install + repo-creds Secret from `GITHUB_TOKEN` + `kubectl apply` of the `nvidia-stack` app-of-apps + terminal-pass wait on every `Application`). The [readiness phase](#install-and-readiness-phases) that follows install is deployer-agnostic — it validates deployed cluster state (`aicr validate --phase deployment`), not the deployment mechanism — so a green Argo CD cell means the GitOps deploy path converges on the same operator-managed stack the helmfile lane validates.
 
 **How the bundle reaches Argo CD.** `phase_prep` calls `aicr bundle --output oci://ghcr.io/nvidia/aicr-bundle-scratch/<config-metadata-name>:run-<id> --repo oci://ghcr.io/nvidia/aicr-bundle-scratch/<config-metadata-name>` — the path segment is the AICRConfig's `metadata.name` (yq-read from the test-config in `phase_prep`), not the recipe coordinate. The `--output` flag pushes the rendered bundle to GHCR (the job already has `packages: write`), and `--repo` sets the `source.repoURL` baked into every generated `Application`. `install_argocd` provisions a prefix-matched `argocd.argoproj.io/secret-type: repo-creds` Secret from `GITHUB_TOKEN` so Argo CD's repo-server can pull the pushed artifact. Concurrent runs on the same recipe are isolated by the `:run-<id>` tag.
 
-**Coverage today (issue #2194).** Only `aws-h100` training carries a `-argocd` config file. Dispatching `deployer=argocd` against a non-AWS reservation (`gcp-h100`, `azure-h100`, `kind-h100`) fails closed at the top level: `uat-run.yaml`'s `unsupported-deployer-for-cloud` guard job emits a red workflow, and the per-cloud `run-<cloud>.if:` skips the reusable pipeline so no cluster is provisioned for a request that couldn't have been served. Only `run-aws` forwards the `deployer` input to its reusable pipeline; the other reusable workflows declare no such input. Nightly enrollment is deliberately deferred until a manual dispatch is green on hardware — mirroring the `azure-h100` (#1722) and `kind-h100` (#1843) onboarding pattern. The `argocd-helm` variant, and extension to gcp/azure/kind, are separate follow-ups.
+**Coverage today (issue #2194).** Only AWS H100 training carries a `-argocd` config file (`tests/uat/aws/tests/h100-training-argocd-config.yaml`, shared by every `cloud: aws` reservation). Dispatching `deployer=argocd` against a non-AWS reservation (`gcp-h100`, `azure-h100`, `kind-h100`) fails closed at the top level: `uat-run.yaml`'s `unsupported-deployer-for-cloud` guard job emits a red workflow, and the per-cloud `run-<cloud>.if:` skips the reusable pipeline so no cluster is provisioned for a request that couldn't have been served. Only `run-aws` forwards the `deployer` input to its reusable pipeline; the other reusable workflows declare no such input. Nightly enrollment is deliberately deferred until a manual dispatch is green on hardware — mirroring the `azure-h100` (#1722) and `kind-h100` (#1843) onboarding pattern. The `argocd-helm` variant, and extension to gcp/azure/kind, are separate follow-ups.
 
 ## Selecting the platform
 
@@ -131,7 +122,7 @@ The two gates are deliberately separate: `uat-run.yaml`'s answers "can this lane
 
 `platform=slurm` needs **four schedulable nodes**, and the reservation-bound kind lane has one. A Slurm topology block groups *slurmd pods*, the Slinky operator attaches a hard per-hostname `podAntiAffinity` to every NodeSet pod, so four replicas need four nodes; on single-node nvkind one pod would run and three would stay `Pending`. That is why the leased lane refuses the dispatch outright rather than accepting one it could only fail.
 
-`.github/workflows/uat-kind-sim.yaml` is that lane. Four real kind workers whose GPU capacity is **simulated** (a mocked NVML driver tree plus a device plugin pointed at it), on `ubuntu-latest`:
+`.github/workflows/uat-kind-sim.yaml` is that lane. Four real kind workers whose GPU capacity is **simulated** (a mocked NVML driver tree, a device plugin pointed at it, and a real DCGM host engine reading it), on `ubuntu-latest`:
 
 ```bash
 # Simulated four-worker Slurm lane (issue #2358): no hardware, no lease
@@ -139,6 +130,8 @@ gh workflow run uat-kind-sim.yaml --repo NVIDIA/aicr --ref main
 ```
 
 It is dispatched directly, **not** through `uat-run.yaml`: it holds no lease and consumes no GPU capacity, because simulated devices need no hardware. It stands its cluster up through `tests/uat/kind/bootstrap-cluster.sh`, the same committed script a local reproduction calls, so the CI cluster and the local one cannot drift apart; `tests/uat/kind/bootstrap-cluster_test.sh` fails if a second copy of `kind create cluster` appears in a workflow or under `tests/uat/`. The phases come from the shared `tests/uat/lib/phases.sh` through the `tests/uat/kind/run-sim` shim, which differs from `tests/uat/kind/run` only in what the cluster is: the GPU-node census is enforced (four labelled workers) instead of skipped. No CUJ phase runs, because a Slurm recipe has none.
+
+**It gates NVSentinel's GPU health monitors.** The host engine is what the simulated devices add for NVSentinel: its labeler stamps `dcgm.version` only on nodes with a Ready DCGM pod, and the GPU health monitor DaemonSets select on that label. The lane's `gpu_health` step runs `tests/uat/kind/verify-gpu-health-monitors.sh` after the topology check, and fails unless the monitor is Ready on all four workers and has connected to the host engine; conformance runs only when it passes. It is a lane step rather than a recipe health check because `recipes/checks/nvsentinel` omits the monitor DaemonSets, which legitimately sit at zero pods on any lane with no host engine. Both images are large, and `bootstrap-cluster.sh` pulls both in a local run as in CI. The host engine is a 1.9GB pull from nvcr.io, with up to 900s (`DCGM_ROLLOUT_TIMEOUT` in `tests/uat/kind/setup-gpu-sim.sh`) to roll out. The monitor image adds another 2.5GB, pre-pulled on every worker under `MONITOR_PREPULL_TIMEOUT` (1200s). Bootstrap pulls the monitor image because the labeler stamps the label as soon as it starts, so otherwise the pull would land inside nvsentinel's 600s `helm --wait` during install.
 
 **Its evidence is not corroboration evidence.** The run signs a bundle with its own workflow identity and verifies against it, but that identity is absent from `recipes/evidence/allowlist.yaml` and from `evidence-ingest.yaml`'s `FIRST_PARTY_IDENTITY` (both pin `uat-(aws|gcp|azure|kind).yaml`), so a bundle attesting to simulated devices cannot reach `validation.aicr.run` even by accident.
 
@@ -166,7 +159,7 @@ Which cloud hosts which flavor is **data, not code**: the `daytime-intent` colum
 
 | Reservation | Cloud | `daytime-intent` | Daytime deployment |
 |-------------|-------|------------------|--------------------|
-| `aws-h100` | AWS | `training` | training stack (Kubeflow `TrainJob`s) |
+| `aws-h100-ct-1` | AWS | `training` | training stack (Kubeflow `TrainJob`s) |
 | `gcp-h100` | GCP | `inference` | inference stack (Dynamo, OpenAI-compatible endpoint) |
 
 Re-splitting (or adding a daytime reservation) is a registry edit — no workflow change. Only **one** reservation per cloud may carry a `daytime-intent` today: a single reservation cannot host both a held daytime cluster and the nightly batch at once, so *both* flavors on one cloud during the day is out of scope until more capacity lands. The `uatbroker` committed-registry test enforces the one-per-cloud invariant and the launch split.
@@ -197,7 +190,7 @@ To stand up (or tear down) a **single reservation** without touching the rest of
 
 ```bash
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
-  -f reservation=aws-h100 -f lifecycle=daytime-up      # or -f lifecycle=daytime-down
+  -f reservation=aws-h100-ct-1 -f lifecycle=daytime-up      # or -f lifecycle=daytime-down
 ```
 
 You never *have* to tear a cluster down by hand — the evening safety-net cron will — but doing so frees the reservation (and its GPU capacity) sooner. Different reservations run in parallel (independent hardware); a daytime run that finds its reservation still busy (an overrunning batch) *queues* on the lease rather than racing.
@@ -221,11 +214,11 @@ Access is **out-of-band by design**: nothing here routes a kubeconfig or endpoin
 # and more than one means a leak the pre-batch guard should have caught.
 one() { [ "$(printf '%s' "$1" | grep -c .)" -eq 1 ] || { echo "expected exactly one daytime cluster, got: ${1:-<none>}" >&2; return 1; }; }
 
-# AWS — training cluster: new (slug, slot) prefix aicr-uat-day-ah1-0-, plus the
+# AWS — training cluster: new (slug, slot) prefix aicr-uat-day-ch1-0-, plus the
 # legacy aicr-uat-day-aws-h100- for the life of the ADR-017 migration shim (drop
 # the legacy alternative once no old-named daytime clusters remain).
 name=$(aws eks list-clusters --region us-east-1 --query "clusters[]" --output text \
-  | tr '\t' '\n' | grep -E '^aicr-uat-day-(ah1-0|aws-h100)-')
+  | tr '\t' '\n' | grep -E '^aicr-uat-day-(ch1-0|aws-h100)-')
 one "$name" && aws eks update-kubeconfig --region us-east-1 --name "$name"
 
 # GCP — inference cluster: new prefix aicr-uat-day-gh1-0-, plus legacy
@@ -269,11 +262,11 @@ The lease is a GitHub Actions concurrency group keyed by reservation name — `u
 
 This replaces the previous behavior, where a second run hitting a busy AWS reservation hard-failed on the capacity check. Now it queues.
 
-**The one-in-progress-plus-one-pending limit.** GitHub concurrency holds at most one in-progress run plus one pending run per group. If a *third* run is queued for a reservation that already has one in-progress and one pending, GitHub cancels the older pending run and the newest takes its place. At launch this is acceptable: there are three reservations, each contended by at most the nightly cron plus an occasional ad-hoc dispatch. A run cancelled this way is *superseded*, not failed. So that a dropped request is never silent, the `uat-superseded-notice.yaml` observer watches for it: triggered on `workflow_run: completed` for `UAT Run`, it classifies a cancelled run that never started a job as a supersede (versus a genuine mid-run cancel) and emits a job-summary entry plus a `::warning`. (The nightly controller reconciles the same signal synchronously for the cells it dispatches; a DC6 regression guard, #1279, will exercise the observer.) If deeper queuing is ever needed (many requesters per reservation), the escalation path is the *Deferred* standing broker service — a pull-based queue rather than GitHub concurrency — recorded in the epic (#1264).
+**The one-in-progress-plus-one-pending limit.** GitHub concurrency holds at most one in-progress run plus one pending run per group. If a *third* run is queued for a reservation that already has one in-progress and one pending, GitHub cancels the older pending run and the newest takes its place. This is acceptable: each of the six reservations is contended by at most the nightly batch and, on a daytime reservation, the evening teardown (`gcp-h100` carries both, two hours apart), plus an occasional ad-hoc dispatch. A run cancelled this way is *superseded*, not failed. So that a dropped request is never silent, the `uat-superseded-notice.yaml` observer watches for it: triggered on `workflow_run: completed` for `UAT Run`, it classifies a cancelled run that never started a job as a supersede (versus a genuine mid-run cancel) and emits a job-summary entry plus a `::warning`. (The nightly controller reconciles the same signal synchronously for the cells it dispatches; a DC6 regression guard, #1279, will exercise the observer.) If deeper queuing is ever needed (many requesters per reservation), the escalation path is the *Deferred* standing broker service — a pull-based queue rather than GitHub concurrency — recorded in the epic (#1264).
 
 ## The version matrix
 
-The nightly batch runs a **cross-version regression** per reservation: `main` (built from source at tip) plus the previous **N** stable releases, so an older stable `aicr` is re-checked against today's cluster. `uat-broker schedule` orders the cells `main`-first, then releases in descending semver order; the controller runs them **sequentially** on the reservation (each cell dispatched through `uat-run.yaml`, so they share the lease) and **time-boxes** the batch — once the deadline passes it stops dispatching, so the in-flight cell finishes and the remaining (oldest) releases are dropped, guaranteeing `main` and the freshest releases always land.
+The nightly batch runs a **cross-version regression** per reservation: `main` (built from source at tip) plus the previous **N** stable releases, so an older stable `aicr` is re-checked against today's cluster. `uat-broker schedule` orders the cells `main`-first, then releases in descending semver order; the controller runs them **sequentially** on the reservation (each cell dispatched through `uat-run.yaml`, so they share the lease) and **time-boxes** the batch — once the deadline passes it stops dispatching, so the in-flight cell finishes and the remaining (oldest) releases are dropped, guaranteeing `main` and the freshest releases always land. Release cells run against `main`'s fixtures and harness, so a release that predates a breaking `tests/uat/**` change is skipped by the [harness-compat floor](#release-cells-and-the-harness-compat-floor).
 
 **Release cells install released artifacts, not source.** A `main` cell builds the `aicr` binary + validator/agent images from the checked-out tree. A release cell (`aicr_version=vX.Y.Z`) instead downloads the released `aicr` binary at that tag; the released binary self-resolves its own version's validator images (`…/aicr-validators/<phase>:vX.Y.Z`) and snapshot agent (`ghcr.io/nvidia/aicr:vX.Y.Z`), so no images are built for release cells. Each run's summary records its `aicr_version` (`main` or the tag).
 
@@ -281,11 +274,56 @@ The nightly batch runs a **cross-version regression** per reservation: `main` (b
 
 **Tunables** — workflow inputs on `uat-nightly-batch.yaml` (these are the scheduled-run defaults):
 
-- `previous_n` — stable releases below `main` to run per reservation (default `2`; `0` = `main` only).
+- `previous_n` — stable releases below `main` to run per reservation (default `1`; `0` = `main` only).
 - `deadline_offset_hours` — hours after batch start to stop dispatching new cells (default `5`). This is a **secondary** cap: the controller also enforces a **budget-aware** cutoff derived from the drive job's own `timeout-minutes`, stopping dispatch once fewer than `max_cell_minutes` remain so the last cell always finishes before GitHub kills the job. The effective cutoff is the earlier of the two, so `deadline_offset_hours` no longer needs hand-tuning against the job timeout to keep the graceful drop-oldest reachable.
 - `max_cell_minutes` — wall-clock a single dispatched cell may need to complete (default `150`). Sets the drive job's dispatch reserve: a new cell is dispatched only if at least this many minutes remain before the job's `timeout-minutes` (a small setup slack is also held back), so an overrun sheds the oldest remaining cell gracefully instead of hard-failing the leg mid-cell. Keep it at or above the realistic worst-case cell duration.
 
-To test a single released version by hand: `gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100 -f aicr_version=v1.2.3`. (`--ref main` dispatches the nightly-path revision of the workflow, not your feature branch's.)
+To test a single released version by hand: `gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100-ct-2 -f aicr_version=v1.2.3`. (`--ref main` dispatches the nightly-path revision of the workflow, not your feature branch's.)
+
+## Release cells and the harness-compat floor
+
+**The contract.** A release cell runs a **released** `aicr` binary against **`main`'s** `tests/uat/**` fixtures and harness, driven by `main`'s `.github/**` workflows. Fixture and harness move together, and neither is pinned to the release tag. The alternatives were rejected: checking out `tests/uat/**` at the tag would run against old workflows and composites it was never paired with; pinning only fixtures would split the fixture from the harness that reads it; and dropping release cells would lose the cross-version signal. The cost of this contract is that a `tests/uat/**` change can require a newer binary than an older release ships. When that happens, the release is skipped by a **floor**, so its cell is not reported red on a break it cannot satisfy.
+
+**When you must add a floor.** Add or raise a floor for any `tests/uat/**` change that a released binary cannot satisfy: a new recipe-config field in a lane fixture (a released binary's strict decode rejects it, as in #2705), a new training runtime, or a phase that calls a new CLI flag. Put the floor in `tests/uat/compat.yaml` **in the same commit** as the change, set to the **first release that contains the change**. While the change is unreleased, that is the next release (`vX.Y.Z+1` or `vX.Y+1.0`). An unreleased floor is self-resolving: until that release ships, the lane and intent run on `main` only, and the release enrolls automatically once it exists. Most `tests/uat/**` edits are compatible and need no floor. No PR check nudges you when the harness changes, so the author and reviewer own this decision.
+
+**Schema.** Floors are keyed by **lane**, the reservation's `cloud`, because the fixture and harness boundary is the per-cloud `tests/uat/<lane>/` directory, which every reservation on that cloud shares:
+
+```yaml
+floors:
+  - lane: gcp                 # == reservation `cloud` == tests/uat/<lane>/
+    intents: [training]       # non-empty subset of {training, inference}
+    min-release: v0.22.0      # stable semver tag, `v` prefix required
+    reason: >-                # required; names the mechanism, printed in the notice
+      #2705: spec.recipe.configuration.gke.tcpxoInterfaces (unknown field pre-v0.22.0)
+```
+
+The file is decoded strictly, so an unknown key fails. `lane` must be a `cloud` in `infra/uat/reservations.yaml` and have a `tests/uat/<lane>/` directory. `intents` must be non-empty, valid, and free of duplicates, and each (lane, intent) pair may appear in **at most one** row, so raising a floor means editing that row. `min-release` must be a stable semver tag with no pre-release segment and a `v` prefix, and `reason` must be non-empty. A shared `tests/uat/lib/**` break is expressed by listing each affected lane; there is no wildcard. The registry field `nightly-intent-min-versions` that used to carry these floors has been removed, and a registry that still sets it fails to parse.
+
+**What you'll see.** `main` is never gated, because it is built from source and always runs every listed intent. A release cell below a floor is gated differently depending on how it was started:
+
+- **Nightly batch.** `uat-broker schedule --compat tests/uat/compat.yaml` drops the gated (version × intent) pairs and reports each one in its JSON. The controller prints one notice per skipped pair, even when every intent of a version is skipped, and appends a *Release cells skipped by harness-compat floor* table to the step summary:
+
+  ```text
+  ::notice title=UAT release cell skipped (compat floor)::gcp-h100 training @ v0.21.1 skipped: tests/uat/compat.yaml requires >= v0.22.0 for lane gcp (#2705: ...). main still runs this intent.
+  ```
+
+  The schedule is computed once from the batch's own checkout, but each cell's `uat-run.yaml` dispatch runs at `main`'s tip. If a floor raise merges while a batch is running, `uat-run.yaml` refuses an already-scheduled cell below the new floor and the leg goes red instead of skipping it. That cell would have run red against the new fixtures anyway; the refusal is just faster and names the floor ([#3059](https://github.com/NVIDIA/aicr/issues/3059) tracks keeping both on one revision).
+
+- **`uat-run.yaml` dispatch.** A below-floor `aicr_version` is **refused** with an `::error` naming the floor, because the run is guaranteed red and would hold the reservation for hours. To reproduce the incompatibility deliberately, set `allow_below_compat_floor=true`. The refusal then becomes a `::warning` and the run proceeds. Release candidates need the same override: a floor names the next release while it is unreleased, and `v0.24.0-rc.1` sorts below a `v0.24.0` floor, so hand-validating an RC of the floor release requires `allow_below_compat_floor=true`:
+
+  ```shell
+  gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
+    -f reservation=gcp-h100 -f aicr_version=v0.21.1 -f allow_below_compat_floor=true
+  ```
+
+The per-cloud pipelines (`uat-{aws,gcp,azure,kind}.yaml`) are `workflow_call`-only, so every run reaches them through `uat-run.yaml` and its gate; they carry no gate of their own.
+
+**Floor correctness.** A floor that is too **high** silently skips a good release, which is the dangerous direction, so it is checked. `uat-broker compat check` receives git facts computed by the workflow: `git blame` finds the commit that last edited each row's `min-release` line, and `git tag --contains` lists the tags that carry that commit. A floor is rejected when a stable tag below it already contains the commit (the error names the lowest such tag as the correct floor), or when no tag contains the commit and the floor is neither an existing tag nor the next patch, minor, or major release after the latest tag. Because the check blames the line, any edit to a `min-release` line, even reformatting, moves blame to the newer commit and loses the proof for that row; do not touch a `min-release` line you are not changing. The check runs in two places:
+
+- **At PR time,** by the `UAT Compat Floor Check` workflow (`compat-floor-check.yaml`) on any PR touching `tests/uat/compat.yaml`, `infra/uat/reservations.yaml`, or the broker. It fails the PR's check before merge; it is not part of the required merge gate.
+- **In the nightly batch.** A rejected row, or an inconclusive check (for example, no stable tags visible), is **not honored**. The cell runs and shows its real color, the planner prints an `::error title=UAT compat floor rejected` naming the expected floor, and the leg ends red.
+
+A floor that is too **low** is left alone: it shows up as a red release cell, which is the safe direction, and the fix is to raise the floor. A row whose floor is at or below the oldest scheduled release skips nothing, and the planner reports it with an `::notice title=UAT compat floor inert`. Delete an inert row once no `previous_n` window can reach below its floor.
 
 ## Adding a reservation
 

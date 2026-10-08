@@ -338,7 +338,7 @@ spec:
 Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
 `platform-inference`, `platform-kubeflow`, `nvsentinel-observability`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
-`nvsentinel-preflight`, `npd`.
+`nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `npd`.
 
 **Mixin rules:**
 
@@ -354,7 +354,7 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
   `preManifestFiles`, `dependencyRefs`. Setting any of `chart`,
   `type`, `source`, `version`, `tag`, `path`, `valuesFile`,
   `patches`, `cleanup`, `expectedResources`,
-  `healthCheckAsserts` is rejected at compose time — those fields
+  `healthCheckAsserts`, or `healthCheckSkip` is rejected at compose time — those fields
   silently override the chain's chosen chart, so the resolver names
   the offending field and refuses to merge (see ADR-005 "Silent
   constraint override" mitigation).
@@ -412,7 +412,8 @@ Some overlays apply across an entire criteria dimension without being
 referenced via `spec.base` or `spec.mixins`. The resolver picks them
 up automatically because `FindMatchingOverlays` returns *all* maximal
 matches, not just the most specific one. Two wildcard patterns in
-the tree today: `gb200-any.yaml` (matches `service: any`) and
+the tree today: the per-accelerator `<accelerator>-any.yaml` overlays
+such as `gb200-any.yaml` (match `service: any`) and
 `monitoring-hpa.yaml` (matches `intent: any`).
 
 ```yaml

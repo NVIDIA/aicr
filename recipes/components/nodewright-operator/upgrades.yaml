@@ -29,7 +29,7 @@ kind: ComponentUpgrades
 component: nodewright-operator
 transitions:
   - from: "<0.18.0"
-    to: ">=0.18.0 <=0.19.0"
+    to: ">=0.18.0 <=0.19.1"
     verdict: manual
     summary: >-
       v0.18.0 renames skyhook.nvidia.com/v1alpha1 Skyhook to
@@ -196,7 +196,7 @@ transitions:
   # change relative to v0.18.0 behaviour, and anyone below that has the rename
   # to cross first.
   - from: ">=0.18.0 <0.19.0"
-    to: "=0.19.0"
+    to: ">=0.19.0 <=0.19.1"
     verdict: safe
     verifiedBy: >-
       Upstream release note operator/v0.19.0 (NVIDIA/nodewright), which
@@ -204,7 +204,8 @@ transitions:
       opt-in spec.runtimeRequiredCordonAfter field. The chart moves only the
       operator image between v0.18.0 and v0.19.0, and its one CRD edit adds
       that optional field under templates/, which Helm applies on upgrade like
-      any other template.
+      any other template. v0.19.1 adds only the interrupt memory change
+      described in the record below.
     summary: >-
       Drain now completes when evicted pods have terminated rather than when
       their evictions were accepted, so an interrupt starts roughly the longest
@@ -217,3 +218,24 @@ transitions:
       - https://github.com/NVIDIA/nodewright/blob/main/operator/RELEASE_NOTES.md
       - https://github.com/NVIDIA/nodewright/blob/main/docs/user-guide/runtime-required.md
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nodewright-operator-v0180-renames-skyhook-to-nodewright
+
+  - from: ">=0.19.0 <0.19.1"
+    to: "=0.19.1"
+    verdict: safe
+    verifiedBy: >-
+      Upstream changelog operator/v0.19.1 (NVIDIA/nodewright), whose one change
+      is NVIDIA/nodewright#771: the interrupt container's memory request and
+      limit go from 64Mi to 256Mi. The chart moves only the operator image and
+      chart version between v0.19.0 and v0.19.1; the agent stays v6.4.2 and no
+      CRD changes.
+    summary: >-
+      Interrupt pods request and are limited to 256Mi of memory instead of
+      64Mi, so the agent is no longer OOM-killed during a reboot interrupt on
+      64K-page arm64 nodes, which left the node cordoned and never rebooted.
+      Nothing to change on upgrade, unless the operator namespace has a
+      LimitRange with max.memory below 256Mi, which would reject interrupt
+      pods at admission.
+    references:
+      - https://github.com/NVIDIA/nodewright/pull/771
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/operations/resource-management.md
+      - https://github.com/NVIDIA/aicr/issues/3101

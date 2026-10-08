@@ -42,9 +42,13 @@ spec:
                 (desiredNumberScheduled > `0`): true
                 (updatedNumberScheduled == desiredNumberScheduled): true
                 (numberReady == desiredNumberScheduled): true
+    # Negative (error) form, not assert: a list assert passes when ANY pod
+    # matches, so one healthy pod would mask a restarting sibling. The
+    # DaemonSet step above is the existence guard, so an empty pod list
+    # cannot pass vacuously here.
     - name: validate-pods-healthy
       try:
-        - assert:
+        - error:
             resource:
               apiVersion: v1
               kind: Pod
@@ -53,5 +57,46 @@ spec:
                 labels:
                   app: dra-node-labeler
               status:
-                phase: Running
-                (containerStatuses[?restartCount > `0`] | length(@)): 0
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: gpu-operator
+                labels:
+                  app: dra-node-labeler
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: gpu-operator
+                labels:
+                  app: dra-node-labeler
+              status:
+                phase: Unknown
+        # The labeler retries in place; a restart means its script exited,
+        # which the readiness probe cannot see once the pod is Running again.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: gpu-operator
+                labels:
+                  app: dra-node-labeler
+              status:
+                ((containerStatuses || `[]`)[?restartCount > `0`] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: gpu-operator
+                labels:
+                  app: dra-node-labeler
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

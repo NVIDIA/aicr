@@ -114,24 +114,25 @@ The recipe includes OpenShift-specific component references with two-phase OLM d
 
 ```yaml
 # Earlier recipe fields omitted.
-spec:
-  componentRefs:
-    - name: gpu-operator-ocp-olm
-      type: Helm
-      valuesFile: components/gpu-operator-ocp-olm/values.yaml
-      manifestFiles:
-        - components/gpu-operator-ocp-olm/manifests/operatorgroup.yaml
-        - components/gpu-operator-ocp-olm/manifests/subscription.yaml
-      dependencyRefs:
-        - nfd-ocp        # waits for NFD CR to be applied
+componentRefs:
+  - name: gpu-operator-ocp-olm
+    type: Helm
+    valuesFile: components/gpu-operator-ocp-olm/values.yaml
+    manifestFiles:
+      - components/gpu-operator-ocp-olm/manifests/operatorgroup.yaml
+      - components/gpu-operator-ocp-olm/manifests/subscription.yaml
+    dependencyRefs:
+      - nfd-ocp        # waits for NFD CR to be applied
 
-    - name: gpu-operator-ocp
-      type: Helm
-      valuesFile: components/gpu-operator-ocp/values.yaml
-      manifestFiles:
-        - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
-      dependencyRefs:
-        - gpu-operator-ocp-olm  # waits for OLM phase to complete
+  - name: gpu-operator-ocp
+    type: Helm
+    valuesFile: components/gpu-operator-ocp/values.yaml
+    manifestFiles:
+      - components/gpu-operator-ocp/manifests/dcgm-exporter-configmap.yaml
+      - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
+    dependencyRefs:
+      - gpu-operator-ocp-olm  # waits for OLM phase to complete
+      - network-operator-ocp  # NicClusterPolicy before the GPU driver stack
 # Remaining recipe fields omitted.
 ```
 
@@ -270,7 +271,10 @@ aicr snapshot --output snapshot.yaml
 
 ### 7. Validate Deployment
 
-Validate the deployed components against the recipe and snapshot:
+Validate the deployed components against the bundle's recipe (the component
+set it deployed) and the snapshot. The shell is still inside `ocp-bundle/`
+from step 3, so `recipe.yaml` here is the bundle's recipe and `snapshot.yaml`
+is the file step 6 wrote there:
 
 ```bash
 aicr validate \
@@ -407,7 +411,7 @@ base.yaml → ocp.yaml → ocp-<intent>.yaml → ocp-<intent>-<platform>.yaml
 
 The **base OCP overlay** (`ocp.yaml`) declares the OLM/CR component pairs for all operators supported on the platform and disables base components that are either replaced by OLM equivalents or not applicable to OpenShift (e.g., components managed natively by OCP or not yet supported).
 
-**Intent overlays** (e.g., `ocp-training.yaml`) inherit from the base and apply workload-specific values overrides to operator CRs.
+**Intent overlays** (e.g., `ocp-training.yaml`) inherit from the base and can apply workload-specific values overrides to operator CRs.
 
 
 

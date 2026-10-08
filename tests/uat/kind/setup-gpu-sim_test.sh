@@ -263,4 +263,114 @@ check "each instance annotation carries that node's own name" \
 check "labelling touches only the mapped workers" "4" \
     "$(printf '%s\n' "$label_argv" | grep -cF -- 'label node')"
 
+# --- the DCGM host engine -------------------------------------------------
+#
+# NVSentinel's GPU health monitors are DaemonSets gated on the node label
+# nvsentinel.dgxc.nvidia.com/dcgm.version. Its labeler writes that label only
+# when it finds a READY pod carrying app=nvidia-dcgm (v1.25.0 also accepts
+# app=nvidia-dcgm-dra) whose IMAGE STRING matches `dcgm:<major>.`
+# (labeler/pkg/labeler/labeler.go, verified at the v1.25.0 this repo pins).
+# Nothing in that path inspects a GPU, which is why a mocked NVML
+# driver under a real DCGM host engine is enough.
+#
+# Three separate contracts have to hold, and each failed at least once while
+# this was being built. All three fail SILENTLY: the lane comes up green with
+# the monitors sitting at desiredNumberScheduled 0.
+
+# 1. Reproducibility AND parseability, which pull in opposite directions here.
+#    The lane pins images by digest. A bare digest reference contains no
+#    `dcgm:4.` substring, so pinning the way the device plugin is pinned would
+#    stop the labeler stamping. The tag+digest form satisfies both: the digest
+#    still decides which bytes run, and the tag is inert for resolution but
+#    parseable by the labeler.
+ref="$(dcgm_image_ref)"
+check "the DCGM reference carries a digest" "digest" \
+    "$(grep -qE '@sha256:[0-9a-f]{64}$' <<<"$ref" && echo digest || echo "no-digest:${ref}")"
+check "the DCGM reference also carries a labeler-parseable tag" "parseable" \
+    "$(grep -qE 'dcgm:[0-9]+\.' <<<"$ref" && echo parseable || echo "unparseable:${ref}")"
+
+# The host engine release tracks what the pinned gpu-operator chart renders, so
+# the lane gates NVSentinel against the engine real deployments run. The BOM is
+# regenerated from that chart on every pin bump (make bom-docs), so a chart
+# that moves its DCGM image fails here until the lane follows.
+bom="${SCRIPT_DIR}/../../../docs/user/container-images.md"
+check "the host engine release is the one gpu-operator ships" \
+    "$(sed -n '/^### gpu-operator$/,/^### /p' "${bom}" |
+        sed -nE 's|.*nvcr\.io/nvidia/cloud-native/dcgm:([^`@]+).*|\1|p')" \
+    "${DCGM_VERSION}"
+
+# 2. The pod label is the labeler's selector (--dcgm-app-label, default
+#    nvidia-dcgm,nvidia-dcgm-dra at v1.25.0). Rename it and the labeler sees
+#    no DCGM pod at all.
+check "the DaemonSet carries the app label the labeler selects on" "1" \
+    "$(dcgm_manifest | grep -cE '^        app: nvidia-dcgm$' | tr -d ' ')"
+
+# 3. nv-hostengine binds loopback by default. NVSentinel connects over the
+#    Service from another pod, so without an explicit bind the handshake fails
+#    with "connection to the host engine is not valid any longer", surfacing in
+#    the monitor as a Python AttributeError that names nothing relevant.
+check "the host engine binds all interfaces" "1" \
+    "$(dcgm_manifest | grep -cE '^            - ALL$' | tr -d ' ')"
+
+# 4. NVSentinel hardcodes the endpoint nvidia-dcgm.<ns>.svc:5555, so the
+#    Service name and port are a contract, not a preference.
+# Scoped to the Service document: the DaemonSet carries the same name by
+# convention, so an unscoped count is 2 and proves nothing about the Service.
+check "exactly one Service is emitted" "1" \
+    "$(dcgm_manifest | grep -cE '^kind: Service$' | tr -d ' ')"
+check "the Service is named nvidia-dcgm" "1" \
+    "$(dcgm_manifest | awk '/^kind: Service$/,0' | grep -cE '^  name: nvidia-dcgm$' | tr -d ' ')"
+check "the Service exposes 5555" "1" \
+    "$(dcgm_manifest | grep -cE '^      port: 5555$' | tr -d ' ')"
+# Each monitor reports the GPUs of whichever host engine answers under its own
+# node's name, so the Service must route to the engine on the caller's node.
+# Without the policy kube-proxy spreads connections across all four workers and
+# every monitor still comes up Ready. GPU Operator's own nvidia-dcgm Service
+# sets the same field (assets/state-dcgm/0500_service.yaml at v26.7.1).
+# Read by path rather than by indent: under metadata the line has the same
+# indent and the policy does nothing.
+check "the Service routes only to the caller's node" "Local" \
+    "$(dcgm_manifest | yq -r 'select(.kind == "Service") | .spec.internalTrafficPolicy')"
+
+# 5. The host engine image is a 1.9GB download and is not side-loaded, so it
+#    cannot share the device plugin's 300s rollout budget. A wait that expires
+#    on a cold pull fails the lane for being slow rather than wrong, and the
+#    usual repair is to widen it until it no longer discriminates. Require a
+#    dedicated, and strictly larger, budget so a later tidy-up cannot collapse
+#    the two.
+check "the host engine has its own rollout budget" "own" \
+    "$([[ "${DCGM_ROLLOUT_TIMEOUT}" != "${ROLLOUT_TIMEOUT}" ]] && echo own || echo "shared:${DCGM_ROLLOUT_TIMEOUT}")"
+check "the host engine budget exceeds the shared one" "larger" \
+    "$([[ "${DCGM_ROLLOUT_TIMEOUT%s}" -gt "${ROLLOUT_TIMEOUT%s}" ]] && echo larger || echo "not-larger:${DCGM_ROLLOUT_TIMEOUT}")"
+
+# --- the GPU health monitor pre-pull ----------------------------------------
+#
+# The pre-pull exists so that the 2.5GB monitor pull happens here and not
+# inside nvsentinel's 600s helm --wait. It only does that if kubelet later
+# finds the image under the exact reference the nvsentinel chart renders, and
+# the chart renders a tag that moves with every nvsentinel bump. The BOM is
+# rendered from that chart (make bom-docs, gated against the registry pin), so
+# a bump that forgets the pre-pull fails here instead of silently pulling a
+# stale image while the real one lands back inside install.
+dcgm_major="${DCGM_VERSION%%.*}"
+bom_monitors="$(sed -n '/^### nvsentinel$/,/^### /p' "${bom}" |
+    sed -nE "s|^- \`(ghcr\.io/nvidia/nvsentinel/gpu-health-monitor:[^\`@]*-dcgm-${dcgm_major}\.x)\`$|\1|p")"
+check "the BOM lists one nvsentinel monitor image for DCGM ${dcgm_major}.x" "1" \
+    "$(grep -c . <<<"${bom_monitors}" | tr -d ' ')"
+check "the pre-pulled image is the one the nvsentinel chart renders" "${bom_monitors}" \
+    "${MONITOR_PREPULL_IMAGE:-unset}"
+check "the pre-pull DaemonSet runs that image" "${MONITOR_PREPULL_IMAGE:-unset}" \
+    "$(monitor_prepull_manifest 2>/dev/null | yq -r '.spec.template.spec.containers[0].image')"
+# Always would re-pull at install and defeat the pre-pull.
+check "the pre-pull leaves the image for IfNotPresent to find" "IfNotPresent" \
+    "$(monitor_prepull_manifest 2>/dev/null | yq -r '.spec.template.spec.containers[0].imagePullPolicy')"
+check "the pre-pull lands on the simulated-GPU workers only" "${MOKKA_NODE_TYPE}" \
+    "$(monitor_prepull_manifest 2>/dev/null | yq -r ".spec.template.spec.nodeSelector[\"${MOKKA_NODE_TYPE_LABEL}\"]")"
+# Same reasoning as the host engine's budget: a 2.5GB cold pull cannot share
+# the device plugin's 300s.
+check "the pre-pull has a budget larger than the shared one" "larger" \
+    "$([[ "${MONITOR_PREPULL_TIMEOUT:-}" =~ ^[0-9]+s$ ]] &&
+        ((${MONITOR_PREPULL_TIMEOUT%s} > ${ROLLOUT_TIMEOUT%s})) &&
+        echo larger || echo "not-larger:${MONITOR_PREPULL_TIMEOUT:-unset}")"
+
 exit "${fail}"

@@ -1045,8 +1045,9 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"cluster-autoscaling",
 		"secure-accelerator-access",
 		"slinky-slurm-health",
+		"slinky-slurm-gpu-access",
 	}
-	gbEKSSlurmConformanceChecks := []string{
+	gbSlurmConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
 		"dra-support",
@@ -1058,6 +1059,7 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 		"slinky-slurm-imex-channel",
+		"slinky-slurm-gpu-access",
 	}
 	kindConformanceChecks := []string{
 		"platform-health",
@@ -1076,8 +1078,9 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		name string
 		want []string
 	}{
-		{name: "gb200-eks-ubuntu-training-slurm", want: gbEKSSlurmConformanceChecks},
-		{name: "gb300-eks-ubuntu-training-slurm", want: gbEKSSlurmConformanceChecks},
+		{name: "gb200-eks-ubuntu-training-slurm", want: gbSlurmConformanceChecks},
+		{name: "gb200-gke-cos-training-slurm", want: gbSlurmConformanceChecks},
+		{name: "gb300-eks-ubuntu-training-slurm", want: gbSlurmConformanceChecks},
 		{name: "h100-aks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-eks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-gke-cos-training-slurm", want: conformanceChecks},

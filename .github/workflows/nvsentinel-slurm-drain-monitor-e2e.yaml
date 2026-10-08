@@ -1,0 +1,127 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runtime Kind test for the nvsentinel-slurm-drain-monitor mixin (#2611).
+#
+# Bundles a platform: slurm leaf with the mixin, installs nvsentinel through
+# the bundle's own install.sh, and drives the SlurmNodeStateDrain condition on
+# Slinky-labelled worker pods: an [HC] drain must reach the platform connector
+# as STORE_ONLY with no node condition or Event, the undrain must publish the
+# recovery, and an operator-owned or unmatched drain must publish nothing. Not
+# wired into `make qualify`: it needs a Kind cluster and pulls the NVSentinel
+# image set.
+#
+# The path filter is deliberately narrow, for the same reason as the object
+# monitor's lane: pkg/recipe/** or pkg/bundler/** would drag a cluster spin-up
+# onto most core PRs, and the logic those packages own is unit-tested.
+
+name: NVSentinel Slurm Drain Monitor E2E
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'recipes/mixins/nvsentinel-slurm-drain-monitor.yaml'
+      - 'recipes/registry.yaml'
+      - 'recipes/components/nvsentinel/**'
+      # The tested leaf inherits h100-kind-training -> kind -> base, and
+      # base.yaml is where nvsentinel enters the chain at all.
+      - 'recipes/overlays/h100-kind-training-slurm.yaml'
+      - 'recipes/overlays/h100-kind-training.yaml'
+      - 'recipes/overlays/kind.yaml'
+      - 'recipes/overlays/base.yaml'
+      - 'tests/e2e/nvsentinel-slurm-drain-monitor/**'
+      - 'pkg/bundler/deployer/localformat/templates/**'
+      # run.sh sources tools/common and is invoked through a make target.
+      - 'tools/common'
+      - 'Makefile'
+      - '.github/workflows/nvsentinel-slurm-drain-monitor-e2e.yaml'
+      - '.github/actions/setup-build-tools/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/load-versions/**'
+      - '.settings.yaml'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: NVSentinel Slurm Drain Monitor E2E
+    runs-on: ubuntu-latest
+    # Bounded waits: node ready, a cold pull of the NVSentinel image set, and
+    # three event windows, before kind create and go build.
+    timeout-minutes: 35
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Prep Kind runner
+        uses: ./.github/actions/prep-kind-runner
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # run.sh's has_tools gate needs these; jq ships on the runner image.
+      - name: Install Kind, kubectl, Helm and yq
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kind: 'true'
+          kind_version: '${{ steps.versions.outputs.kind }}'
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+
+      # KEEP_CLUSTER so the cluster survives for the diagnostics below; the
+      # always() step after them does the teardown instead.
+      - name: Run nvsentinel-slurm-drain-monitor e2e
+        env:
+          KEEP_CLUSTER: 'true'
+        run: make nvsentinel-slurm-drain-monitor-e2e
+
+      # run.sh removes its kubeconfig on exit, so re-export before querying.
+      - name: Collect diagnostics on failure
+        if: ${{ failure() }}
+        run: |
+          set +e
+          cluster=aicr-nvsentinel-slurm-drain-monitor-e2e
+          export KUBECONFIG="${RUNNER_TEMP}/slurm-drain-monitor-diag.kubeconfig"
+          kind export kubeconfig --name "$cluster" --kubeconfig "$KUBECONFIG" || exit 0
+          kubectl get pods -A -o wide
+          kubectl -n slurm get pods -o yaml
+          kubectl -n nvsentinel logs -l app.kubernetes.io/name=slurm-drain-monitor --tail=200
+          kubectl -n nvsentinel logs daemonset/platform-connectors --all-containers --tail=200
+
+      - name: Delete Kind cluster
+        if: ${{ always() }}
+        run: kind delete cluster --name aicr-nvsentinel-slurm-drain-monitor-e2e || true

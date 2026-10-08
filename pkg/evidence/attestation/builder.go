@@ -60,6 +60,7 @@ type BuildOptions struct {
 	PhaseResults []*validator.PhaseResult
 
 	AICRVersion             string
+	AICRCommit              string
 	ValidatorCatalogVersion string
 
 	// Digest fields stay blank: the catalog tracks refs by tag and
@@ -242,6 +243,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		Profile:                 profilePredicateOf(opts.Recipe),
 		AttestedAt:              attestedAt,
 		AICRVersion:             opts.AICRVersion,
+		AICRCommit:              opts.AICRCommit,
 		ValidatorCatalogVersion: opts.ValidatorCatalogVersion,
 		ValidatorImages:         opts.ValidatorImages,
 		Recipe:                  RecipeRef{Name: recipeName, Digest: subjectDigest},

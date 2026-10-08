@@ -357,9 +357,10 @@ components:
       # in_progress without bound. Both boundaries carry transition records.
       # v0.20.0 removes the legacy skyhook.nvidia.com group outright and is not
       # reachable until the CRs shipped under nodewright-customizations are
-      # renamed (#2594).
+      # renamed (#2594). v0.19.1 raises the interrupt pod's memory to 256Mi so
+      # the agent is not OOM-killed mid-reboot on 64K-page arm64 nodes (#3101).
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
-      defaultVersion: v0.19.0
+      defaultVersion: v0.19.1
       defaultNamespace: nodewright
     nodeScheduling:
       nodeCountPaths:
@@ -466,9 +467,10 @@ components:
         tolerationPaths:
           - global.systemNodeTolerations
     # Opt-in surface for the nvsentinel-observability (#2617),
-    # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610) and
-    # nvsentinel-nic-health-monitor mixins: the exact leaf paths a mixin may
-    # set on this already-base-chained component. global.tracing.endpoint is
+    # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610),
+    # nvsentinel-nic-health-monitor and nvsentinel-slurm-drain-monitor (#2611)
+    # mixins: the exact leaf paths a mixin may set on this
+    # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
     # recipe's own override, or an operator --set), never from a mixin, so
     # CheckNVSentinelTracingEndpointRequired always has a real value to
@@ -509,6 +511,11 @@ components:
       - preflight.initContainers
       - global.nicHealthMonitor.enabled
       - nic-health-monitor.processingStrategy
+      - global.slurmDrainMonitor.enabled
+      - slurm-drain-monitor.namespace
+      - slurm-drain-monitor.labelSelector
+      - slurm-drain-monitor.processingStrategy
+      - slurm-drain-monitor.patterns
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -578,6 +585,14 @@ components:
       # nothing, invisible to `aicr bundle`/`aicr validate`. A no-op for
       # every recipe that doesn't set global.nicHealthMonitor.enabled.
       - function: CheckNVSentinelNicHealthMonitorRequiresMetadataCollector
+        severity: error
+      # Blocking: slurm-drain-monitor watches worker pods in one namespace,
+      # and only slinky-slurm creates them there. Enabled on a recipe without
+      # slinky-slurm, or watching a namespace slinky-slurm does not deploy to,
+      # the Deployment renders, runs, and never sees a pod -- with nothing in
+      # `aicr bundle`/`aicr validate` to show it. A no-op for every recipe that
+      # doesn't set global.slurmDrainMonitor.enabled.
+      - function: CheckNVSentinelSlurmDrainMonitorRequiresSlinky
         severity: error
 
   - name: nvidia-dra-driver-gpu
@@ -1077,18 +1092,20 @@ components:
       - cluster-readiness-engine
     healthCheck:
       assertFile: checks/nvcre/health-check.yaml
+    upgrades:
+      file: components/nvcre/upgrades.yaml
     # Chart ships LogProfile CRDs in crds/ and LogProfile CRs in templates/.
     # helm-diff on a fresh cluster fails ("no matches for kind LogProfile")
     # unless disableValidation is set. Same pattern as kai-scheduler.
     # See https://github.com/NVIDIA/aicr/issues/914.
     hasSelfRefCRDs: true
     helm:
-      # Chart and controller image are public on GHCR. Image pull is
-      # anonymous; Helm OCI chart pulls may require GHCR credentials.
+      # Chart and controller image are public on GHCR; both pull anonymously,
+      # so no pull secret is required for either.
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: cluster-readiness-engine
       # renovate: datasource=docker depName=ghcr.io/nvidia/cluster-readiness-engine
-      defaultVersion: v0.2.0
+      defaultVersion: v0.6.0
       defaultNamespace: nvcre
     nodeScheduling:
       # tolerationPaths only: the Deployment template has no nodeSelector

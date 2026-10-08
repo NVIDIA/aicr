@@ -14,10 +14,11 @@
   │                                                                        │
   │  Criteria ──▶ Overlay Chain ──▶ recipe.yaml                            │
   │                                                                        │
-  │  base ─▶ eks ─▶ eks-inference ─▶ h100-eks-inference ─▶                 │
+  │  base ─▶ monitoring-hpa ─▶ h100-any ─▶ eks ─▶ eks-ubuntu ─▶            │
+  │          eks-inference ─▶ h100-eks-inference ─▶                        │
   │          h100-eks-ubuntu-inference ─▶ h100-eks-ubuntu-inference-dynamo │
   │                                                                        │
-  │  Output: 18 components, constraints, deployment order                  │
+  │  Output: component refs, constraints, deployment order                 │
   └────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -65,7 +66,7 @@
   ┌────────────────────────────────────────────────────────────────────────┐
   │ 3. DEPLOY — Install to cluster                                         │
   │                                                                        │
-  │  $ cd bundle && aicr verify . && ./deploy.sh                           │
+  │  $ (cd bundle && aicr verify . && ./deploy.sh)                         │
   │                                                                        │
   │  selected components in deployment order (post-folders &               │
   │  some steps omitted): agentgateway-crds ──▶ ... ──▶ cert-manager       │
@@ -83,7 +84,7 @@
   ┌────────────────────────────────────────────────────────────────────────┐
   │ 4. VALIDATE — Verify conformance                                       │
   │                                                                        │
-  │  $ aicr validate --recipe recipe.yaml \                                │
+  │  $ aicr validate --recipe bundle/recipe.yaml \                         │
   │      --phase deployment --phase conformance                            │
   │                                                                        │
   │  ┌──────────────────────────────────────────────────────────────┐      │
@@ -114,7 +115,6 @@ publication revalidate a private snapshot and publish only that inventory.
 ```
 ┌─────────────────────────────────────┬─────────────────────────────────────┐
 │      TRAINING (kubeflow)            │      INFERENCE (dynamo)             │
-│  15 components, 8 overlays +mixins  │  18 components, 8 overlays +mixins  │
 ├─────────────────────────────────────┼─────────────────────────────────────┤
 │                                     │                                     │
 │  base.yaml                          │  base.yaml                          │
@@ -127,6 +127,7 @@ publication revalidate a private snapshot and publish only that inventory.
 │  ├── kube-prometheus-stack          │  ├── kube-prometheus-stack          │
 │  ├── k8s-ephemeral-storage-metrics  │  ├── k8s-ephemeral-storage-metrics  │
 │  ├── nvidia-dra-driver-gpu          │  ├── nvidia-dra-driver-gpu          │
+│  ├── dra-node-labeler               │  ├── dra-node-labeler               │
 │  └── kai-scheduler                  │  └── kai-scheduler                  │
 │  monitoring-hpa (metadata)          │  monitoring-hpa (metadata)          │
 │  └── prometheus-adapter             │  └── prometheus-adapter             │
@@ -134,27 +135,27 @@ publication revalidate a private snapshot and publish only that inventory.
 │  eks.yaml                           │  eks.yaml                           │
 │  ├── aws-ebs-csi-driver             │  ├── aws-ebs-csi-driver             │
 │  └── aws-efa                        │  └── aws-efa                        │
+│  eks-ubuntu.yaml                    │  eks-ubuntu.yaml                    │
+│  + os-ubuntu (Ubuntu constraints)   │  + os-ubuntu (Ubuntu constraints)   │
 │  eks-training.yaml                  │  eks-inference.yaml                 │
-│  (gpu-operator overrides)           │  (inference constraints)            │
+│  (gpu-operator overrides)           │  + platform-inference (mixin)       │
+│                                     │  ├── agentgateway-crds (via mixin)  │
+│                                     │  └── agentgateway (via mixin)       │
 │  h100-eks-training.yaml             │  h100-eks-inference.yaml            │
 │  └── nodewright-customizations      │  └── nodewright-customizations      │
 │  h100-eks-ubuntu-training.yaml      │  h100-eks-ubuntu-inference.yaml     │
-│  (Ubuntu constraints)               │  (Ubuntu constraints)               │
+│  + os-ubuntu                        │  + os-ubuntu                        │
 │  h100-eks-ubuntu-training-kubeflow  │  h100-eks-ubuntu-inference-dynamo   │
-│  mixins (merged separately):        │  ├── grove                          │
-│  + os-ubuntu, platform-kubeflow     │  └── dynamo-platform                │
-│  └── kubeflow-trainer (via mixin)   │  mixins (merged separately):        │
-│                                     │  + os-ubuntu, platform-inference    │
-│                                     │  ├── agentgateway-crds (via mixin)  │
-│                                     │  └── agentgateway (via mixin)       │
+│  + os-ubuntu, platform-kubeflow     │  ├── grove                          │
+│  └── kubeflow-trainer (via mixin)   │  └── dynamo-platform                │
 ├─────────────────────────────────────┴─────────────────────────────────────┤
 │  Unique training: kubeflow-trainer                                        │
 │  Unique inference: agentgateway-crds, agentgateway, grove, dynamo-platform│
 ├───────────────────────────────────────────────────────────────────────────┤
 │  Shared (base/eks/h100/hpa layers):                                       │
 │    cert-manager, kube-prometheus-stack, gpu-operator, kai-scheduler,      │
-│    nvidia-dra-driver-gpu, nvsentinel, nfd, nodewright-operator,           │
-│    nodewright-customizations, prometheus-adapter,                         │
+│    nvidia-dra-driver-gpu, dra-node-labeler, nvsentinel, nfd,              │
+│    nodewright-operator, nodewright-customizations, prometheus-adapter,    │
 │    prometheus-operator-crds, k8s-ephemeral-storage-metrics,               │
 │    aws-ebs-csi-driver, aws-efa                                            │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -265,7 +266,7 @@ http://127.0.0.1:9090/chat.html
 
 ## CNCF AI Conformance 
 
-[Requirements](https://github.com/cncf/k8s-ai-conformance/blob/main/docs/AIConformance-1.34.yaml)
+[Requirements](https://github.com/cncf/k8s-ai-conformance/blob/main/docs/AIConformance-1.35.yaml)
 
 ### Components Mapping
 
@@ -334,6 +335,6 @@ http://127.0.0.1:9090/chat.html
 |---|------|------|----|-------|--------|
 | 1 | 2026-02-18 | [NVIDIA/KAI-Scheduler](https://github.com/NVIDIA/KAI-Scheduler) | [#1035](https://github.com/NVIDIA/KAI-Scheduler/pull/1035) | fix: skip runtimeClassName injection when gpuPodRuntimeClassName is empty | Merged |
 | 2 | 2026-02-11 | [Mellanox/network-operator](https://github.com/Mellanox/network-operator) | [#2167](https://github.com/Mellanox/network-operator/pull/2167) | fix: relax kubeVersion constraint to support pre-release suffixes | Merged |
-| 3 | 2026-02-06 | [jmcgrath207/k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) | [#181](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics/pull/181) | chore: add nameOverride and fullnameOverride values | Open |
+| 3 | 2026-02-06 | [jmcgrath207/k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) | [#181](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics/pull/181) | chore: add nameOverride and fullnameOverride values | Merged |
 | 4 | 2026-02-04 | [NVIDIA/NVSentinel](https://github.com/NVIDIA/NVSentinel) | [#789](https://github.com/NVIDIA/NVSentinel/pull/789) | Make metrics-access network policy configurable | Merged |
 | 5 | 2026-02-02 | [prometheus-community/helm-charts](https://github.com/prometheus-community/helm-charts) | [#6584](https://github.com/prometheus-community/helm-charts/pull/6584) | chore(prometheus-adapter): add nameOverride and fullnameOverride values | Merged |
