@@ -125,7 +125,7 @@ jobs:
       # Same action and digest-pinned image as renovate.yaml; keep them in
       # lockstep with RENOVATE_VALIDATOR_IMAGE in the Makefile.
       - name: Run Renovate (dry-run, registry chart pins only)
-        uses: renovatebot/github-action@6d26fcf0275dc65624cbc3d51fe78bc773f98321  # v46.3.6
+        uses: renovatebot/github-action@230ce922b08968d0a4f6f70f295601daff09ef1d  # v46.3.7
         with:
           renovate-version: '43@sha256:00185c0d63462acec8331cc9a94dcd74a763f2765fca0edcc3ff568af1dc8104'
         env:
