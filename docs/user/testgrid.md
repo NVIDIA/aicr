@@ -73,7 +73,7 @@ Trust in a column comes from its provenance metadata. Each build column carries 
 | `signer_issuer` | the OIDC issuer that vouched for that identity |
 | `source_class` | verified origin class: NVIDIA `uat`, or allowlisted `community`/partner evidence |
 | `evidence_digest` | the digest of the underlying signed evidence artifact |
-| `aicr_run_url` | the GitHub Actions run that produced the result, shown as the build's run link (empty for community backfills) |
+| `aicr_run_url` | the GitHub Actions run (and attempt) that produced the result, shown as the build's run link; empty when the publisher was not given one, such as manual backfills |
 
 `signer_identity` and `signer_issuer` together identify **community-submitted** results versus **NVIDIA UAT** runs and key the latest-per-signer default scope. The publisher verifies those certificate claims against the checked-in signer allowlist and derives `source_class`; callers cannot assign their own trust class. Allowlisted partner evidence is represented as `community` because TestGrid's wire contract distinguishes first-party UAT from external evidence. `evidence_digest` is the verifiable anchor: every cell traces back to a signed [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) artifact you can verify independently with [artifact verification](./artifact-verification.md).
 

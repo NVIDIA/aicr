@@ -124,10 +124,12 @@ criteria:
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = oldStdout })
 
+	const runURL = "https://github.com/NVIDIA/aicr/actions/runs/123/attempts/1"
 	if runErr := run(context.Background(), runConfig{
 		bundleDir:   dir,
 		bucket:      "test-bucket",
 		sourceClass: sourceClassUAT,
+		runURL:      runURL,
 		dryRun:      true,
 	}); runErr != nil {
 		_ = w.Close()
@@ -141,8 +143,8 @@ criteria:
 	}
 	output := string(outBytes)
 
-	// Parse emitted key names from lines like "  key_name             = ..."
-	emitted := make(map[string]bool)
+	// Parse emitted keys and values from lines like "  key_name             = value"
+	emitted := make(map[string]string)
 	for line := range strings.SplitSeq(output, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -150,13 +152,16 @@ criteria:
 		}
 		parts := strings.SplitN(trimmed, "=", 2)
 		if len(parts) == 2 {
-			emitted[strings.TrimSpace(parts[0])] = true
+			emitted[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 		}
 	}
 
 	for _, k := range MetaKeys() {
-		if !emitted[k] {
+		if _, ok := emitted[k]; !ok {
 			t.Errorf("MetaKeys() key %q not found in dry-run output:\n%s", k, output)
 		}
+	}
+	if got := emitted[metaKeyAICRRunURL]; got != runURL {
+		t.Errorf("%s = %q, want %q", metaKeyAICRRunURL, got, runURL)
 	}
 }

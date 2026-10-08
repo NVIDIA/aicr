@@ -293,9 +293,15 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # On the UAT workflow_call path this run is the UAT run that produced
-          # the bundle; the dispatched publish is a new run and cannot see it.
-          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          # Called from UAT, the github context is the caller's, so this run
+          # (and attempt) is the UAT run that produced the bundle; the
+          # dispatched publish is a new run and cannot see it. A direct
+          # dispatch of this workflow re-ingests an existing bundle, whose
+          # producing run is unknown here, so it publishes no run link.
+          RUN_URL=""
+          if [[ "${GITHUB_WORKFLOW_REF}" != "${REPO}/.github/workflows/evidence-ingest.yaml@"* ]]; then
+            RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
+          fi
           for attempt in 1 2 3; do
             if gh workflow run testgrid-publish.yml \
               --repo "${REPO}" --ref main \
@@ -308,4 +314,4 @@ jobs:
             echo "dispatch attempt ${attempt} failed; retrying in 5s..."
             sleep 5
           done
-          echo "::warning::could not dispatch TestGrid Publish after 3 attempts; backfill bundle ${BUNDLE_REF} manually"
+          echo "::warning::could not dispatch TestGrid Publish after 3 attempts; backfill bundle ${BUNDLE_REF} manually with run_url=${RUN_URL:-<none>}"

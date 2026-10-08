@@ -73,7 +73,7 @@ on:
           - prod
           - staging
       run_url:
-        description: "https://github.com URL of the run that produced the bundle (optional; shown as the build's run link)"
+        description: "GitHub Actions run that produced the bundle, https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>] (optional; shown as the build's run link)"
         type: string
         required: false
         default: ""
@@ -191,6 +191,18 @@ jobs:
           fi
           echo "bundle_ref=${BUNDLE_REF}" >> "${GITHUB_OUTPUT}"
           echo "Resolved bundle: ${BUNDLE_REF}"
+
+      # Fail a malformed manual run_url before verification and GCP auth;
+      # testgrid-publish applies the same rule before writing anything.
+      - name: Validate run URL
+        env:
+          RUN_URL: ${{ inputs.run_url }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${RUN_URL}" && ! "${RUN_URL}" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+(/attempts/[0-9]+)?$ ]]; then
+            echo "::error::run_url must be https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>]"
+            exit 1
+          fi
 
       # Community/partner evidence must have a reviewed pointer on main. Its
       # claimed signer is escaped into an exact regexp and then cross-checked

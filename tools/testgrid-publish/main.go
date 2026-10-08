@@ -52,6 +52,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"time"
 
@@ -76,7 +77,7 @@ func main() {
 	flag.StringVar(&bundleDir, "bundle-dir", "", "pre-materialized bundle directory (alternative to --bundle)")
 	flag.StringVar(&bucket, "bucket", "", "GCS bucket to publish to (required)")
 	flag.StringVar(&sourceClass, "source-class", sourceClassUAT, "bundle origin: "+sourceClassUAT+" or "+sourceClassCommunity)
-	flag.StringVar(&runURL, "run-url", "", "https://github.com URL of the run that produced the bundle (optional)")
+	flag.StringVar(&runURL, "run-url", "", "GitHub Actions run URL that produced the bundle (optional)")
 	flag.BoolVar(&plainHTTP, "plain-http", false, "use plain HTTP for OCI registry (dev only)")
 	flag.BoolVar(&insecureTLS, "insecure-tls", false, "skip TLS verification for OCI registry (dev only)")
 	flag.BoolVar(&dryRun, "dry-run", false, "print output paths and started.json without writing to GCS")
@@ -305,8 +306,13 @@ func run(ctx context.Context, cfg runConfig) error {
 	return nil
 }
 
-// validateRunURL accepts an empty value or an https://github.com URL. The
-// TestGrid UI renders it as a link, so other schemes and hosts are rejected.
+// runURLPath matches a GitHub Actions run, optionally pinned to one attempt.
+// Kept in step with the run_url check in .github/workflows/testgrid-publish.yml.
+var runURLPath = regexp.MustCompile(`^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+(/attempts/[0-9]+)?$`)
+
+// validateRunURL accepts an empty value or a GitHub Actions run URL. The
+// value is published permanently as the build's run link, so anything else
+// (other schemes, hosts or GitHub pages) is rejected.
 func validateRunURL(raw string) error {
 	if raw == "" {
 		return nil
@@ -315,8 +321,11 @@ func validateRunURL(raw string) error {
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "--run-url is not a valid URL", err)
 	}
-	if u.Scheme != "https" || u.Host != "github.com" || u.User != nil {
-		return errors.New(errors.ErrCodeInvalidRequest, "--run-url must be an https://github.com URL")
+	if u.Scheme != "https" || u.Host != "github.com" || u.User != nil ||
+		u.RawQuery != "" || u.Fragment != "" || !runURLPath.MatchString(u.EscapedPath()) {
+
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--run-url must be https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>]")
 	}
 	return nil
 }
