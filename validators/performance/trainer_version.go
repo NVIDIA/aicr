@@ -43,11 +43,18 @@ const (
 // self-install. Precedence is the recipe's kubeflow-trainer version, then
 // trainerVersionEnv, then the kubeflow-trainer pin in the component registry. A
 // recipe that enables kubeflow-trainer never reaches the self-install, so in
-// practice the recipe version comes from a ref the recipe disables.
+// practice the recipe version comes from a ref the recipe disables. Recipe
+// resolution stamps the registry pin onto every ref without a version, so a
+// resolved recipe with any kubeflow-trainer ref always decides the release and
+// trainerVersionEnv applies only when the recipe has no such ref.
 func resolveTrainerVersion(ctx *validators.Context) (string, error) {
+	env := strings.TrimSpace(os.Getenv(trainerVersionEnv))
 	raw, source := recipeTrainerPin(ctx), "recipe component "+kubeflowTrainerComponent
 	if raw == "" {
-		raw, source = strings.TrimSpace(os.Getenv(trainerVersionEnv)), trainerVersionEnv
+		raw, source = env, trainerVersionEnv
+	} else if env != "" {
+		slog.Warn("Ignoring Kubeflow Trainer version from env, the recipe's version takes precedence",
+			"env", trainerVersionEnv, "envVersion", env, "recipeVersion", raw)
 	}
 	if raw == "" {
 		pin, err := registryTrainerPin()

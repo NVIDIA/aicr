@@ -48,6 +48,8 @@ func TestResolveTrainerVersion(t *testing.T) {
 		return recipe.ComponentRef{Name: kubeflowTrainerComponent, Version: v,
 			Overrides: map[string]any{"enabled": false}}
 	}
+	hydratedDisabledRef := disabledRef("")
+	hydratedDisabledRef.ApplyRegistryDefaults(registry.Get(kubeflowTrainerComponent))
 	tests := []struct {
 		name    string
 		ctx     *validators.Context
@@ -60,8 +62,8 @@ func TestResolveTrainerVersion(t *testing.T) {
 		{name: "blank env falls through to registry pin", ctx: trainerRefCtx(), env: "   ", want: registryPin},
 		{name: "env beats registry pin", ctx: trainerRefCtx(), env: "2.3.0", want: "2.3.0"},
 		{name: "recipe version beats env", ctx: trainerRefCtx(disabledRef("2.4.1")), env: "2.3.0", want: "2.4.1"},
-		{name: "recipe ref without version falls through to env",
-			ctx: trainerRefCtx(recipe.ComponentRef{Name: kubeflowTrainerComponent}), env: "2.3.0", want: "2.3.0"},
+		{name: "resolved recipe ref carries registry pin and beats env",
+			ctx: trainerRefCtx(hydratedDisabledRef), env: "2.3.0", want: registryPin},
 		{name: "leading v accepted", ctx: trainerRefCtx(), env: "v2.3.0", want: "2.3.0"},
 		{name: "prerelease accepted", ctx: trainerRefCtx(), env: "2.3.0-rc.0", want: "2.3.0-rc.0"},
 		{name: "non-semver rejected", ctx: trainerRefCtx(), env: "latest", wantErr: true},
