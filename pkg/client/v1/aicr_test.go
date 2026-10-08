@@ -2773,9 +2773,9 @@ func inheritTestClient(t *testing.T) *aicr.Client {
 }
 
 // priorRecipe writes a hydrated RecipeResult naming each component at the
-// namespace a previous resolution installed it into. Only the namespace is
-// read back; the type/source/version fields are the minimum a hydrated recipe
-// must carry to pass the loader's coherence rules.
+// namespace a previous resolution installed it into. The source and version
+// fields also let tests distinguish full inheritance from namespace-only
+// inheritance while satisfying the loader's coherence rules.
 func priorRecipe(t *testing.T, path string, namespaces map[string]string) string {
 	t.Helper()
 	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n"
@@ -3377,6 +3377,143 @@ func TestResolveRecipeWithOptions_InheritFromRejectsConfigMapURI(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "does not support cm:// locations yet") {
 				t.Errorf("error = %v, want the cm:// rejection", err)
+			}
+		})
+	}
+}
+
+func TestResolveRecipeInheritNamespaceOnly(t *testing.T) {
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := baseline.Components[0].Name
+	baseRef := baseline.Resolved().GetComponentRef(name)
+	prior := filepath.Join(t.TempDir(), "prior.yaml")
+	doc := fmt.Sprintf(`kind: RecipeResult
+apiVersion: aicr.run/v1
+metadata:
+  version: test
+componentRefs:
+  - name: %s
+    type: Helm
+    namespace: legacy-namespace
+    chart: legacy-chart
+    source: https://charts.invalid/prior
+    version: 1.0.0
+    manifestFiles: [legacy.yaml]
+    preManifestFiles: [legacy-pre.yaml]
+`, name)
+	if err := os.WriteFile(prior, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	assertResult := func(t *testing.T, result *aicr.RecipeResult, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref := result.Resolved().GetComponentRef(name)
+		if ref.Namespace != "legacy-namespace" {
+			t.Errorf("namespace = %q, want legacy-namespace", ref.Namespace)
+		}
+		if ref.Chart != baseRef.Chart || ref.Source != baseRef.Source || ref.Version != baseRef.Version ||
+			!reflect.DeepEqual(ref.ManifestFiles, baseRef.ManifestFiles) ||
+			!reflect.DeepEqual(ref.PreManifestFiles, baseRef.PreManifestFiles) ||
+			!reflect.DeepEqual(ref.Overrides, baseRef.Overrides) {
+
+			t.Errorf("namespace-only inheritance changed other resolved fields: got %+v, want fields from %+v", ref, baseRef)
+		}
+	}
+
+	t.Run("request", func(t *testing.T) {
+		req := inheritTestRequest(prior)
+		req.Inherit = "namespace"
+		result, resolveErr := client.ResolveRecipe(t.Context(), req)
+		assertResult(t, result, resolveErr)
+	})
+	for _, resolver := range inheritOptionResolvers() {
+		t.Run(resolver.name, func(t *testing.T) {
+			result, resolveErr := resolver.resolve(t, client,
+				aicr.WithInheritFrom(prior), aicr.WithInherit("namespace"))
+			assertResult(t, result, resolveErr)
+		})
+	}
+}
+
+func TestResolveRecipeInheritNamespaceSkipsObjectNames(t *testing.T) {
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := baseline.Components[0].Name
+	baseRef := baseline.Resolved().GetComponentRef(name)
+	dir := priorBundle(t, filepath.Join(t.TempDir(), "bundle"),
+		map[string]string{name: "legacy-namespace"},
+		map[string]map[string]any{name: {"fullnameOverride": "legacy-object-name"}})
+
+	req := inheritTestRequest(dir)
+	req.Inherit = "namespace"
+	result, err := client.ResolveRecipe(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := result.Resolved().GetComponentRef(name)
+	if ref.Namespace != "legacy-namespace" || !reflect.DeepEqual(ref.Overrides, baseRef.Overrides) {
+		t.Fatalf("namespace-only inheritance changed object names or lost the namespace: %+v", ref)
+	}
+}
+
+func TestResolveRecipeInheritNamespaceIgnoresBundleValueMetadata(t *testing.T) {
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := baseline.Components[0].Name
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), map[string]string{name: "legacy-namespace"})
+	if writeErr := os.WriteFile(filepath.Join(dir, bundleinfo.FileName), []byte("releases: [invalid"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	req := inheritTestRequest(dir)
+	req.Inherit = "namespace"
+	result, err := client.ResolveRecipe(t.Context(), req)
+	if err != nil {
+		t.Fatalf("namespace-only inheritance read unusable bundle value metadata: %v", err)
+	}
+	if ref := result.Resolved().GetComponentRef(name); ref == nil || ref.Namespace != "legacy-namespace" {
+		t.Fatalf("namespace was not inherited from recipe.yaml: %+v", ref)
+	}
+}
+
+func TestResolveRecipeInheritSelectionRejects(t *testing.T) {
+	client := inheritTestClient(t)
+	tests := []struct {
+		name   string
+		source string
+		mode   string
+		want   string
+	}{
+		{"unknown mode", "missing.yaml", "namespaces", "invalid inherit mode"},
+		{"namespace without source", "", "namespace", "requires --inherit-from"},
+		{"all without source", "", "all", "requires --inherit-from"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := inheritTestRequest(tt.source)
+			req.Inherit = tt.mode
+			_, err := client.ResolveRecipe(t.Context(), req)
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) ||
+				!strings.Contains(err.Error(), tt.want) {
+
+				t.Fatalf("error = %v, want INVALID_REQUEST containing %q", err, tt.want)
 			}
 		})
 	}

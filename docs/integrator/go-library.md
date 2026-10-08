@@ -699,19 +699,23 @@ result, err := client.ResolveRecipe(ctx, aicr.RecipeRequest{
 	Accelerator: "h100",
 	Intent:      "training",
 	InheritFrom: "./bundles-v0.17.0", // or a recipe file
+	Inherit:     "namespace",
 })
 ```
 
 `RecipeRequest.InheritFrom` is honored by `ResolveRecipe`;
-`aicr.WithInheritFrom(ref)` is the equivalent for
+`aicr.WithInheritFrom(ref)` with `aicr.WithInherit("namespace")` is the
+equivalent for
 `ResolveRecipeFromCriteriaWithOptions` and
 `ResolveRecipeFromSnapshotWithOptions`. A bundle directory is read through the
 `recipe.yaml` at its root. A component the prior artifact does not name keeps
-the registry default.
+the registry default. Omit `Inherit` / `WithInherit`, or select `"all"`, to
+preserve the prior chart, source, kustomize path and manifest sets as well as
+the namespace.
 
 A **bundle directory** carries one thing a recipe file cannot: the merged
 values each release installed with, which is where `fullnameOverride` and
-`nameOverride` live. Given one, the resolve also pins those object names,
+`nameOverride` live. In `"all"` mode, the resolve also pins those object names,
 writing a `ComponentRef.Overrides` entry only where the inherited name differs
 from what this binary resolves. Given a recipe file, namespaces are still
 pinned and a warning records that object names were not, because a recipe
