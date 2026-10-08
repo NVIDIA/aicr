@@ -1829,11 +1829,19 @@ server's rules when `aicr bundle` reads them, whether they come from
 `--accelerated-node-selector`, `--accelerated-node-toleration`,
 `--workload-selector`, or the matching `scheduling.*` keys in `--config`.
 Selector keys must be qualified names and values must be label values. A
-toleration with an empty key must use `Exists`, an `Equal` value must be a
-label value, an `Exists` toleration takes no value, and the effect must be
-`NoSchedule`, `PreferNoSchedule`, or `NoExecute`. An invalid value fails the
-bundle with `INVALID_REQUEST` naming the flag or config key, so it never
-reaches `helm install`.
+non-empty toleration key must be a qualified name, a toleration with an empty
+key must use `Exists`, an `Equal` value must be a label value, an `Exists`
+toleration takes no value, and the effect must be `NoSchedule`,
+`PreferNoSchedule`, or `NoExecute`. An invalid value fails the bundle with
+`INVALID_REQUEST` naming the flag or config key, so it never reaches
+`helm install`.
+
+Go SDK callers passing tolerations through `config.WithSystemNodeTolerations`
+or `config.WithAcceleratedNodeTolerations` get the same checks in
+`bundler.New`, plus the API server's rule that `tolerationSeconds` requires
+`NoExecute`. AICR also rejects the `Lt` and `Gt` operators, which the API
+server accepts only behind a feature gate AICR cannot verify. Flags and config
+keys cannot express either.
 
 `--image-refs` writes the published digest through a mode-`0600` temporary
 file and an anchored same-directory rename. Its target may be absent or an
