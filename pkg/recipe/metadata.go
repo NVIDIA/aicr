@@ -315,6 +315,36 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 // relocation this function exists to prevent. A prior component absent from
 // the current recipe is never copied, so it is not validated.
 func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
+	return ApplyInheritedIdentityWithMode(refs, prior, InheritAll)
+}
+
+// InheritMode selects which deployment identity fields a prior artifact supplies.
+type InheritMode string
+
+const (
+	InheritAll       InheritMode = "all"
+	InheritNamespace InheritMode = "namespace"
+)
+
+// ParseInheritMode parses an explicit inheritance selection.
+func ParseInheritMode(value string) (InheritMode, error) {
+	mode := InheritMode(value)
+	switch mode {
+	case InheritAll, InheritNamespace:
+		return mode, nil
+	default:
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid inherit mode %q: must be all or namespace", value))
+	}
+}
+
+// ApplyInheritedIdentityWithMode preserves the selected identity fields and
+// retargets health checks to inherited namespaces. Unselected fields stay as
+// resolved. An invalid inherited value leaves refs unmodified.
+func ApplyInheritedIdentityWithMode(refs []ComponentRef, prior []ComponentRef, mode InheritMode) error {
+	if _, err := ParseInheritMode(string(mode)); err != nil {
+		return err
+	}
 	if len(prior) == 0 {
 		return nil
 	}
@@ -323,6 +353,9 @@ func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 	work := slices.Clone(refs)
 	pinned := make(map[string]ComponentRef, len(prior))
 	for _, p := range prior {
+		if mode == InheritNamespace {
+			p = ComponentRef{Name: p.Name, Namespace: p.Namespace}
+		}
 		pinned[p.Name] = p
 	}
 	for i := range work {

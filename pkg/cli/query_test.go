@@ -409,9 +409,9 @@ func TestRecipeAndQueryRejectRepeatedGKETCPXOInterfaces(t *testing.T) {
 }
 
 // priorRecipeFile writes a hydrated recipe naming one component at the
-// namespace a previous resolution installed it into. Only the namespace is
-// read back; the other fields are the minimum a hydrated recipe must carry to
-// pass the loader's coherence rules.
+// namespace a previous resolution installed it into. The source and version
+// fields also let tests distinguish full inheritance from namespace-only
+// inheritance while satisfying the loader's coherence rules.
 func priorRecipeFile(t *testing.T, path, component, namespace string) string {
 	t.Helper()
 	doc := fmt.Sprintf(`kind: RecipeResult
@@ -470,6 +470,8 @@ func TestQueryCmd_InheritFrom(t *testing.T) {
 	}{
 		{name: "criteria path"},
 		{name: "snapshot path", extra: []string{"--snapshot", snapFile}},
+		{name: "namespace criteria path", extra: []string{"--inherit=namespace"}},
+		{name: "namespace snapshot path", extra: []string{"--snapshot", snapFile, "--inherit=namespace"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -481,7 +483,10 @@ func TestQueryCmd_InheritFrom(t *testing.T) {
 
 			// Baseline first: the registry default has to differ from the
 			// inherited value, or the assertion below would hold either way.
-			base := runQueryValue(t, args...)
+			baseArgs := slices.DeleteFunc(slices.Clone(args), func(arg string) bool {
+				return strings.HasPrefix(arg, "--inherit=")
+			})
+			base := runQueryValue(t, baseArgs...)
 			if base == movedNamespace {
 				t.Fatalf("setup: %s already resolves to %q, so the test would assert nothing",
 					component, movedNamespace)
@@ -493,6 +498,59 @@ func TestQueryCmd_InheritFrom(t *testing.T) {
 					selector, got, movedNamespace, base)
 			}
 		})
+	}
+}
+
+func TestInheritanceSelectionCLIRejects(t *testing.T) {
+	commands := []struct {
+		name   string
+		newCmd func() *cli.Command
+		args   []string
+	}{
+		{"recipe", recipeCmd, []string{"recipe", "--service", "eks"}},
+		{"query", queryCmd, []string{"query", "--service", "eks", "--selector", "deploymentOrder"}},
+		{"mirror", mirrorListCmd, []string{"list", "--service", "eks"}},
+	}
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"namespace without source", []string{"--inherit=namespace"}, "requires --inherit-from"},
+		{"all without source", []string{"--inherit=all"}, "requires --inherit-from"},
+		{"invalid mode", []string{"--inherit-from=missing.yaml", "--inherit=namespaces"}, "invalid inherit mode"},
+		{"empty mode", []string{"--inherit-from=missing.yaml", "--inherit="}, "invalid inherit mode"},
+		{"repeated mode", []string{"--inherit=namespace", "--inherit=all"}, "flag --inherit can only be specified once"},
+	}
+	for _, command := range commands {
+		for _, tt := range tests {
+			t.Run(command.name+"/"+tt.name, func(t *testing.T) {
+				err := command.newCmd().Run(t.Context(), slices.Concat(command.args, tt.args))
+				if err == nil || !strings.Contains(err.Error(), tt.want) {
+					t.Fatalf("error = %v, want %q", err, tt.want)
+				}
+			})
+		}
+	}
+}
+
+func TestRecipeNamespaceInheritanceOutput(t *testing.T) {
+	dir := t.TempDir()
+	prior := priorRecipeFile(t, filepath.Join(dir, "prior.yaml"), "gpu-operator", "legacy-gpu-operator")
+	output := filepath.Join(dir, "recipe.yaml")
+	err := recipeCmd().Run(t.Context(), []string{"recipe", "--service", "eks", "--accelerator", "h100", "--intent", "training",
+		"--inherit-from", prior, "--inherit=namespace", "--output", output})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(doc, []byte("namespace: legacy-gpu-operator")) ||
+		bytes.Contains(doc, []byte("https://charts.invalid/prior")) {
+
+		t.Fatalf("recipe must inherit the namespace and retain the current source:\n%s", doc)
 	}
 }
 

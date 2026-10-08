@@ -2478,6 +2478,91 @@ func TestApplyInheritedIdentityRegistryFields(t *testing.T) {
 	}
 }
 
+func TestApplyInheritedNamespace(t *testing.T) {
+	tests := []struct {
+		name           string
+		kind           ComponentType
+		priorNamespace string
+		wantNamespace  string
+	}{
+		{"helm", ComponentTypeHelm, "legacy", "legacy"},
+		{"kustomize", ComponentTypeKustomize, "legacy", "legacy"},
+		{"empty prior namespace", ComponentTypeHelm, "", "current"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current := ComponentRef{Name: "component", Type: tt.kind, Namespace: "current",
+				Chart: "new-chart", Source: "https://new.example", Path: "deploy/new", Version: "2.0.0", Tag: "v2",
+				ManifestFiles: []string{"a.yaml", "new.yaml"}, PreManifestFiles: []string{"pre-new.yaml"},
+				ValuesFile: "values.yaml", Overrides: map[string]any{"fullnameOverride": "new-name"},
+				HealthCheckAsserts: "metadata:\n  namespace: current\n"}
+			refs := []ComponentRef{current, {Name: "new-component", Namespace: "new-namespace"}}
+			prior := []ComponentRef{{Name: "component", Namespace: tt.priorNamespace,
+				Chart: "old-chart", Source: "https://old.example", Path: "deploy/old", Version: "1.0.0", Tag: "v1",
+				ManifestFiles: []string{"a.yaml"}, PreManifestFiles: []string{"pre-old.yaml"},
+				Overrides: map[string]any{"fullnameOverride": "old-name"}},
+				{Name: "removed-component", Namespace: "removed-namespace"}}
+			if err := ApplyInheritedIdentityWithMode(refs, prior, InheritNamespace); err != nil {
+				t.Fatal(err)
+			}
+			want := current
+			want.Namespace = tt.wantNamespace
+			if refs[0].Namespace != want.Namespace || !strings.Contains(refs[0].HealthCheckAsserts, "namespace: "+want.Namespace) {
+				t.Fatalf("namespace and health check were not rebound: %+v", refs[0])
+			}
+			refs[0].HealthCheckAsserts = current.HealthCheckAsserts
+			if !reflect.DeepEqual(refs[0], want) {
+				t.Errorf("namespace-only inheritance changed other fields: got %+v, want %+v", refs[0], want)
+			}
+			if len(refs) != 2 || refs[1].Namespace != "new-namespace" {
+				t.Errorf("inheritance changed component membership or new component defaults: %+v", refs)
+			}
+		})
+	}
+}
+
+func TestApplyInheritedNamespaceValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        InheritMode
+		prior       ComponentRef
+		brokenCheck bool
+		wantErr     bool
+	}{
+		{name: "ignores unselected identity", mode: InheritNamespace,
+			prior: ComponentRef{Chart: "bad chart", Source: "bad source", Path: "../bad", ManifestFiles: []string{"../bad"}}},
+		{name: "rejects selected namespace", mode: InheritNamespace, prior: ComponentRef{Namespace: "bad namespace"}, wantErr: true},
+		{name: "rejects invalid mode", mode: "namespaces", wantErr: true},
+		{name: "rejects empty mode", wantErr: true},
+		{name: "rejects broken health check", mode: InheritNamespace, brokenCheck: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := []ComponentRef{{Name: "first", Namespace: "current"}, {Name: "second", Namespace: "current"}}
+			if tt.brokenCheck {
+				refs[1].HealthCheckAsserts = "[invalid"
+			}
+			before := slices.Clone(refs)
+			tt.prior.Name = "second"
+			if tt.prior.Namespace == "" {
+				tt.prior.Namespace = "legacy"
+			}
+			err := ApplyInheritedIdentityWithMode(refs,
+				[]ComponentRef{{Name: "first", Namespace: "legacy"}, tt.prior}, tt.mode)
+			if tt.wantErr {
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Fatalf("error = %v, want INVALID_REQUEST", err)
+				}
+				if !reflect.DeepEqual(refs, before) {
+					t.Fatal("failed inheritance partially mutated the recipe")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestApplyInheritedIdentityManifestFilesDoNotAlias(t *testing.T) {
 	prior := []ComponentRef{{Name: "c", ManifestFiles: []string{"a.yaml"}, PreManifestFiles: []string{"pre.yaml"}}}
 	refs := []ComponentRef{{Name: "c"}}
