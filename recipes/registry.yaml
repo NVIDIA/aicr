@@ -1092,6 +1092,8 @@ components:
       - cluster-readiness-engine
     healthCheck:
       assertFile: checks/nvcre/health-check.yaml
+    upgrades:
+      file: components/nvcre/upgrades.yaml
     # Chart ships LogProfile CRDs in crds/ and LogProfile CRs in templates/.
     # helm-diff on a fresh cluster fails ("no matches for kind LogProfile")
     # unless disableValidation is set. Same pattern as kai-scheduler.
@@ -1103,7 +1105,7 @@ components:
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: cluster-readiness-engine
       # renovate: datasource=docker depName=ghcr.io/nvidia/cluster-readiness-engine
-      defaultVersion: v0.2.0
+      defaultVersion: v0.6.0
       defaultNamespace: nvcre
     nodeScheduling:
       # tolerationPaths only: the Deployment template has no nodeSelector

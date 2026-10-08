@@ -124,6 +124,7 @@ Currently on disk:
 | eks | h100 | `eks/system-m7i.yaml` | `eks/p5-h100.yaml` |
 | eks | gb200 | `eks/system-m7i.yaml` | `eks/p6-gb200.yaml` |
 | eks | gb300 | `eks/system-m7i.yaml` | `eks/p6e-gb300.yaml` |
+| gke | gb300 | `gke/system-n2.yaml` | `gke/a4x-maxgpu-4g-metal.yaml` |
 | k0s | h200 | `k0s/system-generic.yaml` | `k0s/accelerated-h200.yaml` |
 | rke2 | vr200 | `rke2/system-generic.yaml` | `rke2/accelerated-vr200.yaml` |
 
