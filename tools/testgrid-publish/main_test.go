@@ -405,6 +405,7 @@ func TestValidateRunURL(t *testing.T) {
 		{"actions page", "https://github.com/NVIDIA/aicr/actions", true},
 		{"run job page", "https://github.com/NVIDIA/aicr/actions/runs/123/job/456", true},
 		{"query", "https://github.com/NVIDIA/aicr/actions/runs/123?x=1", true},
+		{"fragment", "https://github.com/NVIDIA/aicr/actions/runs/123#step:1:1", true},
 		{"percent-encoded path", "https://github.com/%4eVIDIA/aicr/actions/runs/123", true},
 		{"http", "http://github.com/NVIDIA/aicr/actions/runs/123", true},
 		{"other host", "https://evil.example/NVIDIA/aicr/actions/runs/123", true},
