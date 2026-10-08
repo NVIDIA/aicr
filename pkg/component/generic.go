@@ -199,7 +199,8 @@ func enrichConfigFromRegistry(cfg *ComponentConfig, provider recipe.DataProvider
 }
 
 // Deprecated: MakeBundle is unused in production code. Bundle generation
-// is now handled by DefaultBundler.Make with deployer generators.
+// is now handled by DefaultBundler.Make with deployer generators, which also
+// implements the shared-path toleration union this function lacks (#3135).
 // MakeBundle generates a bundle using the generic bundling logic.
 // This function handles the common steps: creating directories, applying overrides,
 // writing values.yaml, generating README, generating checksums, and finalizing.

@@ -228,6 +228,21 @@ func TestApplyTolerationsOverrides(t *testing.T) {
 			},
 		},
 		{
+			name:   "repeated toleration is written once",
+			values: make(map[string]any),
+			tolerations: []corev1.Toleration{
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+			},
+			paths: []string{"tolerations"},
+			verify: func(t *testing.T, values map[string]any) {
+				tols, _ := values["tolerations"].([]any)
+				if len(tols) != 1 {
+					t.Fatalf("expected 1 toleration, got %d (%v)", len(tols), tols)
+				}
+			},
+		},
+		{
 			name:        "empty tolerations is no-op",
 			values:      make(map[string]any),
 			tolerations: []corev1.Toleration{},
@@ -325,6 +340,55 @@ func TestAppendTolerationsOverrides(t *testing.T) {
 			},
 		},
 		{
+			name: "duplicate of an existing entry is not appended",
+			values: map[string]any{
+				"controller": map[string]any{
+					"tolerations": []any{
+						map[string]any{"key": "node-role.kubernetes.io/master", "operator": "Exists", "effect": "NoSchedule"},
+					},
+				},
+			},
+			tolerations: []corev1.Toleration{
+				{Key: "node-role.kubernetes.io/master", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+				{Key: "kwok.x-k8s.io/node", Operator: corev1.TolerationOpEqual, Value: "fake", Effect: corev1.TaintEffectNoSchedule},
+				{Key: "kwok.x-k8s.io/node", Operator: corev1.TolerationOpEqual, Value: "fake", Effect: corev1.TaintEffectNoSchedule},
+			},
+			paths: []string{"controller.tolerations"},
+			verify: func(t *testing.T, values map[string]any) {
+				got, _ := GetValueByPath(values, "controller.tolerations")
+				list, _ := got.([]any)
+				if len(list) != 2 {
+					t.Fatalf("expected 2 tolerations (existing + one new), got %d (%v)", len(list), list)
+				}
+				first, _ := list[0].(map[string]any)
+				second, _ := list[1].(map[string]any)
+				if first["key"] != "node-role.kubernetes.io/master" || second["key"] != "kwok.x-k8s.io/node" {
+					t.Errorf("order or content wrong: %v", list)
+				}
+			},
+		},
+		{
+			name: "existing map[any]any entry is recognised as a duplicate",
+			values: map[string]any{
+				"controller": map[string]any{
+					"tolerations": []any{
+						map[any]any{"key": "node-role.kubernetes.io/master", "operator": "Exists", "effect": "NoSchedule"},
+					},
+				},
+			},
+			tolerations: []corev1.Toleration{
+				{Key: "node-role.kubernetes.io/master", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+			},
+			paths: []string{"controller.tolerations"},
+			verify: func(t *testing.T, values map[string]any) {
+				got, _ := GetValueByPath(values, "controller.tolerations")
+				list, _ := got.([]any)
+				if len(list) != 1 {
+					t.Fatalf("expected the YAML-decoded entry to count as present, got %d (%v)", len(list), list)
+				}
+			},
+		},
+		{
 			name:        "empty tolerations slice is a no-op",
 			values:      map[string]any{"x": "untouched"},
 			tolerations: nil,
@@ -342,6 +406,24 @@ func TestAppendTolerationsOverrides(t *testing.T) {
 			AppendTolerationsOverrides(tt.values, tt.tolerations, tt.paths...)
 			tt.verify(t, tt.values)
 		})
+	}
+}
+
+func TestTolerationEntryKey(t *testing.T) {
+	seconds := int64(300)
+	fromSpec := TolerationsToPodSpec([]corev1.Toleration{
+		{Key: "k", Operator: corev1.TolerationOpEqual, Value: "v", Effect: corev1.TaintEffectNoExecute, TolerationSeconds: &seconds},
+	})[0]
+	fromYAML := map[any]any{"key": "k", "operator": "Equal", "value": "v", "effect": "NoExecute", "tolerationSeconds": float64(300)}
+
+	if a, b := tolerationEntryKey(fromSpec), tolerationEntryKey(fromYAML); a != b {
+		t.Errorf("map[string]any/int64 and map[any]any/float64 forms must share a key: %q vs %q", a, b)
+	}
+	if a, b := tolerationEntryKey(map[string]any{"key": "k"}), tolerationEntryKey(map[string]any{"key": "k", "effect": "NoSchedule"}); a == b {
+		t.Errorf("entries differing in effect must not share a key: %q", a)
+	}
+	if got := tolerationEntryKey("scalar"); got != "" {
+		t.Errorf("non-map entry key = %q, want empty", got)
 	}
 }
 
