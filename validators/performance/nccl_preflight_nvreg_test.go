@@ -948,9 +948,9 @@ func requireErrCode(t *testing.T, err error, want aicrErrors.ErrorCode) *aicrErr
 
 // preflightTestPod is a bare pod in the given phase, for seeding the fake
 // clientset that waitForPreflightPodPhase reads.
-func preflightTestPod(name string, phase corev1.PodPhase) *corev1.Pod {
+func preflightTestPod(phase corev1.PodPhase) *corev1.Pod {
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns"},
 		Status:     corev1.PodStatus{Phase: phase},
 	}
 }
@@ -1002,7 +1002,7 @@ func scriptPodGets(c *fake.Clientset, results ...podGetResult) {
 func TestWaitForPreflightPodPhaseFastPath(t *testing.T) {
 	for _, phase := range []corev1.PodPhase{corev1.PodSucceeded, corev1.PodFailed} {
 		t.Run(string(phase), func(t *testing.T) {
-			c := fake.NewClientset(preflightTestPod("p", phase))
+			c := fake.NewClientset(preflightTestPod(phase))
 			got, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", time.Second)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -1017,7 +1017,7 @@ func TestWaitForPreflightPodPhaseFastPath(t *testing.T) {
 // A terminal phase reached after the watch is established arrives as an event.
 // Non-pod objects on the channel are skipped rather than treated as a verdict.
 func TestWaitForPreflightPodPhaseWatchEvents(t *testing.T) {
-	running := preflightTestPod("p", corev1.PodRunning)
+	running := preflightTestPod(corev1.PodRunning)
 	tests := []struct {
 		name   string
 		events func(w *watch.FakeWatcher)
@@ -1027,25 +1027,25 @@ func TestWaitForPreflightPodPhaseWatchEvents(t *testing.T) {
 			"Succeeded via modify event",
 			func(w *watch.FakeWatcher) {
 				w.Modify(running)
-				w.Modify(preflightTestPod("p", corev1.PodSucceeded))
+				w.Modify(preflightTestPod(corev1.PodSucceeded))
 			},
 			corev1.PodSucceeded,
 		},
 		{
 			"Failed via modify event",
-			func(w *watch.FakeWatcher) { w.Modify(preflightTestPod("p", corev1.PodFailed)) },
+			func(w *watch.FakeWatcher) { w.Modify(preflightTestPod(corev1.PodFailed)) },
 			corev1.PodFailed,
 		},
 		{
 			"Succeeded via add event",
-			func(w *watch.FakeWatcher) { w.Add(preflightTestPod("p", corev1.PodSucceeded)) },
+			func(w *watch.FakeWatcher) { w.Add(preflightTestPod(corev1.PodSucceeded)) },
 			corev1.PodSucceeded,
 		},
 		{
 			"non-pod object is skipped",
 			func(w *watch.FakeWatcher) {
 				w.Modify(&corev1.Node{})
-				w.Modify(preflightTestPod("p", corev1.PodSucceeded))
+				w.Modify(preflightTestPod(corev1.PodSucceeded))
 			},
 			corev1.PodSucceeded,
 		},
@@ -1071,7 +1071,7 @@ func TestWaitForPreflightPodPhaseWatchEvents(t *testing.T) {
 func TestWaitForPreflightPodPhasePodNotYetVisible(t *testing.T) {
 	w := watch.NewFakeWithChanSize(1, false)
 	c := preflightWaitClient(t, nil, w)
-	w.Add(preflightTestPod("p", corev1.PodSucceeded))
+	w.Add(preflightTestPod(corev1.PodSucceeded))
 
 	got, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", 5*time.Second)
 	if err != nil {
@@ -1086,8 +1086,8 @@ func TestWaitForPreflightPodPhasePodNotYetVisible(t *testing.T) {
 // internal error, never a phase.
 func TestWaitForPreflightPodPhaseDeletedEventIsInternalError(t *testing.T) {
 	w := watch.NewFakeWithChanSize(1, false)
-	c := preflightWaitClient(t, preflightTestPod("p", corev1.PodRunning), w)
-	w.Delete(preflightTestPod("p", corev1.PodRunning))
+	c := preflightWaitClient(t, preflightTestPod(corev1.PodRunning), w)
+	w.Delete(preflightTestPod(corev1.PodRunning))
 
 	_, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", 5*time.Second)
 	se := requireErrCode(t, err, aicrErrors.ErrCodeInternal)
@@ -1099,7 +1099,7 @@ func TestWaitForPreflightPodPhaseDeletedEventIsInternalError(t *testing.T) {
 // A pod that never terminates is a timeout, and a timeout is the one retryable
 // outcome: IsTransient must see it.
 func TestWaitForPreflightPodPhaseTimesOut(t *testing.T) {
-	c := preflightWaitClient(t, preflightTestPod("p", corev1.PodRunning), watch.NewFake())
+	c := preflightWaitClient(t, preflightTestPod(corev1.PodRunning), watch.NewFake())
 
 	_, err := waitForPreflightPodPhase(context.Background(), c, "ns", "p", 20*time.Millisecond)
 	se := requireErrCode(t, err, aicrErrors.ErrCodeTimeout)
@@ -1115,7 +1115,7 @@ func TestWaitForPreflightPodPhaseTimesOut(t *testing.T) {
 // idle-connection reaping). The pod may have finished in that window, so the
 // wait re-Gets before failing, and classifies whatever the re-Get says.
 func TestWaitForPreflightPodPhaseWatchChannelClosed(t *testing.T) {
-	running := podGetResult{pod: preflightTestPod("p", corev1.PodRunning)}
+	running := podGetResult{pod: preflightTestPod(corev1.PodRunning)}
 	tests := []struct {
 		name      string
 		recheck   podGetResult
@@ -1125,12 +1125,12 @@ func TestWaitForPreflightPodPhaseWatchChannelClosed(t *testing.T) {
 	}{
 		{
 			name:      "re-Get finds Succeeded",
-			recheck:   podGetResult{pod: preflightTestPod("p", corev1.PodSucceeded)},
+			recheck:   podGetResult{pod: preflightTestPod(corev1.PodSucceeded)},
 			wantPhase: corev1.PodSucceeded,
 		},
 		{
 			name:      "re-Get finds Failed",
-			recheck:   podGetResult{pod: preflightTestPod("p", corev1.PodFailed)},
+			recheck:   podGetResult{pod: preflightTestPod(corev1.PodFailed)},
 			wantPhase: corev1.PodFailed,
 		},
 		{
@@ -1200,7 +1200,7 @@ func TestWaitForPreflightPodPhaseInfrastructureErrors(t *testing.T) {
 	})
 
 	t.Run("Get after Watch fails", func(t *testing.T) {
-		running := podGetResult{pod: preflightTestPod("p", corev1.PodRunning)}
+		running := podGetResult{pod: preflightTestPod(corev1.PodRunning)}
 		c := preflightWaitClient(t, nil, watch.NewFake())
 		scriptPodGets(c, running, podGetResult{err: stderrors.New("forbidden")})
 
@@ -1212,7 +1212,7 @@ func TestWaitForPreflightPodPhaseInfrastructureErrors(t *testing.T) {
 	})
 
 	t.Run("Watch fails", func(t *testing.T) {
-		c := fake.NewClientset(preflightTestPod("p", corev1.PodRunning))
+		c := fake.NewClientset(preflightTestPod(corev1.PodRunning))
 		c.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
 			return true, nil, stderrors.New("watch denied")
 		})
@@ -1249,7 +1249,13 @@ func TestCheckNVregOnNodeDeletesProbePod(t *testing.T) {
 	for _, phase := range []corev1.PodPhase{corev1.PodSucceeded, corev1.PodFailed} {
 		t.Run(string(phase), func(t *testing.T) {
 			c, _ := nvregProbeClient(t, phase)
-			_, _ = checkNVregOnNode(context.Background(), c, "ns", "n1")
+			_, probeErr := checkNVregOnNode(context.Background(), c, "ns", "n1")
+			if phase == corev1.PodFailed {
+				// A probe that never completed is an internal error, never a verdict.
+				requireErrCode(t, probeErr, aicrErrors.ErrCodeInternal)
+			} else if probeErr != nil {
+				t.Fatalf("unexpected error for %s probe: %v", phase, probeErr)
+			}
 
 			pods, err := c.CoreV1().Pods("ns").List(context.Background(), metav1.ListOptions{})
 			if err != nil {
@@ -1310,9 +1316,9 @@ func TestCheckNVregOnNodeHostPathIsTypeChecked(t *testing.T) {
 }
 
 // nvregProbeEvent builds the Warning event the kubelet raises against a pod.
-func nvregProbeEvent(name, pod, reason, message string) *corev1.Event {
+func nvregProbeEvent(pod, reason, message string) *corev1.Event {
 	return &corev1.Event{
-		ObjectMeta:     metav1.ObjectMeta{Name: name, Namespace: "ns"},
+		ObjectMeta:     metav1.ObjectMeta{Name: "e1", Namespace: "ns"},
 		InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: pod, Namespace: "ns"},
 		Type:           corev1.EventTypeWarning,
 		Reason:         reason,
@@ -1333,7 +1339,7 @@ func TestNvregProbeMountFailure(t *testing.T) {
 	}{
 		{
 			name:   "kubelet type-check failure is reported",
-			events: []*corev1.Event{nvregProbeEvent("e1", pod, "FailedMount", nvregTypeCheckMessage)},
+			events: []*corev1.Event{nvregProbeEvent(pod, "FailedMount", nvregTypeCheckMessage)},
 			want:   "hostPath type check failed",
 		},
 		{
@@ -1341,15 +1347,15 @@ func TestNvregProbeMountFailure(t *testing.T) {
 		},
 		{
 			name:   "another pod's failure is not attributed to this one",
-			events: []*corev1.Event{nvregProbeEvent("e1", "other-pod", "FailedMount", nvregTypeCheckMessage)},
+			events: []*corev1.Event{nvregProbeEvent("other-pod", "FailedMount", nvregTypeCheckMessage)},
 		},
 		{
 			name:   "unrelated warning is ignored",
-			events: []*corev1.Event{nvregProbeEvent("e1", pod, "FailedScheduling", "0/3 nodes are available")},
+			events: []*corev1.Event{nvregProbeEvent(pod, "FailedScheduling", "0/3 nodes are available")},
 		},
 		{
 			name:    "event read failure yields no claim",
-			events:  []*corev1.Event{nvregProbeEvent("e1", pod, "FailedMount", nvregTypeCheckMessage)},
+			events:  []*corev1.Event{nvregProbeEvent(pod, "FailedMount", nvregTypeCheckMessage)},
 			listErr: stderrors.New("events forbidden"),
 		},
 	}
@@ -1386,7 +1392,7 @@ func TestNvregProbeMountFailure(t *testing.T) {
 		c := fake.NewClientset()
 		long := nvregMountFailureMarker + strings.Repeat("x", 4*maxProbeErrorOutputBytes)
 		if _, err := c.CoreV1().Events("ns").Create(context.Background(),
-			nvregProbeEvent("e1", pod, "FailedMount", long), metav1.CreateOptions{}); err != nil {
+			nvregProbeEvent(pod, "FailedMount", long), metav1.CreateOptions{}); err != nil {
 			t.Fatalf("seed event: %v", err)
 		}
 		got := nvregProbeMountFailure(context.Background(), c, "ns", pod)
@@ -1421,7 +1427,7 @@ const nvregStalledPodName = preflightPodNamePrefix + "stamped"
 // cannot apply until a driver exists.
 func TestCheckNVregOnNodeDriverAbsentIsNamed(t *testing.T) {
 	err := runStalledNVregProbe(t,
-		nvregProbeEvent("e1", nvregStalledPodName, "FailedMount", nvregTypeCheckMessage))
+		nvregProbeEvent(nvregStalledPodName, "FailedMount", nvregTypeCheckMessage))
 
 	se := requireErrCode(t, err, aicrErrors.ErrCodeInvalidRequest)
 	msg := se.Error()
@@ -1451,10 +1457,10 @@ func TestCheckNVregOnNodeStallWithoutMountEventStaysTimeout(t *testing.T) {
 	for name, events := range map[string][]*corev1.Event{
 		"no events": nil,
 		"unrelated warning": {
-			nvregProbeEvent("e1", nvregStalledPodName, "FailedScheduling", "0/3 nodes are available"),
+			nvregProbeEvent(nvregStalledPodName, "FailedScheduling", "0/3 nodes are available"),
 		},
 		"mount failure on another pod": {
-			nvregProbeEvent("e1", "other-pod", "FailedMount", nvregTypeCheckMessage),
+			nvregProbeEvent("other-pod", "FailedMount", nvregTypeCheckMessage),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

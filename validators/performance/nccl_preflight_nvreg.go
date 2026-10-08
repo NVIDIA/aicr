@@ -473,7 +473,7 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 		if kubeletMsg := nvregProbeMountFailure(ctx, clientset, namespace, created.Name); kubeletMsg != "" {
 			return nvregResult{}, aicrErrors.NewWithContext(aicrErrors.ErrCodeInvalidRequest,
 				"NVIDIA driver is not loaded on node "+nodeName+" (kubelet: "+kubeletMsg+"). "+nvregDriverAbsentHint,
-				map[string]any{"node": nodeName, "pod": created.Name})
+				map[string]any{"node": nodeName})
 		}
 		return nvregResult{}, err
 	}
@@ -523,7 +523,7 @@ func nvregProbeMountFailure(ctx context.Context, clientset kubernetes.Interface,
 		return ""
 	}
 	for _, ev := range events.Items {
-		// Filter again client-side: not every apiserver or fake honours the
+		// Filter again client-side: not every apiserver or fake honors the
 		// field selector, and an event for another pod must never be attributed
 		// to this one.
 		if ev.InvolvedObject.Name != podName || !strings.Contains(ev.Message, nvregMountFailureMarker) {
