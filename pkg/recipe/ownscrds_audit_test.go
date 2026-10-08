@@ -40,10 +40,11 @@ import "testing"
 //
 // See https://github.com/NVIDIA/aicr/issues/2264.
 var auditedOwnsCRDs = map[string]string{
-	"gatekeeper": "3.22.2",
-	"k8s-aibom":  "1.5.1",
-	"nvcre":      "v0.6.0",
-	"nvsentinel": "v1.25.0",
+	"gatekeeper":     "3.22.2",
+	"k8s-aibom":      "1.5.1",
+	"nvcre":          "v0.6.0",
+	"nvsentinel":     "v1.25.0",
+	"psmdb-operator": "1.21.3",
 }
 
 func TestOwnsCRDsPinsMatchAuditedVersions(t *testing.T) {

@@ -53,9 +53,9 @@ transitions:
     reversibleNotes: >-
       helm rollback to the v1.22.0 revision restores the previous workloads.
       The v1.25.0 CRDs stay applied; their changes are cosmetic, so v1.22.0
-      runs against them unchanged. This rests on the CRD diff and on AICR
-      running no NVSentinel datastore; the rollback itself was not
-      exercised.
+      runs against them unchanged. This rests on the CRD diff and on the
+      v1.22.0 bundle running no NVSentinel datastore (the remediation steps
+      first ship with v1.25.0); the rollback itself was not exercised.
     stepsByDeployer:
       - deployers: [helmfile]
         steps:
@@ -89,7 +89,9 @@ transitions:
               Apply the v1.25.0 CRDs using the CRD-apply command under
               "Upgrade, uninstall, and troubleshooting" in
               docs/user/component-catalog.md, with
-              CHART=oci://ghcr.io/nvidia/nvsentinel and VERSION=v1.25.0.
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.25.0 and
+              EXCLUDE_SUBCHARTS=mongodb-store, so the Percona CRDs
+              psmdb-operator owns are left alone.
             reason: >-
               helmfile never updates CRDs for ownsCRDs components. The
               v1.25.0 changes are cosmetic (a description and a vr shortName

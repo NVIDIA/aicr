@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **49**
-- Unique images: **116**
+- Components: **51**
+- Unique images: **122**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -72,9 +72,11 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.25.0 | 6 |
+| nvsentinel-mongodb | helm | psmdb-db | 1.21.2 | 5 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
+| psmdb-operator | helm | psmdb-operator | 1.21.3 | 1 |
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
@@ -130,7 +132,7 @@ _No images extracted._
 
 ### dra-node-labeler
 
-- `docker.io/alpine/kubectl:1.37.1@sha256:7b4cc9a9ce0d064cedeb85550266c11f2b32f010ca299525518646261e4d955e`
+- `docker.io/alpine/kubectl:1.37.1@sha256:b57b3bd3cd9f4f02dd444281857126aa78efa4b7b7e6ec57579dd927bf146fc3`
 
 ### dranet
 
@@ -333,6 +335,14 @@ _No images extracted._
 - `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.25.0`
 - `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.25.0`
 
+### nvsentinel-mongodb
+
+- `docker.io/percona/fluentbit:4.0.1@sha256:dd584776ba987d77c5d1848ad98d31ae807c3781bc78b305ffc4088a4575fbae`
+- `docker.io/percona/mongodb_exporter:0.40.0@sha256:d66daa6aff0513860d1577cee3b55ab82fde43394f8319d7b4674411b9153cce`
+- `docker.io/percona/percona-backup-mongodb:2.11.0@sha256:4e3156800f08b8cfab8086cc41667a697afeb3166db242b3fe6317c8b2288da9`
+- `docker.io/percona/percona-server-mongodb:8.0.17-6@sha256:8698ffa8c0a3cb1902160e75599adb9d8b2e448e922a145fcf55915ef2fd556a`
+- `docker.io/percona/pmm-client:3.5.0@sha256:82b36789edc633ea97a0f2433dd9ef472e11811d1798de01fb700b78455059e1`
+
 ### prometheus-adapter
 
 - `registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.12.0`
@@ -344,6 +354,10 @@ _No images extracted._
 ### prometheus-operator-crds
 
 _No images extracted._
+
+### psmdb-operator
+
+- `docker.io/percona/percona-server-mongodb-operator:1.21.2@sha256:4f8be902b46ae8375e852aa37e384d0f68dcc9f00c0ebde0485d59d535b408d3`
 
 ### slinky-slurm
 
@@ -395,7 +409,7 @@ Air-gapped OpenShift deployments must separately mirror the relevant Red Hat cer
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
 
-**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Five known cases, none counted in the `nvsentinel` row's image count above. Four set a `global.*` toggle:
+**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Six known cases, none counted in the `nvsentinel` row's image count above. Four set a `global.*` toggle:
 
 - The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e`) to the `platform-connectors` DaemonSet and `labeler` Deployment. The chart's own default for this init container is `docker.io/bitnamilegacy/os-shell:12-debian-12-r30`, which sits in Bitnami's frozen archive and will never be patched; AICR overrides `global.initContainerImage` in `recipes/components/nvsentinel/values.yaml` to the same digest-pinned busybox it already ships in the `network-operator` and `gpu-operator` manifests.
 - The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.25.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
@@ -415,6 +429,22 @@ The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#pr
 
 `TestNVSentinelPreflightChartRender` pins all four against the rendered chart, so a bump that changes a repository fails there rather than silently diverging from this table.
 
+The three remediation mixins (see [Graded Remediation](component-catalog.md#graded-remediation)) are the sixth case. They turn on NVSentinel's remediation subcharts, so they add images rather than values. `nvsentinel-remediation`, the widest step, pulls all seven below; `nvsentinel-observe` pulls all but `janitor`, `janitor-provider`, `gpu-reset` and the reboot Job's busybox, and `nvsentinel-quarantine` additionally drops `fault-remediation`.
+
+| Image | Role |
+|---|---|
+| `ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.25.0` | cordons a node on a fatal fault |
+| `ghcr.io/nvidia/nvsentinel/node-drainer:v1.25.0` | drains a quarantined node |
+| `ghcr.io/nvidia/nvsentinel/fault-remediation:v1.25.0` | maps the fault to a repair action |
+| `ghcr.io/nvidia/nvsentinel/janitor:v1.25.0` | carries out the repair |
+| `ghcr.io/nvidia/nvsentinel/janitor-provider:v1.25.0` | creates the `generic` provider's reboot Job |
+| `ghcr.io/nvidia/nvsentinel/gpu-reset:v1.25.0` | GPU reset Job, named in janitor's ConfigMap rather than a pod spec |
+| `docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e` | the `generic` provider's reboot Job, passed to janitor-provider as an environment variable |
+
+Every step also adds the `psmdb-operator` and `nvsentinel-mongodb` components, NVSentinel's datastore. Their six Percona images are pinned in those components' values files, so the BOM above lists them; NVSentinel's datastore setup Job reuses `docker.io/percona/percona-server-mongodb` from that list. The six NVIDIA images and the six Percona images are in the weekly image scan and the mirror lane. `TestNVSentinelRemediationChartRender` pins each step's images against the rendered chart, and `TestNVSentinelMongoDBChartRender` pins the two Percona components to exactly their listed images.
+
+The `nvsentinel-remediation` mixin pins the reboot Job image through `janitor-provider.csp.generic.rebootImage`, replacing the chart's `public.ecr.aws/docker/library/busybox:1.37.0` with the busybox already in the scan. `aicr mirror` cannot discover it, because janitor-provider passes it as the `GENERIC_REBOOT_IMAGE` environment variable rather than an `image:` field; mirror it yourself unless another component in the recipe already pulls it.
+
 ### Registries spanned
 
 AICR pulls from a deliberately diverse set of registries:
@@ -427,7 +457,7 @@ AICR pulls from a deliberately diverse set of registries:
 - **Regional ECR** (`<account>.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons. The `aws-efa` entry above shows `us-west-2` because that is the in-tree default; deployments in other regions override `awsefa:image.repository` at bundle or install time. See [Regional registry overrides](../integrator/recipe-development.md#regional-registry-overrides) for the pattern.
 - **`gcr.io`, `gke.gcr.io`, `us-docker.pkg.dev`** — GCP/GKE add-ons (gke-nccl-tcpxo).
 - **`cr.agentgateway.dev`** — agentgateway (AI inference gateway).
-- **`docker.io`** — assorted upstream images (`busybox`, `pytorch`, etc.).
+- **`docker.io`** — assorted upstream images (`busybox`, `pytorch`, the Percona MongoDB images, etc.).
 
 Customers running in air-gapped or private-registry environments need to mirror every registry above. See the [air-gap mirroring guide](air-gap-mirror.md).
 

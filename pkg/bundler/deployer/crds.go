@@ -67,6 +67,27 @@ func ResolveCRDOwners(
 	return out, nil
 }
 
+// ResolveCRDExclusions returns, for each CRD owner in owners, the subcharts
+// whose CRDs it must not apply (recipe.ComponentConfig.OwnsCRDsExcludeSubcharts).
+// Owners without exclusions are omitted.
+func ResolveCRDExclusions(dp recipe.DataProvider, owners map[string]bool) (map[string][]string, error) {
+	registry, err := recipe.GetComponentRegistryFor(dp)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to resolve component registry for CRD exclusions")
+	}
+	out := make(map[string][]string)
+	for name, owns := range owners {
+		if !owns {
+			continue
+		}
+		if cfg := registry.Get(name); cfg != nil && len(cfg.OwnsCRDsExcludeSubcharts) > 0 {
+			out[name] = append([]string(nil), cfg.OwnsCRDsExcludeSubcharts...)
+		}
+	}
+	return out, nil
+}
+
 // UsesRegistryChart reports whether a ref still points at the exact chart the
 // registry pins for its component.
 //

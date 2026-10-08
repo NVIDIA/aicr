@@ -439,8 +439,13 @@ components:
           kernel; see docs/integrator/components/nodewright.md."
 
   - name: nvsentinel
-    # Sole owner of its CRDs and no webhook conversion (audited, #2264).
+    # Sole owner of its CRDs and no webhook conversion (audited, #2264),
+    # except the Percona CRDs its mongodb-store subchart embeds: those belong
+    # to psmdb-operator, and apply-crds would otherwise re-apply the embedded
+    # copy over them.
     ownsCRDs: true
+    ownsCRDsExcludeSubcharts:
+      - mongodb-store
     displayName: nvsentinel
     upgrades:
       file: components/nvsentinel/upgrades.yaml
@@ -468,8 +473,9 @@ components:
           - global.systemNodeTolerations
     # Opt-in surface for the nvsentinel-observability (#2617),
     # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610),
-    # nvsentinel-nic-health-monitor and nvsentinel-slurm-drain-monitor (#2611)
-    # mixins: the exact leaf paths a mixin may set on this
+    # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor (#2611),
+    # nvsentinel-observe, -quarantine and -remediation mixins: the exact leaf
+    # paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
     # recipe's own override, or an operator --set), never from a mixin, so
@@ -516,6 +522,37 @@ components:
       - slurm-drain-monitor.labelSelector
       - slurm-drain-monitor.processingStrategy
       - slurm-drain-monitor.patterns
+      - global.dryRun
+      - global.certificateRotationEnabled
+      - global.datastore.provider
+      - global.datastore.credentialsFromSecret.name
+      - global.datastore.connection.database
+      - global.datastore.tls.enabled
+      - global.datastore.auth.mechanism
+      - global.datastore.auth.clientCertSecretName
+      - global.datastore.auth.x509ApplicationUserDN
+      - global.datastore.auth.x509DgxcopsUserDN
+      - global.datastore.setupJob.image.repository
+      - global.datastore.setupJob.image.tag
+      - global.faultQuarantine.enabled
+      - global.nodeDrainer.enabled
+      - global.faultRemediation.enabled
+      - global.janitor.enabled
+      - global.janitorProvider.enabled
+      - gpu-health-monitor.processingStrategy
+      - syslog-health-monitor.processingStrategy
+      - fault-remediation.maxRemediationAttempts
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.apiGroup
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.version
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.kind
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.scope
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.completeConditionType
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.templateFileName
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.equivalenceGroup
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.impactedEntityScope
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.supersedingEquivalenceGroups
+      - fault-remediation.maintenance.templates.gpureset
+      - janitor-provider.csp.generic.rebootImage
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -594,6 +631,76 @@ components:
       # doesn't set global.slurmDrainMonitor.enabled.
       - function: CheckNVSentinelSlurmDrainMonitorRequiresSlinky
         severity: error
+      # Blocking: a remediation pipeline whose stages, datastore or GPU reset
+      # Job cannot work together. The rules are in the function's doc.
+      - function: CheckNVSentinelRemediationPipelineCoherent
+        severity: error
+
+  # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
+  # -quarantine and -remediation mixins. Bundled apart from NVSentinel's own
+  # mongodb-store subchart so AICR sets the Percona version and steps its
+  # upgrades one minor at a time.
+  - name: psmdb-operator
+    displayName: Percona Operator for MongoDB
+    # Sole owner of the psmdb.percona.com CRDs; none uses webhook conversion.
+    ownsCRDs: true
+    valueOverrideKeys:
+      - psmdboperator
+    healthCheck:
+      assertFile: checks/psmdb-operator/health-check.yaml
+    upgrades:
+      file: components/psmdb-operator/upgrades.yaml
+    helm:
+      defaultRepository: https://percona.github.io/percona-helm-charts/
+      defaultChart: psmdb-operator
+      # renovate: datasource=helm depName=psmdb-operator registryUrl=https://percona.github.io/percona-helm-charts/
+      defaultVersion: "1.21.3"
+      defaultNamespace: nvsentinel
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+
+  - name: nvsentinel-mongodb
+    displayName: NVSentinel MongoDB
+    valueOverrideKeys:
+      - nvsentinelmongodb
+    healthCheck:
+      assertFile: checks/nvsentinel-mongodb/health-check.yaml
+    helm:
+      defaultRepository: https://percona.github.io/percona-helm-charts/
+      defaultChart: psmdb-db
+      # renovate: datasource=helm depName=psmdb-db registryUrl=https://percona.github.io/percona-helm-charts/
+      defaultVersion: "1.21.2"
+      defaultNamespace: nvsentinel
+    manifestFiles:
+      - components/nvsentinel-mongodb/manifests/client-certificate.yaml
+      - components/nvsentinel-mongodb/manifests/connection.yaml
+    storageClassPaths:
+      - replsets.rs0.volumeSpec.pvc.storageClassName
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - replsets.rs0.nodeSelector
+        # Each member's PVC binds to the zone of the node it first lands
+        # on; an unpinned member on a GPU node strands its volume there.
+        requireNodeSelector: true
+        tolerationPaths:
+          - replsets.rs0.tolerations
+    validations:
+      # Blocking: a datastore NVSentinel cannot use or psmdb-operator cannot
+      # reconcile. The rules are in the function's doc.
+      - function: CheckNVSentinelMongoDBCoherent
+        severity: error
+      # Mixed-severity policy: a blocking error when the snapshot shows no
+      # default StorageClass for the classless volumes, another Percona
+      # operator or cluster whose CRDs psmdb-operator would replace, or
+      # evidence it could not read; a non-blocking warning when the recipe
+      # carries no snapshot evidence or only the psmdb.percona.com CRDs.
+      - function: CheckNVSentinelDatastorePrerequisites
+        severity: warning
 
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu

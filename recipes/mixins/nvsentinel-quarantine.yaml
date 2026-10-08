@@ -1,0 +1,151 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Opt-in mixin, step 2 of 3 of NVSentinel remediation: a node that reports a
+# fatal fault is cordoned, then node-drainer waits for its user pods
+# (non-DaemonSet, outside the chart's systemNamespaces) to finish. Nothing is
+# evicted: the chart default is AllowCompletion, so a node running
+# long-lived pods stays cordoned in state "draining" until they exit or an
+# operator runs kubectl uncordon; node-drainer.userNamespaces sets a
+# different mode per namespace. The node is not repaired; it stays cordoned
+# until a healthy event clears it or an operator does. No shipped recipe
+# composes it. See docs/user/component-catalog.md#graded-remediation.
+#
+# fault-remediation is deliberately off: without janitor nothing acts on the
+# repair requests it creates, yet it labels each node remediation-succeeded
+# as soon as it creates one.
+#
+# Mutually exclusive with nvsentinel-observe and nvsentinel-remediation.
+# Adds the same Percona datastore as nvsentinel-observe, with the same
+# prerequisites.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-quarantine
+spec:
+  componentRefs:
+    - name: nvsentinel
+      dependencyRefs:
+        - nvsentinel-mongodb
+      overrides:
+        # The GPU and syslog monitors are the event sources this step acts
+        # on. Pinned rather than left to the chart default, so a chart bump
+        # cannot silently stop or start node-mutating events.
+        gpu-health-monitor:
+          processingStrategy: EXECUTE_REMEDIATION
+        syslog-health-monitor:
+          processingStrategy: EXECUTE_REMEDIATION
+        global:
+          dryRun: false
+          # NVSentinel's datastore is the separately bundled Percona cluster
+          # below (nvsentinel-mongodb), reached as an external datastore with
+          # x509 client auth. The ops DN equals the app DN so the setup Job's
+          # user lookup finds the user the operator created.
+          certificateRotationEnabled: true
+          datastore:
+            provider: mongodb
+            credentialsFromSecret:
+              name: nvsentinel-mongodb-uri
+            connection:
+              database: HealthEventsDatabase
+            tls:
+              enabled: true
+            auth:
+              mechanism: x509
+              clientCertSecretName: nvsentinel-mongodb-app-client
+              x509ApplicationUserDN: "CN=mongo-user-client,OU=DGXC,O=Nvidia,L=SantaClara,ST=California,C=US"
+              x509DgxcopsUserDN: "CN=mongo-user-client,OU=DGXC,O=Nvidia,L=SantaClara,ST=California,C=US"
+            setupJob:
+              image:
+                repository: docker.io/percona/percona-server-mongodb
+                tag: "8.0.17-6@sha256:8698ffa8c0a3cb1902160e75599adb9d8b2e448e922a145fcf55915ef2fd556a"
+          faultQuarantine:
+            enabled: true
+          nodeDrainer:
+            enabled: true
+    - name: psmdb-operator
+      type: Helm
+      valuesFile: components/psmdb-operator/values.yaml
+    - name: nvsentinel-mongodb
+      type: Helm
+      valuesFile: components/nvsentinel-mongodb/values.yaml
+      dependencyRefs:
+        - psmdb-operator
+        - cert-manager
+      # The registry check plus every Deployment this step enables, all
+      # positive, so aicr validate fails when one is missing.
+      healthCheckAsserts: |
+        apiVersion: chainsaw.kyverno.io/v1alpha1
+        kind: Test
+        metadata:
+          name: nvsentinel-mongodb-quarantine-health
+        spec:
+          timeouts:
+            assert: 5m
+          steps:
+            - try:
+                - assert:
+                    resource:
+                      apiVersion: psmdb.percona.com/v1
+                      kind: PerconaServerMongoDB
+                      metadata:
+                        name: nvsentinel-mongodb
+                        namespace: nvsentinel
+                      status:
+                        state: ready
+                # readyReplicas is omitempty, hence the null-coalescing.
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: StatefulSet
+                      metadata:
+                        name: nvsentinel-mongodb-rs0
+                        namespace: nvsentinel
+                      (spec.replicas > `0` && (status.readyReplicas || `0`) == spec.replicas): true
+                - assert:
+                    resource:
+                      apiVersion: cert-manager.io/v1
+                      kind: Certificate
+                      metadata:
+                        name: nvsentinel-mongodb-app-client
+                        namespace: nvsentinel
+                      status:
+                        (conditions[?type == 'Ready' && status == 'True'] | length(@) > `0`): true
+                - assert:
+                    resource:
+                      apiVersion: v1
+                      kind: Secret
+                      metadata:
+                        name: nvsentinel-mongodb-uri
+                        namespace: nvsentinel
+                      (keys(data)[?@ == 'MONGODB_URI'] | length(@) == `1`): true
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: fault-quarantine
+                        namespace: nvsentinel
+                      status:
+                        (availableReplicas > `0`): true
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: node-drainer
+                        namespace: nvsentinel
+                      status:
+                        (availableReplicas > `0`): true

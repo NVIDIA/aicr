@@ -1,0 +1,100 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Written at pin 1.21.3, describing the next minor above it. from starts at
+# 1.21.0 because AICR has shipped no earlier Percona release. The <1.23.0
+# ceiling is Percona's one-minor-at-a-time rule: a jump over two minors lands
+# beyond it and is reported blocked. Transcribed from Percona's upgrade docs,
+# which remain the authoritative account.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: psmdb-operator
+transitions:
+  - from: ">=1.21.0 <1.22.0"
+    to: ">=1.22.0 <1.23.0"
+    verdict: manual
+    summary: >-
+      Percona moves the operator one minor at a time, CRDs before the operator.
+      The nvsentinel-mongodb cluster then rolls its members one at a time when
+      its crVersion and images move to the same minor, which AICR requires
+      (CheckNVSentinelMongoDBCoherent), so both components move in one bundle.
+    precondition: >-
+      The nvsentinel-mongodb cluster is healthy. Check with `kubectl get
+      perconaservermongodb nvsentinel-mongodb -n nvsentinel`; STATUS must be
+      ready.
+    reversible: false
+    affectedResources:
+      - group: psmdb.percona.com
+        kinds:
+          - PerconaServerMongoDB
+    stepsByDeployer:
+      - deployers: [helmfile]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              helm show crds psmdb-operator --repo
+              https://percona.github.io/percona-helm-charts/ --version <new> |
+              kubectl apply --server-side --force-conflicts -f -
+            reason: >-
+              helmfile upgrades through Helm, which never applies a changed
+              crds/ directory, and Percona requires the new CRDs before the new
+              operator.
+          - id: apply-bundle
+            description: >-
+              Run helmfile apply from a bundle generated at the new pins.
+            reason: >-
+              The bundle orders psmdb-operator before nvsentinel-mongodb, so
+              the operator is upgraded before the cluster's crVersion moves.
+          - id: verify
+            description: >-
+              kubectl get perconaservermongodb nvsentinel-mongodb -n
+              nvsentinel reports ready.
+            reason: >-
+              The members restart one at a time; ready means all three rejoined
+              on the new images.
+      - deployers: [helm]
+        steps:
+          - id: apply-bundle
+            description: >-
+              Run install.sh from a bundle generated at the new pins.
+            reason: >-
+              The bundle's apply-crds.sh applies the new CRDs before the
+              operator is upgraded, and psmdb-operator is installed before
+              nvsentinel-mongodb.
+          - id: verify
+            description: >-
+              kubectl get perconaservermongodb nvsentinel-mongodb -n
+              nvsentinel reports ready.
+            reason: >-
+              The members restart one at a time; ready means all three rejoined
+              on the new images.
+      - steps:
+          - id: reconcile
+            description: >-
+              Commit a bundle generated at the new pins, then reconcile or sync
+              it.
+            reason: >-
+              Flux and Argo CD apply the new CRDs themselves, and the bundle's
+              ordering upgrades psmdb-operator before nvsentinel-mongodb.
+          - id: verify
+            description: >-
+              kubectl get perconaservermongodb nvsentinel-mongodb -n
+              nvsentinel reports ready.
+            reason: >-
+              The members restart one at a time; ready means all three rejoined
+              on the new images.
+    references:
+      - https://github.com/percona/k8spsmdb-docs/blob/main/docs/update.md
+      - https://github.com/percona/k8spsmdb-docs/blob/main/docs/update-operator.md
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#graded-remediation
