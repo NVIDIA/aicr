@@ -31,7 +31,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// REST is one of the four surfaces ROADMAP §1 freezes at v1, and
+// REST is one of the four surfaces ROADMAP.md freezes at v1, and
 // api/aicr/v1/server.yaml is its declared contract. Until this file, nothing in
 // the tree read that spec for routing purposes: no workflow, no Makefile target,
 // and no tool validated it, diffed it, or checked it against the handlers. The
