@@ -147,12 +147,14 @@ compute:
             desired: 2
             reservation:
               preference: capacity-reservations-only
-              # Verified against EC2: p6e-gb300r.36xlarge in us-east-2a,
-              # matching the worker/pod subnet pin above. The reservation's
-              # total instance count is still unreconciled (the capacity
-              # ordering doc says 16, an NVL72 rack would be 18), but nothing
-              # here turns on it: the post-lease capacity assertion is
-              # TotalInstanceCount >= desired, and desired is 2.
+              # Verified against EC2 from this tenancy: p6e-gb300r.36xlarge in
+              # us-east-2a, matching the worker/pod subnet pin above, state
+              # active, InstanceMatchCriteria targeted, TotalInstanceCount 18
+              # (not the 16 the capacity ordering doc lists). The post-lease
+              # assertion in uat-aws.yaml is TotalInstanceCount >= desired, so
+              # it clears at desired: 2. It also asserts AvailableInstanceCount,
+              # which does vary: the reservation is RAM-shared and other
+              # consumers hold instances in it.
               #
               # No marketType: this is an ordinary ODCR, not a Capacity Block
               # (CapacityReservationType is null). It does carry an end date of

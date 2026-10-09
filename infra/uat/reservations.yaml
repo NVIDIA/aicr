@@ -177,12 +177,12 @@ reservations:
   # every prerequisite from the earlier GB200 bring-up: the GitHub OIDC
   # provider, github-actions-role-aicr, and its Terraform state bucket.
   #
-  # gpu-count is 4 because a p6e-gb300r.36xlarge carries 4 B300. It is a
-  # per-instance fact and does not depend on the size of the reservation, which
-  # is still unreconciled: the capacity ordering doc lists this reservation as
-  # 16 instances, while an NVL72 rack would be 18 (18 x 4 = 72 GPUs). Nothing
-  # here depends on the total — the two slots cap AICR at 4 instances either
-  # way — so reconcile it before planning node counts, not before merging.
+  # gpu-count is 4 because a p6e-gb300r.36xlarge carries 4 B300
+  # (describe-instance-types: GpuInfo B300 x 4, arm64, EFA-capable). The
+  # reservation holds 18 of them, so it is exactly one NVL72 rack
+  # (18 x 4 = 72 GPUs). The capacity ordering doc lists 16; that is the stale
+  # number — describe-capacity-reservations reports TotalInstanceCount 18.
+  # Nothing here depends on the total regardless: the two slots cap AICR at 4.
   - name: aws-gb300-1
     slug: ag3
     cloud: aws
