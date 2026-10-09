@@ -195,7 +195,7 @@ The contract is **8 keys**, in this order. The strings below are the canonical
 | 5 | `signer_issuer` | attestation | `https://token.actions.githubusercontent.com` | Signer OIDC issuer — pairs with identity to scope the latest-per-signer default. |
 | 6 | `source_class` | provenance | `ci` | Source class (e.g. `ci` vs. ad-hoc / local), so a reader can weigh trust. |
 | 7 | `evidence_digest` | evidence | `sha256:…` | Digest of the underlying evidence artifact — the verifiable anchor for the result. |
-| 8 | `aicr_run_url` | publisher input | `https://github.com/NVIDIA/aicr/actions/runs/…/attempts/1` | The GitHub Actions run (and attempt) that produced the bundle, rendered as the build's run link. Empty when the publisher was not given one (e.g. manual backfills). |
+| 8 | `aicr_run_url` | publisher input | `https://github.com/NVIDIA/aicr/actions/runs/…/attempts/1` | The GitHub Actions run (and attempt) the publisher reports for the bundle, rendered as the build's run link. Publisher-supplied and format-checked only, not verified against the signed evidence. Empty when none is supplied. |
 
 Notes:
 

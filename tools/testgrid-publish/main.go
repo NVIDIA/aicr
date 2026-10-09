@@ -49,7 +49,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -306,29 +305,22 @@ func run(ctx context.Context, cfg runConfig) error {
 	return nil
 }
 
-// runURLPath matches a GitHub Actions run, optionally pinned to one attempt.
-// Owner and repo need a non-dot character, so "." and ".." cannot pass.
-// Kept in step with the run_url check in .github/workflows/testgrid-publish.yml.
-var runURLPath = regexp.MustCompile(`^/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*/actions/runs/[0-9]+(/attempts/[0-9]+)?$`)
+// runURLPattern matches a GitHub Actions run URL, optionally pinned to one
+// attempt. Owner and repo need a non-dot character, so "." and ".." cannot
+// pass. It is matched against the raw value, which is what gets published,
+// and is the same pattern as the run_url check in
+// .github/workflows/testgrid-publish.yml.
+var runURLPattern = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*/actions/runs/[0-9]+(/attempts/[0-9]+)?$`)
 
 // validateRunURL accepts an empty value or a GitHub Actions run URL. The
 // value is published permanently as the build's run link, so anything else
 // (other schemes, hosts or GitHub pages) is rejected.
 func validateRunURL(raw string) error {
-	if raw == "" {
+	if raw == "" || runURLPattern.MatchString(raw) {
 		return nil
 	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "--run-url is not a valid URL", err)
-	}
-	if u.Scheme != "https" || u.Host != "github.com" || u.User != nil ||
-		u.RawQuery != "" || u.Fragment != "" || !runURLPath.MatchString(u.EscapedPath()) {
-
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"--run-url must be https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>]")
-	}
-	return nil
+	return errors.New(errors.ErrCodeInvalidRequest,
+		"--run-url must be https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>]")
 }
 
 // resultString returns "SUCCESS" or "FAILURE".

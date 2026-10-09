@@ -87,8 +87,10 @@ evidence:
   `bundle_ref` this ingest consumed, plus the calling UAT run's URL (with its
   attempt) as `run_url` so the TestGrid build links back to it. A direct
   dispatch of this workflow passes no `run_url`; when backfilling by hand,
-  pass the producing run's URL if known. Dispatch happens only for the
-  first-party UAT path (`bundle_ref` set) on `main` or a `release/*` ref. A feature-branch UAT or a
+  pass the producing run's URL if known, otherwise leave it empty. The link
+  is format-checked only, not verified against the bundle. Dispatch happens
+  only for the first-party UAT path (`bundle_ref` set) on `main` or a
+  `release/*` ref. A feature-branch UAT or a
   push-triggered community/partner ingest does not dispatch TestGrid
   automatically; an allowlisted external bundle can be backfilled manually.
 
