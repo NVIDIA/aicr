@@ -2550,7 +2550,7 @@ func TestApplyInheritedNamespaceValidation(t *testing.T) {
 			err := ApplyInheritedIdentityWithMode(refs,
 				[]ComponentRef{{Name: "first", Namespace: "legacy"}, tt.prior}, tt.mode)
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("error = %v, want INVALID_REQUEST", err)
 				}
 				if !reflect.DeepEqual(refs, before) {
