@@ -24,10 +24,13 @@
 #      forced a split subnet layout (control plane in region AZs, workers in
 #      the Local Zone, egress via a region NAT). This reservation is in
 #      us-east-2a, an ordinary AZ, so every subnet lives in a region AZ.
-#   2. NOT A CAPACITY BLOCK. describe-capacity-reservations reports
-#      CapacityReservationType null (an ordinary ODCR with an end date of
-#      2030-03-09), so there is no marketType: capacity-block here. Setting it
-#      would not match the reservation.
+#   2. A CAPACITY BLOCK, so marketType: capacity-block is required below.
+#      Read ReservationType, not CapacityReservationType: the latter is absent
+#      on this reservation, and reading it instead is what first led this file
+#      to call the reservation an ordinary ODCR and omit the market type. ASG
+#      rejects that with "The market type (purchasing) option is not valid",
+#      which names the field the launch template is missing rather than the
+#      reservation it cannot match.
 #
 # The account is the same as GB200's and already carries every prerequisite
 # from that bring-up: the GitHub OIDC provider, github-actions-role-aicr, and
@@ -162,11 +165,15 @@ compute:
               # it clears at desired: 2. It also asserts AvailableInstanceCount,
               # which does vary: the reservation is RAM-shared and other
               # consumers hold instances in it.
-              #
-              # No marketType: this is an ordinary ODCR, not a Capacity Block
-              # (CapacityReservationType is null). It does carry an end date of
-              # 2030-03-09 — far out, but it is not open-ended.
+              # It carries an end date of 2030-03-09 — far out, but it is not
+              # open-ended.
               target: cr-0a5fe73705830011a
+              # REQUIRED — ReservationType is capacity-block. Without it the
+              # launch template omits instance_market_options and
+              # CreateAutoScalingGroup fails; the GPU nodegroup is the first
+              # thing to touch the reservation, so this surfaces only after the
+              # control plane and system nodegroup are already up.
+              marketType: capacity-block
           labels:
             nodeGroup: gpu-worker
             dedicated: user-workload
