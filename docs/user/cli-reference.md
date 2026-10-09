@@ -1832,7 +1832,9 @@ Selector keys must be qualified names and values must be label values. A
 non-empty toleration key must be a qualified name, a toleration with an empty
 key must use `Exists`, an `Equal` value must be a label value, an `Exists`
 toleration takes no value, and the effect must be `NoSchedule`,
-`PreferNoSchedule`, or `NoExecute`. An invalid value fails the bundle with
+`PreferNoSchedule`, or `NoExecute`. The `*` wildcard is exempt from the effect
+rule, because it is a keyless `Exists` toleration with no effect that tolerates
+every taint. An invalid value fails the bundle with
 `INVALID_REQUEST` naming the flag or config key, so it never reaches
 `helm install`.
 
