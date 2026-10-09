@@ -81,6 +81,23 @@ runs:
     - name: Prep runner for Kind
       uses: ./.github/actions/prep-kind-runner
 
+    # Anonymous Docker Hub pulls are rate-limited per runner IP, a quota the
+    # shared runner pool exhausts (main red 2026-10-09 on aiperf-bench's
+    # python:3.13-slim FROM). BuildKit resolves docker.io FROM images through
+    # this mirror; plain `docker pull` still contacts Docker Hub, which is why
+    # cluster-create pulls its images from mirrors by name.
+    - name: Route Docker Hub pulls through mirror.gcr.io
+      shell: bash
+      run: |
+        set -euo pipefail
+        cfg=/etc/docker/daemon.json
+        current="$(sudo cat "${cfg}" 2>/dev/null || true)"
+        [[ -n ${current} ]] || current='{}'
+        jq '."registry-mirrors" = (((."registry-mirrors" // []) + ["https://mirror.gcr.io"]) | unique)' <<<"${current}" | sudo tee "${cfg}.new" >/dev/null
+        sudo mv "${cfg}.new" "${cfg}"
+        sudo systemctl restart docker
+        docker info --format '{{json .RegistryConfig.Mirrors}}'
+
     - name: Install E2E testing tools
       uses: ./.github/actions/install-e2e-tools
       with:
