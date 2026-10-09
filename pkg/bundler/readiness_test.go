@@ -185,19 +185,29 @@ func TestCollectComponentReadiness(t *testing.T) {
 		}
 	})
 
-	// An invalid system scheduling value is the user's input, not a
-	// readiness.yaml defect, so the error names where it came from.
+	// The error names the user's input as its source, not readiness.yaml. New
+	// rejects the value, and the gate rejects it again when New is bypassed.
 	t.Run("invalid system node scheduling names its source", func(t *testing.T) {
-		b, err := New(WithConfig(config.NewConfig(
+		cfg := config.NewConfig(
 			config.WithReadinessHooks(true),
 			config.WithDeployer(config.DeployerHelm),
 			config.WithSystemNodeTolerations([]corev1.Toleration{{
 				Key: "dedicated", Operator: corev1.TolerationOpExists, Value: "system",
 			}}),
-		)))
+		)
+		_, err := New(WithConfig(cfg))
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
+			t.Fatalf("New error = %v, want ErrCodeInvalidRequest", err)
+		}
+		if !strings.Contains(err.Error(), "WithSystemNodeTolerations") {
+			t.Errorf("New error does not name the option: %v", err)
+		}
+
+		b, err := New()
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
+		b.Config = cfg
 		_, err = b.collectComponentReadiness(context.Background(), rr)
 		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("collectComponentReadiness error = %v, want ErrCodeInvalidRequest", err)

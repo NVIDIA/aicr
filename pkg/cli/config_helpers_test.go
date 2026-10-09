@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -249,6 +250,18 @@ func TestResolveNodeSelector(t *testing.T) {
 			_, err := resolveNodeSelector(c, "sel", nil)
 			if err == nil {
 				t.Errorf("expected error for malformed selector")
+			}
+		})
+	})
+
+	t.Run("invalid label names the flag", func(t *testing.T) {
+		runWith(t, []cli.Flag{flag}, []string{"--sel", "bad key=v"}, func(c *cli.Command) {
+			_, err := resolveNodeSelector(c, "sel", nil)
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
+				t.Fatalf("err = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), "invalid --sel") {
+				t.Errorf("error %q must mention --sel", err.Error())
 			}
 		})
 	})
