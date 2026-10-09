@@ -45,6 +45,9 @@ KIND_NODE_IMAGE ?= $(shell yq -r '.testing.kind_node_image' .settings.yaml 2>/de
 # testing_tools.registry_image, an ECR Public mirror). Unset, ctlptl pulls
 # docker.io/library/registry:3 anonymously, which shared CI runners rate-limit.
 KIND_REGISTRY_IMAGE ?= $(shell yq -r '.testing_tools.registry_image' .settings.yaml 2>/dev/null)
+# The same image on Google's mirror (identical index digest), the fallback when
+# ECR Public sheds an anonymous pull.
+KIND_REGISTRY_MIRROR_IMAGE = $(patsubst public.ecr.aws/docker/%,mirror.gcr.io/%,$(KIND_REGISTRY_IMAGE))
 
 # Default target
 all: help
@@ -1095,6 +1098,14 @@ cluster-create: ## Creates local Kind cluster with registry
 	@docker image inspect "$(KIND_NODE_IMAGE)" >/dev/null 2>&1 || \
 		{ docker pull -q "mirror.gcr.io/$(KIND_NODE_IMAGE)" && docker tag "mirror.gcr.io/$(KIND_NODE_IMAGE)" "$(KIND_NODE_IMAGE)"; } || \
 		echo "Warning: mirror.gcr.io/$(KIND_NODE_IMAGE) unavailable; kind will pull from Docker Hub"
+	@# ctlptl drops its pull's progress stream, where the daemon reports mid-pull
+	@# failures such as a refused layer download, so those surface only as a
+	@# misleading "No such image" at container create. Pulling here keeps the
+	@# real error in the log and adds the mirror as a second source.
+	@docker image inspect "$(KIND_REGISTRY_IMAGE)" >/dev/null 2>&1 || \
+		docker pull -q "$(KIND_REGISTRY_IMAGE)" || \
+		{ echo "Warning: $(KIND_REGISTRY_IMAGE) pull failed; trying $(KIND_REGISTRY_MIRROR_IMAGE)"; \
+		  docker pull -q "$(KIND_REGISTRY_MIRROR_IMAGE)" && docker tag "$(KIND_REGISTRY_MIRROR_IMAGE)" "$(KIND_REGISTRY_IMAGE)"; }
 	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE), registry image: $(KIND_REGISTRY_IMAGE) (from .settings.yaml)"
 	img="$(KIND_NODE_IMAGE)" reg="$(KIND_REGISTRY_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img) | (select(.kind == "Registry")).image = strenv(reg)' $(CTLPTL_CONFIG_FILE) | ctlptl apply -f -
 	@echo "Waiting for nodes to be ready..."
