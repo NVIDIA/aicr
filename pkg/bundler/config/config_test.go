@@ -15,12 +15,12 @@
 package config
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -236,7 +236,7 @@ func TestConfigValidate(t *testing.T) {
 				}
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("Validate() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
@@ -276,7 +276,7 @@ func TestValidateTolerations(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ValidateTolerations() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if err != nil && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("ValidateTolerations() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})

@@ -245,7 +245,7 @@ func TestParseBundleConfig_InvalidScheduling(t *testing.T) {
 
 			target := "/v1/bundle?" + url.Values{tt.param: {tt.value}}.Encode()
 			_, err := ParseBundleConfig(httptest.NewRequest("POST", target, nil))
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("ParseBundleConfig() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.param) {

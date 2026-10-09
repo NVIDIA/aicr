@@ -196,7 +196,7 @@ func TestCollectComponentReadiness(t *testing.T) {
 			}}),
 		)
 		_, err := New(WithConfig(cfg))
-		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("New error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if !strings.Contains(err.Error(), "WithSystemNodeTolerations") {
