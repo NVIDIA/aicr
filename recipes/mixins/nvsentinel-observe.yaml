@@ -1,0 +1,192 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Opt-in mixin, step 1 of 3 of NVSentinel remediation: runs the whole
+# pipeline in dry-run. Fault events are stored and walked through
+# quarantine, drain and remediation; each stage logs what it would have done
+# and still labels and annotates the node, but nothing is cordoned, evicted
+# or repaired. As when live, the drain stage waits for the node's user pods
+# to finish, so it never completes while long-lived pods run. No shipped
+# recipe composes it. See docs/user/component-catalog.md#graded-remediation.
+#
+# The three steps are mutually exclusive: each sets the same toggles, so a
+# leaf composing two fails at recipe resolution. Move to
+# nvsentinel-quarantine by swapping the mixin name. Faults observed before
+# the switch are cancelled, because fault-quarantine reads their leftover
+# annotation on the uncordoned node as a manual uncordon.
+#
+# Adds psmdb-operator and nvsentinel-mongodb, a three-member Percona MongoDB
+# that NVSentinel uses as its datastore. Needs cert-manager, a default
+# StorageClass (three 8Gi volumes) and a bundle --system-node-selector; a
+# Percona operator already on the cluster is unsupported.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-observe
+spec:
+  componentRefs:
+    - name: nvsentinel
+      dependencyRefs:
+        - nvsentinel-mongodb
+      overrides:
+        # The GPU and syslog monitors are the event sources this step acts
+        # on. Pinned rather than left to the chart default, so a chart bump
+        # cannot silently stop or start node-mutating events.
+        gpu-health-monitor:
+          processingStrategy: EXECUTE_REMEDIATION
+        syslog-health-monitor:
+          processingStrategy: EXECUTE_REMEDIATION
+        global:
+          dryRun: true
+          # NVSentinel's datastore is the separately bundled Percona cluster
+          # below (nvsentinel-mongodb), reached as an external datastore with
+          # x509 client auth. The ops DN equals the app DN so the setup Job's
+          # user lookup finds the user the operator created.
+          certificateRotationEnabled: true
+          datastore:
+            provider: mongodb
+            credentialsFromSecret:
+              name: nvsentinel-mongodb-uri
+            connection:
+              database: HealthEventsDatabase
+            tls:
+              enabled: true
+            auth:
+              mechanism: x509
+              clientCertSecretName: nvsentinel-mongodb-app-client
+              x509ApplicationUserDN: "CN=mongo-user-client,OU=DGXC,O=Nvidia,L=SantaClara,ST=California,C=US"
+              x509DgxcopsUserDN: "CN=mongo-user-client,OU=DGXC,O=Nvidia,L=SantaClara,ST=California,C=US"
+            setupJob:
+              image:
+                repository: docker.io/percona/percona-server-mongodb
+                tag: "8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c"
+          faultQuarantine:
+            enabled: true
+          nodeDrainer:
+            enabled: true
+          faultRemediation:
+            enabled: true
+        # The chart maps COMPONENT_RESET to RebootNode, rebooting the whole
+        # node for a fault a GPU reset clears. This resets just that GPU, as
+        # upstream's values-remediation.yaml does; the template key drops the
+        # .yaml suffix because mixin keys may not contain a dot. The {{ }}
+        # placeholders are filled in by fault-remediation, not Helm.
+        fault-remediation:
+          maintenance:
+            actions:
+              COMPONENT_RESET:
+                apiGroup: "janitor.dgxc.nvidia.com"
+                version: "v1alpha1"
+                kind: "GPUReset"
+                scope: "Cluster"
+                completeConditionType: "Complete"
+                templateFileName: "gpureset"
+                equivalenceGroup: "reset"
+                impactedEntityScope: "GPU_UUID"
+                supersedingEquivalenceGroups: ["restart"]
+            templates:
+              gpureset: |
+                apiVersion: {{ .ApiGroup }}/{{ .Version }}
+                kind: GPUReset
+                metadata:
+                  name: maintenance-{{ .HealthEvent.NodeName }}-{{ .HealthEventID }}
+                spec:
+                  nodeName: {{ .HealthEvent.NodeName }}
+                  selector:
+                    uuids:
+                      - {{ .ImpactedEntityScopeValue }}
+    - name: psmdb-operator
+      type: Helm
+      valuesFile: components/psmdb-operator/values.yaml
+    - name: nvsentinel-mongodb
+      type: Helm
+      valuesFile: components/nvsentinel-mongodb/values.yaml
+      dependencyRefs:
+        - psmdb-operator
+        - cert-manager
+      # The registry check plus every Deployment this step enables, all
+      # positive, so aicr validate fails when one is missing.
+      healthCheckAsserts: |
+        apiVersion: chainsaw.kyverno.io/v1alpha1
+        kind: Test
+        metadata:
+          name: nvsentinel-mongodb-observe-health
+        spec:
+          timeouts:
+            assert: 5m
+          steps:
+            - try:
+                - assert:
+                    resource:
+                      apiVersion: psmdb.percona.com/v1
+                      kind: PerconaServerMongoDB
+                      metadata:
+                        name: nvsentinel-mongodb
+                        namespace: nvsentinel
+                      status:
+                        state: ready
+                # readyReplicas is omitempty, hence the null-coalescing.
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: StatefulSet
+                      metadata:
+                        name: nvsentinel-mongodb-rs0
+                        namespace: nvsentinel
+                      (spec.replicas > `0` && (status.readyReplicas || `0`) == spec.replicas): true
+                - assert:
+                    resource:
+                      apiVersion: cert-manager.io/v1
+                      kind: Certificate
+                      metadata:
+                        name: nvsentinel-mongodb-app-client
+                        namespace: nvsentinel
+                      status:
+                        (conditions[?type == 'Ready' && status == 'True'] | length(@) > `0`): true
+                - assert:
+                    resource:
+                      apiVersion: v1
+                      kind: Secret
+                      metadata:
+                        name: nvsentinel-mongodb-uri
+                        namespace: nvsentinel
+                      (keys(data)[?@ == 'MONGODB_URI'] | length(@) == `1`): true
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: fault-quarantine
+                        namespace: nvsentinel
+                      status:
+                        (availableReplicas > `0`): true
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: node-drainer
+                        namespace: nvsentinel
+                      status:
+                        (availableReplicas > `0`): true
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: fault-remediation
+                        namespace: nvsentinel
+                      status:
+                        (availableReplicas > `0`): true

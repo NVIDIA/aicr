@@ -959,7 +959,8 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// ours to clean up after the test completes.
 	recipeDeclaresTrainer := validators.RecipeDeclares(ctx, kubeflowTrainerComponent)
 	installedResources, err = ensureTrainerInstalled(ctx.Ctx, dynamicClient, ctx.Clientset,
-		ctx.Clientset.Discovery(), recipeDeclaresTrainer)
+		ctx.Clientset.Discovery(), recipeDeclaresTrainer,
+		func() (string, error) { return resolveTrainerVersion(ctx) })
 	if err != nil {
 		return "", err
 	}

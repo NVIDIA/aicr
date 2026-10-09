@@ -119,7 +119,15 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 					"hostPaths.driverInstallDir", "toolkit.enabled",
 				},
 				"nvidia-dra-driver-gpu": {"enabled", "nvidiaDriverRoot"},
-				"nvsentinel":            {"enabled", "labeler.assumeDriverInstalled"},
+				"nvsentinel": {
+					"enabled", "janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
+					"janitor.config.controllers.gpuReset.serviceManager.name",
+					"janitor.config.controllers.gpuReset.serviceManager.spec.apps",
+					"janitor.config.controllers.gpuReset.serviceManager.spec.namespace",
+					"janitor.config.controllers.gpuReset.serviceManager.spec.restoreTimeout",
+					"janitor.config.controllers.gpuReset.serviceManager.spec.teardownTimeout",
+					"labeler.assumeDriverInstalled",
+				},
 			}
 			for component, want := range wantOwned {
 				got := selected.OwnedPaths[component]

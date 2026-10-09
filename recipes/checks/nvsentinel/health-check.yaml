@@ -230,6 +230,177 @@ spec:
                 name: nic-health-monitor
                 namespace: nvsentinel
               ((status.observedGeneration || `0`) < metadata.generation): true
+    - name: validate-remediation-pipeline-rolled-out
+      try:
+        # The remediation workloads the nvsentinel-observe, -quarantine and
+        # -remediation mixins turn on; their datastore is checked by
+        # nvsentinel-mongodb's own health check. Negative form, as
+        # above: off in every shipped recipe, so each op passes on a 404 and
+        # fails only when the workload renders without a complete rollout.
+        # The status counters are omitempty, hence the `|| 0`.
+        # updatedReplicas catches pods still on the previous revision, and
+        # replicas above spec a Deployment whose old ReplicaSet has not
+        # scaled down.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: fault-quarantine
+                namespace: nvsentinel
+              ((status.readyReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: fault-quarantine
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: fault-quarantine
+                namespace: nvsentinel
+              ((status.replicas || `0`) > spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: fault-quarantine
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: node-drainer
+                namespace: nvsentinel
+              ((status.readyReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: node-drainer
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: node-drainer
+                namespace: nvsentinel
+              ((status.replicas || `0`) > spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: node-drainer
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: fault-remediation
+                namespace: nvsentinel
+              ((status.readyReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: fault-remediation
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: fault-remediation
+                namespace: nvsentinel
+              ((status.replicas || `0`) > spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: fault-remediation
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: janitor
+                namespace: nvsentinel
+              ((status.readyReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: janitor
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: janitor
+                namespace: nvsentinel
+              ((status.replicas || `0`) > spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: janitor
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: janitor-provider
+                namespace: nvsentinel
+              ((status.readyReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: janitor-provider
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: janitor-provider
+                namespace: nvsentinel
+              ((status.replicas || `0`) > spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: janitor-provider
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
     - name: validate-all-pods-healthy
       try:
         # Assert no pods are in unhealthy phases (Pending / Failed /

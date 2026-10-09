@@ -24,6 +24,10 @@ const (
 	versionV1beta1           = "v1beta1"
 	keyName                  = "name"
 	keyOperator              = "operator"
+	kindDeployment           = "Deployment"
+	kindService              = "Service"
+	kindValidatingWebhook    = "ValidatingWebhookConfiguration"
+	kindMutatingWebhook      = "MutatingWebhookConfiguration"
 	checkNameNCCLAllReduceBW = "nccl-all-reduce-bw"
 
 	// nodeJobName is the name of both the NCCL worker replicatedJob and its

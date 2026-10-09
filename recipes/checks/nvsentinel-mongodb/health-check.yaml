@@ -1,0 +1,82 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVSentinel's datastore and the pipeline it feeds. This component exists only
+# where a remediation step mixin is composed, so these are positive asserts:
+# a missing workload fails, unlike the negative form nvsentinel's own check
+# must use. fault-quarantine and node-drainer run in every step. Each step
+# mixin replaces this check inline with a copy that also asserts the rest of
+# the Deployments that step enables.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nvsentinel-mongodb-health
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - try:
+        - assert:
+            resource:
+              apiVersion: psmdb.percona.com/v1
+              kind: PerconaServerMongoDB
+              metadata:
+                name: nvsentinel-mongodb
+                namespace: nvsentinel
+              status:
+                state: ready
+        # readyReplicas is omitempty, hence the null-coalescing.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: StatefulSet
+              metadata:
+                name: nvsentinel-mongodb-rs0
+                namespace: nvsentinel
+              (spec.replicas > `0` && (status.readyReplicas || `0`) == spec.replicas): true
+        - assert:
+            resource:
+              apiVersion: cert-manager.io/v1
+              kind: Certificate
+              metadata:
+                name: nvsentinel-mongodb-app-client
+                namespace: nvsentinel
+              status:
+                (conditions[?type == 'Ready' && status == 'True'] | length(@) > `0`): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: nvsentinel-mongodb-uri
+                namespace: nvsentinel
+              (keys(data)[?@ == 'MONGODB_URI'] | length(@) == `1`): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: fault-quarantine
+                namespace: nvsentinel
+              status:
+                (availableReplicas > `0`): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: node-drainer
+                namespace: nvsentinel
+              status:
+                (availableReplicas > `0`): true
