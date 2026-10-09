@@ -19,7 +19,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **51**
+- Components: **52**
 - Unique images: **122**
 - Distinct registries: **11**
 
@@ -82,6 +82,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
 | slinky-topograph | helm | topograph/topograph | 1.0.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.6.0 | 0 |
+| topograph | helm | topograph/topograph | 1.0.0 | 1 |
 
 ## Version variants
 
@@ -383,6 +384,10 @@ _No images extracted._
 ### slurm-accounting-mariadb
 
 _No images extracted._
+
+### topograph
+
+- `ghcr.io/nvidia/topograph:v1.0.0`
 
 ### kube-prometheus-stack@83.7.0 (variant)
 

@@ -253,7 +253,7 @@ type AgentConfig struct {
 //   - Accelerator: GPU model identifier (h100/h200/b200/gb200/a100/l40/l40s/rtx-pro-6000).
 //   - Intent: workload intent (training/inference).
 //   - OS: worker-node OS (ubuntu/rhel/cos/amazonlinux/talos/ol).
-//   - Platform: framework overlay (dynamo/kubeflow/nim/runai/slurm).
+//   - Platform: framework overlay (dynamo/kubeflow/kueue/nim/runai/slurm).
 //   - Nodes: worker-node count hint (0 = unspecified).
 //
 // Empty string is the "unspecified" sentinel for every field except Nodes,
@@ -365,7 +365,7 @@ type RecipeRequest struct {
 	// Platform is the workload platform overlay. Mapped to
 	// CriteriaPlatform. Supported values are defined by
 	// pkg/recipe.GetCriteriaPlatformTypes — today "", "any", "dynamo",
-	// "kubeflow", "nim".
+	// "kubeflow", "kueue", "nim", "runai", "slurm".
 	Platform string
 
 	// Profile is an optional name=value configuration profile selection.
