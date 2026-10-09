@@ -122,7 +122,7 @@ componentRefs:
     type: Helm
     source: https://kubernetes-sigs.github.io/node-feature-discovery/charts
     version: 0.19.0
-    valuesFile: components/nfd/values.yaml
+    valuesFile: components/nfd/values-nvidia-nics-aks.yaml
     overrides:
       topologyUpdater:
         enable: true

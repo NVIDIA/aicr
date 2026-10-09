@@ -26,6 +26,40 @@ master:
 
 worker:
   enable: true
+  # Publish labels, not raw features. nfd-worker still discovers every
+  # feature and computes every label, including its own sources.custom
+  # rules, from the full set; noPublishFeatures only drops these keys from
+  # the NodeFeature object it writes. nfd-master caches one NodeFeature per
+  # node, and on a 1720-node GB300 cluster the raw features (about 334 KB per
+  # node, mostly kernel.config) pushed it past 4Gi (#3038).
+  #
+  # Only cluster-side NodeFeatureRule and NodeFeatureGroup objects read
+  # published features. kernel.loadedmodule stays published for the GPU
+  # Operator's opt-in nvidia-kernel-modules rule (gpuoperator
+  # nfd.nodefeaturerules). values-nvidia-nics*.yaml computes the Mellanox NIC
+  # label on the node; for one release network-operator's chart rule (and the
+  # AKS nfd-network-rule manifest) also produce it, so the label does not
+  # drop while workers roll, except under Flux on AKS
+  # (docs/user/component-catalog.md). TestNFDFeaturePublishingContract fails when a shipped
+  # rule other than those two transitional rules reads a stripped key; its
+  # chart-rule table must be re-checked when a chart that ships
+  # NodeFeatureRules is bumped.
+  config:
+    core:
+      noPublishFeatures:
+        - "cpu.*"
+        - "kernel.config"
+        - "kernel.enabledmodule"
+        - "kernel.kvm"
+        - "kernel.selinux"
+        - "kernel.version"
+        - "local.*"
+        - "memory.*"
+        - "network.*"
+        - "pci.*"
+        - "storage.*"
+        - "system.*"
+        - "usb.*"
 
 # Topology Updater disabled by default (enable via overlay override)
 topologyUpdater:

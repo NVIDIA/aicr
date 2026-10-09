@@ -306,9 +306,13 @@ gpu-operator installs, so a modprobe-gated readiness probe would deadlock the
 GPU-Operator-managed alternative profile below, where the driver only appears
 after gpu-operator deploys (and where the operator's driver pod loads
 `nvidia-peermem` itself, making the reloader a harmless no-op). It targets
-IB-capable nodes (the same `pci-15b3.present` NFD label as the
-NicClusterPolicy) and is removed together with the RDMA stack by the
-documented opt-out (`--set networkoperator:enabled=false`). See
+IB-capable nodes (the same `pci-15b3.present` label as the
+NicClusterPolicy, set by the nfd-worker rule in
+`components/nfd/values-nvidia-nics-aks.yaml` and, for one release, by the
+`nfd-network-rule` manifest) and is removed together with the RDMA stack by
+the documented opt-out (`--set networkoperator:enabled=false
+--set-json 'nfd:worker.config.sources.custom=[]'`; the second flag stops
+nfd-worker labeling nodes for a network-operator that is not installed). See
 [Azure's GPU driver guidance](https://azure.github.io/aks-rdma-infiniband/configurations/gpu-drivers).
 
 **Stub `nvidia-peermem` builds and the DMA-BUF path.** The reloader
@@ -727,6 +731,7 @@ disables `nodewright-customizations`, so no keyed toleration is required:
 ```shell
 aicr bundle -r recipe.yaml \
   --set networkoperator:enabled=false \
+  --set-json 'nfd:worker.config.sources.custom=[]' \
   --set gpuoperator:driver.rdma.useHostMofed=false \
   --set nodewrightcustomizations:enabled=false \
   -o ./bundles

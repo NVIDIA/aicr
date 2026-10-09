@@ -19,8 +19,10 @@
 # reconciles the full RDMA stack: MOFED driver, RDMA shared device plugin, and
 # DOCA telemetry service.
 #
-# nodeAffinity targets only IB-capable nodes (labeled by the nfd-network-rule
-# manifest), so DaemonSets are not scheduled on CPU-only nodes.
+# nodeAffinity targets only IB-capable nodes (labeled pci-15b3.present by the
+# nfd-worker rule in components/nfd/values-nvidia-nics-aks.yaml and, for one
+# release, the nfd-network-rule manifest), so DaemonSets are not scheduled on
+# CPU-only nodes.
 #
 # rdmaSharedDevicePlugin replaces the raw rdma-shared-dp-ds DaemonSet and
 # rdma-devices ConfigMap that were deployed manually on the working cluster.

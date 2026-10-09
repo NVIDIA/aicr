@@ -36,9 +36,10 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 spec:
-  # Fabric DaemonSets run only on Mellanox-NIC nodes (labeled by the chart's
-  # NodeFeatureRule); tolerations alone would let them land on untainted
-  # CPU-only nodes.
+  # Fabric DaemonSets run only on Mellanox-NIC nodes (labeled pci-15b3.present
+  # by the nfd-worker rule in components/nfd/values-nvidia-nics.yaml and, for
+  # one release, the chart's NodeFeatureRule); tolerations alone would let them
+  # land on untainted CPU-only nodes.
   nodeAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:
       nodeSelectorTerms:

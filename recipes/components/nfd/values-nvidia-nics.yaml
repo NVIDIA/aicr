@@ -1,0 +1,43 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# nfd-worker rule for recipes that ship network-operator. Labels nodes with an
+# NVIDIA networking NIC (PCI vendor 15b3, class 0200 Ethernet or 0207
+# InfiniBand) feature.node.kubernetes.io/pci-15b3.present=true, which the
+# NicClusterPolicy nodeAffinity and the deployment validator's RDMA readiness
+# gate select on.
+#
+# Port of network-operator's nvidia-nics-rules NodeFeatureRule (chart 26.4.1),
+# evaluated on the node because values.yaml stops publishing pci.device. For
+# one release the chart rule also stays enabled; it matches nothing once the
+# node's worker strips pci.*. Only overlays that add network-operator
+# reference this file: the GPU Operator validator waits for the
+# network-operator MOFED driver on any node with this label when GPUDirect
+# RDMA is on and useHostMofed is false.
+worker:
+  config:
+    sources:
+      custom:
+        - name: nvidia-nics
+          labels:
+            feature.node.kubernetes.io/pci-15b3.present: "true"
+          matchFeatures:
+            - feature: pci.device
+              matchExpressions:
+                vendor:
+                  op: In
+                  value: ["15b3"]
+                class:
+                  op: In
+                  value: ["0200", "0207"]

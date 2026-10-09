@@ -93,7 +93,7 @@ func TestRecipeDeclaresRDMAFabric(t *testing.T) {
 		{
 			name: "marker present among several manifests",
 			manifestFiles: []string{
-				"components/network-operator/manifests/nfd-network-rule.yaml",
+				"components/network-operator/manifests/talos-namespace.yaml",
 				"components/network-operator/manifests/nic-cluster-policy-aks.yaml",
 				"components/network-operator/manifests/nvidia-peermem-reloader.yaml",
 			},

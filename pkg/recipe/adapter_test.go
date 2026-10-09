@@ -598,7 +598,7 @@ func TestGetValuesForComponent_BuilderIntegration(t *testing.T) {
 
 func TestGetManifestContent(t *testing.T) {
 	t.Run("existing manifest", func(t *testing.T) {
-		content, err := GetManifestContent("components/network-operator/manifests/nfd-network-rule.yaml")
+		content, err := GetManifestContent("components/network-operator/manifests/talos-namespace.yaml")
 		if err != nil {
 			t.Fatalf("GetManifestContent() error = %v", err)
 		}
@@ -855,7 +855,7 @@ func TestGetManifestContentWithProvider(t *testing.T) {
 // preserving back-compat for callers that don't have a RecipeResult-bound
 // provider.
 func TestGetManifestContentWithProvider_NilFallback(t *testing.T) {
-	content, err := GetManifestContentWithProvider(nil, "components/network-operator/manifests/nfd-network-rule.yaml")
+	content, err := GetManifestContentWithProvider(nil, "components/network-operator/manifests/talos-namespace.yaml")
 	if err != nil {
 		t.Fatalf("GetManifestContentWithProvider(nil): %v", err)
 	}

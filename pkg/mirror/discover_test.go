@@ -1176,7 +1176,7 @@ func TestDiscover_RegistryFailureWithoutOverridesIsNotFatal(t *testing.T) {
 // (recipe.GetManifestContentWithContext treats a nil dp as embedded fallback).
 // We use a real embedded manifest path to keep the test hermetic.
 func TestDiscover_NilDataProviderFallsBackToEmbedded(t *testing.T) {
-	const embeddedManifest = "components/network-operator/manifests/nfd-network-rule.yaml"
+	const embeddedManifest = "components/network-operator/manifests/talos-namespace.yaml"
 
 	rec := &recipe.RecipeResult{
 		APIVersion: recipe.RecipeResultAPIVersion,

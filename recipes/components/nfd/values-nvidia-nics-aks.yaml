@@ -1,0 +1,40 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AKS variant of values-nvidia-nics.yaml. ND-series VMs expose the InfiniBand
+# NIC to the guest as an SR-IOV virtual function, 101c (ConnectX-6 VF) or 101e
+# (mlx5Gen VF). The class-based rule would also match the Mellanox Ethernet VFs
+# that Azure accelerated networking attaches, which is the broader match the
+# AKS recipe has always avoided.
+#
+# Port of components/network-operator/manifests/nfd-network-rule.yaml,
+# which stays for one release and matches nothing once the node's worker
+# strips pci.*.
+# Reference: https://github.com/Azure/aks-rdma-infiniband/blob/main/tests/setup-infra/network-operator-nfd.yaml
+worker:
+  config:
+    sources:
+      custom:
+        - name: nvidia-ib-vfs
+          labels:
+            feature.node.kubernetes.io/pci-15b3.present: "true"
+          matchFeatures:
+            - feature: pci.device
+              matchExpressions:
+                vendor:
+                  op: In
+                  value: ["15b3"]
+                device:
+                  op: In
+                  value: ["101c", "101e"]

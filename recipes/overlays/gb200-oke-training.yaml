@@ -74,6 +74,7 @@ spec:
 
     - name: nfd
       type: Helm
+      valuesFile: components/nfd/values-nvidia-nics.yaml
       overrides:
         topologyUpdater:
           enable: true
