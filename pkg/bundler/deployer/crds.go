@@ -43,28 +43,57 @@ func ResolveCRDOwners(
 	refs []recipe.ComponentRef,
 ) (map[string]bool, error) {
 
+	owners, _, err := ResolveCRDPolicy(ctx, dp, refs)
+	return owners, err
+}
+
+// ResolveCRDPolicy is ResolveCRDOwners plus, for each owner, the subcharts
+// whose CRDs it must not apply (recipe.ComponentConfig.OwnsCRDsExcludeSubcharts),
+// from the same registry round-trip. Owners without exclusions are omitted
+// from the second map.
+func ResolveCRDPolicy(
+	ctx context.Context,
+	dp recipe.DataProvider,
+	refs []recipe.ComponentRef,
+) (map[string]bool, map[string][]string, error) {
+
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeTimeout,
+		return nil, nil, errors.Wrap(errors.ErrCodeTimeout,
 			"context cancelled before resolving CRD upgrade policy", ctxErr)
 	}
 	registry, regErr := recipe.GetComponentRegistryFor(dp)
 	if regErr != nil {
-		return nil, errors.PropagateOrWrap(regErr, errors.ErrCodeInternal,
+		return nil, nil, errors.PropagateOrWrap(regErr, errors.ErrCodeInternal,
 			"failed to resolve component registry for CRD upgrade policy")
 	}
-	out := make(map[string]bool, len(refs))
+	owners := make(map[string]bool, len(refs))
 	for _, ref := range refs {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout,
+			return nil, nil, errors.Wrap(errors.ErrCodeTimeout,
 				"context cancelled while resolving CRD upgrade policy", ctxErr)
 		}
 		cfg := registry.Get(ref.Name)
 		if cfg == nil || !cfg.OwnsCRDs || !UsesRegistryChart(ref, cfg) {
 			continue
 		}
-		out[ref.Name] = true
+		owners[ref.Name] = true
 	}
-	return out, nil
+	return owners, crdExclusions(registry, owners), nil
+}
+
+// crdExclusions returns the registry's subchart exclusions for each true
+// entry in owners, copied so callers cannot mutate the registry.
+func crdExclusions(registry *recipe.ComponentRegistry, owners map[string]bool) map[string][]string {
+	out := make(map[string][]string)
+	for name, owns := range owners {
+		if !owns {
+			continue
+		}
+		if cfg := registry.Get(name); cfg != nil && len(cfg.OwnsCRDsExcludeSubcharts) > 0 {
+			out[name] = append([]string(nil), cfg.OwnsCRDsExcludeSubcharts...)
+		}
+	}
+	return out
 }
 
 // UsesRegistryChart reports whether a ref still points at the exact chart the

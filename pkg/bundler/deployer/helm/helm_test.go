@@ -2258,3 +2258,79 @@ func TestDeployScript_RemediationHintPreservesMergedKubeconfig(t *testing.T) {
 		t.Errorf("kubectl resolved KUBECONFIG %q (err %v), want %q", env, envErr, merged)
 	}
 }
+
+// TestGenerate_ApplyCRDsExcludeSubcharts pins the registry's
+// ownsCRDsExcludeSubcharts reaching the rendered apply-crds.sh: nvsentinel's
+// script must skip its mongodb-store subchart (psmdb-operator owns those
+// CRDs), while an owner without exclusions renders an empty array. Refs are
+// resolved from the registry so they always match the audited pin.
+func TestGenerate_ApplyCRDsExcludeSubcharts(t *testing.T) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+	resolve := func(name string) recipe.ComponentRef {
+		cfg := registry.Get(name)
+		if cfg == nil || !cfg.OwnsCRDs {
+			t.Fatalf("registry component %q missing or not ownsCRDs", name)
+		}
+		ref := recipe.ComponentRef{Name: name, Type: recipe.ComponentTypeHelm}
+		ref.ApplyRegistryDefaults(cfg)
+		if ref.Namespace == "" {
+			ref.Namespace = name
+		}
+		return ref
+	}
+
+	tests := []struct {
+		component string
+		wantLine  string
+	}{
+		{component: "nvsentinel", wantLine: "EXCLUDE_SUBCHARTS=('mongodb-store' )"},
+		{component: "k8s-aibom", wantLine: "EXCLUDE_SUBCHARTS=()"},
+	}
+
+	refs := make([]recipe.ComponentRef, 0, len(tests))
+	order := make([]string, 0, len(tests))
+	values := make(map[string]map[string]any, len(tests))
+	for _, tt := range tests {
+		refs = append(refs, resolve(tt.component))
+		order = append(order, tt.component)
+		values[tt.component] = map[string]any{}
+	}
+
+	outDir := t.TempDir()
+	g := &Generator{
+		RecipeResult: &recipe.RecipeResult{
+			Kind:            "RecipeResult",
+			APIVersion:      "aicr.run/v1",
+			Metadata:        recipe.RecipeResultMetadata{Version: "v0.1.0"},
+			ComponentRefs:   refs,
+			DeploymentOrder: order,
+		},
+		ComponentValues: values,
+		Version:         "v1.0.0",
+	}
+	if _, err := g.Generate(context.Background(), outDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.component, func(t *testing.T) {
+			matches, globErr := filepath.Glob(filepath.Join(outDir, "[0-9][0-9][0-9]-"+tt.component, "apply-crds.sh"))
+			if globErr != nil || len(matches) != 1 {
+				t.Fatalf("apply-crds.sh for %s: matches=%v err=%v", tt.component, matches, globErr)
+			}
+			script := readFile(t, matches[0])
+			var got []string
+			for _, line := range strings.Split(script, "\n") {
+				if strings.HasPrefix(line, "EXCLUDE_SUBCHARTS=") {
+					got = append(got, line)
+				}
+			}
+			if len(got) != 1 || got[0] != tt.wantLine {
+				t.Errorf("EXCLUDE_SUBCHARTS assignments = %q, want exactly [%q]", got, tt.wantLine)
+			}
+		})
+	}
+}
