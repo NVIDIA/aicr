@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -444,7 +446,7 @@ func TestDeleteTrainer_PersistentTransientFailureIsUnavailable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected persistent transient failure to surface, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeUnavailable {
 		t.Errorf("error code is not Unavailable: %v", err)
 	}
 }
@@ -469,7 +471,7 @@ func TestDeleteTrainer_DeterministicFailureIsInternal(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected forbidden delete to surface, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeInternal {
 		t.Errorf("error code is not Internal: %v", err)
 	}
 	if attempts != 1 {
@@ -494,7 +496,7 @@ func TestApplyTrainerResources_ClassifiesTransientCreateFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected create failure, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeUnavailable {
 		t.Errorf("error code is not Unavailable: %v", err)
 	}
 }

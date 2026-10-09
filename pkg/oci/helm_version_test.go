@@ -15,11 +15,12 @@
 package oci
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestHelmChartVersionFromTag(t *testing.T) {
@@ -113,7 +114,7 @@ func assertInvalidHelmVersionError(t *testing.T, err error) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 }

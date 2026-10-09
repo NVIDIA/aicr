@@ -26,6 +26,8 @@ import (
 	"time"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -256,7 +258,7 @@ func TestNormalizeManifestBuildError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := normalizeManifestBuildError(tt.ctx(t), helperTimeout)
-			if !stderrors.Is(got, apperrors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(got) != tt.wantCode {
 				t.Fatalf("normalizeManifestBuildError() = %v, want code %s", got, tt.wantCode)
 			}
 			if tt.wantSame && got.Error() != helperTimeout.Error() {
@@ -511,7 +513,7 @@ func TestProfileSegment(t *testing.T) {
 				t.Fatalf("ProfileSegment() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != apperrors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return

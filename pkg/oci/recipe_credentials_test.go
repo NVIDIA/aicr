@@ -16,7 +16,6 @@ package oci
 
 import (
 	"encoding/base64"
-	stderrors "errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +30,8 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestRemoteRecipeArtifactRepositoryUsesORASDockerCredentials(t *testing.T) {
@@ -111,7 +112,7 @@ func TestRemoteRecipeArtifactRepositoryRejectsMalformedDockerConfig(t *testing.T
 
 	_, err := newRemoteRecipeArtifactRepository(
 		t.Context(), "registry.example.test/aicr/recipes")
-	if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != apperrors.ErrCodeInvalidRequest {
 		t.Fatalf("newRemoteRecipeArtifactRepository() error = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -132,7 +133,7 @@ func TestRemoteRecipeArtifactRepositoryRejectsMalformedRegistryCredential(t *tes
 	remoteRepository := repository.(*remoteRecipeArtifactRepository)
 	authClient := remoteRepository.repository.Client.(*auth.Client)
 	_, err = authClient.Credential(t.Context(), "registry.example.test")
-	if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != apperrors.ErrCodeInvalidRequest {
 		t.Fatalf("Credential() error = %v, want ErrCodeInvalidRequest", err)
 	}
 }

@@ -16,7 +16,6 @@ package attestation
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +23,7 @@ import (
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func signableSignPointer() *Pointer {
@@ -65,7 +65,7 @@ func TestValidateSignablePointer(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("error code = %v, want %v", err, tt.wantCode)
 			}
 		})
@@ -105,7 +105,7 @@ func TestSignExisting_RejectsBadPointer(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error for %s", tt.name)
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("error code = %v, want %v", err, tt.wantCode)
 			}
 		})
@@ -131,7 +131,7 @@ func TestSignExisting_RejectsIncompleteDescriptor(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error for incomplete descriptor %+v", tt.desc)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -156,7 +156,7 @@ func TestSignExisting_CanceledContextSurfacesAbort(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeCanceled {
 		t.Errorf("expected ErrCodeCanceled, got %v", err)
 	}
 }
@@ -182,7 +182,7 @@ func TestSignExisting_RejectsPredicateTypeMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 		t.Errorf("expected ErrCodeConflict, got %v", err)
 	}
 }

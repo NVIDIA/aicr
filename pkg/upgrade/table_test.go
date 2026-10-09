@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // The report is compared byte for byte against a committed golden rather than
@@ -680,7 +682,7 @@ func TestWriteTableRejectsMalformedCalls(t *testing.T) {
 			if err == nil {
 				t.Fatal("WriteTable accepted a malformed call, want ErrCodeInvalidRequest")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -695,7 +697,7 @@ func TestWriteTablePropagatesWriteFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("WriteTable on a failing writer returned nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error = %v, want ErrCodeInternal", err)
 	}
 }
@@ -724,7 +726,7 @@ func TestWriteAtRiskRowsPropagatesWriteFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("writeAtRiskRows on a failing writer returned nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error = %v, want ErrCodeInternal", err)
 	}
 }

@@ -41,6 +41,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 type testRecipeArtifact struct {
@@ -379,7 +380,7 @@ func TestStageRecipeArtifactFailureClassificationAndCleanup(t *testing.T) {
 			_, err := stageRecipeArtifactWithDependencies(context.Background(), RecipePullOptions{
 				Repository: "ghcr.io/nvidia/aicr-recipes", Selector: "v1", TempDir: parent,
 			}, deps)
-			if !stderrors.Is(err, apperrors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("error = %v, want code %s", err, tt.wantCode)
 			}
 			if repository.resolveCalls != tt.wantCalls {
@@ -436,7 +437,7 @@ func TestStageRecipeArtifactContextBoundsAndCleanup(t *testing.T) {
 		_, err := stageRecipeArtifactWithDependencies(ctx, RecipePullOptions{
 			Repository: "ghcr.io/nvidia/aicr-recipes", Selector: "v1", TempDir: parent,
 		}, testRecipePullDependencies(&blockingResolveRepository{}))
-		if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeCanceled, "")) {
+		if errorstest.ReportedCode(err) != apperrors.ErrCodeCanceled {
 			t.Errorf("error = %v, want ErrCodeCanceled", err)
 		}
 		assertEmptyDirectory(t, parent)
@@ -452,7 +453,7 @@ func TestStageRecipeArtifactContextBoundsAndCleanup(t *testing.T) {
 		_, err := stageRecipeArtifactWithDependencies(context.Background(), RecipePullOptions{
 			Repository: "ghcr.io/nvidia/aicr-recipes", Selector: "v1", TempDir: parent,
 		}, deps)
-		if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeUnavailable, "")) {
+		if errorstest.ReportedCode(err) != apperrors.ErrCodeUnavailable {
 			t.Errorf("error = %v, want ErrCodeUnavailable", err)
 		}
 		if repository.calls != 2 {
@@ -537,7 +538,7 @@ func TestStageRecipeArtifactRejectsTamperingAndDigestMismatch(t *testing.T) {
 			_, err := stageRecipeArtifactWithDependencies(context.Background(), RecipePullOptions{
 				Repository: "ghcr.io/nvidia/aicr-recipes", Selector: tt.selector, TempDir: parent,
 			}, deps)
-			if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != apperrors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if entries, readErr := os.ReadDir(parent); readErr != nil || len(entries) != 0 {
@@ -699,22 +700,22 @@ func TestRecipePullPublicAndGuardPaths(t *testing.T) {
 		t.Errorf("nil Close() error = %v", err)
 	}
 	_, nilMaterializeErr := nilArtifact.Materialize(context.Background())
-	if !stderrors.Is(nilMaterializeErr, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(nilMaterializeErr) != apperrors.ErrCodeInvalidRequest {
 		t.Errorf("nil Materialize() error = %v, want ErrCodeInvalidRequest", nilMaterializeErr)
 	}
 	_, stageErr := StageRecipeArtifact(context.Background(), RecipePullOptions{})
-	if !stderrors.Is(stageErr, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(stageErr) != apperrors.ErrCodeInvalidRequest {
 		t.Errorf("StageRecipeArtifact() error = %v, want ErrCodeInvalidRequest", stageErr)
 	}
 
 	closed := &StagedRecipeArtifact{closed: true}
 	_, closedMaterializeErr := closed.Materialize(context.Background())
-	if !stderrors.Is(closedMaterializeErr, apperrors.New(apperrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(closedMaterializeErr) != apperrors.ErrCodeUnavailable {
 		t.Errorf("closed Materialize() error = %v, want ErrCodeUnavailable", closedMaterializeErr)
 	}
 	incomplete := &StagedRecipeArtifact{authorization: recipeMaterializationDigestAuthorized}
 	_, incompleteMaterializeErr := incomplete.Materialize(context.Background())
-	if !stderrors.Is(incompleteMaterializeErr, apperrors.New(apperrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(incompleteMaterializeErr) != apperrors.ErrCodeInternal {
 		t.Errorf("incomplete Materialize() error = %v, want ErrCodeInternal", incompleteMaterializeErr)
 	}
 	already := &StagedRecipeArtifact{
@@ -752,7 +753,7 @@ func TestRecipePullPublicAndGuardPaths(t *testing.T) {
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	backoffErr := waitRecipePullBackoff(canceled, time.Hour)
-	if !stderrors.Is(backoffErr, apperrors.New(apperrors.ErrCodeCanceled, "")) {
+	if errorstest.ReportedCode(backoffErr) != apperrors.ErrCodeCanceled {
 		t.Errorf("canceled backoff error = %v, want ErrCodeCanceled", backoffErr)
 	}
 	if err := waitRecipePullBackoff(context.Background(), 0); err != nil {
@@ -842,7 +843,7 @@ func TestValidateRecipeManifestRejectsUnsupportedShapes(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = validateRecipeManifest(data)
-			if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != apperrors.ErrCodeInvalidRequest {
 				t.Errorf("validateRecipeManifest() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -908,7 +909,7 @@ func TestExtractRecipeArchiveSafetyAndLimits(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("extractRecipeArchive() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != apperrors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !tt.wantErr {
@@ -993,7 +994,7 @@ func TestStagedRecipeArtifactMaterializeFailureCleansAndCanRetry(t *testing.T) {
 
 	staged.extract = recipeExtractLimits{maxTotal: 1, maxFile: 10, maxFiles: 2}
 	_, firstErr := staged.Materialize(context.Background())
-	if !stderrors.Is(firstErr, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(firstErr) != apperrors.ErrCodeInvalidRequest {
 		t.Fatalf("first Materialize() error = %v, want ErrCodeInvalidRequest", firstErr)
 	}
 	assertNoMaterializedChildren(t, staged.layout.Path())
@@ -1056,7 +1057,7 @@ func TestStagedRecipeArtifactCloseCoordinatesWithMaterialize(t *testing.T) {
 		t.Fatalf("second Close() error = %v", err)
 	}
 	_, postCloseErr := staged.Materialize(context.Background())
-	if !stderrors.Is(postCloseErr, apperrors.New(apperrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(postCloseErr) != apperrors.ErrCodeUnavailable {
 		t.Errorf("post-close Materialize() error = %v, want ErrCodeUnavailable", postCloseErr)
 	}
 	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {

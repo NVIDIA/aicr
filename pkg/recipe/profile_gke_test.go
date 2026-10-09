@@ -16,7 +16,6 @@ package recipe
 
 import (
 	"context"
-	stderrors "errors"
 	"maps"
 	"slices"
 	"strings"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func gkeCriteria() *Criteria {
@@ -289,7 +289,7 @@ func TestGKEGpuStackClosureLockRejectsPolicyDivergence(t *testing.T) {
 			allocpolicy.ComponentDRADriver: {allocpolicy.PathDRAGPUsEnabled},
 		}
 		err := result.ValidateProfileLock(ctx, result.ComponentRefs, hydrate(t), dynamic)
-		if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("ValidateProfileLock() error = %v, want install-time mutability rejection", err)
 		}
 	})
@@ -371,7 +371,7 @@ func TestCoherenceGateRejectsExternalWithDevicePluginEnabled(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "devicePlugin.enabled=true") {
 		t.Fatalf("PrepareAndValidateWithContext() error = %v, want dual-advertisement rejection", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -454,7 +454,7 @@ func TestCoherenceGateRejectsBundleInstallerIncoherentTuples(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
 				t.Fatalf("PrepareAndValidateWithContext() error = %v, want %q rejection", err, tt.wantMsg)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -500,7 +500,7 @@ func TestCoherenceGateRejectsAbsentDRAGPUsEnabled(t *testing.T) {
 		t.Fatalf("PrepareAndValidateWithContext() error = %v, want absent-switch rejection at %s",
 			err, allocpolicy.PathDRAGPUsEnabled)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }

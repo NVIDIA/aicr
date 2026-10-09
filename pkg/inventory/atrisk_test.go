@@ -37,6 +37,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
@@ -344,7 +345,7 @@ func TestScanAtRiskFailsOnADiscoveryOutage(t *testing.T) {
 			if err == nil {
 				t.Fatal("scanAtRisk reported success on a discovery failure")
 			}
-			if !stderrors.Is(err, errors.New(tt.code, "")) {
+			if errorstest.ReportedCode(err) != tt.code {
 				t.Errorf("error = %v, want %s", err, tt.code)
 			}
 			if !strings.Contains(err.Error(), kindDescription(tt.kind)) {
@@ -430,7 +431,7 @@ func TestScanAtRiskRefusesAbsenceDiscoveryCannotEstablish(t *testing.T) {
 			if err == nil {
 				t.Fatalf("scanAtRisk() = %#v, want an error rather than the kind reported absent", got)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 				t.Errorf("error = %v, want %s", err, errors.ErrCodeUnavailable)
 			}
 			for _, want := range tt.wantContain {
@@ -493,7 +494,7 @@ func TestScanAtRiskFailsOnAListDenial(t *testing.T) {
 	if err == nil {
 		t.Fatal("scanAtRisk reported success on a forbidden List")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 		t.Errorf("error = %v, want ErrCodeUnavailable", err)
 	}
 }
@@ -588,7 +589,7 @@ func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 		if err == nil {
 			t.Fatal("scanAtRisk followed a repeated continue token without failing")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Errorf("error = %v, want ErrCodeInternal", err)
 		}
 	})
@@ -647,7 +648,7 @@ func TestScanAtRiskHonorsCancellation(t *testing.T) {
 			if err == nil {
 				t.Fatal("scanAtRisk on an ended context returned no error")
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("error = %v, want %s", err, tt.wantCode)
 			}
 			if !strings.Contains(err.Error(), tt.wantMessage) {
@@ -690,7 +691,7 @@ func TestScanAtRiskClassifiesAnAbortMidList(t *testing.T) {
 			if err == nil {
 				t.Fatal("scanAtRisk reported success on an aborted List")
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("error = %v, want %s", err, tt.wantCode)
 			}
 		})
@@ -706,7 +707,7 @@ func TestScanAtRiskRejectsAnEmptyKind(t *testing.T) {
 	if err == nil {
 		t.Fatal("scanAtRisk accepted a kind with no name")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -725,7 +726,7 @@ func TestScanAtRiskRejectsAnEmptyKindBeforeDialing(t *testing.T) {
 	if err == nil {
 		t.Fatal("ScanAtRisk accepted a kind with no name")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "no kind") {

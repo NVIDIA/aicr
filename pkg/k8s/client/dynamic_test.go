@@ -15,12 +15,12 @@
 package client
 
 import (
-	stderrors "errors"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"k8s.io/client-go/rest"
 )
 
@@ -78,7 +78,7 @@ func TestNewDynamicClientForConfig(t *testing.T) {
 		if got != nil {
 			t.Errorf("client = %v, want nil on error", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -112,7 +112,7 @@ func TestNewRESTMapperForConfig(t *testing.T) {
 		if got != nil {
 			t.Errorf("mapper = %v, want nil on error", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 		}
 	})

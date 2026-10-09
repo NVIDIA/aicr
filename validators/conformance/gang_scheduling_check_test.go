@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/validators"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -273,7 +275,7 @@ func TestWaitForGangTestPodsFailsClosedOnTerminalRead(t *testing.T) {
 			}
 			// Assert the code, not just non-nil: a terminal error accidentally
 			// routed through the retry path would otherwise burn the poll budget.
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 				t.Errorf("%s should classify as ErrCodeInternal, got %v", tt.name, err)
 			}
 		})
@@ -297,7 +299,7 @@ func TestWaitForGangTestPodsNotFoundIsTerminal(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected NotFound to fail the check, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("want ErrCodeNotFound, got %v", err)
 	}
 	var structuredErr *errors.StructuredError
@@ -378,7 +380,7 @@ func TestWaitForDeploymentAvailableRecoveredReadNotReportedAsUnreadable(t *testi
 	if err == nil {
 		t.Fatal("expected a timeout error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("want ErrCodeNotFound after a recovered blip, got %v", err)
 	}
 	if strings.Contains(err.Error(), "kept failing") {
@@ -417,7 +419,7 @@ func TestWaitForGangTestPodsRecoveredReadNotReportedAsUnreadable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a timeout error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("want ErrCodeTimeout after a recovered blip, got %v", err)
 	}
 	if strings.Contains(err.Error(), "kept failing") {
@@ -497,7 +499,7 @@ func TestWaitForGangTestPodsParentCanceledDuringRead(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected cancellation error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("want ErrCodeTimeout for caller cancellation, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "canceled") {

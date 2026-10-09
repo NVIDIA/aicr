@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func assertKubeconfigErrorContext(t *testing.T, err error, wantKubeconfig string) {
@@ -97,7 +99,7 @@ func TestBuildKubeClient_PathResolution(t *testing.T) {
 					t.Errorf("BuildKubeClient() error = %v, want error containing %q", err, tt.errorContains)
 				}
 			}
-			if err != nil && tt.wantCode != "" && !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if err != nil && tt.wantCode != "" && errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("BuildKubeClient() error = %v, want code %s", err, tt.wantCode)
 			}
 			if err != nil && tt.wantKubeconfig != "" {
@@ -148,7 +150,7 @@ func TestBuildKubeClient_ExplicitPath(t *testing.T) {
 	if !strings.Contains(err.Error(), "failed to build kube config") {
 		t.Errorf("BuildKubeClient() error = %v, want error containing 'failed to build kube config'", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("BuildKubeClient() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	assertKubeconfigErrorContext(t, err, invalidConfig)
@@ -185,7 +187,7 @@ users:
 	if err == nil {
 		t.Fatal("BuildKubeClient() error = nil, want invalid request")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("BuildKubeClient() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "failed to create kubernetes client from kubeconfig") {
@@ -554,7 +556,7 @@ func TestBuildKubeClient_MultiFileKUBECONFIGErrorsAreCallerInput(t *testing.T) {
 	if err == nil {
 		t.Fatal("BuildKubeClient() error = nil, want a rejection for an unparsable kubeconfig in the merge")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("BuildKubeClient() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "multi-file KUBECONFIG") {
