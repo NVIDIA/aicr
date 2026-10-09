@@ -1387,7 +1387,8 @@ CI. `nvsentinel` excludes the Percona CRDs its `mongodb-store` subchart embeds
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the
 `helm` and `helmfile` deployers install releases by name, and a release the new
-bundle no longer mentions is simply left alone. Skipping the explicit uninstall
+bundle no longer mentions is simply left alone. Fleet in `gitrepo` mode is the
+exception, and step 2 relies on it. Skipping the explicit uninstall
 leaves the controller running while the next step deletes the CRs and CRDs
 underneath it, so it reconciles against resources that are disappearing.
 
@@ -1402,7 +1403,30 @@ underneath it, so it reconciles against resources that are disappearing.
    ```
 
    For Argo CD, delete the owning `Application`; for Flux, the `HelmRelease`.
-   Confirm the controller Deployment is gone before continuing.
+
+   For Fleet, do not `helm uninstall` the release: Fleet still declares it and
+   reinstalls it on the next reconcile. Remove it from Fleet instead, and leave
+   the rest of the bundle in place:
+
+   - `--fleet-mode gitrepo`: push the regenerated bundle from step 1 and apply
+     its `gitrepo.yaml`. Fleet deletes the Bundle the repository no longer
+     produces (`<app-name>-k8s-aibom`), and the agent uninstalls its release on
+     every targeted cluster.
+   - `--fleet-mode helmop`: `kubectl apply` never deletes, so apply the
+     regenerated `helmops.yaml` first (it re-points the next component's
+     `dependsOn`), then delete only the removed HelmOp on the management
+     cluster:
+
+     ```bash
+     # FLEET_NAMESPACE and APP_NAME are the bundle's --fleet-namespace and --app-name.
+     kubectl delete helmops.fleet.cattle.io -n "$FLEET_NAMESPACE" "$APP_NAME-k8s-aibom"
+     ```
+
+   Do not delete the `GitRepo` or run `kubectl delete -f helmops.yaml`; either
+   uninstalls every release in the bundle.
+
+   Confirm the controller Deployment is gone before continuing; for Fleet,
+   check each downstream cluster the bundle targets.
 
    **Do not use `helmfile destroy` for this.** It tears down *every* release in
    the bundle in reverse dependency order, not just this component. It is also
