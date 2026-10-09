@@ -155,16 +155,34 @@ EOF
   expect "go run (consumer importing ${MOD}/pkg/probe)" "${want}" "$(g -C "${dir}" run .)"
 }
 
-check_install() { # query version
+check_binary() { # check version
   local want
   want="^module=$(re "${MOD}") version=$(re "$2") embedded=embedded-from-go-subdir\$"
-  if ! g install -x "${MOD}/cmd/probe@$1" > /dev/null; then
+  expect "$1 → run" "${want}" "$("${GOBIN}/probe")"
+  expect "installed binary build info (go version -m)" "^$(re "${MOD} $2")\$" \
+    "$(go version -m "${GOBIN}/probe" | awk '$1 == "mod" { print $2, $3 }')"
+}
+
+check_install() { # query version
+  local pre_merge
+  if g install -x "${MOD}/cmd/probe@$1" > /dev/null; then
+    check_binary "go install ${MOD}/cmd/probe@$1" "$2"
+    return
+  fi
+  # go install pkg@version also resolves the module's @latest for its
+  # deprecation check. With no go/ tag, @latest is the default branch, which
+  # has no go/go.mod until the migration merges.
+  pre_merge="loading deprecation for $(re "${MOD}"): no matching versions for query \"latest\"\$"
+  if [[ ${MODE} != real || ! $(last_err) =~ ${pre_merge} ]]; then
     record FAIL "go install ${MOD}/cmd/probe@$1" "$(last_err)"
     return
   fi
-  expect "go install ${MOD}/cmd/probe@$1 → run" "${want}" "$("${GOBIN}/probe")"
-  expect "installed binary build info (go version -m)" "^$(re "${MOD} $2")\$" \
-    "$(go version -m "${GOBIN}/probe" | awk '$1 == "mod" { print $2, $3 }')"
+  record PASS "go install ${MOD}/cmd/probe@$1 fails until go/go.mod is on main (expected)" "$(last_err)"
+  if ! g -C "${WORK}/consumer" install -x "${MOD}/cmd/probe" > /dev/null; then
+    record FAIL "go install ${MOD}/cmd/probe (from consumer module)" "$(last_err)"
+    return
+  fi
+  check_binary "go install ${MOD}/cmd/probe (from consumer module)" "$2"
 }
 
 check_network() {
