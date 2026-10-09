@@ -1594,6 +1594,144 @@ also installs `computedomains` from its chart. This pairing has not yet been
 verified on a live OpenShift cluster; see
 [NVIDIA/aicr#2969](https://github.com/NVIDIA/aicr/issues/2969).
 
+### `mariadb-operator`: `26.3.0` or `26.6.0` to `26.10.1`
+
+`26.10.0` changes the replication configuration rendered by the MariaDB init
+container and the replication liveness probe served by the agent, so the data
+plane has to move with the operator, and `26.10.1` keeps that requirement.
+`updateStrategy.autoUpdateDataPlane` defaults to `false`, so an operator
+upgraded without setting it first runs `26.10.1` against init and agent
+containers left at the prior version.
+
+The init container and agent are the HA data plane, so they exist only where
+Galera or replication is enabled. AICR's accounting database ships as a single
+non-HA instance (`galera.enabled: false`, `replicas: 1`), so steps 1 and 5
+below are inert for it: the field is accepted and does nothing. They matter for
+any HA `MariaDB` the same operator manages. List what you have with:
+
+```bash
+kubectl get mariadb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,GALERA:.spec.galera.enabled,REPLICATION:.spec.replication.enabled
+```
+
+Fresh installs are unaffected, and so is a cluster already on `26.10.0`:
+upstream's `26.10.1` guide applies only when coming from before `26.10.x`, and
+`26.10.1` adds only optional CRD fields. A cluster on a `25.x` release or
+earlier is not covered by the steps below: upstream's `25.10.0` guide runs a
+replication migration script, and it and the `25.08.0` guide forbid skipping
+intermediate versions, so follow upstream's guides up to `26.3.0` first. To
+migrate an existing cluster from `26.3.0` or `26.6.0`, set the flag **before**
+the operator moves, then upgrade CRDs first and the operator second:
+
+1. Enable data-plane auto-update on every **HA** MariaDB the operator manages,
+   substituting each one's name and namespace. AICR's own accounting database
+   (`mariadb` in namespace `slurm`) is not HA, so it needs no patch:
+   ```bash
+   kubectl patch mariadb <name> -n <namespace> --type merge \
+     -p '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
+   ```
+   With Argo CD or Flux, do not patch the live resource. Set
+   `spec.updateStrategy.autoUpdateDataPlane: true` in the desired configuration
+   the application syncs, commit it, and sync it before step 2, then confirm
+   the live value with
+   `kubectl get mariadb <name> -n <namespace> -o jsonpath='{.spec.updateStrategy.autoUpdateDataPlane}'`.
+   A pruning or self-healing sync restores whatever git says, and if git still
+   says `false` when the upgraded operator first reconciles an HA `MariaDB`,
+   the operator's Galera and replication defaulting keep the old init and
+   agent images: the data-plane upgrade is skipped and the waits in step 4
+   time out. Keep `true` in git until step 4 passes.
+2. Upgrade `mariadb-operator-crds` to `26.10.1` **in place**. With Helm or
+   helmfile, confirm which namespace the existing release is in first, because
+   Helm scopes a release by namespace: without `--namespace` the request lands
+   in whatever namespace the kubeconfig context points at and `--install` does
+   not find the existing release. The install it attempts instead fails Helm's
+   ownership check, because the existing CRDs carry the original release's
+   `meta.helm.sh/release-namespace` annotation. `mariadb-system` is the
+   registry default and no overlay overrides it, but an inherited bundle may
+   differ.
+   ```bash
+   # Helm and helmfile only.
+   helm list -A | grep mariadb-operator-crds
+   helm upgrade --install mariadb-operator-crds \
+     oci://ghcr.io/mariadb-operator/charts/mariadb-operator-crds \
+     --version 26.10.1 --namespace mariadb-system
+   ```
+   With Argo CD or Flux, sync the `mariadb-operator-crds` application or
+   HelmRelease to `26.10.1` before the operator instead. Never `helm uninstall`,
+   prune or delete the CRD release: that deletes the CRDs and cascade-deletes
+   every `MariaDB`, `User`, `Database` and `Grant` with them.
+3. Upgrade `mariadb-operator` to `26.10.1` (re-run `install.sh`, `helmfile
+   apply`, or sync the release).
+4. For each HA MariaDB enabled in step 1, wait until the `26.10.1` data plane
+   is running before continuing. The `Updated` and `Ready` conditions cannot
+   show this: the operator computes both against whatever StatefulSet exists,
+   so they are already `True` before `26.10.1` first reconciles the resource,
+   and a flag reverted at that point leaves `26.10.1` keeping the old init and
+   agent images. The waits below cannot pass on that old state. Substitute the
+   name, namespace and pod names (`<name>-0` up to `<name>-<replicas-1>`), and
+   set `3` to the replica count:
+   ```bash
+   IMG=ghcr.io/mariadb-operator/mariadb-operator:26.10.1
+   # The StatefulSet renders the new data plane.
+   kubectl wait sts <name> -n <namespace> --timeout=10m \
+     --for=jsonpath='{.spec.template.spec.initContainers[?(@.name=="init")].image}'=$IMG
+   kubectl wait sts <name> -n <namespace> --timeout=10m \
+     --for=jsonpath='{.spec.template.spec.containers[?(@.name=="agent")].image}'=$IMG
+   # Every pod runs it.
+   kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace> --timeout=15m \
+     --for=jsonpath='{.status.initContainerStatuses[?(@.name=="init")].image}'=$IMG
+   kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace> --timeout=15m \
+     --for=jsonpath='{.status.containerStatuses[?(@.name=="agent")].image}'=$IMG
+   # The roll has finished.
+   kubectl wait sts <name> -n <namespace> --timeout=15m \
+     --for=jsonpath='{.status.updatedReplicas}'=3
+   kubectl wait sts <name> -n <namespace> --timeout=15m \
+     --for=jsonpath='{.status.readyReplicas}'=3
+   ```
+   The operator writes the new images into the `MariaDB` spec before it
+   renders the StatefulSet, so once the template carries them step 5 can no
+   longer take them back; the pod and replica waits confirm the roll itself.
+   A resource that names its own init or agent image, such as a mirror, keeps
+   that repository and takes only the `26.10.1` tag, so set `IMG` to match.
+   Name the pods rather than selecting them with `-l`: a label selector
+   resolves the pod list once, so a pod being recreated when the command
+   starts is never waited on, while a missing named pod fails the command and
+   you rerun it. The replica counts mean something only after the image waits,
+   because before the new template exists they already equal the replica
+   count for the old revision. Skip non-HA instances: they have no init or
+   agent container, so these waits run to their timeout.
+5. Return the flag to `false` on every instance enabled in step 1, so a later
+   operator bump does not update the data plane unattended. With Argo CD or Flux, set it back to `false` in the
+   desired configuration, commit it, and sync, only after step 4 passes.
+
+`26.10.0` also changes the operator's default server image to
+`mariadb:12.3.3`, and `26.10.1` keeps it. AICR pins `mariadb:11.8.8` by tag
+and index digest in `recipes/components/slurm-accounting-mariadb/values.yaml`,
+so a cluster bundled from this recipe stays on `11.8.8`; the pin also puts the
+server image into the rendered `MariaDB` resource, where the BOM records it.
+Where the accounting database already runs, the first bundle that carries the
+digest changes that resource's `spec.image` string, so the operator restarts the
+database pod once and slurmdbd loses its database for the length of that
+restart. Plan the bundle upgrade for a quiet window. The pod then runs the build
+the digest names, which can be a newer rebuild of `11.8.8` than the one it last
+pulled.
+
+Existing `MariaDB` resources keep their image. The operator writes its default
+into `spec.image` the first time it reconciles a resource, so every resource it
+already manages carries an image, and upgrading the operator does not change
+it. Only a `MariaDB` created after the upgrade from a manifest that omits
+`spec.image` comes up on `12.3.3`, such as one re-created on a rebuilt cluster.
+Live objects cannot show that exposure, so check the manifests they are created
+from instead: every `MariaDB` in your Helm values, Kustomize trees and GitOps
+repositories should set `spec.image`. For one a Helm release creates, print the
+manifest as rendered, before the operator filled anything in:
+
+```bash
+helm get manifest <release> -n <namespace>
+```
+
+A `kind: MariaDB` document there with no `image:` under `spec` comes up on
+`12.3.3` the next time it is created.
+
 ### `agentgateway`: upgrading across breaking releases
 
 AICR pins the `agentgateway` and `agentgateway-crds` charts in the component
@@ -1865,7 +2003,19 @@ crash-loops. Seven sub-gates default on and each requires TAS
 `TASRecomputeAssignmentWithinSchedulingCycle`), and `TASProfileMixed`, on by
 default since 0.15, fails on its own with `cannot use a TAS profile with TAS
 disabled`. The manager reached `1/1 Running` only with all nine set false
-together. AICR sets no feature gates for kueue, so a default install is
+together.
+
+AICR now pins 0.19.6, which adds a tenth: `TASPartialSlices` is new in 0.19.6,
+defaults on, and requires TAS, so at 0.19.6 the nine above still fail with
+`TASPartialSlices requires TopologyAwareScheduling to be enabled`. Checked
+against 0.19.6 by running kueue's own feature-gate validation:
+`TopologyAwareScheduling=false` alone fails with nine causes, the nine gates
+above fail with that one, and all ten set false together pass. Releases before
+0.19.6 do not know the gate and reject it with
+`unrecognized feature gate: TASPartialSlices`, so set the tenth in the same
+change that moves kueue to 0.19.6, not ahead of it. `TASGroupedPodSetSlicing`
+also requires TAS from 0.19.6 but defaults off, so it matters only if you turned
+it on. AICR sets no feature gates for kueue, so a default install is
 unaffected and stays unaffected. This reaches only a cluster that disabled TAS
 through an override on the `kueue` component, in either
 `controllerManager.featureGates` or a `featureGates:` block inside

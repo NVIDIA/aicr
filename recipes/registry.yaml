@@ -955,6 +955,8 @@ components:
       - kueue
     healthCheck:
       assertFile: checks/kueue/health-check.yaml
+    upgrades:
+      file: components/kueue/upgrades.yaml
     # Default quota CRs so a referenced kueue admits workloads out of the
     # box. Applied post-install (wave N+1) via the injected -post local
     # chart, after the main release ships the CRDs.
@@ -973,7 +975,7 @@ components:
       defaultRepository: oci://registry.k8s.io/kueue/charts
       defaultChart: kueue
       # renovate: datasource=docker depName=registry.k8s.io/kueue/charts/kueue
-      defaultVersion: "0.19.3"
+      defaultVersion: "0.19.6"
       defaultNamespace: kueue-system
     nodeScheduling:
       system:
@@ -1131,6 +1133,8 @@ components:
       - slurmoperatorcrds
     healthCheck:
       assertFile: checks/slinky-slurm-operator-crds/health-check.yaml
+    upgrades:
+      file: components/slinky-slurm-operator-crds/upgrades.yaml
     # CRDs-only chart; slinky-slurm-operator consumes the kinds it
     # registers via its templates, so slinky-slurm-operator must
     # declare this chart as a DependencyRef for the DAG-stratified
@@ -1139,7 +1143,7 @@ components:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator-crds
       # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator-crds
-      defaultVersion: "1.2.0"
+      defaultVersion: "1.2.2"
       defaultNamespace: slinky
 
   - name: mariadb-operator-crds
@@ -1148,11 +1152,13 @@ components:
       - mariadboperatorcrds
     healthCheck:
       assertFile: checks/mariadb-operator-crds/health-check.yaml
+    upgrades:
+      file: components/mariadb-operator-crds/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator-crds
       # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator-crds
-      defaultVersion: "26.6.0"
+      defaultVersion: "26.10.1"
       defaultNamespace: mariadb-system
 
   - name: mariadb-operator
@@ -1161,11 +1167,13 @@ components:
       - mariadboperator
     healthCheck:
       assertFile: checks/mariadb-operator/health-check.yaml
+    upgrades:
+      file: components/mariadb-operator/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator
       # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator
-      defaultVersion: "26.6.0"
+      defaultVersion: "26.10.1"
       defaultNamespace: mariadb-system
     nodeScheduling:
       system:
@@ -1191,11 +1199,13 @@ components:
       - slurmaccountingmariadb
     healthCheck:
       assertFile: checks/slurm-accounting-mariadb/health-check.yaml
+    upgrades:
+      file: components/slurm-accounting-mariadb/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-cluster
       # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-cluster
-      defaultVersion: "26.6.0"
+      defaultVersion: "26.10.1"
       defaultNamespace: slurm
     storageClassPaths:
       - mariadb.storage.storageClassName
@@ -1224,6 +1234,8 @@ components:
       - slurm
     healthCheck:
       assertFile: checks/slinky-slurm-operator/health-check.yaml
+    upgrades:
+      file: components/slinky-slurm-operator/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator
@@ -1234,7 +1246,7 @@ components:
       # file mirrors the chart defaults explicitly for documentation, but
       # an upstream default flip would otherwise pass through unnoticed.
       # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator
-      defaultVersion: "1.2.0"
+      defaultVersion: "1.2.2"
       defaultNamespace: slinky
     nodeScheduling:
       system:
@@ -1255,6 +1267,8 @@ components:
       - slurmcluster
     healthCheck:
       assertFile: checks/slinky-slurm/health-check.yaml
+    upgrades:
+      file: components/slinky-slurm/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm
@@ -1263,7 +1277,7 @@ components:
       # pkg/recipe TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths
       # enforces their alignment with the scheduling paths below.
       # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm
-      defaultVersion: "1.2.0"
+      defaultVersion: "1.2.2"
       defaultNamespace: slurm
     sharedStorageClassPaths:
       - storage.home.storageClassName

@@ -1,0 +1,100 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The CRD half of the mariadb-operator record, which owns the procedure. The
+# loader binds a record to one component, so the ordering that procedure
+# depends on is restated here for whoever reads this component's row alone.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: mariadb-operator-crds
+transitions:
+  # from and to match the mariadb-operator record: the two charts move
+  # together, and 25.x origins need upstream's 25.10.0 replication migration
+  # first, so they resolve to blocked here as well.
+  - from: ">=26.3.0 <26.10.0"
+    to: ">=26.10.0 <=26.10.1"
+    verdict: manual
+    summary: >-
+      The CRD changes up to 26.10.1 only add optional fields, but this chart
+      is the first step of the mariadb-operator upgrade and its one hazard is
+      removal: uninstalling, pruning or deleting the release deletes the CRDs
+      and cascade-deletes every MariaDB, User, Database and Grant. Upgrade it
+      in place, after autoUpdateDataPlane is set on every HA MariaDB and
+      before the operator.
+    precondition: >-
+      mariadb-operator's enable-dataplane-autoupdate step is done: every HA
+      MariaDB carries spec.updateStrategy.autoUpdateDataPlane: true.
+    affectedResources:
+      - group: k8s.mariadb.com
+        kinds:
+          - MariaDB
+    stepsByDeployer:
+      - deployers: [helm, helmfile]
+        steps:
+          - id: upgrade-crds
+            description: >-
+              Confirm the namespace the existing release lives in with
+              `helm list -A | grep mariadb-operator-crds`, then upgrade in
+              place: `helm upgrade --install mariadb-operator-crds
+              oci://ghcr.io/mariadb-operator/charts/mariadb-operator-crds
+              --version 26.10.1 --namespace mariadb-system`, substituting the
+              namespace the previous command reported.
+            reason: >-
+              Without --namespace, Helm looks for the release in the
+              kubeconfig context's namespace, does not find it, and the
+              install it attempts instead fails the ownership check on the
+              existing CRDs, so nothing is upgraded. Never helm uninstall this
+              release: that deletes the CRDs and every MariaDB with them.
+          - id: continue-with-operator
+            description: >-
+              Continue with mariadb-operator's upgrade-operator step.
+            reason: >-
+              The operator moves only once the 26.10.1 CRD schema is
+              Established.
+      - steps:
+          - id: sync-crds
+            description: >-
+              Sync or reconcile the mariadb-operator-crds release to 26.10.1
+              before the mariadb-operator release.
+            reason: >-
+              The operator release needs the new CRD schema, so this release
+              syncs first. Never prune or delete it to achieve the version
+              change: that cascade-deletes every MariaDB.
+          - id: continue-with-operator
+            description: >-
+              Continue with mariadb-operator's sync-operator step.
+            reason: >-
+              The operator moves only once the 26.10.1 CRD schema is
+              Established.
+    references:
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#mariadb-operator-2630-or-2660-to-26101
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.0.md
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
+
+  - from: ">=26.10.0 <26.10.1"
+    to: "26.10.1"
+    verdict: safe
+    verifiedBy: >-
+      Upstream upgrade guide UPGRADE_26.10.1.md (mariadb-operator), which
+      applies only when updating from a version prior to 26.10.x and
+      otherwise allows upgrading directly, and the 26.10.1 release note. A
+      diff of the 26.10.0 and 26.10.1 mariadb-operator-crds charts adds only
+      optional fields: MariaDB updateStrategy.mariadbAutoUpgradeEnabled, and
+      MaxScale filters, volumes and status.filtersSpec.
+    summary: >-
+      Patch release that adds only optional CRD fields. Nothing to change on
+      upgrade.
+    references:
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
+      - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.1
