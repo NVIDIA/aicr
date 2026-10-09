@@ -208,7 +208,19 @@ aicr upgrade-check --from ./old-bundle --to new-recipe.yaml --deployer helm
 
 `--inherit-from` takes the bundle directory you deployed, which is read through the `recipe.yaml` every deployer writes at the bundle root, or failing that the recipe you deployed from. The resolved recipe keeps that artifact's namespace, chart name, source, kustomize path, manifest file set and pre-manifest file set. Everything else, version pins and values included, comes from the new binary as usual. A file set the prior artifact lists is restored whole, so a file the registry dropped is kept and a file the registry added is left out. A set the prior artifact leaves empty is not restored, so a file the new release adds is kept. A component whose deployment type changed between Helm and Kustomize keeps only its namespace, since no chart, source, path or manifest set carries across that flip, and `upgrade-check` reports the type move. The relocation rows then disappear from the check, leaving the version axis to be assessed on its own.
 
-**Chart and source are pinned beside the new version.** The chart name and source come from the prior artifact while the version pin comes from the new binary, and nothing checks that the old source serves the new version. If a release moves a chart to a new repository and pins a version published only there, install fails against the inherited source. In that case resolve without `--inherit-from` and let `upgrade-check` report the move.
+**Keep only namespaces.** Add `--inherit=namespace` to preserve each matching component's deployed namespace while taking its chart, source, path, manifest sets and object names from the new release:
+
+```shell
+aicr recipe --service eks --accelerator h100 --intent training \
+  --inherit-from ./old-bundle --inherit=namespace -o new-recipe.yaml
+aicr upgrade-check --from ./old-bundle --to new-recipe.yaml --deployer helm
+```
+
+Health-check namespaces follow the inherited namespace. New manifests remain included, and a chart can move to its new repository without moving the installed namespace. Other identity changes still appear in `upgrade-check`; assess them before applying the bundle. This mode reads only the bundle's `recipe.yaml`, so it does not require the recorded values used to inherit object names.
+
+Omitting `--inherit`, or specifying `--inherit=all`, keeps the full inheritance behavior described above and below. Both modes use the newly resolved versions and general configuration. `--inherit` requires `--inherit-from` and accepts only `all` or `namespace`.
+
+**Chart and source are pinned beside the new version.** The chart name and source come from the prior artifact while the version pin comes from the new binary, and nothing checks that the old source serves the new version. If a release moves a chart to a new repository and pins a version published only there, install fails against the inherited source. In that case use `--inherit-from ./old-bundle --inherit=namespace` to keep the deployed namespaces while adopting the new chart location, and let `upgrade-check` report the other identity changes.
 
 **Object names are pinned too, from a bundle.** Given a bundle directory, the flag also carries forward the `fullnameOverride` and `nameOverride` values that bundle installed with, so a values-file edit in the new AICR release does not rename a running release's objects. It writes an override *only where the inherited name differs* from what the new binary resolves, so a steady-state inherit adds nothing to the recipe and an override appears exactly where a rename was prevented:
 
@@ -238,7 +250,7 @@ A component the prior artifact does not name keeps the registry default, because
 
 The flag fails closed rather than quietly resolving as a first deploy. A path that does not exist, a directory with no `recipe.yaml` in it, and a `cm://` URI (not supported yet) are each rejected with `INVALID_REQUEST`. So is an artifact resolved for a different service, accelerator, intent or OS than the new recipe, because same-named components differ across them. A dimension either side leaves unset or `any`, and the platform and node count, are not compared.
 
-`aicr query` and `aicr mirror list` carry the same flag, because all three share `aicr recipe`'s resolution flags. The REST API does not: `--inherit-from` names a path on the machine running the CLI, so it is CLI-only for now, as `aicr recipe --snapshot` and `--data` already are.
+`aicr query` and `aicr mirror list` carry both flags, because all three share `aicr recipe`'s resolution flags. The REST API does not: `--inherit-from` names a path on the machine running the CLI, so it is CLI-only for now, as `aicr recipe --snapshot` and `--data` already are.
 
 ## Gating a pipeline
 

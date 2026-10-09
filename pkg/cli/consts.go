@@ -40,6 +40,7 @@ const (
 	flagRuntimeInventory    = "runtime-inventory"
 	flagGKETCPXOInterfaces  = "gke-tcpxo-interfaces"
 	flagInheritFrom         = "inherit-from"
+	flagInherit             = "inherit"
 	flagNoHealth            = "no-health"
 
 	// flagAddRolesToSA switches `aicr snapshot` into a generate-and-exit
