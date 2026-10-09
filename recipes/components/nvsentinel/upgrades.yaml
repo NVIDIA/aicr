@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Written for the v1.22.0 to v1.25.0 pin move. AICR never shipped v1.23.0 or
-# v1.24.0, so this records the one hop AICR makes: from starts at the previous
-# pin rather than reaching lower, because nothing below v1.22.0 was assessed,
-# and the changes v1.23.0 through v1.25.0 introduced are described together at
-# the v1.25.0 boundary.
-#
-# verdict is manual rather than safe: the host-port check below is real work on
-# clusters that already bind 2112, and safe may not carry steps.
+# The first transition was written for the v1.22.0 to v1.25.0 pin move. AICR
+# never shipped v1.23.0 or v1.24.0, so it records the one hop AICR made: from
+# starts at the previous pin rather than reaching lower, because nothing below
+# v1.22.0 was assessed, and the changes v1.23.0 through v1.25.0 introduced are
+# described together at the v1.25.0 boundary. Its verdict is manual rather than
+# safe: the host-port check is real work on clusters that already bind 2112,
+# and safe may not carry steps. The second records the v1.26.0 pin move,
+# which changes no value or default AICR's recipes rely on.
 apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: nvsentinel
@@ -53,9 +53,9 @@ transitions:
     reversibleNotes: >-
       helm rollback to the v1.22.0 revision restores the previous workloads.
       The v1.25.0 CRDs stay applied; their changes are cosmetic, so v1.22.0
-      runs against them unchanged. This rests on the CRD diff and on AICR
-      running no NVSentinel datastore; the rollback itself was not
-      exercised.
+      runs against them unchanged. This rests on the CRD diff and on the
+      v1.22.0 bundle running no NVSentinel datastore (the remediation steps
+      first ship with v1.25.0); the rollback itself was not exercised.
     stepsByDeployer:
       - deployers: [helmfile]
         steps:
@@ -89,7 +89,9 @@ transitions:
               Apply the v1.25.0 CRDs using the CRD-apply command under
               "Upgrade, uninstall, and troubleshooting" in
               docs/user/component-catalog.md, with
-              CHART=oci://ghcr.io/nvidia/nvsentinel and VERSION=v1.25.0.
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.25.0 and
+              EXCLUDE_SUBCHARTS=mongodb-store, so the Percona CRDs
+              psmdb-operator owns are left alone.
             reason: >-
               helmfile never updates CRDs for ownsCRDs components. The
               v1.25.0 changes are cosmetic (a description and a vr shortName
@@ -157,3 +159,25 @@ transitions:
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.25.0
       - https://github.com/NVIDIA/NVSentinel/blob/v1.25.0/metadata-collector/main.go
       - https://github.com/NVIDIA/NVSentinel/pull/1849
+  - from: ">=1.25.0 <1.26.0"
+    to: "1.26.0"
+    verdict: safe
+    verifiedBy: >-
+      Upstream v1.26.0 release notes, and helm template of v1.25.0 and v1.26.0
+      with AICR's nvsentinel values, alone and with each nvsentinel mixin's
+      overrides, on 2026-10-08: without a remediation step the renders differ
+      only in image tags, an explicit --metrics-addr 0.0.0.0 (the previous
+      bind address) on gpu-health-monitor, and a quoted hostPath; every CRD
+      file is byte-identical.
+    summary: >-
+      Images move to v1.26.0; no CRD, no value AICR sets, and no chart default
+      AICR relies on changed. The external MongoDB setup Job stops being a Helm
+      hook, but it renders only with global.datastore set, which no AICR
+      release has deployed.
+    reversible: true
+    reversibleNotes: >-
+      helm rollback to the v1.25.0 revision restores the previous workloads;
+      the CRDs are identical across the two versions. This rests on the chart
+      diff; the rollback itself was not exercised.
+    references:
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.26.0

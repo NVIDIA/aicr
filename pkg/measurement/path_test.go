@@ -800,6 +800,19 @@ func TestPath_ExtractValue_SlinkySlurmSummary(t *testing.T) {
 						"collection-state": Str("absent"),
 					},
 				},
+				{
+					Name: "default-storage-class",
+					Data: map[string]Reading{
+						"collection-state": Str("present"),
+						"default-classes":  Str("gp3"),
+					},
+				},
+				{
+					Name: "percona-server-mongodb",
+					Data: map[string]Reading{
+						"collection-state": Str("api-detected"),
+					},
+				},
 			},
 		},
 	}
@@ -833,6 +846,16 @@ func TestPath_ExtractValue_SlinkySlurmSummary(t *testing.T) {
 			name: "MariaDB collection state",
 			path: "K8s.mariadb-operator.collection-state",
 			want: "absent",
+		},
+		{
+			name: "default StorageClass names",
+			path: "K8s.default-storage-class.default-classes",
+			want: "gp3",
+		},
+		{
+			name: "Percona collection state",
+			path: "K8s.percona-server-mongodb.collection-state",
+			want: "api-detected",
 		},
 	}
 

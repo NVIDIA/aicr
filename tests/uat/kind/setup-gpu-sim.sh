@@ -131,9 +131,9 @@ DEVICE_PLUGIN_NAMESPACE="kube-system"
 
 # The DCGM host engine. NVSentinel's GPU health monitors are gated on the node
 # label nvsentinel.dgxc.nvidia.com/dcgm.version, which its labeler writes only
-# when it finds a Ready pod labelled app=nvidia-dcgm (v1.25.0 also accepts
+# when it finds a Ready pod labelled app=nvidia-dcgm (v1.26.0 also accepts
 # app=nvidia-dcgm-dra) whose image string matches `dcgm:<major>.`
-# (labeler/pkg/labeler/labeler.go at the v1.25.0 this repo pins). Nothing on
+# (labeler/pkg/labeler/labeler.go at the v1.26.0 this repo pins). Nothing on
 # that path inspects a GPU, so a real host engine reading the
 # mocked NVML driver is enough to bring the monitors up with no hardware.
 #
@@ -177,7 +177,7 @@ DCGM_ROLLOUT_TIMEOUT="${DCGM_ROLLOUT_TIMEOUT:-900s}"
 # pull is budgeted here rather than inside nvsentinel's helm --wait. With the
 # host engine Ready from this script, the labeler stamps dcgm.version=4.x as
 # soon as it starts (reconcileAllNodes in labeler/pkg/labeler/labeler.go at
-# v1.25.0), the 4.x monitor DaemonSet schedules on every worker, and helm 4's
+# v1.26.0), the 4.x monitor DaemonSet schedules on every worker, and helm 4's
 # watcher waits on it with the release's 600s (helmDefaults in
 # pkg/bundler/deployer/helmfile/releases.go). A cold pull does not fit that.
 #
@@ -187,7 +187,7 @@ DCGM_ROLLOUT_TIMEOUT="${DCGM_ROLLOUT_TIMEOUT:-900s}"
 # monitor's own pull still to happen. setup-gpu-sim_test.sh pins this to the
 # nvsentinel section of docs/user/container-images.md, which make bom-docs
 # re-renders from the chart on every nvsentinel bump.
-MONITOR_PREPULL_IMAGE="ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.25.0-dcgm-4.x"
+MONITOR_PREPULL_IMAGE="ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.26.0-dcgm-4.x"
 MONITOR_PREPULL_NAME="gpu-health-monitor-prepull"
 MONITOR_PREPULL_NAMESPACE="kube-system"
 # The linux/amd64 manifest carries 2,699,785,123 bytes of compressed layers

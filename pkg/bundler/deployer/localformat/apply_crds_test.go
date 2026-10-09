@@ -1301,3 +1301,93 @@ func TestInstallScript_DryRunIgnoresStaleChartArchive(t *testing.T) {
 			"branch: %s", upgradeCall)
 	}
 }
+
+// TestApplyCRDsScript_SkipsExcludedSubcharts pins OwnsCRDsExcludeSubcharts:
+// CRDs under an excluded subchart, unpacked or packaged, are not applied,
+// while the chart's own CRDs and other subcharts' still are, including a
+// sibling whose name has the excluded name as a prefix.
+func TestApplyCRDsScript_SkipsExcludedSubcharts(t *testing.T) {
+	for _, bin := range []string{"bash", "tar"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+	crd := func(name string) string {
+		return "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: " + name + "\n"
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	root := t.TempDir()
+	write(filepath.Join(root, "parent", "crds", "own.yaml"), crd("owns.example.com"))
+	write(filepath.Join(root, "parent", "charts", "kept", "crds", "kept.yaml"), crd("kepts.example.com"))
+	write(filepath.Join(root, "parent", "charts", "store", "charts", "op", "crds", "op.yaml"), crd("unpacked.excluded.example.com"))
+
+	depRoot := t.TempDir()
+	write(filepath.Join(depRoot, "store", "crds", "dep.yaml"), crd("packaged.excluded.example.com"))
+	depTgz := filepath.Join(root, "parent", "charts", "store-0.1.0.tgz")
+	if out, err := exec.Command("tar", "-czf", depTgz, "-C", depRoot, "store").CombinedOutput(); err != nil {
+		t.Fatalf("tar dep: %v\n%s", err, out)
+	}
+	// A sibling whose name extends the excluded one must not be caught by
+	// the exclusion's archive glob, packaged or unpacked.
+	write(filepath.Join(root, "parent", "charts", "store-extra", "crds", "extra.yaml"), crd("unpacked.sibling.example.com"))
+	siblingRoot := t.TempDir()
+	write(filepath.Join(siblingRoot, "store-extra", "crds", "sibling.yaml"), crd("packaged.sibling.example.com"))
+	siblingTgz := filepath.Join(root, "parent", "charts", "store-extra-0.2.0.tgz")
+	if out, err := exec.Command("tar", "-czf", siblingTgz, "-C", siblingRoot, "store-extra").CombinedOutput(); err != nil {
+		t.Fatalf("tar sibling: %v\n%s", err, out)
+	}
+	tgz := filepath.Join(t.TempDir(), "parent.tgz")
+	if out, err := exec.Command("tar", "-czf", tgz, "-C", root, "parent").CombinedOutput(); err != nil {
+		t.Fatalf("tar parent: %v\n%s", err, out)
+	}
+
+	c := ownsCRDsComponent(true)
+	c.CRDExcludeSubcharts = []string{"store"}
+	scriptPath := writeApplyCRDs(t, c)
+	record := filepath.Join(t.TempDir(), "applied")
+	kubectl := "#!/usr/bin/env bash\n" +
+		"case \"$1\" in\n" +
+		"  get) echo 'customresourcedefinition.apiextensions.k8s.io/owns.example.com' ;;\n" +
+		"  apply)\n" +
+		"    f=\"\"; prev=\"\"\n" +
+		"    for a in \"$@\"; do [[ \"${prev}\" == -f ]] && f=\"${a}\"; prev=\"${a}\"; done\n" +
+		"    cat \"${f}\" >>" + record + " ;;\n" +
+		"esac\nexit 0\n"
+	path := stubPATH(t, map[string]string{
+		"helm":    helmStub("echo k8s-aibom", tgz),
+		"kubectl": kubectl,
+		"timeout": passthroughTimeoutStub,
+	})
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script failed: %v\n%s", err, out)
+	}
+	applied, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("nothing was applied: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"owns.example.com", "kepts.example.com",
+		"unpacked.sibling.example.com", "packaged.sibling.example.com",
+	} {
+		if !strings.Contains(string(applied), want) {
+			t.Errorf("%s was not applied; only excluded subcharts may be skipped\n%s", want, applied)
+		}
+	}
+	for _, skipped := range []string{"unpacked.excluded.example.com", "packaged.excluded.example.com"} {
+		if strings.Contains(string(applied), skipped) {
+			t.Errorf("%s was applied though its subchart is excluded\n%s", skipped, applied)
+		}
+	}
+}

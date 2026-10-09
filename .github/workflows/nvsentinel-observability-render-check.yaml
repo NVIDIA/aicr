@@ -14,12 +14,15 @@
 
 # Weekly live-render checks for the opt-in nvsentinel mixins.
 #
-# Each test (pkg/bundler/validations) renders the real, live-pulled nvsentinel
+# These tests (pkg/bundler/validations) render the real, live-pulled nvsentinel
 # chart with a mixin's actual values: the observability one asserts the
 # audit-logging mount shape, the object-monitor one asserts both policies
 # reach the generated config with every namespace the catalog deploys the
-# watched components into, and the slurm-drain-monitor one asserts the
-# workload, its read-only RBAC and its config. All are gated on testing.Short() -- `make
+# watched components into, the slurm-drain-monitor one asserts the
+# workload, its read-only RBAC and its config, and the remediation ones
+# assert each step's Deployments, --dry-run, images, the full remediation
+# action map, the quarantine rule sets and the drain mode.
+# All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
 # components are opt-in and off by default, so a transient upstream chart
@@ -79,3 +82,26 @@ jobs:
         run: |
           go test ./pkg/bundler/validations/... -run '^TestNVSentinelSlurmDrainMonitorChartRender$' -v -count=1 | tee "${RUNNER_TEMP}/sdm-render.log"
           grep -q -- '--- PASS: TestNVSentinelSlurmDrainMonitorChartRender' "${RUNNER_TEMP}/sdm-render.log"
+      # -run exits 0 with "no tests to run" after a rename, and -short skips
+      # these everywhere else, so assert each PASS line.
+      - name: Render nvsentinel remediation mixins
+        if: ${{ !cancelled() }}
+        run: |
+          set -uo pipefail
+          tests=(
+            TestNVSentinelRemediationChartRender
+            TestNVSentinelRemediationAbsentWithoutMixin
+            TestNVSentinelMongoDBChartRender
+          )
+          pattern="^($(IFS='|'; echo "${tests[*]}"))$"
+          out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          for t in "${tests[@]}"; do
+            if ! grep -qE "^--- PASS: ${t} \(" <<<"$out"; then
+              echo "::error::$t did not execute (renamed or removed?); update this job to match."
+              exit 1
+            fi
+          done

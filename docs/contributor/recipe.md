@@ -338,7 +338,8 @@ spec:
 Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
 `platform-inference`, `platform-kubeflow`, `nvsentinel-observability`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
-`nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `npd`.
+`nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
+`nvsentinel-quarantine`, `nvsentinel-remediation`, `npd`.
 
 **Mixin rules:**
 
@@ -367,7 +368,10 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
   add that edge to an already-chained `nvsentinel`.
 - A mixin **introducing a genuinely new component** (one not already in
   the chain) may set those structural fields — that is how
-  `platform-kubeflow` and `platform-inference` add their components.
+  `platform-kubeflow` and `platform-inference` add their components,
+  and how the three NVSentinel remediation steps add `psmdb-operator`
+  and `nvsentinel-mongodb` (while adding an `nvsentinel-mongodb` edge to
+  the already-chained `nvsentinel` through `dependencyRefs`).
   The restriction above exists to stop a mixin silently redefining a
   component the chain already chose, so it only applies on collision.
   **One exception:** if that fresh component's registry entry declares a

@@ -1,0 +1,147 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVSentinel's health-event datastore: a Percona Server for MongoDB replica
+# set reconciled by psmdb-operator. Settings follow NVSentinel's own embedded
+# Percona configuration (mongodb-store subchart), except the x509 app user,
+# which the operator creates here instead of an admin-credential Job.
+#
+# TLS is operator-managed through cert-manager: the operator issues a CA
+# valid 365 days that renews 730h early, and NVSentinel's client certificate
+# (manifests/client-certificate.yaml) chains to it.
+fullnameOverride: nvsentinel-mongodb
+crVersion: 1.23.0
+image:
+  repository: docker.io/percona/percona-server-mongodb
+  tag: "8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c"
+imagePullPolicy: IfNotPresent
+initImage:
+  repository: docker.io/percona/percona-server-mongodb-operator
+  tag: "1.23.0@sha256:feaff989e25346716d85be9ea918593f89ad7481d30e033df21e0a764a6a484e"
+upgradeOptions:
+  apply: disabled
+# No delete-psmdb-pods-in-order finalizer (the chart default), so deleting the
+# cluster resource never waits on psmdb-operator; garbage collection removes
+# the replica set and the volume claims remain.
+finalizers: []
+tls:
+  mode: requireTLS
+# NVSentinel's setup Job runs as the app user and changes an existing TTL
+# index with collMod when mongodb-store.collectionExpirySeconds changes;
+# readWrite does not grant collMod.
+roles:
+  - role: nvsentinelTTLIndex
+    db: admin
+    privileges:
+      - resource:
+          db: HealthEventsDatabase
+          collection: ""
+        actions: [collMod]
+# The subject of manifests/client-certificate.yaml, in RFC 2253 order.
+users:
+  - name: "CN=mongo-user-client,OU=DGXC,O=Nvidia,L=SantaClara,ST=California,C=US"
+    db: "$external"
+    roles:
+      - name: readWrite
+        db: HealthEventsDatabase
+      - name: nvsentinelTTLIndex
+        db: admin
+replsets:
+  rs0:
+    name: rs0
+    size: 3
+    configuration: |
+      setParameter:
+        authenticationMechanisms: "MONGODB-X509,SCRAM-SHA-256,SCRAM-SHA-1"
+    # Preferred rather than required, so clusters with fewer than three
+    # system nodes still schedule every member.
+    affinity:
+      advanced:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: nvsentinel-mongodb
+                    app.kubernetes.io/replset: rs0
+    nodeSelector: {}
+    tolerations: []
+    podDisruptionBudget:
+      maxUnavailable: 1
+    resources:
+      requests:
+        cpu: "1"
+        memory: 1.5Gi
+      limits:
+        cpu: "1.5"
+        memory: 2Gi
+    volumeSpec:
+      pvc:
+        resources:
+          requests:
+            storage: 8Gi
+    sidecars:
+      - name: mongodb-exporter
+        image: "docker.io/percona/mongodb_exporter:0.40.0@sha256:d66daa6aff0513860d1577cee3b55ab82fde43394f8319d7b4674411b9153cce"
+        imagePullPolicy: IfNotPresent
+        args:
+          - --discovering-mode
+          - --compatible-mode
+          - --collect-all
+          - --web.listen-address=:9216
+          - --mongodb.direct-connect
+          - --collector.replicasetstatus
+          - --collector.dbstats
+          - --collector.dbstatsfreestorage
+          - --collector.collstats
+          - --collector.topmetrics
+          - --collector.indexstats
+        env:
+          - name: MONGODB_USER
+            valueFrom:
+              secretKeyRef:
+                name: internal-nvsentinel-mongodb-users
+                key: MONGODB_CLUSTER_MONITOR_USER
+          - name: MONGODB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: internal-nvsentinel-mongodb-users
+                key: MONGODB_CLUSTER_MONITOR_PASSWORD
+          - name: MONGODB_URI
+            value: "mongodb://localhost:27017/admin?directConnection=true&tls=true&tlsInsecure=true&authMechanism=SCRAM-SHA-256"
+        ports:
+          - name: metrics
+            containerPort: 9216
+            protocol: TCP
+sharding:
+  enabled: false
+# Disabled features still render their image into the cluster resource, so
+# each is pinned and inventoried.
+backup:
+  enabled: false
+  image:
+    repository: docker.io/percona/percona-backup-mongodb
+    tag: "2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5"
+logcollector:
+  enabled: false
+  image:
+    repository: docker.io/percona/fluentbit
+    tag: "5.0.9-1@sha256:030e3faf454e93c19d9cfa1ec85ba6943fe293f5bd29fb04533a1b3de8c78bd6"
+pmm:
+  enabled: false
+  image:
+    repository: docker.io/percona/pmm-client
+    tag: "3.8.1@sha256:ea4061a6d9bd59d9c7aecbe75b91989bbddad55208b898d75064ac436014ca16"

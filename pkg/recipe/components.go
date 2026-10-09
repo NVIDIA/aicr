@@ -170,6 +170,13 @@ type ComponentConfig struct {
 	// See https://github.com/NVIDIA/aicr/issues/2264.
 	OwnsCRDs bool `yaml:"ownsCRDs,omitempty"`
 
+	// OwnsCRDsExcludeSubcharts names subcharts, by chart name, whose CRDs an
+	// OwnsCRDs component does not own. Its CRD step collects every crds/
+	// directory in the archive, disabled subcharts included, so a bundled
+	// dependency that another registry component owns would otherwise be
+	// re-applied at the parent's pinned schema. Valid only with OwnsCRDs.
+	OwnsCRDsExcludeSubcharts []string `yaml:"ownsCRDsExcludeSubcharts,omitempty"`
+
 	// ManifestsUseChartCRDs signals that the component's attached
 	// manifestFiles (wrapped by the bundler into an injected -post
 	// local-helm release) instantiate CRs whose CRDs this component's
@@ -665,6 +672,19 @@ func (r *ComponentRegistry) Validate() []error {
 				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("duplicate valueOverrideKey %q: used by both %s and %s", key, existing, comp.Name)))
 			}
 			overrideKeys[key] = comp.Name
+		}
+	}
+
+	for _, comp := range r.Components {
+		if len(comp.OwnsCRDsExcludeSubcharts) > 0 && !comp.OwnsCRDs {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: ownsCRDsExcludeSubcharts is set without ownsCRDs", comp.Name)))
+		}
+		for _, name := range comp.OwnsCRDsExcludeSubcharts {
+			if name == "" || strings.ContainsAny(name, "/*?[] ") || name == "." || name == ".." {
+				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q: ownsCRDsExcludeSubcharts entry %q must be a bare subchart name", comp.Name, name)))
+			}
 		}
 	}
 
