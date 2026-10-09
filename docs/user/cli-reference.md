@@ -1595,6 +1595,8 @@ Omitting `--to` asks *"am I behind, and does catching up hurt?"*, which is usual
 
 **`--from cluster` takes the source side from what is installed.** Instead of a source artifact, the check reads the record the named deployer leaves behind, and only that one: Helm's release records, out of the Kubernetes objects Helm stores them in, for `helm`, `helmfile`, `flux` and `fleet`; Argo CD's `Application` objects for `argocd` and `argocd-helm`, which write no per-component Helm release at all. The `--to` side is still an artifact; there is nothing in a cluster to upgrade *to*.
 
+Under `fleet`, the Fleet agent writes those Helm release records on each downstream cluster the bundle installed into, not on the Rancher management cluster the `GitRepo` or `HelmOp`s were applied to. Point `--kubeconfig` at the downstream cluster you are upgrading. The exception is a bundle generated with `--fleet-namespace fleet-local`, which installs into the management cluster itself. Read from the management cluster, a `fleet-default` bundle matches nothing and every row reads "added".
+
 That answers *which version is installed*, authoritatively, including where a cluster has drifted from the recipe in git. It answers nothing else. A version counts only once it is established: a Helm release whose newest revision reached `deployed`, and an `Application` revision its sync status or history shows was synced, never the pin it is configured to reach. A Helm upgrade that is pending or failed reads as `unversioned` rather than at its target, since the old version may still be what runs; an `Application` that has not finished a sync reads at its last completed one, or as `unversioned` if there is none. A component the read places but cannot version, such as one whose release record cannot be decoded, reads as `unversioned` too rather than dropping out, where it would read as newly installed. Both sources are records of what was applied rather than observations, so a resource somebody edited by hand leaves both untouched and reading them will not say so. It is not a view of live cluster state.
 
 Two flags stop being optional:
@@ -1612,7 +1614,7 @@ A component need not sit in its registry default namespace to be found. The read
 
 A read that recognizes nothing is reported, never failed. Every row then reads "added", and the block says so in as many words, because from the rows alone a cluster with none of these components installed looks identical to the two likelier causes: the wrong cluster, or components installed by a deployer other than the one you named.
 
-**A cluster read reports no namespace move.** The identity comparison below is artifact-to-artifact only. The read recovers a version and no namespace, and that is not an omission it could fill: attribution composes the release name *from* the registry's namespace, so a namespace is an input to the read rather than a fact recovered from it, and only `helm` and `helmfile` match on the component's bare name at all. A namespace stated here would come from two deployers of five and be silently absent under the other three, which is a worse report than none.
+**A cluster read reports no namespace move.** The identity comparison below is artifact-to-artifact only. The read recovers a version and no namespace, and that is not an omission it could fill: attribution composes the release name *from* the registry's namespace, so a namespace is an input to the read rather than a fact recovered from it, and only `helm`, `helmfile` and `fleet` match on the component's bare name at all. A namespace stated here would come from three deployers of six and be silently absent under the other three, which is a worse report than none.
 
 **`--scan-cluster` warns about objects the upgrade could destroy.** It is an axis of its own rather than a property of `--from`: the scan needs a cluster wherever the `from` table came from, so comparing two bundles while scanning a live cluster is a legitimate and useful combination. `--from cluster` implies it, and an explicit `--scan-cluster=false` wins over that implication.
 
@@ -1807,8 +1809,8 @@ aicr bundle [flags]
 | `--serial` | | bool | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `--deployer argocd`, `argocd-helm`, `flux`, and `helmfile` (helm is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, and helmfile chains every release via `needs:` into one linear apply chain. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. Off by default. |
 | `--flux-oci-source-name` | | string | Name of the OCIRepository CR that Flux uses to pull the bundle (default: `aicr-bundle`). Used with `--deployer flux` and OCI output. Must match the OCIRepository deployed in the target cluster. See [Flux OCI Mode](#flux-oci-mode). |
 | `--flux-namespace` | | string | Kubernetes namespace where Flux CRs (HelmRelease, sources, ArtifactGenerator) are deployed (default: `flux-system`). Must match the namespace of the Flux installation in the target cluster. |
-| `--fleet-namespace` | | string | Fleet workspace the generated GitRepo is applied to (default: `fleet-default`, which targets downstream clusters registered with Rancher). `fleet-local` targets the Rancher local cluster. Used with `--deployer fleet`. |
-| `--fleet-mode` | | string | Fleet output shape for `--deployer fleet`: `gitrepo` (default) writes a `fleet.yaml` per component plus `gitrepo.yaml`; `helmop` writes `helmops.yaml` with one HelmOp per component. HelmOps reference charts instead of embedding them in Fleet Bundles, so large charts (for example kube-prometheus-stack) stay under the ~1MiB Bundle limit, but local charts (raw manifests, `--vendor-charts`) are rejected. |
+| `--fleet-namespace` | | string | Fleet workspace the generated GitRepo or HelmOps are applied to (default: `fleet-default`, which targets downstream clusters registered with Rancher). `fleet-local` targets the Rancher local cluster. Used with `--deployer fleet`. |
+| `--fleet-mode` | | string | Fleet output shape for `--deployer fleet`: `gitrepo` (default) writes a `fleet.yaml` per component plus `gitrepo.yaml`; `helmop` writes `helmops.yaml` with one HelmOp per component and needs Fleet v0.13 or later. In `gitrepo` mode Fleet embeds each chart in a Bundle object (gzip-compressed above 1MB, capped by etcd at about 1.5MiB); kube-prometheus-stack compresses to about 1.4MB, which deploys from a GitRepo but is rejected when `fleet apply` posts it through Rancher's 1Mi `public-api-body-limit`. HelmOps reference charts instead of embedding them, so Bundle size does not apply, but local charts (raw manifests, `--vendor-charts`) are rejected. |
 | `--app-name` | | string | Parent Argo Application name (default: `aicr-stack` for `--deployer argocd-helm`, `nvidia-stack` for `--deployer argocd`), or the Fleet GitRepo name and bundle-name prefix for `--deployer fleet` (default: `aicr`). Must be a DNS-1123 subdomain. With `--deployer fleet` it must be a DNS-1123 label, and every `<app-name>-<release>` bundle name must be at most 63 characters (Fleet copies it into a label value). Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `--deployer argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected on other deployers (`helm`, `flux`, `helmfile`). |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
@@ -2124,7 +2126,7 @@ The `--deployer` flag controls how deployment artifacts are generated:
 | `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All non-profile-owned values overridable at install time via `helm --set`; a profiled recipe ships a lock template that rejects overrides on profile-owned paths. Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
 | `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
 | `helmfile` | Generates a `helmfile.yaml` release graph driven by the upstream [helmfile](https://helmfile.readthedocs.io/) CLI (`helmfile apply` / `diff` / `destroy`). Supports `--dynamic` via per-release `cluster-values.yaml`. Requires the `helmfile` binary at deploy time. |
-| `fleet` | Generates a [Rancher Fleet](https://fleet.rancher.io/) GitRepo bundle: one `fleet.yaml` per component folder plus a root `gitrepo.yaml`. Supports `--dynamic` via per-folder `cluster-values.yaml`. Clusters opt in with the `aicr.nvidia.com/bundle=<app-name>` label. OCI output (`--output oci://`) is not supported. |
+| `fleet` | Generates a [Rancher Fleet](https://fleet.rancher.io/) bundle: by default one `fleet.yaml` per component folder plus a root `gitrepo.yaml`, or with `--fleet-mode helmop` a single `helmops.yaml` with one HelmOp per component. Supports `--dynamic` via per-folder `cluster-values.yaml` (inlined into `helmops.yaml` in HelmOp mode). Clusters opt in with the `aicr.nvidia.com/bundle=<app-name>` label. OCI output (`--output oci://`) is not supported. |
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all non-profile-owned values are overridable at install time (a profiled recipe ships a lock template that rejects install-time values on profile-owned paths).
 
@@ -2140,7 +2142,7 @@ Ordering follows each component's declared dependencies (`dependencyRefs`), not 
 - **Argo CD** / **Argo CD (Helm)**: `argocd.argoproj.io/sync-wave` annotation assigned by dependency depth. Independent components share a wave and sync together; a dependent lands in a later wave band that Argo starts only after the prior tier (including any readiness gate) is healthy.
 - **Flux**: `dependsOn` references in each `HelmRelease` mirror the component's declared `dependencyRefs` directly (a component with no dependencies has no `dependsOn` and reconciles in parallel). Pre/post manifests preserve the per-component chain `<name>-pre → <name> → <name>-post`. The bundle's root `kustomization.yaml` is a plain Kustomize file (not a Flux Kustomization CR).
 - **Helmfile**: emits one `level-N.yaml` sub-helmfile per dependency tier, processed in sequence (so each tier's CRDs register before the next tier renders). Within a tier, `needs:` chains only a component's own `-pre → primary → -post` releases; independent components carry no edge, so helmfile applies them concurrently.
-- **Fleet**: every folder's `fleet.yaml` `dependsOn` the previous folder's bundle, so Fleet reconciles strictly in folder order, including `-pre` / `-post` folders. Each bundle starts only after its predecessor is `Ready`.
+- **Fleet**: every folder's `fleet.yaml` (or HelmOp) `dependsOn` the previous folder's bundle, so Fleet reconciles strictly in folder order, including `-pre` / `-post` folders. Each bundle starts only after its predecessor is `Ready`.
 
 Pass `--serial` to force every deployer to install strictly one component at a time in deployment order (reverts argocd/argocd-helm/flux/helmfile to a linear chain; helm is already serial). For the full model and per-deployer rationale, see [Deployment ordering](../contributor/component.md#deployment-ordering).
 
@@ -2971,7 +2973,7 @@ order:
 Both interactive flows time out after 5 minutes.
 
 Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`, `flux`,
-`helmfile`). External `--data` files copied into the bundle are included in
+`helmfile`, `fleet`). External `--data` files copied into the bundle are included in
 `checksums.txt` and listed as resolved dependencies in the attestation.
 
 ##### Privacy: identity in keyless signatures
@@ -3367,11 +3369,13 @@ for flags and behavior.
 
 ##### fleet
 
-Delete the GitRepo from the Rancher management cluster; Fleet uninstalls
-every bundle it created:
+Delete the GitRepo, or the HelmOps for a `--fleet-mode helmop` bundle, from
+the Rancher management cluster; Fleet uninstalls every bundle it created:
 
 ```bash
 kubectl delete -f gitrepo.yaml
+# --fleet-mode helmop:
+kubectl delete -f helmops.yaml
 ```
 
 CRD / PVC cleanup follows the **helm** walkthrough above.

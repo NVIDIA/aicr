@@ -3,7 +3,7 @@
 NVIDIA AI Cluster Runtime (AICR) generates validated, reproducible
 configuration artifacts for GPU-accelerated Kubernetes clusters.
 Given a description of your environment — cloud, accelerator, OS,
-intent — AICR emits the Helm, Argo CD, Flux, or Helmfile artifacts
+intent — AICR emits the Helm, Argo CD, Flux, Helmfile, or Fleet artifacts
 your deployment tool consumes. The output is hardware-aware,
 version-locked, and backed by SLSA Build Level 3 image provenance.
 

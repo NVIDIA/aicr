@@ -163,7 +163,7 @@ type readmeData struct {
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
-// Generator creates a Fleet GitRepo bundle from recipe results.
+// Generator creates a Fleet bundle (GitRepo or HelmOps) from recipe results.
 // Configure it with the required fields, then call Generate.
 type Generator struct {
 	// RecipeResult contains the recipe metadata and component references.
@@ -175,11 +175,11 @@ type Generator struct {
 	// Version is the bundler version.
 	Version string
 
-	// AppName names the GitRepo and prefixes every bundle name.
+	// AppName names the GitRepo and prefixes every bundle and HelmOp name.
 	// Defaults to DefaultAppName.
 	AppName string
 
-	// Namespace is the Fleet workspace the GitRepo is applied to.
+	// Namespace is the Fleet workspace the GitRepo or HelmOps are applied to.
 	// Defaults to DefaultNamespace.
 	Namespace string
 
@@ -255,8 +255,9 @@ func (g *Generator) targetRevision() string {
 	return g.TargetRevision
 }
 
-// Generate writes the localformat folders, a fleet.yaml and .fleetignore per
-// folder, the root gitrepo.yaml, and README.md.
+// Generate writes the localformat folders and README.md, plus a fleet.yaml and
+// .fleetignore per folder and the root gitrepo.yaml in GitRepo mode, or
+// helmops.yaml in HelmOp mode.
 func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
 	start := time.Now()
 

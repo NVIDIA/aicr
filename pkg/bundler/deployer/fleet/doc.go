@@ -13,11 +13,12 @@
 // limitations under the License.
 
 /*
-Package fleet generates a Rancher Fleet GitRepo bundle from AICR recipes.
+Package fleet generates a Rancher Fleet bundle from AICR recipes, as a GitRepo
+(ModeGitRepo, the default) or as HelmOps (ModeHelmOp).
 
 Per-component folders are written by pkg/bundler/deployer/localformat (the
-same NNN-<component>/ layout the helm and helmfile deployers use). This
-package adds the Fleet-specific files on top:
+same NNN-<component>/ layout the helm and helmfile deployers use). In GitRepo
+mode this package adds the Fleet-specific files on top:
 
   - NNN-<component>/fleet.yaml: one Fleet bundle per folder. Upstream-chart
     folders set helm.repo/chart/version; local-chart folders (Chart.yaml
@@ -31,19 +32,27 @@ package adds the Fleet-specific files on top:
     path, applied to the Fleet workspace (default fleet-default).
   - README.md: deployment instructions.
 
+In HelmOp mode it writes helmops.yaml instead of fleet.yaml, .fleetignore and
+gitrepo.yaml: one fleet.cattle.io/v1alpha1 HelmOp per folder with the values
+inlined, so Fleet pulls each chart at deploy time instead of embedding it in a
+Bundle. A HelmOp needs a chart repository, so local-chart folders are
+rejected. The folders' values files are kept for reference only; Fleet and
+bundleinfo both read the inlined values.
+
 # Deployment Ordering
 
 Each fleet.yaml sets an explicit bundle name (<app>-<release>) so dependsOn
 references are deterministic regardless of the GitRepo name or the path the
-bundle is pushed under. Every folder depends on the folder immediately
+bundle is pushed under; a HelmOp carries the same name. Every folder depends
+on the folder immediately
 preceding it, so Fleet reconciles the bundle in the same order deploy.sh
 installs a helm bundle, including injected -pre and -post folders.
 
 # Targeting
 
-The GitRepo targets clusters by label (aicr.nvidia.com/bundle=<app>) so
-nothing is rolled out until a cluster is explicitly opted in. In the
-fleet-local workspace the GitRepo targets the Rancher local cluster instead.
+The GitRepo or HelmOps target clusters by label (aicr.nvidia.com/bundle=<app>)
+so nothing is rolled out until a cluster is explicitly opted in. In the
+fleet-local workspace they target the Rancher local cluster instead.
 
 # Limitations
 

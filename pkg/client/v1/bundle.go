@@ -112,7 +112,7 @@ type BundleOptions struct {
 	Config *BundleConfig
 
 	// Deployer selects the bundle output format (Helm, Argo CD, Argo CD Helm
-	// chart, Flux, or Helmfile). The zero value is DeployerType(""), which
+	// chart, Flux, Helmfile, or Fleet). The zero value is DeployerType(""), which
 	// bundlerConfig treats as "not set" and leaves at bundler config.NewConfig's
 	// own default (Helm) — unlike every other flat field here, an empty
 	// DeployerType is not a safe pass-through: WithDeployer("") would
@@ -179,8 +179,10 @@ type BundleOptions struct {
 	// artifact is air-gap deployable. Off (false) by default.
 	VendorCharts bool
 
-	// AppName overrides the parent Argo Application's metadata.name. Empty
-	// means each deployer applies its own default. See #1011.
+	// AppName overrides the parent Argo Application's metadata.name for the
+	// argocd and argocd-helm deployers, or names the GitRepo and prefixes
+	// every bundle and HelmOp for fleet, where it must be a DNS-1123 label.
+	// Empty means each deployer applies its own default. See #1011.
 	AppName string
 
 	// Attester signs bundle content. When nil, MakeBundle derives one from

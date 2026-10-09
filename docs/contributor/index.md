@@ -239,6 +239,7 @@ deployment tools:
 | `argocd` | Argo CD `Application` manifests with sync-waves | Argo CD GitOps |
 | `argocd-helm` | Argo CD `Application` referencing per-component Helm charts | Argo CD + upstream Helm |
 | `flux` | Flux `HelmRelease` + `Kustomization` manifests | Flux GitOps |
+| `fleet` | Fleet `fleet.yaml` per component + `GitRepo`, or `HelmOp`s (`--fleet-mode helmop`) | Rancher Fleet GitOps |
 
 We are open to adding additional community-standard targets when
 there is demonstrated demand. We do **not** add custom or

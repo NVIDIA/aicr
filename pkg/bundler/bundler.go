@@ -805,8 +805,9 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	//   - argocd / argocd-helm: the gate folder inherits the next sync-wave,
 	//     and Argo CD's built-in batch/Job health blocks that wave until the
 	//     Job completes.
-	// Flux and helmfile wrap each folder in HelmRelease / needs semantics that
-	// need dedicated gating wiring (not yet implemented). Fail clearly rather
+	// Flux, helmfile and fleet wrap each folder in HelmRelease / needs /
+	// dependsOn semantics that need dedicated gating wiring (not yet
+	// implemented). Fail clearly rather
 	// than silently dropping the opt-in flag and shipping a bundle without the
 	// readiness gate the user asked for. See #904.
 	if b.Config.ReadinessHooks() {
@@ -3323,7 +3324,7 @@ const gkeCriticalPriorityQuotaPodsPerNode = 32
 
 // gkeCriticalPriorityQuotaName is the metadata.name of the synthesized
 // ResourceQuota. Stable across runs so idempotent re-apply by the
-// deployer (helmfile / argocd / flux) updates the existing object
+// deployer (helmfile / argocd / flux / fleet) updates the existing object
 // rather than creating duplicates.
 const gkeCriticalPriorityQuotaName = "aicr-gke-critical-pods"
 

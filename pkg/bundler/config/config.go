@@ -37,7 +37,7 @@ type DeployerType string
 const DefaultFluxNamespace = "flux-system"
 
 // DefaultFleetNamespace is the default Fleet workspace (namespace) where the
-// generated GitRepo is applied. fleet-default targets downstream clusters
+// generated GitRepo or HelmOps are applied. fleet-default targets downstream clusters
 // registered with Rancher; use fleet-local for the Rancher local cluster.
 // Overridable via WithFleetNamespace / --fleet-namespace.
 const DefaultFleetNamespace = "fleet-default"
@@ -92,8 +92,9 @@ const (
 	// bundle is self-contained and air-gap deployable when combined with
 	// --vendor-charts.
 	DeployerHelmfile DeployerType = "helmfile"
-	// DeployerFleet generates a Rancher Fleet GitRepo bundle: one fleet.yaml
-	// per localformat folder, chained with dependsOn, plus a GitRepo CR.
+	// DeployerFleet generates a Rancher Fleet bundle chained with dependsOn:
+	// one fleet.yaml per localformat folder plus a GitRepo CR, or, with
+	// FleetModeHelmOp, one HelmOp per folder.
 	DeployerFleet DeployerType = "fleet"
 )
 
@@ -366,8 +367,9 @@ type Config struct {
 	ociParentNamespace string
 
 	// appName overrides the parent Argo Application's `metadata.name` for
-	// the argocd-helm and argocd deployers. Empty means each deployer
-	// applies its own default ("aicr-stack" / "nvidia-stack"). When two
+	// the argocd-helm and argocd deployers, and names the GitRepo and
+	// prefixes every bundle and HelmOp for fleet. Empty means each deployer
+	// applies its own default ("aicr-stack" / "nvidia-stack" / "aicr"). When two
 	// non-overlapping bundles are deployed to the same Argo CD namespace,
 	// each must supply a distinct appName so the parent Applications do not
 	// collide. See #1011.
@@ -973,8 +975,9 @@ func WithOCIParentNamespace(ns string) Option {
 }
 
 // WithAppName sets the parent Argo Application's `metadata.name` for the
-// argocd-helm and argocd deployers. Empty leaves the deployer's default
-// in place. Required by operators deploying multiple non-overlapping
+// argocd-helm and argocd deployers, and the GitRepo name and bundle/HelmOp
+// name prefix for fleet (a DNS-1123 label; see ValidateFleetName). Empty
+// leaves the deployer's default in place. Required by operators deploying multiple non-overlapping
 // AICR bundles to the same Argo CD namespace; without distinct names the
 // parent Applications silently overwrite each other and orphan the
 // previous bundle's children. See #1011.
