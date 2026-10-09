@@ -131,7 +131,7 @@ For contributors:
 
 ## Resources
 
-- **[Roadmap](ROADMAP.md)** — Feature priorities and development timeline
+- **[Roadmap](ROADMAP.md)** — Focus areas, outcomes, and tracking issues
 - **[Adopters](ADOPTERS.md)** — Organizations and projects using or building on AICR
 - **[Security](SECURITY.md)** — Supply chain security, vulnerability reporting, and verification
 - **[Releases](https://github.com/NVIDIA/aicr/releases)** — Binaries, SBOMs, and attestations
