@@ -366,10 +366,11 @@ func collectVersionPins(reg *ComponentRegistry, store *MetadataStore) []versionP
 	return pins
 }
 
-// governs reports whether u speaks for version: it exists and is not ahead of
-// it.
+// governs reports whether u speaks for version: it has transitions and is not
+// ahead of it. A record without transitions, such as one carrying only a
+// replaces block, describes no version, which is how the matcher reads it too.
 func governs(u *upgrade.ComponentUpgrades, version string) bool {
-	return u != nil && !u.AheadOf(version)
+	return u != nil && len(u.Transitions) > 0 && !u.AheadOf(version)
 }
 
 // recordedPinViolations reports every pin a record governs but does not
@@ -392,9 +393,11 @@ func recordedPinViolations(set upgrade.Set, pins []versionPin) []string {
 
 // pinMoves returns every version cur pins that the merge base did not pin from
 // the same source. A source pinning the component at both is compared
-// directly; a source new to cur moves only to a version the base pinned
-// nowhere, so renaming an overlay is not a bump. A surviving base, overlay, or
-// mixin that drops its override is compared against cur's registry default.
+// directly. A surviving base, overlay, or mixin that adds an override is
+// compared against the registry default it inherited at the base, and one that
+// drops its override against cur's registry default. A source new to cur moves
+// only to a version the base pinned nowhere, so renaming an overlay is not a
+// bump.
 // Sources are compared as written, not as resolved: what an overlay inherits
 // through spec.base or spec.mixins is not followed.
 func pinMoves(base, cur coverageView) []versionPin {
@@ -402,9 +405,13 @@ func pinMoves(base, cur coverageView) []versionPin {
 	type componentVersion struct{ component, version string }
 	baseAt := make(map[sourcePin]string, len(base.pins))
 	basePinned := make(map[componentVersion]bool, len(base.pins))
+	baseDefaults := make(map[string]string)
 	for _, p := range base.pins {
 		baseAt[sourcePin{p.component, p.source}] = p.version
 		basePinned[componentVersion{p.component, p.version}] = true
+		if p.source == registryPinSource {
+			baseDefaults[p.component] = p.version
+		}
 	}
 
 	var moves []versionPin
@@ -417,6 +424,12 @@ func pinMoves(base, cur coverageView) []versionPin {
 		}
 		if prev, ok := baseAt[sourcePin{p.component, p.source}]; ok {
 			if prev != p.version {
+				moves = append(moves, p)
+			}
+			continue
+		}
+		if base.sources[p.source] {
+			if p.version != baseDefaults[p.component] {
 				moves = append(moves, p)
 			}
 			continue
@@ -455,7 +468,10 @@ func changedPinViolations(base, cur coverageView, set upgrade.Set) []string {
 		}
 		reported[k] = true
 		gap := "has no transition record"
-		if set[m.component] != nil {
+		switch u := set[m.component]; {
+		case u != nil && len(u.Transitions) == 0:
+			gap = "has a record with no transitions"
+		case u != nil:
 			gap = "has a transition record that describes only later versions"
 		}
 		violations = append(violations, fmt.Sprintf(
@@ -484,6 +500,7 @@ func TestRecordedPinViolations(t *testing.T) {
 	set := upgrade.Set{
 		"alpha": {Component: "alpha", Transitions: []upgrade.Transition{{To: ">=1.0.0 <=1.2.0"}}},
 		"ahead": {Component: "ahead", Transitions: []upgrade.Transition{{To: "=2.0.0"}}},
+		"swap":  {Component: "swap", Replaces: &upgrade.Replaces{Component: "legacy-swap", Verdict: upgrade.VerdictManual}},
 	}
 	pin := func(component, version, source string) versionPin {
 		return versionPin{component: component, version: version, source: source}
@@ -506,6 +523,7 @@ func TestRecordedPinViolations(t *testing.T) {
 		{"a record ahead of its pin governs nothing yet", []versionPin{pin("ahead", "1.9.0", registryPinSource)}, 0},
 		{"a pin that has reached the record ahead of it", []versionPin{pin("ahead", "2.0.1", registryPinSource)}, 1},
 		{"a component without a record is not this rule's", []versionPin{pin("beta", "9.0.0", registryPinSource)}, 0},
+		{"a replaces-only record governs no pin", []versionPin{pin("swap", "1.0.0", registryPinSource)}, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -519,6 +537,10 @@ func TestRecordedPinViolations(t *testing.T) {
 func TestChangedPinViolations(t *testing.T) {
 	record := &upgrade.ComponentUpgrades{Component: "alpha", Transitions: []upgrade.Transition{{To: "=1.0.0"}}}
 	ahead := &upgrade.ComponentUpgrades{Component: "beta", Transitions: []upgrade.Transition{{To: "=3.0.0"}}}
+	replacesOnly := &upgrade.ComponentUpgrades{
+		Component: "beta",
+		Replaces:  &upgrade.Replaces{Component: "legacy-beta", Verdict: upgrade.VerdictManual},
+	}
 	pin := func(component, version, source string) versionPin {
 		return versionPin{component: component, version: version, source: source}
 	}
@@ -575,6 +597,28 @@ func TestChangedPinViolations(t *testing.T) {
 			name: "an override dropped, so its recipes move to the registry default",
 			base: view(nil, nil, pin("beta", "2.1.0", registryPinSource), pin("beta", "2.0.0", "overlay aks")),
 			cur:  view(nil, []string{"overlay aks"}, pin("beta", "2.1.0", registryPinSource)),
+			want: 1,
+		},
+		{
+			name: "a surviving overlay adds an override another source already pins",
+			base: view(nil, []string{"overlay eks"},
+				pin("beta", "2.1.0", registryPinSource), pin("beta", "2.0.0", "overlay aks")),
+			cur: view(nil, []string{"overlay eks"},
+				pin("beta", "2.1.0", registryPinSource), pin("beta", "2.0.0", "overlay aks"),
+				pin("beta", "2.0.0", "overlay eks")),
+			want: 1,
+		},
+		{
+			name: "a surviving overlay adds an override equal to what it inherited",
+			base: view(nil, []string{"overlay eks"}, pin("beta", "2.1.0", registryPinSource)),
+			cur: view(nil, []string{"overlay eks"},
+				pin("beta", "2.1.0", registryPinSource), pin("beta", "2.1.0", "overlay eks")),
+		},
+		{
+			name: "a bump of a component whose record only replaces another",
+			base: view(nil, nil, pin("beta", "2.0.0", registryPinSource)),
+			cur:  view([]string{"beta"}, nil, pin("beta", "2.1.0", registryPinSource)),
+			set:  upgrade.Set{"beta": replacesOnly},
 			want: 1,
 		},
 		{

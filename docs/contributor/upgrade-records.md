@@ -52,16 +52,16 @@ falls inside no record's `to` range: `aicr upgrade-check` reports `unknown`, or
   a comparison with the base can see it. Moves are compared per source: the
   registry default, `base.yaml`, and each overlay and mixin's own
   `componentRefs`. Bumping one overlay's override counts even when another
-  source already pins that version, and a source that drops its override is
-  compared against the registry default. What a recipe inherits is not
+  source already pins that version, and a source that adds or drops an
+  override is compared against the registry default. What a recipe inherits is not
   resolved, so re-parenting an overlay or attaching a mixin that pins a
   different version goes unseen.
 
 A record reaches a pin unless every one of its `to` ranges starts above it. A
 record written ahead of its bump reaches nothing yet, so the gate treats those
 pins as recordless until the pin gets there, and the bump that gets it there
-must land inside a `to`.
-Components that predate records are not gated until their pin next moves, and a
+must land inside a `to`. A record with no transitions, such as one carrying only
+a `replaces` block, reaches no pin at all. Components that predate records are not gated until their pin next moves, and a
 component new to the registry needs no record for its first pin, since nobody
 upgrades into it from an earlier release.
 
