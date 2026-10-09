@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -262,10 +264,11 @@ func TestGenerate_FleetLocalTargetsLocalCluster(t *testing.T) {
 func TestGenerate_Errors(t *testing.T) {
 	longName := strings.Repeat("a", 50)
 	tests := []struct {
-		name string
-		gen  *Generator
-		ctx  func() context.Context
-		want string
+		name     string
+		gen      *Generator
+		ctx      func() context.Context
+		want     string
+		wantCode errors.ErrorCode
 	}{
 		{
 			name: "nil recipe",
@@ -276,6 +279,14 @@ func TestGenerate_Errors(t *testing.T) {
 			name: "invalid app name",
 			gen:  &Generator{RecipeResult: recipeWith(), AppName: "Not_Valid"},
 			want: "invalid Fleet app name",
+		},
+		{
+			// The CLI validates --fleet-namespace, but an SDK caller reaches
+			// Generate directly; gitrepo.yaml would fail at kubectl apply.
+			name:     "invalid namespace",
+			gen:      &Generator{RecipeResult: recipeWith(), Namespace: "team.a"},
+			want:     "invalid Fleet namespace",
+			wantCode: errors.ErrCodeInvalidRequest,
 		},
 		{
 			name: "bundle name too long",
@@ -293,7 +304,8 @@ func TestGenerate_Errors(t *testing.T) {
 				cancel()
 				return ctx
 			},
-			want: "context canceled",
+			want:     "context canceled",
+			wantCode: errors.ErrCodeCanceled,
 		},
 	}
 	for _, tt := range tests {
@@ -305,6 +317,9 @@ func TestGenerate_Errors(t *testing.T) {
 			_, err := tt.gen.Generate(ctx, t.TempDir())
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("Generate() error = %v, want containing %q", err, tt.want)
+			}
+			if tt.wantCode != "" && !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				t.Errorf("Generate() error = %v, want code %s", err, tt.wantCode)
 			}
 		})
 	}

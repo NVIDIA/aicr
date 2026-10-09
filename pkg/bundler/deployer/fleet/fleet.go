@@ -264,11 +264,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled before generation", err)
+		return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "context canceled before generation")
 	}
 	if errs := validation.IsDNS1123Label(g.appName()); len(errs) > 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid Fleet app name %q: %s", g.appName(), strings.Join(errs, "; ")))
+	}
+	if err := config.ValidateFleetName("Fleet namespace", g.namespace()); err != nil {
+		return nil, err
 	}
 
 	switch g.mode() {
