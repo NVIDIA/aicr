@@ -197,7 +197,9 @@ func guideNotes(t *testing.T) []BundleNote {
 }
 
 func TestWriteGuideGolden(t *testing.T) {
-	for _, d := range []string{"helm", "argocd", "argocd-helm", "flux", "helmfile"} {
+	// canonicalDeployers is drift-checked against config.GetDeployerTypes(), so
+	// a new deployer gets a guide golden without editing this list.
+	for _, d := range canonicalDeployers {
 		t.Run(d, func(t *testing.T) {
 			var buf bytes.Buffer
 			if err := WriteGuide(&buf, guideNotes(t), d); err != nil {

@@ -1,0 +1,3 @@
+install.sh
+upstream.env
+apply-crds.sh

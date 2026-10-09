@@ -36,7 +36,7 @@ curl -sfL https://get.aicr.run | bash -s --
 aicr recipe --service eks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
-# Render it into deployment-ready bundles (helm, argocd, argocd-helm, flux, or helmfile)
+# Render it into deployment-ready bundles (helm, argocd, argocd-helm, flux, helmfile, or fleet)
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
 # After deploying the bundle, validate the running cluster against the recipe
@@ -49,7 +49,7 @@ aicr query --service eks --accelerator h100 --os ubuntu \
   --selector components.gpu-operator.values.driver.version
 ```
 
-The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, or simple Helm commands for `helm`.
+The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, Fleet `fleet.yaml` bundles and a `GitRepo` (or `HelmOp`s) for `fleet`, or simple Helm commands for `helm`.
 
 See the [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 
@@ -61,7 +61,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 | **API Server (`aicrd`)** | REST API exposing the same capabilities as the CLI. Run in-cluster for CI/CD integration or air-gapped environments. |
 | **Go Library (`github.com/NVIDIA/aicr/pkg/client/v1`)** | Stable Go SDK facade for in-process consumers — same workflow (resolve, bundle, snapshot, validate) callable from any Go program without a subprocess or REST hop. Per-Client isolation supports multi-tenant use. |
 | **Snapshot Agent** | Kubernetes Job that captures live cluster state (GPU hardware, drivers, kernel, OS, operators, K8s config) into a ConfigMap for validation against recipes. |
-| **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD (App of Apps or Helm chart variant), Flux, or Helmfile artifacts — pick whichever fits your GitOps pipeline. |
+| **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD (App of Apps or Helm chart variant), Flux, Helmfile, or Rancher Fleet artifacts — pick whichever fits your GitOps pipeline. |
 | **Multi-Phase Validation** | Deployment, performance (training and inference), and conformance phases — run all or one at a time. |
 | **Drift Detection** | `aicr diff` compares two snapshots to surface configuration drift between clusters or over time. |
 | **Supply Chain Security** | SLSA Build Level 3 image provenance, signed image SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
@@ -97,7 +97,7 @@ A **recipe** is a version-locked configuration for a specific environment. You d
 
 The **bundler** materializes a recipe into deployment-ready artifacts: one folder per component, each with Helm values, checksums, and a README. The **validator** compares a recipe against a live cluster snapshot — first checking declarative constraints, then optionally running deployment, performance, and conformance phases inside the cluster.
 
-This separation means the same validated configuration works whether you deploy with Helm, Argo CD, Flux, Helmfile, or a custom pipeline.
+This separation means the same validated configuration works whether you deploy with Helm, Argo CD, Flux, Helmfile, Rancher Fleet, or a custom pipeline.
 
 ## What AI Cluster Runtime Is Not
 

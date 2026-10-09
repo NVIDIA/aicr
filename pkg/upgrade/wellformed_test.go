@@ -335,8 +335,8 @@ func TestValidateStepGroups(t *testing.T) {
 	}{
 		{"single remainder group covers everything", []StepGroup{group(nil)}, false, ""},
 		{
-			"explicit groups covering all five pass",
-			[]StepGroup{group([]string{"argocd", "argocd-helm", "flux"}), group([]string{"helm", "helmfile"})},
+			"explicit groups covering all six pass",
+			[]StepGroup{group([]string{"argocd", "argocd-helm", "fleet", "flux"}), group([]string{"helm", "helmfile"})},
 			false, "",
 		},
 		{

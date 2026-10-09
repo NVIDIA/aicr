@@ -36,6 +36,43 @@ type DeployerType string
 // WithFluxNamespace / --flux-namespace.
 const DefaultFluxNamespace = "flux-system"
 
+// DefaultFleetNamespace is the default Fleet workspace (namespace) where the
+// generated GitRepo or HelmOps are applied. fleet-default targets downstream clusters
+// registered with Rancher; use fleet-local for the Rancher local cluster.
+// Overridable via WithFleetNamespace / --fleet-namespace.
+const DefaultFleetNamespace = "fleet-default"
+
+// Fleet deployer output shapes. FleetModeGitRepo writes a fleet.yaml per
+// component plus a GitRepo; FleetModeHelmOp writes one HelmOp per component.
+const (
+	FleetModeGitRepo = "gitrepo"
+	FleetModeHelmOp  = "helmop"
+)
+
+// ParseFleetMode normalizes a --fleet-mode value. Empty selects
+// FleetModeGitRepo.
+func ParseFleetMode(s string) (string, error) {
+	switch m := strings.ToLower(strings.TrimSpace(s)); m {
+	case "":
+		return FleetModeGitRepo, nil
+	case FleetModeGitRepo, FleetModeHelmOp:
+		return m, nil
+	default:
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid fleet mode %q: must be %q or %q", s, FleetModeGitRepo, FleetModeHelmOp))
+	}
+}
+
+// ValidateFleetName reports whether name is usable as a Fleet object name or
+// workspace: a DNS-1123 label. what names the flag in the error message.
+func ValidateFleetName(what, name string) error {
+	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s %q: must be a DNS-1123 label (%s)", what, name, strings.Join(errs, "; ")))
+	}
+	return nil
+}
+
 // Supported deployer types.
 const (
 	// DeployerHelm generates Helm per-component bundles (default).
@@ -55,6 +92,10 @@ const (
 	// bundle is self-contained and air-gap deployable when combined with
 	// --vendor-charts.
 	DeployerHelmfile DeployerType = "helmfile"
+	// DeployerFleet generates a Rancher Fleet bundle chained with dependsOn:
+	// one fleet.yaml per localformat folder plus a GitRepo CR, or, with
+	// FleetModeHelmOp, one HelmOp per folder.
+	DeployerFleet DeployerType = "fleet"
 )
 
 // allDeployerTypes is the single source of truth for supported deployer types.
@@ -64,6 +105,7 @@ var allDeployerTypes = []DeployerType{
 	DeployerArgoCDHelm,
 	DeployerFlux,
 	DeployerHelmfile,
+	DeployerFleet,
 }
 
 // ParseDeployerType parses a string into a DeployerType.
@@ -296,6 +338,14 @@ type Config struct {
 	// sources, ArtifactGenerator) are deployed. Defaults to DefaultFluxNamespace.
 	fluxNamespace string
 
+	// fleetNamespace is the Fleet workspace (namespace) the generated GitRepo
+	// is applied to. Defaults to DefaultFleetNamespace.
+	fleetNamespace string
+
+	// fleetMode selects the Fleet deployer output shape ("gitrepo" or
+	// "helmop"). Empty means the deployer default (gitrepo).
+	fleetMode string
+
 	// bundleChartName overrides the Helm chart name written into Chart.yaml
 	// and used as `source.chart` in the parent Argo Application emitted by
 	// the argocd-helm deployer. Empty means "use the deployer's default"
@@ -317,8 +367,9 @@ type Config struct {
 	ociParentNamespace string
 
 	// appName overrides the parent Argo Application's `metadata.name` for
-	// the argocd-helm and argocd deployers. Empty means each deployer
-	// applies its own default ("aicr-stack" / "nvidia-stack"). When two
+	// the argocd-helm and argocd deployers, and names the GitRepo and
+	// prefixes every bundle and HelmOp for fleet. Empty means each deployer
+	// applies its own default ("aicr-stack" / "nvidia-stack" / "aicr"). When two
 	// non-overlapping bundles are deployed to the same Argo CD namespace,
 	// each must supply a distinct appName so the parent Applications do not
 	// collide. See #1011.
@@ -865,6 +916,34 @@ func WithFluxNamespace(ns string) Option {
 	}
 }
 
+// FleetNamespace returns the Fleet workspace the generated GitRepo targets.
+// Returns DefaultFleetNamespace when not explicitly set.
+func (c *Config) FleetNamespace() string {
+	if c.fleetNamespace == "" {
+		return DefaultFleetNamespace
+	}
+	return c.fleetNamespace
+}
+
+// WithFleetNamespace sets the Fleet workspace for the generated GitRepo.
+func WithFleetNamespace(ns string) Option {
+	return func(c *Config) {
+		c.fleetNamespace = ns
+	}
+}
+
+// FleetMode returns the Fleet deployer output shape; empty means the default.
+func (c *Config) FleetMode() string {
+	return c.fleetMode
+}
+
+// WithFleetMode sets the Fleet deployer output shape ("gitrepo" or "helmop").
+func WithFleetMode(mode string) Option {
+	return func(c *Config) {
+		c.fleetMode = mode
+	}
+}
+
 // WithBundleChartName sets the Helm chart name written into the argocd-helm
 // bundle's Chart.yaml (and used as `source.chart` in the generated parent
 // Argo Application). Empty leaves the deployer's default in place. The CLI
@@ -896,8 +975,9 @@ func WithOCIParentNamespace(ns string) Option {
 }
 
 // WithAppName sets the parent Argo Application's `metadata.name` for the
-// argocd-helm and argocd deployers. Empty leaves the deployer's default
-// in place. Required by operators deploying multiple non-overlapping
+// argocd-helm and argocd deployers, and the GitRepo name and bundle/HelmOp
+// name prefix for fleet (a DNS-1123 label; see ValidateFleetName). Empty
+// leaves the deployer's default in place. Required by operators deploying multiple non-overlapping
 // AICR bundles to the same Argo CD namespace; without distinct names the
 // parent Applications silently overwrite each other and orphan the
 // previous bundle's children. See #1011.

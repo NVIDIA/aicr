@@ -1079,11 +1079,11 @@ kubectl get crd aibomcontrollerconfigs.aibom.k8saibom.dev \
 `k8s-aibom` is marked `ownsCRDs` in the registry, so most deployers update its
 CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` through
 the generated `apply-crds.sh`, and Argo CD by applying them as ordinary
-manifests each sync. `helmfile` has no equivalent automation — see
+manifests each sync. `helmfile` and `fleet` have no equivalent automation — see
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
 for the manual step. Whether a given bump needs that step depends on whether
 the upgrade uses anything the new schema adds: a v1.3.0 to v1.5.1 bump on
-default values upgrades cleanly on `helmfile` against the old CRDs, but the
+default values upgrades cleanly on `helmfile` and `fleet` against the old CRDs, but the
 same bump setting `config.verification` aborts the release with
 `.spec.verification: field not declared in schema` after the Deployment has
 already advanced. When in doubt, apply the CRDs first; it is never harmful.
@@ -1098,9 +1098,9 @@ below — therefore upgrades the controller with **no** CRD update on those two
 deployers, silently. Such a recipe needs its own audit of the chart it points
 at and its own CRD step; the fallback command below is the manual form. Argo CD
 is unaffected, since it applies whatever CRDs the rendered chart contains
-regardless of provenance. `helmfile` is also unaffected by this particular
-caveat, in the sense that there is nothing to disable: it never acts on
-`ownsCRDs`, checked or not, so no version override can take its automation
+regardless of provenance. `helmfile` and `fleet` are also unaffected by this
+particular caveat, in the sense that there is nothing to disable: neither acts
+on `ownsCRDs`, checked or not, so no version override can take their automation
 away. Whether a given bump actually needs the manual step is a separate
 question, answered per transition by the upgrade record.
 The assertion is still worth making on every deployer, because it proves the
@@ -1225,25 +1225,25 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**CRDs are applied for you on every deployer except `helmfile`.** The chart
+**CRDs are applied for you on every deployer except `helmfile` and `fleet`.** The chart
 ships its CRDs under `crds/`. Helm installs that directory on first install and
 never touches it again on upgrade, so a chart bump whose CRDs changed would
 leave the previous schema in place and the API server would silently prune the
 new controller's writes to added fields.
 
-Every deployer except `helmfile` closes that on its own, by a different route;
-see the deployer table below. `helm` bundles carry an `apply-crds.sh` in the
-component's folder, run automatically before the upgrade; `flux` and Argo CD
-apply the CRDs through their own controllers. `helmfile` has no automated
-equivalent: the manual command below is always required for its `ownsCRDs`
-components.
+Every deployer except `helmfile` and `fleet` closes that on its own, by a
+different route; see the deployer table below. `helm` bundles carry an
+`apply-crds.sh` in the component's folder, run automatically before the
+upgrade; `flux` and Argo CD apply the CRDs through their own controllers.
+`helmfile` and `fleet` have no automated equivalent: the manual command below
+is always required for their `ownsCRDs` components.
 
 When you run the command below depends on your deployer, because only some of
 them do it for you:
 
-- **`helmfile`: always, including from a generated bundle.** Nothing runs it
-  for you on this deployer, so it is a required step before every `ownsCRDs`
-  upgrade, not a fallback.
+- **`helmfile`, `fleet`: always, including from a generated bundle.** Nothing
+  runs it for you on these deployers, so it is a required step before every
+  `ownsCRDs` upgrade, not a fallback.
 - **`helm`: only** when you are upgrading outside a generated bundle, or when
   the bundle's `apply-crds.sh` failed and you are reproducing it by hand.
 - **`flux`, `argocd`, `argocd-helm`: not needed.** Their controllers apply the
@@ -1334,7 +1334,7 @@ Four details are load-bearing, and the obvious shorter forms fail on them:
   chart whose `crds/` is empty or moved runs the loop zero times and exits 0.
   Either way you would proceed to upgrade the controller against a stale or
   partial schema — the exact failure this command exists to prevent, and it
-  matters most on `helmfile`, where nothing else covers it.
+  matters most on `helmfile` and `fleet`, where nothing else covers it.
 
 The generated `apply-crds.sh` does exactly this, with each call bounded; it is
 the reference if you need the details.
@@ -1347,8 +1347,9 @@ Which deployers need that step differs, so check yours:
 | `helmfile` | Upgrades through Helm, so it skips `crds/` too; no automation exists, because a `presync` hook fires only for releases `helmfile apply` decides to sync, so it would hold on a chart bump and silently not hold on an unchanged rerun | Assume yes — see note below |
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
+| `fleet` | Fleet's agent upgrades through Helm, so it skips `crds/` too, and a Fleet bundle cannot run `apply-crds.sh`; the bundle README and deployment notes name the `ownsCRDs` components instead | Assume yes — see note below |
 
-**On `helmfile`'s "assume yes".** helmfile never updates CRDs for you, so the
+**On `helmfile`'s and `fleet`'s "assume yes".** Neither updates CRDs for you, so the
 deployer itself can never narrow the step — that much is unconditional. Whether
 a *particular* version bump actually needs it is a different question, and the
 only thing that can answer it is the component's ADR-021 upgrade record for

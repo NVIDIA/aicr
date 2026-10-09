@@ -182,12 +182,12 @@ func checkVerdictFields(where string, t *Transition) []string {
 
 // canonicalDeployers mirrors config.GetDeployerTypes(), sorted. It is declared
 // here rather than imported: pkg/bundler/config transitively pulls 621
-// packages, 245 of them k8s.io/client-go, which is the wrong price for five
+// packages, 245 of them k8s.io/client-go, which is the wrong price for six
 // strings. wellformed_test.go carries that import and fails on drift.
 //
 // localformat is deliberately absent — it is the internal bundle-layout package
 // every deployer consumes, not a selectable deployer.
-var canonicalDeployers = []string{"argocd", "argocd-helm", "flux", "helm", "helmfile"}
+var canonicalDeployers = []string{"argocd", "argocd-helm", "fleet", "flux", "helm", "helmfile"}
 
 // checkStepGroups implements rule 6. Groups partition the deployers: no two
 // explicit groups may claim the same one, at most one group may omit deployers

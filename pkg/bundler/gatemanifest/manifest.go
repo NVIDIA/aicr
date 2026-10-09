@@ -308,7 +308,7 @@ func jobMetadataAnnotations(deployer config.DeployerType) string {
 		// detection, so an image-tag-only bump could silently go undetected.
 		return `  annotations:
     argocd.argoproj.io/sync-options: Replace=true,Force=true`
-	case config.DeployerFlux, config.DeployerHelmfile:
+	case config.DeployerFlux, config.DeployerHelmfile, config.DeployerFleet:
 		return ""
 	default:
 		return ""

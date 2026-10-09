@@ -369,12 +369,12 @@ pods depend on).
 
 ## Deployers
 
-AICR ships five output adapters in
+AICR ships six output adapters in
 [`pkg/bundler/deployer/`](https://github.com/NVIDIA/aicr/tree/main/pkg/bundler/deployer):
-`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. Each calls
+`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `fleet`. Each calls
 `localformat.Write()` and then layers its own orchestration files
 (`deploy.sh`, `helmfile.yaml`, Argo `Application` CRs, Flux
-`HelmRelease`s). **Components do not need to be deployer-aware** —
+`HelmRelease`s, Fleet `fleet.yaml` files with a `GitRepo` or `HelmOp`s). **Components do not need to be deployer-aware** —
 the bundler renders per-deployer from one component definition.
 
 ### Deployment ordering

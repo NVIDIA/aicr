@@ -204,7 +204,7 @@ This boundary is enforced mechanically by a CI gate — see
 | `pkg/inventory` | Installed component inventory from a live cluster (Helm release records, Argo CD Applications) and the advisory at-risk scan, for `aicr upgrade-check --from cluster` |
 | **Bundle generation** | |
 | `pkg/bundler` | Per-component bundle generation entry point. [component.md](component.md) |
-| `pkg/bundler/deployer` | Output adapters: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux` |
+| `pkg/bundler/deployer` | Output adapters: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `fleet` |
 | `pkg/bundler/validations` | Bundle-time component validation checks. [validator.md](validator.md#component-validations-bundle-time) |
 | `pkg/component` | Bundler utilities and test helpers |
 | `pkg/manifest`, `pkg/helm`, `pkg/bom` | Manifest rendering, chart inspection, BOM extraction |
@@ -239,6 +239,7 @@ deployment tools:
 | `argocd` | Argo CD `Application` manifests with sync-waves | Argo CD GitOps |
 | `argocd-helm` | Argo CD `Application` referencing per-component Helm charts | Argo CD + upstream Helm |
 | `flux` | Flux `HelmRelease` + `Kustomization` manifests | Flux GitOps |
+| `fleet` | Fleet `fleet.yaml` per component + `GitRepo`, or `HelmOp`s (`--fleet-mode helmop`) | Rancher Fleet GitOps |
 
 We are open to adding additional community-standard targets when
 there is demonstrated demand. We do **not** add custom or

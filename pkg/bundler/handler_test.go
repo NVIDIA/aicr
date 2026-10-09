@@ -684,3 +684,41 @@ func readZipFile(t *testing.T, file *zip.File) []byte {
 	}
 	return data
 }
+
+func TestParseBundleConfig_AppName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		target  string
+		want    string
+		wantErr bool
+	}{
+		{"argocd accepts subdomain", "/v1/bundle?deployer=argocd&app-name=team.a", "team.a", false},
+		{"fleet accepts label", "/v1/bundle?deployer=fleet&app-name=team-a", "team-a", false},
+		{"fleet rejects subdomain", "/v1/bundle?deployer=fleet&app-name=team.a", "", true},
+		{"helm rejects app-name", "/v1/bundle?deployer=helm&app-name=team-a", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := ParseBundleConfig(httptest.NewRequest("POST", tt.target, nil))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ParseBundleConfig() expected error, got nil")
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseBundleConfig() error = %v", err)
+			}
+			if got := cfg.AppName(); got != tt.want {
+				t.Errorf("AppName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

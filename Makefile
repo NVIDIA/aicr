@@ -430,7 +430,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 	@printf '%s\n' "Regenerating pkg/bundler/testdata/layout/manifests/ from the fixture recipe." \
 		"A removed path is a broken promise to integrator automation -- read the diff."
 # Every manifest is rendered under $$tmp first and copied over the committed
-# files only after all five deployers succeed. Writing them in place meant a
+# files only after every deployer succeeds. Writing them in place meant a
 # failure partway left a mixed old/new baseline set, which is worse than no
 # refresh: the manifests would disagree with each other and with the bundler.
 #
@@ -444,15 +444,19 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 # set -e can catch.
 	@set -e; tmp=$$(mktemp -d); \
 	  trap 'rm -rf "$$tmp"' EXIT; \
-	  for d in helm argocd argocd-helm flux helmfile; do \
+	  for d in helm argocd argocd-helm flux helmfile fleet fleet-helmop; do \
+	    case "$$d" in \
+	      fleet-helmop) dep=fleet; extra="--fleet-mode helmop" ;; \
+	      *) dep="$$d"; extra="" ;; \
+	    esac; \
 	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
 	      -r pkg/bundler/testdata/layout/recipe.yaml \
-	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
+	      --deployer "$$dep" $$extra -o "$$tmp/bundle-$$d" >/dev/null; \
 	    ( cd "$$tmp/bundle-$$d" && find . -type f > "$$tmp/raw-$$d.txt" ); \
 	    sed 's|^\./||' "$$tmp/raw-$$d.txt" > "$$tmp/rel-$$d.txt"; \
 	    LC_ALL=C sort "$$tmp/rel-$$d.txt" > "$$tmp/$$d.txt"; \
 	  done; \
-	  for d in helm argocd argocd-helm flux helmfile; do \
+	  for d in helm argocd argocd-helm flux helmfile fleet fleet-helmop; do \
 	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
 	  done
 	@echo "Bundle layout manifests updated."

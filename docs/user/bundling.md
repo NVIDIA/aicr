@@ -24,6 +24,7 @@ re-render the same recipe for whatever pipeline you run:
 | `argocd` | Argo CD `Application` manifests (app-of-apps), published from a Git repo (`--repo`). |
 | `argocd-helm` | A Helm chart app-of-apps; `repoURL` defaults to the push-target registry — plain `helm install` works with no `--set repoURL` needed. Override with `--set repoURL=oci://mirror` when mirroring. Bringing your own root Application? Set `deployer.includeRootApp=false` to render children-only — see [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options). |
 | `flux` | Flux `HelmRelease` manifests plus their source objects, and a plain Kustomize `kustomization.yaml` at the bundle root (not a Flux `Kustomization` CR). |
+| `fleet` | Rancher Fleet: a `fleet.yaml` per component plus a root `gitrepo.yaml` (`--fleet-mode gitrepo`, the default), or a single `helmops.yaml` with values inlined (`--fleet-mode helmop`). |
 
 ```bash
 # GitOps with Argo CD, sourced from your config repo
@@ -40,7 +41,7 @@ shown here will not disappear or be renamed without a deliberate, reviewed
 change. Automation may read these paths.
 
 Every deployer writes `bundle-info.yaml`, `checksums.txt`, `README.md` and
-`recipe.yaml` at the bundle root. Four of the five group components into
+`recipe.yaml` at the bundle root. Five of the six group components into
 ordered `NNN-<component>` directories; Flux is the exception and uses a plain
 `<component>` directory with shared `sources/`.
 
@@ -80,11 +81,34 @@ helmfile/
 `argocd-helm` renders a Helm chart at the root — `Chart.yaml`, `values.yaml`,
 `values.schema.json` — with one template per component.
 
+`fleet` keeps Helm's per-component folders and adds its own files. In the
+default `gitrepo` mode each folder gets a `fleet.yaml` (one Fleet bundle) and a
+`.fleetignore`, and the root gets `gitrepo.yaml`; in `helmop` mode the root gets
+a single `helmops.yaml` instead, with each component's values inlined. In
+`helmop` mode the folders' values files are reference copies: Fleet, and
+`--inherit-from` and `upgrade-check`, read the values in `helmops.yaml`. Both
+trees are gated; the `helmop` tree has its own manifest.
+
+```text
+fleet/ (--fleet-mode gitrepo)        fleet/ (--fleet-mode helmop)
+  001-cert-manager/                    001-cert-manager/   same four files as helm
+    same four files as helm            002-nfd/
+    fleet.yaml                         helmops.yaml
+    .fleetignore                       recipe.yaml
+  002-nfd/                             bundle-info.yaml
+  gitrepo.yaml                         checksums.txt
+  recipe.yaml                          README.md
+  bundle-info.yaml
+  checksums.txt
+  README.md
+```
+
 Two kinds of name appear in these trees, and only one is a promise:
 
 - **Fixed names are contract.** `deploy.sh`, `app-of-apps.yaml`,
-  `kustomization.yaml`, `bundle-info.yaml`, `checksums.txt`, `values.yaml`,
-  `helmrelease.yaml`, and the `NNN-<component>` convention itself.
+  `kustomization.yaml`, `gitrepo.yaml`, `helmops.yaml`, `fleet.yaml`,
+  `bundle-info.yaml`, `checksums.txt`, `values.yaml`, `helmrelease.yaml`, and
+  the `NNN-<component>` convention itself.
 - **Derived names are not.** Flux writes one `helmrepo-<host>.yaml` per chart
   repository and helmfile one `level-N.yaml` per dependency depth, so both sets
   change with the recipe. Discover them by listing the directory rather than
@@ -132,13 +156,13 @@ the upgrade steps instead.
 ### Bundle info
 
 Every bundle carries a `bundle-info.yaml` at its root, written unconditionally
-by all five deployers — no flag turns it off. It answers three questions a
+by every deployer — no flag turns it off. It answers three questions a
 bundle cannot answer for itself: which deployer built it, which `aicr` binary
 built it, and which Helm release landed in which directory.
 
 `layout.entrypoint` names the file a consumer invokes or applies —
-`deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`, or
-`kustomization.yaml` — so automation reads one key instead of branching on
+`deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`,
+`kustomization.yaml`, `gitrepo.yaml`, or `helmops.yaml` — so automation reads one key instead of branching on
 `build.deployer`.
 
 `layout.releases` lists every Helm release the bundle installs, in deployment

@@ -405,7 +405,7 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 		}
 	}
 
-	// Parse repo URL (for Argo CD deployer)
+	// Parse repo URL (for the argocd, flux and fleet deployers)
 	params.repoURL = query.Get(bundleQueryRepo)
 
 	// Parse workload-gate taint
@@ -453,16 +453,24 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 		params.serial = b
 	}
 
-	// Parse app-name (parent Argo Application name for argocd / argocd-helm).
-	// Reject on other deployers so a typo on a helm-deployer request fails
-	// loudly rather than being silently ignored.
+	// Parse app-name (parent Argo Application name for argocd / argocd-helm;
+	// GitRepo name and bundle-name prefix for fleet). Reject on other
+	// deployers so a typo on a helm-deployer request fails loudly rather than
+	// being silently ignored.
 	if v := query.Get(bundleQueryAppName); v != "" {
-		if params.deployer != config.DeployerArgoCD && params.deployer != config.DeployerArgoCDHelm {
+		if params.deployer != config.DeployerArgoCD && params.deployer != config.DeployerArgoCDHelm &&
+			params.deployer != config.DeployerFleet {
+
 			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-				"app-name is only valid with deployer=argocd or deployer=argocd-helm")
+				"app-name is only valid with deployer=argocd, deployer=argocd-helm, or deployer=fleet")
 		}
 		if validateErr := config.ValidateAppName(v); validateErr != nil {
 			return nil, validateErr
+		}
+		if params.deployer == config.DeployerFleet {
+			if validateErr := config.ValidateFleetName("app-name", v); validateErr != nil {
+				return nil, validateErr
+			}
 		}
 		params.appName = v
 	}

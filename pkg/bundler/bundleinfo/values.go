@@ -15,6 +15,7 @@
 package bundleinfo
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"fmt"
@@ -31,7 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// valuesFileName and clusterValuesFileName are the two files four of the five
+// valuesFileName and clusterValuesFileName are the two files five of the six
 // deployers write per release, layered in the order install.sh applies them
 // (`-f values.yaml -f cluster-values.yaml`). The second carries install-time
 // values and is usually empty.
@@ -43,6 +44,11 @@ const (
 	// beside those two. Its dependency names the subchart the values are
 	// nested under.
 	chartFileName = "Chart.yaml"
+
+	// helmOpKind is the Fleet resource --fleet-mode helmop writes, one
+	// document per release in a manifest the releases share. Its values are
+	// inlined under spec.helm.values.
+	helmOpKind = "HelmOp"
 )
 
 // injectedSuffixes name a release the bundler injected around a component
@@ -64,9 +70,10 @@ var injectedSuffixes = []string{"-pre", "-post", "-readiness"}
 // Locations come from bundle-info.yaml's releases, so this reads paths the
 // bundle recorded about itself. That is not the deployer-layout fingerprinting
 // upgrade-check refuses to do: nothing here guesses a filename from the shape
-// of the directory. Four deployers write <path>/values.yaml with
+// of the directory. Five deployers write <path>/values.yaml with
 // cluster-values.yaml layered over it; flux inlines the same values under
-// spec.values in the HelmRelease named by <manifest>.
+// spec.values in the HelmRelease named by <manifest>, and fleet's HelmOp mode
+// under spec.helm.values in the matching HelmOp of <manifest>.
 //
 // A release with neither is rejected, not omitted. Every deployer writes one
 // or the other for every release — the local-format writers emit values.yaml
@@ -119,7 +126,7 @@ func isInjectedRelease(r *Release) bool {
 }
 
 // releaseValues reads one release's merged values, preferring the values-file
-// layout over the inlined one.
+// layout over the inlined one, except for a HelmOp (see readHelmOpValues).
 //
 // The preference is not arbitrary. Argo writes BOTH a values.yaml and an
 // Application that references it through spec.source.helm.valueFiles, so the
@@ -131,6 +138,14 @@ func isInjectedRelease(r *Release) bool {
 // them: flux nests vendored values under the subchart key inside spec.values
 // exactly as the other deployers do inside values.yaml.
 func releaseValues(dir string, r *Release, vendored bool) (map[string]any, error) {
+	if values, isHelmOp, err := readHelmOpValues(dir, r); err != nil {
+		return nil, err
+	} else if isHelmOp {
+		// --fleet-mode helmop refuses --vendor-charts, so there is nothing
+		// to un-nest.
+		return values, nil
+	}
+
 	values, found, err := readValuesFile(dir, r.Path, valuesFileName)
 	if err != nil {
 		return nil, err
@@ -216,7 +231,7 @@ func vendoredSubchartName(dir, relDir string) (string, error) {
 }
 
 // readValuesFile reads dir/relDir/name, reporting whether it existed. Absence
-// is a state rather than a failure: three of the five layouts write no
+// is a state rather than a failure: three of the six layouts write no
 // cluster-values.yaml, and flux writes no values.yaml at all.
 func readValuesFile(dir, relDir, name string) (map[string]any, bool, error) {
 	data, found, err := readBounded(dir, filepath.Join(relDir, name))
@@ -281,6 +296,67 @@ func readManifestValues(dir, manifest string) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	return doc.Spec.Values, nil
+}
+
+// readHelmOpValues returns spec.helm.values of the HelmOp in r's manifest
+// whose releaseName is r.Name, and reports whether the manifest holds HelmOps
+// at all.
+//
+// A HelmOp bundle still leaves values.yaml and cluster-values.yaml in each
+// release folder, but Fleet never reads them: it installs the values inlined
+// in the HelmOp, and that is the document the bundle README tells a user to
+// edit. Unlike Argo's Application, which only points at values.yaml, the
+// manifest is the live document here, so it is read before the folder files.
+// Reading the folder instead would hand inheritance the pre-edit values.
+//
+// A manifest that holds HelmOps but none for r is an incomplete bundle, not a
+// release that pinned nothing. A missing manifest, or one with no HelmOp, is
+// left to the other layouts.
+func readHelmOpValues(dir string, r *Release) (map[string]any, bool, error) {
+	if r.Manifest == "" {
+		return nil, false, nil
+	}
+	data, found, err := readBounded(dir, r.Manifest)
+	if err != nil || !found {
+		return nil, false, err
+	}
+
+	sawHelmOp := false
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	for {
+		var doc struct {
+			Kind string `yaml:"kind"`
+			Spec struct {
+				Helm struct {
+					ReleaseName string         `yaml:"releaseName"`
+					Values      map[string]any `yaml:"values"`
+				} `yaml:"helm"`
+			} `yaml:"spec"`
+		}
+		if decErr := dec.Decode(&doc); decErr != nil {
+			if stderrors.Is(decErr, io.EOF) {
+				break
+			}
+			return nil, false, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("failed to parse %s", r.Manifest), decErr)
+		}
+		if doc.Kind != helmOpKind {
+			continue
+		}
+		sawHelmOp = true
+		if doc.Spec.Helm.ReleaseName != r.Name {
+			continue
+		}
+		if doc.Spec.Helm.Values == nil {
+			return map[string]any{}, true, nil
+		}
+		return doc.Spec.Helm.Values, true, nil
+	}
+	if !sawHelmOp {
+		return nil, false, nil
+	}
+	return nil, true, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+		"%s holds no HelmOp for release %q; the bundle is incomplete", r.Manifest, r.Name))
 }
 
 // readBounded opens dir/rel under the same guards as Read: lexically joined,

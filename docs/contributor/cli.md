@@ -32,7 +32,7 @@ Subcommands registered in `pkg/cli/root.go` (`Commands:` slice on
 | `recipe sign-catalog` | `recipe_sign_catalog.go` | Sign the recipe catalog. |
 | `recipe verify-catalog` | `recipe_verify_catalog.go` | Verify the signed recipe catalog. |
 | `query` | `query.go` | Extract a single hydrated value from a recipe (`--selector components.gpu-operator.values.driver.version`). |
-| `bundle` | `bundle.go` | Render per-component deployment artifacts from a recipe via a chosen deployer (`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`). |
+| `bundle` | `bundle.go` | Render per-component deployment artifacts from a recipe via a chosen deployer (`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `fleet`). |
 | `verify` | `bundle_verify.go` | Verify a bundle's checksums, attestation signatures, and provenance chain; report the achieved trust level and enforce a `--min-trust-level` / creator / CLI-version policy. |
 | `validate` | `validate.go` | Evaluate recipe constraints against a snapshot or live cluster; optionally emit evidence. |
 | `evidence digest` | `evidence_digest.go` | Print the canonical digest of a resolved recipe (offline). |

@@ -1076,6 +1076,8 @@ func TestParseDeployerType(t *testing.T) {
 		{"helmfile uppercase", "HELMFILE", DeployerHelmfile, false},
 		{"helmfile mixed case", "Helmfile", DeployerHelmfile, false},
 		{"helmfile with spaces", "  helmfile  ", DeployerHelmfile, false},
+		{"fleet lowercase", "fleet", DeployerFleet, false},
+		{"fleet uppercase", "FLEET", DeployerFleet, false},
 		{"invalid type", "invalid", "", true},
 		{"empty string", "", "", true},
 	}
@@ -1097,9 +1099,9 @@ func TestParseDeployerType(t *testing.T) {
 func TestGetDeployerTypes(t *testing.T) {
 	types := GetDeployerTypes()
 
-	// Verify we get the expected types (argocd, argocd-helm, flux, helm, helmfile)
-	if len(types) != 5 {
-		t.Errorf("GetDeployerTypes() returned %d types, want 5", len(types))
+	// Verify we get the expected types (argocd, argocd-helm, fleet, flux, helm, helmfile)
+	if len(types) != 6 {
+		t.Errorf("GetDeployerTypes() returned %d types, want 6", len(types))
 	}
 
 	// Verify types are sorted alphabetically
@@ -1130,6 +1132,9 @@ func TestGetDeployerTypes(t *testing.T) {
 	if !found[string(DeployerHelmfile)] {
 		t.Error("GetDeployerTypes() missing 'helmfile'")
 	}
+	if !found[string(DeployerFleet)] {
+		t.Error("GetDeployerTypes() missing 'fleet'")
+	}
 }
 
 func TestDeployerTypeString(t *testing.T) {
@@ -1142,6 +1147,7 @@ func TestDeployerTypeString(t *testing.T) {
 		{DeployerArgoCDHelm, "argocd-helm"},
 		{DeployerFlux, "flux"},
 		{DeployerHelmfile, "helmfile"},
+		{DeployerFleet, "fleet"},
 	}
 
 	for _, tt := range tests {
@@ -1343,4 +1349,59 @@ func TestWithBundlers(t *testing.T) {
 			t.Errorf("Bundlers()[0] = %q after output mutation, want %q", again[0], "gpu-operator")
 		}
 	})
+}
+
+func TestWithFleetNamespace(t *testing.T) {
+	t.Run("set value", func(t *testing.T) {
+		cfg := NewConfig(WithFleetNamespace("fleet-local"))
+		if cfg.FleetNamespace() != "fleet-local" {
+			t.Errorf("FleetNamespace() = %q, want %q", cfg.FleetNamespace(), "fleet-local")
+		}
+	})
+
+	t.Run("default", func(t *testing.T) {
+		cfg := NewConfig()
+		if cfg.FleetNamespace() != DefaultFleetNamespace {
+			t.Errorf("default FleetNamespace() = %q, want %q", cfg.FleetNamespace(), DefaultFleetNamespace)
+		}
+	})
+
+	t.Run("empty string returns default", func(t *testing.T) {
+		cfg := NewConfig(WithFleetNamespace(""))
+		if cfg.FleetNamespace() != DefaultFleetNamespace {
+			t.Errorf("FleetNamespace() with empty = %q, want %q", cfg.FleetNamespace(), DefaultFleetNamespace)
+		}
+	})
+}
+
+func TestParseFleetMode(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", FleetModeGitRepo, false},
+		{"gitrepo", FleetModeGitRepo, false},
+		{" HelmOp ", FleetModeHelmOp, false},
+		{"bundle", "", true},
+	}
+	for _, tt := range tests {
+		got, err := ParseFleetMode(tt.in)
+		if (err != nil) != tt.wantErr || got != tt.want {
+			t.Errorf("ParseFleetMode(%q) = %q, %v; want %q, err=%v", tt.in, got, err, tt.want, tt.wantErr)
+		}
+	}
+}
+
+func TestValidateFleetName(t *testing.T) {
+	for _, ok := range []string{"aicr", "fleet-local", "team-a1"} {
+		if err := ValidateFleetName("name", ok); err != nil {
+			t.Errorf("ValidateFleetName(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "team.a", "Fleet", "has space"} {
+		if err := ValidateFleetName("name", bad); err == nil {
+			t.Errorf("ValidateFleetName(%q) = nil, want error", bad)
+		}
+	}
 }
