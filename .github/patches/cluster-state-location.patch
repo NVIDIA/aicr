@@ -1,0 +1,166 @@
+diff --git a/pkg/cluster/cli.go b/pkg/cluster/cli.go
+index 59cc7d0..5be28b1 100644
+--- a/pkg/cluster/cli.go
++++ b/pkg/cluster/cli.go
+@@ -266,6 +266,7 @@ func buildRunConfig(cmd *cli.Command) (*runConfigResult, func(), error) {
+ 			Provider:     cfg.Deployment.Provider,
+ 			State:        cfg.Deployment.State,
+ 			Region:       cfg.Deployment.Location,
++			StateRegion:  cfg.Deployment.StateLocation,
+ 			Destroy:      cfg.Deployment.Destroy,
+ 		},
+ 		stateDir: sd,
+diff --git a/pkg/config/config.go b/pkg/config/config.go
+index dfeaf78..61a918b 100644
+--- a/pkg/config/config.go
++++ b/pkg/config/config.go
+@@ -15,13 +15,18 @@ type Config struct {
+ }
+ 
+ type Deployment struct {
+-	ID       string            `yaml:"id"`
+-	Provider string            `yaml:"provider"`
+-	Tenancy  string            `yaml:"tenancy"`
+-	Location string            `yaml:"location"`
+-	State    string            `yaml:"state"`
+-	Destroy  bool              `yaml:"destroy"`
+-	Tags     map[string]string `yaml:"tags,omitempty"`
++	ID       string `yaml:"id"`
++	Provider string `yaml:"provider"`
++	Tenancy  string `yaml:"tenancy"`
++	Location string `yaml:"location"`
++	State    string `yaml:"state"`
++	// StateLocation is the region holding the state backend; empty means
++	// Location. The two differ only when one tenancy deploys into more than
++	// one region, since the state bucket is named per-tenancy and so lives in
++	// exactly one of them.
++	StateLocation string            `yaml:"stateLocation,omitempty"`
++	Destroy       bool              `yaml:"destroy"`
++	Tags          map[string]string `yaml:"tags,omitempty"`
+ }
+ 
+ type ProviderConfig struct {
+diff --git a/pkg/terraform/terraform.go b/pkg/terraform/terraform.go
+index c79b60b..398322f 100644
+--- a/pkg/terraform/terraform.go
++++ b/pkg/terraform/terraform.go
+@@ -22,9 +22,14 @@ type RunConfig struct {
+ 	Provider     string // config.ProviderEKS, ProviderGKE, or ProviderAKS
+ 	State        string // config.StateTenancy or config.StateLocal
+ 	Bucket       string
+-	Region       string
+-	StateKey     string
+-	Destroy      bool
++	// Region is where the cluster is provisioned: the provider's region.
++	Region string
++	// StateRegion is where the state backend lives. Empty means Region, which
++	// is the single-region case. It is separate because Region is also the
++	// provider region, and only one of the two may move.
++	StateRegion string
++	StateKey    string
++	Destroy     bool
+ 
+ 	// AWS credentials passed explicitly (not via os.Setenv).
+ 	AccessKeyID     string
+@@ -217,6 +222,15 @@ func buildEnv(cfg RunConfig) []string {
+ 	return env
+ }
+ 
++// stateRegion returns the region of the state backend, defaulting to the
++// provider region.
++func (c RunConfig) stateRegion() string {
++	if c.StateRegion != "" {
++		return c.StateRegion
++	}
++	return c.Region
++}
++
+ func buildInitArgs(cfg RunConfig) []string {
+ 	args := []string{cmdInit}
+ 
+@@ -228,7 +242,7 @@ func buildInitArgs(cfg RunConfig) []string {
+ 	case config.ProviderEKS:
+ 		args = append(args,
+ 			fmt.Sprintf("-backend-config=bucket=%s", cfg.Bucket),
+-			fmt.Sprintf("-backend-config=region=%s", cfg.Region),
++			fmt.Sprintf("-backend-config=region=%s", cfg.stateRegion()),
+ 			"-backend-config=encrypt=true",
+ 			fmt.Sprintf("-backend-config=key=%s", cfg.StateKey),
+ 		)
+diff --git a/pkg/terraform/terraform_test.go b/pkg/terraform/terraform_test.go
+index 94c7996..6eef25f 100644
+--- a/pkg/terraform/terraform_test.go
++++ b/pkg/terraform/terraform_test.go
+@@ -3,6 +3,7 @@ package terraform
+ import (
+ 	"context"
+ 	"fmt"
++	"slices"
+ 	"strings"
+ 	"testing"
+ 
+@@ -69,6 +70,49 @@ func TestBuildInitArgsS3(t *testing.T) {
+ 	}
+ }
+ 
++// A tenancy deploying into a second region keeps its state in the region where
++// the per-tenancy bucket was created, so the backend region has to diverge from
++// the provider region while the state key still tracks the deployment.
++func TestBuildInitArgsS3StateRegion(t *testing.T) {
++	args := buildInitArgs(RunConfig{
++		Provider:    config.ProviderEKS,
++		State:       config.StateTenancy,
++		Bucket:      "my-bucket",
++		Region:      "us-east-2",
++		StateRegion: "us-east-1",
++		StateKey:    "deployments/us-east-2/demo/terraform.tfstate",
++	})
++	expected := []string{
++		"init",
++		"-backend-config=bucket=my-bucket",
++		"-backend-config=region=us-east-1",
++		"-backend-config=encrypt=true",
++		"-backend-config=key=deployments/us-east-2/demo/terraform.tfstate",
++	}
++
++	if len(args) != len(expected) {
++		t.Fatalf("len = %d, want %d\nargs: %v", len(args), len(expected), args)
++	}
++	for i, arg := range args {
++		if arg != expected[i] {
++			t.Errorf("args[%d] = %q, want %q", i, arg, expected[i])
++		}
++	}
++}
++
++// StateRegion must not reach the provider, which stays in the deployment region.
++func TestBuildEnvStateRegionNotProviderRegion(t *testing.T) {
++	env := buildEnv(RunConfig{
++		Provider:    config.ProviderEKS,
++		Region:      "us-east-2",
++		StateRegion: "us-east-1",
++	})
++	want := "AWS_DEFAULT_REGION=us-east-2"
++	if !slices.Contains(env, want) {
++		t.Errorf("env = %v, want to contain %q", env, want)
++	}
++}
++
+ func TestBuildInitArgsLocal(t *testing.T) {
+ 	args := buildInitArgs(RunConfig{
+ 		Provider: config.ProviderEKS,
+diff --git a/schema/cluster-config.schema.json b/schema/cluster-config.schema.json
+index 2a73b69..d51efe7 100644
+--- a/schema/cluster-config.schema.json
++++ b/schema/cluster-config.schema.json
+@@ -32,6 +32,10 @@
+           "default": "tenancy",
+           "description": "Terraform state backend: 'tenancy' for cloud storage, 'local' for local tfstate"
+         },
++        "stateLocation": {
++          "type": "string",
++          "description": "Region of the state backend, when it differs from location (one tenancy deploying into several regions). Defaults to location"
++        },
+         "destroy": {
+           "type": "boolean",
+           "default": false,

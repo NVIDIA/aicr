@@ -46,6 +46,13 @@ deployment:
   tenancy: "897722687756"
   location: us-east-2
   state: tenancy                # remote TF state in this account's S3
+  # The state bucket is named per-account (cluster-state-<tenancy>), so it
+  # exists in exactly one region: us-east-1, where the ct and gb200 lanes
+  # bootstrapped it. This is the first us-east-2 AWS lane, so without this the
+  # backend region would be derived from location and S3 would answer the
+  # init with a 301 (#3162). Needs an actuator carrying mchmarny/cluster#51 —
+  # upstream's released image ignores this key and still fails.
+  stateLocation: us-east-1
   destroy: false
   tags:
     env: dev

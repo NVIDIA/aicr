@@ -443,6 +443,54 @@ jobs:
       # fresh 1h session at each long phase boundary so no single phase runs on
       # an expiring token; the role's max_session_duration is left at the STS
       # default, so we deliberately do NOT set role-duration-seconds here.
+      # ======================= TEMPORARY — DO NOT MERGE =======================
+      # Builds an actuator carrying mchmarny/cluster#51 and overrides EKS_IMAGE
+      # for the steps below. GB300 is the first us-east-2 AWS lane, and the
+      # released actuator derives the state backend region from
+      # deployment.location, so its `terraform init` is answered with an S3 301
+      # against the us-east-1 state bucket (#3162). There is no released image
+      # with the fix yet; this lane cannot run without one.
+      #
+      # It is deliberately placed BEFORE the credential step, so the build runs
+      # with no AWS credentials in the environment. Upstream is pinned by commit
+      # and the patch is committed in-tree, so the diff shows every byte that
+      # ends up in the image — nothing is pulled from a personal namespace.
+      #
+      # Gated on the ref so it is inert anywhere but this test branch. Delete
+      # this step and restore the EKS_IMAGE digest once #51 ships an image.
+      - name: Build patched actuator (test/uat only)
+        if: github.ref == 'refs/heads/test/uat'
+        env:
+          # Upstream main at the time #51 was opened.
+          UPSTREAM_SHA: 0ac8457fe90e690e84add73b8c715b6f7b050df4
+          # Matches image/eks.dockerfile's default, which the mirror must agree
+          # with: providers are resolved at build time and the runtime
+          # terraformrc then forbids direct downloads.
+          TF_VERSION: 1.15.5
+          LOCAL_IMAGE: aicr-local/cluster-eks:state-location
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          curl -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o "${workdir}/tf.zip"
+          unzip -q "${workdir}/tf.zip" -d "${workdir}/bin"
+          export PATH="${workdir}/bin:${PATH}"
+          git clone --quiet https://github.com/mchmarny/cluster.git "${workdir}/cluster"
+          git -C "${workdir}/cluster" checkout --quiet "${UPSTREAM_SHA}"
+          git -C "${workdir}/cluster" apply "${GITHUB_WORKSPACE}/.github/patches/cluster-state-location.patch"
+          # Without the mirror the image's terraformrc points at an empty
+          # filesystem mirror AND excludes direct installs, so every provider
+          # resolution inside the container fails.
+          (cd "${workdir}/cluster" && ./tools/mirror eks)
+          # --load because the buildx step above leaves a docker-container
+          # driver as the default builder, whose output does not reach the
+          # local daemon that `docker run` below (and bringup) reads from.
+          docker buildx build --load \
+            -f "${workdir}/cluster/image/eks.dockerfile" \
+            -t "${LOCAL_IMAGE}" "${workdir}/cluster"
+          echo "EKS_IMAGE=${LOCAL_IMAGE}" >> "${GITHUB_ENV}"
+          docker run --rm "${LOCAL_IMAGE}" --version
+      # ===================== END TEMPORARY — DO NOT MERGE =====================
+
       - name: Configure AWS credentials
         id: auth
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd  # v6.3.0
