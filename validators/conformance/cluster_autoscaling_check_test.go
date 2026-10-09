@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -153,7 +155,7 @@ func TestDetectPlatformListError_FailsClosed(t *testing.T) {
 			if validators.IsSkip(err) {
 				t.Fatalf("detectPlatform() = %v, want a blocking failure but got a Skip — an infra error must never masquerade as inapplicable (#2122)", err)
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("detectPlatform() code = %v, want %v", err, tt.wantCode)
 			}
 		})
@@ -183,7 +185,7 @@ func TestCheckPlatformAutoscalingListError_FailsClosed(t *testing.T) {
 	if strings.Contains(err.Error(), "not recognized") {
 		t.Errorf("checkPlatformAutoscaling() masqueraded infra error as unrecognized-platform skip: %v", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnauthorized, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnauthorized {
 		t.Errorf("checkPlatformAutoscaling() code = %v, want Unauthorized", err)
 	}
 }

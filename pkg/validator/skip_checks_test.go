@@ -15,11 +15,12 @@
 package validator
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/redact"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -130,7 +131,7 @@ func TestPreflightSkipChecks(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 			}
 			for _, want := range tt.wantSubstrs {
@@ -324,7 +325,7 @@ func TestPreflightSkipChecksExported(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 			}
 			for _, want := range tt.wantSubstrs {

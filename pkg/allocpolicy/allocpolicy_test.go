@@ -15,11 +15,12 @@
 package allocpolicy
 
 import (
-	stderrors "errors"
 	"sort"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func boolPtr(v bool) *bool { return &v }
@@ -159,7 +160,7 @@ func TestValidateAdvertiser(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ValidateAdvertiser(%q) error = %v, wantErr %v", tt.advertiser, err, tt.wantErr)
 			}
-			if err != nil && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if err != nil && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -214,7 +215,7 @@ func TestCheckCoherence(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("CheckCoherence(%+v) error = %v, wantErr %v", tt.obs, err, tt.wantErr)
 			}
-			if err != nil && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if err != nil && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})

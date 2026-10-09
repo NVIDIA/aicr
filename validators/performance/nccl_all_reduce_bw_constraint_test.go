@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
@@ -354,7 +355,7 @@ func TestRunNCCLTrainJob_AbortsIfExecutionLockLostBeforeApply(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a conflict error when the execution lock was taken over before apply, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeConflict {
 		t.Errorf("expected ErrCodeConflict, got %v", err)
 	}
 	if runtimeApplied {
@@ -455,7 +456,7 @@ func TestRunNCCLTrainJob_KeepsNamespaceOnConcurrentClaimConflict(t *testing.T) {
 	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
 
 	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "", "", &benchmarkRuntimePlan{source: runtimeSourceCapability})
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeConflict {
 		t.Fatalf("expected ErrCodeConflict, got %v", err)
 	}
 	if _, getErr := clientset.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); getErr != nil {
@@ -868,7 +869,7 @@ func TestWaitForLauncherPodAndGetLogs_TakenOverLockFailsClosed(t *testing.T) {
 		if res.logs != "" {
 			t.Errorf("expected no logs once the lock was taken over, got %q", res.logs)
 		}
-		if !stderrors.Is(res.err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+		if errorstest.ReportedCode(res.err) != aicrErrors.ErrCodeConflict {
 			t.Errorf("expected ErrCodeConflict for a taken-over lock, got: %v", res.err)
 		}
 	case <-time.After(2 * time.Second):
@@ -1084,7 +1085,7 @@ func TestClaimNCCLExecutionLock_RefusesLiveLease(t *testing.T) {
 		},
 	})
 
-	if _, err := claimNCCLExecutionLock(context.Background(), clientset, ns); !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+	if _, err := claimNCCLExecutionLock(context.Background(), clientset, ns); errorstest.ReportedCode(err) != aicrErrors.ErrCodeConflict {
 		t.Errorf("expected ErrCodeConflict against a live lease, got: %v", err)
 	}
 }
@@ -1408,7 +1409,7 @@ func assertAllConflict(t *testing.T, errs []error, wantCount int) {
 		t.Fatalf("expected %d losing callers, got %d: %v", wantCount, len(errs), errs)
 	}
 	for _, err := range errs {
-		if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+		if errorstest.ReportedCode(err) != aicrErrors.ErrCodeConflict {
 			t.Errorf("expected ErrCodeConflict for a losing caller, got: %v", err)
 		}
 	}
@@ -1465,7 +1466,7 @@ func TestVerifyNCCLNamespaceNotLive(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("verifyNCCLNamespaceNotLive() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil && !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+			if err != nil && errorstest.ReportedCode(err) != aicrErrors.ErrCodeConflict {
 				t.Errorf("expected ErrCodeConflict, got %v", err)
 			}
 		})
@@ -1521,7 +1522,7 @@ func TestRunNCCLTrainJob_RefusesLiveForeignNamespace(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a conflict error for a live foreign namespace, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeConflict {
 		t.Errorf("expected ErrCodeConflict, got %v", err)
 	}
 

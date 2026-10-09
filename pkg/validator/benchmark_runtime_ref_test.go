@@ -16,12 +16,13 @@ package validator
 
 import (
 	"context"
-	stderrors "errors"
 	"io/fs"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
@@ -235,7 +236,7 @@ func TestResolveBenchmarkRuntimeRef(t *testing.T) {
 				if tt.wantTimeout {
 					wantCode = errors.ErrCodeTimeout
 				}
-				if !stderrors.Is(err, errors.New(wantCode, "")) {
+				if errorstest.ReportedCode(err) != wantCode {
 					t.Errorf("error code = %v, want %v", err, wantCode)
 				}
 				if tt.wantErrSub != "" && !strings.Contains(err.Error(), tt.wantErrSub) {

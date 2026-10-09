@@ -17,7 +17,6 @@ package recipe
 import (
 	"context"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -26,6 +25,8 @@ import (
 	"time"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
@@ -1494,7 +1495,7 @@ func TestListCatalogWithProfilesCanceled(t *testing.T) {
 	if entries != nil {
 		t.Fatalf("ListCatalogWithProfiles() entries = %#v, want nil", entries)
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeTimeout {
 		t.Fatalf("ListCatalogWithProfiles() error = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -1629,7 +1630,7 @@ func TestValidateProfileLock(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileLock() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileLock() error code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -1692,7 +1693,7 @@ func TestValidateProfileValuesWithContextCanceled(t *testing.T) {
 	cancel()
 
 	err = result.ValidateProfileValuesWithContext(ctx)
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeTimeout {
 		t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -1798,7 +1799,7 @@ func TestValidateProfileValuesRejectsInvalidBaseline(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -1887,7 +1888,7 @@ func TestApplyEffectiveProfileConstraints(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "no version can satisfy") {
 			t.Fatalf("applyEffectiveProfile() error = %v, want an unsatisfiable-range rejection", err)
 		}
-		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("applyEffectiveProfile() error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if len(spec.Constraints) != 1 || spec.Constraints[0].Value != "<= 1.30" {
@@ -1916,7 +1917,7 @@ func TestApplyEffectiveProfileConstraints(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "collides with the composed recipe") {
 			t.Fatalf("applyEffectiveProfile() error = %v, want collision", err)
 		}
-		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("applyEffectiveProfile() error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if len(spec.Constraints) != 1 {
@@ -2060,7 +2061,7 @@ func TestValidateProfileValuesRejectsUnsupportedArtifactScalars(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -2145,7 +2146,7 @@ func TestValidateProfileValuesScopesArtifactValidationToOwnedPaths(t *testing.T)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -2201,7 +2202,7 @@ func TestValidateProfileValuesKustomizeOwnership(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -2345,7 +2346,7 @@ func TestValidateOwnershipDisjoint(t *testing.T) {
 				t.Fatalf("ValidateOwnershipDisjoint() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if err != nil {
-				if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 					t.Fatalf("ValidateOwnershipDisjoint() error = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), tt.wantDetail) {

@@ -30,6 +30,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
@@ -1360,7 +1361,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a non-integer knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1371,7 +1372,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a malformed duration knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1382,7 +1383,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a malformed populate-timeout knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1393,7 +1394,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a malformed health-timeout knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1411,7 +1412,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a malformed cache-size knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1429,7 +1430,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for an unknown router-mode knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1474,7 +1475,7 @@ func TestResolveRouterMode(t *testing.T) {
 				t.Fatalf("resolveRouterMode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1602,7 +1603,7 @@ func TestValidateModelID(t *testing.T) {
 	for _, bad := range []string{"$(touch x)", "a:b", `a"b`, "a b", "a\nb", "", "../etc"} {
 		if err := validateModelID(bad); err == nil {
 			t.Errorf("validateModelID(%q) = nil, want ErrCodeInvalidRequest", bad)
-		} else if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		} else if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("validateModelID(%q) error code = %v, want ErrCodeInvalidRequest", bad, err)
 		}
 	}
@@ -1638,7 +1639,7 @@ func TestResolveConcurrencyPerGPU(t *testing.T) {
 				t.Fatalf("resolveConcurrencyPerGPU() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1673,7 +1674,7 @@ func TestResolveRoutingMode(t *testing.T) {
 				t.Fatalf("resolveRoutingMode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1924,7 +1925,7 @@ func TestEnsureNamespace(t *testing.T) {
 		foreign := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
 		client := fake.NewClientset(foreign)
 		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
-		if _, _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+		if _, _, err := ensureNamespace(ctx, ns, component); errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 			t.Errorf("got %v, want ErrCodeConflict", err)
 		}
 	})
@@ -1945,7 +1946,7 @@ func TestEnsureNamespace(t *testing.T) {
 			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
 		})
 		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
-		if _, _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+		if _, _, err := ensureNamespace(ctx, ns, component); errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 			t.Errorf("got %v, want ErrCodeConflict", err)
 		}
 	})
@@ -2608,7 +2609,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		if err == nil {
 			t.Fatalf("countUsedGPUsByNode() = %v, want error — a list failure must not report GPUs as free", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Errorf("error code = %v, want ErrCodeInternal", err)
 		}
 	})
@@ -2623,7 +2624,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		if err == nil {
 			t.Fatalf("countUsedGPUsByNode() = %v, want error — an ambiguous DRA lookup must not be treated as zero usage", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Errorf("error code = %v, want ErrCodeInternal", err)
 		}
 	})
@@ -2667,7 +2668,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 				if err == nil {
 					t.Fatalf("countUsedGPUsByNode() = %v, want error — a canceled scan must not report GPUs as free", got)
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 					t.Errorf("error code = %v, want ErrCodeTimeout for %v", err, ctx.Err())
 				}
 			})
@@ -2706,7 +2707,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		if err == nil {
 			t.Fatalf("countUsedGPUsByNode() = %v, want error — a canceled scan must not report success", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 	})
@@ -2726,7 +2727,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		if err == nil {
 			t.Fatalf("countUsedGPUsByNode() = %v, want error — a canceled scan with an empty List must not report success", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 	})
@@ -3296,7 +3297,7 @@ func TestWaitForEndpointReady_TimesOutWhenAlwaysEmpty(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error code = %v, want ErrCodeTimeout (err=%v)", err, err)
 	}
 }
@@ -3521,7 +3522,7 @@ func TestRejectUnsupportedGPUTopology(t *testing.T) {
 			if err == nil {
 				t.Fatal("rejectUnsupportedGPUTopology() = nil, want fail-fast error")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			for _, want := range tt.wantErr {
