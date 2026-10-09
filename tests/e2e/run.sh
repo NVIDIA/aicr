@@ -2147,9 +2147,7 @@ test_oci_bundle() {
   # Test: Bundle as OCI image
   # The Tilt/kind registry at localhost:5001 is plain HTTP, so the push needs
   # --plain-http. --insecure-tls only relaxes certificate verification on an
-  # HTTPS dial, so it produced "http: server gave HTTP response to HTTPS
-  # client" and the case silently SKIPped -- this suite never exercised an OCI
-  # push (#3108). A failure here is a real failure now.
+  # HTTPS dial.
   msg "--- Test: Bundle as OCI image ---"
   local digest_file="${oci_dir}/.digest"
   rm -f "$digest_file"
