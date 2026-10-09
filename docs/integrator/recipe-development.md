@@ -395,6 +395,16 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 > recipe resolution (rather than silently producing an unpatched bundle), so do
 > not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
 
+### Kueue topology-aware scheduling
+
+The `platform=kueue` leaves (`h100-kind-training-kueue`, `h100-gke-cos-training-kueue`, `h100-eks-ubuntu-training-kueue`) show the pattern for an opt-in that differs per provider. Each leaf declares `topograph` (the Kubernetes-scoped component, `k8s` engine, labels nodes) and `kueue` with `topograph` in its `dependencyRefs`, and sets only what is provider-specific:
+
+- `topograph` `overrides.provider.name`: `gcp`, `aws`, or `dra` (Kind, reading the existing `nvidia.com/gpu.clique` node label).
+- `kueue` `manifestFiles`: the `Topology` whose levels match the depth that provider produces (`topology-accelerator.yaml` or `topology-tiers-3.yaml`, widest level first, ending in `kubernetes.io/hostname`), then `tas-flavor.yaml`, `cluster-queue-tas.yaml`, and `local-queue.yaml`. Hook weights order them Topology (0), flavor (1), ClusterQueue (5), LocalQueue (10).
+- `kueue` `healthCheckAsserts`: required whenever `manifestFiles` is overridden, since the registry check pins `default-flavor`. Assert existence and ClusterQueue `Active`, never node labels; Topograph labels nodes after install.
+
+`default-flavor` stays topology-free, so recipes that do not select `platform: kueue` render as before. See [Topology-aware scheduling](../user/component-catalog.md#topology-aware-scheduling-with-kueue-and-topograph) for IAM requirements and a sample Job.
+
 ## Preview recipes
 
 Recipe coordinates in AICR carry a maturity classification. The definitions
