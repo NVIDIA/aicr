@@ -124,8 +124,10 @@ func TestGenerate_UpstreamChain(t *testing.T) {
 	if !h.DisablePreProcess {
 		t.Errorf("gpu-operator helm disablePreProcess = false, want true")
 	}
-	// No AICR deployer adopts objects owned by other releases; Fleet already
-	// upgrades an existing release of the same name without the flag.
+	// helm.takeOwnership would let the first install adopt objects owned by
+	// other releases, which no AICR deployer does. Fleet upgrades an existing
+	// release of the same name without it. (Fleet's later upgrades take
+	// ownership regardless; the README says so.)
 	if raw, readErr := os.ReadFile(filepath.Join(out, "002-gpu-operator", fileFleetYAML)); readErr != nil {
 		t.Fatalf("read fleet.yaml: %v", readErr)
 	} else if strings.Contains(string(raw), "takeOwnership") {
@@ -536,6 +538,56 @@ func TestGenerate_ReadmeMatchesMode(t *testing.T) {
 				}
 			} else if !mentionsFleetYAML {
 				t.Errorf("gitrepo README does not mention fleet.yaml:\n%s", text)
+			}
+		})
+	}
+}
+
+// Fleet embeds a GitRepo folder's chart in its Bundle, and kube-prometheus-stack,
+// in every recipe, compresses to about 1.4MB: deployable from a GitRepo but
+// close to etcd's limit, and rejected when `fleet apply` posts it through
+// Rancher's 1Mi body limit. A gitrepo bundle carrying it must say so and name
+// the HelmOp path out; a helmop bundle embeds nothing and must not.
+func TestGenerate_BundleSizeGuidance(t *testing.T) {
+	for _, mode := range []string{ModeGitRepo, ModeHelmOp} {
+		t.Run(mode, func(t *testing.T) {
+			g := &Generator{
+				RecipeResult: recipeWith(
+					ref("prometheus-operator-crds", "monitoring", "prometheus-operator-crds", "24.0.1",
+						"https://prometheus-community.github.io/helm-charts"),
+					ref("kube-prometheus-stack", "monitoring", "kube-prometheus-stack", "84.4.0",
+						"https://prometheus-community.github.io/helm-charts"),
+				),
+				Version: testBundlerVersion,
+				Mode:    mode,
+			}
+			out := t.TempDir()
+			res, err := g.Generate(context.Background(), out)
+			if err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			readme, err := os.ReadFile(filepath.Join(out, fileReadme))
+			if err != nil {
+				t.Fatalf("read README: %v", err)
+			}
+			notes := strings.Join(res.DeploymentNotes, "\n")
+			hasSection := strings.Contains(string(readme), "### Bundle size")
+			if mode == ModeHelmOp {
+				if hasSection || strings.Contains(notes, "Bundle size") {
+					t.Errorf("helmop bundle embeds no chart but carries Bundle size guidance:\n%s\n%s", readme, notes)
+				}
+				return
+			}
+			if !hasSection {
+				t.Fatalf("gitrepo README has no Bundle size section:\n%s", readme)
+			}
+			for _, want := range []string{"kube-prometheus-stack", "public-api-body-limit", "--fleet-mode helmop"} {
+				if !strings.Contains(string(readme), want) {
+					t.Errorf("Bundle size section does not mention %q:\n%s", want, readme)
+				}
+			}
+			if !strings.Contains(notes, "Bundle size") {
+				t.Errorf("deployment notes do not point at the Bundle size section:\n%s", notes)
 			}
 		})
 	}

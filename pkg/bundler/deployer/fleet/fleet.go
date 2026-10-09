@@ -389,7 +389,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	output.Duration = time.Since(start)
-	g.finalizeOutput(output, crdOwnerNames, len(writeResult.VendoredCharts) > 0)
+	g.finalizeOutput(output, crdOwnerNames)
 
 	slog.Debug("fleet bundle generated",
 		"components", len(sortedRefs),
@@ -402,7 +402,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 // finalizeOutput records the deployment source, the steps a user runs, and
 // the notes that depend on the bundle's mode and content.
-func (g *Generator) finalizeOutput(output *deployer.Output, crdOwnerNames []string, hasVendored bool) {
+func (g *Generator) finalizeOutput(output *deployer.Output, crdOwnerNames []string) {
 	if g.mode() == ModeHelmOp {
 		// A HelmOp bundle names no Git source; only the app name appears.
 		output.Source = deployer.Source{AppName: g.appName()}
@@ -441,9 +441,9 @@ func (g *Generator) finalizeOutput(output *deployer.Output, crdOwnerNames []stri
 				"Per-component cluster-values.yaml files have been generated. Edit them before pushing to customize per-cluster settings.")
 		}
 	}
-	if hasVendored {
+	if g.mode() == ModeGitRepo {
 		notes = append(notes,
-			"This bundle contains vendored Helm charts. Fleet Bundles are stored in etcd; check that each folder stays well under the ~1MiB object limit.")
+			"Fleet embeds each folder's chart in a Bundle object; if one is rejected as too large, see \"Bundle size\" in README.md.")
 	}
 	output.DeploymentNotes = notes
 }
