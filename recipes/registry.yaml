@@ -1465,6 +1465,8 @@ components:
           - nodeObserver.tolerations
       accelerated:
         nodeSelectorPaths:
+          # nodeObserver.topograph.trigger.nodeSelector is a watch filter —
+          # it narrows which node-change events trigger topology regeneration.
           - nodeObserver.topograph.trigger.nodeSelector
           - nodeDataBroker.nodeSelector
         tolerationPaths:

@@ -146,6 +146,35 @@ case "${KUBECTL_CALLS}" in
 esac
 unset -f kubectl
 
+# --- main's cleanup verdict ---------------------------------------------------
+#
+# Drives main with every cluster-touching function stubbed, so only the
+# delete_job_and_wait calls decide the result. The Jobs have fixed names, so a
+# cleanup that fails must fail the run rather than leave a Job behind a green
+# exit. Calls 1 and 3 are the pre-apply deletes, 2 and 4 the post-check ones.
+main_with_failing_delete() {
+    FAIL_ON="$1"
+    (
+        DELETE_CALLS=0
+        node_domain_table() { printf 'n1 cq0\nn2 cq0\nn3 cq1\nn4 cq1\n'; }
+        apply_spread_job() { return 0; }
+        check_admitted_within_domain() { return 0; }
+        check_refused_across_domains() { return 0; }
+        kubectl() { return 0; }
+        delete_job_and_wait() {
+            DELETE_CALLS=$((DELETE_CALLS + 1))
+            [[ "${DELETE_CALLS}" -ne "${FAIL_ON}" ]]
+        }
+        main aicr-uat-slurm >/dev/null 2>&1
+    )
+}
+main_with_failing_delete 0
+check "main passes when every delete succeeds" "0" "$?"
+main_with_failing_delete 2
+check "main fails when the spread Job cannot be cleaned up" "1" "$?"
+main_with_failing_delete 4
+check "main fails when the too-large Job cannot be cleaned up" "1" "$?"
+
 if [[ "${fail}" -ne 0 ]]; then
     echo "FAILED" >&2
     exit 1
