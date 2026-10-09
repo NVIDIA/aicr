@@ -29,7 +29,7 @@
 //	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, any
-//	    Platform    CriteriaPlatformType    // dynamo, kubeflow, nim, runai, slurm, any
+//	    Platform    CriteriaPlatformType    // dynamo, kubeflow, kueue, nim, runai, slurm, any
 //	    Nodes       int                     // node count (0 = any)
 //	}
 //
@@ -105,6 +105,7 @@
 // Platform types for workload frameworks:
 //   - CriteriaPlatformDynamo: NVIDIA Dynamo
 //   - CriteriaPlatformKubeflow: Kubeflow
+//   - CriteriaPlatformKueue: Kueue topology-aware scheduling
 //   - CriteriaPlatformNIM: NVIDIA NIM
 //   - CriteriaPlatformRunai: NVIDIA Run:ai
 //   - CriteriaPlatformSlurm: SchedMD Slinky Slurm
@@ -193,7 +194,7 @@
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
 //   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, any (default: any)
-//   - platform: dynamo, kubeflow, nim, runai, slurm, any (default: any)
+//   - platform: dynamo, kubeflow, kueue, nim, runai, slurm, any (default: any)
 //   - nodes: integer node count (default: 0 = any)
 //
 // # Criteria Files (CLI and HTTP API - POST)
