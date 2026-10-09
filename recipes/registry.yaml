@@ -1438,6 +1438,40 @@ components:
         tolerationPaths:
           - nodeDataBroker.tolerations
 
+  # Kubernetes-scoped Topograph: the k8s engine writes
+  # fabric.topograph.run/tier-N and accelerator.topograph.run/* node labels
+  # that Kueue TAS reads. Separate from slinky-topograph, which depends on
+  # slinky-slurm and writes a Slurm topology.conf instead. Chart pin shared
+  # with slinky-topograph; bump both together.
+  - name: topograph
+    displayName: topograph
+    valueOverrideKeys:
+      - topograph
+    healthCheck:
+      assertFile: checks/topograph/health-check.yaml
+    helm:
+      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      defaultChart: topograph/topograph
+      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
+      defaultVersion: "1.0.0"
+      defaultNamespace: topograph
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+          - nodeObserver.nodeSelector
+        tolerationPaths:
+          - tolerations
+          - nodeObserver.tolerations
+      accelerated:
+        nodeSelectorPaths:
+          # nodeObserver.topograph.trigger.nodeSelector is a watch filter —
+          # it narrows which node-change events trigger topology regeneration.
+          - nodeObserver.topograph.trigger.nodeSelector
+          - nodeDataBroker.nodeSelector
+        tolerationPaths:
+          - nodeDataBroker.tolerations
+
   - name: gatekeeper
     # Sole owner of its CRDs and no webhook conversion (audited, #2264).
     ownsCRDs: true

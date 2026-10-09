@@ -187,7 +187,7 @@ Criteria fields (see `pkg/recipe/criteria.go` `type Criteria`):
 | `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200` |
 | `intent` | `CriteriaIntentType` | `any` or empty | `training`, `inference` |
 | `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos` |
-| `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `nim`, `runai`, `slurm` |
+| `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `kueue`, `nim`, `runai`, `slurm` |
 | `nodes` | int | `0` | any positive int |
 
 `--data` overlays may contribute additional values via the criteria
