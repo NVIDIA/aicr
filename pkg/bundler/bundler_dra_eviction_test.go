@@ -16,7 +16,6 @@ package bundler
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -255,7 +255,7 @@ func TestInjectDRAEvictionLabel_RejectsMalformedManagedPaths(t *testing.T) {
 			}}
 
 			err = b.injectDRAEvictionLabel(values, rr)
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("injectDRAEvictionLabel() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.path) {
@@ -376,7 +376,7 @@ func TestRejectDRAEvictionDynamicPaths(t *testing.T) {
 				&recipe.RecipeResult{ComponentRefs: tt.refs}, tt.dynamicValues,
 				config.DefaultDRAEvictionNodeLabel())
 			if tt.wantErr {
-				if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 					t.Fatalf("rejectDRAEvictionDynamicPaths() error = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), tt.wantPath) {
@@ -465,7 +465,7 @@ func TestMake_DRAEvictionLabelRejectsMalformedManagedOverrides(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), draBundleMakeTimeout)
 			defer cancel()
 			_, err = b.Make(ctx, testDRAEvictionRecipeResult(), t.TempDir())
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.path) {
@@ -507,7 +507,7 @@ func TestMake_DRAEvictionLabelRejectsDynamicManagedPaths(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), draBundleMakeTimeout)
 			defer cancel()
 			_, err = b.Make(ctx, testDRAEvictionRecipeResult(), t.TempDir())
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.path) {

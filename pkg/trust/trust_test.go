@@ -16,7 +16,6 @@ package trust
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // sigstoreFetchTimeout bounds the network-backed integration tests that pull
@@ -150,7 +150,7 @@ func TestLoadTrustedMaterialFromFile(t *testing.T) {
 	})
 	t.Run("missing file is InvalidRequest", func(t *testing.T) {
 		_, err := LoadTrustedMaterialFromFile("testdata/does-not-exist.json")
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
 		}
 	})
@@ -161,7 +161,7 @@ func TestLoadTrustedMaterialFromFile(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := LoadTrustedMaterialFromFile(p)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
 		}
 	})
@@ -172,7 +172,7 @@ func TestLoadTrustedMaterialFromFile(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := LoadTrustedMaterialFromFile(p)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
 		}
 	})
@@ -183,7 +183,7 @@ func TestLoadTrustedMaterialFromFile(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := LoadTrustedMaterialFromFile(p)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
 		}
 		// Assert on the distinct message to prove the size guard runs BEFORE

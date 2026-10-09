@@ -28,6 +28,7 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // writeConfig writes an AICRConfig document to a temp file and returns its path.
@@ -1016,7 +1017,7 @@ spec:
 		if err == nil {
 			t.Fatal("LoadConfig accepted a document mixing KMS and keyless signing settings")
 		}
-		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Errorf("error = %v, want code %v", err, aicrerrors.ErrCodeInvalidRequest)
 		}
 		if !strings.Contains(err.Error(), "mutually exclusive") {

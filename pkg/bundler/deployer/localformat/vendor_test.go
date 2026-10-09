@@ -32,6 +32,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestValidateForPull(t *testing.T) {
@@ -1884,7 +1885,7 @@ func TestFetchIndexYAMLRetry(t *testing.T) {
 				t.Errorf("wantErr=%v, got err=%v", tt.wantErr, err)
 			}
 			if tt.wantErr && err != nil {
-				if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantCode {
 					t.Errorf("wantCode=%s, got error %v", tt.wantCode, err)
 				}
 			}
@@ -1980,7 +1981,7 @@ func TestFetchIndexYAMLContextCancellation(t *testing.T) {
 		if err == nil {
 			t.Error("expected error from canceled context")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeCanceled {
 			t.Errorf("expected ErrCodeCanceled, got error %v", err)
 		}
 		if !stderrors.Is(ctx.Err(), context.Canceled) {

@@ -16,7 +16,6 @@ package attestation
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
@@ -60,7 +60,7 @@ func wantInvalidRequest(t *testing.T, err error) {
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -74,7 +74,7 @@ func wantAborted(t *testing.T, err error) {
 	// ErrCodeCanceled so IsTransient keeps a deliberate Ctrl-C out of the
 	// retryable bucket. What matters either way is that the reader fails
 	// closed rather than returning content or "not a bundle".
-	if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeCanceled {
 		t.Errorf("expected ErrCodeCanceled, got %v", err)
 	}
 }
@@ -335,7 +335,7 @@ func TestReadBundlePredicate_MissingStatement(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error for missing statement")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 }

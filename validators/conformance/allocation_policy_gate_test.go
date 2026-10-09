@@ -20,11 +20,12 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
@@ -156,7 +157,7 @@ func TestCheckSecureAcceleratorAccess_PolicyMismatchFailsClosed(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected a policy-mismatch failure")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantMsg) {
@@ -214,7 +215,7 @@ func TestCheckDRASupport_PolicyClaimRequiresFullGPUDRA(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), "no usable full-GPU DRA") {
@@ -304,7 +305,7 @@ func TestCheckDRASupport_PolicySelectsSubtestMechanism(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantMsg) {

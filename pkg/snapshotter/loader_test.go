@@ -15,13 +15,14 @@
 package snapshotter
 
 import (
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -140,7 +141,7 @@ func TestLoadFromFile(t *testing.T) {
 				}
 			}
 			if tt.wantCode != "" {
-				if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantCode {
 					t.Errorf("error = %v, want structured code %q", err, tt.wantCode)
 				}
 			}

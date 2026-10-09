@@ -28,6 +28,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/k8s/agent"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
@@ -1044,7 +1046,7 @@ func TestDeliverSnapshot_RejectsUnknownFormat(t *testing.T) {
 			if err == nil {
 				t.Fatalf("DeliverSnapshot(%s, format=toml) = nil error, want a rejection", tt.output)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 		})
@@ -1106,7 +1108,7 @@ func TestDeliverSnapshot_ConfigMapRejectsMalformedURI(t *testing.T) {
 				t.Fatalf("DeliverSnapshot(%q) = nil error, want a rejection; a ConfigMap "+
 					"destination must never report success without writing one", tt.uri)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 		})
@@ -1189,7 +1191,7 @@ func TestDeliverSnapshot_TemplateRejectsUnparseableDocument(t *testing.T) {
 	if err == nil {
 		t.Fatal("DeliverSnapshot(unparseable) = nil error, want a parse failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error = %v, want code ErrCodeInternal", err)
 	}
 }
@@ -1217,7 +1219,7 @@ func TestAgentConfigMapTargetRejectsMalformedURI(t *testing.T) {
 			if err == nil {
 				t.Fatalf("agentConfigMapTarget(%q) = nil error, want rejection before any cluster access", tt.output)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 		})
@@ -1297,7 +1299,7 @@ func TestDeployAndCollectRejectsBeforeClusterAccess(t *testing.T) {
 			if err == nil {
 				t.Fatal("DeployAndCollect() = nil error, want rejection")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantMsg) {

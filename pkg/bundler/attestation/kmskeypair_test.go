@@ -22,12 +22,13 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	stderrors "errors"
 	"testing"
 
 	protocommon "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestKMSKeypairSignAndVerify(t *testing.T) {
@@ -108,7 +109,7 @@ func TestClassifyPublicKey(t *testing.T) {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 				}
 				return

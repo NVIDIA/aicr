@@ -16,13 +16,14 @@ package cli
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // runWith builds a Command with the given Flags and runs it with args, calling
@@ -256,7 +257,7 @@ func TestResolveNodeSelector(t *testing.T) {
 	t.Run("invalid label names the flag", func(t *testing.T) {
 		runWith(t, []cli.Flag{flag}, []string{"--sel", "bad key=v"}, func(c *cli.Command) {
 			_, err := resolveNodeSelector(c, "sel", nil)
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("err = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), "invalid --sel") {
@@ -273,7 +274,7 @@ func TestResolveDRAEvictionNodeLabelRejectsMalformedCLIValue(t *testing.T) {
 		_, gotErr = resolveDRAEvictionNodeLabel(c, nil)
 	})
 
-	if !stderrors.Is(gotErr, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(gotErr) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("resolveDRAEvictionNodeLabel() error = %v, want ErrCodeInvalidRequest", gotErr)
 	}
 }

@@ -16,11 +16,11 @@ package verifier
 
 import (
 	"context"
-	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
@@ -103,7 +103,7 @@ func TestVerifierFilesystemPathsAreBounded(t *testing.T) {
 			// operator abort keep being reported as a retryable fault, which
 			// is the defect this bounding work exists to fix — a looser
 			// assertion would pass while the bug was still present.
-			if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeCanceled {
 				t.Errorf("abort misclassified (want ErrCodeCanceled): %v", err)
 			}
 		})
