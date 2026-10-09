@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -255,7 +257,7 @@ func TestCheckPermissions_PrefixModeRequiresRBACCreateAndDelete(t *testing.T) {
 			if err == nil {
 				t.Fatalf("CheckPermissions() error = nil; %s %s must be required in prefix mode", req.verb, req.resource)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeUnauthorized, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeUnauthorized {
 				t.Errorf("error code = %v, want ErrCodeUnauthorized", err)
 			}
 
@@ -373,7 +375,7 @@ func TestCheckPermissions_ServiceAccountGetIsRequired(t *testing.T) {
 	if err == nil {
 		t.Fatal("CheckPermissions() error = nil; a caller that cannot read ServiceAccounts must fail the gate")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeUnauthorized, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeUnauthorized {
 		t.Errorf("error code = %v, want ErrCodeUnauthorized", err)
 	}
 	for _, want := range []string{

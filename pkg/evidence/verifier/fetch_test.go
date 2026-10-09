@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestMaterializeBundle_DirAcceptsParentOrSummary(t *testing.T) {
@@ -95,7 +97,7 @@ func TestBundleMarkerProbe_CanceledCtxPropagatesAbort(t *testing.T) {
 			if err == nil {
 				t.Fatalf("%s: expected error on canceled ctx, got nil", tt.name)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeCanceled {
 				t.Errorf("%s: got %v, want ErrCodeCanceled (must not flatten to \"not a bundle\")", tt.name, err)
 			}
 			if stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {

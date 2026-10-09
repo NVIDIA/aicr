@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // shortCircuitCtxTimeout bounds runs whose asserts are expected to fail, so
@@ -936,7 +937,7 @@ spec:
 			if r.Error == nil {
 				t.Fatalf("expected terminal eval error, got nil (Passed=%v Output=%s)", r.Passed, r.Output)
 			}
-			if !stderrors.Is(r.Error, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(r.Error) != errors.ErrCodeInvalidRequest {
 				t.Errorf("expected ErrCodeInvalidRequest (terminal), got %v", r.Error)
 			}
 			if elapsed >= defaults.AssertRetryInterval {

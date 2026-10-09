@@ -31,6 +31,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 )
 
@@ -210,7 +211,7 @@ func TestWriteRejectsEscapingPaths(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 			// Write rejects a malformed record for several reasons under this
@@ -237,7 +238,7 @@ func TestWriteRejectsNilInfo(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -290,7 +291,7 @@ func TestWriteRejectsIncompleteRecord(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -312,7 +313,7 @@ func TestReadRejectsOversizeFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -367,7 +368,7 @@ func TestReadRejectsNonRegularFile(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -458,7 +459,7 @@ func TestReadFailsClosed(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(tt.code, "")) {
+			if errorstest.ReportedCode(err) != tt.code {
 				t.Errorf("error = %v, want code %s", err, tt.code)
 			}
 			if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {
@@ -570,7 +571,7 @@ func TestReadRejectsIncompleteRecord(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
@@ -654,7 +655,7 @@ func TestReadRejectsTrailingDocument(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -681,7 +682,7 @@ func TestWriteRefusesSymlinkedTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 
@@ -764,7 +765,7 @@ func TestContextErrorsAreCodedByCause(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("error = %v, want code %s", err, tt.wantCode)
 			}
 			if !stderrors.Is(err, tt.wantErr) {
@@ -788,7 +789,7 @@ func TestWriteRejectsOversizeRecord(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -560,7 +561,7 @@ func TestWriteProfileLockTemplateRejectsUnownedExistingFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("writeProfileLockTemplate() accepted a user-owned template collision")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("writeProfileLockTemplate() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	got, readErr := os.ReadFile(guardPath)
@@ -613,7 +614,7 @@ spec:
 	if err == nil {
 		t.Fatal("transformApplication() error = nil, want collision rejection")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "collides with a deployer-owned template") {
@@ -739,7 +740,7 @@ func TestGenerate_RejectsInvalidBundleChartVersion(t *testing.T) {
 			}
 
 			_, err := g.Generate(context.Background(), outputDir)
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("Generate() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			entries, readErr := os.ReadDir(outputDir)
@@ -1017,7 +1018,7 @@ func TestGenerate_DynamicRejectedForLocalChart(t *testing.T) {
 			if err == nil {
 				t.Fatal("Generate() error = nil, want ErrCodeInvalidRequest for --dynamic on unsupported component")
 			}
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), "nfd-ocp") || !strings.Contains(err.Error(), "--dynamic") {
@@ -1258,15 +1259,11 @@ func TestGenerate_StaleStaticPathIsNotDestroyed(t *testing.T) {
 			}
 			// Both routes must agree on the code: the same user error must not
 			// be INVALID_REQUEST for one recipe shape and INTERNAL for another.
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
 			}
-			// The negative direction is what actually pins writeValuesFiles to
-			// PropagateOrWrap. errors.Is walks the Unwrap chain, so the check
-			// above still passes when an outer Wrap(ErrCodeInternal, ...) buries
-			// the real code — while ExitCodeFromError reads the OUTERMOST
-			// StructuredError, so the exit code a user observes would flip from
-			// 2 to 8 with the assertion above still green.
+			// Stricter than the reported code. An Internal wrap anywhere in the
+			// chain means writeValuesFiles stopped propagating the inner code.
 			if errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
 				t.Errorf("Generate() error = %v, want no ErrCodeInternal anywhere in the chain", err)
 			}
@@ -3395,7 +3392,7 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.errSubstr) {

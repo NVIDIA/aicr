@@ -15,13 +15,14 @@
 package main
 
 import (
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -64,14 +65,14 @@ func TestDiffAllowlist(t *testing.T) {
 // --- loadAllowlist error paths (F27) ---
 
 func TestLoadAllowlistErrors(t *testing.T) {
-	if _, err := loadAllowlist(filepath.Join(t.TempDir(), "missing.yaml")); !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if _, err := loadAllowlist(filepath.Join(t.TempDir(), "missing.yaml")); errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("missing file: got %v, want ErrCodeNotFound", err)
 	}
 	bad := filepath.Join(t.TempDir(), "bad.yaml")
 	if err := os.WriteFile(bad, []byte("hosts: [::: not yaml"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadAllowlist(bad); !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if _, err := loadAllowlist(bad); errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("malformed yaml: got %v, want ErrCodeInvalidRequest", err)
 	}
 }

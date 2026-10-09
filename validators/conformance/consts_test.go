@@ -16,12 +16,13 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 )
 
@@ -127,7 +128,7 @@ func TestGPUCheckWorkBudget(t *testing.T) {
 				t.Fatalf("gpuCheckWorkBudget() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 					t.Errorf("error code = %v, want ErrCodeTimeout", err)
 				}
 				if !strings.Contains(err.Error(), "too short to guarantee cleanup") {
