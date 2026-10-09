@@ -14,6 +14,9 @@ finished with signed evidence) is covered at the end under
 **EKS**
 
 * User is already authenticated to an EKS cluster with 2+ H100 (p5.48xlarge) nodes.
+* An AWS credential path for the EBS CSI driver. The bundle installs the driver
+  but not its credentials, and without them no volume can be provisioned — see
+  [EBS CSI Driver Credentials](../docs/user/component-catalog.md#ebs-csi-driver-credentials).
 * Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`,
   `--system-node-selector`, and `--system-node-toleration` flags are examples only.
   Update them to match your cluster.
@@ -147,18 +150,21 @@ aicr bundle \
 ## Install Bundle into the Cluster
 
 ```shell
-cd ./bundle && chmod +x deploy.sh && ./deploy.sh
+(cd ./bundle && chmod +x deploy.sh && ./deploy.sh)
 ```
 
 > **GKE only:** If nodewright-operator is already installed on the cluster, generate the bundle without the nodewright components — add `--set nodewright:enabled=false --set nodewrightcustomizations:enabled=false` to the `aicr bundle` command — to avoid upgrade conflicts. Don't hand-edit the generated `deploy.sh`: it deploys the numbered component directories generically, and edits break `aicr verify` because `deploy.sh` is covered by the bundle's `checksums.txt` (whose digest the attestation signs).
 
 ## Validate Cluster
 
+Validate against the bundle's `recipe.yaml`: it records the components the
+bundle actually deployed, which the original recipe cannot.
+
 **EKS**
 
 ```shell
 aicr validate \
-    --recipe recipe.yaml \
+    --recipe ./bundle/recipe.yaml \
     --toleration dedicated=worker-workload:NoSchedule \
     --toleration dedicated=worker-workload:NoExecute \
     --phase all \
@@ -169,7 +175,7 @@ aicr validate \
 
 ```shell
 aicr validate \
-    --recipe recipe.yaml \
+    --recipe ./bundle/recipe.yaml \
     --toleration dedicated=gpu-workload:NoSchedule \
     --toleration nvidia.com/gpu=present:NoSchedule \
     --phase all \
@@ -266,21 +272,28 @@ recipe-evidence bundle out.
   The cluster has 2× `a3-megagpu-8g` (H100, 8 GPUs/node) GPU nodes labeled
   `nodeGroup=gpu-worker` with taint `dedicated=gpu-workload:NoSchedule`, and
   system nodes labeled `nodeGroup=system-worker` (no custom taints — GKE
-  managed pods don't tolerate them).
+  managed pods don't tolerate them). Its GPU NIC networks are named
+  `<deployment-id>-gpu-nic-0` through `-7`, where the deployment ID of a
+  `uat-run.yaml` cluster is `aicr-uat-<run_id>`; set `DEPLOYMENT_ID` in the
+  [Config](#config) block to that value.
 * GKE nodes run Container-Optimized OS (COS) with GPU drivers pre-installed.
 * `aicr trust update` has been run once on this machine to bootstrap the
   Sigstore TUF root (prerequisite for `evidence verify`).
-* OCI registry write access for `--push` (e.g. `ghcr.io/<owner>/aicr-evidence`).
-  Skip `--push` to produce an unsigned local bundle.
+* OCI registry write access for `--push` (e.g. `ghcr.io/<owner>/aicr-evidence`;
+  set `GHCR_OWNER` in the [Config](#config) block). Skip `--push` to produce an
+  unsigned local bundle.
 
 ### Config
 
 Single source of truth for recipe criteria, bundle scheduling, validate input,
-and the evidence emit path. Drop this into `aicr-config.yaml` once and reuse it
-across the workflow:
+and the evidence emit path. Set the two variables, then drop this into
+`aicr-config.yaml` once and reuse it across the workflow:
 
 ```shell
-cat > aicr-config.yaml <<'EOF'
+DEPLOYMENT_ID=aicr-uat-1234567890   # aicr-uat- plus the uat-run.yaml run ID
+GHCR_OWNER=my-github-org            # a ghcr.io owner you can push to
+
+cat > aicr-config.yaml <<EOF
 kind: AICRConfig
 apiVersion: aicr.run/v1beta1
 metadata:
@@ -310,14 +323,14 @@ spec:
     configuration:
       gke:
         tcpxoInterfaces:
-          - {interfaceName: eth1, network: aicr-demo2-gpu-nic-0}
-          - {interfaceName: eth2, network: aicr-demo2-gpu-nic-1}
-          - {interfaceName: eth3, network: aicr-demo2-gpu-nic-2}
-          - {interfaceName: eth4, network: aicr-demo2-gpu-nic-3}
-          - {interfaceName: eth5, network: aicr-demo2-gpu-nic-4}
-          - {interfaceName: eth6, network: aicr-demo2-gpu-nic-5}
-          - {interfaceName: eth7, network: aicr-demo2-gpu-nic-6}
-          - {interfaceName: eth8, network: aicr-demo2-gpu-nic-7}
+          - {interfaceName: eth1, network: ${DEPLOYMENT_ID}-gpu-nic-0}
+          - {interfaceName: eth2, network: ${DEPLOYMENT_ID}-gpu-nic-1}
+          - {interfaceName: eth3, network: ${DEPLOYMENT_ID}-gpu-nic-2}
+          - {interfaceName: eth4, network: ${DEPLOYMENT_ID}-gpu-nic-3}
+          - {interfaceName: eth5, network: ${DEPLOYMENT_ID}-gpu-nic-4}
+          - {interfaceName: eth6, network: ${DEPLOYMENT_ID}-gpu-nic-5}
+          - {interfaceName: eth7, network: ${DEPLOYMENT_ID}-gpu-nic-6}
+          - {interfaceName: eth8, network: ${DEPLOYMENT_ID}-gpu-nic-7}
     output:
       path: recipe.yaml
 
@@ -352,10 +365,10 @@ spec:
         - nvidia.com/gpu=present:NoSchedule
     evidence:
       attestation:
-        # Setting `out` enables emit. Push target is the OCI repo;
+        # Setting out enables emit. Push target is the OCI repo;
         # the signer's OIDC identity is resolved at sign time.
         out: ./evidence
-        push: ghcr.io/nvidia/aicr-evidence-cuj1-gke-demo
+        push: ghcr.io/${GHCR_OWNER}/aicr-evidence-cuj1-gke-demo
 EOF
 ```
 
@@ -427,6 +440,7 @@ cd ..
 
 ```shell
 aicr validate --config aicr-config.yaml \
+    --recipe ./bundle/recipe.yaml \
     --phase all \
     --output report.json
 ```
@@ -434,7 +448,7 @@ aicr validate --config aicr-config.yaml \
 Because `spec.validate.evidence.attestation.out` is set in the config, this run
 also writes a recipe-evidence bundle to `./evidence/` and pushes it (signed via
 cosign keyless OIDC — opens a browser, or uses ambient GitHub Actions OIDC if
-present) to `ghcr.io/nvidia/aicr-evidence-cuj1-gke-demo` (the
+present) to `ghcr.io/${GHCR_OWNER}/aicr-evidence-cuj1-gke-demo` (the
 `spec.validate.evidence.attestation.push` value above).
 
 ```text
@@ -476,7 +490,7 @@ JSON for CI:
 
 ```shell
 aicr evidence verify ./evidence/pointer.yaml -o evidence-result.json -t json
-jq '.exit' evidence-result.json     # 0 ok, 1 validator-failed, 2 bundle invalid
+jq '.exit' evidence-result.json     # 0 ok, 1 validator-failed, 2 bundle invalid, 3 no verdict
 ```
 
 Or, with no `--push` in the config, verify the local bundle directly (no

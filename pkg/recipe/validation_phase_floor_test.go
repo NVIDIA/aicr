@@ -176,7 +176,7 @@ func resolvedPhases(v *ValidationConfig) []string {
 // can return as a maximal-leaf candidate for some query — every overlay
 // with concrete criteria, minus wildcard fragments whose intent or service
 // is "any". Wildcard fragments are cross-cutting overlays composed onto
-// specific queries — see docs/contributor/data.md#criteria-wildcard-overlays —
+// specific queries — see docs/contributor/recipe.md#criteria-wildcard-overlays —
 // not standalone user-facing entry points.
 //
 // Concrete intermediate overlays (e.g., h100-gke-cos-training) are NOT

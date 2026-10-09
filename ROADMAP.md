@@ -49,16 +49,12 @@ is closed. Artifact maturity and the project's v1 release remain separate axes.
   surface, and bundle layout/artifact schemas each have a committed baseline.
 - Compatibility checks for all four surfaces run in `make qualify` and the
   merge gate.
-- An integrator can implement the snapshot, recipe, bundle, validate, and
-  recipe-evidence workflow using `github.com/NVIDIA/aicr/pkg/client/v1` plus
-  standard-library and explicitly stable third-party types, without importing
-  another AICR `pkg/*` package. CNCF AI Conformance evidence emission is the
-  one documented exception: it is reachable only through the CLI, which calls
-  `pkg/evidence/cncf` directly. The gap is recorded in
-  `tests/architecture/facade-policy.yaml` and tracked by
-  [#2561](https://github.com/NVIDIA/aicr/issues/2561). Closing it adds exported
-  identifiers to the facade, which is additive under the table in `RELEASE.md`
-  and therefore does not require the v1 tag.
+- An integrator can implement the snapshot, recipe, bundle, validate,
+  recipe-evidence, and CNCF AI Conformance evidence workflow using
+  `github.com/NVIDIA/aicr/pkg/client/v1` plus standard-library and explicitly
+  stable third-party types, without importing another AICR `pkg/*` package.
+  CNCF evidence goes through `Client.RenderCNCFEvidence` and
+  `Client.CollectCNCFEvidence`.
 - `RELEASE.md` defines breaking changes and the deprecation policy for every
   surface. Breaking changes after v1 require a major version bump.
 
@@ -142,8 +138,9 @@ end-user verification documentation are shipped.
 - Promote VR200 from Preview to Supported through broader recipe coverage,
   hardware qualification, UAT, observability, and operational runbooks.
 - Continue contribution-path automation and review-pipeline improvements.
-- Build the machine-readable component upgrade lifecycle described by
-  [#2424](https://github.com/NVIDIA/aicr/issues/2424), including cluster-aware
-  upgrade checks and upgrade/rollback validation.
+- Finish the machine-readable component upgrade lifecycle described by
+  [#2424](https://github.com/NVIDIA/aicr/issues/2424): upgrade and rollback
+  validation in KWOK and UAT, and pre-migration releases for transitions that
+  need hooks.
 - Continue CNCF AI Conformance work as its requirements mature, treating
   conformance evidence as a first-class validator output.

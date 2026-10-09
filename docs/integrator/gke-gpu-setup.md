@@ -267,15 +267,18 @@ See [Recording the ownership mode in snapshots](#gpu-device-plugin-ownership)
 above. A criteria-only generation (no `--snapshot`, as in the example above)
 defers both the label and pool-creation checks to `aicr validate` readiness.
 
-On A4X/GB200 (`a4x-highgpu-4g`, arm64) nodes, the component's default
-`partitionGpuImage` (the `partition-gpus` init container) is an amd64-only
-digest and fails with `exec format error` on arm64. Supported GB200 GKE
-recipes, including any that inherit from the training or inference
-overlays, already set `gcp-driver-installer.partitionGpuImage` to a
-multi-arch digest automatically. Only a custom recipe that does not
-inherit those overlays needs to set the override manually. See
+On Grace (arm64) nodes, A4X/GB200 (`a4x-highgpu-4g`) and A4X Max/GB300
+(`a4x-maxgpu-4g-metal`), the component's default `partitionGpuImage` (the
+`partition-gpus` init container) is an amd64-only digest and fails with
+`exec format error`. Supported GB200 and GB300 GKE recipes, including any
+that inherit from their training or inference overlays, already set
+`gcp-driver-installer.partitionGpuImage` to a multi-arch digest
+automatically. Only a custom recipe that does not inherit those overlays
+needs to set the override manually. See
 [GKE GB200 Networking › Driver Installer](gke-gb200-networking.md#driver-installer)
-for why and the exact digest.
+for why and the GB200 digest. The GB300 overlays instead pin the multi-arch
+image that GKE's own GPU device plugin runs, so their digest differs; copy
+it from `recipes/overlays/gb300-gke-cos-training.yaml`.
 
 Set the label when you create the GPU node pool, alongside the disabled
 managed install:

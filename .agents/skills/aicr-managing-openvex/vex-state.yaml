@@ -59,64 +59,25 @@
 # A post-merge check belongs here rather than only in a PR description, because
 # the skill reads this file and does not read PR descriptions. A check recorded
 # only in a PR is a check nobody runs.
-deferred_verifications:
-  - id: busybox-init-image-scans-in-ci
-    opened: 2026-09-27
-    check: >-
-      The scan matrix entry for the nvsentinel init-container image was
-      repointed from docker.io/bitnamilegacy/os-shell:12-debian-12-r30 to
-      docker.io/library/busybox:1.38.0@sha256:fd7dc986... in
-      .github/workflows/vuln-scan-images.yaml. That entry puts a digest in
-      the matrix `tag` field, which no other row does, so the composed
-      reference is `<image>:<tag-with-digest>`. Run `gh workflow run "Weekly
-      Image Vulnerability Scan" --repo NVIDIA/aicr --ref main` and read the
-      busybox scan-result artifact.
-    resolves_when: >-
-      that run's artifact contains a `busybox: ...` line with 0 critical and
-      0 high, and no `os-shell` line appears in any artifact
-    caveat: >-
-      The override itself was verified by `helm template` against the v1.20.0
-      chart with both gating toggles on: three init containers
-      (fix-state-permissions, and fix-audit-log-permissions on
-      platform-connectors and labeler) render busybox and zero os-shell
-      references remain. What is unverified is only whether the CI scan step
-      accepts the tag-plus-digest matrix value, not whether the override
-      works.
-  - id: aiperf-0.13.0-image-scans-clean-in-ci
-    opened: 2026-09-29
-    check: >-
-      The aiperf 0.13.0 bump retired the 10 pillow statements and
-      GHSA-cq5v-8q36-5273 (0.13.0 resolves pillow 12.3.0 and aiohttp 3.14.3,
-      the fixed versions) and rewrote the CVE-2026-82049 evidence for the
-      0.13.0 closure. Read the aiperf-bench scan-result artifact of the first
-      `Weekly Image Vulnerability Scan` run on main after that PR merged.
-    resolves_when: >-
-      that run's aiperf-bench line reports 0 critical, 0 high and exactly
-      1 VEX-suppressed row (CVE-2026-82049 on python 3.13.15)
-    caveat: >-
-      Measured on a local linux/amd64 build of the branch with grype v0.118.0
-      (the version scan-action v7.4.2 pins), `--fail-on high --only-fixed -c
-      .grype.yaml --vex .openvex.json`, against the 2026-09-29 grype DB. A newer DB in CI can add
-      findings this run could not see; triage those as new, not as a
-      regression of the retirement.
+deferred_verifications: []
 
 known_negatives:
   - id: no-fixed-cpython-3.13-for-cve-2026-82049
-    checked: 2026-09-29
+    checked: 2026-10-05
     finding: >-
       CVE-2026-82049 (tarfile extraction filters) cannot be remediated by any
       bump available to this image. 3.13.15 is the newest CPython 3.13 release
       (2026-08-05); the advisory published 2026-09-14 and the 3.13 backport
       landed after that release, so grype records the sole fixed version as
       `3.14.0b1` -- which is why `--only-fixed` does not withhold it.
-      nvcr.io/nvidia/distroless/python publishes a 3.14-v4.1.4 tag, but aiperf
+      nvcr.io/nvidia/distroless/python publishes a 3.14-v4.1.5 tag, but aiperf
       0.13.0 still declares `Requires-Python: <3.14,>=3.11`, so building the
       venv on 3.14 fails pip resolution instead of producing a fixed image.
     also: >-
       The finding is on the base image's interpreter (pkg:generic/python@3.13.15
       at /usr/local/bin/python), not a pip package, so no requirements.txt change
       can touch it either. Do not re-derive this by bumping the distroless pin:
-      3.13-v4.1.4 is already the newest 3.13 tag.
+      3.13-v4.1.5 is the newest 3.13 tag and still ships CPython 3.13.15.
     invalidated_by: >-
       a CPython 3.13.16+ release carrying the backport (then bump the distroless
       3.13 pin and delete the statement), or an aiperf release whose
@@ -164,28 +125,29 @@ deliberate_exclusions:
 
   - id: nvsentinel-image-cves-are-a-pin-bump
     decided: 2026-09-17
-    rechecked: 2026-09-27
+    rechecked: 2026-10-08
     decision: >-
-      The HIGH+ findings on all four scanned nvsentinel images get no VEX
-      statement. AICR does not build them -- the scan matrix pins each to
-      nvsentinel's registry defaultVersion, currently v1.20.0 -- and the fix is
-      reachable by bumping that pin. Remediation is tracked as the nvsentinel
-      bump (#2596), not here. A statement would also be a reachability claim
-      about a third party's Go binary that this repo has no source to support.
-      Scope widened at the 2026-09-27 recheck: this was written for
-      kubernetes-object-monitor alone, but the 2026-09-24 scan surfaced the
-      same situation on three more images, and one entry covers them all.
-    evidence_2026_09_27: >-
-      grype 0.119.0, `--only-fixed -c .grype.yaml`, each image at both pins.
-      v1.20.0 -> v1.24.0 HIGH+: kubernetes-object-monitor 9 -> 0,
-      nic-health-monitor 8 -> 0, preflight 6 -> 0, preflight-dcgm-diag 1 -> 0.
-      The v1.20.0 column reproduces the weekly scan's counts exactly. Posted to
-      #2596 as issuecomment-5856671971, so do not re-derive it there.
+      HIGH+ findings on the nvsentinel images get no VEX statement. AICR does
+      not build them -- the scan matrix pins each to nvsentinel's registry
+      defaultVersion -- so the fix is a pin bump, and a statement would be a
+      reachability claim about third-party binaries this repo has no source
+      to support. Current instance: preflight-dcgm-diag v1.25.0 carries
+      CVE-2026-84782 (High) on libssl3t64 and openssl 3.0.13-0ubuntu3.15,
+      fixed in 3.0.13-0ubuntu3.16. It comes from the runtime base
+      nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04, which upstream
+      leaves tag-pinned and never `apt-get upgrade`s, so only an nvsentinel
+      rebuild picks up the fix.
+    evidence_2026_10_08: >-
+      grype 0.120.1, `--only-fixed -c .grype.yaml --vex .openvex.json`,
+      linux/amd64. preflight-dcgm-diag v1.25.0: 2 high / 12 medium / 11 low,
+      matching weekly run 37736381710 exactly; v1.26.0: 0 high / 12 medium /
+      1 low, no openssl match. Only preflight-dcgm-diag was rescanned at
+      v1.26.0; the other nvsentinel images were not, so a bump must scan them.
     invalidated_by: >-
       the nvsentinel defaultVersion in recipes/registry.yaml advancing past
-      v1.20.0, which removes the findings outright; or an nvsentinel release
-      carrying HIGH+ findings with no clean successor version, which would make
-      the suppression question real for the first time
+      v1.25.0, which removes the finding; or an nvsentinel release carrying
+      HIGH+ findings with no clean successor version, which would make the
+      suppression question real for the first time
 
   - id: busybox-init-image-unfixed-highs
     decided: 2026-09-27

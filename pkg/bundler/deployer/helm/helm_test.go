@@ -389,6 +389,412 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	}
 }
 
+// TestGenerate_DeployScript_DRARestartGatedOnDriverOwnership pins the
+// fix for #2135's review follow-up: live cluster state alone (absent
+// DaemonSet + no labeled node) cannot tell "driver is host-managed" apart
+// from "driver is operator-managed but the migration gate hasn't converged
+// yet" — the latter must block the DRA kubelet-plugin restart rather than
+// running it unguarded, or it reproduces the invalid-CDI/ContainerCreating
+// failure (#973). DriverOwnership is derived at bundle time from
+// gpu-operator's/gpu-operator-ocp's effective driver.enabled and threaded
+// into the rendered script, so this only needs to check the generated
+// text — no live cluster required.
+func TestGenerate_DeployScript_DRARestartGatedOnDriverOwnership(t *testing.T) {
+	recipeResult := func() *recipe.RecipeResult {
+		return &recipe.RecipeResult{
+			Kind:       "RecipeResult",
+			APIVersion: "aicr.run/v1alpha2",
+			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+			Criteria: &recipe.Criteria{
+				Service:     "eks",
+				Accelerator: "h100",
+				Intent:      "training",
+			},
+			ComponentRefs: []recipe.ComponentRef{
+				{
+					Name:      "gpu-operator",
+					Namespace: "gpu-operator",
+					Chart:     "gpu-operator",
+					Version:   "v25.3.3",
+					Source:    "https://helm.ngc.nvidia.com/nvidia",
+				},
+				{
+					Name:      "nvidia-dra-driver-gpu",
+					Namespace: "nvidia-dra-driver",
+					Chart:     "nvidia-dra-driver-gpu",
+					Version:   "0.4.1",
+					Source:    "https://helm.ngc.nvidia.com/nvidia",
+				},
+			},
+			DeploymentOrder: []string{"gpu-operator", "nvidia-dra-driver-gpu"},
+		}
+	}
+
+	tests := []struct {
+		name string
+		// variant selects the recipe shape: "" canonical, "ocp" OCP
+		// component names throughout, "dra-only" a bundle carrying no
+		// gpu-operator component at all.
+		variant         string
+		componentValues map[string]map[string]any
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name: "operator-managed driver with neither signal observable skips wait like host-managed",
+			componentValues: map[string]map[string]any{
+				"gpu-operator": {
+					"driver": map[string]any{"enabled": true},
+				},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`SKIP_RESTART="false"`,
+				`DRIVER_OWNERSHIP="operator"`,
+				`driver DaemonSet not present and no nodes labeled nvidia.com/gpu.deploy.driver=true; skipping migration wait`,
+				`SKIP_RESTART=true`,
+				`if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then`,
+				`no nodes labeled nvidia.com/gpu.deploy.driver=true yet; skipping migration wait and DRA restart`,
+				`blocking the DRA plugin restart until the migration completes`,
+			},
+			wantNotContains: []string{
+				`blocking the DRA plugin restart until the driver rollout is detectable`,
+			},
+		},
+		{
+			// A host-managed driver renders no probe at all. Both gates read
+			// live state that cannot distinguish "no migration is possible"
+			// from "a migration has not become observable yet": the operator
+			// creates no DaemonSet, yet still labels the nodes it tracks, so
+			// a rendered wait stalls for its full timeout and then fails
+			// closed on a migration that can never run (#3115).
+			name: "host-managed driver renders no migration probe and cannot stall",
+			componentValues: map[string]map[string]any{
+				"gpu-operator": {
+					"driver": map[string]any{"enabled": false},
+				},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+				`SKIP_RESTART="false"`,
+				`if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then`,
+			},
+			wantNotContains: []string{
+				`blocking the DRA plugin restart until the driver rollout is detectable`,
+				// No probe, no wait, and nothing that can set the retry
+				// signal for this component. The label name still appears
+				// in the gate preamble and the global retry hint, so match
+				// the probe and the wait rather than the label alone.
+				`DRIVER_OWNERSHIP=`,
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`gpu-driver-upgrade-state`,
+				`--timeout=15m`,
+				`NEEDS_RETRY="${NEEDS_RETRY} nvidia-dra-driver-gpu"`,
+			},
+		},
+		{
+			// The chart defaults driver.enabled to true, so values that
+			// never mention the driver still install one. Defaulting the
+			// other way would skip the migration wait on a rollout that
+			// is actually happening, which is the #973 failure the gate
+			// exists to prevent — the opposite and worse direction than
+			// the #3115 stall. No in-tree recipe omits the key; this
+			// pins the derivation, not a shipped configuration.
+			name: "driver section absent defaults to operator-managed and renders the probe",
+			componentValues: map[string]map[string]any{
+				"gpu-operator":          {},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`DRIVER_OWNERSHIP="operator"`,
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`gpu-driver-upgrade-state`,
+				`--timeout=15m`,
+				`NEEDS_RETRY="${NEEDS_RETRY} nvidia-dra-driver-gpu"`,
+			},
+			wantNotContains: []string{
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+			},
+		},
+		{
+			name: "driver.enabled key absent defaults to operator-managed and renders the probe",
+			componentValues: map[string]map[string]any{
+				"gpu-operator": {
+					"driver": map[string]any{},
+				},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`DRIVER_OWNERSHIP="operator"`,
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`gpu-driver-upgrade-state`,
+				`--timeout=15m`,
+				`NEEDS_RETRY="${NEEDS_RETRY} nvidia-dra-driver-gpu"`,
+			},
+			wantNotContains: []string{
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+			},
+		},
+		{
+			// A bundle with no gpu-operator component says nothing about
+			// who installs the driver, so it must not be read as
+			// host-managed: the driver may be externally managed and
+			// mid-rollout, and skipping the wait there is the #973
+			// failure. The node label is not usable evidence either,
+			// because nothing in this bundle applies it — only an
+			// observed DaemonSet is.
+			name:    "DRA-only bundle falls back to live state instead of assuming host-managed",
+			variant: "dra-only",
+			componentValues: map[string]map[string]any{
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`DRIVER_OWNERSHIP="unknown"`,
+				`get nodes -l nvidia.com/gpu.deploy.driver=true -o name`,
+				`driver ownership is external, skipping migration wait`,
+				`gpu-driver-upgrade-state`,
+			},
+			wantNotContains: []string{
+				// The host-managed message would claim an explicit
+				// driver.enabled=false this bundle never expressed.
+				`gpu-operator manages no driver (driver.enabled=false); skipping migration wait`,
+			},
+		},
+		{
+			name:    "OCP DRA component renders its own guard and skips the wait the same way when neither signal is observable",
+			variant: "ocp",
+			componentValues: map[string]map[string]any{
+				"gpu-operator-ocp": {
+					"driver": map[string]any{"enabled": true},
+				},
+				"nvidia-dra-driver-gpu-ocp": {},
+			},
+			wantContains: []string{
+				`if [[ "${name}" == "nvidia-dra-driver-gpu-ocp" ]]; then`,
+				`SKIP_RESTART="false"`,
+				`driver DaemonSet not present and no nodes labeled nvidia.com/gpu.deploy.driver=true; skipping migration wait`,
+				`SKIP_RESTART=true`,
+				`blocking the DRA plugin restart until the migration completes`,
+			},
+			wantNotContains: []string{
+				`if [[ "${name}" == "nvidia-dra-driver-gpu" ]]; then`,
+				`blocking the DRA plugin restart until the driver rollout is detectable`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			rr := recipeResult()
+			switch tt.variant {
+			case "dra-only":
+				rr = &recipe.RecipeResult{
+					Kind:       "RecipeResult",
+					APIVersion: "aicr.run/v1alpha2",
+					Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+					Criteria: &recipe.Criteria{
+						Service:     "eks",
+						Accelerator: "h100",
+						Intent:      "training",
+					},
+					ComponentRefs: []recipe.ComponentRef{
+						{
+							Name:      "nvidia-dra-driver-gpu",
+							Namespace: "nvidia-dra-driver",
+							Chart:     "nvidia-dra-driver-gpu",
+							Version:   "0.4.1",
+							Source:    "https://helm.ngc.nvidia.com/nvidia",
+						},
+					},
+					DeploymentOrder: []string{"nvidia-dra-driver-gpu"},
+				}
+			case "ocp":
+				rr = &recipe.RecipeResult{
+					Kind:       "RecipeResult",
+					APIVersion: "aicr.run/v1alpha2",
+					Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+					Criteria: &recipe.Criteria{
+						Service:     "ocp",
+						Accelerator: "h100",
+						Intent:      "training",
+					},
+					ComponentRefs: []recipe.ComponentRef{
+						{
+							Name:      "gpu-operator-ocp",
+							Namespace: "gpu-operator",
+							Chart:     "gpu-operator",
+							Version:   "",
+							Source:    "",
+						},
+						{
+							Name:      "nvidia-dra-driver-gpu-ocp",
+							Namespace: "nvidia-dra-driver",
+							Chart:     "nvidia-dra-driver-gpu",
+							Version:   "0.4.1",
+							Source:    "https://helm.ngc.nvidia.com/nvidia",
+						},
+					},
+					DeploymentOrder: []string{"gpu-operator-ocp", "nvidia-dra-driver-gpu-ocp"},
+				}
+			}
+
+			g := &Generator{
+				RecipeResult:    rr,
+				ComponentValues: tt.componentValues,
+				Version:         "v1.0.0",
+			}
+
+			if _, err := g.Generate(ctx, outputDir); err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+
+			content, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+			if err != nil {
+				t.Fatalf("failed to read deploy.sh: %v", err)
+			}
+			script := string(content)
+
+			for _, want := range tt.wantContains {
+				if !strings.Contains(script, want) {
+					t.Errorf("deploy.sh missing %q", want)
+				}
+			}
+			for _, notWant := range tt.wantNotContains {
+				if strings.Contains(script, notWant) {
+					t.Errorf("deploy.sh unexpectedly contains %q", notWant)
+				}
+			}
+		})
+	}
+}
+
+// TestGenerate_DeployScriptRendersValidBash pins the regression from PR
+// #2346's review: the per-component DRA guard's closing `fi` was dropped in
+// a restructure, and because the goldens compare rendered bytes rather than
+// parsing them, that broke every bundle containing a DRA component (OCP or
+// canonical) without failing any existing test. This renders deploy.sh for
+// both the canonical and OCP recipe shapes and asserts the result is valid
+// bash via `bash -n`, so a reintroduced syntax error fails CI directly
+// instead of only showing up at actual deploy time.
+func TestGenerate_DeployScriptRendersValidBash(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available in PATH; skipping syntax check")
+	}
+
+	canonicalRecipeResult := &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: "aicr.run/v1alpha2",
+		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+		Criteria: &recipe.Criteria{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "gpu-operator",
+				Namespace: "gpu-operator",
+				Chart:     "gpu-operator",
+				Version:   "v25.3.3",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name:      "nvidia-dra-driver-gpu",
+				Namespace: "nvidia-dra-driver",
+				Chart:     "nvidia-dra-driver-gpu",
+				Version:   "0.4.1",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+		DeploymentOrder: []string{"gpu-operator", "nvidia-dra-driver-gpu"},
+	}
+
+	ocpRecipeResult := &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: "aicr.run/v1alpha2",
+		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+		Criteria: &recipe.Criteria{
+			Service:     "ocp",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "gpu-operator-ocp",
+				Namespace: "gpu-operator",
+				Chart:     "gpu-operator",
+			},
+			{
+				Name:      "nvidia-dra-driver-gpu-ocp",
+				Namespace: "nvidia-dra-driver",
+				Chart:     "nvidia-dra-driver-gpu",
+				Version:   "0.4.1",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+		DeploymentOrder: []string{"gpu-operator-ocp", "nvidia-dra-driver-gpu-ocp"},
+	}
+
+	tests := []struct {
+		name            string
+		recipeResult    *recipe.RecipeResult
+		componentValues map[string]map[string]any
+	}{
+		{
+			name:         "canonical DRA component, operator-managed driver",
+			recipeResult: canonicalRecipeResult,
+			componentValues: map[string]map[string]any{
+				"gpu-operator":          {"driver": map[string]any{"enabled": true}},
+				"nvidia-dra-driver-gpu": {},
+			},
+		},
+		{
+			name:         "canonical DRA component, host-managed driver",
+			recipeResult: canonicalRecipeResult,
+			componentValues: map[string]map[string]any{
+				"gpu-operator":          {"driver": map[string]any{"enabled": false}},
+				"nvidia-dra-driver-gpu": {},
+			},
+		},
+		{
+			name:         "OCP DRA component, operator-managed driver",
+			recipeResult: ocpRecipeResult,
+			componentValues: map[string]map[string]any{
+				"gpu-operator-ocp":          {"driver": map[string]any{"enabled": true}},
+				"nvidia-dra-driver-gpu-ocp": {},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			g := &Generator{
+				RecipeResult:    tt.recipeResult,
+				ComponentValues: tt.componentValues,
+				Version:         "v1.0.0",
+			}
+
+			if _, err := g.Generate(ctx, outputDir); err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+
+			deployPath := filepath.Join(outputDir, "deploy.sh")
+			cmd := exec.Command("bash", "-n", deployPath)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Errorf("rendered deploy.sh failed bash -n syntax check: %v\noutput:\n%s", err, out)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Property tests (helpers and data-shape preservation)
 // ---------------------------------------------------------------------------

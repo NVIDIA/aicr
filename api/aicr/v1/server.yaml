@@ -53,9 +53,10 @@ info:
     - **External data overlays** (`aicr recipe --data`, `aicr bundle --data`) — overlays
       custom components and overlays from a local directory onto embedded recipe data.
 
-    - **Namespace inheritance** (`aicr recipe --inherit-from`) reads a prior recipe file or
-      bundle directory from the local filesystem, so the resolved recipe keeps the namespaces
-      that artifact already deployed into instead of re-deriving them from the registry.
+    - **Identity inheritance** (`aicr recipe --inherit-from`) reads a prior recipe file or
+      bundle directory from the local filesystem, so the resolved recipe keeps the namespace,
+      chart, source, kustomize path and manifest files that artifact already deployed instead
+      of re-deriving them from the registry.
 
 servers:
   - url: http://localhost:8080
@@ -1206,7 +1207,7 @@ components:
           examples:
             - INVALID_REQUEST
             - METHOD_NOT_ALLOWED
-            - INTERNAL_ERROR
+            - INTERNAL
             - RATE_LIMIT_EXCEEDED
         message:
           type: string

@@ -392,11 +392,14 @@
 <span class="p">$</span> echo '# tampered' &gt;&gt; "$f"
 <span class="p">$</span> aicr verify ./my-bundle
 
-<span class="r">✗</span> Checksums failed: 1 file mismatch
-<span class="d">    &lt;NNN-component&gt;/values.yaml — sha256 mismatch (got 3f9a…, want 7b21…)</span>
+  <span class="r">✗</span> Checksum verification failed
 <span class="d">  Trust level: <span class="r">unknown</span></span>
+<span class="d">    ↳ checksum inventory verification failed</span>
 
-<span class="r">Bundle verification: FAILED (non-zero exit)</span></pre>
+<span class="d">Details:</span>
+<span class="d">  - [INVALID_REQUEST] checksum mismatch for "001-aws-ebs-csi-driver/values.yaml"</span>
+
+<span class="r">Bundle verification: FAILED</span></pre>
     </div>
     <p>The signature&rsquo;s subject is the digest of <code class="inl">checksums.txt</code>, and
       <code class="inl">checksums.txt</code> pins every regular payload file. Mutating a listed

@@ -378,9 +378,13 @@ type RecipeRequest struct {
 	AccountingMode string
 
 	// InheritFrom is a prior recipe file or bundle directory whose resolved
-	// namespaces this resolution preserves. Empty means resolve from the
-	// registry alone. A cm:// URI is rejected: not supported yet (#2830).
+	// identity this resolution preserves according to Inherit. Empty resolves
+	// from the registry alone. A cm:// URI is not supported yet.
 	InheritFrom string
+
+	// Inherit selects "all" or "namespace" from InheritFrom. Empty defaults
+	// to "all". An explicit selection requires InheritFrom.
+	Inherit string
 
 	// PinnedName reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable; set the criteria
@@ -405,6 +409,7 @@ type RecipeResolveOption func(*recipeResolveConfig)
 type recipeResolveConfig struct {
 	profile              string
 	inheritFrom          string
+	inheritMode          *recipe.InheritMode
 	accountingMode       *recipe.AccountingMode
 	runtimeInventoryMode *recipe.RuntimeInventoryMode
 	tcpxoInterfaces      *[]recipe.NetworkInterfaceMapping
@@ -438,9 +443,11 @@ func WithProfile(profile string) RecipeResolveOption {
 }
 
 // WithInheritFrom names a prior recipe file or bundle directory whose resolved
-// namespaces this resolve keeps, so a moved registry default does not relocate
-// a component that is already running. A component the prior artifact does not
-// name keeps its registry default. Empty resolves from the registry alone.
+// namespace, chart, source, path, manifest files and pre-manifest files this
+// resolve keeps by default, so a moved registry default does not relocate or replace a
+// component that is already running. A component the prior artifact does not
+// name keeps its registry default. WithInherit narrows the fields preserved.
+// Empty resolves from the registry alone.
 //
 // The reference is read when the resolve runs: a cm:// URI, an unreadable
 // path, or a directory holding no recipe is rejected with
@@ -448,6 +455,20 @@ func WithProfile(profile string) RecipeResolveOption {
 func WithInheritFrom(ref string) RecipeResolveOption {
 	return func(cfg *recipeResolveConfig) {
 		cfg.inheritFrom = ref
+	}
+}
+
+// WithInherit selects "all" or "namespace" from WithInheritFrom. Omitting
+// this option preserves all supported identity fields, including object names
+// from bundles. An explicit selection requires a nonempty inheritance source.
+func WithInherit(mode string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		parsed, err := recipe.ParseInheritMode(mode)
+		if err != nil {
+			cfg.recordOptErr(err)
+			return
+		}
+		cfg.inheritMode = &parsed
 	}
 }
 

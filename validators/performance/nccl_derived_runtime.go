@@ -243,7 +243,10 @@ func verifyDeliveredTCPXORuntime(ctx *validators.Context, recorded []recipe.Netw
 		// stalled or canceled read its own code rather than an internal fault.
 		return nil, aicrErrors.Wrap(gkenet.ReadErrorCode(err), "failed to discover GKE GPU NIC networks", err)
 	}
-	if err := gkenet.VerifyNetworksExist(deployed, discovered); err != nil {
+	// usable == present here: the performance phase does not filter discovered
+	// Networks by readiness; it only confirms the runtime's selected Networks exist
+	// on the cluster.
+	if err := gkenet.VerifyNetworksExist(deployed, discovered, discovered); err != nil {
 		return nil, err
 	}
 	return shipped, nil
@@ -266,7 +269,7 @@ var benchmarkOwnedNodePaths = ownedWorkerPaths(benchmarkOwnedWorkerFields)
 // guard allowlist are derived from it, so a field cannot be added to one and
 // forgotten in the other — which would let a differing skeleton value pass the
 // guard while the derived template silently kept the shipped value.
-var benchmarkOwnedWorkerFields = []string{"image", "command", "args", "resources", "terminationMessagePolicy"}
+var benchmarkOwnedWorkerFields = []string{"image", "command", "args", "resources", "terminationMessagePolicy", "readinessProbe"}
 
 func ownedWorkerPaths(fields []string) []string {
 	out := make([]string, 0, len(fields))
@@ -436,6 +439,15 @@ func checkShippedWorkerBaseline(tmpl map[string]any) error {
 	if _, ok := worker["terminationMessagePolicy"]; ok {
 		return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("shipped %s worker sets terminationMessagePolicy, which the benchmark overrides; confirm the derivation still measures what the recipe ships and update the baseline deliberately", gkenet.TCPXORuntimeName))
+	}
+	// readinessProbe: the skeleton's probe gates the launcher's dependsOn on
+	// the benchmark sshd (#3109) and replaces whatever the shipped worker
+	// carries. A shipped probe targets the training workload, never sshd, so
+	// one appearing means the shipped runtime changed shape — fail rather than
+	// replace it silently.
+	if _, ok := worker["readinessProbe"]; ok {
+		return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("shipped %s worker sets readinessProbe, which the benchmark overrides; confirm the derivation still measures what the recipe ships and update the baseline deliberately", gkenet.TCPXORuntimeName))
 	}
 	// image is the one override with no precondition by design: the benchmark
 	// binary (nccl-tests under MPI) lives in the fixture image, and the shipped

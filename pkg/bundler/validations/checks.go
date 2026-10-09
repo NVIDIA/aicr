@@ -62,6 +62,7 @@ func init() {
 	registerCheck("CheckNVSentinelPreflightDCGMReachable", CheckNVSentinelPreflightDCGMReachable)
 	registerCheck("CheckNVSentinelPreflightGangSchedulerRequired", CheckNVSentinelPreflightGangSchedulerRequired)
 	registerCheck("CheckNVSentinelNicHealthMonitorRequiresMetadataCollector", CheckNVSentinelNicHealthMonitorRequiresMetadataCollector)
+	registerCheck("CheckNVSentinelSlurmDrainMonitorRequiresSlinky", CheckNVSentinelSlurmDrainMonitorRequiresSlinky)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -539,6 +540,10 @@ const gpuOperatorManagedOverrideSet = "--set gpuoperator:driver.enabled=true " +
 	"--set gpuoperator:operator.runtimeClass=nvidia " +
 	"--set dradriver:nvidiaDriverRoot=/run/nvidia/driver"
 
+const ocpGPUOperatorManagedOverrideSet = "--set gpuoperatorocp:driver.enabled=true " +
+	"--set gpuoperatorocp:toolkit.enabled=true " +
+	"--set dradriverocp:nvidiaDriverRoot=/run/nvidia/driver"
+
 // gkeGPUOperatorManagedOverrideSet extends the override tuple for GKE
 // remedies. GKE preinstalled-driver profiles (Google driver installer,
 // documented for both COS and Ubuntu node images) pin
@@ -567,20 +572,25 @@ func legacyRecipeAlternativeRemedy(service recipe.CriteriaServiceType, os recipe
 		"driver, so the GPU-Operator-managed override set is not available there; if the " +
 		"GPU nodes use the GKE-managed driver install, retarget the DRA driver root " +
 		"instead: --set dradriver:nvidiaDriverRoot=" + gkeManagedDriverRootPath + "."
-	if service != recipe.CriteriaServiceGKE {
+	switch service { //nolint:exhaustive // only GKE and OCP need dedicated override-key wording; every other service takes the generic gpuOperatorManagedOverrideSet default
+	case recipe.CriteriaServiceOCP:
+		return "Or supply the full GPU-Operator-managed override set: " +
+			ocpGPUOperatorManagedOverrideSet + "."
+	case recipe.CriteriaServiceGKE:
+		switch os { //nolint:exhaustive // COS and Ubuntu are the only GKE node images with specific wording; everything else (unknown, any, or an OS GKE does not offer) gets both supported GKE paths
+		case recipe.CriteriaOSCOS:
+			return gkeCOSAlternative
+		case recipe.CriteriaOSUbuntu:
+			return "Or supply the full GPU-Operator-managed override set: " +
+				gkeGPUOperatorManagedOverrideSet + "."
+		default:
+			return gkeCOSAlternative + " On GKE Ubuntu node images the GPU Operator can manage " +
+				"the driver, so those may instead supply the full GPU-Operator-managed " +
+				"override set: " + gkeGPUOperatorManagedOverrideSet + "."
+		}
+	default:
 		return "Or supply the full GPU-Operator-managed override set: " +
 			gpuOperatorManagedOverrideSet + "."
-	}
-	switch os { //nolint:exhaustive // COS and Ubuntu are the only GKE node images with specific wording; everything else (unknown, any, or an OS GKE does not offer) gets both supported GKE paths
-	case recipe.CriteriaOSCOS:
-		return gkeCOSAlternative
-	case recipe.CriteriaOSUbuntu:
-		return "Or supply the full GPU-Operator-managed override set: " +
-			gkeGPUOperatorManagedOverrideSet + "."
-	default:
-		return gkeCOSAlternative + " On GKE Ubuntu node images the GPU Operator can manage " +
-			"the driver, so those may instead supply the full GPU-Operator-managed " +
-			"override set: " + gkeGPUOperatorManagedOverrideSet + "."
 	}
 }
 
@@ -598,7 +608,7 @@ func legacyRecipeAlternativeRemedy(service recipe.CriteriaServiceType, os recipe
 // (see gpuOperatorManagedOverrideSet above for why the duplication
 // exists).
 func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOSType, profiled bool) string {
-	switch service { //nolint:exhaustive // only AKS and GKE have provider-specific wording; every other service takes the generic default
+	switch service { //nolint:exhaustive // only AKS, GKE, and OCP have provider-specific wording; every other service takes the generic default
 	case recipe.CriteriaServiceAKS:
 		if !profiled {
 			// Legacy pre-profile artifact: the ownership lock does not
@@ -651,6 +661,10 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"driver, so those may bundle in GPU-Operator-managed mode: " +
 				gkeGPUOperatorManagedOverrideSet + "."
 		}
+	case recipe.CriteriaServiceOCP:
+		return "Either reprovision the GPU nodes with a platform-installed " +
+			"NVIDIA driver, or bundle in GPU-Operator-managed mode: " +
+			ocpGPUOperatorManagedOverrideSet + "."
 	default:
 		return "Either reprovision the GPU nodes with a platform-installed " +
 			"NVIDIA driver, or bundle in GPU-Operator-managed mode: " +
@@ -1144,7 +1158,7 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 				"populates that path when the operator does not manage the driver. This is "+
 				"commonly the signature of a recipe generated before the preinstalled-driver "+
 				"default flip: regenerate the recipe (aicr recipe ...) for this AICR version. %s",
-			componentName, draDriverComponentName, operatorContainerDriverRoot,
+			componentName, draRef.Name, operatorContainerDriverRoot,
 			legacyRecipeAlternativeRemedy(service, osCriteria)))
 	}
 	return msgs, nil
@@ -2323,16 +2337,16 @@ func nicInclusionOverrideUsable(override string) bool {
 // (verified against chart v1.20.0: `--set global.nicHealthMonitor.enabled=0`
 // still renders nic-health-monitor, while `=false` does not). So only the
 // literal false switches a subchart off, and only a well-formed table can
-// carry it. present is false when the key is absent, leaving the chart's
-// own default to decide.
-func nvsentinelSubchartRenders(values map[string]any, key string) (renders, present bool) {
+// carry it. An absent key reports false: every subchart this reads defaults
+// to off.
+func nvsentinelSubchartRenders(values map[string]any, key string) bool {
 	global, ok := values["global"].(map[string]any)
 	if !ok {
-		return false, false
+		return false
 	}
 	sectionRaw, present := global[key]
 	if !present {
-		return false, false
+		return false
 	}
 	section, isMap := sectionRaw.(map[string]any)
 	if !isMap {
@@ -2340,15 +2354,15 @@ func nvsentinelSubchartRenders(values map[string]any, key string) (renders, pres
 		// string) leaves the condition path unresolvable, so Helm warns
 		// and falls back to rendering the dependency. Reading it as
 		// "absent, therefore off" would let exactly that through.
-		return true, true
+		return true
 	}
 	raw, ok := section["enabled"]
 	if !ok {
-		return false, false
+		return false
 	}
 	enabled, isBool := raw.(bool)
 
-	return !isBool || enabled, true
+	return !isBool || enabled
 }
 
 // CheckNVSentinelNicHealthMonitorRequiresMetadataCollector blocks a bundle
@@ -2386,7 +2400,7 @@ func CheckNVSentinelNicHealthMonitorRequiresMetadataCollector(ctx context.Contex
 
 	// Absent means the chart default, which is off for nicHealthMonitor and
 	// on for metadataCollector -- hence the asymmetry in how each is read.
-	monitorEnabled, _ := nvsentinelSubchartRenders(values, "nicHealthMonitor")
+	monitorEnabled := nvsentinelSubchartRenders(values, "nicHealthMonitor")
 	collectorDisabled := nvsentinelMetadataCollectorDisabled(values)
 	override, _, overrideValid := resolvedStringValue(values, nicInclusionRegexOverridePath)
 	overrideEmpty := overrideValid && strings.TrimSpace(override) == ""
@@ -2459,6 +2473,123 @@ func CheckNVSentinelNicHealthMonitorRequiresMetadataCollector(ctx context.Contex
 			"without it -- enable metadata-collector, or set --set nv-sentinel:%s=<regex>",
 			componentName, nvsentinelNicHealthMonitorEnabledPath, nicInclusionRegexOverridePath,
 			nicInclusionRegexOverridePath))}
+}
+
+// Paths and names CheckNVSentinelSlurmDrainMonitorRequiresSlinky reads.
+// slurmDrainMonitorChartNamespace is the subchart's default for
+// slurm-drain-monitor.namespace (NVSentinel chart v1.25.0); it also stands in
+// for slinky-slurm's namespace on a ref that does not carry one, which recipe
+// resolution otherwise fills from the registry's defaultNamespace, also slurm.
+const (
+	nvsentinelSlurmDrainMonitorEnabledPath = "global.slurmDrainMonitor.enabled"
+	slurmDrainMonitorNamespacePath         = "slurm-drain-monitor.namespace"
+	slurmDrainMonitorChartNamespace        = "slurm"
+	slinkySlurmComponent                   = "slinky-slurm"
+	slinkySlurmEnabledPath                 = "enabled"
+)
+
+// CheckNVSentinelSlurmDrainMonitorRequiresSlinky blocks a bundle that enables
+// the slurm-drain-monitor subchart without the Slinky worker pods it watches.
+//
+// The monitor reads the SlurmNodeStateDrain condition off pods in one
+// namespace, and only slinky-slurm's NodeSets create them. Without
+// slinky-slurm, or watching a namespace slinky-slurm does not deploy to, the
+// Deployment renders, runs, and never sees a pod, which nothing downstream
+// reports. Registration details are in recipes/registry.yaml.
+func CheckNVSentinelSlurmDrainMonitorRequiresSlinky(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	sentinelRef := recipeResult.GetComponentRef(componentName)
+	if sentinelRef == nil {
+		return nil, nil
+	}
+	provider := recipeResult.DataProvider()
+	sentinelKeys := componentOverrideKeys(componentName, provider)
+	if componentDisabled(sentinelRef, bundlerConfig, sentinelKeys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, sentinelKeys,
+		"NVSentinel slurm-drain-monitor Slinky dependency")
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	// A statically-off monitor still needs its toggle guarded: a --dynamic
+	// declaration on it would let an operator switch it on at install time,
+	// after this gate concluded there was nothing to check.
+	monitorEnabled := nvsentinelSubchartRenders(values, "slurmDrainMonitor")
+	if !monitorEnabled {
+		msgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+			[]string{nvsentinelSlurmDrainMonitorEnabledPath},
+			"decides whether slurm-drain-monitor runs at all, and this recipe has it statically off -- so the gate would validate nothing while an install-time edit switched it on")
+		for _, msg := range msgs {
+			slog.Warn(msg, logKeyComponent, componentName)
+		}
+		return msgs, nil
+	}
+
+	slinkyKeys := componentOverrideKeys(slinkySlurmComponent, provider)
+	dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+		[]string{nvsentinelSlurmDrainMonitorEnabledPath, slurmDrainMonitorNamespacePath},
+		"decides whether slurm-drain-monitor runs and which namespace it watches for Slinky worker pods")
+	dynMsgs = append(dynMsgs, nvsentinelDynamicGuardViolations(bundlerConfig, slinkySlurmComponent, slinkyKeys,
+		[]string{slinkySlurmEnabledPath},
+		"decides whether the Slinky worker pods slurm-drain-monitor watches exist at all")...)
+	if len(dynMsgs) > 0 {
+		for _, msg := range dynMsgs {
+			slog.Warn(msg, logKeyComponent, componentName)
+		}
+		return dynMsgs, nil
+	}
+
+	namespace, set, valid := resolvedStringValue(values, slurmDrainMonitorNamespacePath)
+	if !valid {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s must be a string", componentName, slurmDrainMonitorNamespacePath))}
+	}
+	// The monitor restricts its watch only to a non-empty namespace, verbatim:
+	// "" watches every namespace, while a whitespace-only value is a real
+	// namespace nothing can create, so it watches nothing.
+	if set && namespace != "" && strings.TrimSpace(namespace) == "" {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s is whitespace-only, so slurm-drain-monitor would watch a namespace that cannot exist",
+				componentName, slurmDrainMonitorNamespacePath))}
+	}
+	if !set {
+		namespace = slurmDrainMonitorChartNamespace
+	}
+
+	// Read the DECLARED union, not the enabled set: a `bundlers=` subset that
+	// omits slinky-slurm is a legitimate partial install of a correct recipe.
+	union := declaredUnionView(recipeResult)
+	slinky := union.GetComponentRef(slinkySlurmComponent)
+	if slinky == nil {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s=true but %s is not in the recipe; slurm-drain-monitor watches Slinky worker pods "+
+				"and would run without ever seeing one -- adopt the nvsentinel-slurm-drain-monitor mixin only on a platform: slurm recipe",
+				componentName, nvsentinelSlurmDrainMonitorEnabledPath, slinkySlurmComponent))}
+	}
+	if componentDisabled(slinky, bundlerConfig, slinkyKeys) {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s=true but %s is disabled, so no Slinky worker pods exist for slurm-drain-monitor to watch; "+
+				"re-enable %s or drop the nvsentinel-slurm-drain-monitor mixin",
+				componentName, nvsentinelSlurmDrainMonitorEnabledPath, slinkySlurmComponent, slinkySlurmComponent))}
+	}
+	slinkyNamespace := slinky.Namespace
+	if slinkyNamespace == "" {
+		slinkyNamespace = slurmDrainMonitorChartNamespace
+	}
+	if namespace != "" && namespace != slinkyNamespace {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s is %q but %s is deployed to %q; slurm-drain-monitor would watch a namespace "+
+				"with no Slinky worker pods -- pass --set nv-sentinel:%s=%s at bundle time",
+				componentName, slurmDrainMonitorNamespacePath, namespace, slinkySlurmComponent, slinkyNamespace,
+				slurmDrainMonitorNamespacePath, slinkyNamespace))}
+	}
+
+	return nil, nil
 }
 
 // CheckMariaDBOperatorOwnershipCoherence enforces the snapshot-driven

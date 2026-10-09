@@ -39,9 +39,11 @@ exclude:
 # carries the structured status + justification + per-CVE
 # reachability evidence and is self-sufficient for suppression.
 # The image builds on python:3.13-slim (Debian trixie) and ships on
-# nvcr.io/nvidia/distroless/python:3.13-v4.1.4. The only suppressed finding
+# nvcr.io/nvidia/distroless/python:3.13-v4.1.5. The only suppressed finding
 # is CVE-2026-82049 on that base's CPython 3.13.15, which no 3.13 release
 # fixes yet. Other base-package findings are answered by bumping this pin: the
+# v4.1.5 bump (from v4.1.4) moved openssl 3.5.7-1~deb13u2 -> u3, clearing
+# 8 HIGH rows (4 CVEs on libssl3t64 and openssl-provider-fips); the
 # v4.1.4 bump (from v4.1.2) moved glibc 2.41-12+deb13u3 -> u4 and
 # libsqlite3-0 3.46.1-7+deb13u1 -> u2, clearing 6 HIGH+ rows without
 # adding one; the v4.1.2 bump (from v4.1.1) moved openssl
@@ -54,7 +56,7 @@ exclude:
 # source tree (`make scan` → `grype dir:.`) don't need VEX since the
 # suppressed CVE is in the image's CPython interpreter and never
 # surfaces against Go source.
-# Reviewed: 2026-09-29
+# Reviewed: 2026-10-05
 
 # Go-source suppressions (accepted risk, not "not affected").
 #

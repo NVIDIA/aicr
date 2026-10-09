@@ -119,20 +119,27 @@ spec:
         # arm64 (see this leaf's OS constraints), so the driver libraries
         # live under /usr/lib/aarch64-linux-gnu — not /usr/lib/x86_64-linux-gnu
         # or /run/nvidia/driver.
+        #
+        # Only libnvidia-ml.so.1 is mounted, never the whole directory: that
+        # directory also holds the host's glibc (2.43 on 26.04), and putting
+        # it on LD_LIBRARY_PATH makes the collector (Ubuntu 22.04 image,
+        # glibc 2.35) load the host libc and exit 127 with "undefined symbol:
+        # __tunable_is_initialized". The host NVML resolves its own
+        # dependencies against the container's glibc.
         metadata-collector:
           runtimeClassName: ""
           extraEnv:
             - name: LD_LIBRARY_PATH
               value: /usr/local/nvidia/lib
           additionalVolumeMounts:
-            - name: nvidia-driver-libs
-              mountPath: /usr/local/nvidia/lib
+            - name: nvidia-ml
+              mountPath: /usr/local/nvidia/lib/libnvidia-ml.so.1
               readOnly: true
           additionalHostVolumes:
-            - name: nvidia-driver-libs
+            - name: nvidia-ml
               hostPath:
-                path: /usr/lib/aarch64-linux-gnu
-                type: Directory
+                path: /usr/lib/aarch64-linux-gnu/libnvidia-ml.so.1
+                type: File
 
     # GPU-allocation policy is unchanged: resources.gpus stays disabled
     # (the gpu-operator device plugin remains the whole-GPU advertiser per

@@ -41,9 +41,11 @@ evidence-publish writer, so a Pages build can only read published evidence.
 
 The publish workflow inlines this SA email directly (matching the repo norm for
 `GCP_WIF_SERVICE_ACCOUNT`); the `EVIDENCE_READ_SERVICE_ACCOUNT` output exists so
-the value can be confirmed against what the workflow hardcodes. GP3
-(`infra/evidence-dashboard`) still owns the hardened data bucket and the
-dedicated `objectCreator` writer.
+the value can be confirmed against what the workflow hardcodes. There is no
+dedicated data bucket or `objectCreator`-only writer: GP3
+([#1403](https://github.com/NVIDIA/aicr/issues/1403)) was closed as not planned
+in favor of the existing bucket and WIF identities, with the dedicated writer
+deferred as a hardening item.
 
 ## State
 

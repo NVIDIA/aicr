@@ -34,7 +34,7 @@ linting:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
-  oasdiff: 'v1.32.1'
+  oasdiff: 'v1.33.0'
   # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
   # oras pin in security_tools: the checksums.txt served beside the tarball
@@ -52,7 +52,7 @@ linting:
   #
   # linux/amd64 only: this feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oasdiff_sha256_linux_amd64: '7c8939fc49b75ee11fec66a5b83b37a2fca6aee109fed85013b1ba2ac2a1ee7f'
+  oasdiff_sha256_linux_amd64: '43a4e328e2d13ba1552d760aa68d2485c75c5621f309f6ff64ae895188345247'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.14.0'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -84,11 +84,11 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.119.0'
+  grype: 'v0.120.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.3'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.52.0'
+  syft: 'v1.54.0'
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
   # (tools/generate-aiperf-source). Cosign cannot attach arbitrary artifacts, so
   # this is a separate dependency from the signing/attestation path.
@@ -141,13 +141,13 @@ testing_tools:
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
   ctlptl: '0.9.6'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
-  tilt: '0.37.7'
+  tilt: '0.37.8'
   # Keep in step with sigs.k8s.io/controller-runtime in go.mod: setup-envtest is
   # released from that repo under the tools/setup-envtest/vX.Y.Z tag series, and
   # the envtest control-plane binaries it fetches are matched to the
   # controller-runtime the tests link against.
   # renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest depType=testing_tools
-  setup_envtest: 'v0.25.1'
+  setup_envtest: 'v0.25.2'
   # CI installs the released linux/amd64 binary rather than `go install`ing the
   # module, so the gate no longer depends on sum.golang.org being up (#2667).
   # The two are the same code: `tools/setup-envtest/v0.25.0` and `v0.25.0` are
@@ -165,7 +165,7 @@ testing_tools:
   # linux/amd64 only, for the reason on oasdiff_sha256_linux_amd64: this feeds
   # the setup-build-tools action, which runs on ubuntu runners, while
   # tools/setup-tools covers local dev on other platforms.
-  setup_envtest_sha256_linux_amd64: '531726d9a1d9e4c5661e22ab90186e186f5dbebbc109b13333fa7e237068f06d'
+  setup_envtest_sha256_linux_amd64: '94534f83896f3b09934d9570b213fbda04aa5c17457942270928cdca0317bf9b'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.3.0'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
@@ -180,14 +180,14 @@ testing_tools:
     darwin_amd64: '214d890745b45679400442552ad4554fb4df622b92d031931536eff85bdb46c2'
     darwin_arm64: 'af2834052ba32fe8006a44a31db16cad30baf1c46f6b59160b092974578d7798'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.8.0'
+  helmfile: 'v1.8.1'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
-    linux_amd64: '35d5d39fc608342b23fc7ce1dd0c3bf0c96cc07ec3796507ab6894a5d172bf20'
-    linux_arm64: '01037dc187840a778ec65eae66b549b63d619a853540c8983f90d73ccbce5033'
-    darwin_amd64: 'd367d72d035985b69863f0e0a6e1815c23a546a1bcdae3cdbb9c17893303e6f3'
-    darwin_arm64: 'b377e295940018fb0e49ca9e0aabdabb00fc612af3d9e12003f01635dc87e1ef'
+    linux_amd64: 'ccabbe75dddbc25008d055fe92a44f95a184342211e7244d32b870409239c7a3'
+    linux_arm64: '2217788de9fb42cd0b3d84f1ee99c63617e19dea7af4995a59e45e4952c86ec4'
+    darwin_amd64: 'b7a44505f1cf09e8e42db4e5914d46bd6f3abae95d226d16ea182d56954eb3bd'
+    darwin_arm64: '62a6b086bdd7a934ff4a36d4974446d7271566b88db200b3956053a9b388fed8'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.8.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
@@ -200,7 +200,7 @@ testing_tools:
     darwin_amd64: 'ddb56002ff8c6265f55ec40c82eb0ef0dddec5127dd12d4fc5e7953453481f4b'
     darwin_arm64: '502bef17dd822217e82590e9ccf01c1e26a56b3fa34a835789b9af73e82a169a'
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
-  yq: 'v4.53.6'
+  yq: 'v4.54.1'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
   awscli: '1.46.1'
@@ -210,14 +210,14 @@ testing_tools:
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.5.17'
+  ministack_image: 'ministackorg/ministack:1.5.21'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault
   # provider drives it over plain HTTP in dev mode (no TLS needed). Pinned (never
   # :latest) for reproducibility.
   # renovate: datasource=docker depName=openbao/openbao depType=testing_tools
-  openbao_image: 'openbao/openbao:2.7.0'
+  openbao_image: 'openbao/openbao:2.7.1'
   # mkcert issues a trusted localhost cert for MiniStack's TLS and installs its CA
   # into the system trust store, so the Go AWS SDK accepts the awskms:// endpoint.
   # renovate: datasource=github-releases depName=FiloSottile/mkcert depType=testing_tools
@@ -262,7 +262,7 @@ testing_tools:
   # kustomize-controller and helm-controller are the only controllers the
   # bundle consumes (OCIRepository -> Kustomization -> HelmRelease).
   # renovate: datasource=github-releases depName=fluxcd/flux2 depType=testing_tools
-  flux_version: 'v2.9.5'
+  flux_version: 'v2.9.6'
   # In-cluster Git server for the KWOK flux-git deployer lane (issue #963).
   # Rootless variant so the admin-user bootstrap can `kubectl exec gitea
   # admin user create` directly without su gymnastics.
@@ -274,7 +274,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v2.1.1'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
-  zarf: 'v0.86.0'
+  zarf: 'v0.87.0'
 # Quality Thresholds
 quality:
   coverage_threshold: '83'
@@ -299,7 +299,7 @@ testing:
   # static Go and detects GPUs driver-free via NFD/PCI, so it no longer needs a
   # CUDA base / nvidia-smi. Matches the NVIDIA static distroless base used for
   # the aicr image (see .ko.yaml).
-  snapshot_agent_base_image: 'nvcr.io/nvidia/distroless/static:v4.1.3@sha256:ec947edce045116008a8aeab38c5da643fbf110990b133bad200dbf5e4b6e296'
+  snapshot_agent_base_image: 'nvcr.io/nvidia/distroless/static:v4.1.3@sha256:e6eb65cecc405fabfdfd69f95d4e090baa696c97ab3759151f4160c97aa8ecb7'
 
   # Component test harness configuration
   # Used by tools/component-test/ scripts to validate individual components

@@ -23,7 +23,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
@@ -54,7 +53,9 @@ var namePattern = regexp.MustCompile(`^[a-z]([a-z0-9-]*[a-z0-9])?$`)
 // ParseRegistry parses and validates a reservations.yaml document. Decoding
 // is strict (KnownFields): a mistyped key like `nightly-intnts:` must fail
 // the parse rather than silently leave the real field on its default and
-// fail open (e.g. re-enrolling an opted-out row in the nightly batch).
+// fail open (e.g. re-enrolling an opted-out row in the nightly batch). It
+// also rejects the retired nightly-intent-min-versions key, whose floors now
+// live in tests/uat/compat.yaml.
 func ParseRegistry(data []byte) (*Registry, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -76,20 +77,30 @@ func ParseRegistry(data []byte) (*Registry, error) {
 // LoadRegistryFile reads, size-bounds, parses, and validates the
 // reservation registry at path.
 func LoadRegistryFile(path string) (*Registry, error) {
-	f, err := os.Open(path) //nolint:gosec // operator-supplied registry path (CLI flag), size-bounded below
+	data, err := readFileBounded(path, "reservation registry", maxRegistryBytes)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "open reservation registry "+path, err)
+		return nil, err
+	}
+	return ParseRegistry(data)
+}
+
+// readFileBounded reads at most limit bytes of the operator-supplied file at
+// path, failing rather than truncating when the file is larger.
+func readFileBounded(path, what string, limit int64) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // operator-supplied path (CLI flag), size-bounded below
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "open "+what+" "+path, err)
 	}
 	defer func() { _ = f.Close() }()
 
-	data, err := io.ReadAll(io.LimitReader(f, maxRegistryBytes+1))
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "read reservation registry "+path, err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "read "+what+" "+path, err)
 	}
-	if int64(len(data)) > maxRegistryBytes {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "reservation registry "+path+" exceeds size limit")
+	if int64(len(data)) > limit {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, what+" "+path+" exceeds size limit")
 	}
-	return ParseRegistry(data)
+	return data, nil
 }
 
 // Validate enforces registry invariants: at least one row; every row has the
@@ -191,33 +202,6 @@ func (r *Registry) Validate() error {
 					fmt.Sprintf("reservation %s lists duplicate nightly-intent %q", res.Name, intent))
 			}
 			seenIntent[intent] = true
-		}
-		// nightly-intent-min-versions gates RELEASE cells per intent. Each key
-		// must be an intent this reservation actually runs (a gate on an unrun
-		// intent — including any gate on an explicitly opted-out row — is dead
-		// config / a typo that would silently never apply) and each value must
-		// parse as semver (else the gate is inert and every release cell runs
-		// the intent, defeating the gate). Fail closed on both.
-		runsIntent := make(map[string]bool, len(res.NightlyIntents))
-		for _, intent := range res.NightlyIntentsOrDefault() {
-			runsIntent[intent] = true
-		}
-		for intent, minVer := range res.NightlyIntentMinVersions {
-			if !validIntents[intent] {
-				return errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("reservation %s has a nightly-intent-min-version for unknown intent %q (want %s or %s)",
-						res.Name, intent, IntentTraining, IntentInference))
-			}
-			if !runsIntent[intent] {
-				return errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("reservation %s gates intent %q via nightly-intent-min-versions but does not run it nightly (add %q to nightly-intents or drop the gate)",
-						res.Name, intent, intent))
-			}
-			if _, err := semver.NewVersion(minVer); err != nil {
-				return errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("reservation %s has an invalid nightly-intent-min-version %q for intent %q (want a semver tag like v0.18.0)",
-						res.Name, minVer, intent))
-			}
 		}
 		// daytime-intent is optional (empty = not in the daytime rotation), but
 		// when set it must be a recognized intent — a typo would otherwise

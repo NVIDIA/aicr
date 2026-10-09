@@ -322,12 +322,14 @@ array. The action's header comment explains the full subject policy.
 ## Workflows
 
 ### `on-push.yaml`
-**Trigger**: Push to main, PRs to main
-**Purpose**: CI validation
-**Jobs** (run in parallel):
-1. **Unit Tests**: Go CI (setup, test, lint) + security scan
-2. **Integration Tests**: Chainsaw CLI integration tests via `tools/e2e`
-3. **E2E Tests**: Full end-to-end tests using Kind cluster (via `.github/actions/e2e`)
+**Trigger**: Push to main (Markdown-, `docs/**`- and `LICENSE`-only pushes are skipped), manual dispatch
+**Purpose**: Qualify each merged commit and publish validator images from main
+**Jobs**:
+1. **Qualification** (`tests`): Calls the reusable `qualification.yaml` (test, lint, CLI E2E, E2E, security scan)
+2. **Validator Images** (`build-docker`): After qualification, builds each validator image for amd64 and arm64
+3. **Docker Manifest** (`docker-manifest`): Publishes the multi-arch `sha-<commit>` and `edge` tags
+
+Pull requests run the same `qualification.yaml` through `merge-gate.yaml`.
 
 ### `on-tag.yaml`
 **Trigger**: Semantic version tags (v*.*.*)
@@ -513,12 +515,12 @@ To use these actions in other repositories:
 ```yaml
 - uses: NVIDIA/aicr/.github/actions/go-test@main
   with:
-    go_version: '1.27.1'
-    helm_version: 'v4.3.0'
-    setup_envtest_version: 'v0.25.1'
-    setup_envtest_sha256: '531726d9a1d9e4c5661e22ab90186e186f5dbebbc109b13333fa7e237068f06d'
-    oasdiff_version: 'v1.32.1'
-    oasdiff_sha256: '7c8939fc49b75ee11fec66a5b83b37a2fca6aee109fed85013b1ba2ac2a1ee7f'
+    go_version: '...'             # .go-version
+    helm_version: '...'           # .settings.yaml testing_tools.helm
+    setup_envtest_version: '...'  # .settings.yaml testing_tools.setup_envtest
+    setup_envtest_sha256: '...'   # .settings.yaml testing_tools.setup_envtest_sha256_linux_amd64
+    oasdiff_version: '...'        # .settings.yaml linting.oasdiff
+    oasdiff_sha256: '...'         # .settings.yaml linting.oasdiff_sha256_linux_amd64
     coverage_report: 'true'
 ```
 
@@ -530,6 +532,7 @@ Everything else shown is required and has no such escape hatch:
 `setup_envtest_version`, `setup_envtest_sha256` and `oasdiff_sha256` are each
 checked at the top of their install step and fail the job when empty or
 malformed, so omitting one produces a failure at run time rather than a skipped
-step. A cross-repo caller has no `load-versions` to read `.settings.yaml`, hence
-the literals — keep them in step with the pins there, and note that each
-`*_sha256` must be the digest for the version beside it.
+step. A cross-repo caller has no `load-versions` to read `.settings.yaml`, so it
+passes literal values: copy each from the file and key named in its comment
+rather than from this page, and note that each `*_sha256` must be the digest for
+the version beside it.

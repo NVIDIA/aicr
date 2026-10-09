@@ -55,7 +55,7 @@ import (
 // recipe made its capability inapplicable (see validators/applicability.go).
 const skipCheckReason = "skipped: named in skipChecks, so the caller declared this check out of scope for this run"
 
-// skipCheckReasonCode is the same fact as skipCheckReason in the one channel a
+// SkipCheckReasonCode is the same fact as skipCheckReason in the one channel a
 // signed evidence bundle preserves. The default (minimal) redaction policy
 // blanks TestResult.Message for every test, so a reason carried only in the
 // message reaches the attestation as the empty string: a bundle that records
@@ -68,7 +68,7 @@ const skipCheckReason = "skipped: named in skipChecks, so the caller declared th
 // (validators/deployment/nvidia_smi.go) precisely so an auditor can tell a
 // caller-declared skip from a check that found its own capability
 // inapplicable.
-const skipCheckReasonCode = "named-in-skip-checks"
+const SkipCheckReasonCode = "named-in-skip-checks"
 
 // preflightSkipChecks fails closed on a skip list that would not do what its
 // author meant, before the cluster is prepared or any Job is deployed. It
@@ -224,7 +224,7 @@ func (v *Validator) selectEntries(
 		}
 		slog.Info("skipping validator: named in skipChecks", "name", entry.Name, "phase", phase)
 		builder.AddSkippedWithExtra(entry.Name, entry.Phase, skipCheckReason,
-			map[string]string{"skipReason": skipCheckReasonCode})
+			map[string]string{"skipReason": SkipCheckReasonCode})
 	}
 	return entries
 }

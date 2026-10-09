@@ -4,7 +4,7 @@ Runbook for AICR maintainers. Two surfaces:
 
 - **Releases** — cadence, tag flow, supply-chain verification.
 - **Recipe contributions** — reviewing PRs against `recipes/` paths,
-  including the forthcoming evidence-backed flow from ADR-007.
+  including the evidence-backed flow from ADR-007 (partly shipped).
 
 For end-user release verification, see
 [RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md).
@@ -502,16 +502,18 @@ A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,
    the hard one — maintainers cannot run a contributor's GB200 recipe
    on an H100. ADR-007 closes that gap with bundled evidence.
 
-The forthcoming evidence flow is documented below as future state.
-Until ADR-007 PR-D lands, recipe acceptance still relies on author
-attestation + maintainer judgement.
+The evidence flow below is partly shipped: the pointer gates and ingest
+run today, but evidence is not required to merge (the `recipe-evidence`
+check is warning-only), so recipe acceptance still relies on author
+attestation + maintainer judgement, informed by evidence when a pointer
+is present.
 
-## Evidence-Backed Review (Future State per ADR-007)
+## Evidence-Backed Review (ADR-007)
 
 > **Status (partially landed).** `recipes/evidence/` now exists: the
-> per-source pointer tree (`#1347` Option A / `#1401`) shipped, and two
+> per-source pointer tree (`#1347` Option A / `#1401`) shipped, and
 > signed nested pointers are committed today
-> (`h100-gke-cos-training`, `gb200-eks-ubuntu-training`), each under
+> (e.g. `h100-gke-cos-training`, `gb200-eks-ubuntu-training`), each under
 > `recipes/evidence/<recipe>/<src>/<digest>.yaml`. Two gates run on
 > `recipes/evidence/**`: the **blocking** *Evidence Pointer Contract*
 > (`tools/evidence-pointercheck`) rejects any committed pointer that lacks a
@@ -522,7 +524,8 @@ attestation + maintainer judgement.
 > recipe-evidence verify gate (signature/integrity against OCI). Cryptographic
 > trust is enforced **after merge, at ingest** (`evidence-ingest.yaml`), which
 > verifies the signature pinned to the claimed signer before any result is
-> counted (#1535). The ADR-007 `spec.maintainers` work (PR-D) is still future
+> counted (#1535). The ADR-007 `spec.maintainers` work (PR-D) and the
+> `evidence/known-failure` and `evidence/exempt` labels are still future
 > state. Treat
 > proposed-only items below as design contract, not operational guide.
 

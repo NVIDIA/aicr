@@ -246,11 +246,12 @@ the bundle's own components as missing until `deploy.sh` has actually
 deployed them.
 
 Once `deploy.sh` has deployed the bundle, `aicr validate --phase
-deployment` checks it, including `gke-gb200-rdma`, without running
+deployment` against the bundle's `recipe.yaml` (the component set it
+deployed) checks it, including `gke-gb200-rdma`, without running
 conformance or performance (see [Validation](../user/validation.md)):
 
 ```shell
-aicr validate --recipe recipe.yaml --phase deployment
+aicr validate --recipe ./bundle/recipe.yaml --phase deployment
 ```
 
 ## Storage Prerequisites

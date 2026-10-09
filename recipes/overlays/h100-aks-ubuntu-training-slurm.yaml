@@ -34,6 +34,7 @@ spec:
 
   mixins:
     - os-ubuntu
+    - nvsentinel-slurm-drain-monitor
 
   constraints:
     - name: K8s.server.version
@@ -64,6 +65,16 @@ spec:
   # Accelerated nodeSelector/tolerations on slurmd are injected via the
   # registry's nodesets.slinky.podSpec.{nodeSelector,tolerations} paths.
   componentRefs:
+    # The nvsentinel-slurm-drain-monitor mixin enables the monitor, but a mixin
+    # cannot carry expectedResources, so normal deployment validation verifies
+    # the Deployment from here. To opt out, remove this entry together with the
+    # mixin; removing only the mixin fails deployment validation.
+    - name: nvsentinel
+      type: Helm
+      expectedResources:
+        - kind: Deployment
+          namespace: nvsentinel
+          name: slurm-drain-monitor
     - name: mariadb-operator-crds
       type: Helm
       valuesFile: components/mariadb-operator-crds/values.yaml
@@ -124,11 +135,12 @@ spec:
   # InfiniBand path already present on the parent AKS leaf via
   # network-operator. Deployment checks are inherited unchanged.
   # Conformance keeps the inherited parent checks and appends the
-  # Slurm-specific health check below.
+  # Slurm-specific health and GPU access checks below.
   validation:
     conformance:
       checks:
         - slinky-slurm-health
+        - slinky-slurm-gpu-access
     performance:
       checks: []
       constraints: []

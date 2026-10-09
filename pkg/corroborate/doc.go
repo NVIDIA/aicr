@@ -13,8 +13,8 @@
 // limitations under the License.
 
 // Package corroborate computes the recipe corroboration consensus model and
-// emits the deterministic interim-evidence dashboard (GP4, design doc
-// docs/design/013-interim-evidence-dashboard.md).
+// emits the deterministic interim-evidence dashboard (GP4, #1404; user guide
+// docs/user/evidence-dashboard.md).
 //
 // The model answers one question per recipe row (a CTRF check within a phase):
 // how many DISTINCT, verified, allowlisted signers agree on the result? It
