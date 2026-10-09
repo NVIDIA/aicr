@@ -372,8 +372,9 @@ returns a successful *skipped* result without measuring bandwidth. The selected
 nodes also need **free** GPU capacity (the TrainJob places a full GPU node per
 worker); if the GPUs are already occupied the workers stay Pending and the check
 times out — it does not skip. If Kubeflow Trainer is not already installed, the validator
-downloads and installs it (Trainer v2.2.0 from GitHub, then removes it
-afterward), so the validator environment needs GitHub egress.
+downloads and installs it from GitHub, then removes it afterward, so the
+validator environment needs GitHub egress. See
+[Validation](../user/validation.md) for choosing the installed release.
 
 ### Manual standalone benchmark
 
