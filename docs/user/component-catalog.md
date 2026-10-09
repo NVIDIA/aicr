@@ -1474,10 +1474,13 @@ The leaves ship a `tas-flavor` (`topologyName`, `nvidia.com/gpu.present: "true"`
 
 Without access no labels are written and TAS admits nothing.
 
-Verify the labels, then submit a Job that must land inside one domain:
+Verify the labels, then submit a Job that must land inside one domain. On GKE and EKS every `Topology` level must be present on the GPU nodes (a node missing one is not TAS-eligible); on Kind check `accelerator.topograph.run/domain` instead:
 
 ```bash
-kubectl get nodes -L fabric.topograph.run/tier-0,fabric.topograph.run/tier-1
+# GKE / EKS
+kubectl get nodes -L fabric.topograph.run/tier-0,fabric.topograph.run/tier-1,fabric.topograph.run/tier-2
+# Kind
+kubectl get nodes -L accelerator.topograph.run/domain
 ```
 
 ```yaml
