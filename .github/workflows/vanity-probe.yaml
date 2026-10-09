@@ -1,0 +1,74 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Branch-only probe: proves aicr.run/v2 resolves through the Go toolchain.
+# Never merged; runs only on pushes to its own branch.
+name: Vanity Module Probe
+
+on:
+  push:
+    branches:
+      - chore/go-vanity-probe
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  probe:
+    name: aicr.run/v2 (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [real, tagged]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Probe
+        env:
+          MODE: ${{ matrix.mode }}
+          REV: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          OUT: ${{ runner.temp }}/vanity-probe
+        run: tools/vanity-probe "${MODE}"
+
+      - name: Publish summary
+        if: always()
+        env:
+          SUMMARY: ${{ runner.temp }}/vanity-probe/${{ matrix.mode }}/summary.md
+        run: if [ -f "${SUMMARY}" ]; then cat "${SUMMARY}" >> "${GITHUB_STEP_SUMMARY}"; fi
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: vanity-probe-${{ matrix.mode }}
+          path: ${{ runner.temp }}/vanity-probe/${{ matrix.mode }}
+          retention-days: 30
+          if-no-files-found: error

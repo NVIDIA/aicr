@@ -1,0 +1,271 @@
+#!/bin/bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# tools/vanity-probe — prove aicr.run/v2 resolves through the Go toolchain.
+#
+#   real    live aicr.run discovery plus a real GitHub fetch of REV; needs no tag
+#   tagged  live aicr.run discovery, but git fetches of the repository are
+#           redirected to a throwaway local fixture tagged v1.0.0, v2.0.0 and
+#           go/v2.0.0-rc.0, so tag semantics are tested without pushing a tag
+#
+# Every go command runs with GOPROXY=direct and an explicit GONOSUMDB/GONOPROXY
+# (an inherited GONOSUMDB replaces the GOPRIVATE-derived default), and a check
+# fails if go contacts any HTTP host other than aicr.run or github.com.
+# Evidence lands in $OUT/<mode>/: summary.md, results.tsv, commands.txt,
+# trace.log (go -x output), download.json and zip-contents.txt.
+#
+# Usage: tools/vanity-probe real|tagged      env: REV, BRANCH, OUT
+
+set -uo pipefail
+
+MODE="${1:-}"
+case "${MODE}" in
+  real|tagged) ;;
+  *) echo "usage: $0 real|tagged" >&2; exit 2 ;;
+esac
+
+SRC="$(git rev-parse --show-toplevel)"
+REV="${REV:-$(git -C "${SRC}" rev-parse HEAD)}"
+BRANCH="${BRANCH:-$(git -C "${SRC}" rev-parse --abbrev-ref HEAD)}"
+OUT="${OUT:-$(mktemp -d)}/${MODE}"
+WORK="$(mktemp -d)"
+trap 'rm -rf "${WORK}"' EXIT
+
+MOD="aicr.run/v2"
+LEGACY="github.com/NVIDIA/aicr"
+REPO_URL="https://${LEGACY}"
+RC_TAG="go/v2.0.0-rc.0"
+WANT_META='<meta name="go-import" content="aicr.run git https://github.com/NVIDIA/aicr go">'
+PRIVATE="aicr.run,${LEGACY}"
+
+export GOMODCACHE="${WORK}/modcache" GOBIN="${WORK}/bin" GOFLAGS=-modcacherw GOTOOLCHAIN=local
+export GOPROXY=direct GOPRIVATE="${PRIVATE}" GONOSUMDB="${PRIVATE}" GONOPROXY="${PRIVATE}" GOWORK=off
+
+rm -rf "${OUT}" && mkdir -p "${OUT}" && OUT="$(cd "${OUT}" && pwd)"
+# Run go outside any module, as a fresh consumer would; inside the repo the
+# root module's dependency graph gets loaded too.
+cd "${WORK}" || exit 1
+: > "${OUT}/results.tsv"; : > "${OUT}/rows.md"; : > "${OUT}/commands.txt"; : > "${OUT}/trace.log"
+
+# shellcheck disable=SC2016 # literal backticks are Markdown code spans
+record() { # PASS|FAIL check detail
+  local icon="✅"
+  [[ $1 == FAIL ]] && icon="❌"
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "${OUT}/results.tsv"
+  printf '| %s | %s `%s` |\n' "$2" "${icon}" "${3//|/\\|}" >> "${OUT}/rows.md"
+  printf '%s  %s: %s\n' "$1" "$2" "$3"
+}
+
+expect() { # check want-regex got
+  if [[ $3 =~ $2 ]]; then record PASS "$1" "$3"; else record FAIL "$1" "got '$3', want /$2/"; fi
+}
+
+re() { # escape ERE metacharacters
+  local s="" c i
+  for ((i = 0; i < ${#1}; i++)); do
+    c="${1:i:1}"
+    case "${c}" in
+      [.\[\]\\*^\$\(\)+?{}\|]) s+="\\${c}" ;;
+      *) s+="${c}" ;;
+    esac
+  done
+  printf '%s' "${s}"
+}
+
+g() { # go args...; stdout to caller, stderr (including -x trace) to trace.log
+  printf '$ go %s\n' "$*" >> "${OUT}/commands.txt"
+  printf '\n$ go %s\n' "$*" >> "${OUT}/trace.log"
+  go "$@" 2>> "${OUT}/trace.log"
+}
+
+last_err() { grep -E '^go: ' "${OUT}/trace.log" | tail -1; }
+
+check_discovery() {
+  local p body
+  for p in / /v2 /v2/pkg/probe /v2/cmd/probe; do
+    if ! body="$(curl -fsS --max-time 15 "https://aicr.run${p}?go-get=1" 2>&1)"; then
+      record FAIL "discovery aicr.run${p}?go-get=1" "${body}"
+    elif grep -qF "${WANT_META}" <<<"${body}"; then
+      record PASS "discovery aicr.run${p}?go-get=1" "aicr.run git ${REPO_URL} go"
+    else
+      record FAIL "discovery aicr.run${p}?go-get=1" "go-import meta missing or different"
+    fi
+  done
+}
+
+check_download() { # query version want-hash [want-ref]
+  local js listing
+  if ! js="$(g mod download -x -json "${MOD}@$1")"; then
+    record FAIL "go mod download ${MOD}@$1" "$(last_err)"
+    return
+  fi
+  printf '%s\n' "${js}" > "${OUT}/download.json"
+  expect "origin: repository + subdir" "^$(re "${REPO_URL}") go\$" "$(jq -r '.Origin.URL + " " + .Origin.Subdir' <<<"${js}")"
+  expect "origin: commit" "^$3\$" "$(jq -r '.Origin.Hash' <<<"${js}")"
+  if [[ -n ${4:-} ]]; then
+    expect "origin: ref" "^$(re "$4")\$" "$(jq -r '.Origin.Ref' <<<"${js}")"
+  fi
+  unzip -Z1 "$(jq -r '.Zip' <<<"${js}")" | sed 's|^[^@]*@[^/]*/||' | LC_ALL=C sort > "${OUT}/zip-contents.txt"
+  listing="$(paste -sd' ' - < "${OUT}/zip-contents.txt")"
+  expect "module zip = go/ + root LICENSE only" \
+    '^LICENSE cmd/probe/main\.go go\.mod pkg/probe/data/hello\.txt pkg/probe/probe\.go$' "${listing}"
+}
+
+check_consumer() { # query version
+  local dir="${WORK}/consumer" got want
+  want="^module=$(re "${MOD}") version=$(re "$2") embedded=embedded-from-go-subdir\$"
+  rm -rf "${dir}" && mkdir -p "${dir}"
+  cat > "${dir}/main.go" <<'EOF'
+package main
+
+import (
+	"fmt"
+
+	"aicr.run/v2/pkg/probe"
+)
+
+func main() {
+	p, v := probe.Module()
+	fmt.Printf("module=%s version=%s embedded=%s\n", p, v, probe.Embedded())
+}
+EOF
+  g -C "${dir}" mod init example.com/consumer > /dev/null
+  if ! g -C "${dir}" get -x "${MOD}/pkg/probe@$1" > /dev/null; then
+    record FAIL "go get ${MOD}/pkg/probe@$1" "$(last_err)"
+    return
+  fi
+  expect "go get ${MOD}/pkg/probe@$1" "^go: added $(re "${MOD} $2")\$" "$(grep '^go: added' "${OUT}/trace.log" | tail -1)"
+  g -C "${dir}" mod tidy -x > /dev/null
+  cp "${dir}/go.mod" "${OUT}/consumer-go.mod"; cp "${dir}/go.sum" "${OUT}/consumer-go.sum"
+  expect "go mod verify" '^all modules verified$' "$(g -C "${dir}" mod verify)"
+  expect "consumer graph (go list -m all)" "^example\.com/consumer $(re "${MOD} $2")\$" \
+    "$(g -C "${dir}" list -m all | paste -sd' ' -)"
+  expect "go run (consumer importing ${MOD}/pkg/probe)" "${want}" "$(g -C "${dir}" run .)"
+}
+
+check_install() { # query version
+  local want
+  want="^module=$(re "${MOD}") version=$(re "$2") embedded=embedded-from-go-subdir\$"
+  if ! g install -x "${MOD}/cmd/probe@$1" > /dev/null; then
+    record FAIL "go install ${MOD}/cmd/probe@$1" "$(last_err)"
+    return
+  fi
+  expect "go install ${MOD}/cmd/probe@$1 → run" "${want}" "$("${GOBIN}/probe")"
+  expect "installed binary build info (go version -m)" "^$(re "${MOD} $2")\$" \
+    "$(go version -m "${GOBIN}/probe" | awk '$1 == "mod" { print $2, $3 }')"
+}
+
+check_network() {
+  local hosts
+  hosts="$(grep -oE '^# get https://[^/?]+' "${OUT}/trace.log" | sed 's|.*https://||' | sort -u | paste -sd' ' -)"
+  expect "go HTTP hosts (no proxy.golang.org / sum.golang.org)" \
+    '^(aicr\.run|github\.com)( (aicr\.run|github\.com))*$' "${hosts}"
+}
+
+build_fixture_remote() {
+  local fixture="${WORK}/fixture-remote" n="${GIT_CONFIG_COUNT:-0}"
+  mkdir -p "${fixture}"
+  git -C "${fixture}" init -q || return 1
+  git -C "${SRC}" archive "${REV}" go LICENSE go.mod | tar -x -C "${fixture}" || return 1
+  git -C "${fixture}" add -A || return 1
+  git -C "${fixture}" -c user.name=vanity-probe -c user.email=vanity-probe@invalid \
+    -c commit.gpgSign=false commit -qm "vanity probe fixture" || return 1
+  for t in v1.0.0 v2.0.0 "${RC_TAG}"; do
+    git -C "${fixture}" -c tag.gpgSign=false tag "${t}" || return 1
+  done
+  export GIT_CONFIG_COUNT=$((n + 1))
+  export "GIT_CONFIG_KEY_${n}=url.${fixture}.insteadOf" "GIT_CONFIG_VALUE_${n}=${REPO_URL}"
+  FIXTURE_HEAD="$(git -C "${fixture}" rev-parse HEAD)"
+}
+
+probe_real() {
+  local ver got
+  check_discovery
+  expect "no go/v* tags published upstream (go list -m -versions)" "^$(re "${MOD}")\$" \
+    "$(g list -x -m -versions "${MOD}")"
+  ver="$(g list -x -m -f '{{.Version}}' "${MOD}@${REV}")"
+  expect "go list -m ${MOD}@${REV:0:12} → pseudo-version" "^v2\.0\.0-[0-9]{14}-${REV:0:12}\$" "${ver:-$(last_err)}"
+  [[ -z ${ver} ]] && return
+  expect "go list -m ${MOD}@${BRANCH}" "^$(re "${ver}")\$" "$(g list -x -m -f '{{.Version}}' "${MOD}@${BRANCH}")"
+  check_download "${REV}" "${ver}" "${REV}"
+  check_consumer "${REV}" "${ver}"
+  check_install "${REV}" "${ver}"
+  expect "legacy ${LEGACY}@latest stays on v0/v1" "^$(re "${LEGACY}") v[01]\.[0-9]+\.[0-9]+\$" \
+    "$(g list -x -m "${LEGACY}@latest")"
+  got="$(g list -x -m -versions "${LEGACY}")"
+  if [[ ${got} =~ ^$(re "${LEGACY}")(\ v[01]\.[^ ]+)+$ ]]; then
+    record PASS "legacy version list has no v2+ or go/ entries" "$(wc -w <<<"${got}" | awk '{print $1 - 1}') versions, highest ${got##* }"
+  else
+    record FAIL "legacy version list has no v2+ or go/ entries" "${got}"
+  fi
+}
+
+probe_tagged() {
+  local got
+  if ! build_fixture_remote; then
+    record FAIL "fixture remote" "could not build ${WORK}/fixture-remote"
+    return
+  fi
+  record PASS "fixture remote (runner-local only)" "tags v1.0.0 v2.0.0 ${RC_TAG} at ${FIXTURE_HEAD:0:12}"
+  expect "go list -m -versions ${MOD}" "^$(re "${MOD}") v2\.0\.0-rc\.0\$" "$(g list -x -m -versions "${MOD}")"
+  expect "go list -m ${MOD}@latest" "^$(re "${MOD}") v2\.0\.0-rc\.0\$" "$(g list -x -m "${MOD}@latest")"
+  if got="$(g list -x -m "${MOD}@v2.0.0")"; then
+    record FAIL "unprefixed v2.0.0 tag ignored by ${MOD}" "resolved: ${got}"
+  else
+    expect "unprefixed v2.0.0 tag ignored by ${MOD}" 'unknown revision go/v2\.0\.0' "$(last_err)"
+  fi
+  check_download v2.0.0-rc.0 v2.0.0-rc.0 "${FIXTURE_HEAD}" "refs/tags/${RC_TAG}"
+  check_consumer v2.0.0-rc.0 v2.0.0-rc.0
+  check_install v2.0.0-rc.0 v2.0.0-rc.0
+  expect "legacy versions exclude v2.0.0 and ${RC_TAG}" "^$(re "${LEGACY}") v1\.0\.0\$" "$(g list -x -m -versions "${LEGACY}")"
+  expect "legacy ${LEGACY}@latest" "^$(re "${LEGACY}") v1\.0\.0\$" "$(g list -x -m "${LEGACY}@latest")"
+  if got="$(g list -x -m "${LEGACY}@v2.0.0")"; then
+    record FAIL "legacy rejects unprefixed v2.0.0" "resolved: ${got}"
+  else
+    expect "legacy rejects unprefixed v2.0.0" 'major version' "$(last_err)"
+  fi
+}
+
+"probe_${MODE}"
+check_network
+
+fails="$(grep -c '^FAIL' "${OUT}/results.tsv")"
+passes="$(grep -c '^PASS' "${OUT}/results.tsv")"
+{
+  echo "## \`${MOD}\` probe: ${MODE}"
+  echo
+  if [[ ${MODE} == real ]]; then
+    echo "Live \`aicr.run\` discovery and a real fetch from \`${REPO_URL}\` at \`${REV}\` (branch \`${BRANCH}\`). No tags involved."
+  else
+    echo "Live \`aicr.run\` discovery; git fetches of \`${REPO_URL}\` redirected to a runner-local fixture built from \`${REV}\` and tagged \`v1.0.0\`, \`v2.0.0\`, \`${RC_TAG}\`. No tag was pushed."
+  fi
+  echo
+  echo "\`$(go version)\` · \`GOPROXY=$(go env GOPROXY)\` · \`GONOSUMDB=$(go env GONOSUMDB)\` · **${passes} passed, ${fails} failed**"
+  echo
+  echo '| Check | Result |'
+  echo '|---|---|'
+  cat "${OUT}/rows.md"
+  echo
+  echo '<details><summary>Go commands run</summary>'
+  echo
+  echo '```'
+  cat "${OUT}/commands.txt"
+  echo '```'
+  echo '</details>'
+} > "${OUT}/summary.md"
+rm -f "${OUT}/rows.md"
+
+echo "${passes} passed, ${fails} failed; evidence in ${OUT}"
+[[ ${fails} -eq 0 ]]
