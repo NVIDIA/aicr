@@ -45,13 +45,17 @@ func TestAKSGPUStackProfile(t *testing.T) {
 			"driver.enabled", "enabled", "operator.runtimeClass", "toolkit.enabled",
 		},
 		"nvidia-dra-driver-gpu": {"enabled", "nvidiaDriverRoot"},
-		// nvsentinel's two paths follow from who installs the driver:
+		// nvsentinel's paths follow from who installs the driver:
 		// the labeler's driver-pod evidence (#2175) and the RuntimeClass
 		// name the ClusterPolicy controller derives from
-		// operator.runtimeClass (#2176). Both are profile-owned so a
-		// bundle-time --set cannot reintroduce either defect (#2181).
+		// operator.runtimeClass (#2176), which metadata-collector and the
+		// GPU reset Job both request, and the driver root the reset Job
+		// chroots into. All are profile-owned so a bundle-time --set cannot
+		// reintroduce either defect (#2181).
 		"nvsentinel": {
-			"enabled", "labeler.assumeDriverInstalled", "metadata-collector.runtimeClassName",
+			"enabled", "janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
+			"janitor.config.controllers.gpuReset.resetJob.runtimeClassName",
+			"labeler.assumeDriverInstalled", "metadata-collector.runtimeClassName",
 		},
 	}
 
@@ -293,8 +297,10 @@ func TestAKSDefaultKeepsPreProfileEffectiveValues(t *testing.T) {
 	// metadata-collector.runtimeClassName, which is exactly why
 	// azure-managed clusters silently lost three DaemonSets (#2175) and had
 	// every metadata-collector pod rejected at admission (#2176). The
-	// profile now supplies both. The delta is asserted exactly rather than
-	// waived, so any further drift still fails.
+	// profile now supplies both, plus the GPU reset Job's RuntimeClass and
+	// driver root.
+	// The delta is asserted exactly rather than waived, so any further
+	// drift still fails.
 	for _, name := range profiledNames {
 		got, err := profiled.GetValuesForComponentWithContext(ctx, name)
 		if err != nil {
@@ -311,6 +317,9 @@ func TestAKSDefaultKeepsPreProfileEffectiveValues(t *testing.T) {
 			for key, wantSubtree := range map[string]map[string]any{
 				"labeler":            {"assumeDriverInstalled": true},
 				"metadata-collector": {"runtimeClassName": "nvidia-container-runtime"},
+				"janitor": {"config": map[string]any{"controllers": map[string]any{"gpuReset": map[string]any{
+					"resetJob": map[string]any{"runtimeClassName": "nvidia-container-runtime", "hostDriverRootPath": "/"},
+				}}}},
 			} {
 				subtree, subtreeOK := got[key].(map[string]any)
 				if !subtreeOK {

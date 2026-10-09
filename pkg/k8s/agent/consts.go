@@ -55,6 +55,12 @@ const (
 	mariaDBAPIGroup = "k8s.mariadb.com"
 	mariaDBResource = "mariadbs"
 
+	storageAPIGroup      = "storage.k8s.io"
+	storageClassResource = "storageclasses"
+
+	perconaAPIGroup = "psmdb.percona.com"
+	perconaResource = "perconaservermongodbs"
+
 	// rbacAPIGroup is the API group RoleRef / ClusterRoleRef values bind
 	// against, and that PolicyRules use when permitting Role / RoleBinding
 	// / ClusterRole / ClusterRoleBinding resources.

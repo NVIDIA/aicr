@@ -329,14 +329,13 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/conformance
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
-          # AICR does not build the eight below. They ship only with the
+          # AICR does not build the images below. They ship only with the
           # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
-          # (#2610), nvsentinel-nic-health-monitor and
-          # nvsentinel-slurm-drain-monitor (#2611) mixins, and the static
-          # BOM cannot see a mixin-gated image, so nothing else would surface
-          # a CVE in them. Because they are not built by this workflow they
-          # carry the nvsentinel chart's own version rather than SCAN_TAG --
-          # see the overrides below.
+          # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
+          # (#2611) and remediation mixins, and the static BOM cannot see a
+          # mixin-gated image, so nothing else would surface a CVE in them.
+          # Because they are not built by this workflow they carry their
+          # upstream tag rather than SCAN_TAG -- see the overrides below.
           - ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
           - ghcr.io/nvidia/nvsentinel/preflight
           - ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
@@ -344,35 +343,79 @@ jobs:
           - ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
           - ghcr.io/nvidia/nvsentinel/nic-health-monitor
           - ghcr.io/nvidia/nvsentinel/slurm-drain-monitor
-          # Third-party, and the only one here not published by NVIDIA:
+          - ghcr.io/nvidia/nvsentinel/fault-quarantine
+          - ghcr.io/nvidia/nvsentinel/node-drainer
+          - ghcr.io/nvidia/nvsentinel/fault-remediation
+          - ghcr.io/nvidia/nvsentinel/janitor
+          - ghcr.io/nvidia/nvsentinel/janitor-provider
+          - ghcr.io/nvidia/nvsentinel/gpu-reset
+          # Percona, from the remediation mixins' separately bundled datastore
+          # (psmdb-operator, nvsentinel-mongodb). Pinned by AICR, by digest.
+          - docker.io/percona/percona-server-mongodb-operator
+          - docker.io/percona/percona-server-mongodb
+          - docker.io/percona/mongodb_exporter
+          - docker.io/percona/percona-backup-mongodb
+          - docker.io/percona/fluentbit
+          - docker.io/percona/pmm-client
+          # Third-party, pinned by AICR rather than the chart:
           # global.initContainerImage, used by chown/permission init
-          # containers in the nic-health-monitor and audit-logging paths.
-          # AICR overrides the chart's frozen bitnamilegacy/os-shell default
-          # in recipes/components/nvsentinel/values.yaml, so what is scanned
-          # here is the override -- keep the two in step.
+          # containers in the nic-health-monitor and audit-logging paths,
+          # and janitor-provider's generic reboot Job image. AICR overrides
+          # the chart's defaults for both -- the first in
+          # recipes/components/nvsentinel/values.yaml, the second
+          # (janitor-provider.csp.generic.rebootImage) in
+          # recipes/mixins/nvsentinel-remediation.yaml -- so what is scanned
+          # here is the override; keep them in step.
           - docker.io/library/busybox
         include:
           # Keep in lockstep with nvsentinel's defaultVersion in
           # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere,
           # TestPreflightImagesPinnedEverywhere,
-          # TestNICHealthMonitorImagePinnedEverywhere and
-          # TestSlurmDrainMonitorImagePinnedEverywhere fail if these drift apart.
+          # TestNICHealthMonitorImagePinnedEverywhere,
+          # TestSlurmDrainMonitorImagePinnedEverywhere and
+          # TestRemediationImagesPinnedEverywhere fail if these drift apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
-            tag: v1.25.0
+            tag: v1.26.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
-            tag: v1.25.0
+            tag: v1.26.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
-            tag: v1.25.0
+            tag: v1.26.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
-            tag: v1.25.0
+            tag: v1.26.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
-            tag: v1.25.0
+            tag: v1.26.0
           - image: ghcr.io/nvidia/nvsentinel/nic-health-monitor
-            tag: v1.25.0
+            tag: v1.26.0
           - image: ghcr.io/nvidia/nvsentinel/slurm-drain-monitor
-            tag: v1.25.0
+            tag: v1.26.0
+          - image: ghcr.io/nvidia/nvsentinel/fault-quarantine
+            tag: v1.26.0
+          - image: ghcr.io/nvidia/nvsentinel/node-drainer
+            tag: v1.26.0
+          - image: ghcr.io/nvidia/nvsentinel/fault-remediation
+            tag: v1.26.0
+          - image: ghcr.io/nvidia/nvsentinel/janitor
+            tag: v1.26.0
+          - image: ghcr.io/nvidia/nvsentinel/janitor-provider
+            tag: v1.26.0
+          - image: ghcr.io/nvidia/nvsentinel/gpu-reset
+            tag: v1.26.0
+          # AICR's own pins in recipes/components/{psmdb-operator,nvsentinel-mongodb};
+          # TestRemediationImagesPinnedEverywhere fails if these drift apart.
+          - image: docker.io/percona/percona-server-mongodb-operator
+            tag: 1.23.0@sha256:feaff989e25346716d85be9ea918593f89ad7481d30e033df21e0a764a6a484e
+          - image: docker.io/percona/percona-server-mongodb
+            tag: 8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c
+          - image: docker.io/percona/mongodb_exporter
+            tag: 0.40.0@sha256:d66daa6aff0513860d1577cee3b55ab82fde43394f8319d7b4674411b9153cce
+          - image: docker.io/percona/percona-backup-mongodb
+            tag: 2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5
+          - image: docker.io/percona/fluentbit
+            tag: 5.0.9-1@sha256:030e3faf454e93c19d9cfa1ec85ba6943fe293f5bd29fb04533a1b3de8c78bd6
+          - image: docker.io/percona/pmm-client
+            tag: 3.8.1@sha256:ea4061a6d9bd59d9c7aecbe75b91989bbddad55208b898d75064ac436014ca16
           # Versioned independently of the nvsentinel chart -- this comes from
-          # global.initContainerImage, not the chart's appVersion, so it does
+          # AICR's values override, not the chart's appVersion, so it does
           # not move with defaultVersion. Digest-pinned, so the tag is only
           # there to read; grype resolves the digest.
           - image: docker.io/library/busybox

@@ -1440,6 +1440,11 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	if applyErr := applyMariaDBOperatorState(ctx, internal, internalSnap); applyErr != nil {
 		return nil, applyErr
 	}
+	// NVSentinel datastore prerequisites follow the same observational
+	// pattern; CheckNVSentinelDatastorePrerequisites enforces them.
+	if applyErr := applyNVSentinelDatastoreState(ctx, internal, internalSnap); applyErr != nil {
+		return nil, applyErr
+	}
 	// Last write to the refs before the facade projection, so the emitted
 	// recipe and the Components view agree on where each component lives.
 	if resolveCfg.inheritFrom != "" {

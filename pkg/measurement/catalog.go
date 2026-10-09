@@ -166,6 +166,10 @@ var catalog = map[Type]typeSpec{
 			},
 			// pkg/collector/k8s/mariadb.go
 			"mariadb-operator": {scalar: closedKeys("collection-state", "api-available", "api-version")},
+			// pkg/collector/k8s/storageclass.go
+			"default-storage-class": {scalar: closedKeys("collection-state", "default-count", "default-classes")},
+			// pkg/collector/k8s/percona.go
+			"percona-server-mongodb": {scalar: closedKeys("collection-state", "api-available", "api-version")},
 		},
 	},
 

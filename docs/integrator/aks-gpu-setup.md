@@ -508,13 +508,23 @@ override is accepted.
 
 **NVSentinel is configured by the profile.** Two silent NVSentinel
 misconfigurations are specific to `azure-managed`. The `gpuStack` profile now
-sets both values itself ([#2181](https://github.com/NVIDIA/aicr/issues/2181)),
-so no bundle-time override is needed under either profile value:
+sets them itself ([#2181](https://github.com/NVIDIA/aicr/issues/2181)), along
+with the values janitor's GPU reset Job needs, so no bundle-time override is
+needed under either profile value:
 
 | Path | `azure-managed` (default) | `operator-managed` |
 |---|---|---|
 | `nvsentinel.labeler.assumeDriverInstalled` | `true` | `false` |
 | `nvsentinel.metadata-collector.runtimeClassName` | `nvidia-container-runtime` | `nvidia` |
+| `nvsentinel.janitor.config.controllers.gpuReset.resetJob.runtimeClassName` | `nvidia-container-runtime` | `nvidia` |
+| `nvsentinel.janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath` | `/` | `/run/nvidia/driver` |
+
+The last two rows matter only with the
+[`nvsentinel-remediation`](../user/component-catalog.md#graded-remediation)
+mixin, which deploys janitor. Its GPU reset Job requests the same RuntimeClass,
+and would otherwise be rejected at admission the same way, and it runs
+`nvidia-smi` by chrooting into the driver root: the host root where the node
+image installs the driver, the operator's install path where the operator does.
 
 Because these are profile-owned paths, a bundle-time `--set` diverging from the
 selected value is **rejected** rather than silently applied. The two gates
@@ -566,11 +576,13 @@ pod rejected: RuntimeClass "nvidia" not found
 No pod object is ever created, so there is nothing to `kubectl describe`; the
 `FailedCreate` event on the DaemonSet is the only signal.
 
-The same profile value owns both `gpu-operator.operator.runtimeClass` and
-`nvsentinel.metadata-collector.runtimeClassName`, so the two names are
-consistent by construction under either value.
-`CheckNVSentinelRuntimeClassCoherence` still compares the resolved names as a
-**blocking error** if they ever diverge.
+The same profile value owns `gpu-operator.operator.runtimeClass`,
+`nvsentinel.metadata-collector.runtimeClassName` and the GPU reset Job's
+`runtimeClassName` and driver root, so they are consistent by construction
+under either value. `CheckNVSentinelRuntimeClassCoherence` still compares the
+operator and metadata-collector names as a **blocking error** if they ever
+diverge, and `CheckNVSentinelRemediationPipelineCoherent` does the same for the
+reset Job.
 
 **Labeling the nodes by hand does not persist.** Applying the label manually:
 

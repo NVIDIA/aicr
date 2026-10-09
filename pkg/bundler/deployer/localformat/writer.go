@@ -61,6 +61,9 @@ type Component struct {
 	// Only primary Helm folders honor it. Injected -pre/-post/-readiness
 	// wrappers carry AICR-rendered manifests, not a chart with crds/.
 	OwnsCRDs bool
+	// CRDExcludeSubcharts names subcharts whose CRDs the apply-crds step
+	// skips; see recipe.ComponentConfig.OwnsCRDsExcludeSubcharts.
+	CRDExcludeSubcharts []string
 }
 
 // WriteResult is the typed return shape from Write. Callers consume
