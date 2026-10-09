@@ -22,6 +22,13 @@ import (
 
 const nvsentinelComponent = "nvsentinel"
 
+// nvsentinelRuntimeClassPaths are the NVSentinel values that name the NVIDIA
+// RuntimeClass, which must match gpu-operator's operator.runtimeClass.
+var nvsentinelRuntimeClassPaths = []string{
+	"metadata-collector.runtimeClassName",
+	"janitor.config.controllers.gpuReset.resetJob.runtimeClassName",
+}
+
 // TestNVSentinelConfigurationMatrix pins the exact per-platform NVSentinel
 // configuration issue #2181 specifies, resolved from the real embedded
 // catalog.
@@ -51,8 +58,8 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 		// wantAssume is the expected labeler.assumeDriverInstalled;
 		// nil means the path must be left unset (chart default false).
 		wantAssume *bool
-		// wantRuntimeClass is the expected
-		// metadata-collector.runtimeClassName; "" means left unset
+		// wantRuntimeClass is the expected value of every
+		// nvsentinelRuntimeClassPaths entry; "" means left unset
 		// (chart default nvidia).
 		wantRuntimeClass string
 	}{
@@ -164,31 +171,34 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 				t.Fatalf("labeler.assumeDriverInstalled = %v, want %v", assume, *tt.wantAssume)
 			}
 
-			runtimeClass, runtimeSet := nestedString(values, "metadata-collector", "runtimeClassName")
-			switch {
-			case tt.wantRuntimeClass == "" && runtimeSet:
-				t.Fatalf("metadata-collector.runtimeClassName = %q, want it left unset "+
-					"(the chart default already matches operator.runtimeClass)", runtimeClass)
-			case tt.wantRuntimeClass != "" && !runtimeSet:
-				t.Fatalf("metadata-collector.runtimeClassName is unset, want %q.\n"+
-					"  Left unset the API server rejects every metadata-collector pod with\n"+
-					"  `RuntimeClass \"nvidia\" not found`. See #2176.", tt.wantRuntimeClass)
-			case tt.wantRuntimeClass != "" && runtimeClass != tt.wantRuntimeClass:
-				t.Fatalf("metadata-collector.runtimeClassName = %q, want %q", runtimeClass, tt.wantRuntimeClass)
+			for _, path := range nvsentinelRuntimeClassPaths {
+				raw, state := profileValueAtPath(values, path)
+				runtimeClass, isString := raw.(string)
+				switch {
+				case tt.wantRuntimeClass == "" && state != PathAbsent:
+					t.Fatalf("%s = %#v, want it left unset "+
+						"(the chart default already matches operator.runtimeClass)", path, raw)
+				case tt.wantRuntimeClass != "" && !isString:
+					t.Fatalf("%s = %#v, want %q.\n"+
+						"  Left unset the API server rejects every pod that requests it with\n"+
+						"  `RuntimeClass \"nvidia\" not found`.", path, raw, tt.wantRuntimeClass)
+				case tt.wantRuntimeClass != "" && runtimeClass != tt.wantRuntimeClass:
+					t.Fatalf("%s = %q, want %q", path, runtimeClass, tt.wantRuntimeClass)
+				}
 			}
 		})
 	}
 }
 
 // TestAKSRuntimeClassNamesAgreeUnderEveryProfileValue pins the #2176
-// invariant directly: the RuntimeClass the GPU Operator creates and the one
-// metadata-collector requests must be the same string under every gpuStack
-// value.
+// invariant directly: the RuntimeClass the GPU Operator creates and the ones
+// metadata-collector and janitor's GPU reset Job request must be the same
+// string under every gpuStack value.
 //
-// Both are owned by the same profile value, so they are consistent by
-// construction rather than by convention — CheckNVSentinelRuntimeClassCoherence
-// remains defense in depth. This test asserts the property itself, so it
-// still fails if a future edit moves either path out of the profile.
+// All three are owned by the same profile value, so they are consistent by
+// construction rather than by convention; CheckNVSentinelRuntimeClassCoherence
+// backs up only the metadata-collector name. This test asserts the property
+// itself, so it still fails if a future edit moves any path out of the profile.
 func TestAKSRuntimeClassNamesAgreeUnderEveryProfileValue(t *testing.T) {
 	t.Parallel()
 
@@ -215,15 +225,17 @@ func TestAKSRuntimeClassNamesAgreeUnderEveryProfileValue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetValuesForComponentWithContext(nvsentinel): %v", err)
 			}
-			collectorClass, ok := nestedString(sentinelValues, "metadata-collector", "runtimeClassName")
-			if !ok {
-				t.Fatal("nvsentinel metadata-collector.runtimeClassName is unset — the comparison would be vacuous")
-			}
-
-			if operatorClass != collectorClass {
-				t.Fatalf("operator.runtimeClass = %q but metadata-collector.runtimeClassName = %q; "+
-					"the API server rejects every metadata-collector pod when they differ (#2176)",
-					operatorClass, collectorClass)
+			for _, path := range nvsentinelRuntimeClassPaths {
+				raw, _ := profileValueAtPath(sentinelValues, path)
+				sentinelClass, ok := raw.(string)
+				if !ok {
+					t.Fatalf("nvsentinel %s = %#v, want a string — the comparison would be vacuous", path, raw)
+				}
+				if operatorClass != sentinelClass {
+					t.Fatalf("operator.runtimeClass = %q but nvsentinel %s = %q; "+
+						"the API server rejects every pod that requests it when they differ",
+						operatorClass, path, sentinelClass)
+				}
 			}
 		})
 	}
@@ -403,8 +415,16 @@ func TestOKENVSentinelValueIsProfileOwned(t *testing.T) {
 		t.Fatalf("selectedProfile = %#v, want gpuStack=oci-managed", selected)
 	}
 	owned := selected.OwnedPaths[nvsentinelComponent]
-	wantOwned := []string{"enabled", "labeler.assumeDriverInstalled"}
-	if len(owned) != len(wantOwned) || owned[0] != wantOwned[0] || owned[1] != wantOwned[1] {
+	wantOwned := []string{
+		"enabled", "janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
+		"janitor.config.controllers.gpuReset.serviceManager.name",
+		"janitor.config.controllers.gpuReset.serviceManager.spec.apps",
+		"janitor.config.controllers.gpuReset.serviceManager.spec.namespace",
+		"janitor.config.controllers.gpuReset.serviceManager.spec.restoreTimeout",
+		"janitor.config.controllers.gpuReset.serviceManager.spec.teardownTimeout",
+		"labeler.assumeDriverInstalled",
+	}
+	if !slices.Equal(owned, wantOwned) {
 		t.Fatalf("ownedPaths[nvsentinel] = %v, want %v", owned, wantOwned)
 	}
 	if len(result.EffectiveLockSet()) == 0 {

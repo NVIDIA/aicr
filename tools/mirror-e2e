@@ -70,18 +70,18 @@ WORK=""
 # checks ~9.9 GiB each, which would exhaust an ubuntu-latest runner's disk and
 # blow the lane's timeout on every recipe PR. Carrying a mixin-gated image
 # through the whole transfer path is what discovery alone does not prove.
-PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.25.0"
+PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.26.0"
 PREFLIGHT_IMAGES=(
-    "ghcr.io/nvidia/nvsentinel/preflight:v1.25.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag:v1.25.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback:v1.25.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce:v1.25.0"
+    "ghcr.io/nvidia/nvsentinel/preflight:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce:v1.26.0"
 )
 
 # The image the nvsentinel-object-monitor mixin pulls in (#2612). Same
 # invisibility to the static BOM, for a different reason: it lives in a
 # mixin-gated subchart rather than a mixin-gated values override.
-OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.25.0"
+OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.26.0"
 
 # The images the nvsentinel-nic-health-monitor mixin pulls in. The subchart
 # image is invisible to the static BOM for the same reason as the object
@@ -92,13 +92,36 @@ OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.25.
 # for main ones, so asserting only the subchart image would let an
 # init-container regression through.
 NIC_HEALTH_MONITOR_IMAGES=(
-    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.25.0"
+    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.26.0"
     "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 )
 
 # The image the nvsentinel-slurm-drain-monitor mixin pulls in (#2611), from a
 # mixin-gated subchart like the object monitor's.
-SLURM_DRAIN_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.25.0"
+SLURM_DRAIN_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.26.0"
+
+# The images the nvsentinel-remediation mixin pulls in, the widest of the
+# three remediation steps. gpu-reset is not in any pod spec: janitor reads it
+# from its ConfigMap and runs it as a Job, so discovery reaches it only
+# through the embedded-YAML walk. The Percona images are AICR's pins in the
+# psmdb-operator and nvsentinel-mongodb components. The reboot Job image is
+# left out on purpose: janitor-provider gets it as an env var, which discovery
+# cannot see, and the busybox it is pinned to already comes from the NIC
+# mixin, so listing it would prove nothing.
+REMEDIATION_IMAGES=(
+    "ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/node-drainer:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/fault-remediation:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/janitor:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/janitor-provider:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/gpu-reset:v1.26.0"
+    "docker.io/percona/percona-server-mongodb-operator:1.23.0@sha256:feaff989e25346716d85be9ea918593f89ad7481d30e033df21e0a764a6a484e"
+    "docker.io/percona/percona-server-mongodb:8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c"
+    "docker.io/percona/mongodb_exporter:0.40.0@sha256:d66daa6aff0513860d1577cee3b55ab82fde43394f8319d7b4674411b9153cce"
+    "docker.io/percona/percona-backup-mongodb:2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5"
+    "docker.io/percona/fluentbit:5.0.9-1@sha256:030e3faf454e93c19d9cfa1ec85ba6943fe293f5bd29fb04533a1b3de8c78bd6"
+    "docker.io/percona/pmm-client:3.8.1@sha256:ea4061a6d9bd59d9c7aecbe75b91989bbddad55208b898d75064ac436014ca16"
+)
 
 # Every mixin-gated image, asserted in all three `mirror list` formats.
 MIXIN_IMAGES=(
@@ -106,6 +129,7 @@ MIXIN_IMAGES=(
     "${PREFLIGHT_IMAGES[@]}"
     "${NIC_HEALTH_MONITOR_IMAGES[@]}"
     "${SLURM_DRAIN_MONITOR_IMAGE}"
+    "${REMEDIATION_IMAGES[@]}"
 )
 
 # The subset carried through the Hauler sync, Zarf package and registry
@@ -235,7 +259,7 @@ REGISTRY_EOF
     # nvsentinel-slurm-drain-monitor is composed on a non-Slurm leaf here only
     # because this lane never bundles: CheckNVSentinelSlurmDrainMonitorRequiresSlinky
     # would reject it at `aicr bundle`, but `mirror list` runs no bundle gates.
-    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor"]' \
+    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor", "nvsentinel-remediation"]' \
         "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
         > "${data_dir}/overlays/h100-kind-training.yaml"
 
@@ -258,8 +282,8 @@ REGISTRY_EOF
     yq -i '(.componentRefs[] | select(.name == "gpu-operator") | .overrides.dcgm.enabled) = true' "${WORK}/recipe.yaml"
 
     # Fail loudly here rather than letting a silently-unapplied mixin turn the
-    # image assertions below into no-ops. Both are checked: either mixin
-    # failing to compose would quietly halve this lane's coverage.
+    # image assertions below into no-ops. Each is checked: any mixin failing
+    # to compose would quietly shrink this lane's coverage.
     if ! grep -q "kubernetesObjectMonitor" "${WORK}/recipe.yaml"; then
         err "nvsentinel-object-monitor mixin did not apply -- the recipe carries no kubernetesObjectMonitor override"
     fi
@@ -271,6 +295,9 @@ REGISTRY_EOF
     fi
     if ! grep -q "slurmDrainMonitor" "${WORK}/recipe.yaml"; then
         err "nvsentinel-slurm-drain-monitor mixin did not apply -- the recipe carries no slurmDrainMonitor override"
+    fi
+    if ! grep -q "janitorProvider" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-remediation mixin did not apply -- the recipe carries no janitorProvider override"
     fi
     msg "Recipe generated at ${WORK}/recipe.yaml"
 }

@@ -403,6 +403,12 @@ nvsentinel-preflight-e2e: ## Live Kind test: nvsentinel-preflight mixin injects 
 	echo "Running nvsentinel-preflight mixin e2e test..."; \
 	tests/e2e/nvsentinel-preflight/run.sh
 
+.PHONY: nvsentinel-remediation-e2e
+nvsentinel-remediation-e2e: ## Live Kind test: nvsentinel-observe dry-run carries a GPU fault to a GPU-scoped reset without acting
+	@set -e; \
+	echo "Running nvsentinel-observe mixin dry-run e2e test..."; \
+	tests/e2e/nvsentinel-remediation/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \

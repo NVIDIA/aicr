@@ -43,7 +43,7 @@ Each subdirectory is one collector; one collector emits one
 | Kind | Package | Emits | Notes |
 |------|---------|-------|-------|
 | GPU | `pkg/collector/gpu` | `TypeGPU` | One subtype: `hardware` (NFD/PCI enumeration; resolves the accelerator SKU from the PCI device ID). Driver-free — no nvidia-smi. Degrades to no subtype when sysfs is unavailable. |
-| Kubernetes | `pkg/collector/k8s` | `TypeK8s` | Server version, image inventory, GPU Operator ClusterPolicy, node-local info, secret-safe Slinky resource topology, official MariaDB Operator API conflict evidence, and OKE legacy device-plugin conflict evidence. Uses the singleton `pkg/k8s/client`. |
+| Kubernetes | `pkg/collector/k8s` | `TypeK8s` | Server version, image inventory, GPU Operator ClusterPolicy, node-local info, secret-safe Slinky resource topology, official MariaDB Operator API conflict evidence, OKE legacy device-plugin conflict evidence, default StorageClass evidence, and Percona Operator for MongoDB conflict evidence. Uses the singleton `pkg/k8s/client`. |
 | OS | `pkg/collector/os` | `TypeOS` | Subtypes for `release` (`/etc/os-release`), `grub`, `kmod`, `sysctl`. |
 | SystemD | `pkg/collector/systemd` | `TypeSystemD` | D-Bus probe of configured services. Routes to Talos via factory when `os: talos`. |
 | Topology | `pkg/collector/topology` | `TypeNodeTopology` | Cluster-wide taints and labels across all nodes, in two encodings — lossless `Items` plus the legacy folded `Data` map — see [Cross-cutting topology collector](#cross-cutting-topology-collector). |
@@ -75,6 +75,17 @@ free-form configuration. See the
 [Slinky](../integrator/measurement-api.md#k8s-slinky-slurm-shape) and
 [MariaDB](../integrator/measurement-api.md#k8s-mariadb-operator-shape)
 measurement contracts for field-presence semantics.
+
+The `percona-server-mongodb` sub-collector applies the same discovery seam to
+`psmdb.percona.com/perconaservermongodbs`, pages through CRs to tell AICR's own
+`nvsentinel/nvsentinel-mongodb` apart from foreign ones, and lists pods by
+Percona operator label to detect an operator AICR did not install (outside
+`nvsentinel`, or there under another Helm release). The
+`default-storage-class` sub-collector lists StorageClasses and records the
+annotated defaults. See the
+[default StorageClass](../integrator/measurement-api.md#k8s-default-storage-class-shape)
+and [Percona](../integrator/measurement-api.md#k8s-percona-server-mongodb-shape)
+measurement contracts.
 
 ## Collector Interface
 
