@@ -3011,7 +3011,7 @@ h100-gke-cos-training-kubeflow:
   010-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   010-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 15cb81ff1802213e252876a40a70668667e1241942a72a349a2ef332336bba1d
+  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 8017598c6be99dddf5c58b78467f30a6b7a8b836f957f85467ea5cd5906ace5e
   010-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   010-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -3048,7 +3048,7 @@ h100-gke-cos-training-kubeflow:
   README.md: 45b414b118cad9bc7f380feaecc2643e510e5f6ff0408b4afa71c69c6d90b487
   UPGRADING.md: be531c62f8c2f5ad3245852ac79d8359ba691d390846ef7edd31b29c1e470722
   bundle-info.yaml: b677837a70b0da020018f245c067de2e173d3a7c8299f83c2a8d60b7dd55166f
-  checksums.txt: 084c31673cb7bf1b849b1abf6017687f9358b253e2e55a068727f8f8453ece9c
+  checksums.txt: ac181bcfcb5a0690db15427388f1a73a35b09a26b4d260aabc9685208ccf1d54
   deploy.sh: ebea4672ba821640529834c701377d0196541a056dd820fa4920461b72f88d0f
   recipe.yaml: 6e92355ab9d775216232b39d83ecf895890b12df1dc69aa869ac156c3e4a74e8
 h100-gke-cos-training-kueue:
@@ -3093,7 +3093,7 @@ h100-gke-cos-training-kueue:
   010-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   010-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 15cb81ff1802213e252876a40a70668667e1241942a72a349a2ef332336bba1d
+  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 8017598c6be99dddf5c58b78467f30a6b7a8b836f957f85467ea5cd5906ace5e
   010-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   010-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -3136,7 +3136,7 @@ h100-gke-cos-training-kueue:
   README.md: 5bea5857cf6bca342bf2e8b9903fdd248bfed5cfde4fec557aba0aab24209f78
   UPGRADING.md: be531c62f8c2f5ad3245852ac79d8359ba691d390846ef7edd31b29c1e470722
   bundle-info.yaml: 4c4900d96e3e95c832b104c4f3463090faba74037b1323637ea01c5927582ee3
-  checksums.txt: 0d9af6d968a9707f815ea710d6974dbd48397037a9c69098079901b49c9e130c
+  checksums.txt: 3ff7d0901287866c69c8316be7794f36a28b2631b66dd57815dc29efa36cffbb
   deploy.sh: 35d70d033297a44687aa29b1a82b30b521d398981b23ceac58b5ce067ff3bda2
   recipe.yaml: 6efca31c6379d5666b62206edc72707989a53958e52c9b2b4e6e4c3dbc3d5b82
 h100-gke-cos-training-slurm:
@@ -3181,7 +3181,7 @@ h100-gke-cos-training-slurm:
   010-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   010-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 15cb81ff1802213e252876a40a70668667e1241942a72a349a2ef332336bba1d
+  010-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 8017598c6be99dddf5c58b78467f30a6b7a8b836f957f85467ea5cd5906ace5e
   010-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   010-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -3229,7 +3229,7 @@ h100-gke-cos-training-slurm:
   README.md: 4e77dccdeef4d33ccbe13af9730ca3910d8e3908af2d07fa009327807fc728dd
   UPGRADING.md: be531c62f8c2f5ad3245852ac79d8359ba691d390846ef7edd31b29c1e470722
   bundle-info.yaml: 66ff5a59b462915996e15e49b200be5fdd84f73301818a38e88f40c79489d06d
-  checksums.txt: 17bb675ed9b190d8259280f947c16517d4b6689fa3889050efbf92bb6d40aea5
+  checksums.txt: 5edc3793350b0d683cd625395ce3655221b7339f8e3d0c83c570787d76d337b0
   deploy.sh: 50df59bd35e4e94ac5245f3bbc1f9a949aab52e40a2c77d31a8110fe037e1414
   recipe.yaml: 11dcb4ecdbb0c2a77e66cf7ffba30bcdd937ce068e8e17755445741681d2d12b
 h100-kind-inference-dynamo:
