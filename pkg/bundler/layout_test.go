@@ -57,6 +57,31 @@ const (
 // against the OpenAPI enum, so a new deployer cannot ship unfrozen.
 var layoutDeployers = []string{"helm", "argocd", "argocd-helm", "flux", "helmfile", "fleet"}
 
+// layoutShape is one frozen bundle tree: a deployer rendered with the given
+// extra flags, compared against the manifest of the same name.
+type layoutShape struct {
+	name     string
+	deployer string
+	args     []string
+}
+
+// layoutVariants are the trees a deployer emits only under a non-default
+// flag. The default render never produces them, so without their own manifest
+// a renamed or dropped path in them would keep the gate green.
+var layoutVariants = []layoutShape{
+	{name: "fleet-helmop", deployer: "fleet", args: []string{"--fleet-mode", "helmop"}},
+}
+
+// layoutShapes returns every frozen tree: each deployer's default render,
+// then the variants.
+func layoutShapes() []layoutShape {
+	shapes := make([]layoutShape, 0, len(layoutDeployers)+len(layoutVariants))
+	for _, deployer := range layoutDeployers {
+		shapes = append(shapes, layoutShape{name: deployer, deployer: deployer})
+	}
+	return append(shapes, layoutVariants...)
+}
+
 // TestBundleLayoutMatchesManifest asserts each deployer emits the frozen tree.
 //
 // Removals and renames fail: they break an integrator reading that path.
@@ -66,9 +91,10 @@ var layoutDeployers = []string{"helm", "argocd", "argocd-helm", "flux", "helmfil
 func TestBundleLayoutMatchesManifest(t *testing.T) {
 	binary := buildAICR(t)
 
-	for _, deployer := range layoutDeployers {
+	for _, shape := range layoutShapes() {
+		deployer := shape.name
 		t.Run(deployer, func(t *testing.T) {
-			got := generateLayout(t, binary, deployer)
+			got := generateLayout(t, binary, shape)
 			want := readManifest(t, deployer)
 
 			if len(want) == 0 {
@@ -180,10 +206,10 @@ func TestBundleLayoutCoversEveryDeployer(t *testing.T) {
 		}
 	}
 
-	// Every frozen deployer needs a manifest on disk, or its subtest above
+	// Every frozen tree needs a manifest on disk, or its subtest above
 	// fails for a confusing reason.
-	for _, name := range layoutDeployers {
-		path := filepath.Join(layoutManifests, name+".txt")
+	for _, shape := range layoutShapes() {
+		path := filepath.Join(layoutManifests, shape.name+".txt")
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("no manifest at %s; run `make bundle-layout-baseline`", path)
 		}
@@ -207,14 +233,16 @@ func buildAICR(t *testing.T) string {
 }
 
 // generateLayout bundles the fixture and returns the sorted relative paths.
-func generateLayout(t *testing.T, binary, deployer string) []string {
+func generateLayout(t *testing.T, binary string, shape layoutShape) []string {
 	t.Helper()
 
-	outDir := filepath.Join(t.TempDir(), deployer)
-	cmd := exec.Command(binary, "bundle",
-		"-r", layoutFixture, "--deployer", deployer, "-o", outDir)
+	outDir := filepath.Join(t.TempDir(), shape.name)
+	args := append([]string{"bundle",
+		"-r", layoutFixture, "--deployer", shape.deployer, "-o", outDir}, shape.args...)
+	cmd := exec.Command(binary, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bundle --deployer %s: %v\n%s", deployer, err, out)
+		t.Fatalf("bundle --deployer %s %s: %v\n%s", shape.deployer,
+			strings.Join(shape.args, " "), err, out)
 	}
 
 	var paths []string
@@ -261,7 +289,8 @@ func readManifest(t *testing.T, deployer string) []string {
 	return paths
 }
 
-// requiredRootPaths are the root entries a manifest must contain, per deployer.
+// requiredRootPaths are the root entries a manifest must contain, per frozen
+// tree (each deployer, plus each layoutVariants entry).
 //
 // These are structural: every bundle carries checksums.txt, README.md and
 // recipe.yaml, and each deployer has its own entry point that integrator
@@ -273,12 +302,13 @@ func readManifest(t *testing.T, deployer string) []string {
 // had not been refreshed. bundle-info.yaml is listed for the same reason: it
 // arrived after the baselines were frozen (#2758).
 var requiredRootPaths = map[string][]string{
-	"helm":        {"checksums.txt", "README.md", "deploy.sh", "recipe.yaml", "bundle-info.yaml"},
-	"argocd":      {"checksums.txt", "README.md", "app-of-apps.yaml", "recipe.yaml", "bundle-info.yaml"},
-	"argocd-helm": {"checksums.txt", "README.md", "Chart.yaml", "values.yaml", "recipe.yaml", "bundle-info.yaml"},
-	"flux":        {"checksums.txt", "README.md", "kustomization.yaml", "recipe.yaml", "bundle-info.yaml"},
-	"helmfile":    {"checksums.txt", "README.md", "helmfile.yaml", "recipe.yaml", "bundle-info.yaml"},
-	"fleet":       {"checksums.txt", "README.md", "gitrepo.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"helm":         {"checksums.txt", "README.md", "deploy.sh", "recipe.yaml", "bundle-info.yaml"},
+	"argocd":       {"checksums.txt", "README.md", "app-of-apps.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"argocd-helm":  {"checksums.txt", "README.md", "Chart.yaml", "values.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"flux":         {"checksums.txt", "README.md", "kustomization.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"helmfile":     {"checksums.txt", "README.md", "helmfile.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"fleet":        {"checksums.txt", "README.md", "gitrepo.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"fleet-helmop": {"checksums.txt", "README.md", "helmops.yaml", "recipe.yaml", "bundle-info.yaml"},
 }
 
 // TestBundleLayoutManifestsAreComplete rejects a truncated manifest.
@@ -305,7 +335,8 @@ func TestBundleLayoutManifestsAreComplete(t *testing.T) {
 			"at least two to be meaningful", len(components))
 	}
 
-	for _, deployer := range layoutDeployers {
+	for _, shape := range layoutShapes() {
+		deployer := shape.name
 		t.Run(deployer, func(t *testing.T) {
 			roots, declared := requiredRootPaths[deployer]
 			if !declared || len(roots) == 0 {

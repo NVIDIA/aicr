@@ -444,15 +444,19 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 # set -e can catch.
 	@set -e; tmp=$$(mktemp -d); \
 	  trap 'rm -rf "$$tmp"' EXIT; \
-	  for d in helm argocd argocd-helm flux helmfile fleet; do \
+	  for d in helm argocd argocd-helm flux helmfile fleet fleet-helmop; do \
+	    case "$$d" in \
+	      fleet-helmop) dep=fleet; extra="--fleet-mode helmop" ;; \
+	      *) dep="$$d"; extra="" ;; \
+	    esac; \
 	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
 	      -r pkg/bundler/testdata/layout/recipe.yaml \
-	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
+	      --deployer "$$dep" $$extra -o "$$tmp/bundle-$$d" >/dev/null; \
 	    ( cd "$$tmp/bundle-$$d" && find . -type f > "$$tmp/raw-$$d.txt" ); \
 	    sed 's|^\./||' "$$tmp/raw-$$d.txt" > "$$tmp/rel-$$d.txt"; \
 	    LC_ALL=C sort "$$tmp/rel-$$d.txt" > "$$tmp/$$d.txt"; \
 	  done; \
-	  for d in helm argocd argocd-helm flux helmfile fleet; do \
+	  for d in helm argocd argocd-helm flux helmfile fleet fleet-helmop; do \
 	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
 	  done
 	@echo "Bundle layout manifests updated."

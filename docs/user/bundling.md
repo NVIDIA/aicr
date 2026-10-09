@@ -84,7 +84,10 @@ helmfile/
 `fleet` keeps Helm's per-component folders and adds its own files. In the
 default `gitrepo` mode each folder gets a `fleet.yaml` (one Fleet bundle) and a
 `.fleetignore`, and the root gets `gitrepo.yaml`; in `helmop` mode the root gets
-a single `helmops.yaml` instead, with each component's values inlined.
+a single `helmops.yaml` instead, with each component's values inlined. In
+`helmop` mode the folders' values files are reference copies: Fleet, and
+`--inherit-from` and `upgrade-check`, read the values in `helmops.yaml`. Both
+trees are gated; the `helmop` tree has its own manifest.
 
 ```text
 fleet/ (--fleet-mode gitrepo)        fleet/ (--fleet-mode helmop)
