@@ -16,13 +16,14 @@ package topology
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"slices"
 	"sort"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -37,7 +38,7 @@ func assertDecodeRejected(t *testing.T, err error, accessor string) {
 		t.Errorf("%s error = nil, want a decode error", accessor)
 		return
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("%s error = %v, want code %s", accessor, err, errors.ErrCodeInvalidRequest)
 	}
 }

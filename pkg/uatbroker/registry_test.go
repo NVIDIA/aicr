@@ -15,13 +15,14 @@
 package uatbroker
 
 import (
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 const validRegistryYAML = `
@@ -615,7 +616,7 @@ reservations:
 				t.Fatalf("ParseRegistry err = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(tt.code, "")) {
+				if errorstest.ReportedCode(err) != tt.code {
 					t.Errorf("error code = %v, want %v", err, tt.code)
 				}
 				return
@@ -641,7 +642,7 @@ func TestRegistryLookup(t *testing.T) {
 		t.Errorf("Lookup(gcp-h100) = %+v, want cloud=gcp id=projects/p/reservations/r", res)
 	}
 
-	if _, missErr := reg.Lookup("does-not-exist"); !stderrors.Is(missErr, errors.New(errors.ErrCodeNotFound, "")) {
+	if _, missErr := reg.Lookup("does-not-exist"); errorstest.ReportedCode(missErr) != errors.ErrCodeNotFound {
 		t.Errorf("Lookup(missing) error = %v, want ErrCodeNotFound", missErr)
 	}
 
@@ -687,7 +688,7 @@ func TestLoadRegistryFile(t *testing.T) {
 		t.Errorf("loaded %d reservations, want 2", len(reg.Reservations))
 	}
 
-	if _, err := LoadRegistryFile(filepath.Join(dir, "nope.yaml")); !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if _, err := LoadRegistryFile(filepath.Join(dir, "nope.yaml")); errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("LoadRegistryFile(missing) error = %v, want ErrCodeInvalidRequest", err)
 	}
 }

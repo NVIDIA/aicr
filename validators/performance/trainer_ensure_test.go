@@ -23,6 +23,8 @@ import (
 	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -222,9 +224,7 @@ func TestEnsureTrainerInstalled_WaitsForPreexistingController(t *testing.T) {
 	if len(refs) != 0 {
 		t.Errorf("refs = %d, want 0", len(refs))
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
-		t.Errorf("error code is not Timeout: %v", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 }
 
 // TestEnsureTrainerInstalled_RefusesToInstallOverForeignNamespace is the guard for
@@ -252,9 +252,7 @@ func TestEnsureTrainerInstalled_RefusesToInstallOverForeignNamespace(t *testing.
 	if len(refs) != 0 {
 		t.Errorf("refs = %d, want 0", len(refs))
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
-		t.Errorf("error code is not Conflict: %v", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeConflict)
 	if !strings.Contains(err.Error(), "kubeflow") {
 		t.Errorf("error does not name the live installation's namespace: %v", err)
 	}
@@ -273,7 +271,7 @@ func TestEnsureTrainerInstalled_PreservesProbeErrorCode(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeUnavailable {
 		t.Errorf("probe classification was overwritten; want Unavailable, got: %v", err)
 	}
 }
@@ -289,26 +287,24 @@ func TestFoldCleanupError(t *testing.T) {
 		name    string
 		bench   error
 		cleanup error
-		want    error
+		want    aicrErrors.ErrorCode
 	}{
-		{name: "clean run reports success", bench: nil, cleanup: nil, want: nil},
-		{name: "cleanup failure fails a passing benchmark", bench: nil, cleanup: cleanupErr, want: cleanupErr},
-		{name: "benchmark failure outranks cleanup failure", bench: benchErr, cleanup: cleanupErr, want: benchErr},
-		{name: "benchmark failure survives clean teardown", bench: benchErr, cleanup: nil, want: benchErr},
+		{name: "clean run reports success", bench: nil, cleanup: nil, want: ""},
+		{name: "cleanup failure fails a passing benchmark", bench: nil, cleanup: cleanupErr, want: aicrErrors.ErrCodeUnavailable},
+		{name: "benchmark failure outranks cleanup failure", bench: benchErr, cleanup: cleanupErr, want: aicrErrors.ErrCodeTimeout},
+		{name: "benchmark failure survives clean teardown", bench: benchErr, cleanup: nil, want: aicrErrors.ErrCodeTimeout},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := foldCleanupError(tt.bench, tt.cleanup, "NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
-			if tt.want == nil {
+			if tt.want == "" {
 				if got != nil {
 					t.Fatalf("got %v, want nil", got)
 				}
 				return
 			}
-			if !stderrors.Is(got, tt.want) {
-				t.Errorf("got %v, want it to wrap %v", got, tt.want)
-			}
+			errorstest.WantReportedCode(t, got, tt.want)
 		})
 	}
 }
@@ -319,7 +315,7 @@ func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 	cleanupErr := aicrErrors.New(aicrErrors.ErrCodeUnavailable, "apiserver is down")
 
 	got := foldCleanupError(nil, cleanupErr, "fallback message")
-	if !stderrors.Is(got, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(got) != aicrErrors.ErrCodeUnavailable {
 		t.Errorf("cleanup error code was flattened: %v", got)
 	}
 }
@@ -390,9 +386,7 @@ func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 			// (see the decision table on validators.Require), and filing a product
 			// defect under it tells whoever triages the failure to re-run rather than
 			// to fix their deployment.
-			if !stderrors.Is(err, aicrErrors.New(tt.wantErrCode, "")) {
-				t.Errorf("error code = %v, want %s", err, tt.wantErrCode)
-			}
+			errorstest.WantReportedCode(t, err, tt.wantErrCode)
 			if !strings.Contains(err.Error(), tt.wantErrContains) {
 				t.Errorf("error %q does not name %q, so an operator cannot tell which "+
 					"component failed to deploy", err, tt.wantErrContains)
@@ -453,9 +447,7 @@ func TestWaitForDeclaredTrainer_CanceledRunIsNotADeploymentDefect(t *testing.T) 
 		t.Errorf("canceled run reported as NotFound (%v); an aborted run is not a "+
 			"failed deployment and must not be filed as one", err)
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
-		t.Errorf("error code = %v, want ErrCodeTimeout", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 	// Witness that the guard ran rather than getTrainerObject's own pre-read check.
 	// Without this the test passes on the probe-error path and would not notice the
 	// guard being removed — which is how the earlier version of it was vacuous.
@@ -558,10 +550,7 @@ func TestWaitForDeclaredTrainer_SlowProbeCannotOutrunTheDeadline(t *testing.T) {
 		t.Errorf("slow read reported as NotFound (%v); no probe observed anything "+
 			"incomplete, so there is no deployment defect to file", err)
 	}
-	var se *aicrErrors.StructuredError
-	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeTimeout {
-		t.Errorf("reported code = %v, want Timeout", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 }
 
 // TestWaitForDeclaredTrainer_TransportErrorKeepsItsClassification pins the narrow
@@ -601,19 +590,7 @@ func TestWaitForDeclaredTrainer_TransportErrorKeepsItsClassification(t *testing.
 			"is not a deployment that never completed, and swallowing that signal sends "+
 			"the operator to fix the wrong thing", err)
 	}
-	// Assert the code a consumer actually reads. ExitCodeFromError resolves the
-	// outermost StructuredError, so that is the value which reaches the exit status —
-	// errors.Is would match Unavailable anywhere in the chain and would still pass if
-	// the verdict were flattened to Internal, which is observable, not cosmetic.
-	//
-	// stderrors.As walks from the outermost and assigns the first match, which is the
-	// same resolution ExitCodeFromError performs. The pattern is already used for this
-	// purpose in pkg/chainsaw's tests.
-	var se *aicrErrors.StructuredError
-	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeUnavailable {
-		t.Errorf("reported code = %v, want Unavailable: a degraded control plane must not "+
-			"reach the operator as a deployment that never completed", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeUnavailable)
 }
 
 // TestWaitForDeclaredTrainer_LateSuccessDoesNotOutrunTheDeadline covers the other
@@ -651,10 +628,7 @@ func TestWaitForDeclaredTrainer_LateSuccessDoesNotOutrunTheDeadline(t *testing.T
 		t.Errorf("late success reported as NotFound (%v); the probe found the "+
 			"installation complete, so nothing was missing", err)
 	}
-	var se *aicrErrors.StructuredError
-	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeTimeout {
-		t.Errorf("reported code = %v, want Timeout", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 	// The reason must describe this probe, not the previous one. The installation is
 	// complete here, so blaming a missing object would point the operator at something
 	// that is present; the finding is a rollout slower than its budget.
@@ -702,7 +676,7 @@ func TestWaitForDeclaredTrainer_ExpiryNamesTheProbeThatJustRan(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error once the allowance expired with the installation incomplete")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeNotFound {
 		t.Errorf("error code = %v, want ErrCodeNotFound: the deadline expired locally "+
 			"with the parent still live", err)
 	}
@@ -788,10 +762,7 @@ func TestWaitForDeclaredTrainer_ReadTimeoutsAloneAreNotADeploymentDefect(t *test
 		t.Errorf("read timeouts reported as NotFound (%v); no probe ever observed an "+
 			"incomplete installation, so there is no deployment defect to file", err)
 	}
-	var se *aicrErrors.StructuredError
-	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeTimeout {
-		t.Errorf("reported code = %v, want Timeout", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 	if strings.Contains(err.Error(), "no complete installation was found") {
 		t.Errorf("verdict claims nothing was found, but nothing was ever read: %v", err)
 	}

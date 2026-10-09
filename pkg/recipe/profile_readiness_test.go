@@ -16,13 +16,14 @@ package recipe
 
 import (
 	"bytes"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // readinessDecl builds a single-value declaration carrying both a
@@ -124,7 +125,7 @@ func TestValidateProfileDeclaration_ReadinessConstraints(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileDeclaration() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileDeclaration() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -254,7 +255,7 @@ func TestApplyEffectiveProfile_ReadinessConstraints(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "collides with the composed recipe's readiness constraints") {
 			t.Fatalf("applyEffectiveProfile() error = %v, want readiness collision", err)
 		}
-		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("applyEffectiveProfile() error = %v, want ErrCodeInvalidRequest", err)
 		}
 	})

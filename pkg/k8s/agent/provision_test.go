@@ -15,12 +15,13 @@
 package agent
 
 import (
-	stderrors "errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -415,7 +416,7 @@ func TestBuildServiceAccountRoleManifests_Rejections(t *testing.T) {
 			if err == nil {
 				t.Fatal("BuildServiceAccountRoleManifests() error = nil, want ErrCodeInvalidRequest")
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, aicrerrors.ErrCodeInvalidRequest)
 			}
 			if tt.wantInMsg != "" && !strings.Contains(err.Error(), tt.wantInMsg) {

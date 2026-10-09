@@ -32,6 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/urfave/cli/v3"
 )
@@ -123,7 +124,7 @@ func TestBundleGenerationPublishCancellationBeforeCommitRestoresPreviousOutput(t
 	outputName = target.relativePath
 
 	err := stage.publish(ctx)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("publish() error = %v, want timeout", err)
 	}
 	if _, statErr := os.Lstat(filepath.Join(target.path, "old.txt")); statErr != nil {
@@ -200,7 +201,7 @@ func TestBundleGenerationPublishPreservesChangedBackupDuringCleanup(t *testing.T
 		})
 
 	err := stage.publish(context.Background())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("publish() error = %v, want changed-backup internal error", err)
 	}
 	if !backupSwapped {
@@ -245,7 +246,7 @@ func TestBundleGenerationStageClosePreservesChangedName(t *testing.T) {
 	}
 
 	closeErr := stage.close()
-	if !stderrors.Is(closeErr, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(closeErr) != errors.ErrCodeInternal {
 		t.Fatalf("stage.close() error = %v, want internal identity error", closeErr)
 	}
 	if _, statErr := os.Lstat(filepath.Join(stage.path, "replacement.txt")); statErr != nil {
@@ -267,7 +268,7 @@ func TestBundleOutputTargetRejectsFilesystemVolumeRoot(t *testing.T) {
 		_ = target.close()
 		t.Fatalf("prepareBundleOutputTarget(%q) returned a target", volumeRoot)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("prepareBundleOutputTarget(%q) error = %v, want invalid request", volumeRoot, err)
 	}
 }
@@ -305,7 +306,7 @@ func TestImageRefsTargetRejectsDirectoryIdentityAliases(t *testing.T) {
 			if target != nil {
 				_ = target.close()
 			}
-			if !stderrors.Is(prepErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(prepErr) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("error = %v, want invalid request directory alias rejection", prepErr)
 			}
 		})
@@ -325,7 +326,7 @@ func TestImageRefsTargetRejectsDirectoryIdentityAliases(t *testing.T) {
 		if target != nil {
 			_ = target.close()
 		}
-		if !stderrors.Is(prepErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(prepErr) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("error = %v, want deterministic directory identity rejection", prepErr)
 		}
 	})
@@ -368,7 +369,7 @@ func TestBundleOutputTargetWrapsPreexistingRootLstatFailure(t *testing.T) {
 	if target != nil {
 		_ = target.close()
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("error = %v, want structured internal", err)
 	}
 	if !stderrors.Is(err, injected) {
@@ -396,7 +397,7 @@ func TestBundleCommandDeadlinesAreAuthoritative(t *testing.T) {
 			return nil, stderrors.New("optional target preparation should not run")
 		}
 		err := runDeadlineBundleCommand(t, ctx, deps, true)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("error = %v, want timeout", err)
 		}
 		if refsCalls.Load() != 0 {
@@ -412,7 +413,7 @@ func TestBundleCommandDeadlinesAreAuthoritative(t *testing.T) {
 			return nil, errors.New(errors.ErrCodeInternal, "injected preflight failure")
 		}
 		err := runDeadlineBundleCommand(t, ctx, deps, false)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("error = %v, want timeout", err)
 		}
 	})
@@ -453,7 +454,7 @@ func TestBundleCommandDeadlinesAreAuthoritative(t *testing.T) {
 			return nil
 		}
 		err := runDeadlineBundleCommand(t, ctx, deps, false)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("error = %v, want timeout", err)
 		}
 		if pushCalls.Load() != 0 {
@@ -485,7 +486,7 @@ func TestBundleCommandDeadlinesAreAuthoritative(t *testing.T) {
 			return &result.Output{OutputDir: opts.OutputDir}, nil
 		}
 		err := runDeadlineBundleCommand(t, ctx, deps, false)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("error = %v, want timeout", err)
 		}
 	})
@@ -521,7 +522,7 @@ func TestBundleCommandDeadlinesAreAuthoritative(t *testing.T) {
 					return nil, stderrors.New("bundle generation should not run")
 				}
 				err := runDeadlineBundleCommand(t, ctx, deps, true)
-				if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 					t.Fatalf("error = %v, want timeout", err)
 				}
 				if makeCalls.Load() != 0 {
@@ -568,7 +569,7 @@ func TestBundleCommandGenerationDoesNotWriteThroughReplacedOutputPath(t *testing
 	}
 
 	err := runDeadlineBundleCommand(t, context.Background(), deps, false)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("error = %v, want internal output-identity rejection", err)
 	}
 	if pushCalls.Load() != 0 {
@@ -755,7 +756,7 @@ func TestPushOCIBundleDeadlinesAreAuthoritative(t *testing.T) {
 				}
 				err := pushOCIBundleWithDependencies(ctx, opts,
 					&result.Output{OutputDir: bundleDir}, bundle, nil, deps)
-				if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 					t.Fatalf("error = %v, want timeout", err)
 				}
 				if workspaceCalls.Load() != 0 {
@@ -798,7 +799,7 @@ func TestPushOCIBundleDeadlinesAreAuthoritative(t *testing.T) {
 				}
 				err := pushOCIBundleWithDependencies(ctx, opts,
 					&result.Output{OutputDir: bundleDir}, bundle, nil, deps)
-				if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 					t.Fatalf("error = %v, want timeout", err)
 				}
 				if packageCalls.Load() != 0 {
@@ -829,7 +830,7 @@ func TestPushOCIBundleDeadlinesAreAuthoritative(t *testing.T) {
 				}
 				err := pushOCIBundleWithDependencies(ctx, opts,
 					&result.Output{OutputDir: bundleDir}, bundle, nil, deps)
-				if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 					t.Fatalf("error = %v, want timeout", err)
 				}
 			})
@@ -864,7 +865,7 @@ func TestPushOCIBundleDeadlinesAreAuthoritative(t *testing.T) {
 				}
 				err = pushOCIBundleWithDependencies(ctx, opts,
 					&result.Output{OutputDir: bundleDir}, bundle, refs, deps)
-				if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 					t.Fatalf("error = %v, want timeout", err)
 				}
 			})
@@ -899,7 +900,7 @@ func TestImageRefsWriteDeadlineAfterRenameIsAuthoritative(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = refs.close() })
 			err = refs.writeAtomic(ctx, []byte("sha256:abc\n"))
-			if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 				t.Fatalf("error = %v, want timeout", err)
 			}
 		})
@@ -942,7 +943,7 @@ func TestImageRefsWriteDeadlineAfterFinalValidationIsAuthoritative(t *testing.T)
 			}
 			t.Cleanup(func() { _ = refs.close() })
 			err = refs.writeAtomic(ctx, []byte("sha256:abc\n"))
-			if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 				t.Fatalf("error = %v, want timeout", err)
 			}
 		})
@@ -1019,7 +1020,7 @@ func TestImageRefsAdversarialFailureMatrix(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = refs.close() })
 			writeErr := refs.writeAtomic(context.Background(), []byte("sha256:abc\n"))
-			if !stderrors.Is(writeErr, errors.New(errors.ErrCodeInternal, "")) {
+			if errorstest.ReportedCode(writeErr) != errors.ErrCodeInternal {
 				t.Fatalf("error = %v, want internal", writeErr)
 			}
 			if tt.name != "mode mismatch" && !stderrors.Is(writeErr, injected) {
@@ -1086,7 +1087,7 @@ func TestImageRefsTargetDescriptorCloseFailure(t *testing.T) {
 	if target != nil {
 		_ = target.close()
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) || !stderrors.Is(err, injected) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal || !stderrors.Is(err, injected) {
 		t.Fatalf("error = %v, want structured target close failure", err)
 	}
 }
@@ -1188,7 +1189,7 @@ func assertInvalidImageRefsTarget(t *testing.T, bundle *bundleOutputTarget, path
 	if target != nil {
 		_ = target.close()
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("prepareImageRefsTarget(%q) error = %v, want invalid request", path, err)
 	}
 }
@@ -1252,7 +1253,7 @@ func TestPushOCIBundleRejectsInSourceTempAndPreservesSource(t *testing.T) {
 	}
 	err = pushOCIBundleWithDependencies(context.Background(), opts,
 		&result.Output{OutputDir: bundleDir}, bundle, nil, deps)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("error = %v, want internal", err)
 	}
 	if packageCalls.Load() != 0 {
@@ -1287,7 +1288,7 @@ func TestPushOCIBundleWorkspaceCleanupOnPublisherFailure(t *testing.T) {
 	}
 	err = pushOCIBundleWithDependencies(context.Background(), opts,
 		&result.Output{OutputDir: bundleDir}, bundle, nil, deps)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("error = %v, want publisher error", err)
 	}
 	if _, statErr := os.Lstat(workspacePath); !os.IsNotExist(statErr) {
@@ -1426,7 +1427,7 @@ func assertConcurrentCachedClose(t *testing.T, closeFn func() error, injected er
 	}
 	wg.Wait()
 	for index, err := range errs {
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) ||
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal ||
 			!stderrors.Is(err, injected) {
 
 			t.Fatalf("close[%d] error = %v", index, err)

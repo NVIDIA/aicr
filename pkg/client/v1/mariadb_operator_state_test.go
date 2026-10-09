@@ -16,10 +16,11 @@ package aicr
 
 import (
 	"context"
-	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -183,7 +184,7 @@ func TestComputeMariaDBOperatorStateHonorsCancellation(t *testing.T) {
 			cancel()
 
 			_, err := computeMariaDBOperatorState(ctx, tt.snap)
-			if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 				t.Fatalf("computeMariaDBOperatorState() error = %v, want timeout error", err)
 			}
 		})
@@ -195,7 +196,7 @@ func TestComputeMariaDBOperatorStateRejectsNilContext(t *testing.T) {
 
 	//nolint:staticcheck // SA1012: deliberately passing nil context to test the guard.
 	_, err := computeMariaDBOperatorState(nil, nil)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("computeMariaDBOperatorState() error = %v, want invalid request error", err)
 	}
 }

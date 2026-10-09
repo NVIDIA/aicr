@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"net"
 	"strings"
@@ -24,6 +23,8 @@ import (
 	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -383,7 +384,7 @@ func TestWaitForDeploymentReady_TerminalErrorFailsFast(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected forbidden Get to fail fast, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnauthorized, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeUnauthorized {
 		t.Errorf("error code is not Unauthorized: %v", err)
 	}
 }
@@ -554,7 +555,7 @@ func TestIsTrainerInstalled_UnavailableAPISurfacesAsUnavailable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeUnavailable {
 		t.Errorf("error code is not Unavailable: %v", err)
 	}
 }

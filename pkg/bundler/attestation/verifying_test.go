@@ -19,7 +19,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	stderrors "errors"
 	"strings"
 	"testing"
 
@@ -28,6 +27,8 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // requireErrCode fails the test unless err carries the given pkg/errors code.
@@ -36,7 +37,7 @@ func requireErrCode(t *testing.T, err error, code errors.ErrorCode) {
 	if err == nil {
 		t.Fatalf("expected error with code %v, got nil", code)
 	}
-	if !stderrors.Is(err, errors.New(code, "")) {
+	if errorstest.ReportedCode(err) != code {
 		t.Fatalf("expected error code %v, got %v", code, err)
 	}
 }

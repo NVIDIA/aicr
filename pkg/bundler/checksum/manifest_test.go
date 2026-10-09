@@ -16,13 +16,14 @@ package checksum
 
 import (
 	"context"
-	stderrors "errors"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 const emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -175,7 +176,7 @@ func TestParseManifest(t *testing.T) {
 			if err == nil {
 				t.Fatal("ParseManifest() expected error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("ParseManifest() code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -210,7 +211,7 @@ func TestParseManifestRejectsInvalidOptions(t *testing.T) {
 			if err == nil {
 				t.Fatal("ParseManifest() expected error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("ParseManifest() code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -227,7 +228,7 @@ func TestParseManifestContextCanceled(t *testing.T) {
 	if err == nil {
 		t.Fatal("ParseManifest() expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("ParseManifest() code = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -329,7 +330,7 @@ func TestManifestMarshalText(t *testing.T) {
 			if err == nil {
 				t.Fatal("MarshalText() expected error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("MarshalText() code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
