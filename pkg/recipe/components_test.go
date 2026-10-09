@@ -1819,7 +1819,7 @@ func TestComponentRegistryValidate_OwnsCRDsExcludeSubcharts(t *testing.T) {
 				if !strings.Contains(errs[i].Error(), want) {
 					t.Errorf("Validate()[%d] = %v, want it to contain %q", i, errs[i], want)
 				}
-				if !stderrors.Is(errs[i], errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(errs[i]) != errors.ErrCodeInvalidRequest {
 					t.Errorf("Validate()[%d] code = %v, want ErrCodeInvalidRequest", i, errs[i])
 				}
 			}
