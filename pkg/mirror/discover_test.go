@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -66,7 +67,7 @@ func TestPrepareMirrorCandidate_Canceled(t *testing.T) {
 		APIVersion:    recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}},
 	}, nil)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("prepareMirrorCandidate() error = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -515,7 +516,7 @@ func TestDiscover_SetEnabledOverride(t *testing.T) {
 				if err == nil {
 					t.Fatal("Discover() error = nil, want invalid enabled override")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("Discover() error = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), "invalid --set enabled value") {

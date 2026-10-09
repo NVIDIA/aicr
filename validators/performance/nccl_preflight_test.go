@@ -16,11 +16,12 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"testing"
 	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,7 +60,7 @@ func TestRunPerNodeProbe(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != aicrErrors.ErrCodeTimeout {
 			t.Errorf("error code not preserved: got %v", err)
 		}
 	})
@@ -89,7 +90,7 @@ func TestRunPerNodeProbeNeverPassesVacuously(t *testing.T) {
 	}
 	// Operator cancellation is not a timeout: mislabeling it makes the failure
 	// look transient and retryable.
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeCanceled, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeCanceled {
 		t.Errorf("want ErrCodeCanceled, got %v", err)
 	}
 }
@@ -134,7 +135,7 @@ func TestRunPerNodeProbeDistinguishesDeadlineFromCancel(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error")
 		}
-		if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != aicrErrors.ErrCodeTimeout {
 			t.Errorf("want ErrCodeTimeout, got %v", err)
 		}
 	})
@@ -147,7 +148,7 @@ func TestRunPerNodeProbeDistinguishesDeadlineFromCancel(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error")
 		}
-		if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeCanceled, "")) {
+		if errorstest.ReportedCode(err) != aicrErrors.ErrCodeCanceled {
 			t.Errorf("want ErrCodeCanceled, got %v", err)
 		}
 	})

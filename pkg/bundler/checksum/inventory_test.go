@@ -36,6 +36,8 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestVerifyBundle(t *testing.T) {
@@ -426,7 +428,7 @@ func TestReadAndVerifyBundle_MissingManifestSentinel(t *testing.T) {
 			if got := stderrors.Is(err, ErrChecksumManifestMissing); got != tt.wantSentinel {
 				t.Errorf("errors.Is(error, ErrChecksumManifestMissing) = %v, want %v", got, tt.wantSentinel)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("ReadAndVerifyBundle() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if tt.wantSentinel && !stderrors.Is(err, os.ErrNotExist) {
@@ -1405,7 +1407,7 @@ func requireInventoryErrorCode(t *testing.T, err error, code errors.ErrorCode) {
 	if err == nil {
 		t.Fatalf("expected %s error, got nil", code)
 	}
-	if !stderrors.Is(err, errors.New(code, "")) {
+	if errorstest.ReportedCode(err) != code {
 		t.Errorf("error = %v, want code %s", err, code)
 	}
 }

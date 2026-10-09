@@ -591,6 +591,42 @@ func TestBundleResolve_InvalidValues(t *testing.T) {
 			wantSub: "spec.bundle.scheduling.acceleratedNodeTolerations",
 		},
 		{
+			name: "system toleration the API server rejects",
+			spec: &config.BundleSpec{
+				Scheduling: &config.SchedulingSpec{
+					SystemNodeTolerations: []string{"bad key=v:NoSchedule"},
+				},
+			},
+			wantSub: "spec.bundle.scheduling.systemNodeTolerations",
+		},
+		{
+			name: "invalid system node selector",
+			spec: &config.BundleSpec{
+				Scheduling: &config.SchedulingSpec{
+					SystemNodeSelector: map[string]string{"bad key": "v"},
+				},
+			},
+			wantSub: "spec.bundle.scheduling.systemNodeSelector",
+		},
+		{
+			name: "invalid accelerated node selector",
+			spec: &config.BundleSpec{
+				Scheduling: &config.SchedulingSpec{
+					AcceleratedNodeSelector: map[string]string{"nvidia.com/gpu.present": "not valid"},
+				},
+			},
+			wantSub: "spec.bundle.scheduling.acceleratedNodeSelector",
+		},
+		{
+			name: "invalid workload selector",
+			spec: &config.BundleSpec{
+				Scheduling: &config.SchedulingSpec{
+					WorkloadSelector: map[string]string{"k": "{{ .Values.x }}"},
+				},
+			},
+			wantSub: "spec.bundle.scheduling.workloadSelector",
+		},
+		{
 			name: "invalid workload gate",
 			spec: &config.BundleSpec{
 				Scheduling: &config.SchedulingSpec{WorkloadGate: "no-effect"},
@@ -838,6 +874,14 @@ func TestValidateResolve_InvalidToleration(t *testing.T) {
 	}
 }
 
+func TestValidateResolve_InvalidNodeSelector(t *testing.T) {
+	v := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{NodeSelector: map[string]string{"bad key": "v"}}}
+	_, err := v.Resolve()
+	if err == nil || !strings.Contains(err.Error(), "spec.validate.agent.nodeSelector") {
+		t.Fatalf("expected nodeSelector error, got %v", err)
+	}
+}
+
 func TestValidateResolve_DefensiveCloneOfNodeSelector(t *testing.T) {
 	src := map[string]string{"k": "v"}
 	v := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{NodeSelector: src}}
@@ -1009,6 +1053,11 @@ func TestSnapshotResolve_InvalidInput(t *testing.T) {
 			name:    "invalid toleration",
 			in:      &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{Tolerations: []string{"::"}}},
 			wantSub: "spec.snapshot.agent.tolerations",
+		},
+		{
+			name:    "invalid node selector",
+			in:      &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{NodeSelector: map[string]string{"bad key": "v"}}},
+			wantSub: "spec.snapshot.agent.nodeSelector",
 		},
 	}
 	for _, tt := range tests {

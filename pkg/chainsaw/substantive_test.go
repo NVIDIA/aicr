@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // TestAssertSingleDocument_PropagatesStructuredCode guards the raw-path grace:
@@ -74,7 +75,7 @@ metadata:
 	if r.Error == nil {
 		t.Fatalf("expected a terminal error, got nil (Passed=%v)", r.Passed)
 	}
-	if !stderrors.Is(r.Error, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(r.Error) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest (terminal), got %v", r.Error)
 	}
 	if elapsed >= defaults.AssertRetryInterval {

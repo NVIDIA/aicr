@@ -37,6 +37,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 var testZipHeaders = []string{
@@ -159,7 +160,7 @@ func TestParseBundleConfig_Bundlers(t *testing.T) {
 				if err == nil {
 					t.Fatal("ParseBundleConfig() expected error, got nil")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("ParseBundleConfig() error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -210,7 +211,7 @@ func TestParseBundleConfig_DRAEvictionNodeLabel(t *testing.T) {
 				if err == nil {
 					t.Fatal("ParseBundleConfig() expected error, got nil")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -220,6 +221,35 @@ func TestParseBundleConfig_DRAEvictionNodeLabel(t *testing.T) {
 			}
 			if got := cfg.DRAEvictionNodeLabel(); got != tt.want {
 				t.Errorf("DRAEvictionNodeLabel() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseBundleConfig_InvalidScheduling(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		param string
+		value string
+	}{
+		{"system-node-selector", "bad key=v"},
+		{"accelerated-node-selector", "k={{ .Values.x }}"},
+		{"workload-selector", "k=a b"},
+		{"system-node-toleration", "=v:NoSchedule"},
+		{"accelerated-node-toleration", "bad key=v:NoSchedule"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.param, func(t *testing.T) {
+			t.Parallel()
+
+			target := "/v1/bundle?" + url.Values{tt.param: {tt.value}}.Encode()
+			_, err := ParseBundleConfig(httptest.NewRequest("POST", target, nil))
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+				t.Fatalf("ParseBundleConfig() error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.param) {
+				t.Errorf("error %q does not name %s", err, tt.param)
 			}
 		})
 	}
@@ -248,7 +278,7 @@ func TestParseBundleConfig_Serial(t *testing.T) {
 				if err == nil {
 					t.Fatal("ParseBundleConfig() expected error, got nil")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -406,7 +436,7 @@ func TestStreamZipResponseContext_RejectsBeforeCommit(t *testing.T) {
 			if err == nil {
 				t.Fatal("StreamZipResponseContext() expected error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("StreamZipResponseContext() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if writer.committed() {
@@ -428,7 +458,7 @@ func TestStreamZipResponseContext_NilOutput(t *testing.T) {
 	if err == nil {
 		t.Fatal("StreamZipResponseContext() expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("StreamZipResponseContext() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if writer.committed() {
@@ -445,7 +475,7 @@ func TestStreamZipResponseContext_CanceledBeforeStage(t *testing.T) {
 	if err == nil {
 		t.Fatal("StreamZipResponseContext() expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("StreamZipResponseContext() error = %v, want ErrCodeTimeout", err)
 	}
 	if writer.committed() {
@@ -462,7 +492,7 @@ func TestStreamZipResponseContext_CopyCancellation(t *testing.T) {
 	if err == nil {
 		t.Fatal("copyZipEntryContext() expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("copyZipEntryContext() error = %v, want ErrCodeTimeout", err)
 	}
 	if reader.reads != 1 {
@@ -537,7 +567,7 @@ func TestStreamZipResponseContext_CleanupFailure(t *testing.T) {
 		writer := newTrackingResponseWriter()
 		err := streamZipResponseContextWithDependencies(
 			context.Background(), writer, dir, &result.Output{}, deps)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Fatalf("StreamZipResponseContext cleanup error = %v, want ErrCodeInternal", err)
 		}
 		if !stderrors.Is(err, cleanupFailure) {
@@ -554,7 +584,7 @@ func TestStreamZipResponseContext_CleanupFailure(t *testing.T) {
 		deps, warnCalls := newDependencies(t, cancel)
 		writer := newTrackingResponseWriter()
 		err := streamZipResponseContextWithDependencies(ctx, writer, dir, &result.Output{}, deps)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("StreamZipResponseContext primary error = %v, want ErrCodeTimeout", err)
 		}
 		if stderrors.Is(err, cleanupFailure) {

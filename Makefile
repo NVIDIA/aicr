@@ -41,6 +41,11 @@ REGISTRY_NAME = ctlptl-registry
 # instead of silently degrading to a stale image (see its yq-missing check).
 KIND_NODE_IMAGE ?= $(shell yq -r '.testing.kind_node_image' .settings.yaml 2>/dev/null)
 
+# ctlptl registry image (single source of truth: .settings.yaml
+# testing_tools.registry_image, an ECR Public mirror). Unset, ctlptl pulls
+# docker.io/library/registry:3 anonymously, which shared CI runners rate-limit.
+KIND_REGISTRY_IMAGE ?= $(shell yq -r '.testing_tools.registry_image' .settings.yaml 2>/dev/null)
+
 # Default target
 all: help
 
@@ -1080,8 +1085,18 @@ cluster-create: ## Creates local Kind cluster with registry
 		echo "Check the key exists and .settings.yaml is valid YAML."; \
 		exit 1; \
 	fi
-	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE) (from .settings.yaml)"
-	img="$(KIND_NODE_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img)' $(CTLPTL_CONFIG_FILE) | ctlptl apply -f -
+	@if [ -z "$(KIND_REGISTRY_IMAGE)" ] || [ "$(KIND_REGISTRY_IMAGE)" = "null" ]; then \
+		echo "Error: could not resolve testing_tools.registry_image from .settings.yaml."; \
+		exit 1; \
+	fi
+	@# kind pulls the node image only when it is not already local, so seeding it
+	@# from Google's Docker Hub mirror keeps the anonymous Docker Hub rate limit
+	@# out of the critical path. On a mirror miss kind pulls from Docker Hub.
+	@docker image inspect "$(KIND_NODE_IMAGE)" >/dev/null 2>&1 || \
+		{ docker pull -q "mirror.gcr.io/$(KIND_NODE_IMAGE)" && docker tag "mirror.gcr.io/$(KIND_NODE_IMAGE)" "$(KIND_NODE_IMAGE)"; } || \
+		echo "Warning: mirror.gcr.io/$(KIND_NODE_IMAGE) unavailable; kind will pull from Docker Hub"
+	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE), registry image: $(KIND_REGISTRY_IMAGE) (from .settings.yaml)"
+	img="$(KIND_NODE_IMAGE)" reg="$(KIND_REGISTRY_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img) | (select(.kind == "Registry")).image = strenv(reg)' $(CTLPTL_CONFIG_FILE) | ctlptl apply -f -
 	@echo "Waiting for nodes to be ready..."
 	@kubectl wait --for=condition=ready nodes --all --timeout=300s
 	@echo "Cluster created. Registry at localhost:$(REGISTRY_PORT)"
