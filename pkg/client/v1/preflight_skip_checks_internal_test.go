@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -122,7 +124,7 @@ func TestPreflightSkipChecks_JudgesNamesAgainstTheCatalog(t *testing.T) {
 	if err == nil {
 		t.Fatal("a name matching no catalog entry must be refused, got nil")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), `skipChecks entry "dra-suport" matches no validator in the catalog`) {

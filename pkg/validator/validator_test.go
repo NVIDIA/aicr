@@ -26,6 +26,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -179,7 +181,7 @@ func TestPrepareClusterRejectsMissingKubeconfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("prepareCluster() error = nil, want invalid request")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("prepareCluster() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !stderrors.Is(err, fs.ErrNotExist) {
@@ -405,7 +407,7 @@ func TestPreflightDeclaredChecks(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 			}
 			for _, sub := range tt.wantSubstrs {
@@ -443,7 +445,7 @@ func TestPreflightDeclaredChecks_ExternalCatalogMissingCheck(t *testing.T) {
 	if err == nil {
 		t.Fatal("preflightDeclaredChecks() = nil error, want fail-closed on missing external-catalog check")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 	if !strings.Contains(err.Error(), "expected-resources") {
@@ -464,7 +466,7 @@ func TestValidatePhaseNoClusterRejectsUnmatchedCheck(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ValidatePhase(--no-cluster) = %+v, nil error; want fail-closed on unmatched check", pr)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -481,7 +483,7 @@ func TestValidatePhasesNoClusterRejectsUnmatchedCheck(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ValidatePhases(--no-cluster) = %+v, nil error; want fail-closed on unmatched check", results)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -522,7 +524,7 @@ func TestValidatePhaseRunsReadinessPreflight(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidatePhase() = nil error, want readiness failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -566,7 +568,7 @@ func TestValidatePhasesRunsReadinessPreflight(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidatePhases() = nil error, want readiness failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 	if results != nil {
@@ -607,7 +609,7 @@ func TestCheckReadinessNilSnapshotWithConstraintsFailsClosed(t *testing.T) {
 	if err == nil {
 		t.Fatal("checkReadiness() = nil, want error for declared constraints without a snapshot")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -1204,7 +1206,7 @@ func TestValidatePhasesPromotesRBACCleanupFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidatePhases() error = nil, want promoted RBAC cleanup failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("ValidatePhases() error = %v, want ErrCodeInternal", err)
 	}
 	if len(results) == 0 {
@@ -1227,7 +1229,7 @@ func TestValidatePhasePromotesRBACCleanupFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidatePhase() error = nil, want promoted RBAC cleanup failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("ValidatePhase() error = %v, want ErrCodeInternal", err)
 	}
 	if result == nil {
@@ -1265,7 +1267,7 @@ func TestPrepareClusterSurfacesRollbackFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("prepareCluster() error = nil, want prep + rollback failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("prepareCluster() error = %v, want ErrCodeInternal", err)
 	}
 	if !stderrors.Is(err, rollbackDeleteCause) {

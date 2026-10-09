@@ -21,11 +21,12 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/allocmode"
@@ -281,7 +282,7 @@ func TestBuildInferenceConfig_UnspecifiedDRAOnlyNamesTheState(t *testing.T) {
 	if err == nil {
 		t.Fatal("buildInferenceConfig() = nil error, want the DRA-only rejection")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 	for _, want := range []string{"full-GPU DRA devices", "dra-node", "dra-resource-claim", "#1327"} {

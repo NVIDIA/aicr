@@ -22,16 +22,13 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // wedgedReadTimeout is the deadline the wedged-read tests rely on to fire
 // while fn is still blocked — the expiry is the behavior under test, so it
 // stays tiny to keep the suite fast.
 const wedgedReadTimeout = 10 * time.Millisecond
-
-func isCode(err error, code errors.ErrorCode) bool {
-	return stderrors.Is(err, errors.New(code, ""))
-}
 
 // TestDo_PropagatesFnError proves the boundary is transparent on the happy
 // path: fn's own coded error reaches the caller unchanged, so callers keep
@@ -56,7 +53,7 @@ func TestDo_DeadlineSurfacesTimeout(t *testing.T) {
 		<-release
 		return nil
 	})
-	if !isCode(err, errors.ErrCodeTimeout) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("expected ErrCodeTimeout, got %v", err)
 	}
 	if !stderrors.Is(err, context.DeadlineExceeded) {
@@ -106,7 +103,7 @@ func TestDo_OperatorCancelIsNotTimeout(t *testing.T) {
 				err = <-errCh
 			}
 
-			if isCode(err, errors.ErrCodeTimeout) {
+			if stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
 				t.Errorf("operator cancellation was classified as a timeout: %v", err)
 			}
 			if !IsCanceled(err) {
@@ -140,7 +137,7 @@ func TestDo_CallerUnblocksWhileWorkerRuns(t *testing.T) {
 	}()
 
 	<-started
-	if err := <-errCh; !isCode(err, errors.ErrCodeTimeout) {
+	if err := <-errCh; errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("caller did not unblock with a timeout, got %v", err)
 	}
 

@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestResolveKMSPublicKey_UnknownScheme(t *testing.T) {
@@ -27,7 +29,7 @@ func TestResolveKMSPublicKey_UnknownScheme(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error for unknown scheme")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -54,7 +56,7 @@ func TestResolveKMSPublicKey_HashivaultProviderRegistered(t *testing.T) {
 	// reserved for an unregistered/unknown scheme. Asserting the specific code
 	// both pins the blank import (an unregistered scheme would surface
 	// ErrCodeInvalidRequest instead) and confirms the provider-init failure path.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 		t.Errorf("want ErrCodeUnavailable (provider registered, init failed), got %v", err)
 	}
 }
@@ -134,7 +136,7 @@ func TestKMSTimeoutError(t *testing.T) {
 				if got == nil {
 					t.Fatal("want ErrCodeTimeout, got nil")
 				}
-				if !stderrors.Is(got, errors.New(errors.ErrCodeTimeout, "")) {
+				if errorstest.ReportedCode(got) != errors.ErrCodeTimeout {
 					t.Errorf("want ErrCodeTimeout, got %v", got)
 				}
 			} else if got != nil {

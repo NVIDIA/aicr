@@ -17,11 +17,12 @@ package cli
 import (
 	"bytes"
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestEvidenceCmd_RegistersPublishSubcommand(t *testing.T) {
@@ -91,7 +92,7 @@ func TestEvidencePublishCmd_RejectsInvalidInvocations(t *testing.T) {
 				t.Fatalf("expected error, got nil")
 			}
 			// Every rejection here is a malformed invocation → invalid-request.
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantSubstr) {

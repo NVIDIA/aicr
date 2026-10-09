@@ -31,6 +31,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator"
 )
@@ -1266,7 +1267,7 @@ func TestAdoptRecipe_RejectsCyclicProfileOverridesBeforeDeepCopy(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cyclic reference") {
 		t.Fatalf("AdoptRecipe() error = %v, want cyclic-reference rejection", err)
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("AdoptRecipe() error = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -1778,7 +1779,7 @@ func TestAdoptRecipe_RejectsVersionlessHelmRef(t *testing.T) {
 	if err == nil {
 		t.Fatal("adoptRecipe accepted an enabled Helm ref without a chart version")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %v", err, aicrerrors.ErrCodeInvalidRequest)
 	}
 	for _, want := range []string{"versionless-helm", "chart version"} {
@@ -1792,7 +1793,7 @@ func TestAdoptRecipe_RejectsVersionlessHelmRef(t *testing.T) {
 	if err == nil {
 		t.Fatal("AdoptRecipe accepted an enabled Helm ref without a chart version")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("AdoptRecipe error code = %v, want %v", err, aicrerrors.ErrCodeInvalidRequest)
 	}
 	for _, want := range []string{"versionless-helm", "chart version"} {
@@ -1818,7 +1819,7 @@ func TestAdoptRecipe_RejectsVersionlessHelmRef(t *testing.T) {
 		},
 	}
 	if _, err := client.adoptRecipe(t.Context(), wsInput); err == nil ||
-		!stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 
 		t.Errorf("adoptRecipe(whitespace version) error = %v, want %v", err, aicrerrors.ErrCodeInvalidRequest)
 	}

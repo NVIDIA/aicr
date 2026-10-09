@@ -15,7 +15,6 @@
 package snapshotter
 
 import (
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/yaml"
 )
@@ -203,7 +204,7 @@ func TestWriteAgentRoleManifests_ExistingDirectory(t *testing.T) {
 	if res != nil {
 		t.Errorf("result = %+v, want nil", res)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeConflict)
 	}
 	if !strings.Contains(err.Error(), dir) {
@@ -306,7 +307,7 @@ func TestWriteAgentRoleManifests_Rejections(t *testing.T) {
 			if err == nil {
 				t.Fatal("WriteAgentRoleManifests() error = nil, want ErrCodeInvalidRequest")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 			if res != nil {

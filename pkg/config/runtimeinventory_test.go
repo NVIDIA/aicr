@@ -15,10 +15,11 @@
 package config
 
 import (
-	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -74,7 +75,7 @@ func TestRecipeSpecResolveRuntimeInventoryMode(t *testing.T) {
 			if tt.wantErr {
 				// The wrapped code is what callers branch on, so assert it
 				// rather than merely that some error occurred.
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 				}
 				if present {

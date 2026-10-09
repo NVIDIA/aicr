@@ -170,6 +170,8 @@ if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
 }
 ```
 
+**Tests asserting a reported code are the exception.** Consumers such as `ExitCodeFromError` read the outermost code, and `errors.Is` still passes when the expected code is buried under a wrap that reports a different one. Assert what a consumer reads with `errorstest.WantReportedCode(t, err, code)` or `errorstest.ReportedCode(err) != code` from `pkg/errors/errorstest`. Keep `errors.Is` for asserting that a code is absent, where matching anywhere in the chain is the stricter check.
+
 **Context with timeout (always):**
 ```go
 // Collectors: 10s timeout
