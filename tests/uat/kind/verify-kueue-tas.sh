@@ -118,7 +118,47 @@ domains_used() {
     return "${rc}"
 }
 
+# nodes_used <pod-node-table>
+#
+# Prints the sorted, deduplicated set of Kubernetes nodes in <pod-node-table>
+# (one <pod> <kubernetes-node> row per pod), one per line. Pods with no node
+# are skipped; domains_used is what rejects those.
+nodes_used() {
+    printf '%s\n' "${1:-}" | awk 'NF >= 2 {print $2}' | sort -u
+}
+
 # --- live-cluster entry point ------------------------------------------------
+
+# delete_job_and_wait <context> <job-name>
+#
+# Removes a Job left by an interrupted run and waits for its pods and Workload
+# to go. Jobs have fixed names, so without this a rerun's apply would leave the
+# old completed Job in place, its succeeded count would already match, and the
+# check would evaluate the previous run's pods and Workload.
+delete_job_and_wait() {
+    local context="$1" job="$2"
+    kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
+        delete job "${job}" -n "${LOCAL_QUEUE_NAMESPACE}" \
+        --ignore-not-found --cascade=foreground --wait=true --timeout="${VERIFY_TAS_TIMEOUT}s" >&2
+}
+
+# cleanup_jobs <context> <job-name>...
+#
+# Best-effort removal of the Jobs this script creates, run from main's EXIT trap
+# so an interrupt or an early return does not leave fixed-name Jobs behind. It
+# never waits (a second Ctrl-C should not hang on a finalizer) and never
+# changes the exit status: the verdict was already decided, and the next run's
+# delete_job_and_wait is what waits for the Jobs to go.
+cleanup_jobs() {
+    local context="$1" job
+    shift
+    for job in "$@"; do
+        kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
+            delete job "${job}" -n "${LOCAL_QUEUE_NAMESPACE}" \
+            --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    done
+    return 0
+}
 
 # job_pod_table <context> <job-name>
 #
@@ -238,6 +278,16 @@ check_admitted_within_domain() {
         return 1
     fi
 
+    # The Job is sized so no single node can hold it; pods on one node would
+    # mean the spread this check exists to observe never happened.
+    local node_count
+    node_count="$(nodes_used "${pods}" | grep -c '[^[:space:]]')"
+    if [[ "${node_count}" -lt 2 ]]; then
+        echo "FAIL: ${job}'s pods ran on ${node_count} node(s), want at least 2:" >&2
+        printf '%s\n' "${pods}" | sed 's/^/    /' >&2
+        return 1
+    fi
+
     local workload assignment
     workload="$(workload_name_for_job "${context}" "${job}")" || {
         echo "FAIL: could not resolve the Workload for ${job}" >&2
@@ -252,8 +302,8 @@ check_admitted_within_domain() {
         return 1
     fi
 
-    echo "ok: ${job}'s pods spanned $(printf '%s\n' "${pods}" | grep -c '[^[:space:]]') node(s)" \
-        "within a single domain ($(printf '%s' "${used}" | tr -d '\n'))"
+    echo "ok: ${job}'s pods spanned ${node_count} nodes within a single domain" \
+        "($(printf '%s' "${used}" | tr -d '\n'))"
 }
 
 # check_refused_across_domains <context> <job-name>
@@ -321,20 +371,27 @@ main() {
 
     local rc=0 spread_job="tas-verify-spread" toolarge_job="tas-verify-toolarge"
     local spread_count=2
+    # context and the job names are locals of main, out of scope by the time an
+    # EXIT trap fires, so their values are expanded into the trap string now.
+    # INT and TERM exit explicitly so the EXIT trap runs on an interrupt.
+    # shellcheck disable=SC2064
+    trap "cleanup_jobs $(printf '%q ' "${context}" "${spread_job}" "${toolarge_job}")" EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     # Each worker holds 8 simulated GPUs (setup-gpu-sim.sh); 5 per pod means
     # 2 pods cannot both fit on one node, forcing the spread this check
     # exists to observe. 6 per pod across 3 pods needs 18 GPU, which exceeds
     # one domain's 16 (its two nodes' combined capacity) but not the
     # cluster's 32.
+    delete_job_and_wait "${context}" "${spread_job}" || return 1
     apply_spread_job "${context}" "${spread_job}" 5 "${spread_count}" || return 1
     check_admitted_within_domain "${context}" "${nodes}" "${spread_job}" "${spread_count}" || rc=1
-    kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
-        delete job "${spread_job}" -n "${LOCAL_QUEUE_NAMESPACE}" --ignore-not-found >&2
+    delete_job_and_wait "${context}" "${spread_job}" || rc=1
 
+    delete_job_and_wait "${context}" "${toolarge_job}" || return 1
     apply_spread_job "${context}" "${toolarge_job}" 6 3 || return 1
     check_refused_across_domains "${context}" "${toolarge_job}" || rc=1
-    kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" \
-        delete job "${toolarge_job}" -n "${LOCAL_QUEUE_NAMESPACE}" --ignore-not-found >&2
+    delete_job_and_wait "${context}" "${toolarge_job}" || rc=1
 
     return "${rc}"
 }

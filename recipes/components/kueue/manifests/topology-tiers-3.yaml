@@ -14,7 +14,10 @@
 
 # Kueue Topology for a three-tier Topograph fabric (EKS aws provider, GKE gcp
 # provider). Levels are node label keys, widest domain first, ending in the
-# per-node hostname. A Topology has a fixed level list while Topograph's fabric depth varies per cluster, so each leaf ships the one matching its provider; a node missing any level label is not usable by TAS (see topology-accelerator.yaml for the Kind shape).
+# per-node hostname. A Topology has a fixed level list while Topograph's
+# fabric depth varies per cluster, so each leaf ships the one matching its
+# provider; a node missing any level label is not usable by TAS (see
+# topology-accelerator.yaml for the Kind shape).
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: Topology
 metadata:

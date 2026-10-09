@@ -2786,12 +2786,12 @@ h100-eks-ubuntu-training-kueue:
   017-kueue-post/templates/cluster-queue-tas.yaml: 9cec20f28239249b9fa3db6d6135a547796c1ae7b324fc613c578e6397230344
   017-kueue-post/templates/local-queue.yaml: cff31413ea268709e25330a2e8800e98d69eaef8e7183c1bd89942313dd93ead
   017-kueue-post/templates/tas-flavor.yaml: 96016a5899b403b6fc980013e7deee18f51c4ae820be6c840ba18cd17d7ce3ed
-  017-kueue-post/templates/topology-tiers-3.yaml: 285d154d0a033a5f714a05d866adef9b24858520d263626bc261d9c17fef8b52
+  017-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   017-kueue-post/values.yaml: 0094dcf36757e8943365d8f50128659c03a2bfdc7043557be5af323c4f8983ef
   README.md: 81845b0dd4cab2cc0085ec75a9bff5d1822bb0e9d0be6eeef404629911eb3270
   UPGRADING.md: be531c62f8c2f5ad3245852ac79d8359ba691d390846ef7edd31b29c1e470722
   bundle-info.yaml: dbad5052b94a2d71dfc3cbbc481a6f8de25191d2105f73dc04447ede670279e1
-  checksums.txt: a1df8fbfc3eb8240576d83c9d929ea4a5fb8d52b36a7265445f261fdd35cb78d
+  checksums.txt: 7bb762ebb3ff18ac086dd41f3577d1f3a983ca236b19ae5a298d6a0a46c08419
   deploy.sh: f1d15f2c19ebf1bd8136d7b2393e80964fe372d2755dd1e78b8505ecd9dce006
   recipe.yaml: 1ecc5af319bfac27ad21cf302ab08c8c99589bf89c13c0761d733977ed9284de
 h100-eks-ubuntu-training-slurm:
@@ -3131,12 +3131,12 @@ h100-gke-cos-training-kueue:
   018-kueue-post/templates/cluster-queue-tas.yaml: 9cec20f28239249b9fa3db6d6135a547796c1ae7b324fc613c578e6397230344
   018-kueue-post/templates/local-queue.yaml: cff31413ea268709e25330a2e8800e98d69eaef8e7183c1bd89942313dd93ead
   018-kueue-post/templates/tas-flavor.yaml: 96016a5899b403b6fc980013e7deee18f51c4ae820be6c840ba18cd17d7ce3ed
-  018-kueue-post/templates/topology-tiers-3.yaml: 285d154d0a033a5f714a05d866adef9b24858520d263626bc261d9c17fef8b52
+  018-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   018-kueue-post/values.yaml: 0094dcf36757e8943365d8f50128659c03a2bfdc7043557be5af323c4f8983ef
   README.md: 5bea5857cf6bca342bf2e8b9903fdd248bfed5cfde4fec557aba0aab24209f78
   UPGRADING.md: be531c62f8c2f5ad3245852ac79d8359ba691d390846ef7edd31b29c1e470722
   bundle-info.yaml: 4c4900d96e3e95c832b104c4f3463090faba74037b1323637ea01c5927582ee3
-  checksums.txt: 4ce6fd843cbb563f0812c51b1041bd55c7582e96e69e44d4ef94e75fad19e3e4
+  checksums.txt: 0d9af6d968a9707f815ea710d6974dbd48397037a9c69098079901b49c9e130c
   deploy.sh: 35d70d033297a44687aa29b1a82b30b521d398981b23ceac58b5ce067ff3bda2
   recipe.yaml: 6efca31c6379d5666b62206edc72707989a53958e52c9b2b4e6e4c3dbc3d5b82
 h100-gke-cos-training-slurm:
