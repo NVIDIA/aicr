@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -339,7 +340,10 @@ func readHelmOps(t *testing.T, dir string) []HelmOp {
 	for {
 		var ho HelmOp
 		if err := dec.Decode(&ho); err != nil {
-			break
+			if stderrors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode helmops.yaml: %v", err)
 		}
 		out = append(out, ho)
 	}
