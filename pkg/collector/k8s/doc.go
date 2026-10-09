@@ -16,12 +16,14 @@
 //
 // This collector gathers comprehensive cluster information including node
 // details, server version, deployed container images, GPU Operator
-// ClusterPolicy configuration, Slinky Slurm declarations, and official
-// MariaDB Operator API conflict evidence.
+// ClusterPolicy configuration, Slinky Slurm declarations, official
+// MariaDB Operator API conflict evidence, OKE legacy device-plugin conflict
+// evidence, default StorageClass evidence, and Percona Operator for MongoDB
+// API conflict evidence.
 //
 // # Collected Data
 //
-// The collector returns a measurement with 6 subtypes:
+// The collector returns a measurement with 9 subtypes:
 //
 // 1. node - Node information:
 //   - provider: Cloud provider (EKS, GKE, AKS, etc.) detected from node labels
@@ -60,6 +62,21 @@
 //   - API-group and exact-resource availability
 //   - Presence of one or more official MariaDB custom resources
 //   - No database availability, operator health, or external database inference
+//
+// 7. oke-legacy-plugin - OKE legacy NVIDIA device-plugin conflict evidence
+//
+// 8. default-storage-class - StorageClasses annotated as the cluster default:
+//   - collection-state: present, multiple, absent, or unknown
+//   - default-count and the sorted, comma-joined default-classes names
+//   - No provisioner health or capacity inference
+//
+// 9. percona-server-mongodb - Percona Operator for MongoDB conflict evidence:
+//   - psmdb.percona.com API-group and exact-resource availability
+//   - Presence of PerconaServerMongoDB custom resources other than AICR's own
+//     nvsentinel/nvsentinel-mongodb
+//   - Percona operator pods AICR did not install: outside the nvsentinel
+//     namespace, or inside it under another Helm release
+//   - No database availability or operator health inference
 //
 // # Usage
 //
@@ -115,8 +132,8 @@
 //   - No nodes found: Returns error
 //   - API server unavailable during initialization: Returns an empty K8s
 //     measurement with custom-resource detection marked unknown
-//   - Slinky or MariaDB discovery/List failure: Preserves other subtypes and
-//     reports unknown or partial state
+//   - Slinky, MariaDB, StorageClass, or Percona discovery/List failure:
+//     Preserves other subtypes and reports unknown or partial state
 //
 // Partial data is returned when possible.
 //
@@ -153,6 +170,15 @@
 //	  verbs: ["list"]
 //	- apiGroups: ["k8s.mariadb.com"]
 //	  resources: ["mariadbs"]
+//	  verbs: ["list"]
+//	- apiGroups: ["apps"]
+//	  resources: ["daemonsets"]
+//	  verbs: ["get", "list"]
+//	- apiGroups: ["storage.k8s.io"]
+//	  resources: ["storageclasses"]
+//	  verbs: ["list"]
+//	- apiGroups: ["psmdb.percona.com"]
+//	  resources: ["perconaservermongodbs"]
 //	  verbs: ["list"]
 //
 // # Use in Recipes

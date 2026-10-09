@@ -146,7 +146,7 @@ aicr snapshot \
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
-- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the run-scoped `aicr-node-reader-<run-id>` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, DaemonSets, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, and official MariaDB CRs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
+- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the run-scoped `aicr-node-reader-<run-id>` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, DaemonSets, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, official MariaDB CRs, StorageClasses, and PerconaServerMongoDB CRs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
 - `--privileged`: Run agent in privileged mode (default: enabled; required for GPU/SystemD collectors). Set to `false` for PSS-restricted namespaces.
 - `--require-gpu`: In privileged mode (the default), requests an `nvidia.com/gpu` resource for the agent pod (required in CDI environments). With `--privileged=false` it adds no GPU request, but still disables automatic GPU-node selection; pass `--node-selector` to target GPU nodes.
 - `--runtime-class`: Set `runtimeClassName` on the agent pod for `nvidia-smi` access without consuming a GPU. Use with `--node-selector` to target GPU nodes.
@@ -548,6 +548,10 @@ kubectl auth can-i list accountings.slinky.slurm.net --all-namespaces \
   --as=system:serviceaccount:gpu-operator:$SA
 kubectl auth can-i list mariadbs.k8s.mariadb.com --all-namespaces \
   --as=system:serviceaccount:gpu-operator:$SA
+kubectl auth can-i list storageclasses.storage.k8s.io \
+  --as=system:serviceaccount:gpu-operator:$SA
+kubectl auth can-i list perconaservermongodbs.psmdb.percona.com --all-namespaces \
+  --as=system:serviceaccount:gpu-operator:$SA
 ```
 
 ### Job Pending
@@ -681,7 +685,7 @@ kubectl get cm -n gpu-operator aicr-agent-snapshot-<run-id> -o yaml
 ### RBAC Permissions
 
 The agent requires these permissions (created automatically by the CLI):
-- **ClusterRole** (`aicr-node-reader-<run-id>`, run-scoped): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`); and `get`/`list` access to DaemonSets (`apps`, for OKE legacy device-plugin detection)
+- **ClusterRole** (`aicr-node-reader-<run-id>`, run-scoped): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`); `get`/`list` access to DaemonSets (`apps`, for OKE legacy device-plugin detection); `list` access to StorageClasses (`storage.k8s.io`, for default StorageClass detection); and cluster-wide `list` access to PerconaServerMongoDB CRs (`psmdb.percona.com`)
 - **Role** (`aicr-<run-id>`, run-scoped): Create/update ConfigMaps and list pods in the deployment namespace
 
 The baseline ClusterRole above is read-only (`get`/`list` only). Slinky
@@ -689,7 +693,10 @@ detection projects only allowlisted identity, association, and boolean fields;
 it omits free-form configuration, status, pod templates, and Secret/ConfigMap
 references or contents. MariaDB detection records only official API-group and
 CR presence; it does not inspect database configuration, Services, operator
-Deployments, pods, or external databases.
+Deployments, pods, or external databases. Percona detection records API-group
+and PerconaServerMongoDB CR presence and whether a Percona operator pod that
+AICR did not install runs; StorageClass detection records only which
+classes are annotated as the default.
 
 **Additional privileges with `--discover-network`.** When `--discover-network`
 is set, the CLI appends a set of **cluster-scoped mutating** rules to the
@@ -777,7 +784,8 @@ derived from the same rule set the run-scoped `Role` and `ClusterRole` grant
 (and that `--add-roles-to-service-account` renders), so the gate cannot fall
 behind what the agent needs: namespaced `configmaps` and `pods` access, plus
 cluster-scoped `nodes`, `pods`, `apps` DaemonSets, `nvidia.com` ClusterPolicies,
-the Slinky CRs and the MariaDB CRs — widened to the full mutating set when
+the Slinky CRs, the MariaDB CRs, StorageClasses, and the PerconaServerMongoDB
+CRs — widened to the full mutating set when
 `--discover-network` is passed.
 
 This check runs **in exact-ServiceAccount mode only**. In prefix mode the

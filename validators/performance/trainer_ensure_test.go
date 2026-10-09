@@ -27,9 +27,95 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
+
+// invalidTrainerVersion fails like a malformed AICR_NCCL_TRAINER_VERSION. Tests
+// on paths that never self-install pass it, so its error must never surface.
+func invalidTrainerVersion() (string, error) {
+	return "", aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, "invalid Kubeflow Trainer version")
+}
+
+// TestEnsureTrainerInstalled_VersionResolvedOnlyForSelfInstall pins that an
+// invalid version fails only the run that must self-install. A run that reuses
+// a present Trainer, or waits on a recipe-declared one, never resolves it.
+func TestEnsureTrainerInstalled_VersionResolvedOnlyForSelfInstall(t *testing.T) {
+	tests := []struct {
+		name         string
+		declared     bool
+		objects      []runtime.Object
+		wantResolved bool
+	}{
+		{name: "present and not declared: reused", objects: completeTrainerInstall()},
+		{name: "present and declared: used as delivered", declared: true, objects: completeTrainerInstall()},
+		{name: "absent and not declared: self-install resolves", wantResolved: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := newTrainerFakeClient(tt.objects...)
+			resolved := false
+			resolve := func() (string, error) {
+				resolved = true
+				return invalidTrainerVersion()
+			}
+
+			refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, tt.declared, resolve)
+			if resolved != tt.wantResolved {
+				t.Fatalf("version resolved = %v, want %v", resolved, tt.wantResolved)
+			}
+			if len(refs) != 0 {
+				t.Errorf("refs = %d, want 0", len(refs))
+			}
+			if !tt.wantResolved {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, "")) {
+				t.Fatalf("err = %v, want the resolver's ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
+// TestEnsureTrainerInstalled_SelfInstallUsesResolvedVersion pins that the
+// self-install installs exactly the release the resolver returned and claims
+// what the installer created for cleanup.
+func TestEnsureTrainerInstalled_SelfInstallUsesResolvedVersion(t *testing.T) {
+	t.Setenv(trainerVersionEnv, "")
+	resolvedVersion, err := resolveTrainerVersion(nil)
+	if err != nil {
+		t.Fatalf("resolveTrainerVersion: %v", err)
+	}
+	created := []trainerResourceRef{{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment}}
+
+	var installedVersion string
+	oldInstall := installTrainerFunc
+	installTrainerFunc = func(_ context.Context, _ dynamic.Interface, _ kubernetes.Interface,
+		_ discovery.DiscoveryInterface, version string) ([]trainerResourceRef, error) {
+
+		installedVersion = version
+		return created, nil
+	}
+	defer func() { installTrainerFunc = oldInstall }()
+
+	resolve := func() (string, error) { return resolveTrainerVersion(nil) }
+	refs, err := ensureTrainerInstalled(context.Background(), newTrainerFakeClient(), fake.NewClientset(), nil, false, resolve)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if installedVersion != resolvedVersion {
+		t.Errorf("installTrainer got version %q, want the resolved %q", installedVersion, resolvedVersion)
+	}
+	if len(refs) != len(created) {
+		t.Errorf("refs = %d, want the %d resource(s) the installer created", len(refs), len(created))
+	}
+}
 
 // TestEnsureTrainerInstalled_CompleteInstallIsLeftAlone verifies a healthy
 // pre-existing Trainer is neither reinstalled nor claimed for cleanup: returning
@@ -37,7 +123,7 @@ import (
 func TestEnsureTrainerInstalled_CompleteInstallIsLeftAlone(t *testing.T) {
 	client := newTrainerFakeClient(completeTrainerInstall()...)
 
-	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false)
+	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,7 +170,7 @@ func TestEnsureTrainerInstalled_WaitsOnDiscoveredControllerName(t *testing.T) {
 		return false, nil, nil
 	})
 
-	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false)
+	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err != nil {
 		t.Fatalf("unexpected error waiting on the discovered controller %q (polled %v): %v",
 			discoveredName, polled, err)
@@ -129,7 +215,7 @@ func TestEnsureTrainerInstalled_WaitsForPreexistingController(t *testing.T) {
 	})
 	defer cancel()
 
-	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false)
+	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err == nil {
 		t.Fatal("expected a not-ready pre-existing controller to fail, got nil error")
 	}
@@ -159,7 +245,7 @@ func TestEnsureTrainerInstalled_RefusesToInstallOverForeignNamespace(t *testing.
 			trainerValidatingWebhookName, "kubeflow"),
 	)
 
-	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false)
+	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err == nil {
 		t.Fatal("expected the installer to refuse installing over an installation in another namespace")
 	}
@@ -183,7 +269,7 @@ func TestEnsureTrainerInstalled_PreservesProbeErrorCode(t *testing.T) {
 		return true, nil, apierrors.NewServiceUnavailable("apiserver is down")
 	})
 
-	_, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false)
+	_, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -251,7 +337,7 @@ func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 //
 // The not-declared + missing row is deliberately absent rather than overlooked: it
 // reaches installTrainer, which downloads and kustomize-builds the upstream release
-// archive, so it is covered by e2e rather than being unit-testable here.
+// archive, so it needs installTrainerFunc stubbed, which this table does not do.
 func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -286,7 +372,7 @@ func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 			defer withShortTrainerWait(t)()
 			client := newTrainerFakeClient(tt.objects...)
 
-			refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, tt.declared)
+			refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, tt.declared, invalidTrainerVersion)
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
@@ -418,7 +504,7 @@ func TestEnsureTrainerInstalled_DeclaredRolloutDoesNotFallThrough(t *testing.T) 
 	// machine with egress a fall-through would download tens of megabytes first. The
 	// assertions below are what catch it — no error, no claimed resources, and a
 	// probe count proving the wait was entered.
-	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, true)
+	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, true, invalidTrainerVersion)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

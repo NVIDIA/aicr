@@ -1775,3 +1775,53 @@ func TestComponentRegistryValidate_MixinSafeOverridePaths(t *testing.T) {
 		})
 	}
 }
+
+func TestComponentRegistryValidate_OwnsCRDsExcludeSubcharts(t *testing.T) {
+	tests := []struct {
+		name     string
+		ownsCRDs bool
+		exclude  []string
+		wantErrs []string
+	}{
+		{name: "owner with bare subchart names passes", ownsCRDs: true, exclude: []string{"mongodb-store", "sub_chart.v2"}},
+		{name: "owner without exclusions passes", ownsCRDs: true},
+		{name: "exclusions without ownsCRDs are rejected", exclude: []string{"mongodb-store"}, wantErrs: []string{"set without ownsCRDs"}},
+		{name: "empty name is rejected", ownsCRDs: true, exclude: []string{""}, wantErrs: []string{`entry "" must be a bare subchart name`}},
+		{name: "path separator is rejected", ownsCRDs: true, exclude: []string{"charts/mongodb-store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob star is rejected", ownsCRDs: true, exclude: []string{"mongodb-*"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob question mark is rejected", ownsCRDs: true, exclude: []string{"mongodb?store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob bracket is rejected", ownsCRDs: true, exclude: []string{"mongodb[a]"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "space is rejected", ownsCRDs: true, exclude: []string{"mongodb store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "dot is rejected", ownsCRDs: true, exclude: []string{"."}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "dot-dot is rejected", ownsCRDs: true, exclude: []string{".."}, wantErrs: []string{"must be a bare subchart name"}},
+		{
+			name:     "both rules report independently",
+			exclude:  []string{"a/b"},
+			wantErrs: []string{"set without ownsCRDs", "must be a bare subchart name"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &ComponentRegistry{
+				Components: []ComponentConfig{{
+					Name:                     "test-component",
+					DisplayName:              "Test Component",
+					OwnsCRDs:                 tt.ownsCRDs,
+					OwnsCRDsExcludeSubcharts: tt.exclude,
+				}},
+			}
+			errs := registry.Validate()
+			if len(errs) != len(tt.wantErrs) {
+				t.Fatalf("Validate() = %v, want %d error(s) containing %q", errs, len(tt.wantErrs), tt.wantErrs)
+			}
+			for i, want := range tt.wantErrs {
+				if !strings.Contains(errs[i].Error(), want) {
+					t.Errorf("Validate()[%d] = %v, want it to contain %q", i, errs[i], want)
+				}
+				if !stderrors.Is(errs[i], errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("Validate()[%d] code = %v, want ErrCodeInvalidRequest", i, errs[i])
+				}
+			}
+		})
+	}
+}

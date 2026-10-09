@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"io/fs"
+	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -246,5 +247,142 @@ func TestResolveCRDOwners_RegistryFailureIsFatal(t *testing.T) {
 	}
 	if owners != nil {
 		t.Errorf("owners = %v, want nil on error", owners)
+	}
+}
+
+// crdExclusionFixtures returns, from the live registry, one ownsCRDs component
+// that declares subchart exclusions (with its list) and one that declares none.
+func crdExclusionFixtures(t *testing.T) (withExcl string, excl []string, withoutExcl string) {
+	t.Helper()
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+	for _, name := range registry.Names() {
+		cfg := registry.Get(name)
+		if cfg == nil || !cfg.OwnsCRDs {
+			continue
+		}
+		if len(cfg.OwnsCRDsExcludeSubcharts) > 0 && withExcl == "" {
+			withExcl, excl = name, cfg.OwnsCRDsExcludeSubcharts
+		}
+		if len(cfg.OwnsCRDsExcludeSubcharts) == 0 && withoutExcl == "" {
+			withoutExcl = name
+		}
+	}
+	if withExcl == "" || withoutExcl == "" {
+		t.Fatalf("registry lacks an ownsCRDs component with (%q) and without (%q) subchart exclusions",
+			withExcl, withoutExcl)
+	}
+	return withExcl, excl, withoutExcl
+}
+
+func TestCRDExclusions(t *testing.T) {
+	t.Parallel()
+	withExcl, excl, withoutExcl := crdExclusionFixtures(t)
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		owners map[string]bool
+		want   map[string][]string
+	}{
+		{
+			name:   "owner with exclusions",
+			owners: map[string]bool{withExcl: true},
+			want:   map[string][]string{withExcl: excl},
+		},
+		{
+			name:   "owner without exclusions is omitted",
+			owners: map[string]bool{withoutExcl: true},
+			want:   map[string][]string{},
+		},
+		{
+			name:   "component not resolved as owner is omitted",
+			owners: map[string]bool{withExcl: false},
+			want:   map[string][]string{},
+		},
+		{
+			name:   "component absent from the registry is omitted",
+			owners: map[string]bool{"not-a-registry-component": true},
+			want:   map[string][]string{},
+		},
+		{
+			name:   "mixed owners",
+			owners: map[string]bool{withExcl: true, withoutExcl: true, "not-a-registry-component": true},
+			want:   map[string][]string{withExcl: excl},
+		},
+		{
+			name:   "nil owners",
+			owners: nil,
+			want:   map[string][]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := crdExclusions(registry, tt.owners)
+			if len(got) != len(tt.want) {
+				t.Fatalf("crdExclusions = %v, want %v", got, tt.want)
+			}
+			for name, wantList := range tt.want {
+				if !slices.Equal(got[name], wantList) {
+					t.Errorf("exclusions[%q] = %v, want %v", name, got[name], wantList)
+				}
+			}
+		})
+	}
+}
+
+// TestResolveCRDPolicy_Exclusions checks the exclusions come back for a
+// resolved owner, and are a copy the caller cannot use to mutate the registry.
+func TestResolveCRDPolicy_Exclusions(t *testing.T) {
+	t.Parallel()
+	withExcl, excl, _ := crdExclusionFixtures(t)
+	want := slices.Clone(excl)
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+	ref := recipe.ComponentRef{Name: withExcl, Type: recipe.ComponentTypeHelm}
+	ref.ApplyRegistryDefaults(registry.Get(withExcl))
+
+	resolve := func() (map[string]bool, map[string][]string) {
+		t.Helper()
+		owners, exclusions, resolveErr := ResolveCRDPolicy(context.Background(), nil, []recipe.ComponentRef{ref})
+		if resolveErr != nil {
+			t.Fatalf("ResolveCRDPolicy: %v", resolveErr)
+		}
+		return owners, exclusions
+	}
+	owners, got := resolve()
+	if !owners[withExcl] {
+		t.Fatalf("owners = %v, want %q resolved as an owner", owners, withExcl)
+	}
+	if !slices.Equal(got[withExcl], want) {
+		t.Fatalf("exclusions[%q] = %v, want %v", withExcl, got[withExcl], want)
+	}
+	got[withExcl][0] = "mutated"
+
+	if _, again := resolve(); !slices.Equal(again[withExcl], want) {
+		t.Errorf("registry exclusions mutated through returned slice: got %v, want %v", again[withExcl], want)
+	}
+}
+
+func TestResolveCRDPolicy_RegistryFailureIsFatal(t *testing.T) {
+	t.Parallel()
+
+	owners, exclusions, err := ResolveCRDPolicy(context.Background(), failingProvider{}, []recipe.ComponentRef{
+		{Name: "nvsentinel", Type: recipe.ComponentTypeHelm},
+	})
+	if err == nil {
+		t.Fatalf("ResolveCRDPolicy with an unreadable registry returned no error (owners=%v exclusions=%v)", owners, exclusions)
+	}
+	if owners != nil || exclusions != nil {
+		t.Errorf("owners = %v, exclusions = %v, want nil on error", owners, exclusions)
 	}
 }

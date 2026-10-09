@@ -48,6 +48,9 @@ type Collector struct {
 	// mariaDBDiscovery is the narrow test seam used by official MariaDB
 	// Operator API discovery. Production falls back to ClientSet.Discovery().
 	mariaDBDiscovery apiResourceDiscovery
+	// perconaDiscovery is the narrow test seam used by Percona Operator for
+	// MongoDB API discovery. Production falls back to ClientSet.Discovery().
+	perconaDiscovery apiResourceDiscovery
 
 	dynamicOnce sync.Once
 	dynamicErr  error
@@ -66,7 +69,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	slog.Info("collecting Kubernetes cluster information")
 
 	// Held before the shadowing below so the cancellation checks in the Slinky
-	// and MariaDB branches can consult the caller's context directly. See
+	// and other custom-resource branches can consult the caller's context directly. See
 	// cancellationErr for why the derived contexts are not sufficient.
 	callerCtx := ctx
 
@@ -91,6 +94,8 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		slinky    measurement.Subtype
 		mariaDB   measurement.Subtype
 		okeLegacy measurement.Subtype
+		storage   measurement.Subtype
+		percona   measurement.Subtype
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -160,6 +165,22 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		return nil
 	})
 
+	g.Go(func() error {
+		storage = k.collectDefaultStorageClass(gctx)
+		if err := cancellationErr(gctx, ctx, callerCtx); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "default StorageClass collection cancelled", err)
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		percona = k.collectPerconaServerMongoDB(gctx, discoveryClient)
+		if err := cancellationErr(gctx, ctx, callerCtx); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "Percona Operator for MongoDB collection cancelled", err)
+		}
+		return nil
+	})
+
 	// A timeout/cancellation surfaces here; deterministic sub-collector failures
 	// are swallowed inside collectSafe so the snapshot continues on partial failure.
 	if err := g.Wait(); err != nil {
@@ -178,6 +199,8 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		WithSubtype(slinky).
 		WithSubtype(mariaDB).
 		WithSubtype(okeLegacy).
+		WithSubtype(storage).
+		WithSubtype(percona).
 		Build()
 
 	return res, nil
@@ -248,6 +271,8 @@ func emptyK8sMeasurement() *measurement.Measurement {
 		WithSubtype(unknownSlinkySubtype()).
 		WithSubtype(unknownMariaDBSubtype()).
 		WithSubtype(unknownOKELegacyPluginSubtype()).
+		WithSubtype(unknownDefaultStorageClassSubtype()).
+		WithSubtype(unknownPerconaSubtype()).
 		Build()
 }
 

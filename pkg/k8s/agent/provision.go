@@ -384,6 +384,13 @@ func clusterRoleHeader(name, serviceAccount string, discoverNetwork bool) string
 #
 #   k8s.mariadb.com mariadbs: list
 #     The MariaDB instance backing Slurm accounting, when present.
+#
+#   storage.k8s.io storageclasses: list
+#     Which StorageClass is the cluster default, for components whose
+#     volumes do not name a class.
+#
+#   psmdb.percona.com perconaservermongodbs: list
+#     An existing Percona Operator for MongoDB API or cluster, when present.
 `, name, serviceAccount, clusterRoleBindingFileName)
 	if !discoverNetwork {
 		return header

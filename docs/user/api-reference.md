@@ -311,6 +311,8 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 
 `metadata.mariaDBOperatorState` is optional and appears when a snapshot supplies MariaDB Operator conflict evidence during resolution of AICR-provided Slurm accounting. It records `absent`, `api-detected`, `crs-detected`, or `unknown`; query-generated recipes and older snapshots without the collector subtype omit the field. Recipe generation remains observational: `api-detected`, `crs-detected`, and `unknown` emit warnings but still produce a recipe. At bundle time, `crs-detected` and `unknown` block AICR-provided installation, while `api-detected` or omitted evidence warns but proceeds; `absent` proceeds silently.
 
+`metadata.defaultStorageClassState` and `metadata.perconaOperatorState` are optional and appear when a snapshot supplies the matching evidence during resolution of a recipe containing the `nvsentinel-mongodb` component (added by the NVSentinel remediation step mixins). `defaultStorageClassState` records `present`, `multiple`, `absent`, or `unknown` for the StorageClass annotated as the cluster default, which the component's class-less volumes bind through. `perconaOperatorState` records `absent`, `api-detected`, `aicr-owned` (only AICR's own `nvsentinel/nvsentinel-mongodb` cluster exists), `operator-detected` (a Percona operator AICR did not install runs outside the `nvsentinel` namespace, or inside it under another Helm release), `crs-detected` (another PerconaServerMongoDB exists), or `unknown`. Query-generated recipes and older snapshots omit both fields. Recipe generation remains observational and only warns.
+
 ---
 
 ### GET /v1/query

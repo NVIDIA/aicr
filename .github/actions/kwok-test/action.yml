@@ -23,6 +23,10 @@ inputs:
     description: 'Deployer to exercise: helm | argocd-oci | argocd-helm-oci | argocd-git | flux-oci | flux-git'
     required: false
     default: 'helm'
+  mixins:
+    description: 'Comma-separated opt-in mixins to compose onto the recipe (KWOK_MIXINS); also suffixes the artifact names'
+    required: false
+    default: ''
   kind_version:
     description: 'Kind version to install'
     required: false
@@ -259,6 +263,7 @@ runs:
       shell: bash
       env:
         KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
+        KWOK_MIXINS: ${{ inputs.mixins }}
       run: |
         KWOK_CLUSTER=aicr-kwok-test bash kwok/scripts/run-all-recipes.sh \
           --deployer ${{ inputs.deployer }} \
@@ -303,7 +308,7 @@ runs:
       if: always() && inputs.upload_artifacts == 'true'
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
       with:
-        name: kwok-results-${{ inputs.recipe }}-${{ inputs.deployer }}-${{ github.run_id }}-${{ github.run_attempt }}
+        name: kwok-results-${{ inputs.recipe }}-${{ inputs.deployer }}${{ inputs.mixins && format('-{0}', inputs.mixins) || '' }}-${{ github.run_id }}-${{ github.run_attempt }}
         path: /tmp/kwok-debug-artifacts/kwok-results.json
         retention-days: ${{ inputs.artifact_retention_days }}
         if-no-files-found: warn
@@ -312,7 +317,7 @@ runs:
       if: failure() && inputs.upload_artifacts == 'true'
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
       with:
-        name: kwok-debug-${{ inputs.recipe }}-${{ inputs.deployer }}-${{ github.run_id }}
+        name: kwok-debug-${{ inputs.recipe }}-${{ inputs.deployer }}${{ inputs.mixins && format('-{0}', inputs.mixins) || '' }}-${{ github.run_id }}
         path: |
           /tmp/kwok-debug-artifacts/
           /tmp/kwok-kind-logs/
