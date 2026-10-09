@@ -661,6 +661,8 @@ func TestRecipeResult_DeepCopy_DropsOwner(t *testing.T) {
 	}
 	r.Metadata.GPUDriverState = GPUDriverStateAbsent
 	r.Metadata.MariaDBOperatorState = MariaDBOperatorStateCRsDetected
+	r.Metadata.DefaultStorageClassState = DefaultStorageClassStateAbsent
+	r.Metadata.PerconaOperatorState = PerconaOperatorStateCRsDetected
 	copy := r.DeepCopy()
 	if copy.Owner() != nil {
 		t.Errorf("DeepCopy.Owner() = %v, want nil", copy.Owner())
@@ -685,5 +687,11 @@ func TestRecipeResult_DeepCopy_DropsOwner(t *testing.T) {
 	copy.Metadata.MariaDBOperatorState = MariaDBOperatorStateAbsent
 	if r.Metadata.MariaDBOperatorState != MariaDBOperatorStateCRsDetected {
 		t.Error("mutating the copy's Metadata.MariaDBOperatorState leaked into the original")
+	}
+	if copy.Metadata.DefaultStorageClassState != DefaultStorageClassStateAbsent ||
+		copy.Metadata.PerconaOperatorState != PerconaOperatorStateCRsDetected {
+
+		t.Errorf("DeepCopy dropped datastore evidence: storage=%q percona=%q",
+			copy.Metadata.DefaultStorageClassState, copy.Metadata.PerconaOperatorState)
 	}
 }

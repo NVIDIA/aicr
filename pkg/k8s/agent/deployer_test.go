@@ -177,10 +177,11 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 
 		// Default: nodes, pods, clusterpolicies, read-only Slinky CRs,
-		// official MariaDB CRs, and read-only apps/daemonsets (OKE legacy
-		// device-plugin conflict evidence).
-		if len(cr.Rules) != 6 {
-			t.Errorf("expected 6 rules, got %d", len(cr.Rules))
+		// official MariaDB CRs, read-only apps/daemonsets (OKE legacy
+		// device-plugin conflict evidence), StorageClasses, and Percona
+		// PerconaServerMongoDB CRs.
+		if len(cr.Rules) != 8 {
+			t.Errorf("expected 8 rules, got %d", len(cr.Rules))
 		}
 		ruleTests := []struct {
 			name      string
@@ -204,6 +205,18 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 				name:      "MariaDB",
 				apiGroups: []string{mariaDBAPIGroup},
 				resources: []string{mariaDBResource},
+				verbs:     []string{verbList},
+			},
+			{
+				name:      "StorageClasses",
+				apiGroups: []string{storageAPIGroup},
+				resources: []string{storageClassResource},
+				verbs:     []string{verbList},
+			},
+			{
+				name:      "Percona",
+				apiGroups: []string{perconaAPIGroup},
+				resources: []string{perconaResource},
 				verbs:     []string{verbList},
 			},
 			{

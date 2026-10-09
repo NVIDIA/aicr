@@ -55,6 +55,7 @@ hosts:
   - kubernetes-sigs.github.io        # node-feature-discovery, aws-ebs-csi-driver Helm repos
   - nvcr.io                          # distroless/static base image (compiled-in)
   - open-policy-agent.github.io      # gatekeeper Helm repo
+  - percona.github.io                # psmdb-operator, psmdb-db Helm repo (NVSentinel remediation datastore)
   - prometheus-community.github.io   # kube-prometheus-stack, adapter, operator-crds Helm repos
   - public.ecr.aws                   # in-cluster registry image (KWOK)
   - registry.k8s.io                  # dra-driver, kueue OCI Helm charts

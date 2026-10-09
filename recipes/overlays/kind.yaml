@@ -184,6 +184,38 @@ spec:
       overrides:
         labeler:
           assumeDriverInstalled: true
+        # janitor's GPU reset Job chroots into the driver root to run
+        # nvidia-smi; with a host-installed driver that root is the host's.
+        # Inert unless the nvsentinel-remediation mixin enables janitor.
+        janitor:
+          config:
+            controllers:
+              gpuReset:
+                resetJob:
+                  hostDriverRootPath: /
+                # After a reset janitor waits for the GPU Operator operands it
+                # restarted. Kind runs no standalone DCGM (dcgm.enabled=false
+                # above), so the list omits it; the default would time out. A
+                # custom spec takes no default label values, so each is set.
+                serviceManager:
+                  name: gpu-operator
+                  spec:
+                    namespace: gpu-operator
+                    teardownTimeout: 5m
+                    restoreTimeout: 10m
+                    apps:
+                      - appSelector: {app: nvidia-device-plugin-daemonset}
+                        nodeLabel: nvidia.com/gpu.deploy.device-plugin
+                        enabledValue: "true"
+                        disabledValue: "false"
+                      - appSelector: {app: nvidia-dcgm-exporter}
+                        nodeLabel: nvidia.com/gpu.deploy.dcgm-exporter
+                        enabledValue: "true"
+                        disabledValue: "false"
+                      - appSelector: {app: gpu-feature-discovery}
+                        nodeLabel: nvidia.com/gpu.deploy.gpu-feature-discovery
+                        enabledValue: "true"
+                        disabledValue: "false"
         platformConnector:
           resources:
             requests:

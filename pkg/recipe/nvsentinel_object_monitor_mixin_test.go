@@ -271,11 +271,12 @@ func TestMixinNVSentinelObjectMonitor_PolicyNamespacesMatchCatalog(t *testing.T)
 // A substring check cannot tell whose tag it found: once a second override
 // exists, an unrelated image carrying the expected version would satisfy it
 // while this one kept a stale tag.
-func scanMatrixTagFor(t *testing.T, workflowPath, image string) (string, bool) {
+func scanMatrixTagFor(t *testing.T, image string) (string, bool) {
 	t.Helper()
-	data, err := os.ReadFile(workflowPath)
+	const scanWorkflow = "../../.github/workflows/vuln-scan-images.yaml"
+	data, err := os.ReadFile(scanWorkflow)
 	if err != nil {
-		t.Fatalf("reading %s: %v", workflowPath, err)
+		t.Fatalf("reading %s: %v", scanWorkflow, err)
 	}
 	var wf struct {
 		Jobs map[string]struct {
@@ -287,7 +288,7 @@ func scanMatrixTagFor(t *testing.T, workflowPath, image string) (string, bool) {
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(data, &wf); err != nil {
-		t.Fatalf("parsing %s: %v", workflowPath, err)
+		t.Fatalf("parsing %s: %v", scanWorkflow, err)
 	}
 	for _, job := range wf.Jobs {
 		for _, entry := range job.Strategy.Matrix.Include {
@@ -329,7 +330,7 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 	// override, so it is checked structurally; the rest carry the full
 	// image:tag reference.
 	const scanWorkflow = "../../.github/workflows/vuln-scan-images.yaml"
-	tag, found := scanMatrixTagFor(t, scanWorkflow, image)
+	tag, found := scanMatrixTagFor(t, image)
 	switch {
 	case !found:
 		t.Errorf("%s has no scan matrix entry for %s -- #2612 requires the scan job to cover this image", scanWorkflow, image)

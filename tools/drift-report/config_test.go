@@ -68,8 +68,8 @@ func TestRenovateRegexMatchesEveryAnnotation(t *testing.T) {
 		t.Fatalf("read registry.yaml: %v", err)
 	}
 	matches := re.FindAllStringSubmatch(string(data), -1)
-	if len(matches) != 35 {
-		t.Fatalf("matchString matched %d annotations, want 35", len(matches))
+	if len(matches) != 37 {
+		t.Fatalf("matchString matched %d annotations, want 37", len(matches))
 	}
 
 	idx := re.SubexpIndex("currentValue")

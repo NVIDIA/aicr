@@ -1427,6 +1427,24 @@ components:
                 bundling; API-only detection or omitted evidence produces a
                 non-blocking warning.
               enum: [absent, api-detected, crs-detected, unknown]
+            defaultStorageClassState:
+              type: string
+              description: >
+                Default StorageClass evidence recorded during snapshot-driven
+                resolution of a recipe containing nvsentinel-mongodb, whose
+                volumes name no StorageClass. "multiple" means more than one
+                StorageClass is annotated as the default.
+              enum: [present, multiple, absent, unknown]
+            perconaOperatorState:
+              type: string
+              description: >
+                Percona Operator for MongoDB conflict evidence recorded during
+                snapshot-driven resolution of a recipe containing
+                nvsentinel-mongodb. "aicr-owned" means the only
+                PerconaServerMongoDB found is AICR's own; "operator-detected"
+                means a Percona operator pod AICR did not install runs, with
+                no other PerconaServerMongoDB resources.
+              enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
         criteria:
           $ref: "#/components/schemas/Criteria"
           description: Original criteria parameters
@@ -1733,11 +1751,19 @@ components:
                   - constraintWarnings
                   - gpuDriverState
                   - mariaDBOperatorState
+                  - defaultStorageClassState
+                  - perconaOperatorState
                   - selectedProfile
               properties:
                 mariaDBOperatorState:
                   type: string
                   enum: [absent, api-detected, crs-detected, unknown]
+                defaultStorageClassState:
+                  type: string
+                  enum: [present, multiple, absent, unknown]
+                perconaOperatorState:
+                  type: string
+                  enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
                 excludedOverlays:
                   type: array
                   items:
@@ -1879,6 +1905,8 @@ components:
                       - constraintWarnings
                       - gpuDriverState
                       - mariaDBOperatorState
+                      - defaultStorageClassState
+                      - perconaOperatorState
                       - selectedProfile
                   not:
                     required: [selectedProfile]
@@ -1886,6 +1914,12 @@ components:
                     mariaDBOperatorState:
                       type: string
                       enum: [absent, api-detected, crs-detected, unknown]
+                    defaultStorageClassState:
+                      type: string
+                      enum: [present, multiple, absent, unknown]
+                    perconaOperatorState:
+                      type: string
+                      enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
                     excludedOverlays:
                       type: array
                       items:
