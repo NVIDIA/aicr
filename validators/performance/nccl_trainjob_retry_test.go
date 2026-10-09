@@ -22,6 +22,8 @@ import (
 	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -153,7 +155,7 @@ func TestApplyTrainJobWithRetry_TimeoutClassifiedWhenBudgetExpiresMidCreate(t *t
 	if err == nil {
 		t.Fatal("expected a timeout error, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeTimeout {
 		t.Errorf("expected ErrCodeTimeout when the retry budget expired, got %v", err)
 	}
 }
@@ -175,7 +177,7 @@ func TestApplyTrainJobWithRetry_TimesOutWhenWebhookNeverCatchesUp(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected a timeout error, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeTimeout {
 		t.Errorf("expected ErrCodeTimeout, got %v", err)
 	}
 }

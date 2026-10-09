@@ -15,13 +15,14 @@
 package recipe
 
 import (
-	stderrors "errors"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestParseAccountingMode(t *testing.T) {
@@ -289,7 +290,7 @@ func TestValidateAccountingConfigurationRequiresEnabledComponents(t *testing.T) 
 			if err == nil {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("validateAccountingConfiguration() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.component) ||

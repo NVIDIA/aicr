@@ -473,10 +473,11 @@ aicr bundle --recipe recipe.yaml \
 ```
 
 Most components treat the selectors as optional, but components that declare
-`requireNodeSelector` in the registry (`slinky-slurm`, `slurm-accounting-mariadb`)
-fail the bundle without them. `kube-prometheus-stack` requires
-`--system-node-selector` once it has a storage class, so following the bundle's
-PVC warning with `--storage-class` alone fails. See the selector rows in the
+`requireNodeSelector` in the registry (`nvsentinel-mongodb`, `slinky-slurm`,
+`slurm-accounting-mariadb`) fail the bundle without them.
+`kube-prometheus-stack` requires `--system-node-selector` once it has a storage
+class, so following the bundle's PVC warning with `--storage-class` alone
+fails. See the selector rows in the
 [`aicr bundle` flag table](cli-reference.md#aicr-bundle).
 
 ## Prepare DRA nodes when opting in to eviction coordination

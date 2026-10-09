@@ -16,7 +16,6 @@ package helmfile
 
 import (
 	"context"
-	stderrors "errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -30,6 +29,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -284,7 +284,7 @@ func TestGenerate_NilRecipeResult(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Generate() with nil RecipeResult expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "RecipeResult is required") {
@@ -443,7 +443,7 @@ func TestGenerate_ContextCanceled(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Generate() with canceled context expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("Generate() error code = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -468,7 +468,7 @@ func TestGenerate_MissingDataFile(t *testing.T) {
 	// AddDataFiles wraps the stat failure as ErrCodeInternal — assert the
 	// code rather than just non-nil so a regression that surfaces an
 	// uncoded error here fails this test.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("Generate() error code = %v, want ErrCodeInternal", err)
 	}
 }
@@ -514,7 +514,7 @@ func TestBuildHelmfile_NilUpstream(t *testing.T) {
 	if err == nil {
 		t.Fatalf("buildHelmfile with nil Upstream expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error code = %v, want ErrCodeInternal", err)
 	}
 	if !strings.Contains(err.Error(), "KindUpstreamHelm but Upstream is nil") {
@@ -533,7 +533,7 @@ func TestBuildHelmfile_UnsupportedKind(t *testing.T) {
 	if err == nil {
 		t.Fatalf("buildHelmfile with unsupported kind expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "unsupported folder kind") {

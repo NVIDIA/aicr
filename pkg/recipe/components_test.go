@@ -17,7 +17,6 @@ package recipe
 import (
 	"bytes"
 	"context"
-	stderrors "errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -25,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1447,7 +1448,7 @@ func TestLoadComponentRegistry_ReleaseNHeaders(t *testing.T) {
 				if err == nil {
 					t.Fatal("GetComponentRegistryFor() error = nil, want header rejection")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1614,7 +1615,7 @@ func TestLoadRegistry_RejectsKustomizeManifestFiles(t *testing.T) {
 	// mirroring the coherence-check precedent in
 	// componentref_coherence_test.go. Asserting only the message would stay
 	// green if the guard's code silently regressed to ErrCodeInternal.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -1771,6 +1772,56 @@ func TestComponentRegistryValidate_MixinSafeOverridePaths(t *testing.T) {
 			}
 			if !found {
 				t.Errorf("Validate() = %v, want an error containing %q", errs, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestComponentRegistryValidate_OwnsCRDsExcludeSubcharts(t *testing.T) {
+	tests := []struct {
+		name     string
+		ownsCRDs bool
+		exclude  []string
+		wantErrs []string
+	}{
+		{name: "owner with bare subchart names passes", ownsCRDs: true, exclude: []string{"mongodb-store", "sub_chart.v2"}},
+		{name: "owner without exclusions passes", ownsCRDs: true},
+		{name: "exclusions without ownsCRDs are rejected", exclude: []string{"mongodb-store"}, wantErrs: []string{"set without ownsCRDs"}},
+		{name: "empty name is rejected", ownsCRDs: true, exclude: []string{""}, wantErrs: []string{`entry "" must be a bare subchart name`}},
+		{name: "path separator is rejected", ownsCRDs: true, exclude: []string{"charts/mongodb-store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob star is rejected", ownsCRDs: true, exclude: []string{"mongodb-*"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob question mark is rejected", ownsCRDs: true, exclude: []string{"mongodb?store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob bracket is rejected", ownsCRDs: true, exclude: []string{"mongodb[a]"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "space is rejected", ownsCRDs: true, exclude: []string{"mongodb store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "dot is rejected", ownsCRDs: true, exclude: []string{"."}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "dot-dot is rejected", ownsCRDs: true, exclude: []string{".."}, wantErrs: []string{"must be a bare subchart name"}},
+		{
+			name:     "both rules report independently",
+			exclude:  []string{"a/b"},
+			wantErrs: []string{"set without ownsCRDs", "must be a bare subchart name"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &ComponentRegistry{
+				Components: []ComponentConfig{{
+					Name:                     "test-component",
+					DisplayName:              "Test Component",
+					OwnsCRDs:                 tt.ownsCRDs,
+					OwnsCRDsExcludeSubcharts: tt.exclude,
+				}},
+			}
+			errs := registry.Validate()
+			if len(errs) != len(tt.wantErrs) {
+				t.Fatalf("Validate() = %v, want %d error(s) containing %q", errs, len(tt.wantErrs), tt.wantErrs)
+			}
+			for i, want := range tt.wantErrs {
+				if !strings.Contains(errs[i].Error(), want) {
+					t.Errorf("Validate()[%d] = %v, want it to contain %q", i, errs[i], want)
+				}
+				if errorstest.ReportedCode(errs[i]) != errors.ErrCodeInvalidRequest {
+					t.Errorf("Validate()[%d] code = %v, want ErrCodeInvalidRequest", i, errs[i])
+				}
 			}
 		})
 	}

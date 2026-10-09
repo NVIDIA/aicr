@@ -27,6 +27,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func typedOverrideFlags() []cli.Flag {
@@ -276,7 +278,7 @@ func TestDecodeSetFileValue_MissingFileIsNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("missing file: got code != NOT_FOUND for %v", err)
 	}
 }
@@ -301,7 +303,7 @@ func TestDecodeSetFileValue_NonNotExistOpenErrorIsInvalidRequest(t *testing.T) {
 	if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
 		t.Errorf("ENOTDIR open error must not be NOT_FOUND: %v", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("ENOTDIR open error should be INVALID_REQUEST: %v", err)
 	}
 }
@@ -317,7 +319,7 @@ func TestDecodeSetFileValue_DirectoryIsInvalidRequest(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when --set-file points at a directory")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("directory path should be INVALID_REQUEST, got %v", err)
 	}
 	if stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
@@ -342,7 +344,7 @@ func TestDecodeSetFileValue_NonRegularFileIsInvalidRequest(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when --set-file points at a FIFO")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("non-regular path should be INVALID_REQUEST, got %v", err)
 	}
 	if stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {

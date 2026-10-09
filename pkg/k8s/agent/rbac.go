@@ -236,6 +236,16 @@ func clusterRules(discoverNetwork bool) []rbacv1.PolicyRule {
 			Verbs:     []string{verbList},
 		},
 		{
+			APIGroups: []string{storageAPIGroup},
+			Resources: []string{storageClassResource},
+			Verbs:     []string{verbList},
+		},
+		{
+			APIGroups: []string{perconaAPIGroup},
+			Resources: []string{perconaResource},
+			Verbs:     []string{verbList},
+		},
+		{
 			// OKE legacy device-plugin conflict evidence: the K8s collector
 			// reads kube-system/nvidia-gpu-device-plugin (a single namespaced
 			// Get; list kept for parity with the other read-only rules) —

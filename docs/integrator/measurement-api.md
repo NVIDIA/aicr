@@ -241,6 +241,72 @@ Both `slinky-slurm` and `mariadb-operator` remain in raw snapshots and
 including all Slinky items. Constraint evaluation consumes the raw snapshot
 before evidence packaging.
 
+## K8s default-storage-class shape
+
+`K8s.default-storage-class` records which StorageClasses carry
+`storageclass.kubernetes.io/is-default-class: "true"` (or the beta
+`storageclass.beta.kubernetes.io/is-default-class` annotation, which
+Kubernetes still honors). It does not inspect provisioners, capacity, or
+existing PVCs.
+
+```yaml
+- subtype: default-storage-class
+  data:
+    collection-state: present
+    default-count: 1
+    default-classes: gp3
+```
+
+The fields are:
+
+- `collection-state` — `present` (exactly one default), `multiple` (more than
+  one; Kubernetes binds class-less PVCs to the newest), `absent` (none), or
+  `unknown` (the StorageClass List failed).
+- `default-count` — the number of default StorageClasses. Omitted when
+  `unknown`.
+- `default-classes` — the default StorageClass names, sorted and
+  comma-joined. Omitted when there are none.
+
+## K8s percona-server-mongodb shape
+
+`K8s.percona-server-mongodb` records conflict evidence for the Percona
+Operator for MongoDB: API group `psmdb.percona.com`, resource
+`perconaservermongodbs`, Kind `PerconaServerMongoDB`, plus operator pods
+labeled `app.kubernetes.io/name` `psmdb-operator` or
+`percona-server-mongodb-operator`. AICR's own `nvsentinel-mongodb` CR and
+AICR's own operator pods (namespace `nvsentinel`, `app.kubernetes.io/instance`
+ending in `psmdb-operator`: bare under helm and helmfile,
+`<namePrefix>psmdb-operator` under Argo CD, `nvsentinel-psmdb-operator` under
+Flux) are not counted as conflicts. A foreign operator installed in
+`nvsentinel` under such a release name is read as AICR's own.
+
+```yaml
+- subtype: percona-server-mongodb
+  data:
+    collection-state: aicr-owned
+    api-available: true
+    api-version: v1
+```
+
+`collection-state` is one of:
+
+- `absent` — the API group was conclusively not found.
+- `api-detected` — the group is served but no PerconaServerMongoDB CRs exist
+  and no Percona operator pod AICR did not install runs.
+- `aicr-owned` — the only PerconaServerMongoDB is `nvsentinel/nvsentinel-mongodb`.
+- `operator-detected` — no foreign CR exists, but a Percona operator pod AICR
+  did not install runs, in any namespace.
+- `crs-detected` — a PerconaServerMongoDB other than AICR's own exists.
+- `unknown` — discovery, the CR List, or the operator pod List was
+  inconclusive.
+
+`api-available` and `api-version` follow the
+[mariadb-operator](#k8s-mariadb-operator-shape) semantics.
+
+Snapshot-driven resolution of a recipe containing `nvsentinel-mongodb` records
+both states as recipe metadata (`defaultStorageClassState`,
+`perconaOperatorState`). Neither subtype is kept in minimal evidence.
+
 ## K8s aks-gpu-pools shape
 
 `K8s.aks-gpu-pools` projects AKS GPU agent-pool driver ownership for ADR-015

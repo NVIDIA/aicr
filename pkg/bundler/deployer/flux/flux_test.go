@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	stderrors "errors"
 	"flag"
 	"fmt"
 	"os"
@@ -34,6 +33,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -2303,7 +2303,7 @@ func TestGenerate_PreManifestsCollision(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected collision error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), `would inject "foo"-pre`) {
@@ -2355,7 +2355,7 @@ func TestGenerate_PostManifestsCollision(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected collision error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), `would inject "foo"-post`) {
@@ -2978,7 +2978,7 @@ func TestGenerate_StaleSourcesPathIsNotDestroyed(t *testing.T) {
 			case tt.wantErr && err == nil:
 				t.Fatal("expected Generate() to fail, got nil error")
 			case tt.wantErr:
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
 				}
 				if !strings.Contains(err.Error(), sourcesDir) {

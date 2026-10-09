@@ -158,6 +158,32 @@ spec:
           - name: nvsentinel
             overrides:
               labeler: {assumeDriverInstalled: true}
+              # OKE's add-on advertises the GPUs, so the GPU Operator runs no
+              # device plugin for janitor to wait on after a reset.
+              janitor:
+                config:
+                  controllers:
+                    gpuReset:
+                      resetJob: {hostDriverRootPath: /}
+                      serviceManager:
+                        name: gpu-operator
+                        spec:
+                          namespace: gpu-operator
+                          teardownTimeout: 5m
+                          restoreTimeout: 10m
+                          apps:
+                            - appSelector: {app: nvidia-dcgm}
+                              nodeLabel: nvidia.com/gpu.deploy.dcgm
+                              enabledValue: "true"
+                              disabledValue: "false"
+                            - appSelector: {app: nvidia-dcgm-exporter}
+                              nodeLabel: nvidia.com/gpu.deploy.dcgm-exporter
+                              enabledValue: "true"
+                              disabledValue: "false"
+                            - appSelector: {app: gpu-feature-discovery}
+                              nodeLabel: nvidia.com/gpu.deploy.gpu-feature-discovery
+                              enabledValue: "true"
+                              disabledValue: "false"
         # The canonical qualification signal (#2363): the NvidiaGpuPlugin
         # add-on's control-plane state, projected from an operator-supplied
         # `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump via
@@ -215,6 +241,34 @@ spec:
           - name: nvsentinel
             overrides:
               labeler: {assumeDriverInstalled: false}
+              janitor:
+                config:
+                  controllers:
+                    gpuReset:
+                      resetJob: {hostDriverRootPath: /run/nvidia/driver}
+                      serviceManager:
+                        name: gpu-operator
+                        spec:
+                          namespace: gpu-operator
+                          teardownTimeout: 5m
+                          restoreTimeout: 10m
+                          apps:
+                            - appSelector: {app: nvidia-device-plugin-daemonset}
+                              nodeLabel: nvidia.com/gpu.deploy.device-plugin
+                              enabledValue: "true"
+                              disabledValue: "false"
+                            - appSelector: {app: nvidia-dcgm}
+                              nodeLabel: nvidia.com/gpu.deploy.dcgm
+                              enabledValue: "true"
+                              disabledValue: "false"
+                            - appSelector: {app: nvidia-dcgm-exporter}
+                              nodeLabel: nvidia.com/gpu.deploy.dcgm-exporter
+                              enabledValue: "true"
+                              disabledValue: "false"
+                            - appSelector: {app: gpu-feature-discovery}
+                              nodeLabel: nvidia.com/gpu.deploy.gpu-feature-discovery
+                              enabledValue: "true"
+                              disabledValue: "false"
         # Mirror of oci-managed's canonical signal: the add-on must be
         # ABSENT (the terraform-oci-okecluster shape, NvidiaGpuPlugin =
         # { remove = true }). No driver-state gate in either phase: the

@@ -1,0 +1,143 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runtime Kind test for the nvsentinel-observe mixin.
+#
+# Installs the observe step via the bundle's own install.sh, sends synthetic
+# GPU fault events into platform-connectors, and asserts the dry-run pipeline
+# carries them to fault-remediation's GPU-scoped COMPONENT_RESET mapping
+# without cordoning or repairing anything. The render tests prove the mapping
+# is configured; only a live pipeline proves fault-remediation loads and
+# applies it. Not wired into `make qualify`: it needs a Kind cluster.
+#
+# Path filter kept narrow for the same reason as nvsentinel-preflight-e2e.yaml.
+
+name: NVSentinel Remediation E2E
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'recipes/mixins/nvsentinel-observe.yaml'
+      - 'recipes/registry.yaml'
+      - 'recipes/components/nvsentinel/**'
+      - 'recipes/components/nvsentinel-mongodb/**'
+      - 'recipes/components/psmdb-operator/**'
+      # The tested overlay inherits kind.yaml, which inherits base.yaml, and
+      # base.yaml is where nvsentinel enters the chain at all.
+      - 'recipes/overlays/h100-kind-training.yaml'
+      - 'recipes/overlays/kind.yaml'
+      - 'recipes/overlays/base.yaml'
+      # The run installs cert-manager, for the Percona cluster's certificates,
+      # and prometheus-operator-crds from the bundle.
+      - 'recipes/components/cert-manager/**'
+      - 'recipes/components/prometheus-operator-crds/**'
+      - 'tests/e2e/nvsentinel-remediation/**'
+      - 'pkg/bundler/deployer/localformat/templates/**'
+      # run.sh sources tools/common and is invoked through a make target.
+      - 'tools/common'
+      - 'Makefile'
+      - '.github/workflows/nvsentinel-remediation-e2e.yaml'
+      - '.github/actions/setup-build-tools/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/load-versions/**'
+      - '.settings.yaml'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: NVSentinel Remediation E2E
+    runs-on: ubuntu-latest
+    # The script's bounded waits sum to ~62 minutes worst case (node Ready 2,
+    # cert-manager 10, Percona datastore 15, nvsentinel rollout 15, event
+    # delivery 7, pipeline logs 12, proto fetch 1), before kind create, go
+    # build and the installs.
+    timeout-minutes: 80
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Prep Kind runner
+        uses: ./.github/actions/prep-kind-runner
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # run.sh's has_tools gate also needs jq and curl, which the runner image
+      # already ships; installing only some of the rest fails the lane before
+      # it exercises anything.
+      - name: Install Kind, kubectl, Helm and yq
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kind: 'true'
+          kind_version: '${{ steps.versions.outputs.kind }}'
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+
+      # KEEP_CLUSTER so the cluster survives for the diagnostics below; the
+      # script's own EXIT trap would otherwise delete it before they run,
+      # leaving a failure with nothing to inspect. The always() step after
+      # diagnostics does the teardown instead.
+      - name: Run nvsentinel-remediation e2e
+        env:
+          KEEP_CLUSTER: 'true'
+        run: make nvsentinel-remediation-e2e
+
+      # run.sh writes its kubeconfig inside a mktemp dir and removes that dir on
+      # exit, so KEEP_CLUSTER leaves the cluster running but no credentials to
+      # reach it. Re-export before querying anything. cancelled() because a
+      # job timeout cancels rather than fails.
+      - name: Collect diagnostics on failure
+        if: ${{ failure() || cancelled() }}
+        run: |
+          set +e
+          cluster=aicr-nvsentinel-remediation-e2e
+          export KUBECONFIG="${RUNNER_TEMP}/remediation-diag.kubeconfig"
+          kind export kubeconfig --name "$cluster" --kubeconfig "$KUBECONFIG" || exit 0
+          kubectl get pods -A
+          kubectl get node -o yaml
+          kubectl -n nvsentinel get pvc,statefulset,deployment,perconaservermongodb,certificate
+          for d in fault-quarantine node-drainer fault-remediation; do
+            kubectl -n nvsentinel logs "deployment/$d" --tail=200
+          done
+          kubectl -n nvsentinel logs daemonset/platform-connectors --tail=200
+          kubectl -n nvsentinel logs deployment/psmdb-operator --tail=200
+          kubectl -n nvsentinel logs statefulset/nvsentinel-mongodb-rs0 -c mongod --tail=100
+
+      - name: Delete Kind cluster
+        if: ${{ always() }}
+        run: kind delete cluster --name aicr-nvsentinel-remediation-e2e || true

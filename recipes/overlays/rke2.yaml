@@ -88,6 +88,20 @@ spec:
           enabled: true
           nriPluginEnabled: true
 
+    # janitor's GPU reset Job requests no RuntimeClass: NRI registers no
+    # runtime handler, and the Job sets NVIDIA_VISIBLE_DEVICES=void, so it
+    # needs no runtime injection. Inert unless the nvsentinel-remediation
+    # mixin enables janitor.
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        janitor:
+          config:
+            controllers:
+              gpuReset:
+                resetJob:
+                  runtimeClassName: ""
+
     # Move the node-exporter off 9100 — see the port note above.
     - name: kube-prometheus-stack
       type: Helm

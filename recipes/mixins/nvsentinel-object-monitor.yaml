@@ -58,10 +58,10 @@
 # at: TestObjectMonitorOperandIdentityPinnedToVerifiedVersion fails when either
 # component is bumped in recipes/registry.yaml, forcing revalidation first.
 #
-# isFatal: true is deliberate, not inherited. With no quarantine component
-# enabled in this repo it only produces a node condition today; once
-# remediation lands (#1014) these policies would drive a real cordon/drain,
-# correct for a node that can no longer run GPU or RDMA workloads.
+# isFatal: true is deliberate, not inherited. Alone it only produces a node
+# condition; composed with nvsentinel-quarantine or nvsentinel-remediation
+# these policies drive a real cordon/drain, correct for a node that can no
+# longer run GPU or RDMA workloads.
 # quarantineOverrides/drainOverrides are left unset so that behavior follows
 # whatever mode the recipe's remediation config picks.
 #

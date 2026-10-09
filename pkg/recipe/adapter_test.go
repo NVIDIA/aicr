@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -875,7 +877,7 @@ func TestGetManifestContentWithProvider_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing manifest, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 	if !stderrors.Is(err, fs.ErrNotExist) {
