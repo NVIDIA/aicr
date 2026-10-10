@@ -37,8 +37,10 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -327,14 +329,23 @@ func derive(ctx context.Context, entriesDir, version, commit, platform, arch str
 
 // resolveEntry returns the images and runtime fetches that entry's blocks
 // matching platform and arch reach, including files spliced in at any depth.
+// It returns an error if a file it reads resolves outside entriesDir.
 func resolveEntry(entriesDir, entry, platform, arch string) (images []string, fetches []runtimeFetch, err error) {
-	data, err := os.ReadFile(filepath.Join(entriesDir, entry+".yaml")) //nolint:gosec // bounded by entriesDir
+	fields := map[string]interface{}{entryContextKey: entry}
+	root, err := filepath.EvalSymlinks(entriesDir)
 	if err != nil {
-		return nil, nil, errors.WrapWithContext(errors.ErrCodeNotFound, "read catalog entry", err,
-			map[string]interface{}{entryContextKey: entry})
+		return nil, nil, errors.WrapWithContext(errors.ErrCodeNotFound, "resolve catalog root", err, fields)
+	}
+	path, err := resolveInRoot(root, filepath.Join(root, entry+".yaml"), fields)
+	if err != nil {
+		return nil, nil, err
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // confined to root by resolveInRoot
+	if err != nil {
+		return nil, nil, errors.WrapWithContext(errors.ErrCodeInternal, "read catalog entry", err, fields)
 	}
 
-	s := &entryScan{entriesDir: entriesDir, entry: entry, seen: map[string]struct{}{}}
+	s := &entryScan{root: root, entry: entry, seen: map[string]struct{}{}}
 	for _, b := range splitBlocks(string(data)) {
 		if !b.sel.matches(platform, arch) {
 			continue
@@ -346,13 +357,34 @@ func resolveEntry(entriesDir, entry, platform, arch string) (images []string, fe
 	return s.images, s.fetches, nil
 }
 
-// entryScan accumulates the images and runtime fetches one catalog entry reaches.
+// resolveInRoot returns path with symlinks resolved. It returns an error if the
+// resolved path does not exist or is not under root, which must itself be
+// symlink-free.
+func resolveInRoot(root, path string, fields map[string]interface{}) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		code := errors.ErrCodeInternal
+		if stderrors.Is(err, fs.ErrNotExist) {
+			code = errors.ErrCodeNotFound
+		}
+		return "", errors.WrapWithContext(code, "resolve catalog file", err, fields)
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"catalog file resolves outside the catalog", err, fields)
+	}
+	return resolved, nil
+}
+
+// entryScan accumulates the images and runtime fetches one catalog entry
+// reaches. root is the catalog's entries directory with symlinks resolved.
 type entryScan struct {
-	entriesDir string
-	entry      string
-	seen       map[string]struct{}
-	images     []string
-	fetches    []runtimeFetch
+	root    string
+	entry   string
+	seen    map[string]struct{}
+	images  []string
+	fetches []runtimeFetch
 }
 
 // scan records the images and runtime fetches in body and, if render is true,
@@ -381,19 +413,27 @@ func (s *entryScan) scan(body string, render bool) error {
 }
 
 // include scans the file d splices in, at most once per entry. It returns an
-// error if the target is outside the catalog or missing, including a missing
-// includeTemplate or includeFile target, which upstream renders as empty.
+// error if the target is outside the catalog, including through a symlink, or
+// missing, including a missing includeTemplate or includeFile target, which
+// upstream renders as empty.
 func (s *entryScan) include(d directive) error {
+	fields := map[string]interface{}{"directive": d.fn, "ref": d.ref, entryContextKey: s.entry}
 	if !filepath.IsLocal(d.ref) {
 		return errors.WrapWithContext(errors.ErrCodeInvalidRequest,
-			"template directive target is not a path inside the catalog", nil,
-			map[string]interface{}{"directive": d.fn, "ref": d.ref, entryContextKey: s.entry})
+			"template directive target is not a path inside the catalog", nil, fields)
 	}
-	base := filepath.Join(s.entriesDir, s.entry)
+	base := filepath.Join(s.root, s.entry)
 	if d.fn == directiveLib {
-		base = filepath.Join(s.entriesDir, libPrefix)
+		base = filepath.Join(s.root, libPrefix)
 	}
-	path := filepath.Join(base, d.ref)
+
+	// An optional file and one a catalog layout change moved look the same
+	// here, and rendering the moved one as empty would drop its content from
+	// the closure with no diff.
+	path, err := resolveInRoot(s.root, filepath.Join(base, d.ref), fields)
+	if err != nil {
+		return err
+	}
 
 	// Reading each target once also terminates a reference cycle. A target
 	// carries no selectors, since the block that splices it in already matched.
@@ -403,13 +443,9 @@ func (s *entryScan) include(d directive) error {
 	}
 	s.seen[key] = struct{}{}
 
-	data, err := os.ReadFile(path) //nolint:gosec // confined to entriesDir by the IsLocal check above
+	data, err := os.ReadFile(path) //nolint:gosec // confined to root by resolveInRoot
 	if err != nil {
-		// An optional file and one a catalog layout change moved look the
-		// same here, and rendering the moved one as empty would drop its
-		// content from the closure with no diff.
-		return errors.WrapWithContext(errors.ErrCodeNotFound, "read template directive target", err,
-			map[string]interface{}{"directive": d.fn, "ref": d.ref, entryContextKey: s.entry})
+		return errors.WrapWithContext(errors.ErrCodeInternal, "read template directive target", err, fields)
 	}
 	return s.scan(string(data), d.fn != directiveIncludeFile)
 }

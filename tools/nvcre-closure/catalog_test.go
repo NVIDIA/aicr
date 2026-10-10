@@ -19,6 +19,9 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 const testEntries = "testdata/entries"
@@ -131,7 +134,7 @@ func TestIncludeRejectsEscapingReference(t *testing.T) {
 			t.Run(fn+" "+ref, func(t *testing.T) {
 				t.Parallel()
 
-				s := &entryScan{entriesDir: testEntries, entry: "training/nested", seen: map[string]struct{}{}}
+				s := &entryScan{root: testEntries, entry: "training/nested", seen: map[string]struct{}{}}
 				if err := s.include(directive{fn: fn, ref: ref}); err == nil {
 					t.Errorf("include(%s %q) = nil error, want rejection", fn, ref)
 				}
@@ -325,6 +328,79 @@ func TestResolveEntryMissingIncludeIsAnError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveEntrySymlinks(t *testing.T) {
+	t.Parallel()
+
+	symlink := func(t *testing.T, target, link string) {
+		t.Helper()
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatalf("symlink %s -> %s: %v", link, target, err)
+		}
+	}
+
+	t.Run("lib target escaping the catalog is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		outside := writeCatalog(t, map[string]string{"secret.yaml": "image: example.invalid/outside:v1\n"})
+		dir := writeCatalog(t, map[string]string{
+			"training/e.yaml": "dependencies:\n{{ lib \"deps/escape.yaml\" . }}\n",
+			"_lib/deps/.keep": "",
+		})
+		symlink(t, filepath.Join(outside, "secret.yaml"), filepath.Join(dir, "_lib", "deps", "escape.yaml"))
+
+		_, _, err := resolveEntry(dir, "training/e", "aws", "h100")
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+
+	t.Run("entry escaping the catalog is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		outside := writeCatalog(t, map[string]string{"entry.yaml": "image: example.invalid/outside:v1\n"})
+		dir := writeCatalog(t, map[string]string{"training/.keep": ""})
+		symlink(t, filepath.Join(outside, "entry.yaml"), filepath.Join(dir, "training", "e.yaml"))
+
+		_, _, err := resolveEntry(dir, "training/e", "aws", "h100")
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+
+	t.Run("lib target symlinked within the catalog is read", func(t *testing.T) {
+		t.Parallel()
+
+		dir := writeCatalog(t, map[string]string{
+			"training/e.yaml":     "dependencies:\n{{ lib \"deps/alias.yaml\" . }}\n",
+			"_lib/deps/real.yaml": "image: example.invalid/inside:v1\n",
+		})
+		symlink(t, "real.yaml", filepath.Join(dir, "_lib", "deps", "alias.yaml"))
+
+		images, _, err := resolveEntry(dir, "training/e", "aws", "h100")
+		if err != nil {
+			t.Fatalf("resolveEntry: %v", err)
+		}
+		if !slices.Equal(images, []string{"example.invalid/inside:v1"}) {
+			t.Errorf("images = %v, want the symlinked lib's image", images)
+		}
+	})
+
+	t.Run("catalog reached through a symlink is read", func(t *testing.T) {
+		t.Parallel()
+
+		dir := writeCatalog(t, map[string]string{
+			"training/e.yaml":  "dependencies:\n{{ lib \"deps/a.yaml\" . }}\n",
+			"_lib/deps/a.yaml": "image: example.invalid/a:v1\n",
+		})
+		link := filepath.Join(t.TempDir(), "entries")
+		symlink(t, dir, link)
+
+		images, _, err := resolveEntry(link, "training/e", "aws", "h100")
+		if err != nil {
+			t.Fatalf("resolveEntry: %v", err)
+		}
+		if !slices.Equal(images, []string{"example.invalid/a:v1"}) {
+			t.Errorf("images = %v, want the lib's image", images)
+		}
+	})
 }
 
 func TestResolveEntryMissingEntryIsAnError(t *testing.T) {
