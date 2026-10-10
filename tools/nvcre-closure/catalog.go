@@ -17,6 +17,7 @@ package main
 import (
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -28,8 +29,11 @@ import (
 // therefore line-based over whole blocks rather than a document walk.
 var (
 	templateActionPattern = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
-	directivePattern      = regexp.MustCompile(`(?:^|[\s(|])(lib|includeTemplate|includeFile)\b(\s+"([^"]*)")?`)
-	imageRefPattern       = regexp.MustCompile(`^\s*(?:-\s+)?image:\s*["']?([^"'\s]+)["']?\s*$`)
+	// A whole string literal is its own alternative, so a directive name
+	// inside a string argument is consumed with the literal and never matches.
+	directivePattern = regexp.MustCompile(`(?:^|[\s(|])(lib|includeTemplate|includeFile)\b(?:\s+(` +
+		stringLiteralRegex + `))?|(?:` + stringLiteralRegex + `)`)
+	imageRefPattern = regexp.MustCompile(`^\s*(?:-\s+)?image:\s*["']?([^"'\s]+)["']?\s*$`)
 	// Runtime fetches defeat digest pinning: the bytes arrive at pod start from
 	// outside the image, so a mirrored registry is not sufficient to run the
 	// path disconnected.
@@ -70,20 +74,30 @@ const (
 	directiveIncludeFile     = "includeFile"
 )
 
+// stringLiteralRegex matches an interpreted or raw Go string literal.
+const stringLiteralRegex = `"(?:\\.|[^"\\])*"|` + "`[^`]*`"
+
 // directive is one file-splicing template call and the file it names.
 type directive struct {
 	fn  string
 	ref string
 }
 
-// scanDirectives returns the file-splicing calls in body's template actions. It
-// returns an error for a call whose argument is not a string literal.
+// scanDirectives returns the file-splicing calls in body's template actions,
+// skipping template comments. It returns an error for a call whose argument is
+// not a string literal.
 func scanDirectives(body string) ([]directive, error) {
 	var out []directive
 	for _, action := range templateActionPattern.FindAllString(body, -1) {
 		inner := strings.TrimSuffix(strings.TrimPrefix(action, "{{"), "}}")
 		inner = strings.TrimSuffix(strings.TrimPrefix(inner, "-"), "-")
+		if strings.HasPrefix(strings.TrimSpace(inner), "/*") {
+			continue
+		}
 		for _, m := range directivePattern.FindAllStringSubmatch(inner, -1) {
+			if m[1] == "" {
+				continue
+			}
 			// A non-literal target is known only at render time, so skipping
 			// it would leave its content out of the closure.
 			if m[2] == "" {
@@ -92,7 +106,13 @@ func scanDirectives(body string) ([]directive, error) {
 						"and the closure would omit whatever it splices in", nil,
 					map[string]interface{}{"action": action})
 			}
-			out = append(out, directive{fn: m[1], ref: m[3]})
+			ref, err := strconv.Unquote(m[2])
+			if err != nil {
+				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+					"template directive target is not a valid string literal", err,
+					map[string]interface{}{"action": action})
+			}
+			out = append(out, directive{fn: m[1], ref: ref})
 		}
 	}
 	return out, nil

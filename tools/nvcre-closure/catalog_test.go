@@ -198,6 +198,33 @@ func TestScanDirectives(t *testing.T) {
 			body: `echo lib "deps/a.yaml" includeTemplate "x"`,
 		},
 		{
+			name: "directive word inside a string argument",
+			body: `{{ printf "some lib text" }}`,
+		},
+		{
+			name: "directive word inside a raw string argument",
+			body: "{{ printf `uses includeFile here` }}",
+		},
+		{
+			name: "template comments naming directives",
+			body: `{{/* lib is spliced below */}} {{- /* includeTemplate "x" */ -}}`,
+		},
+		{
+			name: "string argument ahead of a directive",
+			body: `{{ printf "%s lib" (lib "deps/a.yaml" .) }}`,
+			want: []directive{{fn: directiveLib, ref: "deps/a.yaml"}},
+		},
+		{
+			name: "raw string target",
+			body: "{{ lib `deps/a.yaml` . }}",
+			want: []directive{{fn: directiveLib, ref: "deps/a.yaml"}},
+		},
+		{
+			name: "escaped quote in target",
+			body: `{{ lib "deps/a\"b.yaml" . }}`,
+			want: []directive{{fn: directiveLib, ref: `deps/a"b.yaml`}},
+		},
+		{
 			name:    "lib with a field argument",
 			body:    `{{ lib .LibPath . }}`,
 			wantErr: true,
