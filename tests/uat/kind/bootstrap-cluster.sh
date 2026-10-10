@@ -21,8 +21,13 @@
 # must stand the cluster up identically. Written out twice, the two copies
 # drift, and the drift surfaces as an assertion that passes locally and fails
 # in CI, or the reverse: the failure looks like a product defect and is not
-# one. bootstrap-cluster_test.sh fails if a second copy of `kind create
-# cluster` appears under .github/workflows/ or tests/uat/.
+# one. bootstrap-cluster_test.sh fails if a workflow or a script under
+# tests/uat/ runs a `kind create cluster` whose --name or --config names this
+# cluster or slurm-cluster-config.yaml, directly, through a variable or
+# ${{ env.VAR }} the same file assigns, or through a workflow expression the
+# file cannot resolve; a variable assigned such an expression counts too. A
+# lane that creates a cluster of its own topology and name is not a copy of
+# this one and is not flagged.
 #
 # Usage:
 #   tests/uat/kind/bootstrap-cluster.sh [cluster-name]

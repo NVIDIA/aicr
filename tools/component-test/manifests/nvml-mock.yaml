@@ -12,126 +12,817 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# nvml-mock DaemonSet - Fallback manifest for GPU simulation
+# nvml-mock fallback for setup-gpu-mock.sh, applied when Helm is missing or
+# the chart install fails.
 #
-# This manifest is used when the nvml-mock Helm chart from
-# NVIDIA/k8s-test-infra is not available via OCI registry.
+# Rendered from the pinned chart rather than written by hand, so the fallback
+# runs the pod the Helm path runs: label app.kubernetes.io/name=nvml-mock,
+# container node-agent, and the same host mounts, NFD features directory
+# included. The hand-written manifest this replaces had drifted from all
+# three, and started /scripts/entrypoint.sh, which the pinned image does not
+# ship.
 #
-# Placeholder values (NVML_MOCK_IMAGE_PLACEHOLDER, NVML_MOCK_VERSION_PLACEHOLDER,
-# GPU_COUNT_PLACEHOLDER, GPU_PROFILE_PLACEHOLDER) are substituted by
-# setup-gpu-mock.sh at deploy time.
+# The ConfigMap is one GPU profile, verbatim, so the fallback serves that
+# profile alone. setup-gpu-mock.sh reads the lines below and refuses a
+# different profile or chart pin instead of deploying a mismatched mock. The
+# image placeholders are filled from the same pins as the Helm path, so the
+# image is pulled by digest here too.
+#
+# nvml-mock-chart-version: 0.4.0-rc2
+# nvml-mock-chart-digest: sha256:341389c379afea8dfe53e7af46ad8199a6588d3629d2005985ccbdcde35511ce
+# nvml-mock-profile: a100
+#
+# To regenerate after a chart pin bump, render from the new nvml_mock_chart_digest
+# in .settings.yaml with the same arguments:
+#   helm template nvml-mock oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock@<digest> \
+#     --namespace nvml-mock --set gpu.profile=a100 \
+#     --set gpu.count=8 --set image.repository=NVML_MOCK_IMAGE_PLACEHOLDER \
+#     --set image.tag=NVML_MOCK_VERSION_PLACEHOLDER \
+#     --set driverVersion=DRIVER_VERSION_PLACEHOLDER
+# then prepend the `Namespace nvml-mock` document below (helm template emits
+# none, and setup-gpu-mock.sh applies into nvml-mock without creating it),
+# set the GPU_COUNT env value to "GPU_COUNT_PLACEHOLDER" (the only line
+# gpu.count reaches), delete the helm.sh/chart and managed-by labels, the
+# integrations-fgo comment block and trailing whitespace, and update the
+# chart version and digest above.
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: nvml-mock
 ---
+# Source: nvml-mock/templates/network-policy-ibping.yaml
+# The fabric relay listens on 0.0.0.0:18515 without
+# authentication. Admitting only peer nvml-mock pods keeps that surface
+# reachable by its real clients alone.
+# Egress stays open so DNS peer discovery and registration still work.
+#
+# kindnetd enforces NetworkPolicy on current Kind releases, so this is
+# load-bearing in local e2e, not only on Calico/Cilium.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nvml-mock-ibping
+  labels:
+    app.kubernetes.io/name: nvml-mock
+    app.kubernetes.io/instance: nvml-mock
+    app.kubernetes.io/version: "550.163.01"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nvml-mock
+      app.kubernetes.io/instance: nvml-mock
+      app.kubernetes.io/component: daemon
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Name + component, not instance: the fabric spans every daemon pod
+        # cluster-wide and ibping-multinode deploys one release per node, so
+        # instance scoping would drop cross-release REGISTER. The component
+        # label keeps the NRI sidecar out.
+        #
+        # namespaceSelector {} is load-bearing, not redundant: a bare
+        # podSelector matches only this policy's own namespace, silently
+        # dropping REGISTER from a fleet split across namespaces.
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nvml-mock
+              app.kubernetes.io/component: daemon
+      ports:
+        - port: ibping
+          protocol: TCP
+
+---
+# Source: nvml-mock/templates/rbac.yaml
+# Copyright 2026 NVIDIA CORPORATION
+# SPDX-License-Identifier: Apache-2.0
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: nvml-mock
-  namespace: nvml-mock
+  labels:
+    app.kubernetes.io/name: nvml-mock
+    app.kubernetes.io/instance: nvml-mock
+    app.kubernetes.io/version: "550.163.01"
+
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: nvml-mock
-rules:
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: nvml-mock
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: nvml-mock
-subjects:
-  - kind: ServiceAccount
-    name: nvml-mock
-    namespace: nvml-mock
----
+# Source: nvml-mock/templates/configmap.yaml
+# Copyright 2026 NVIDIA CORPORATION
+# SPDX-License-Identifier: Apache-2.0
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nvml-mock-config
-  namespace: nvml-mock
+  labels:
+    app.kubernetes.io/name: nvml-mock
+    app.kubernetes.io/instance: nvml-mock
+    app.kubernetes.io/version: "550.163.01"
 data:
   config.yaml: |
-    profile: GPU_PROFILE_PLACEHOLDER
-    gpuCount: GPU_COUNT_PLACEHOLDER
+    # Mock NVML Configuration: DGX A100
+    # Full configuration for nvidia-smi -x -q compatibility
+    # Use: export MOCK_NVML_CONFIG=/path/to/this/file.yaml
+
+    version: "1.0"
+
+    # =============================================================================
+    # System-level configuration
+    # =============================================================================
+    system:
+      driver_version: "550.163.01"
+      nvml_version: "12.550.163.01"
+      cuda_version: "12.4"
+      cuda_version_major: 12
+      cuda_version_minor: 4
+
+    # =============================================================================
+    # Default device configuration (applied to all devices unless overridden)
+    # =============================================================================
+    device_defaults:
+      # ---------------------------------------------------------------------------
+      # Basic identification
+      # ---------------------------------------------------------------------------
+      name: "NVIDIA A100-SXM4-40GB"
+      brand: "nvidia"                    # nvidia, tesla, quadro, geforce, etc.
+      serial: "1324821083812"
+      board_part_number: "692-2G506-0200-002"
+      vbios_version: "92.00.45.00.03"
+
+      # ---------------------------------------------------------------------------
+      # Architecture
+      # ---------------------------------------------------------------------------
+      architecture: "ampere"
+      compute_capability:
+        major: 8
+        minor: 0
+      num_gpu_cores: 6912               # CUDA cores
+
+      # ---------------------------------------------------------------------------
+      # InfoROM versions
+      # ---------------------------------------------------------------------------
+      inforom:
+        image_version: "G506.0200.00.04"
+        oem_object: "2.0"
+        ecc_object: "6.16"
+        pwr_object: "N/A"
+
+      # ---------------------------------------------------------------------------
+      # Memory configuration
+      # ---------------------------------------------------------------------------
+      memory:
+        total_bytes: 42949672960        # 40 GiB HBM2e
+        reserved_bytes: 611319808       # ~583 MiB reserved
+        free_bytes: 42338353152         # total - reserved at idle
+        used_bytes: 0
+        memory_bus_width: 5120
+
+      bar1_memory:
+        total_bytes: 68719476736        # 64 GiB
+        free_bytes: 68719476736
+        used_bytes: 0
+
+      # ---------------------------------------------------------------------------
+      # PCI configuration
+      # ---------------------------------------------------------------------------
+      pci:
+        device_id: 0x20B010DE           # A100 SXM4 40GB
+        subsystem_id: 0x134F10DE
+        # bus_id is auto-generated per device if not specified
+
+      pcie:
+        max_link_gen: 4                 # PCIe Gen4
+        current_link_gen: 4
+        max_link_width: 16              # x16
+        current_link_width: 16
+        replay_counter: 0
+        tx_throughput_kbps: 0           # KB/s
+        rx_throughput_kbps: 0
+
+      # ---------------------------------------------------------------------------
+      # Power configuration
+      # ---------------------------------------------------------------------------
+      power:
+        management_supported: true
+        management_mode: "enabled"
+        default_limit_mw: 400000        # 400W
+        enforced_limit_mw: 400000
+        min_limit_mw: 100000            # 100W
+        max_limit_mw: 400000            # 400W
+        current_draw_mw: 72000          # 72W idle
+        power_state: "P0"               # P0-P12
+        total_energy_consumption_mj: 500000  # millijoules since boot
+
+      # ---------------------------------------------------------------------------
+      # Thermal configuration
+      # ---------------------------------------------------------------------------
+      thermal:
+        temperature_gpu_c: 33           # Idle temperature
+        temperature_memory_c: 31
+        shutdown_threshold_c: 92
+        slowdown_threshold_c: 87
+        max_operating_c: 83
+        target_temperature_c: 83        # For auto fan control
+
+      # ---------------------------------------------------------------------------
+      # Fan configuration (N/A for SXM form factor)
+      # ---------------------------------------------------------------------------
+      fan:
+        count: 0                        # SXM has no fans (liquid cooled)
+        speed_percent: "N/A"
+        target_speed_percent: "N/A"
+
+      # ---------------------------------------------------------------------------
+      # Clock speeds (MHz)
+      # ---------------------------------------------------------------------------
+      clocks:
+        graphics_current: 210           # Idle
+        graphics_max: 1410
+        graphics_app: 1410              # Application clock setting
+        graphics_app_default: 1410
+        sm_current: 210
+        sm_max: 1410
+        memory_current: 1215
+        memory_max: 1215
+        memory_app: 1215
+        memory_app_default: 1215
+        video_current: 585
+        video_max: 1290
+
+      # ---------------------------------------------------------------------------
+      # Clocks throttle reasons (bitmask reasons)
+      # ---------------------------------------------------------------------------
+      clocks_throttle_reasons:
+        gpu_idle: true                  # Clock is idle
+        applications_clocks_setting: false
+        sw_power_cap: false
+        hw_slowdown: false
+        hw_thermal_slowdown: false
+        hw_power_brake_slowdown: false
+        sync_boost: false
+        sw_thermal_slowdown: false
+        display_clocks_setting: false
+
+      # ---------------------------------------------------------------------------
+      # Supported clocks (for nvidia-smi -q -d SUPPORTED_CLOCKS)
+      # ---------------------------------------------------------------------------
+      supported_clocks:
+        memory_clocks:
+          - freq_mhz: 1215
+            graphics_clocks: [210, 420, 630, 840, 1050, 1215, 1275, 1335, 1410]
+
+      # ---------------------------------------------------------------------------
+      # Performance state
+      # ---------------------------------------------------------------------------
+      performance_state: "P0"           # P0 = max performance
+
+      # ---------------------------------------------------------------------------
+      # Utilization (percentage, 0-100)
+      # ---------------------------------------------------------------------------
+      utilization:
+        gpu: 0
+        memory: 0
+        encoder: 0
+        decoder: 0
+        jpeg: 0
+        ofa: 0                          # Optical flow accelerator
+
+      # ---------------------------------------------------------------------------
+      # Dynamic utilization (#506)
+      #
+      # Live without any Helm overlay, so `utilization.gpu` -- and every
+      # DCGM_FI_PROF_* fraction derived from it -- is never a constant 0.
+      # The driver is elapsed time, NOT workload: these numbers move on a fully
+      # idle node and do not rise under load. gpu_min is deliberately > 0 so
+      # "utilization is reported" is a deterministic assertion, not a flaky one.
+      # ---------------------------------------------------------------------------
+      dynamic_metrics:
+        utilization:
+          pattern: "steady"
+          gpu_min: 10
+          gpu_max: 45
+          memory_min: 5
+          memory_max: 25
+
+      # ---------------------------------------------------------------------------
+      # Encoder/Decoder statistics
+      # ---------------------------------------------------------------------------
+      encoder_stats:
+        session_count: 0
+        average_fps: 0
+        average_latency_us: 0
+
+      fbc_stats:                        # Frame buffer capture
+        session_count: 0
+        average_fps: 0
+        average_latency_us: 0
+
+      # ---------------------------------------------------------------------------
+      # ECC configuration
+      # ---------------------------------------------------------------------------
+      ecc:
+        mode_current: "enabled"
+        mode_pending: "enabled"
+        default_mode: "enabled"
+        # Error counts (all zeros for clean GPU)
+        errors:
+          volatile:
+            single_bit:
+              device_memory: 0
+              l1_cache: 0
+              l2_cache: 0
+              register_file: 0
+              texture_memory: 0
+              total: 0
+            double_bit:
+              device_memory: 0
+              l1_cache: 0
+              l2_cache: 0
+              register_file: 0
+              texture_memory: 0
+              total: 0
+          aggregate:
+            single_bit:
+              device_memory: 0
+              l1_cache: 0
+              l2_cache: 0
+              register_file: 0
+              texture_memory: 0
+              total: 0
+            double_bit:
+              device_memory: 0
+              l1_cache: 0
+              l2_cache: 0
+              register_file: 0
+              texture_memory: 0
+              total: 0
+
+      # ---------------------------------------------------------------------------
+      # Retired pages
+      # ---------------------------------------------------------------------------
+      retired_pages:
+        single_bit_retirement:
+          count: 0
+          addresses: []
+        double_bit_retirement:
+          count: 0
+          addresses: []
+        pending_blacklist: false
+        pending_retirement: false
+
+      # ---------------------------------------------------------------------------
+      # Remapped rows
+      # ---------------------------------------------------------------------------
+      remapped_rows:
+        correctable: 0
+        uncorrectable: 0
+        pending: false
+        failure_occurred: false
+        # Bank remap availability: every bank still holds its full complement of
+        # spare rows, which is what a GPU that has never remapped reports. Row
+        # remapping is Ampere and later, so a pre-Ampere profile (t4) omits this
+        # block and the mock reports the histogram unsupported, as that hardware
+        # does. The bank count follows the 16-banks-per-GiB ratio a real 40 GiB
+        # A100 reports.
+        availability_histogram:
+          max: 640
+          high: 0
+          partial: 0
+          low: 0
+          none: 0
+
+      # ---------------------------------------------------------------------------
+      # Display configuration
+      # ---------------------------------------------------------------------------
+      display:
+        mode: "disabled"                # No display output on A100
+        active: "disabled"
+
+      # ---------------------------------------------------------------------------
+      # Persistence mode
+      # ---------------------------------------------------------------------------
+      persistence_mode: "enabled"       # Typically enabled on servers
+
+      # ---------------------------------------------------------------------------
+      # Compute mode
+      # ---------------------------------------------------------------------------
+      compute_mode: "default"           # default, exclusive_thread, prohibited, exclusive_process
+
+      # ---------------------------------------------------------------------------
+      # MIG configuration
+      # ---------------------------------------------------------------------------
+      mig:
+        mode_current: "disabled"
+        mode_pending: "disabled"
+        max_gpu_instances: 7            # A100 supports up to 7 MIG instances
+        # GPU instances would be defined here if MIG enabled
+
+      # ---------------------------------------------------------------------------
+      # GPU operation mode (GOM)
+      # ---------------------------------------------------------------------------
+      gpu_operation_mode:
+        current: "all_on"               # all_on, compute, low_dp
+        pending: "all_on"
+
+      # ---------------------------------------------------------------------------
+      # Driver model (Windows only)
+      # ---------------------------------------------------------------------------
+      driver_model:
+        current: "N/A"                  # Linux: N/A, Windows: WDDM or TCC
+        pending: "N/A"
+
+      # ---------------------------------------------------------------------------
+      # Accounting mode
+      # ---------------------------------------------------------------------------
+      accounting:
+        mode: "disabled"
+        buffer_size: 4000               # Max PIDs tracked
+
+      # ---------------------------------------------------------------------------
+      # Virtualization
+      # ---------------------------------------------------------------------------
+      virtualization:
+        mode: "none"                    # none, passthrough, vgpu
+        host_vgpu_mode: "N/A"
+
+      # ---------------------------------------------------------------------------
+      # GSP Firmware
+      # ---------------------------------------------------------------------------
+      gsp_firmware:
+        mode: "enabled"                 # GSP enabled on newer drivers
+        version: "550.54.15"
+
+      # ---------------------------------------------------------------------------
+      # Processes (empty at idle)
+      # ---------------------------------------------------------------------------
+      processes: []
+
+    # =============================================================================
+    # Device-specific overrides (indexed 0-7 for DGX A100)
+    # Only specify fields that differ from device_defaults
+    # =============================================================================
+    devices:
+      - index: 0
+        uuid: "GPU-12345678-1234-1234-1234-123456780000"
+        serial: "1324821083800"
+        pci:
+          bus_id: "0000:07:00.0"
+        minor_number: 0
+
+      - index: 1
+        uuid: "GPU-12345678-1234-1234-1234-123456780001"
+        serial: "1324821083801"
+        pci:
+          bus_id: "0000:0F:00.0"
+        minor_number: 1
+
+      - index: 2
+        uuid: "GPU-12345678-1234-1234-1234-123456780002"
+        serial: "1324821083802"
+        pci:
+          bus_id: "0000:47:00.0"
+        minor_number: 2
+
+      - index: 3
+        uuid: "GPU-12345678-1234-1234-1234-123456780003"
+        serial: "1324821083803"
+        pci:
+          bus_id: "0000:4E:00.0"
+        minor_number: 3
+
+      - index: 4
+        uuid: "GPU-12345678-1234-1234-1234-123456780004"
+        serial: "1324821083804"
+        pci:
+          bus_id: "0000:87:00.0"
+        minor_number: 4
+
+      - index: 5
+        uuid: "GPU-12345678-1234-1234-1234-123456780005"
+        serial: "1324821083805"
+        pci:
+          bus_id: "0000:90:00.0"
+        minor_number: 5
+
+      - index: 6
+        uuid: "GPU-12345678-1234-1234-1234-123456780006"
+        serial: "1324821083806"
+        pci:
+          bus_id: "0000:B7:00.0"
+        minor_number: 6
+
+      - index: 7
+        uuid: "GPU-12345678-1234-1234-1234-123456780007"
+        serial: "1324821083807"
+        pci:
+          bus_id: "0000:BD:00.0"
+        minor_number: 7
+
+    # =============================================================================
+    # NVLink topology
+    # =============================================================================
+    nvlink:
+      version: 3
+      links_per_gpu: 12
+      bandwidth_per_link_mbps: 25781    # NVLink3 25.781 GB/s/link unidirectional (`nvlink -s`); 12 links ~= 309 GB/s/GPU (600 GB/s bidir)
+      c2c_enabled: false                # no Grace C2C on DGX A100
+      # DGX A100: 6x NVSwitch -> NV12 all-to-all. Switch-link auto-expansion
+      # (switches declared + links_per_gpu > 0, and no explicit per-device links)
+      # makes the engine synthesize 12 active links per GPU fanned round-robin
+      # across these NVSwitches, so `nvidia-smi topo -m` shows NV12 between every
+      # GPU pair. No fabricmanager coupling: A100 predates the GpuFabricInfo NVML
+      # API (Hopper+), so there is deliberately no device_defaults.fabric block and
+      # nvmlDeviceGetGpuFabricInfo returns NOT_SUPPORTED.
+      switches:
+        - bdf: "0000:01:00.0"
+          uuid: "NVSwitch-A100-0000-0000-0000-000000000000"
+        - bdf: "0000:02:00.0"
+          uuid: "NVSwitch-A100-0000-0000-0000-000000000001"
+        - bdf: "0000:03:00.0"
+          uuid: "NVSwitch-A100-0000-0000-0000-000000000002"
+        - bdf: "0000:04:00.0"
+          uuid: "NVSwitch-A100-0000-0000-0000-000000000003"
+        - bdf: "0000:05:00.0"
+          uuid: "NVSwitch-A100-0000-0000-0000-000000000004"
+        - bdf: "0000:06:00.0"
+          uuid: "NVSwitch-A100-0000-0000-0000-000000000005"
+
+    # =============================================================================
+    # InfiniBand topology - 1 ConnectX-6 HDR HCA per GPU (typical DGX A100)
+    # =============================================================================
+    infiniband:
+      enabled: true
+      hca_type: "MT4123"                # ConnectX-6
+      fw_version: "20.36.1010"
+      hw_rev: "0x0"
+      board_id: "MT_0000000223"
+      link_layer: "InfiniBand"
+      rate_gbps: 200                    # HDR
+      port_state: "ACTIVE"
+      phys_state: "LinkUp"
+      hcas_per_gpu: 1
+      guid_prefix: "a288c2:0300:ab"
+      node_desc_template: "{node_name} mlx5_{idx}"
+
+    # =============================================================================
+    # PCIe topology - 2 NUMA nodes (dual EPYC), 4 GPUs each.
+    # Consumed by `render-pci-sysfs` to materialize a fake /sys/bus/pci tree
+    # under MOCK_PCI_ROOT. C consumers such as `lspci` resolve the PCIe root
+    # complex through these symlinks. The NVIDIA DRA driver does NOT: it is a
+    # Go binary, and Go's os package issues raw syscalls that the LD_PRELOAD
+    # shim cannot intercept, so `dra.k8s.io/pcieRoot` stays absent from the
+    # ResourceSlices it publishes. See issue #265.
+    # =============================================================================
+    pcie_topology:
+      root_complexes:
+        - id: "pci0000:00"
+          numa_node: 0
+          devices:
+            - "0000:07:00.0"
+            - "0000:0F:00.0"
+            - "0000:47:00.0"
+            - "0000:4E:00.0"
+        - id: "pci0000:80"
+          numa_node: 1
+          devices:
+            - "0000:87:00.0"
+            - "0000:90:00.0"
+            - "0000:B7:00.0"
+            - "0000:BD:00.0"
+
+
 ---
+# Source: nvml-mock/templates/service-ibping.yaml
+# Copyright 2026 NVIDIA CORPORATION
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v1
+kind: Service
+metadata:
+  name: nvml-mock-ibping
+  labels:
+    app.kubernetes.io/name: nvml-mock
+    app.kubernetes.io/instance: nvml-mock
+    app.kubernetes.io/version: "550.163.01"
+spec:
+  # Headless: DNS returns fabric daemon pod IPs for peer discovery. Scoped to
+  # the daemon component so the sidecar NRI DaemonSet (which shares the app
+  # name but does not listen on the fabric port) is never returned as a peer.
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: nvml-mock
+    app.kubernetes.io/component: daemon
+  ports:
+    - name: ibping
+      port: 18515
+      targetPort: ibping
+      protocol: TCP
+
+---
+# Source: nvml-mock/templates/daemonset.yaml
+# Copyright 2026 NVIDIA CORPORATION
+# SPDX-License-Identifier: Apache-2.0
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: nvml-mock
-  namespace: nvml-mock
   labels:
-    app: nvml-mock
+    app.kubernetes.io/name: nvml-mock
+    app.kubernetes.io/instance: nvml-mock
+    app.kubernetes.io/version: "550.163.01"
+    app.kubernetes.io/component: daemon
 spec:
   selector:
     matchLabels:
-      app: nvml-mock
+      app.kubernetes.io/name: nvml-mock
+      app.kubernetes.io/instance: nvml-mock
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 25%
+    type: RollingUpdate
   template:
     metadata:
       labels:
-        app: nvml-mock
+        app.kubernetes.io/name: nvml-mock
+        app.kubernetes.io/instance: nvml-mock
+        app.kubernetes.io/component: daemon
+      annotations:
+        # Roll the DaemonSet on any config.yaml change.
+        checksum/config: 90ab5cf9be1a644561feeed7a04fe9a1b81c00299e36b798761c987a30010f06
     spec:
       serviceAccountName: nvml-mock
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 10
+      tolerations:
+        - operator: Exists
       containers:
-        - name: nvml-mock
-          image: NVML_MOCK_IMAGE_PLACEHOLDER:NVML_MOCK_VERSION_PLACEHOLDER
-          command: ["/scripts/entrypoint.sh"]
+        - name: node-agent
+          image: "NVML_MOCK_IMAGE_PLACEHOLDER:NVML_MOCK_VERSION_PLACEHOLDER"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/node-agent
+            - start
+            - --config=/etc/nvml-mock/config.yaml
+            - --host-root=/host
+            - --health-addr=:9091
+            - --log-level=info
+            - --log-format=json
+            - --shutdown-timeout=5s
           env:
-            - name: GPU_COUNT
-              value: "GPU_COUNT_PLACEHOLDER"
-            - name: DRIVER_VERSION
-              value: "DRIVER_VERSION_PLACEHOLDER"
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          volumeMounts:
-            - name: host-nvml-mock
-              mountPath: /host/var/lib/nvml-mock
-            - name: gpu-config
-              mountPath: /config
-              readOnly: true
-            - name: host-cdi
-              mountPath: /host/var/run/cdi
-            - name: host-run-nvidia
-              mountPath: /host/run/nvidia
+            - name: GPU_COUNT
+              value: "GPU_COUNT_PLACEHOLDER"
+            - name: DRIVER_VERSION
+              value: "DRIVER_VERSION_PLACEHOLDER"
+            # Non-empty is what turns the fabricmanager simulator on, and it is
+            # also the path the cdi simulator mounts into workloads. The agent
+            # creates the directory during Stage, before Apply writes the CDI
+            # spec that references it.
+            - name: MOCK_FABRICMANAGER_STATE_DIR
+              value: /var/lib/nvml-mock/fabric-state
+            # Drives both the IB tree the agent renders and the tier the
+            # LD_PRELOAD shims operate at, so the two can never disagree.
+            - name: MOCK_IB
+              value: "full"
+            - name: MOCK_IB_PING_FABRIC
+              value: "1"
+            - name: MOCK_IB_PING_PORT
+              value: "18515"
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: MOCK_IB_PING_SERVICE_HOST
+              value: "nvml-mock-ibping.nvml-mock.svc.cluster.local"
+            # The env below serves `kubectl exec` rather than the agent itself:
+            # nvidia-smi, ibstat and nvml-mock-ctl run in this container and must
+            # resolve the same profile, overrides and mock trees a workload sees.
+            - name: MOCK_NVML_CONFIG
+              value: /etc/nvml-mock/config.yaml
+            # The engine resolves overrides via ConfigOverridePathFor, which would
+            # otherwise look next to MOCK_NVML_CONFIG -- a read-only ConfigMap mount
+            # the CLI can never write to.
+            - name: MOCK_NVML_OVERRIDES
+              value: /var/lib/nvml-mock/driver/config/overrides.yaml
+            # Where the agent announces an injected Xid, as a driver's printk
+            # would. Unlike the env above this one is the agent's own: it
+            # watches the override document and writes the kernel line, so an
+            # Xid raised by any writer reaches the node's log. Empty says this
+            # pod cannot reach the kernel log -- it is only mounted, and only
+            # writable, when nodeAgent.kernelLog is enabled.
+            - name: MOCK_NVML_KMSG
+              value: ""
+            # The socket the UMAD/verbs shims dial. The agent serves it; exec'd
+            # tools only need to find it.
+            - name: MOCK_IB_PING_SOCKET
+              value: /var/lib/nvml-mock/run/mock-ib.sock
+            # LD_PRELOAD installs four shims in every process spawned here.
+            # libibmockumad and libibmockverbs forward UMAD and verbs traffic to
+            # the mock-ib daemon when MOCK_IB=full. libibmocksys rewrites paths
+            # under /sys/class/infiniband, /sys/class/infiniband_mad,
+            # /sys/class/infiniband_verbs, /sys/class/infiniband_cm and
+            # /dev/infiniband into $MOCK_IB_ROOT. libpcisysfs rewrites /sys/bus/pci
+            # and /sys/devices/pci into $MOCK_PCI_ROOT. A path outside those
+            # prefixes passes through unchanged, which is why preloading them into
+            # the agent itself is inert -- it writes under /host, not /sys.
+            # libibmockumad must precede libibmocksys so UMAD ioctls are
+            # intercepted before sysfs path rewriting.
+            - name: LD_PRELOAD
+              value: "/usr/local/lib/libibmockumad.so.1:/usr/local/lib/libibmockverbs.so.1:/usr/local/lib/libibmocksys.so.1:/usr/local/lib/libpcisysfs.so.1"
+            - name: MOCK_IB_ROOT
+              value: "/var/lib/nvml-mock/ib"
+            - name: MOCK_PCI_ROOT
+              value: "/var/lib/nvml-mock"
+          ports:
+            - name: health
+              containerPort: 9091
+              protocol: TCP
+            # The infiniband simulator binds the cross-pod fabric relay here.
+            # Named: the -ibping Service and NetworkPolicy select it by name.
+            - name: ibping
+              containerPort: 18515
+              protocol: TCP
           securityContext:
+            # Kubernetes rejects mountPropagation: Bidirectional (below) on a
+            # non-privileged container regardless of capabilities granted.
             privileged: true
-          lifecycle:
-            preStop:
-              exec:
-                command: ["/scripts/cleanup.sh"]
+          volumeMounts:
+            # Where the simulators write. Every path they stage is rooted here.
+            - name: mokka-root
+              mountPath: /host/var/lib/nvml-mock
+            # The same tree at the path its contents name. MOCK_PCI_ROOT and
+            # MOCK_IB_ROOT are host-absolute, so the LD_PRELOAD shims and any
+            # tool run via `kubectl exec` only resolve them through this mount.
+            - name: mokka-root
+              mountPath: /var/lib/nvml-mock
+            # gpudriver.Apply bind-mounts the driver root here. Bidirectional
+            # so that mount propagates to our consumer workloads that mounted this path before we did (the workload started before Mokka node daemon).
+            - name: driver-root-link
+              mountPath: /host/run/nvidia
+              mountPropagation: Bidirectional
+            # cdi.Apply writes both specs here; containerd scans the directory.
+            - name: cdi-specs
+              mountPath: /host/run/cdi
+            # The agent's --config input, and what exec'd nvidia-smi reads.
+            - name: mokka-profile
+              mountPath: /etc/nvml-mock
+              readOnly: true
+            # pcibus.Apply drops the feature file NFD's local source turns into
+            # a node label.
+            - name: nfd-features
+              mountPath: /host/etc/kubernetes/node-feature-discovery/features.d
+            # The agent writes the readiness marker here; the mock NVML engine in
+            # every consumer reads it to resolve fabric.state: auto.
+            - name: fabric-state
+              mountPath: /host/var/lib/nvml-mock/fabric-state
+            # Read only: the agent copies the node's DMI attributes into the
+            # rendered tree, which shadows them once served at /sys/devices.
+            - name: node-sysfs
+              mountPath: /host/sys
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9091
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 9091
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 200m
-              memory: 128Mi
+              cpu: 10m
+              memory: 32Mi
       volumes:
-        - name: host-nvml-mock
+        # The simulated driver tree: chardevs, shims, PCI and IB sysfs, configs.
+        - name: mokka-root
           hostPath:
             path: /var/lib/nvml-mock
             type: DirectoryOrCreate
-        - name: gpu-config
+        - name: mokka-profile
           configMap:
             name: nvml-mock-config
-        - name: host-cdi
+        - name: cdi-specs
           hostPath:
             path: /var/run/cdi
             type: DirectoryOrCreate
-        - name: host-run-nvidia
+        - name: driver-root-link
           hostPath:
             path: /run/nvidia
             type: DirectoryOrCreate
-      tolerations:
-        - operator: Exists
+        - name: nfd-features
+          hostPath:
+            path: "/etc/kubernetes/node-feature-discovery/features.d"
+            type: DirectoryOrCreate
+        # Directory, not DirectoryOrCreate: a node without /sys should fail
+        # loudly rather than get an empty stand-in.
+        - name: node-sysfs
+          hostPath:
+            path: /sys
+            type: Directory
+        - name: fabric-state
+          hostPath:
+            path: /var/lib/nvml-mock/fabric-state
+            type: DirectoryOrCreate
