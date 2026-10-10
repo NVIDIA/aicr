@@ -46,7 +46,7 @@ var dockerHubMirrorValidators = []struct {
 	},
 	{
 		file:     "Makefile",
-		locate:   regexp.MustCompile(`\[\[ \$\$1 =~ (\^https://\S+) \]\]`),
+		locate:   regexp.MustCompile(`\[\[ \$\$DOCKERHUB_MIRROR =~ (\^https://\S+) \]\]`),
 		unescape: func(s string) string { return strings.ReplaceAll(s, "$$", "$") },
 	},
 }

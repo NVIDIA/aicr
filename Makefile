@@ -1063,6 +1063,9 @@ tilt-ci: ## Runs Tilt in CI mode (no UI, waits for resources)
 # =============================================================================
 
 .PHONY: cluster-create
+# Exported to the recipe rather than pasted into it, so a quote in a
+# DOCKERHUB_MIRROR override cannot rewrite the validation command.
+cluster-create: export DOCKERHUB_MIRROR := $(DOCKERHUB_MIRROR)
 cluster-create: ## Creates local Kind cluster with registry
 	@echo "Creating local development cluster..."
 	@if ! command -v ctlptl >/dev/null 2>&1; then \
@@ -1099,8 +1102,8 @@ cluster-create: ## Creates local Kind cluster with registry
 	fi
 	@# Same bash test as .github/actions/load-versions, so CI and local runs accept
 	@# exactly the same values (grep would match a multi-line value line by line).
-	@bash -c '[[ $$1 =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$$ ]]' _ '$(DOCKERHUB_MIRROR)' || { \
-		echo "Error: DOCKERHUB_MIRROR (default: .settings.yaml build.dockerhub_mirror) must be an https:// host URL with no path, got '$(DOCKERHUB_MIRROR)'."; \
+	@bash -c '[[ $$DOCKERHUB_MIRROR =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$$ ]]' || { \
+		echo "Error: DOCKERHUB_MIRROR (default: .settings.yaml build.dockerhub_mirror) must be an https:// host URL with no path, got '$$DOCKERHUB_MIRROR'."; \
 		exit 1; \
 	}
 	@# kind pulls the node image only when it is not already local, so seeding it
