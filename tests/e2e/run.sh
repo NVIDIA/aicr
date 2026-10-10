@@ -44,7 +44,7 @@ DIM='\033[2m'
 NC='\033[0m' # No Color
 
 # Configuration
-aicrd_URL="${aicrd_URL:-http://localhost:8080}"
+AICRD_URL="${AICRD_URL:-http://localhost:8080}"
 OUTPUT_DIR="${OUTPUT_DIR:-$(mktemp -d)}"
 AICR_BIN="${AICR_BIN:-}"
 AICR_IMAGE="${AICR_IMAGE:-localhost:5001/aicr:local}"
@@ -218,16 +218,16 @@ check_api_health() {
   msg "=========================================="
 
   # Health endpoint
-  if curl -sf "${aicrd_URL}/health" > /dev/null 2>&1; then
+  if curl -sf "${AICRD_URL}/health" > /dev/null 2>&1; then
     pass "api/health"
   else
-    fail "api/health" "aicrd not responding at ${aicrd_URL}/health"
+    fail "api/health" "aicrd not responding at ${AICRD_URL}/health"
     warn "Is Tilt running? Try: make dev-env"
     return 1
   fi
 
   # Ready endpoint
-  if curl -sf "${aicrd_URL}/ready" > /dev/null 2>&1; then
+  if curl -sf "${AICRD_URL}/ready" > /dev/null 2>&1; then
     pass "api/ready"
   else
     fail "api/ready" "aicrd not ready"
@@ -255,11 +255,11 @@ test_api_recipe() {
 
   # Test 1: GET /v1/recipe with query params
   msg "--- Test: GET /v1/recipe ---"
-  echo -e "${DIM}  \$ curl ${aicrd_URL}/v1/recipe?service=eks&accelerator=h100&intent=training${NC}"
+  echo -e "${DIM}  \$ curl ${AICRD_URL}/v1/recipe?service=eks&accelerator=h100&intent=training${NC}"
   local get_recipe="${recipe_dir}/get.json"
   local http_code
   http_code=$(curl -s -w "%{http_code}" -o "$get_recipe" \
-    "${aicrd_URL}/v1/recipe?service=eks&accelerator=h100&intent=training")
+    "${AICRD_URL}/v1/recipe?service=eks&accelerator=h100&intent=training")
 
   if [ "$http_code" = "200" ] && [ -s "$get_recipe" ]; then
     detail "HTTP ${http_code} OK"
@@ -272,7 +272,7 @@ test_api_recipe() {
   msg "--- Test: POST /v1/recipe ---"
   local post_recipe="${recipe_dir}/post.json"
   http_code=$(curl -s -w "%{http_code}" -o "$post_recipe" \
-    -X POST "${aicrd_URL}/v1/recipe" \
+    -X POST "${AICRD_URL}/v1/recipe" \
     -H "Content-Type: application/x-yaml" \
     -d 'criteria:
   service: eks
@@ -304,11 +304,11 @@ test_api_bundle() {
 
   # Test: POST /v1/bundle (recipe -> bundle pipeline)
   msg "--- Test: POST /v1/bundle ---"
-  echo -e "${DIM}  \$ curl -X POST ${aicrd_URL}/v1/bundle?deployer=helm -d <recipe>${NC}"
+  echo -e "${DIM}  \$ curl -X POST ${AICRD_URL}/v1/bundle?deployer=helm -d <recipe>${NC}"
 
   # First get a recipe from API
   local recipe_json
-  recipe_json=$(curl -s "${aicrd_URL}/v1/recipe?service=eks&accelerator=h100&intent=training")
+  recipe_json=$(curl -s "${AICRD_URL}/v1/recipe?service=eks&accelerator=h100&intent=training")
 
   if [ -z "$recipe_json" ]; then
     fail "api/bundle/POST" "Could not get recipe from API"
@@ -319,7 +319,7 @@ test_api_bundle() {
   local bundle_zip="${bundle_dir}/bundle.zip"
   local http_code
   http_code=$(curl -s -w "%{http_code}" -o "$bundle_zip" \
-    -X POST "${aicrd_URL}/v1/bundle?deployer=helm" \
+    -X POST "${AICRD_URL}/v1/bundle?deployer=helm" \
     -H "Content-Type: application/json" \
     -d "$recipe_json")
 
@@ -2082,11 +2082,11 @@ test_api_metrics() {
 
   # Test: GET /metrics (Prometheus format)
   msg "--- Test: GET /metrics ---"
-  echo -e "${DIM}  \$ curl ${aicrd_URL}/metrics${NC}"
+  echo -e "${DIM}  \$ curl ${AICRD_URL}/metrics${NC}"
 
   local metrics_output="${OUTPUT_DIR}/metrics.txt"
   local http_code
-  http_code=$(curl -s -w "%{http_code}" -o "$metrics_output" "${aicrd_URL}/metrics")
+  http_code=$(curl -s -w "%{http_code}" -o "$metrics_output" "${AICRD_URL}/metrics")
 
   if [ "$http_code" = "200" ] && [ -s "$metrics_output" ]; then
     # Verify it's Prometheus format (should contain # HELP or # TYPE)
@@ -2145,28 +2145,27 @@ test_oci_bundle() {
   fi
 
   # Test: Bundle as OCI image
-  # Note: This may fail with local HTTP registries due to HTTPS enforcement in ORAS
+  # The Tilt/kind registry at localhost:5001 is plain HTTP, so the push needs
+  # --plain-http. --insecure-tls only relaxes certificate verification on an
+  # HTTPS dial.
   msg "--- Test: Bundle as OCI image ---"
   local digest_file="${oci_dir}/.digest"
+  rm -f "$digest_file"
   local bundle_output
+  local bundle_rc=0
   bundle_output=$("${AICR_BIN}" bundle \
     --recipe "$recipe_file" \
     --output "oci://localhost:5001/aicr-e2e-bundle" \
     --deployer helm \
-    --insecure-tls \
-    --image-refs "$digest_file" 2>&1) || true
+    --plain-http \
+    --image-refs "$digest_file" 2>&1) || bundle_rc=$?
 
-  if [ -f "$digest_file" ]; then
+  if [ "$bundle_rc" -eq 0 ] && [ -s "$digest_file" ]; then
     pass "bundle/oci-push"
     msg "Bundle pushed: $(cat "$digest_file")"
-  elif echo "$bundle_output" | grep -q "http: server gave HTTP response to HTTPS client"; then
-    # Known issue with local insecure registries
-    warn "OCI push failed due to HTTP/HTTPS mismatch (expected with local registry)"
-    skip "bundle/oci-push" "Local registry requires HTTPS client config"
-  elif curl -sf http://localhost:5001/v2/aicr-e2e-bundle/tags/list 2>/dev/null | grep -q "dev\|latest"; then
-    pass "bundle/oci-push"
   else
-    fail "bundle/oci-push" "Command failed"
+    msg "${bundle_output}"
+    fail "bundle/oci-push" "OCI push to localhost:5001 failed (exit ${bundle_rc}, digest missing or empty)"
   fi
 }
 
@@ -2223,7 +2222,7 @@ print_summary() {
 main() {
   msg "AICR E2E Tests"
   msg "Output directory: ${OUTPUT_DIR}"
-  msg "API URL: ${aicrd_URL}"
+  msg "API URL: ${AICRD_URL}"
   echo ""
 
   # Check required tools
