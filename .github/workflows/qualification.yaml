@@ -155,6 +155,7 @@ jobs:
         uses: ./.github/actions/e2e
         with:
           go_version: ${{ steps.versions.outputs.go }}
+          dockerhub_mirror: ${{ steps.versions.outputs.dockerhub_mirror }}
           privileged_ci: ${{ inputs.privileged_ci }}
 
   security-scan:

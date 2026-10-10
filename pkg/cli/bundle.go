@@ -267,12 +267,10 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		}
 		// For OCI output, retain one absolute planned path from preflight
 		// through generation and publication.
-		opts.outputDir, err = filepath.Abs("./bundle")
+		opts.outputDir, err = ociBundleStagingPath()
 		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to resolve OCI bundle output path", err)
+			return nil, err
 		}
-		opts.outputDir = filepath.Clean(opts.outputDir)
 		// Derive the Helm chart name from the OCI artifact path so the
 		// argocd-helm bundle's Chart.yaml and parent Application
 		// `source.chart` match what `helm push` actually publishes. Without
@@ -624,6 +622,33 @@ func resolveOutputTarget(cmd *cli.Command, input aicr.BundleInputOptions) (*oci.
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve default output target", err)
 	}
 	return ref, nil
+}
+
+// ociBundleStagingPath returns the bundle directory under the working
+// directory, with symlinks in the working directory path resolved.
+func ociBundleStagingPath() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal,
+			"failed to resolve working directory for OCI bundle staging", err)
+	}
+	// Preflight rejects symlinked ancestors, and macOS /tmp and $TMPDIR are symlinks.
+	resolved, err := filepath.EvalSymlinks(wd)
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal,
+			"failed to resolve working directory symlinks for OCI bundle staging", err)
+	}
+	return filepath.Join(resolved, "bundle"), nil
+}
+
+// ociBundleStagingError wraps err with stagingDir, keeping err's error code,
+// or ErrCodeInternal if err has none.
+func ociBundleStagingError(stagingDir string, err error) error {
+	code := errors.ErrCodeInternal
+	if structured, ok := stderrors.AsType[*errors.StructuredError](err); ok {
+		code = structured.Code
+	}
+	return errors.Wrap(code, "cannot stage OCI bundle in "+stagingDir, err)
 }
 
 //nolint:funlen // bundle command is inherently large (flags + description + action)
@@ -1082,6 +1107,10 @@ func prepareBundlePublicationTargets(
 	}
 	preflightCtx, preflightCancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
 	bundleTarget, err := deps.prepareBundleOutput(preflightCtx, opts.outputDir)
+	if err != nil {
+		// --output is a registry reference, so name the local path that failed.
+		err = ociBundleStagingError(opts.outputDir, err)
+	}
 	err = authoritativeFilesystemContextError(preflightCtx, "bundle output preflight canceled", err)
 	var imageRefs *imageRefsTarget
 	if err == nil && opts.imageRefsPath != "" {

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Load Versions'
-description: 'Loads tool versions from .settings.yaml and Go version from .go-version'
+description: 'Loads tool versions and the validated Docker Hub mirror from .settings.yaml, and Go version from .go-version'
 
 outputs:
   go:
@@ -28,6 +28,12 @@ outputs:
   crane:
     description: 'Crane version'
     value: ${{ steps.versions.outputs.crane }}
+  dockerhub_mirror:
+    description: 'Docker Hub pull-through mirror URL (build.dockerhub_mirror), for dockerd registry-mirrors'
+    value: ${{ steps.versions.outputs.dockerhub_mirror }}
+  dockerhub_mirror_host:
+    description: 'Host of dockerhub_mirror, for image refs and BuildKit mirror config'
+    value: ${{ steps.versions.outputs.dockerhub_mirror_host }}
   golangci_lint:
     description: 'golangci-lint version'
     value: ${{ steps.versions.outputs.golangci_lint }}
@@ -195,6 +201,17 @@ runs:
         echo "goreleaser=$(yq eval '.build_tools.goreleaser' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "ko=$(yq eval '.build_tools.ko' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "crane=$(yq eval '.build_tools.crane' .settings.yaml)" >> $GITHUB_OUTPUT
+
+        # Build configuration. Validated, unlike the pins around it: a missing
+        # key reads as "null", and a mirror consumer handed that would fall
+        # back to anonymous Docker Hub pulls instead of failing.
+        dockerhub_mirror="$(yq eval '.build.dockerhub_mirror' .settings.yaml)"
+        if [[ ! ${dockerhub_mirror} =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
+          echo "::error file=.settings.yaml::build.dockerhub_mirror must be an https:// host URL with no path, got '${dockerhub_mirror}'"
+          exit 1
+        fi
+        echo "dockerhub_mirror=${dockerhub_mirror}" >> $GITHUB_OUTPUT
+        echo "dockerhub_mirror_host=${dockerhub_mirror#https://}" >> $GITHUB_OUTPUT
 
         # Linting
         echo "golangci_lint=$(yq eval '.linting.golangci_lint' .settings.yaml)" >> $GITHUB_OUTPUT

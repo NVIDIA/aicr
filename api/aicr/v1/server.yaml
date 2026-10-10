@@ -966,7 +966,7 @@ components:
       description: Platform/framework type.
       schema:
         type: string
-        enum: [dynamo, kubeflow, nim, runai, slurm, any]
+        enum: [dynamo, kubeflow, kueue, nim, runai, slurm, any]
         default: any
     Nodes:
       name: nodes
@@ -1261,7 +1261,7 @@ components:
         platform:
           type: string
           description: Platform/framework type
-          enum: [dynamo, kubeflow, nim, runai, slurm, any]
+          enum: [dynamo, kubeflow, kueue, nim, runai, slurm, any]
           example: kubeflow
         nodes:
           type: integer

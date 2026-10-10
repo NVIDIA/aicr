@@ -85,16 +85,43 @@ has_tools() {
     done
 }
 
+# Print this host's GOOS, or nothing on a host other than darwin or linux.
+# Reads $OSTYPE so it needs no external command.
+host_goos() {
+    case "${OSTYPE:-}" in
+        darwin*) echo darwin ;;
+        linux*) echo linux ;;
+    esac
+}
+
+# Print the GOOS recorded in `go version -m` output read from stdin, or
+# nothing when the build metadata does not record one.
+build_info_goos() {
+    awk '$1 == "build" && $2 ~ /^GOOS=/ { sub(/^GOOS=/, "", $2); print $2; exit }'
+}
+
 # Print the module version embedded in a Go binary's build metadata.
-# Returns non-zero when the binary metadata is unreadable or the requested
-# module is absent. Compatible with the Bash 3.x shipped by macOS.
+# Returns non-zero when the binary metadata is unreadable, the requested
+# module is absent, or the binary is built for another OS and cannot run here.
+# Compatible with the Bash 3.x shipped by macOS.
 go_binary_module_version() {
     local binary_path="$1"
     local module_path="$2"
     local build_info
     local module_version
+    local binary_goos
+    local host
 
     if ! build_info=$(go version -m "${binary_path}" 2>/dev/null); then
+        return 1
+    fi
+
+    # `go version -m` reads any OS's executable format, so a matching version
+    # alone does not prove the binary runs on this host.
+    binary_goos=$(printf '%s\n' "${build_info}" | build_info_goos)
+    host=$(host_goos)
+    if [[ -n "${binary_goos}" && -n "${host}" && "${binary_goos}" != "${host}" ]]; then
+        echo "${binary_path} is built for ${binary_goos} and cannot run on ${host}" >&2
         return 1
     fi
 

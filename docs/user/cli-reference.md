@@ -504,7 +504,7 @@ Generate recipes using direct system parameters:
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
-| `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
+| `--platform` | | string | Platform/framework type: dynamo, kubeflow, kueue, nim, runai, slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` grants the component on a GKE recipe that neither declares nor declines it, confirms it where the recipe already declares it, and is rejected over an explicit recipe decline (any service) or against a non-GKE recipe that does not declare it; `disabled` is unchanged and always requires the recipe to already declare the component. Recorded in the generated recipe |
@@ -1857,6 +1857,11 @@ command runs.
 For every CLI OCI publication, AICR revalidates a private bundle snapshot and
 publishes only its closed-world inventory; it never packages the mutable
 caller tree directly.
+
+OCI output also writes the bundle to `./bundle` in the working directory
+before pushing. Symlinks in the working directory path are resolved first, so
+OCI output works from `/tmp` or `$TMPDIR` on macOS. `./bundle` itself must be
+absent or a real directory, not a symlink.
 
 For Argo CD Helm OCI output, AICR keeps the raw Distribution tag in the
 registry reference and derives a strict Helm semantic version for chart

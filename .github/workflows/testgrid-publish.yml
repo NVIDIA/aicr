@@ -72,6 +72,11 @@ on:
         options:
           - prod
           - staging
+      run_url:
+        description: "GitHub Actions run that produced the bundle, https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>] (optional; shown as the build's run link)"
+        type: string
+        required: false
+        default: ""
 
 concurrency:
   # Serialize publishes for the same environment and bundle while one is in
@@ -186,6 +191,21 @@ jobs:
           fi
           echo "bundle_ref=${BUNDLE_REF}" >> "${GITHUB_OUTPUT}"
           echo "Resolved bundle: ${BUNDLE_REF}"
+
+      # Fail a malformed manual run_url before verification and GCP auth;
+      # testgrid-publish applies the same rule before writing anything.
+      - name: Validate run URL
+        env:
+          RUN_URL: ${{ inputs.run_url }}
+        run: |
+          set -euo pipefail
+          # Owner and repo need a non-dot character, so "." and ".." cannot pass.
+          seg='[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*'
+          run_re="^https://github\.com/${seg}/${seg}/actions/runs/[0-9]+(/attempts/[0-9]+)?$"
+          if [[ -n "${RUN_URL}" && ! "${RUN_URL}" =~ ${run_re} ]]; then
+            echo "::error::run_url must be https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>]"
+            exit 1
+          fi
 
       # Community/partner evidence must have a reviewed pointer on main. Its
       # claimed signer is escaped into an exact regexp and then cross-checked
@@ -333,9 +353,11 @@ jobs:
           BUNDLE_REF: ${{ steps.bundle.outputs.bundle_ref }}
           TG_BUCKET: ${{ steps.gcp.outputs.bucket }}
           TG_SOURCE_CLASS: ${{ steps.source.outputs.source_class }}
+          TG_RUN_URL: ${{ inputs.run_url }}
         run: |
           set -euo pipefail
           /tmp/testgrid-publish \
             --bundle "${BUNDLE_REF}" \
             --bucket "${TG_BUCKET}" \
-            --source-class "${TG_SOURCE_CLASS}"
+            --source-class "${TG_SOURCE_CLASS}" \
+            --run-url "${TG_RUN_URL}"
