@@ -187,6 +187,16 @@ The controller (a Deployment) lands on management nodes; the kubelet-plugin
 DaemonSet lands on GPU nodes — each routed by its own selector/toleration
 pair.
 
+A `tolerationPaths` entry may appear under **both** tiers for a DaemonSet that
+must run on every node (`nfd` `worker.tolerations` and
+`topologyUpdater.tolerations`, `aws-ebs-csi-driver` `node.tolerations`). The
+bundler writes such a path once, with the keyed `--system-node-toleration`
+entries followed by the `--accelerated-node-toleration` entries, deduplicated;
+keyless system entries (the tolerate-all default) are not carried over. The
+usual opt-out (`[]`) and append-mode (non-empty overlay list) rules still
+apply. `nodeSelectorPaths` must not be shared: a selector cannot mean "both
+node classes".
+
 `gpu-operator` is the exception worth knowing: its `accelerated` block is
 tolerations-only. Its operand DaemonSets have no chart/CRD nodeSelector
 field — the operator self-places via its GFD/NFD deploy labels — so only

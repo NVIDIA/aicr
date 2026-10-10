@@ -12,35 +12,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert that gpu-operator values.yaml has scheduling options injected.
+# Assert that nfd values.yaml carries the union of system and accelerated
+# tolerations on worker.tolerations (#3135).
 #
 # When `aicr bundle` is run with:
-#   --system-node-selector nodeGroup=system-pool
 #   --system-node-toleration CriticalAddonsOnly:NoSchedule
-#   --accelerated-node-selector nodeGroup=customer-gpu
 #   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
 #
-# The bundler injects selectors and tolerations at the component's
-# registered Helm value paths.
+# worker.tolerations is registered under both tiers, so it gets both entries,
+# system first; master.tolerations is system-only and gets just the first.
+# Array assertions match length and order.
 #
-# NOTE: chainsaw assert --resource requires apiVersion/kind to parse the YAML.
-# Helm values files don't have these natively, so we prepend them in the test
-# script before asserting. These two lines are not part of the actual values.
+# NOTE: apiVersion/kind are prepended by the test script; they are not part of
+# the actual values.
 apiVersion: helm/v1
 kind: Values
 
-# System node selector: where the operator pod runs
-operator:
-  nodeSelector:
-    nodeGroup: system-pool
-
-# Accelerated: gpu-operator operands self-place via the operator's GPU detection;
-# AICR no longer injects daemonsets.nodeSelector (no such chart/CRD field, #2474).
-# Only the real daemonsets.tolerations are asserted.
-daemonsets:
-  (nodeSelector == null): true  # regression guard: the dead route must not return
+worker:
+  (nodeSelector == null): true  # NFD worker runs on all nodes
   tolerations:
+    - effect: NoSchedule
+      key: CriticalAddonsOnly
+      operator: Exists
     - effect: NoSchedule
       key: nvidia.com/gpu
       operator: Equal
       value: present
+
+master:
+  tolerations:
+    - effect: NoSchedule
+      key: CriticalAddonsOnly
+      operator: Exists
