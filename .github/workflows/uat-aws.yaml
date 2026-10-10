@@ -185,15 +185,25 @@ jobs:
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Target platform(s) for the main-cell image builds (snapshot-agent + the
-      # validators). h100 GPU workers (p5.48xlarge) are amd64; GB200 GPU workers
-      # (p6e-gb200.36xlarge) are Grace/arm64, and the agent + GPU-scheduled
-      # validators are pinned to that pool — so an amd64-only image cannot start
-      # there. GB200 therefore builds a multi-arch (amd64+arm64) manifest: amd64
-      # still covers the m7i system pool, arm64 covers the GPU pool. h100 stays
-      # single-arch so the common nightly path skips the slow QEMU arm64 cross
-      # build. Release cells are unaffected (they pull the already-multi-arch
-      # released images). Mirrors the release build's linux/amd64,linux/arm64.
-      BUILD_PLATFORMS: ${{ inputs.accelerator == 'gb200' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+      # validators). h100 GPU workers (p5.48xlarge) are amd64; Grace-Blackwell
+      # GPU workers (p6e-gb200.36xlarge, p6e-gb300r.36xlarge) are Grace/arm64,
+      # and the agent + GPU-scheduled validators are pinned to that pool — so an
+      # amd64-only image cannot start there. Those accelerators therefore build
+      # a multi-arch (amd64+arm64) manifest: amd64 still covers the m7i system
+      # pool, arm64 covers the GPU pool. h100 stays single-arch so the common
+      # nightly path skips the slow QEMU arm64 cross build. Release cells are
+      # unaffected (they pull the already-multi-arch released images). Mirrors
+      # the release build's linux/amd64,linux/arm64.
+      #
+      # Gated on a SET of arm64 accelerators, not a single name. The predecessor
+      # expression tested `== 'gb200'`, which silently became wrong the moment a
+      # second Grace part arrived: gb300 fell through to the amd64 branch and
+      # would have built amd64-only images for an arm64 node, surfacing as pods
+      # that never start rather than as a build error. Add the next Grace-based
+      # accelerator here.
+      BUILD_PLATFORMS: >-
+        ${{ contains(fromJSON('["gb200", "gb300"]'), inputs.accelerator)
+            && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
       # Pin validator-image resolution for MAIN cells to this run's freshly
       # built+pushed validators (the `Build and push validator images` step
       # tags them `:uat-<run_id>`), mirroring how AICR_IMAGE pins the agent — so
@@ -267,6 +277,20 @@ jobs:
             echo "::error::${CLUSTER_CONFIG} has no .deployment.tenancy"; exit 1
           fi
           echo "AWS_ACCOUNT_ID=${TENANCY}" >> "${GITHUB_ENV}"
+          # Same treatment for the REGION, and for the same reason. The job-level
+          # AWS_REGION default is us-east-1, which silently mismatches any
+          # cluster-config provisioning elsewhere: every aws call in this job is
+          # region-scoped, so the first symptom is a capacity assertion failing
+          # with InvalidCapacityReservationId.NotFound against a reservation that
+          # plainly exists — in another region. Deriving it from
+          # .deployment.location keeps the account and the region resolved from
+          # one source, so a lane cannot authenticate into the right tenancy and
+          # then look for its resources in the wrong place.
+          LOCATION=$(yq eval '.deployment.location' "${CLUSTER_CONFIG}")
+          if [[ -z "${LOCATION}" || "${LOCATION}" == "null" ]]; then
+            echo "::error::${CLUSTER_CONFIG} has no .deployment.location"; exit 1
+          fi
+          echo "AWS_REGION=${LOCATION}" >> "${GITHUB_ENV}"
           # Validate deployer after the account export (which teardown depends on).
           # workflow_dispatch constrains this to a choice, but workflow_call passes
           # free strings, so a typo from a caller must surface as a clear error here
@@ -354,10 +378,11 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       # QEMU registers binfmt handlers so the amd64 runner can build the arm64
-      # layer of a GB200 multi-arch image. Only needed when BUILD_PLATFORMS
-      # includes arm64 (GB200); h100 builds native amd64 and skips it, so the
-      # common nightly path pays no emulation cost. buildx (below) is always set
-      # up because the multi-platform build path uses `buildx build --push`.
+      # layer of a Grace-Blackwell multi-arch image. Only needed when
+      # BUILD_PLATFORMS includes arm64; h100 builds native amd64 and skips it,
+      # so the common nightly path pays no emulation cost. buildx (below) is
+      # always set up because the multi-platform build path uses
+      # `buildx build --push`.
       - name: Set up QEMU
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down' && contains(env.BUILD_PLATFORMS, 'arm64')
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
@@ -386,9 +411,10 @@ jobs:
           # does not consume a prebuilt Go binary. Keep the phase set in sync with
           # VALIDATOR_PHASES in on-push.yaml / on-tag.yaml.
           #
-          # buildx build --push emits a multi-arch manifest for GB200
-          # (BUILD_PLATFORMS=linux/amd64,linux/arm64) and a single-arch image
-          # for h100 (linux/amd64) through one code path. Multi-platform builds
+          # buildx build --push emits a multi-arch manifest for the Grace-based
+          # accelerators (BUILD_PLATFORMS=linux/amd64,linux/arm64) and a
+          # single-arch image for h100 (linux/amd64) through one code path.
+          # Multi-platform builds
           # cannot be loaded into the local daemon, so we push directly (the
           # GHCR login above authenticates the push).
           for phase in deployment performance conformance aiperf-bench; do
@@ -660,8 +686,9 @@ jobs:
       # apiVersion bump) produces a snapshot the freshly-built binary rejects.
       # Build the agent from the PR source and point AICR_IMAGE at it so the
       # snapshot is stamped by the code under test, not a stale release. Built
-      # for BUILD_PLATFORMS: amd64 for h100 (p5.48xlarge), amd64+arm64 for GB200
-      # (the snapshot agent is pinned to the arm64 p6e-gb200 GPU pool). ko
+      # for BUILD_PLATFORMS: amd64 for h100 (p5.48xlarge), amd64+arm64 for the
+      # Grace-Blackwell parts (the snapshot agent is pinned to the arm64
+      # p6e-gb200 / p6e-gb300r GPU pool). ko
       # cross-compiles Go natively — no QEMU — and emits a manifest list at the
       # single tag, so the kubelet pulls the node's arch. Lives in the
       # aicr-validators namespace (not the release ghcr.io/nvidia/aicr repo);
