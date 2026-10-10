@@ -1,0 +1,30 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Opt-in manifest wiring for deployments that move driver lifecycle ownership
+# from ClusterPolicy.spec.driver to a separately managed NVIDIADriver CR. The
+# consuming overlay owns the policy decision and must enable
+# driver.nvidiaDriverCRD, disable deployDefaultCR, clear the legacy driver
+# identity/upgradePolicy, and provide the nvidiaDriver values consumed by the
+# manifest. Keeping those values out of this mixin avoids imposing one fleet's
+# driver version and rollout policy on every AICR consumer.
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: gpu-operator-nvidia-driver-cr
+spec:
+  componentRefs:
+    - name: gpu-operator
+      manifestFiles:
+        - components/gpu-operator/manifests/nvidia-driver.yaml
