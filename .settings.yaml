@@ -285,6 +285,12 @@ quality:
 # Build Configuration
 build:
   image_registry: 'ghcr.io/nvidia'
+  # Docker Hub pull-through mirror for CI and `make cluster-create`: anonymous
+  # Docker Hub pulls rate-limit on shared runner IPs (main red 2026-10-09).
+  # Must be an https:// host that serves Docker Hub's repository paths and
+  # works as a dockerd registry-mirrors entry, so not ECR Public (its paths
+  # carry a docker/ prefix) and not dockerhub.nvidia.com (no public DNS).
+  dockerhub_mirror: 'https://mirror.gcr.io'
 
 # Testing Configuration
 testing:
