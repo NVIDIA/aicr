@@ -279,51 +279,98 @@ runs:
 
     - name: Display loaded versions
       shell: bash
+      # Routed through env rather than interpolated into the script body: these
+      # values come from .settings.yaml, which is fork-controlled on the
+      # ok-to-test path. Matches the env: form in setup-build-tools.
+      env:
+        LOADED_GO: ${{ steps.versions.outputs.go }}
+        LOADED_GORELEASER: ${{ steps.versions.outputs.goreleaser }}
+        LOADED_KO: ${{ steps.versions.outputs.ko }}
+        LOADED_CRANE: ${{ steps.versions.outputs.crane }}
+        LOADED_GOLANGCI_LINT: ${{ steps.versions.outputs.golangci_lint }}
+        LOADED_APIDIFF: ${{ steps.versions.outputs.apidiff }}
+        LOADED_OASDIFF: ${{ steps.versions.outputs.oasdiff }}
+        LOADED_YAMLLINT: ${{ steps.versions.outputs.yamllint }}
+        LOADED_ADDLICENSE: ${{ steps.versions.outputs.addlicense }}
+        LOADED_GO_LICENSES: ${{ steps.versions.outputs.go_licenses }}
+        LOADED_GRYPE: ${{ steps.versions.outputs.grype }}
+        LOADED_COSIGN: ${{ steps.versions.outputs.cosign }}
+        LOADED_KUBECTL: ${{ steps.versions.outputs.kubectl }}
+        LOADED_KUBELOGIN: ${{ steps.versions.outputs.kubelogin }}
+        LOADED_KIND: ${{ steps.versions.outputs.kind }}
+        LOADED_NVKIND: ${{ steps.versions.outputs.nvkind }}
+        LOADED_CTLPTL: ${{ steps.versions.outputs.ctlptl }}
+        LOADED_TILT: ${{ steps.versions.outputs.tilt }}
+        LOADED_HELM: ${{ steps.versions.outputs.helm }}
+        LOADED_HELMFILE: ${{ steps.versions.outputs.helmfile }}
+        LOADED_HELMFILE_SHA256_LINUX_AMD64: ${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}
+        LOADED_HELMFILE_SHA256_LINUX_ARM64: ${{ steps.versions.outputs.helmfile_sha256_linux_arm64 }}
+        LOADED_KWOK: ${{ steps.versions.outputs.kwok }}
+        LOADED_CHAINSAW: ${{ steps.versions.outputs.chainsaw }}
+        LOADED_CHAINSAW_SHA256_LINUX_AMD64: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
+        LOADED_CHAINSAW_SHA256_LINUX_ARM64: ${{ steps.versions.outputs.chainsaw_sha256_linux_arm64 }}
+        LOADED_YQ: ${{ steps.versions.outputs.yq }}
+        LOADED_REGISTRY_IMAGE: ${{ steps.versions.outputs.registry_image }}
+        LOADED_ARGOCD_CHART: ${{ steps.versions.outputs.argocd_chart }}
+        LOADED_SCAFFOLD_CHART: ${{ steps.versions.outputs.scaffold_chart }}
+        LOADED_FLUX: ${{ steps.versions.outputs.flux }}
+        LOADED_HAULER: ${{ steps.versions.outputs.hauler }}
+        LOADED_ZARF: ${{ steps.versions.outputs.zarf }}
+        LOADED_COVERAGE_THRESHOLD: ${{ steps.versions.outputs.coverage_threshold }}
+        LOADED_LINT_TIMEOUT: ${{ steps.versions.outputs.lint_timeout }}
+        LOADED_TEST_TIMEOUT: ${{ steps.versions.outputs.test_timeout }}
+        LOADED_KIND_NODE_IMAGE: ${{ steps.versions.outputs.kind_node_image }}
+        LOADED_H100_KIND_NODE_IMAGE: ${{ steps.versions.outputs.h100_kind_node_image }}
+        LOADED_GPU_OPERATOR_CHART_VERSION: ${{ steps.versions.outputs.gpu_operator_chart_version }}
+        LOADED_AWSCLI: ${{ steps.versions.outputs.awscli }}
+        LOADED_MINISTACK_IMAGE: ${{ steps.versions.outputs.ministack_image }}
+        LOADED_OPENBAO_IMAGE: ${{ steps.versions.outputs.openbao_image }}
+        LOADED_MKCERT: ${{ steps.versions.outputs.mkcert }}
+        LOADED_SNAPSHOT_AGENT_BASE_IMAGE: ${{ steps.versions.outputs.snapshot_agent_base_image }}
       run: |
         set -euo pipefail
         echo "Loaded versions from .settings.yaml:"
-        echo "  go: ${{ steps.versions.outputs.go }}"
-        echo "  goreleaser: ${{ steps.versions.outputs.goreleaser }}"
-        echo "  ko: ${{ steps.versions.outputs.ko }}"
-        echo "  crane: ${{ steps.versions.outputs.crane }}"
-        echo "  dockerhub_mirror: ${{ steps.versions.outputs.dockerhub_mirror }}"
-        echo "  golangci_lint: ${{ steps.versions.outputs.golangci_lint }}"
-        echo "  apidiff: ${{ steps.versions.outputs.apidiff }}"
-        echo "  oasdiff: ${{ steps.versions.outputs.oasdiff }}"
-        echo "  yamllint: ${{ steps.versions.outputs.yamllint }}"
-        echo "  addlicense: ${{ steps.versions.outputs.addlicense }}"
-        echo "  go_licenses: ${{ steps.versions.outputs.go_licenses }}"
-        echo "  grype: ${{ steps.versions.outputs.grype }}"
-        echo "  cosign: ${{ steps.versions.outputs.cosign }}"
-        echo "  kubectl: ${{ steps.versions.outputs.kubectl }}"
-        echo "  kubelogin: ${{ steps.versions.outputs.kubelogin }}"
-        echo "  kind: ${{ steps.versions.outputs.kind }}"
-        echo "  nvkind: ${{ steps.versions.outputs.nvkind }}"
-        echo "  ctlptl: ${{ steps.versions.outputs.ctlptl }}"
-        echo "  tilt: ${{ steps.versions.outputs.tilt }}"
-        echo "  helm: ${{ steps.versions.outputs.helm }}"
-        echo "  helmfile: ${{ steps.versions.outputs.helmfile }}"
-        echo "  helmfile_sha256_linux_amd64: ${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}"
-        echo "  helmfile_sha256_linux_arm64: ${{ steps.versions.outputs.helmfile_sha256_linux_arm64 }}"
-        echo "  kwok: ${{ steps.versions.outputs.kwok }}"
-        echo "  chainsaw: ${{ steps.versions.outputs.chainsaw }}"
-        echo "  chainsaw_sha256_linux_amd64: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}"
-        echo "  chainsaw_sha256_linux_arm64: ${{ steps.versions.outputs.chainsaw_sha256_linux_arm64 }}"
-        echo "  yq: ${{ steps.versions.outputs.yq }}"
-        echo "  registry_image: ${{ steps.versions.outputs.registry_image }}"
-        echo "  argocd_chart: ${{ steps.versions.outputs.argocd_chart }}"
-        echo "  scaffold_chart: ${{ steps.versions.outputs.scaffold_chart }}"
-        echo "  flux: ${{ steps.versions.outputs.flux }}"
-        echo "  hauler: ${{ steps.versions.outputs.hauler }}"
-        echo "  zarf: ${{ steps.versions.outputs.zarf }}"
-        echo "  coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}"
-        echo "  lint_timeout: ${{ steps.versions.outputs.lint_timeout }}"
-        echo "  test_timeout: ${{ steps.versions.outputs.test_timeout }}"
-        echo "  kind_node_image: ${{ steps.versions.outputs.kind_node_image }}"
-        echo "  h100_kind_node_image: ${{ steps.versions.outputs.h100_kind_node_image }}"
-        echo "  gpu_operator_chart_version: ${{ steps.versions.outputs.gpu_operator_chart_version }}"
-        echo "  awscli: ${{ steps.versions.outputs.awscli }}"
-        echo "  ministack_image: ${{ steps.versions.outputs.ministack_image }}"
-        echo "  openbao_image: ${{ steps.versions.outputs.openbao_image }}"
-        echo "  mkcert: ${{ steps.versions.outputs.mkcert }}"
-        echo "  snapshot_agent_base_image: ${{ steps.versions.outputs.snapshot_agent_base_image }}"
+        echo "  go: ${LOADED_GO}"
+        echo "  goreleaser: ${LOADED_GORELEASER}"
+        echo "  ko: ${LOADED_KO}"
+        echo "  crane: ${LOADED_CRANE}"
+        echo "  golangci_lint: ${LOADED_GOLANGCI_LINT}"
+        echo "  apidiff: ${LOADED_APIDIFF}"
+        echo "  oasdiff: ${LOADED_OASDIFF}"
+        echo "  yamllint: ${LOADED_YAMLLINT}"
+        echo "  addlicense: ${LOADED_ADDLICENSE}"
+        echo "  go_licenses: ${LOADED_GO_LICENSES}"
+        echo "  grype: ${LOADED_GRYPE}"
+        echo "  cosign: ${LOADED_COSIGN}"
+        echo "  kubectl: ${LOADED_KUBECTL}"
+        echo "  kubelogin: ${LOADED_KUBELOGIN}"
+        echo "  kind: ${LOADED_KIND}"
+        echo "  nvkind: ${LOADED_NVKIND}"
+        echo "  ctlptl: ${LOADED_CTLPTL}"
+        echo "  tilt: ${LOADED_TILT}"
+        echo "  helm: ${LOADED_HELM}"
+        echo "  helmfile: ${LOADED_HELMFILE}"
+        echo "  helmfile_sha256_linux_amd64: ${LOADED_HELMFILE_SHA256_LINUX_AMD64}"
+        echo "  helmfile_sha256_linux_arm64: ${LOADED_HELMFILE_SHA256_LINUX_ARM64}"
+        echo "  kwok: ${LOADED_KWOK}"
+        echo "  chainsaw: ${LOADED_CHAINSAW}"
+        echo "  chainsaw_sha256_linux_amd64: ${LOADED_CHAINSAW_SHA256_LINUX_AMD64}"
+        echo "  chainsaw_sha256_linux_arm64: ${LOADED_CHAINSAW_SHA256_LINUX_ARM64}"
+        echo "  yq: ${LOADED_YQ}"
+        echo "  registry_image: ${LOADED_REGISTRY_IMAGE}"
+        echo "  argocd_chart: ${LOADED_ARGOCD_CHART}"
+        echo "  scaffold_chart: ${LOADED_SCAFFOLD_CHART}"
+        echo "  flux: ${LOADED_FLUX}"
+        echo "  hauler: ${LOADED_HAULER}"
+        echo "  zarf: ${LOADED_ZARF}"
+        echo "  coverage_threshold: ${LOADED_COVERAGE_THRESHOLD}"
+        echo "  lint_timeout: ${LOADED_LINT_TIMEOUT}"
+        echo "  test_timeout: ${LOADED_TEST_TIMEOUT}"
+        echo "  kind_node_image: ${LOADED_KIND_NODE_IMAGE}"
+        echo "  h100_kind_node_image: ${LOADED_H100_KIND_NODE_IMAGE}"
+        echo "  gpu_operator_chart_version: ${LOADED_GPU_OPERATOR_CHART_VERSION}"
+        echo "  awscli: ${LOADED_AWSCLI}"
+        echo "  ministack_image: ${LOADED_MINISTACK_IMAGE}"
+        echo "  openbao_image: ${LOADED_OPENBAO_IMAGE}"
+        echo "  mkcert: ${LOADED_MKCERT}"
+        echo "  snapshot_agent_base_image: ${LOADED_SNAPSHOT_AGENT_BASE_IMAGE}"

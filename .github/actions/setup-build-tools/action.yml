@@ -189,12 +189,13 @@ runs:
     - name: Install ko
       if: inputs.install_ko == 'true'
       shell: bash
+      env:
+        KO_INPUT_VERSION: ${{ inputs.ko_version }}
       run: |
         set -euo pipefail
         # Install ko from binary release (go install puts in GOPATH which isn't in PATH)
         # Strip 'v' prefix for URL construction
-        KO_VERSION="${{ inputs.ko_version }}"
-        KO_VERSION="${KO_VERSION#v}"
+        KO_VERSION="${KO_INPUT_VERSION#v}"
         KO_BASE="https://github.com/ko-build/ko/releases/download/v${KO_VERSION}"
         KO_TAR="ko_${KO_VERSION}_Linux_x86_64.tar.gz"
         KO_TMP="$(mktemp -d)"
@@ -219,12 +220,13 @@ runs:
     - name: Install crane
       if: inputs.install_crane == 'true'
       shell: bash
+      env:
+        CRANE_INPUT_VERSION: ${{ inputs.crane_version }}
       run: |
         set -euo pipefail
         # Install crane from binary release (go install puts in GOPATH which isn't in PATH)
         # Strip 'v' prefix for URL construction
-        CRANE_VERSION="${{ inputs.crane_version }}"
-        CRANE_VERSION="${CRANE_VERSION#v}"
+        CRANE_VERSION="${CRANE_INPUT_VERSION#v}"
         CRANE_BASE="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}"
         CRANE_TAR="go-containerregistry_Linux_x86_64.tar.gz"
         CRANE_TMP="$(mktemp -d)"
@@ -240,7 +242,7 @@ runs:
         sudo mv "$CRANE_TMP/crane" /usr/local/bin/crane
         sudo chmod +x /usr/local/bin/crane
         rm -rf "$CRANE_TMP"
-        echo "crane installed: $(crane version 2>&1 || echo '${{ inputs.crane_version }}')"
+        echo "crane installed: $(crane version 2>&1 || echo "${CRANE_INPUT_VERSION}")"
 
     # Installed here rather than via oras-project/setup-oras, which resolves the
     # requested version against a statically bundled releases.json and throws on
@@ -259,9 +261,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        ORAS_VERSION="${{ inputs.oras_version }}"
-        ORAS_VERSION="${ORAS_VERSION#v}"
-        EXPECTED="${{ inputs.oras_sha256 }}"
+        ORAS_VERSION="${ORAS_INPUT_VERSION#v}"
+        EXPECTED="${ORAS_INPUT_SHA256}"
         if [[ -z "${ORAS_VERSION}" || -z "${EXPECTED}" ]]; then
           echo "::error::install_oras=true requires oras_version and oras_sha256 (pass from load-versions outputs to keep .settings.yaml as the single source of truth)"
           exit 1
@@ -448,11 +449,14 @@ runs:
     - name: Install Chainsaw
       if: inputs.install_chainsaw == 'true'
       shell: bash
+      env:
+        CHAINSAW_INPUT_VERSION: ${{ inputs.chainsaw_version }}
+        CHAINSAW_INPUT_SHA256: ${{ inputs.chainsaw_sha256 }}
       run: |
         set -euo pipefail
         if [[ -x /usr/local/bin/chainsaw ]]; then echo "chainsaw already installed"; chainsaw version; exit 0; fi
-        VERSION="${{ inputs.chainsaw_version }}"
-        EXPECTED="${{ inputs.chainsaw_sha256 }}"
+        VERSION="${CHAINSAW_INPUT_VERSION}"
+        EXPECTED="${CHAINSAW_INPUT_SHA256}"
         if [[ -z "${VERSION}" || -z "${EXPECTED}" ]]; then
           echo "::error::install_chainsaw=true requires chainsaw_version and chainsaw_sha256 (pass from load-versions outputs to keep .settings.yaml as the single source of truth)"
           exit 1
@@ -476,10 +480,11 @@ runs:
     - name: Install Helm
       if: inputs.install_helm == 'true'
       shell: bash
+      env:
+        HELM_INPUT_VERSION: ${{ inputs.helm_version }}
       run: |
         set -euo pipefail
-        HELM_VERSION="${{ inputs.helm_version }}"
-        HELM_VERSION="${HELM_VERSION#v}"
+        HELM_VERSION="${HELM_INPUT_VERSION#v}"
         # The runner image may ship a preinstalled helm (ubuntu-latest bundles
         # Helm 3 at /usr/local/bin/helm). Only skip installation when the
         # existing binary already matches the pinned version; a bare presence
@@ -515,12 +520,14 @@ runs:
     - name: Install Helmfile
       if: inputs.install_helmfile == 'true'
       shell: bash
+      env:
+        HELMFILE_INPUT_VERSION: ${{ inputs.helmfile_version }}
+        HELMFILE_INPUT_SHA256: ${{ inputs.helmfile_sha256 }}
       run: |
         set -euo pipefail
         if [[ -x /usr/local/bin/helmfile ]]; then echo "helmfile already installed"; helmfile --version; exit 0; fi
-        HELMFILE_VERSION="${{ inputs.helmfile_version }}"
-        HELMFILE_VERSION="${HELMFILE_VERSION#v}"
-        EXPECTED="${{ inputs.helmfile_sha256 }}"
+        HELMFILE_VERSION="${HELMFILE_INPUT_VERSION#v}"
+        EXPECTED="${HELMFILE_INPUT_SHA256}"
         if [[ -z "${EXPECTED}" ]]; then
           echo "::error::helmfile_sha256 input is empty — must be pinned via .settings.yaml testing_tools.helmfile_checksums.linux_amd64 (refresh with tools/update-helmfile-checksums)"
           exit 1
