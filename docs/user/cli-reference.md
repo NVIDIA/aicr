@@ -1858,6 +1858,11 @@ For every CLI OCI publication, AICR revalidates a private bundle snapshot and
 publishes only its closed-world inventory; it never packages the mutable
 caller tree directly.
 
+OCI output also writes the bundle to `./bundle` in the working directory
+before pushing. Symlinks in the working directory path are resolved first, so
+OCI output works from `/tmp` or `$TMPDIR` on macOS. `./bundle` itself must be
+absent or a real directory, not a symlink.
+
 For Argo CD Helm OCI output, AICR keeps the raw Distribution tag in the
 registry reference and derives a strict Helm semantic version for chart
 metadata and consumers. For example, registry tag `1.2.3_build.5` remains

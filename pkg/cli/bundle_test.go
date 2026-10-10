@@ -982,6 +982,153 @@ componentRefs: []
 	}
 }
 
+func runOCIBundleCommandInWorkDir(
+	t *testing.T,
+	workDir string,
+	deps bundleCommandDependencies,
+) error {
+
+	t.Helper()
+	t.Chdir(workDir)
+	recipePath := filepath.Join(realTempDir(t), "recipe.yaml")
+	const bareRecipe = `kind: RecipeResult
+apiVersion: aicr.run/v1
+metadata:
+  version: test
+componentRefs: []
+`
+	if err := os.WriteFile(recipePath, []byte(bareRecipe), 0o600); err != nil {
+		t.Fatalf("WriteFile(recipe) error = %v", err)
+	}
+	cmd := bundleCmd()
+	cmd.Action = func(ctx context.Context, command *cli.Command) error {
+		return runBundleCmdWithDependencies(ctx, command, deps)
+	}
+	return cmd.Run(context.Background(), []string{
+		"bundle",
+		"--recipe", recipePath,
+		"--output", "oci://registry.example.com/team/aicr-bundle:v1.0.0",
+	})
+}
+
+func TestBundleCommandOCIOutputFromSymlinkedWorkingDirectory(t *testing.T) {
+	base := realTempDir(t)
+	realDir := filepath.Join(base, "real")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+	wantStaging := filepath.Join(realDir, "bundle")
+
+	var stagingPath string
+	pushed := false
+	deps := defaultBundleCommandDependencies()
+	deps.prepareBundleOutput = func(ctx context.Context, path string) (*bundleOutputTarget, error) {
+		stagingPath = path
+		return prepareBundleOutputTarget(ctx, path)
+	}
+	deps.makeBundle = func(
+		_ context.Context,
+		_ *aicr.Client,
+		_ *aicr.RecipeResult,
+		opts aicr.BundleOptions,
+	) (aicr.BundleArtifact, error) {
+
+		writeVerifiedCLITestBundle(
+			t, opts.OutputDir, map[string][]byte{"payload.txt": []byte("generated")})
+		return &result.Output{OutputDir: opts.OutputDir}, nil
+	}
+	deps.pushOCIBundle = func(
+		publishCtx context.Context,
+		_ *bundleCmdOptions,
+		out *result.Output,
+		bundle *bundleOutputTarget,
+		_ *imageRefsTarget,
+	) error {
+
+		pushed = true
+		if out.OutputDir != wantStaging || bundle.path != wantStaging {
+			t.Fatalf("published output = %q, retained = %q, want %q", out.OutputDir, bundle.path, wantStaging)
+		}
+		return bundle.validate(publishCtx)
+	}
+
+	if err := runOCIBundleCommandInWorkDir(t, link, deps); err != nil {
+		t.Fatalf("runBundleCmdWithDependencies() error = %v", err)
+	}
+	if stagingPath != wantStaging {
+		t.Fatalf("staging path = %q, want %q", stagingPath, wantStaging)
+	}
+	if !pushed {
+		t.Fatal("pushOCIBundle() was not called")
+	}
+}
+
+func TestBundleCommandOCIOutputRejectsSymlinkedStagingDirectory(t *testing.T) {
+	workDir := realTempDir(t)
+	elsewhere := filepath.Join(realTempDir(t), "elsewhere")
+	if err := os.Mkdir(elsewhere, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	stagingDir := filepath.Join(workDir, "bundle")
+	if err := os.Symlink(elsewhere, stagingDir); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	makeCalls := 0
+	deps := defaultBundleCommandDependencies()
+	deps.makeBundle = func(
+		context.Context,
+		*aicr.Client,
+		*aicr.RecipeResult,
+		aicr.BundleOptions,
+	) (aicr.BundleArtifact, error) {
+
+		makeCalls++
+		return nil, errors.New(errors.ErrCodeInternal, "unexpected MakeBundle call")
+	}
+
+	err := runOCIBundleCommandInWorkDir(t, workDir, deps)
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+		t.Fatalf("error = %v, want invalid request", err)
+	}
+	if makeCalls != 0 {
+		t.Fatalf("MakeBundle() calls = %d, want 0", makeCalls)
+	}
+	if want := "cannot stage OCI bundle in " + stagingDir; !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want it to contain %q", err.Error(), want)
+	}
+}
+
+func TestOCIBundleStagingErrorPreservesCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode errors.ErrorCode
+	}{
+		{"structured invalid request", errors.New(errors.ErrCodeInvalidRequest, "unsafe"), errors.ErrCodeInvalidRequest},
+		{"structured timeout", errors.New(errors.ErrCodeTimeout, "canceled"), errors.ErrCodeTimeout},
+		{"unstructured", stderrors.New("boom"), errors.ErrCodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ociBundleStagingError("/work/bundle", tt.err)
+			if code := errorstest.ReportedCode(got); code != tt.wantCode {
+				t.Fatalf("reported code = %s, want %s: %v", code, tt.wantCode, got)
+			}
+			if !stderrors.Is(got, tt.err) {
+				t.Fatalf("error = %v, want cause %v preserved", got, tt.err)
+			}
+			if !strings.Contains(got.Error(), "/work/bundle") {
+				t.Fatalf("error = %q, want staging path", got.Error())
+			}
+		})
+	}
+}
+
 func TestBundleCommandPushesCapturedBundleAfterPublishedOutputMutation(t *testing.T) {
 	const (
 		generatedPayload = "generated"
