@@ -300,6 +300,7 @@ type CriteriaPlatformType string
 const (
 	CriteriaPlatformAny      CriteriaPlatformType = "any"
 	CriteriaPlatformDynamo   CriteriaPlatformType = "dynamo"
+	CriteriaPlatformKueue    CriteriaPlatformType = "kueue"
 	CriteriaPlatformKubeflow CriteriaPlatformType = "kubeflow"
 	CriteriaPlatformNIM      CriteriaPlatformType = "nim"
 	CriteriaPlatformRunai    CriteriaPlatformType = "runai"
@@ -317,6 +318,8 @@ func (r *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, error)
 		return CriteriaPlatformDynamo, nil
 	case "kubeflow":
 		return CriteriaPlatformKubeflow, nil
+	case "kueue":
+		return CriteriaPlatformKueue, nil
 	case "nim":
 		return CriteriaPlatformNIM, nil
 	case "runai":
@@ -335,7 +338,7 @@ func (r *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, error)
 // types sorted alphabetically. For the union of static + registry, use
 // AllCriteriaPlatformTypes.
 func GetCriteriaPlatformTypes() []string {
-	return []string{"dynamo", "kubeflow", "nim", "runai", "slurm"}
+	return []string{"dynamo", "kubeflow", "kueue", "nim", "runai", "slurm"}
 }
 
 // AllPlatformTypes returns the union of the static OSS list and values
@@ -391,7 +394,7 @@ type Criteria struct {
 	// OS is the worker node operating system type.
 	OS CriteriaOSType `json:"os,omitempty" yaml:"os,omitempty"`
 
-	// Platform is the platform/framework type (dynamo, kubeflow, nim, runai, slurm).
+	// Platform is the platform/framework type (dynamo, kubeflow, kueue, nim, runai, slurm).
 	Platform CriteriaPlatformType `json:"platform,omitempty" yaml:"platform,omitempty"`
 
 	// Nodes is the number of worker nodes (0 means any/unspecified).

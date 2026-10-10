@@ -17,12 +17,13 @@
 package trust
 
 import (
-	stderrors "errors"
 	"path/filepath"
 	"syscall"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // TestLoadTrustedMaterialFromFile_FIFO is the regression guard for the
@@ -42,7 +43,7 @@ func TestLoadTrustedMaterialFromFile_FIFO(t *testing.T) {
 	}
 
 	_, err := LoadTrustedMaterialFromFile(fifo)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("want ErrCodeInvalidRequest for a FIFO, got %v", err)
 	}
 }

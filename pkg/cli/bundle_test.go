@@ -34,6 +34,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/urfave/cli/v3"
 )
@@ -613,7 +614,7 @@ func TestValidateSigningKeyExclusivity(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -631,7 +632,7 @@ func TestValidateSigningKeyExclusivity_ConfigSourcedConflict(t *testing.T) {
 		fulcioURL:  "https://fulcio.example.com", // as if sourced from config
 	}
 	err := validateSigningKeyExclusivity(cmd, opts)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest for config-sourced fulcio-url, got %v", err)
 	}
 }
@@ -647,7 +648,7 @@ func TestValidateSigningKeyExclusivity_BlankNonFlagKey(t *testing.T) {
 	cmd := bundleCmd() // unparsed: cmd.IsSet(flagSigningKey) is false
 	opts := &bundleCmdOptions{signingKey: "   \t "}
 	err := validateSigningKeyExclusivity(cmd, opts)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("want ErrCodeInvalidRequest for a blank non-flag signingKey, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "must not be blank") {
@@ -756,7 +757,7 @@ func TestParseBundleCmdOptions_TLogUpload(t *testing.T) {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -826,7 +827,7 @@ func TestResolveBundleOCIChartVersion(t *testing.T) {
 				"--output", "oci://registry.example.com/team/aicr-bundle:" + tag,
 				"--deployer", "argocd-helm",
 			})
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("error = %v, want invalid request", err)
 			}
 		})
@@ -838,7 +839,7 @@ func TestResolveBundleOCIChartVersion(t *testing.T) {
 			"--output", filepath.Join(tmp, "local-with-refs"),
 			"--image-refs", filepath.Join(tmp, "refs.txt"),
 		})
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("error = %v, want invalid request", err)
 		}
 	})
@@ -890,7 +891,7 @@ func TestBundleOutputTargetRetainsGeneratedIdentity(t *testing.T) {
 	if err := os.MkdirAll(planned, 0o755); err != nil {
 		t.Fatalf("MkdirAll(replacement) error = %v", err)
 	}
-	if err := target.validate(context.Background()); !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if err := target.validate(context.Background()); errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("validate() after replacement = %v, want internal", err)
 	}
 }
@@ -978,6 +979,153 @@ componentRefs: []
 	want := []string{"bundle-preflight", "refs-preflight", "make", "push"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("order = %#v, want %#v", order, want)
+	}
+}
+
+func runOCIBundleCommandInWorkDir(
+	t *testing.T,
+	workDir string,
+	deps bundleCommandDependencies,
+) error {
+
+	t.Helper()
+	t.Chdir(workDir)
+	recipePath := filepath.Join(realTempDir(t), "recipe.yaml")
+	const bareRecipe = `kind: RecipeResult
+apiVersion: aicr.run/v1
+metadata:
+  version: test
+componentRefs: []
+`
+	if err := os.WriteFile(recipePath, []byte(bareRecipe), 0o600); err != nil {
+		t.Fatalf("WriteFile(recipe) error = %v", err)
+	}
+	cmd := bundleCmd()
+	cmd.Action = func(ctx context.Context, command *cli.Command) error {
+		return runBundleCmdWithDependencies(ctx, command, deps)
+	}
+	return cmd.Run(context.Background(), []string{
+		"bundle",
+		"--recipe", recipePath,
+		"--output", "oci://registry.example.com/team/aicr-bundle:v1.0.0",
+	})
+}
+
+func TestBundleCommandOCIOutputFromSymlinkedWorkingDirectory(t *testing.T) {
+	base := realTempDir(t)
+	realDir := filepath.Join(base, "real")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+	wantStaging := filepath.Join(realDir, "bundle")
+
+	var stagingPath string
+	pushed := false
+	deps := defaultBundleCommandDependencies()
+	deps.prepareBundleOutput = func(ctx context.Context, path string) (*bundleOutputTarget, error) {
+		stagingPath = path
+		return prepareBundleOutputTarget(ctx, path)
+	}
+	deps.makeBundle = func(
+		_ context.Context,
+		_ *aicr.Client,
+		_ *aicr.RecipeResult,
+		opts aicr.BundleOptions,
+	) (aicr.BundleArtifact, error) {
+
+		writeVerifiedCLITestBundle(
+			t, opts.OutputDir, map[string][]byte{"payload.txt": []byte("generated")})
+		return &result.Output{OutputDir: opts.OutputDir}, nil
+	}
+	deps.pushOCIBundle = func(
+		publishCtx context.Context,
+		_ *bundleCmdOptions,
+		out *result.Output,
+		bundle *bundleOutputTarget,
+		_ *imageRefsTarget,
+	) error {
+
+		pushed = true
+		if out.OutputDir != wantStaging || bundle.path != wantStaging {
+			t.Fatalf("published output = %q, retained = %q, want %q", out.OutputDir, bundle.path, wantStaging)
+		}
+		return bundle.validate(publishCtx)
+	}
+
+	if err := runOCIBundleCommandInWorkDir(t, link, deps); err != nil {
+		t.Fatalf("runBundleCmdWithDependencies() error = %v", err)
+	}
+	if stagingPath != wantStaging {
+		t.Fatalf("staging path = %q, want %q", stagingPath, wantStaging)
+	}
+	if !pushed {
+		t.Fatal("pushOCIBundle() was not called")
+	}
+}
+
+func TestBundleCommandOCIOutputRejectsSymlinkedStagingDirectory(t *testing.T) {
+	workDir := realTempDir(t)
+	elsewhere := filepath.Join(realTempDir(t), "elsewhere")
+	if err := os.Mkdir(elsewhere, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	stagingDir := filepath.Join(workDir, "bundle")
+	if err := os.Symlink(elsewhere, stagingDir); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	makeCalls := 0
+	deps := defaultBundleCommandDependencies()
+	deps.makeBundle = func(
+		context.Context,
+		*aicr.Client,
+		*aicr.RecipeResult,
+		aicr.BundleOptions,
+	) (aicr.BundleArtifact, error) {
+
+		makeCalls++
+		return nil, errors.New(errors.ErrCodeInternal, "unexpected MakeBundle call")
+	}
+
+	err := runOCIBundleCommandInWorkDir(t, workDir, deps)
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+		t.Fatalf("error = %v, want invalid request", err)
+	}
+	if makeCalls != 0 {
+		t.Fatalf("MakeBundle() calls = %d, want 0", makeCalls)
+	}
+	if want := "cannot stage OCI bundle in " + stagingDir; !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want it to contain %q", err.Error(), want)
+	}
+}
+
+func TestOCIBundleStagingErrorPreservesCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode errors.ErrorCode
+	}{
+		{"structured invalid request", errors.New(errors.ErrCodeInvalidRequest, "unsafe"), errors.ErrCodeInvalidRequest},
+		{"structured timeout", errors.New(errors.ErrCodeTimeout, "canceled"), errors.ErrCodeTimeout},
+		{"unstructured", stderrors.New("boom"), errors.ErrCodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ociBundleStagingError("/work/bundle", tt.err)
+			if code := errorstest.ReportedCode(got); code != tt.wantCode {
+				t.Fatalf("reported code = %s, want %s: %v", code, tt.wantCode, got)
+			}
+			if !stderrors.Is(got, tt.err) {
+				t.Fatalf("error = %v, want cause %v preserved", got, tt.err)
+			}
+			if !strings.Contains(got.Error(), "/work/bundle") {
+				t.Fatalf("error = %q, want staging path", got.Error())
+			}
+		})
 	}
 }
 
@@ -1086,7 +1234,7 @@ func TestBundleCommandRejectsGenerationTempInsideExistingOutput(t *testing.T) {
 	}
 
 	err := runDeadlineBundleCommand(t, context.Background(), deps, false)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("error = %v, want ErrCodeInternal", err)
 	}
 	if makeCalls != 0 {
@@ -1111,7 +1259,7 @@ func TestBundleOutputTargetRejectsSymlinkComponent(t *testing.T) {
 		t.Fatalf("Symlink() error = %v", err)
 	}
 	_, err := prepareBundleOutputTarget(context.Background(), filepath.Join(link, "bundle"))
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("error = %v, want invalid request", err)
 	}
 }
@@ -1133,7 +1281,7 @@ func TestBundleOutputTargetDetectsAncestorAndGeneratedSwaps(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.RemoveAll(moved) })
 		_, err := prepareBundleOutputTargetWithDependencies(context.Background(), planned, deps)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Fatalf("error = %v, want internal", err)
 		}
 	})
@@ -1158,7 +1306,7 @@ func TestBundleOutputTargetDetectsAncestorAndGeneratedSwaps(t *testing.T) {
 			t.Fatalf("Mkdir(bundle) error = %v", err)
 		}
 		captureErr := target.captureGenerated(context.Background(), planned)
-		if !stderrors.Is(captureErr, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(captureErr) != errors.ErrCodeInternal {
 			t.Fatalf("capture error = %v, want internal", captureErr)
 		}
 	})
@@ -1283,7 +1431,7 @@ func TestImageRefsWriteAtomicDetectsInjectedHardlinkSwap(t *testing.T) {
 	t.Cleanup(func() { _ = target.close() })
 
 	err = target.writeAtomic(context.Background(), []byte("attacker-controlled\n"))
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("writeAtomic() error = %v, want internal", err)
 	}
 	got, readErr := os.ReadFile(payload)
@@ -1324,7 +1472,7 @@ func TestImageRefsWriteAtomicDetectsInjectedParentAndTempSwaps(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = target.close() })
 		writeErr := target.writeAtomic(context.Background(), []byte("sha256:abc\n"))
-		if !stderrors.Is(writeErr, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(writeErr) != errors.ErrCodeInternal {
 			t.Fatalf("write error = %v, want internal", writeErr)
 		}
 		if _, err := os.Lstat(filepath.Join(parent, "refs.txt")); !os.IsNotExist(err) {
@@ -1352,7 +1500,7 @@ func TestImageRefsWriteAtomicDetectsInjectedParentAndTempSwaps(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = target.close() })
 		writeErr := target.writeAtomic(context.Background(), []byte("sha256:abc\n"))
-		if !stderrors.Is(writeErr, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(writeErr) != errors.ErrCodeInternal {
 			t.Fatalf("write error = %v, want internal", writeErr)
 		}
 		got, err := os.ReadFile(filepath.Join(parent, replacedName))
@@ -1388,7 +1536,7 @@ func TestImageRefsTargetDetectsParentAndTargetPreflightSwaps(t *testing.T) {
 		t.Cleanup(func() { _ = os.RemoveAll(moved) })
 		_, err := prepareImageRefsTargetWithDependencies(
 			context.Background(), bundle, filepath.Join(parent, "refs.txt"), deps)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Fatalf("error = %v, want internal", err)
 		}
 	})
@@ -1408,7 +1556,7 @@ func TestImageRefsTargetDetectsParentAndTargetPreflightSwaps(t *testing.T) {
 			return os.WriteFile(path, []byte("replacement"), 0o600)
 		}
 		_, err := prepareImageRefsTargetWithDependencies(context.Background(), bundle, path, deps)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Fatalf("error = %v, want internal", err)
 		}
 	})
@@ -1433,7 +1581,7 @@ func TestImageRefsWriteAtomicCleansUpShortWrite(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = target.close() })
 	writeErr := target.writeAtomic(context.Background(), []byte("sha256:abc\n"))
-	if !stderrors.Is(writeErr, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(writeErr) != errors.ErrCodeInternal {
 		t.Fatalf("write error = %v, want internal", writeErr)
 	}
 	entries, readErr := os.ReadDir(parent)
@@ -1543,7 +1691,7 @@ func TestPushOCIBundlePreservesPrimaryErrorWhenCleanupFails(t *testing.T) {
 		ociRef:   &oci.Reference{IsOCI: true, Registry: "registry.example.com", Repository: "team/bundle", Tag: "dev"},
 	}
 	err := pushOCIBundleWithDependencies(context.Background(), opts, &result.Output{OutputDir: bundleDir}, bundle, nil, deps)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("error = %v, want primary invalid request", err)
 	}
 }
@@ -1619,7 +1767,7 @@ func TestPushOCIBundleRejectsMismatchedGeneratedOutputBeforeStaging(t *testing.T
 	}
 	err := pushOCIBundleWithDependencies(context.Background(), opts,
 		&result.Output{OutputDir: filepath.Join(filepath.Dir(bundleDir), "other")}, bundle, nil, deps)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("error = %v, want internal", err)
 	}
 	if stageCalls != 0 {
@@ -1637,7 +1785,7 @@ func TestPushOCIBundleCanceledWholePublication(t *testing.T) {
 		deployer: config.DeployerHelm,
 		ociRef:   &oci.Reference{IsOCI: true, Registry: "registry.example.com", Repository: "team/bundle", Tag: "dev"},
 	}, &result.Output{OutputDir: bundleDir}, bundle, nil)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("error = %v, want timeout", err)
 	}
 }

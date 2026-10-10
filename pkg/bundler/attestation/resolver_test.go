@@ -16,7 +16,6 @@ package attestation
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // TestSelectOIDCSource pins the source-precedence classifier that both
@@ -303,7 +304,7 @@ func TestResolveAttesterSigningModeConflict(t *testing.T) {
 					t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 				}
 				if tt.wantErr {
-					if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 						t.Errorf("error = %v, want code %v", err, errors.ErrCodeInvalidRequest)
 					}
 					if att != nil {

@@ -242,6 +242,19 @@ check_tool() {
         return
     fi
 
+    # Checked before the version command, whose fallback output (such as
+    # "installed") would otherwise pass a binary that cannot run here.
+    local binary_goos host
+    binary_goos=$(go version -m "$(command -v "$cmd_name")" 2>/dev/null | build_info_goos || true)
+    host=$(host_goos)
+    if [[ -n "$binary_goos" && -n "$host" && "$binary_goos" != "$host" ]]; then
+        print_row "$cmd_name" "$expected_version" "${binary_goos}-binary" "⚠"
+        if [[ "$match_strategy" == "strict_exact" ]]; then
+            CHECK_FAILED=1
+        fi
+        return
+    fi
+
     # Get installed version
     local installed_version
     installed_version=$(eval "$version_cmd" 2>/dev/null || echo "unknown")
@@ -309,4 +322,5 @@ check_tool docker any
 
 echo ""
 echo "Legend: ✓ = installed, ⚠ = version mismatch or warning, ✗ = missing"
+echo "        <os>-binary = built for another OS. Reinstall with 'make tools-setup'."
 exit "${CHECK_FAILED}"

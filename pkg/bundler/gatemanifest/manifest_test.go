@@ -15,7 +15,6 @@
 package gatemanifest
 
 import (
-	stderrors "errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,6 +22,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
@@ -291,7 +291,7 @@ func TestNewPlacement_RejectsInvalidScheduling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewPlacement(tt.sched)
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("NewPlacement error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})

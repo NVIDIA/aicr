@@ -27,6 +27,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/inventory"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
@@ -309,7 +311,7 @@ func TestUpgradeCheckFromClusterRequiresATarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("UpgradeCheck with no target error = nil, want rejection")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if strings.Contains(err.Error(), "carries no criteria") {
@@ -340,7 +342,7 @@ func TestUpgradeCheckFromClusterRequiresADeployer(t *testing.T) {
 	if err == nil {
 		t.Fatal("UpgradeCheck with no deployer error = nil, want rejection")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "deployer") {
@@ -367,7 +369,7 @@ func TestUpgradeCheckClusterReadFailureFailsTheRun(t *testing.T) {
 		From: FromCluster, To: to, Deployer: "helm",
 	}); err == nil {
 		t.Fatal("UpgradeCheck error = nil, want the read failure")
-	} else if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+	} else if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 		t.Errorf("error = %v, want the read's own ErrCodeUnavailable preserved", err)
 	}
 }
@@ -823,7 +825,7 @@ func TestUpgradeCheckScanAbortIsNotAFinding(t *testing.T) {
 			if report != nil {
 				t.Errorf("report = %#v, want none beside the error", report)
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("error = %v, want code %s", err, tt.wantCode)
 			}
 			// The code is not the property on its own: ErrCodeCanceled exists
@@ -887,7 +889,7 @@ func TestUpgradeCheckRejectsAClusterTarget(t *testing.T) {
 	_, err := client.UpgradeCheck(t.Context(), UpgradeCheckRequest{
 		From: FromCluster, To: FromCluster, Deployer: "helm",
 	})
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "--to must be an artifact") {

@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -205,7 +206,7 @@ func TestNewClientRejectsInvalidOCISourceConfiguration(t *testing.T) {
 				opts = append(opts, aicr.WithOCISourceTempDir(tt.tempDir))
 			}
 			_, err := aicr.NewClient(opts...)
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("NewClient() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -218,7 +219,7 @@ func TestNewClientContextRejectsInvalidContext(t *testing.T) {
 	var nilContext context.Context
 	client, err := aicr.NewClientContext(nilContext,
 		aicr.WithRecipeSource(aicr.EmbeddedSource()))
-	if client != nil || !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if client != nil || errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("NewClientContext(nil) = (%v, %v), want nil ErrCodeInvalidRequest", client, err)
 	}
 
@@ -226,7 +227,7 @@ func TestNewClientContextRejectsInvalidContext(t *testing.T) {
 	cancel()
 	client, err = aicr.NewClientContext(ctx,
 		aicr.WithRecipeSource(aicr.EmbeddedSource()))
-	if client != nil || !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeCanceled, "")) {
+	if client != nil || errorstest.ReportedCode(err) != aicrerrors.ErrCodeCanceled {
 		t.Fatalf("NewClientContext(canceled) = (%v, %v), want nil ErrCodeCanceled", client, err)
 	}
 }
@@ -2938,7 +2939,7 @@ func TestResolveRecipe_InheritFromIncompleteBundle(t *testing.T) {
 		ref := result.Resolved().GetComponentRef(pinned)
 		t.Fatalf("want an incomplete bundle refused, got a recipe with overrides %#v", ref.Overrides)
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 	if missing := pinned + "/helmrelease.yaml"; !strings.Contains(err.Error(), missing) {
@@ -3142,7 +3143,7 @@ func TestResolveRecipe_InheritFromRejects(t *testing.T) {
 			if err == nil {
 				t.Fatal("ResolveRecipe = nil error, want rejection")
 			}
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantMsg) {
@@ -3197,7 +3198,7 @@ func TestResolveRecipe_InheritFromRejectsCriteriaMismatch(t *testing.T) {
 			if resolveErr == nil {
 				t.Fatal("ResolveRecipe = nil error, want rejection")
 			}
-			if !errors.Is(resolveErr, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(resolveErr) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", resolveErr)
 			}
 			if !strings.Contains(resolveErr.Error(), tt.wantMsg) {
@@ -3243,7 +3244,7 @@ func TestResolveRecipe_InheritFromRevalidatesCoherence(t *testing.T) {
 	if err == nil {
 		t.Fatal("ResolveRecipe = nil error, want the incoherent inherited identity rejected")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "carries Kustomize field") {
@@ -3372,7 +3373,7 @@ func TestResolveRecipeWithOptions_InheritFromRejectsConfigMapURI(t *testing.T) {
 			if err == nil {
 				t.Fatal("resolve = nil error, want rejection")
 			}
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), "does not support cm:// locations yet") {
@@ -3510,7 +3511,7 @@ func TestResolveRecipeInheritSelectionRejects(t *testing.T) {
 			req := inheritTestRequest(tt.source)
 			req.Inherit = tt.mode
 			_, err := client.ResolveRecipe(t.Context(), req)
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) ||
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest ||
 				!strings.Contains(err.Error(), tt.want) {
 
 				t.Fatalf("error = %v, want INVALID_REQUEST containing %q", err, tt.want)

@@ -1,0 +1,37 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Kueue Topology for a three-tier Topograph fabric (EKS aws provider, GKE gcp
+# provider). Levels are node label keys, widest domain first, ending in the
+# per-node hostname. A Topology has a fixed level list while Topograph's
+# fabric depth varies per cluster, so each leaf ships the one matching its
+# provider; a node missing any level label is not usable by TAS (see
+# topology-accelerator.yaml for the Kind shape).
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: Topology
+metadata:
+  name: tas-topology
+  annotations:
+    # Post-install hook required for custom apiVersions (see resource-flavor
+    # .yaml). Weight 0: applied before tas-flavor (weight 1), which
+    # references this Topology by name via spec.topologyName.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  levels:
+    - nodeLabel: fabric.topograph.run/tier-2
+    - nodeLabel: fabric.topograph.run/tier-1
+    - nodeLabel: fabric.topograph.run/tier-0
+    - nodeLabel: kubernetes.io/hostname

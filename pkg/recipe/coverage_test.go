@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // covStore builds a synthetic store from (name, criteria, base) triples.
@@ -277,7 +279,7 @@ func TestVerifyCriteriaCoverage(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		msg := err.Error()
