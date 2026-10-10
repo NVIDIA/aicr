@@ -23,6 +23,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/validators"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
@@ -190,7 +191,7 @@ func TestCleanupNCCLResources_ReturnsErrorOnDeleteFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error from a non-NotFound namespace delete failure, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeInternal {
 		t.Errorf("got %v, want an ErrCodeInternal-wrapped delete failure", err)
 	}
 }
@@ -208,7 +209,7 @@ func TestCleanupNCCLResources_RejectsEmptyUID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for an empty owning UID, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeInternal {
 		t.Errorf("got %v, want an ErrCodeInternal error", err)
 	}
 	if _, getErr := fakeClient.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); getErr != nil {
@@ -256,7 +257,7 @@ func TestCleanupNCCLResources_ReturnsErrorOnTerminationTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a timeout error when the namespace never finishes terminating, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeTimeout {
 		t.Errorf("got %v, want an ErrCodeTimeout-wrapped termination-wait failure", err)
 	}
 }
@@ -374,7 +375,7 @@ func TestWaitForNamespaceGone_TimesOutWhenNeverDeleted(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a timeout error waiting for a namespace that never finishes terminating, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeTimeout {
 		t.Errorf("got %v, want an ErrCodeTimeout-wrapped wait failure", err)
 	}
 }

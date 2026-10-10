@@ -30,6 +30,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -264,7 +265,7 @@ func TestWrite_PreManifestRenderErrorPreservesCode(t *testing.T) {
 	if err == nil {
 		t.Fatal("Write() error = nil, want invalid pre-manifest error")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("Write() error = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }

@@ -135,6 +135,25 @@ runtime](#supplying-a-benchmark-runtime-for-a-private-service), since that
 runtime already owns its image end to end. For reproducible qualification
 runs, prefer pinning by digest (`name@sha256:...`) over a mutable tag.
 
+**Choosing the self-installed Kubeflow Trainer release.** When the cluster has
+no Kubeflow Trainer and the recipe does not enable `kubeflow-trainer`, the NCCL
+checks install a temporary Trainer from GitHub and remove it afterward. The
+release defaults to the `kubeflow-trainer` pin in `recipes/registry.yaml`. When
+the recipe has no `kubeflow-trainer` ref, set `AICR_NCCL_TRAINER_VERSION` in
+the `env` block of each NCCL catalog entry that runs (for example through a
+`--data` overlay) to choose a different release without rebuilding the
+validator image. A recipe that disables `kubeflow-trainer` installs that ref's
+version and ignores `AICR_NCCL_TRAINER_VERSION`. `aicr recipe` fills in the
+registry pin for a ref with no `version`, so set the ref's `version` in the
+overlay to choose a different release for such a recipe. The value is a
+semantic version, with or without a leading `v`. The check fails before any
+Trainer resource is applied when the value is malformed, when the tag
+has no GitHub release, or when the release's manifests lack what the installer
+needs. That means TrainJob and TrainingRuntime CRDs serving the API version the
+benchmark creates, the Trainer admission webhook configurations, and the
+controller Deployment. A Trainer that is already installed is used as-is,
+whatever its version, and the value is not checked.
+
 GB200/EKS recipes (both `training` and `inference` intents) enable `-net` and
 `-nvls` together rather than the auto-detect variant, because those nodes
 expose two inter-node fabrics simultaneously and a single auto-detect test

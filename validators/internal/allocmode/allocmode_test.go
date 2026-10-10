@@ -27,6 +27,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -835,7 +837,7 @@ func TestDiscoverServedDRAAPIVersion_HonorsContext(t *testing.T) {
 	if !stderrors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want context.Canceled in the unwrap chain", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error code = %v, want ErrCodeTimeout for a canceled discovery probe", err)
 	}
 }
@@ -864,7 +866,7 @@ func TestDiscoverServedDRAAPIVersion_FakeClientHonorsContext(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected a canceled context to abort discovery on the fallback branch")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 	})
@@ -886,7 +888,7 @@ func TestDiscoverServedDRAAPIVersion_FakeClientHonorsContext(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected a cancellation during the discovery call to abort the probe")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 		if !stderrors.Is(err, context.Canceled) {

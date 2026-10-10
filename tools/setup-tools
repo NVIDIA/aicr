@@ -385,6 +385,17 @@ install_pinned_yq() {
     fi
 }
 
+# oasdiff_release_asset prints the oasdiff release archive name for version.
+# macOS has one universal build, named "all" rather than by architecture.
+oasdiff_release_asset() {
+    local version="${1#v}"
+    if [[ "${OS}" == "darwin" ]]; then
+        echo "oasdiff_${version}_darwin_all.tar.gz"
+    else
+        echo "oasdiff_${version}_linux_${GO_ARCH}.tar.gz"
+    fi
+}
+
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
@@ -1353,8 +1364,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
     # setup reporting success while the gate runs on a different version.
     oasdiff_current=""
     if command_exists oasdiff; then
-        oasdiff_current="$(go version -m "$(command -v oasdiff)" 2>/dev/null |
-            awk '$1 == "mod" && $2 == "github.com/oasdiff/oasdiff" {print $3; exit}')"
+        oasdiff_current="$(go_binary_module_version "$(command -v oasdiff)" github.com/oasdiff/oasdiff || true)"
     fi
     if [[ "${oasdiff_current}" == "${OASDIFF_VERSION}" && "${UPGRADE}" != "true" ]]; then
         log_success "oasdiff ${OASDIFF_VERSION} already installed"
@@ -1367,11 +1377,11 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
             # Binary release rather than `go install`; see the ctlptl block
             # above for why (#2664).
             OASDIFF_VERSION_NUM="${OASDIFF_VERSION#v}"
-            OASDIFF_TAR="oasdiff_${OASDIFF_VERSION_NUM}_linux_${GO_ARCH}.tar.gz"
+            OASDIFF_TAR="$(oasdiff_release_asset "${OASDIFF_VERSION}")"
             OASDIFF_BASE="https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION_NUM}"
             if install_release_binary "${OASDIFF_BASE}/${OASDIFF_TAR}" \
                 "manifest:${OASDIFF_BASE}/checksums.txt" \
-                oasdiff "oasdiff ${OASDIFF_VERSION} for Linux ${GO_ARCH}"; then
+                oasdiff "oasdiff ${OASDIFF_VERSION} for ${OS} ${GO_ARCH}"; then
                 log_success "oasdiff ${OASDIFF_VERSION} installed"
             else
                 log_error "Failed to install oasdiff. Please install manually."
@@ -1389,8 +1399,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
     # then fail strict_exact with no hint that a second copy exists.
     addlicense_current=""
     if command_exists addlicense; then
-        addlicense_current="$(go version -m "$(command -v addlicense)" 2>/dev/null |
-            awk '$1 == "mod" && $2 == "github.com/google/addlicense" {print $3; exit}')"
+        addlicense_current="$(go_binary_module_version "$(command -v addlicense)" github.com/google/addlicense || true)"
     fi
     if [[ "${addlicense_current}" == "${ADDLICENSE_VERSION}" && "${UPGRADE}" != "true" ]]; then
         log_success "addlicense ${ADDLICENSE_VERSION} already installed"

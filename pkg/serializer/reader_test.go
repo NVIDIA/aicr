@@ -28,6 +28,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -681,7 +682,7 @@ func TestNewFileReader_RejectsOversizeFile(t *testing.T) {
 	}
 	// Oversize is a deterministic client error: assert the code, not just text,
 	// so a wrong-code regression fails.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -1274,7 +1275,7 @@ func TestFromFile_Errors(t *testing.T) {
 		}
 		// The reader's NOT_FOUND code is preserved through FromFile (not
 		// flattened to INTERNAL), so callers can map a missing file to a 4xx.
-		if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 			t.Errorf("Expected ErrCodeNotFound, got: %v", err)
 		}
 	})
@@ -1293,7 +1294,7 @@ func TestFromFile_Errors(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error for invalid JSON")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("Expected ErrCodeInvalidRequest, got: %v", err)
 		}
 	})
@@ -1386,7 +1387,7 @@ func TestClassifyConfigMapGetError(t *testing.T) {
 			t.Parallel()
 
 			err := classifyConfigMapGetError("default", "snapshot", tt.err)
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("classifyConfigMapGetError() error = %v, want code %s", err, tt.wantCode)
 			}
 		})

@@ -15,10 +15,11 @@
 package v1
 
 import (
-	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestDependencyAffinityValidate(t *testing.T) {
@@ -87,7 +88,7 @@ func TestDependencyAffinityValidate(t *testing.T) {
 				t.Fatalf("Validate() err = %v, wantErr %v", err, tt.wantErr)
 			}
 			if err != nil {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 				}
 			}

@@ -23,13 +23,101 @@ import (
 	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
+
+// invalidTrainerVersion fails like a malformed AICR_NCCL_TRAINER_VERSION. Tests
+// on paths that never self-install pass it, so its error must never surface.
+func invalidTrainerVersion() (string, error) {
+	return "", aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, "invalid Kubeflow Trainer version")
+}
+
+// TestEnsureTrainerInstalled_VersionResolvedOnlyForSelfInstall pins that an
+// invalid version fails only the run that must self-install. A run that reuses
+// a present Trainer, or waits on a recipe-declared one, never resolves it.
+func TestEnsureTrainerInstalled_VersionResolvedOnlyForSelfInstall(t *testing.T) {
+	tests := []struct {
+		name         string
+		declared     bool
+		objects      []runtime.Object
+		wantResolved bool
+	}{
+		{name: "present and not declared: reused", objects: completeTrainerInstall()},
+		{name: "present and declared: used as delivered", declared: true, objects: completeTrainerInstall()},
+		{name: "absent and not declared: self-install resolves", wantResolved: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := newTrainerFakeClient(tt.objects...)
+			resolved := false
+			resolve := func() (string, error) {
+				resolved = true
+				return invalidTrainerVersion()
+			}
+
+			refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, tt.declared, resolve)
+			if resolved != tt.wantResolved {
+				t.Fatalf("version resolved = %v, want %v", resolved, tt.wantResolved)
+			}
+			if len(refs) != 0 {
+				t.Errorf("refs = %d, want 0", len(refs))
+			}
+			if !tt.wantResolved {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, "")) {
+				t.Fatalf("err = %v, want the resolver's ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
+// TestEnsureTrainerInstalled_SelfInstallUsesResolvedVersion pins that the
+// self-install installs exactly the release the resolver returned and claims
+// what the installer created for cleanup.
+func TestEnsureTrainerInstalled_SelfInstallUsesResolvedVersion(t *testing.T) {
+	t.Setenv(trainerVersionEnv, "")
+	resolvedVersion, err := resolveTrainerVersion(nil)
+	if err != nil {
+		t.Fatalf("resolveTrainerVersion: %v", err)
+	}
+	created := []trainerResourceRef{{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment}}
+
+	var installedVersion string
+	oldInstall := installTrainerFunc
+	installTrainerFunc = func(_ context.Context, _ dynamic.Interface, _ kubernetes.Interface,
+		_ discovery.DiscoveryInterface, version string) ([]trainerResourceRef, error) {
+
+		installedVersion = version
+		return created, nil
+	}
+	defer func() { installTrainerFunc = oldInstall }()
+
+	resolve := func() (string, error) { return resolveTrainerVersion(nil) }
+	refs, err := ensureTrainerInstalled(context.Background(), newTrainerFakeClient(), fake.NewClientset(), nil, false, resolve)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if installedVersion != resolvedVersion {
+		t.Errorf("installTrainer got version %q, want the resolved %q", installedVersion, resolvedVersion)
+	}
+	if len(refs) != len(created) {
+		t.Errorf("refs = %d, want the %d resource(s) the installer created", len(refs), len(created))
+	}
+}
 
 // TestEnsureTrainerInstalled_CompleteInstallIsLeftAlone verifies a healthy
 // pre-existing Trainer is neither reinstalled nor claimed for cleanup: returning
@@ -37,7 +125,7 @@ import (
 func TestEnsureTrainerInstalled_CompleteInstallIsLeftAlone(t *testing.T) {
 	client := newTrainerFakeClient(completeTrainerInstall()...)
 
-	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false)
+	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,7 +172,7 @@ func TestEnsureTrainerInstalled_WaitsOnDiscoveredControllerName(t *testing.T) {
 		return false, nil, nil
 	})
 
-	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false)
+	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err != nil {
 		t.Fatalf("unexpected error waiting on the discovered controller %q (polled %v): %v",
 			discoveredName, polled, err)
@@ -129,16 +217,14 @@ func TestEnsureTrainerInstalled_WaitsForPreexistingController(t *testing.T) {
 	})
 	defer cancel()
 
-	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false)
+	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err == nil {
 		t.Fatal("expected a not-ready pre-existing controller to fail, got nil error")
 	}
 	if len(refs) != 0 {
 		t.Errorf("refs = %d, want 0", len(refs))
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
-		t.Errorf("error code is not Timeout: %v", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 }
 
 // TestEnsureTrainerInstalled_RefusesToInstallOverForeignNamespace is the guard for
@@ -159,16 +245,14 @@ func TestEnsureTrainerInstalled_RefusesToInstallOverForeignNamespace(t *testing.
 			trainerValidatingWebhookName, "kubeflow"),
 	)
 
-	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false)
+	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err == nil {
 		t.Fatal("expected the installer to refuse installing over an installation in another namespace")
 	}
 	if len(refs) != 0 {
 		t.Errorf("refs = %d, want 0", len(refs))
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
-		t.Errorf("error code is not Conflict: %v", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeConflict)
 	if !strings.Contains(err.Error(), "kubeflow") {
 		t.Errorf("error does not name the live installation's namespace: %v", err)
 	}
@@ -183,11 +267,11 @@ func TestEnsureTrainerInstalled_PreservesProbeErrorCode(t *testing.T) {
 		return true, nil, apierrors.NewServiceUnavailable("apiserver is down")
 	})
 
-	_, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false)
+	_, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false, invalidTrainerVersion)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeUnavailable {
 		t.Errorf("probe classification was overwritten; want Unavailable, got: %v", err)
 	}
 }
@@ -203,26 +287,24 @@ func TestFoldCleanupError(t *testing.T) {
 		name    string
 		bench   error
 		cleanup error
-		want    error
+		want    aicrErrors.ErrorCode
 	}{
-		{name: "clean run reports success", bench: nil, cleanup: nil, want: nil},
-		{name: "cleanup failure fails a passing benchmark", bench: nil, cleanup: cleanupErr, want: cleanupErr},
-		{name: "benchmark failure outranks cleanup failure", bench: benchErr, cleanup: cleanupErr, want: benchErr},
-		{name: "benchmark failure survives clean teardown", bench: benchErr, cleanup: nil, want: benchErr},
+		{name: "clean run reports success", bench: nil, cleanup: nil, want: ""},
+		{name: "cleanup failure fails a passing benchmark", bench: nil, cleanup: cleanupErr, want: aicrErrors.ErrCodeUnavailable},
+		{name: "benchmark failure outranks cleanup failure", bench: benchErr, cleanup: cleanupErr, want: aicrErrors.ErrCodeTimeout},
+		{name: "benchmark failure survives clean teardown", bench: benchErr, cleanup: nil, want: aicrErrors.ErrCodeTimeout},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := foldCleanupError(tt.bench, tt.cleanup, "NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
-			if tt.want == nil {
+			if tt.want == "" {
 				if got != nil {
 					t.Fatalf("got %v, want nil", got)
 				}
 				return
 			}
-			if !stderrors.Is(got, tt.want) {
-				t.Errorf("got %v, want it to wrap %v", got, tt.want)
-			}
+			errorstest.WantReportedCode(t, got, tt.want)
 		})
 	}
 }
@@ -233,7 +315,7 @@ func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 	cleanupErr := aicrErrors.New(aicrErrors.ErrCodeUnavailable, "apiserver is down")
 
 	got := foldCleanupError(nil, cleanupErr, "fallback message")
-	if !stderrors.Is(got, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(got) != aicrErrors.ErrCodeUnavailable {
 		t.Errorf("cleanup error code was flattened: %v", got)
 	}
 }
@@ -251,7 +333,7 @@ func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 //
 // The not-declared + missing row is deliberately absent rather than overlooked: it
 // reaches installTrainer, which downloads and kustomize-builds the upstream release
-// archive, so it is covered by e2e rather than being unit-testable here.
+// archive, so it needs installTrainerFunc stubbed, which this table does not do.
 func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -286,7 +368,7 @@ func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 			defer withShortTrainerWait(t)()
 			client := newTrainerFakeClient(tt.objects...)
 
-			refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, tt.declared)
+			refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, tt.declared, invalidTrainerVersion)
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
@@ -304,9 +386,7 @@ func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 			// (see the decision table on validators.Require), and filing a product
 			// defect under it tells whoever triages the failure to re-run rather than
 			// to fix their deployment.
-			if !stderrors.Is(err, aicrErrors.New(tt.wantErrCode, "")) {
-				t.Errorf("error code = %v, want %s", err, tt.wantErrCode)
-			}
+			errorstest.WantReportedCode(t, err, tt.wantErrCode)
 			if !strings.Contains(err.Error(), tt.wantErrContains) {
 				t.Errorf("error %q does not name %q, so an operator cannot tell which "+
 					"component failed to deploy", err, tt.wantErrContains)
@@ -367,9 +447,7 @@ func TestWaitForDeclaredTrainer_CanceledRunIsNotADeploymentDefect(t *testing.T) 
 		t.Errorf("canceled run reported as NotFound (%v); an aborted run is not a "+
 			"failed deployment and must not be filed as one", err)
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
-		t.Errorf("error code = %v, want ErrCodeTimeout", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 	// Witness that the guard ran rather than getTrainerObject's own pre-read check.
 	// Without this the test passes on the probe-error path and would not notice the
 	// guard being removed — which is how the earlier version of it was vacuous.
@@ -418,7 +496,7 @@ func TestEnsureTrainerInstalled_DeclaredRolloutDoesNotFallThrough(t *testing.T) 
 	// machine with egress a fall-through would download tens of megabytes first. The
 	// assertions below are what catch it — no error, no claimed resources, and a
 	// probe count proving the wait was entered.
-	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, true)
+	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, true, invalidTrainerVersion)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -472,10 +550,7 @@ func TestWaitForDeclaredTrainer_SlowProbeCannotOutrunTheDeadline(t *testing.T) {
 		t.Errorf("slow read reported as NotFound (%v); no probe observed anything "+
 			"incomplete, so there is no deployment defect to file", err)
 	}
-	var se *aicrErrors.StructuredError
-	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeTimeout {
-		t.Errorf("reported code = %v, want Timeout", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 }
 
 // TestWaitForDeclaredTrainer_TransportErrorKeepsItsClassification pins the narrow
@@ -515,19 +590,7 @@ func TestWaitForDeclaredTrainer_TransportErrorKeepsItsClassification(t *testing.
 			"is not a deployment that never completed, and swallowing that signal sends "+
 			"the operator to fix the wrong thing", err)
 	}
-	// Assert the code a consumer actually reads. ExitCodeFromError resolves the
-	// outermost StructuredError, so that is the value which reaches the exit status —
-	// errors.Is would match Unavailable anywhere in the chain and would still pass if
-	// the verdict were flattened to Internal, which is observable, not cosmetic.
-	//
-	// stderrors.As walks from the outermost and assigns the first match, which is the
-	// same resolution ExitCodeFromError performs. The pattern is already used for this
-	// purpose in pkg/chainsaw's tests.
-	var se *aicrErrors.StructuredError
-	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeUnavailable {
-		t.Errorf("reported code = %v, want Unavailable: a degraded control plane must not "+
-			"reach the operator as a deployment that never completed", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeUnavailable)
 }
 
 // TestWaitForDeclaredTrainer_LateSuccessDoesNotOutrunTheDeadline covers the other
@@ -565,10 +628,7 @@ func TestWaitForDeclaredTrainer_LateSuccessDoesNotOutrunTheDeadline(t *testing.T
 		t.Errorf("late success reported as NotFound (%v); the probe found the "+
 			"installation complete, so nothing was missing", err)
 	}
-	var se *aicrErrors.StructuredError
-	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeTimeout {
-		t.Errorf("reported code = %v, want Timeout", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 	// The reason must describe this probe, not the previous one. The installation is
 	// complete here, so blaming a missing object would point the operator at something
 	// that is present; the finding is a rollout slower than its budget.
@@ -616,7 +676,7 @@ func TestWaitForDeclaredTrainer_ExpiryNamesTheProbeThatJustRan(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error once the allowance expired with the installation incomplete")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeNotFound {
 		t.Errorf("error code = %v, want ErrCodeNotFound: the deadline expired locally "+
 			"with the parent still live", err)
 	}
@@ -702,10 +762,7 @@ func TestWaitForDeclaredTrainer_ReadTimeoutsAloneAreNotADeploymentDefect(t *test
 		t.Errorf("read timeouts reported as NotFound (%v); no probe ever observed an "+
 			"incomplete installation, so there is no deployment defect to file", err)
 	}
-	var se *aicrErrors.StructuredError
-	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeTimeout {
-		t.Errorf("reported code = %v, want Timeout", err)
-	}
+	errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeTimeout)
 	if strings.Contains(err.Error(), "no complete installation was found") {
 		t.Errorf("verdict claims nothing was found, but nothing was ever read: %v", err)
 	}

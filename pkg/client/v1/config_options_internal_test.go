@@ -15,11 +15,11 @@
 package aicr
 
 import (
-	stderrors "errors"
 	"testing"
 
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // RecipeResolveOptions returns opaque functional options. The external
@@ -270,7 +270,7 @@ func TestConfig_ErrorBranches_ReachableThroughWrapConfig(t *testing.T) {
 				t.Fatal("accepted an invalid value from an unvalidated document; " +
 					"WrapConfig bypasses the loader, so this branch is the only guard")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %v", err, errors.ErrCodeInvalidRequest)
 			}
 		})

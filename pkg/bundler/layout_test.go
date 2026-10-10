@@ -25,7 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Bundle layout is the last of the four surfaces ROADMAP section 1 freezes at
+// Bundle layout is the last of the four surfaces ROADMAP.md freezes at
 // v1 (issue #2113, scope items 1, 2 and 5's layout half).
 //
 // An integrator's automation reads paths out of a bundle: a GitOps pipeline

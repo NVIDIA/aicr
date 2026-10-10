@@ -243,6 +243,19 @@ func TestResolveTolerations_InvalidFlagReturnsError(t *testing.T) {
 	})
 }
 
+func TestResolveTolerations_APIServerRejectedFlagReturnsError(t *testing.T) {
+	flags := []cli.Flag{&cli.StringSliceFlag{Name: "tol"}}
+	runWith(t, flags, []string{"--tol", "=v:NoSchedule"}, func(c *cli.Command) {
+		_, err := resolveTolerations(c, "tol", nil)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "invalid --tol") {
+			t.Errorf("error %q must mention --tol", err.Error())
+		}
+	})
+}
+
 // === resolveTaint ===
 
 func TestResolveTaint_FlagSetParsesCLI(t *testing.T) {

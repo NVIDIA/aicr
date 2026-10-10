@@ -1,0 +1,147 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: h100-eks-ubuntu-training-kueue
+
+spec:
+  # H100 + EKS + Ubuntu + training with Kueue topology-aware scheduling
+  # (TAS). Topograph uses the `aws` provider (DescribeInstanceTopology:
+  # three network tiers). The Topograph ServiceAccount needs
+  # ec2:DescribeInstanceTopology via IRSA or EKS Pod Identity; see
+  # "Topology-aware scheduling" in docs/user/component-catalog.md.
+  base: h100-eks-ubuntu-training
+
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+    platform: kueue
+
+  mixins:
+    - os-ubuntu
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+
+  # Opt-in: only recipes with platform=kueue install Kueue and Topograph, so
+  # every other recipe renders as before. Topograph is a dependency of kueue
+  # but labels nodes asynchronously, so the kueue health check below asserts
+  # no node labels.
+  componentRefs:
+    - name: topograph
+      type: Helm
+      valuesFile: components/topograph/values.yaml
+      overrides:
+        provider:
+          name: aws
+
+    - name: kueue
+      type: Helm
+      valuesFile: components/kueue/values.yaml
+      dependencyRefs:
+        - topograph
+      manifestFiles:
+        - components/kueue/manifests/topology-tiers-3.yaml
+        - components/kueue/manifests/tas-flavor.yaml
+        - components/kueue/manifests/cluster-queue-tas.yaml
+        - components/kueue/manifests/local-queue.yaml
+      # Inline override of the registry assertFile: that check pins
+      # default-flavor, which this leaf does not ship.
+      healthCheckAsserts: |
+        apiVersion: chainsaw.kyverno.io/v1alpha1
+        kind: Test
+        metadata:
+          name: kueue-health-check-eks
+        spec:
+          timeouts:
+            assert: 5m
+          steps:
+            - name: validate-crds-established
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: topologies.kueue.x-k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: resourceflavors.kueue.x-k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: clusterqueues.kueue.x-k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: localqueues.kueue.x-k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+            - name: validate-deployment-exists
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: kueue-controller-manager
+                        namespace: kueue-system
+                      status:
+                        (availableReplicas > `0`): true
+            - name: validate-tas-crs
+              try:
+                # Existence plus ClusterQueue Active only: Topograph labels
+                # nodes asynchronously, so node labels are not asserted here.
+                - assert:
+                    resource:
+                      apiVersion: kueue.x-k8s.io/v1beta2
+                      kind: Topology
+                      metadata:
+                        name: tas-topology
+                - assert:
+                    resource:
+                      apiVersion: kueue.x-k8s.io/v1beta2
+                      kind: ResourceFlavor
+                      metadata:
+                        name: tas-flavor
+                - assert:
+                    resource:
+                      apiVersion: kueue.x-k8s.io/v1beta2
+                      kind: ClusterQueue
+                      metadata:
+                        name: cluster-queue
+                      status:
+                        ((conditions || `[]`)[?type == 'Active' && status == 'True'] | length(@) > `0`): true

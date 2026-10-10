@@ -16,7 +16,7 @@
 # GENERATED SNAPSHOT -- DO NOT EDIT BY HAND.
 #
 # The frozen REST contract that `make openapi-diff` compares against (issue
-# #2112, ROADMAP section 1). Regenerate with `make openapi-baseline` only when
+# #2112, ROADMAP.md API stability). Regenerate with `make openapi-baseline` only when
 # accepting the current spec as the new contract, and expect the resulting diff
 # to be read in review: moving this file is how a change becomes part of the
 # frozen surface.

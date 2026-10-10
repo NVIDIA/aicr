@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -146,7 +148,7 @@ func TestResolveServiceAccount(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("resolveServiceAccount() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && !stderrors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != tt.wantErrCode {
 				t.Errorf("error = %v, want code %s", err, tt.wantErrCode)
 			}
 			if got := d.existingServiceAccount(); got != tt.wantExisting {
@@ -400,7 +402,7 @@ func TestDeploy_FailsWhenServiceAccountGetForbidden(t *testing.T) {
 	if err == nil {
 		t.Fatal("Deploy() error = nil; an unreadable, explicitly-named ServiceAccount must fail the run")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeUnauthorized, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeUnauthorized {
 		t.Errorf("Deploy() error code = %v, want ErrCodeUnauthorized", err)
 	}
 	if !strings.Contains(err.Error(), "refusing to guess") {

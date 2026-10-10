@@ -16,7 +16,6 @@ package cli
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,6 +26,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -971,7 +972,7 @@ func TestRecipeClientFromCmd_PreservesClientErrorCode(t *testing.T) {
 			ctx, cancel := tt.ctx()
 			defer cancel()
 			err := testCmd.Run(ctx, tt.args)
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("recipeClientFromCmd() error = %v, want code %s", err, tt.wantCode)
 			}
 		})

@@ -28,6 +28,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/k8s/agent"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
@@ -202,10 +204,22 @@ func TestParseNodeSelectors(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:      "selector with equals in value",
+			name:      "invalid value - contains equals",
 			selectors: []string{"label=key=value"},
-			want:      map[string]string{"label": "key=value"},
-			wantErr:   false,
+			want:      nil,
+			wantErr:   true,
+		},
+		{
+			name:      "invalid key - contains whitespace",
+			selectors: []string{"bad key=v"},
+			want:      nil,
+			wantErr:   true,
+		},
+		{
+			name:      "invalid value - template syntax",
+			selectors: []string{"k={{ .Values.x }}"},
+			want:      nil,
+			wantErr:   true,
 		},
 		{
 			name:      "invalid selector no equals",
@@ -484,6 +498,36 @@ func TestParseTolerations(t *testing.T) {
 			wantLen:     1,
 			wantErr:     false,
 		},
+		{
+			name:        "empty key with Exists",
+			tolerations: []string{":NoSchedule"},
+			wantLen:     1,
+			wantErr:     false,
+		},
+		{
+			name:        "empty key with a value",
+			tolerations: []string{"=v:NoSchedule"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "empty key with an explicit empty value",
+			tolerations: []string{"=:NoSchedule"},
+			wantLen:     1,
+			wantErr:     false,
+		},
+		{
+			name:        "invalid key - contains whitespace",
+			tolerations: []string{"bad key=v:NoSchedule"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "invalid value - not a label value",
+			tolerations: []string{"dedicated=a=b:NoSchedule"},
+			wantLen:     0,
+			wantErr:     true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -525,6 +569,14 @@ func TestParseTolerationsOperator(t *testing.T) {
 			wantKey:      "nvidia.com/gpu",
 			wantValue:    "",
 			wantEffect:   corev1.TaintEffectNoExecute,
+		},
+		{
+			name:         "explicit empty value uses Exists operator",
+			toleration:   "dedicated=:NoSchedule",
+			wantOperator: corev1.TolerationOpExists,
+			wantKey:      "dedicated",
+			wantValue:    "",
+			wantEffect:   corev1.TaintEffectNoSchedule,
 		},
 		{
 			name:         "wildcard toleration produces Exists with empty key",
@@ -994,7 +1046,7 @@ func TestDeliverSnapshot_RejectsUnknownFormat(t *testing.T) {
 			if err == nil {
 				t.Fatalf("DeliverSnapshot(%s, format=toml) = nil error, want a rejection", tt.output)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 		})
@@ -1056,7 +1108,7 @@ func TestDeliverSnapshot_ConfigMapRejectsMalformedURI(t *testing.T) {
 				t.Fatalf("DeliverSnapshot(%q) = nil error, want a rejection; a ConfigMap "+
 					"destination must never report success without writing one", tt.uri)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 		})
@@ -1139,7 +1191,7 @@ func TestDeliverSnapshot_TemplateRejectsUnparseableDocument(t *testing.T) {
 	if err == nil {
 		t.Fatal("DeliverSnapshot(unparseable) = nil error, want a parse failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error = %v, want code ErrCodeInternal", err)
 	}
 }
@@ -1167,7 +1219,7 @@ func TestAgentConfigMapTargetRejectsMalformedURI(t *testing.T) {
 			if err == nil {
 				t.Fatalf("agentConfigMapTarget(%q) = nil error, want rejection before any cluster access", tt.output)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 		})
@@ -1247,7 +1299,7 @@ func TestDeployAndCollectRejectsBeforeClusterAccess(t *testing.T) {
 			if err == nil {
 				t.Fatal("DeployAndCollect() = nil error, want rejection")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantMsg) {

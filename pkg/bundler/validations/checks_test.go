@@ -25,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -1968,7 +1969,7 @@ func TestCheckMariaDBOperatorOwnershipCoherence(t *testing.T) {
 			if len(errs) != tt.wantErrors {
 				t.Fatalf("errors = %d (%v), want %d", len(errs), errs, tt.wantErrors)
 			}
-			if tt.wantCode != "" && !stderrors.Is(errs[0], aicrerrors.New(tt.wantCode, "")) {
+			if tt.wantCode != "" && errorstest.ReportedCode(errs[0]) != tt.wantCode {
 				t.Errorf("error = %v, want code %s", errs[0], tt.wantCode)
 			}
 			combined := strings.Join(warnings, "\n")
