@@ -1,0 +1,5 @@
+- apiVersion: v1
+  kind: ConfigMap
+  data:
+    sidecar: |
+{{ lib "nccl/inner-env.yaml" . | indent 6 }}

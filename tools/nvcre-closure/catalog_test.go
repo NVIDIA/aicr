@@ -15,8 +15,13 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 const testEntries = "testdata/entries"
@@ -121,14 +126,281 @@ func TestResolveEntryCapturesRuntimeFetches(t *testing.T) {
 	}
 }
 
-func TestReadLibRejectsEscapingReference(t *testing.T) {
-	for _, ref := range []string{"../../../etc/passwd", "/etc/passwd"} {
-		t.Run(ref, func(t *testing.T) {
-			if _, _, err := readLib(testEntries, ref); err == nil {
-				t.Errorf("readLib(%q) = nil error, want rejection", ref)
+func TestIncludeRejectsEscapingReference(t *testing.T) {
+	t.Parallel()
+
+	for _, fn := range []string{directiveLib, directiveIncludeTemplate, directiveIncludeFile} {
+		for _, ref := range []string{"../../../etc/passwd", "/etc/passwd", ""} {
+			t.Run(fn+" "+ref, func(t *testing.T) {
+				t.Parallel()
+
+				s := &entryScan{root: testEntries, entry: "training/nested", seen: map[string]struct{}{}}
+				if err := s.include(directive{fn: fn, ref: ref}); err == nil {
+					t.Errorf("include(%s %q) = nil error, want rejection", fn, ref)
+				}
+			})
+		}
+	}
+}
+
+// writeCatalog writes files, keyed by relative path, under a new temporary
+// directory and returns the directory.
+func writeCatalog(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for rel, body := range files {
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	return dir
+}
+
+func TestScanDirectives(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		body    string
+		want    []directive
+		wantErr bool
+	}{
+		{
+			name: "lib piped through indent",
+			body: `{{ lib "deps/a.yaml" . | indent 2 }}`,
+			want: []directive{{fn: directiveLib, ref: "deps/a.yaml"}},
+		},
+		{
+			name: "trim markers and includeTemplate",
+			body: `{{- includeTemplate "configs/train.sh" . -}}`,
+			want: []directive{{fn: directiveIncludeTemplate, ref: "configs/train.sh"}},
+		},
+		{
+			name: "call nested in parentheses",
+			body: `{{ indent 2 (lib "deps/a.yaml" .) }}`,
+			want: []directive{{fn: directiveLib, ref: "deps/a.yaml"}},
+		},
+		{
+			name: "includeFile and lib in separate actions",
+			body: "{{ includeFile \"raw.txt\" }}\nkey: v\n{{ lib \"nccl/b.yaml\" . }}",
+			want: []directive{
+				{fn: directiveIncludeFile, ref: "raw.txt"},
+				{fn: directiveLib, ref: "nccl/b.yaml"},
+			},
+		},
+		{
+			name: "field and conditional actions are not directives",
+			body: `{{ .Values.library }} {{ if .SourceRepo }}{{ .SourceRepo }}{{ end }}`,
+		},
+		{
+			name: "directive words outside an action are text",
+			body: `echo lib "deps/a.yaml" includeTemplate "x"`,
+		},
+		{
+			name: "directive word inside a string argument",
+			body: `{{ printf "some lib text" }}`,
+		},
+		{
+			name: "directive word inside a raw string argument",
+			body: "{{ printf `uses includeFile here` }}",
+		},
+		{
+			name: "template comments naming directives",
+			body: `{{/* lib is spliced below */}} {{- /* includeTemplate "x" */ -}}`,
+		},
+		{
+			name: "string argument ahead of a directive",
+			body: `{{ printf "%s lib" (lib "deps/a.yaml" .) }}`,
+			want: []directive{{fn: directiveLib, ref: "deps/a.yaml"}},
+		},
+		{
+			name: "raw string target",
+			body: "{{ lib `deps/a.yaml` . }}",
+			want: []directive{{fn: directiveLib, ref: "deps/a.yaml"}},
+		},
+		{
+			name: "escaped quote in target",
+			body: `{{ lib "deps/a\"b.yaml" . }}`,
+			want: []directive{{fn: directiveLib, ref: `deps/a"b.yaml`}},
+		},
+		{
+			name:    "lib with a field argument",
+			body:    `{{ lib .LibPath . }}`,
+			wantErr: true,
+		},
+		{
+			name:    "includeTemplate with a computed argument",
+			body:    `{{ includeTemplate (printf "configs/%s.sh" .Name) . }}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := scanDirectives(tt.body)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("scanDirectives(%q) error = %v, wantErr %v", tt.body, err, tt.wantErr)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("scanDirectives(%q) = %+v, want %+v", tt.body, got, tt.want)
 			}
 		})
 	}
+}
+
+// TestResolveEntryFollowsNestedDirectives checks that resolveEntry reaches a
+// lib spliced in by a lib, a lib spliced in by an includeTemplate script, and a
+// clone inside that script, and does not follow directives in includeFile content.
+func TestResolveEntryFollowsNestedDirectives(t *testing.T) {
+	t.Parallel()
+
+	images, fetches, err := resolveEntry(testEntries, "training/nested", "aws", "h100")
+	// raw.txt, spliced in by includeFile, names a lib that does not exist.
+	if err != nil {
+		t.Fatalf("resolveEntry: %v", err)
+	}
+	for _, want := range []string{
+		"example.invalid/torch:v3",
+		"example.invalid/nested-sidecar:v5",
+		"example.invalid/raw-noted:v6",
+	} {
+		if !slices.Contains(images, want) {
+			t.Errorf("missing image %q; got %v", want, images)
+		}
+	}
+
+	got := dedupeFetches(fetches)
+	want := []runtimeFetch{
+		{URL: "https://example.invalid/Trainer.git", Ref: "v1.0.0"},
+		{URL: "https://example.invalid/dataset.tar.gz"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("fetches = %+v, want %+v", got, want)
+	}
+}
+
+func TestResolveEntryTerminatesOnLibCycle(t *testing.T) {
+	t.Parallel()
+
+	dir := writeCatalog(t, map[string]string{
+		"communication/loop.yaml": "dependencies:\n{{ lib \"deps/a.yaml\" . }}\n",
+		"_lib/deps/a.yaml":        "image: example.invalid/a:v1\n{{ lib \"deps/b.yaml\" . }}\n",
+		"_lib/deps/b.yaml":        "image: example.invalid/b:v1\n{{ lib \"deps/a.yaml\" . }}\n",
+	})
+
+	images, _, err := resolveEntry(dir, "communication/loop", "aws", "h100")
+	if err != nil {
+		t.Fatalf("resolveEntry: %v", err)
+	}
+	slices.Sort(images)
+	if want := []string{"example.invalid/a:v1", "example.invalid/b:v1"}; !slices.Equal(images, want) {
+		t.Errorf("images = %v, want %v", images, want)
+	}
+}
+
+func TestResolveEntryMissingIncludeIsAnError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		entry string
+	}{
+		{"missing nested lib", "dependencies:\n{{ lib \"deps/outer.yaml\" . }}\n"},
+		{"missing includeTemplate", "dependencies:\n{{ includeTemplate \"configs/train.sh\" . }}\n"},
+		{"missing includeFile", "dependencies:\n{{ includeFile \"raw.txt\" }}\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := writeCatalog(t, map[string]string{
+				"training/e.yaml":      tt.entry,
+				"_lib/deps/outer.yaml": "{{ lib \"nccl/absent.yaml\" . }}\n",
+			})
+			if _, _, err := resolveEntry(dir, "training/e", "aws", "h100"); err == nil {
+				t.Error("resolveEntry = nil error, want failure on the missing target")
+			}
+		})
+	}
+}
+
+func TestResolveEntrySymlinks(t *testing.T) {
+	t.Parallel()
+
+	symlink := func(t *testing.T, target, link string) {
+		t.Helper()
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatalf("symlink %s -> %s: %v", link, target, err)
+		}
+	}
+
+	t.Run("lib target escaping the catalog is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		outside := writeCatalog(t, map[string]string{"secret.yaml": "image: example.invalid/outside:v1\n"})
+		dir := writeCatalog(t, map[string]string{
+			"training/e.yaml": "dependencies:\n{{ lib \"deps/escape.yaml\" . }}\n",
+			"_lib/deps/.keep": "",
+		})
+		symlink(t, filepath.Join(outside, "secret.yaml"), filepath.Join(dir, "_lib", "deps", "escape.yaml"))
+
+		_, _, err := resolveEntry(dir, "training/e", "aws", "h100")
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+
+	t.Run("entry escaping the catalog is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		outside := writeCatalog(t, map[string]string{"entry.yaml": "image: example.invalid/outside:v1\n"})
+		dir := writeCatalog(t, map[string]string{"training/.keep": ""})
+		symlink(t, filepath.Join(outside, "entry.yaml"), filepath.Join(dir, "training", "e.yaml"))
+
+		_, _, err := resolveEntry(dir, "training/e", "aws", "h100")
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+
+	t.Run("lib target symlinked within the catalog is read", func(t *testing.T) {
+		t.Parallel()
+
+		dir := writeCatalog(t, map[string]string{
+			"training/e.yaml":     "dependencies:\n{{ lib \"deps/alias.yaml\" . }}\n",
+			"_lib/deps/real.yaml": "image: example.invalid/inside:v1\n",
+		})
+		symlink(t, "real.yaml", filepath.Join(dir, "_lib", "deps", "alias.yaml"))
+
+		images, _, err := resolveEntry(dir, "training/e", "aws", "h100")
+		if err != nil {
+			t.Fatalf("resolveEntry: %v", err)
+		}
+		if !slices.Equal(images, []string{"example.invalid/inside:v1"}) {
+			t.Errorf("images = %v, want the symlinked lib's image", images)
+		}
+	})
+
+	t.Run("catalog reached through a symlink is read", func(t *testing.T) {
+		t.Parallel()
+
+		dir := writeCatalog(t, map[string]string{
+			"training/e.yaml":  "dependencies:\n{{ lib \"deps/a.yaml\" . }}\n",
+			"_lib/deps/a.yaml": "image: example.invalid/a:v1\n",
+		})
+		link := filepath.Join(t.TempDir(), "entries")
+		symlink(t, dir, link)
+
+		images, _, err := resolveEntry(link, "training/e", "aws", "h100")
+		if err != nil {
+			t.Fatalf("resolveEntry: %v", err)
+		}
+		if !slices.Equal(images, []string{"example.invalid/a:v1"}) {
+			t.Errorf("images = %v, want the lib's image", images)
+		}
+	})
 }
 
 func TestResolveEntryMissingEntryIsAnError(t *testing.T) {

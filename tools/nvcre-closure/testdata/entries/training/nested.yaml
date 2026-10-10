@@ -1,0 +1,25 @@
+dependencies:
+- apiVersion: trainer.kubeflow.org/v1alpha1
+  kind: TrainingRuntime
+  spec:
+    template:
+      spec:
+        containers:
+        - image: example.invalid/torch:v3
+          name: trainer
+          command:
+          - sh
+          - -c
+          - |
+{{ includeTemplate "configs/train.sh" . | indent 12 }}
+- apiVersion: v1
+  kind: ConfigMap
+  data:
+    notes: |
+{{ includeFile "raw.txt" | indent 6 }}
+overrides:
+- when:
+    platform:
+      equals: aws
+  dependencies:
+{{ lib "deps/outer.yaml" . | indent 2 }}

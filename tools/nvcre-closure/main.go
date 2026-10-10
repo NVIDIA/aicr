@@ -25,8 +25,9 @@
 //
 // The closure is read from the upstream repository at the tag matching the
 // pinned chart version. That is equivalent to extracting the embedded files
-// from the released manager and is reproducible without decompiling a binary;
-// the tag is the same input the release builds from.
+// from the released manager and is reproducible without decompiling a binary.
+// The tag is the same input the release builds from. The closure also records
+// the commit the tag resolved to, because a tag can be repointed.
 //
 // Usage:
 //
@@ -36,8 +37,10 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -63,8 +66,12 @@ const (
 	componentName = "nvcre"
 	registryPath  = "recipes/registry.yaml"
 
-	cloneTimeout   = 2 * time.Minute
-	resolveTimeout = 30 * time.Second
+	cloneTimeout    = 2 * time.Minute
+	resolveTimeout  = 30 * time.Second
+	revParseTimeout = 10 * time.Second
+
+	dirContextKey   = "dir"
+	entryContextKey = "entry"
 )
 
 // pinnedChartVersion reads the component's pinned chart version from the
@@ -105,6 +112,7 @@ func pinnedChartVersion(path string) (string, error) {
 type closure struct {
 	Component     string         `yaml:"component"`
 	SourceVersion string         `yaml:"sourceVersion"`
+	SourceCommit  string         `yaml:"sourceCommit"`
 	Platform      string         `yaml:"platform"`
 	Architecture  string         `yaml:"gpuArchitecture"`
 	Entries       []string       `yaml:"entries"`
@@ -112,9 +120,9 @@ type closure struct {
 	RuntimeFetch  []runtimeFetch `yaml:"runtimeFetches,omitempty"`
 }
 
-// closureImage pairs the catalog's tag reference with the digest it resolved to.
-// Both are recorded: the digest is what a mirror must copy, and the tag is what
-// the catalog says, so a drifted tag is visible rather than silently replaced.
+// closureImage pairs a catalog image tag with the digest it resolved to at
+// derivation time. Workloads pull by tag, so Digest names the bytes to mirror,
+// not what a pod runs after upstream repoints the tag.
 type closureImage struct {
 	Image  string `yaml:"image"`
 	Digest string `yaml:"digest"`
@@ -138,7 +146,8 @@ func main() {
 		"comma-separated catalog entries in scope")
 	flag.StringVar(&out, "out", "recipes/components/nvcre/workload-images.yaml", "path to write")
 	flag.BoolVar(&check, "check", false, "compare against the committed file and fail when stale")
-	flag.StringVar(&catalog, "catalog", "", "use an already-checked-out entries directory instead of cloning")
+	flag.StringVar(&catalog, "catalog", "",
+		"use the entries directory of a clean git checkout instead of cloning")
 	flag.Parse()
 
 	if version == "" {
@@ -171,7 +180,12 @@ func run(ctx context.Context, version, platform, arch string, entries []string,
 		catalog = dir
 	}
 
-	doc, err := derive(ctx, catalog, version, platform, arch, entries)
+	commit, err := sourceCommit(ctx, catalog)
+	if err != nil {
+		return err
+	}
+
+	doc, err := derive(ctx, catalog, version, commit, platform, arch, entries)
 	if err != nil {
 		return err
 	}
@@ -226,6 +240,34 @@ func cloneEntries(ctx context.Context, tag string) (string, func(), error) {
 	return filepath.Join(dir, entriesPath), cleanup, nil
 }
 
+// sourceCommit returns the commit checked out at dir. It returns an error if dir
+// is not inside a git checkout or has local changes under it.
+func sourceCommit(ctx context.Context, dir string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, revParseTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--verify", "HEAD^{commit}").Output()
+	if err != nil {
+		return "", errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"resolve catalog commit, which requires the catalog to be a git checkout", err,
+			map[string]interface{}{dirContextKey: dir})
+	}
+	commit := strings.TrimSpace(string(out))
+
+	// A local change means the commit does not describe the files read.
+	status, err := exec.CommandContext(ctx, "git", "-C", dir, "status", "--porcelain", "--", ".").Output()
+	if err != nil {
+		return "", errors.WrapWithContext(errors.ErrCodeInternal, "read catalog worktree status", err,
+			map[string]interface{}{dirContextKey: dir})
+	}
+	if strings.TrimSpace(string(status)) != "" {
+		return "", errors.WrapWithContext(errors.ErrCodeConflict,
+			"catalog has local changes, so its commit does not describe the files read", nil,
+			map[string]interface{}{dirContextKey: dir, "commit": commit})
+	}
+	return commit, nil
+}
+
 // normalizeEntries returns the sorted, trimmed, non-empty entry scope. It runs
 // before the scope is recorded rather than during resolution: the closure
 // otherwise keeps the raw flag value, so `-entries "a, b,"` writes " b" and ""
@@ -244,7 +286,7 @@ func normalizeEntries(entries []string) []string {
 
 // derive resolves the in-scope entries against the platform and architecture
 // selectors and digest-resolves every image the resulting blocks reference.
-func derive(ctx context.Context, entriesDir, version, platform, arch string,
+func derive(ctx context.Context, entriesDir, version, commit, platform, arch string,
 	entries []string,
 ) (*closure, error) {
 
@@ -252,6 +294,7 @@ func derive(ctx context.Context, entriesDir, version, platform, arch string,
 	doc := &closure{
 		Component:     "nvcre",
 		SourceVersion: version,
+		SourceCommit:  commit,
 		Platform:      platform,
 		Architecture:  arch,
 		Entries:       scope,
@@ -284,60 +327,127 @@ func derive(ctx context.Context, entriesDir, version, platform, arch string,
 	return doc, nil
 }
 
-// resolveEntry reads one catalog entry and every `lib` fragment the applicable
-// blocks pull in, returning the images and runtime fetches on that path.
-func resolveEntry(entriesDir, entry, platform, arch string) ([]string, []runtimeFetch, error) {
-	data, err := os.ReadFile(filepath.Join(entriesDir, entry+".yaml")) //nolint:gosec // bounded by entriesDir
+// resolveEntry returns the images and runtime fetches that entry's blocks
+// matching platform and arch reach, including files spliced in at any depth.
+// It returns an error if a file it reads resolves outside entriesDir.
+func resolveEntry(entriesDir, entry, platform, arch string) (images []string, fetches []runtimeFetch, err error) {
+	fields := map[string]interface{}{entryContextKey: entry}
+	root, err := filepath.EvalSymlinks(entriesDir)
 	if err != nil {
-		return nil, nil, errors.WrapWithContext(errors.ErrCodeNotFound, "read catalog entry", err,
-			map[string]interface{}{"entry": entry})
+		return nil, nil, errors.WrapWithContext(errors.ErrCodeNotFound, "resolve catalog root", err, fields)
+	}
+	path, err := resolveInRoot(root, filepath.Join(root, entry+".yaml"), fields)
+	if err != nil {
+		return nil, nil, err
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // confined to root by resolveInRoot
+	if err != nil {
+		return nil, nil, errors.WrapWithContext(errors.ErrCodeInternal, "read catalog entry", err, fields)
 	}
 
-	var images []string
-	var fetches []runtimeFetch
+	s := &entryScan{root: root, entry: entry, seen: map[string]struct{}{}}
 	for _, b := range splitBlocks(string(data)) {
 		if !b.sel.matches(platform, arch) {
 			continue
 		}
-		images = append(images, scanImages(b.body)...)
-		blockFetches, err := scanRuntimeFetches(b.body)
-		if err != nil {
+		if err = s.scan(b.body, true); err != nil {
 			return nil, nil, err
 		}
-		fetches = append(fetches, blockFetches...)
-
-		for _, ref := range b.libRefs {
-			libImages, libFetches, libErr := readLib(entriesDir, ref)
-			if libErr != nil {
-				return nil, nil, libErr
-			}
-			images = append(images, libImages...)
-			fetches = append(fetches, libFetches...)
-		}
 	}
-	return images, fetches, nil
+	return s.images, s.fetches, nil
 }
 
-// readLib loads a shared fragment referenced by a `{{ lib "..." }}` directive.
-// Fragments carry no selectors of their own: the block that pulls one in has
-// already been matched.
-func readLib(entriesDir, ref string) ([]string, []runtimeFetch, error) {
-	path := filepath.Join(entriesDir, libPrefix, filepath.Clean(ref))
-	rel, err := filepath.Rel(filepath.Join(entriesDir, libPrefix), path)
+// resolveInRoot returns path with symlinks resolved. It returns an error if the
+// resolved path does not exist or is not under root, which must itself be
+// symlink-free.
+func resolveInRoot(root, path string, fields map[string]interface{}) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		code := errors.ErrCodeInternal
+		if stderrors.Is(err, fs.ErrNotExist) {
+			code = errors.ErrCodeNotFound
+		}
+		return "", errors.WrapWithContext(code, "resolve catalog file", err, fields)
+	}
+	rel, err := filepath.Rel(root, resolved)
 	if err != nil || !filepath.IsLocal(rel) {
-		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("lib reference escapes the catalog: %q", ref))
+		return "", errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"catalog file resolves outside the catalog", err, fields)
 	}
-	data, err := os.ReadFile(path) //nolint:gosec // confined to entriesDir by the check above
+	return resolved, nil
+}
+
+// entryScan accumulates the images and runtime fetches one catalog entry
+// reaches. root is the catalog's entries directory with symlinks resolved.
+type entryScan struct {
+	root    string
+	entry   string
+	seen    map[string]struct{}
+	images  []string
+	fetches []runtimeFetch
+}
+
+// scan records the images and runtime fetches in body and, if render is true,
+// in the files its template directives splice in.
+func (s *entryScan) scan(body string, render bool) error {
+	s.images = append(s.images, scanImages(body)...)
+	fetches, err := scanRuntimeFetches(body)
 	if err != nil {
-		return nil, nil, errors.WrapWithContext(errors.ErrCodeNotFound, "read lib fragment", err,
-			map[string]interface{}{"ref": ref})
+		return err
 	}
-	fetches, err := scanRuntimeFetches(string(data))
+	s.fetches = append(s.fetches, fetches...)
+	if !render {
+		return nil
+	}
+
+	directives, err := scanDirectives(body)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
-	return scanImages(string(data)), fetches, nil
+	for _, d := range directives {
+		if err := s.include(d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// include scans the file d splices in, at most once per entry. It returns an
+// error if the target is outside the catalog, including through a symlink, or
+// missing, including a missing includeTemplate or includeFile target, which
+// upstream renders as empty.
+func (s *entryScan) include(d directive) error {
+	fields := map[string]interface{}{"directive": d.fn, "ref": d.ref, entryContextKey: s.entry}
+	if !filepath.IsLocal(d.ref) {
+		return errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"template directive target is not a path inside the catalog", nil, fields)
+	}
+	base := filepath.Join(s.root, s.entry)
+	if d.fn == directiveLib {
+		base = filepath.Join(s.root, libPrefix)
+	}
+
+	// An optional file and one a catalog layout change moved look the same
+	// here, and rendering the moved one as empty would drop its content from
+	// the closure with no diff.
+	path, err := resolveInRoot(s.root, filepath.Join(base, d.ref), fields)
+	if err != nil {
+		return err
+	}
+
+	// Reading each target once also terminates a reference cycle. A target
+	// carries no selectors, since the block that splices it in already matched.
+	key := d.fn + "\x00" + path
+	if _, ok := s.seen[key]; ok {
+		return nil
+	}
+	s.seen[key] = struct{}{}
+
+	data, err := os.ReadFile(path) //nolint:gosec // confined to root by resolveInRoot
+	if err != nil {
+		return errors.WrapWithContext(errors.ErrCodeInternal, "read template directive target", err, fields)
+	}
+	return s.scan(string(data), d.fn != directiveIncludeFile)
 }
 
 // resolveDigest resolves a tag reference to the digest a mirror must copy.
@@ -414,7 +524,17 @@ const generatedHeader = `# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. 
 # go:embed-compiled into the manager binary. Mirror tooling reads this file to
 # learn what a disconnected install has to carry beyond the controller image.
 #
-# Scope follows ADR-025's benchmark execution safety gate: the supported
-# certification paths only, not every dormant catalog entry. Re-derive whenever
-# the chart pin moves, because the catalog ships inside the manager image.
+# Scope follows ADR-025's benchmark execution safety gate, which covers the
+# supported certification paths only, not every dormant catalog entry.
+# Re-derive whenever the chart pin moves, because the catalog ships inside the
+# manager image.
+#
+# Each digest is what its tag resolved to when this file was derived. The
+# workloads pull by tag, not by digest, so the digest tells a mirror which bytes
+# to copy but does not guarantee what runs. If upstream repoints a tag, pods
+# pull bytes this file does not describe. A mirror has to serve each tag, and
+# serving it at the recorded digest keeps the cluster on the derived bytes.
+#
+# sourceCommit is the upstream commit sourceVersion pointed to at derivation.
+# Tags are mutable, so the commit is the input that reproduces this file.
 `
