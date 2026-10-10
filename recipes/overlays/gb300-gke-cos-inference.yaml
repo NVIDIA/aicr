@@ -98,8 +98,9 @@ spec:
       constraints:
         - name: Deployment.gpu-operator.version
           value: ">= v25.10.0"
-        # Host driver floor. On COS, GKE installs the GPU driver and the GPU Operator's driver is
-        # disabled, so the operator version cannot gate it. check-nvidia-smi compares this with the
+        # Host driver floor. On COS the GPU driver is installed outside the GPU Operator, by GKE
+        # under gpuStack=gke-default or by the bundle's gcp-driver-installer under bundle-installer,
+        # so the operator version cannot gate it. check-nvidia-smi compares this with the
         # nvidia-smi banner on each GPU node, and fails rather than skips when no node can be
         # measured (busy or cordoned). The value is the lowest GPU driver minimum the GKE Version
         # Vector registry declares for this platform; the workload leaves inherit it.
