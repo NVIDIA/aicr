@@ -39,6 +39,32 @@ obligation self-renewing rather than something you can defer:
   that makes the obligation self-renewing: a bump that leaves a hole below the
   new pin fails, whatever any record's ceiling says.
 
+A coverage gate enforces the obligation itself. No record assesses an upgrade
+into a pinned version, in the registry or in any overlay or mixin override, that
+falls inside no record's `to` range: `aicr upgrade-check` reports `unknown`, or
+`blocked` when the version lies past the record's highest ceiling. So:
+
+- A component's record must cover every pin it has reached
+  (`TestRecordedComponentsCoverTheirPins`, part of `make test`).
+- A pin no record covers may not move, and a record that exists on the merge
+  base may not disappear while its component remains
+  (`TestChangedPinsHaveUpgradeRecords`). A deleted record moves no pin, so only
+  a comparison with the base can see it. Moves are compared per source: the
+  registry default, `base.yaml`, and each overlay and mixin's own
+  `componentRefs`. Bumping one overlay's override counts even when another
+  source already pins that version, and a source that adds or drops an
+  override is compared against the registry default. What a recipe inherits is not
+  resolved, so re-parenting an overlay or attaching a mixin that pins a
+  different version goes unseen.
+
+A record reaches a pin unless every one of its `to` ranges starts above it. A
+record written ahead of its bump reaches nothing yet, so the gate treats those
+pins as recordless until the pin gets there, and the bump that gets it there
+must land inside a `to`. A record with no transitions, such as one carrying only
+a `replaces` block, reaches no pin at all. Components that predate records are not gated until their pin next moves, and a
+component new to the registry needs no record for its first pin, since nobody
+upgrades into it from an earlier release.
+
 ## Where a record lives
 
 `recipes/components/<component>/upgrades.yaml`, referenced from the component's
@@ -284,9 +310,13 @@ aicr upgrade-check --from <old> --to <new> --deployer helm
 ```
 
 The gate runs every well-formedness rule over every record the registry
-references. It **asserts no verdict**, so "make the test green" cannot be
-satisfied by writing `safe`; flipping a `manual` record to `safe` makes it fail
-harder, because `safe` may not carry steps.
+references, then both coverage checks above against the merge base with
+`upstream/main` when your clone has that remote, else `origin/main`; set
+`AICR_UPGRADE_BASE_REF` to compare against another ref, and fetch the base
+first, since a stale one reports moves that are already on `main`. CI runs it
+on every pull request. None of these **asserts a verdict**, so "make the test
+green" cannot be satisfied by writing `safe`; flipping a `manual` record to
+`safe` makes it fail harder, because `safe` may not carry steps.
 
 Do not add a Go test asserting a verdict for a real component. Verdicts for real
 components are validated empirically, by KWOK and UAT. Pinning them in the unit
