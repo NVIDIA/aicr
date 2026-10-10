@@ -45,9 +45,14 @@ KIND_NODE_IMAGE ?= $(shell yq -r '.testing.kind_node_image' .settings.yaml 2>/de
 # testing_tools.registry_image, an ECR Public mirror). Unset, ctlptl pulls
 # docker.io/library/registry:3 anonymously, which shared CI runners rate-limit.
 KIND_REGISTRY_IMAGE ?= $(shell yq -r '.testing_tools.registry_image' .settings.yaml 2>/dev/null)
-# The same image on Google's mirror (identical index digest), the fallback when
-# ECR Public sheds an anonymous pull.
-KIND_REGISTRY_MIRROR_IMAGE = $(patsubst public.ecr.aws/docker/%,mirror.gcr.io/%,$(KIND_REGISTRY_IMAGE))
+
+# Docker Hub pull-through mirror (single source of truth: .settings.yaml
+# build.dockerhub_mirror, an https:// URL). Image refs need the bare host.
+DOCKERHUB_MIRROR ?= $(shell yq -r '.build.dockerhub_mirror' .settings.yaml 2>/dev/null)
+DOCKERHUB_MIRROR_HOST = $(patsubst https://%,%,$(DOCKERHUB_MIRROR))
+# The same image on the Docker Hub mirror (identical index digest), the fallback
+# when ECR Public sheds an anonymous pull.
+KIND_REGISTRY_MIRROR_IMAGE = $(patsubst public.ecr.aws/docker/%,$(DOCKERHUB_MIRROR_HOST)/%,$(KIND_REGISTRY_IMAGE))
 
 # Default target
 all: help
@@ -1058,6 +1063,9 @@ tilt-ci: ## Runs Tilt in CI mode (no UI, waits for resources)
 # =============================================================================
 
 .PHONY: cluster-create
+# Exported to the recipe rather than pasted into it, so a quote in a
+# DOCKERHUB_MIRROR override cannot rewrite the validation command.
+cluster-create: export DOCKERHUB_MIRROR := $(DOCKERHUB_MIRROR)
 cluster-create: ## Creates local Kind cluster with registry
 	@echo "Creating local development cluster..."
 	@if ! command -v ctlptl >/dev/null 2>&1; then \
@@ -1092,12 +1100,18 @@ cluster-create: ## Creates local Kind cluster with registry
 		echo "Error: could not resolve testing_tools.registry_image from .settings.yaml."; \
 		exit 1; \
 	fi
+	@# Same bash test as .github/actions/load-versions, so CI and local runs accept
+	@# exactly the same values (grep would match a multi-line value line by line).
+	@bash -c '[[ $$DOCKERHUB_MIRROR =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$$ ]]' || { \
+		echo "Error: DOCKERHUB_MIRROR (default: .settings.yaml build.dockerhub_mirror) must be an https:// host URL with no path, got '$$DOCKERHUB_MIRROR'."; \
+		exit 1; \
+	}
 	@# kind pulls the node image only when it is not already local, so seeding it
-	@# from Google's Docker Hub mirror keeps the anonymous Docker Hub rate limit
-	@# out of the critical path. On a mirror miss kind pulls from Docker Hub.
+	@# from the Docker Hub mirror keeps the anonymous Docker Hub rate limit out
+	@# of the critical path. On a mirror miss kind pulls from Docker Hub.
 	@docker image inspect "$(KIND_NODE_IMAGE)" >/dev/null 2>&1 || \
-		{ docker pull -q "mirror.gcr.io/$(KIND_NODE_IMAGE)" && docker tag "mirror.gcr.io/$(KIND_NODE_IMAGE)" "$(KIND_NODE_IMAGE)"; } || \
-		echo "Warning: mirror.gcr.io/$(KIND_NODE_IMAGE) unavailable; kind will pull from Docker Hub"
+		{ docker pull -q "$(DOCKERHUB_MIRROR_HOST)/$(KIND_NODE_IMAGE)" && docker tag "$(DOCKERHUB_MIRROR_HOST)/$(KIND_NODE_IMAGE)" "$(KIND_NODE_IMAGE)"; } || \
+		echo "Warning: $(DOCKERHUB_MIRROR_HOST)/$(KIND_NODE_IMAGE) unavailable; kind will pull from Docker Hub"
 	@# ctlptl drops its pull's progress stream, where the daemon reports mid-pull
 	@# failures such as a refused layer download, so those surface only as a
 	@# misleading "No such image" at container create. Pulling here keeps the
