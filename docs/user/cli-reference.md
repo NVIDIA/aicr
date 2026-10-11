@@ -87,8 +87,8 @@ aicr snapshot [flags]
 | `--job-name` | | string | aicr | Prefix for the agent Job name; the run ID is always appended (`<prefix>-<run-id>`) |
 | `--service-account-name` | | string | aicr | ServiceAccount the agent pod runs as. **Exact-if-exists:** when a ServiceAccount of exactly this name already exists in `--namespace`, it is used verbatim and the run creates **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding — and deletes none at cleanup. Otherwise the value is a name prefix and the run ID is appended (`<prefix>-<run-id>`). Exact-if-exists mode needs **fewer** caller permissions — the run's pre-flight gate stops demanding `create`/`delete` on the five RBAC kinds — but requires the ServiceAccount to already carry the agent's rules, which the gate verifies with a `SubjectAccessReview`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) and [Pre-flight permission gate](agent-deployment.md#pre-flight-permission-gate) |
 | `--add-roles-to-service-account` | | string | | **Writes manifests and applies nothing.** Renders the `Role`/`RoleBinding` (`aicr-agent-<sa>-rbac`) and `ClusterRole`/`ClusterRoleBinding` (`aicr-agent-<namespace>.<sa>-rbac`) that grant the agent's permissions to the named ServiceAccount into `./snapshot-rbac-<run-id>/`, one object per file with a comment header explaining what it grants, then exits **without taking a snapshot**. **No cluster is contacted** — no kubeconfig or privileges needed, and the ServiceAccount is not checked for existence. Review the files, then apply with `kubectl apply -f <dir>/` and revoke with `kubectl delete -f <dir>/` yourself; no run cleanup ever touches them. Fails with `CONFLICT` if the directory already exists. Combine with `--discover-network` to also render the mutating live-discovery rules |
-| `--node-selector` | | string[] | auto | Node selector for agent scheduling (key=value, repeatable). When omitted (and neither `--require-gpu` nor `--runtime-class` is set), the agent auto-targets GPU nodes labeled `nvidia.com/gpu.present=true` if the cluster has any — see [GPU Node Auto-Targeting](agent-deployment.md#gpu-node-auto-targeting). Pass an explicit selector to override. |
-| `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
+| `--node-selector` | | string[] | auto | Node selector for agent scheduling (key=value, repeatable). When omitted (and neither `--require-gpu` nor `--runtime-class` is set), the agent auto-targets GPU nodes labeled `nvidia.com/gpu.present=true` if the cluster has any. See [GPU Node Auto-Targeting](agent-deployment.md#gpu-node-auto-targeting). Pass an explicit selector to override. A key or value the Kubernetes API server would reject fails with `INVALID_REQUEST`. |
+| `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. A toleration the Kubernetes API server would reject fails with `INVALID_REQUEST`. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves both the agent's run-scoped `aicr-node-reader-<run-id>` ClusterRole and the identically named ClusterRoleBinding active. By default the ClusterRole grants only read-only access; with `--discover-network` it also carries the mutating rules live network discovery needs (CRD/namespace/daemonset create, pod exec, node patch, NicClusterPolicy). Delete both when you are done — removing only the binding leaves the grant definition behind. |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
@@ -504,7 +504,7 @@ Generate recipes using direct system parameters:
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
-| `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
+| `--platform` | | string | Platform/framework type: dynamo, kubeflow, kueue, nim, runai, slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` grants the component on a GKE recipe that neither declares nor declines it, confirms it where the recipe already declares it, and is rejected over an explicit recipe decline (any service) or against a non-GKE recipe that does not declare it; `disabled` is unchanged and always requires the recipe to already declare the component. Recorded in the generated recipe |
@@ -1095,8 +1095,8 @@ aicr validate [flags]
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--job-name` | | string | aicr-validate | Prefix for the **live snapshot-capture agent's** Job name; the run ID is always appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied — no agent is deployed. Does not name the validator Jobs (`aicr-<validator>-<hash>`) |
 | `--service-account-name` | | string | aicr | ServiceAccount the **live snapshot-capture agent** runs as. Leaving the flag unset is not the same as passing that default: an unset value is never probed, and the agent's run-scoped names are derived from the `aicr-validate` base instead. **Exact-if-exists:** an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the agent creates no RBAC for the run; otherwise the value is a prefix for the agent's ServiceAccount, Role, and RoleBinding and the run ID is appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied. Does not name the validator Jobs' ServiceAccount (`aicr-validator-<run-id>`), whose RBAC is always run-scoped. Generate that ServiceAccount's RBAC manifests with `aicr snapshot --namespace <validate-namespace> --add-roles-to-service-account <name>` (matching this command's `--namespace`) and apply them yourself — that command applies nothing |
-| `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
-| `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
+| `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. A key or value the Kubernetes API server would reject fails with `INVALID_REQUEST`. (format: key=value, repeatable) |
+| `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. A toleration the Kubernetes API server would reject fails with `INVALID_REQUEST`. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for the **live snapshot-capture agent** Job to complete (inert when `--snapshot` is supplied). Validator Jobs use their own per-check timeouts |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion |
 | `--require-gpu` | | bool | false | Request an `nvidia.com/gpu` resource for the **live snapshot-capture agent** pod. Reads `AICR_REQUIRE_GPU` when unset |
@@ -1823,6 +1823,29 @@ aicr bundle [flags]
 | `--tlog-upload` | | bool | Upload the signature to the Rekor transparency log (default: `true`). Set `--tlog-upload=false` to skip the Rekor upload for fully offline / air-gapped signing; this requires `--signing-key` (KMS), because keyless OIDC signing needs Fulcio and Rekor network access to mint a verifiable certificate. Mutually exclusive with `--rekor-url` and `--signing-config` (both select where the transparency-log entry goes, which contradicts writing none). Verify the resulting bundle offline with `aicr verify --key <public-key.pem> --insecure-ignore-tlog`; use a local PEM public key for a fully offline verify, since a KMS `--key` URI still makes a live `GetPublicKey` call. See [KMS-Backed Signing](#kms-backed-signing). |
 | `--yes` | `--assume-yes` | bool | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 
+Node selector and toleration values are checked against the Kubernetes API
+server's rules when `aicr bundle` reads them, whether they come from
+`--system-node-selector`, `--system-node-toleration`,
+`--accelerated-node-selector`, `--accelerated-node-toleration`,
+`--workload-selector`, or the matching `scheduling.*` keys in `--config`.
+Selector keys must be qualified names and values must be label values. A
+non-empty toleration key must be a qualified name, a toleration with an empty
+key must use `Exists`, an `Equal` value must be a label value, an `Exists`
+toleration takes no value, and the effect must be `NoSchedule`,
+`PreferNoSchedule`, or `NoExecute`. The `*` wildcard is exempt from the effect
+rule, because it is a keyless `Exists` toleration with no effect that tolerates
+every taint. An invalid value fails the bundle with
+`INVALID_REQUEST` naming the flag or config key, so it never reaches
+`helm install`.
+
+Go SDK callers passing tolerations through `config.WithSystemNodeTolerations`
+or `config.WithAcceleratedNodeTolerations` get the same checks in
+`bundler.New`, except that an empty effect is accepted and matches every taint
+effect. Two more rules apply there, because flags and config keys cannot
+express them. `tolerationSeconds` requires `NoExecute`, as the API server
+requires. AICR also rejects the `Lt` and `Gt` operators, which the API server
+accepts only behind a feature gate AICR cannot verify.
+
 `--image-refs` writes the published digest through a mode-`0600` temporary
 file and an anchored same-directory rename. Its target may be absent or an
 existing retained regular file; directories, symlinks, other non-regular
@@ -1834,6 +1857,11 @@ command runs.
 For every CLI OCI publication, AICR revalidates a private bundle snapshot and
 publishes only its closed-world inventory; it never packages the mutable
 caller tree directly.
+
+OCI output also writes the bundle to `./bundle` in the working directory
+before pushing. Symlinks in the working directory path are resolved first, so
+OCI output works from `/tmp` or `$TMPDIR` on macOS. `./bundle` itself must be
+absent or a real directory, not a symlink.
 
 For Argo CD Helm OCI output, AICR keeps the raw Distribution tag in the
 registry reference and derives a strict Helm semantic version for chart

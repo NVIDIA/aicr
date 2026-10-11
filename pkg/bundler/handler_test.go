@@ -226,6 +226,35 @@ func TestParseBundleConfig_DRAEvictionNodeLabel(t *testing.T) {
 	}
 }
 
+func TestParseBundleConfig_InvalidScheduling(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		param string
+		value string
+	}{
+		{"system-node-selector", "bad key=v"},
+		{"accelerated-node-selector", "k={{ .Values.x }}"},
+		{"workload-selector", "k=a b"},
+		{"system-node-toleration", "=v:NoSchedule"},
+		{"accelerated-node-toleration", "bad key=v:NoSchedule"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.param, func(t *testing.T) {
+			t.Parallel()
+
+			target := "/v1/bundle?" + url.Values{tt.param: {tt.value}}.Encode()
+			_, err := ParseBundleConfig(httptest.NewRequest("POST", target, nil))
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+				t.Fatalf("ParseBundleConfig() error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.param) {
+				t.Errorf("error %q does not name %s", err, tt.param)
+			}
+		})
+	}
+}
+
 func TestParseBundleConfig_Serial(t *testing.T) {
 	t.Parallel()
 

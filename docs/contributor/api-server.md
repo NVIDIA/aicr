@@ -316,9 +316,9 @@ test strips it before comparison.
 
 ## REST Contract Gate
 
-REST is one of the four surfaces [ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md)
-section 1 freezes at v1. Two gates guard it, and they fail for different
-reasons.
+REST is one of the four surfaces
+[ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#api-stability)
+freezes at v1. Two gates guard it, and they fail for different reasons.
 
 **`make openapi-diff`** ([`tools/openapi-diff`](https://github.com/NVIDIA/aicr/blob/main/tools/openapi-diff))
 compares `api/aicr/v1/server.yaml` against the committed snapshot
@@ -359,8 +359,9 @@ with noise and taught everyone to skim it.
 
 ## Artifact Schema Gate
 
-Artifact schemas are the second of the four surfaces ROADMAP section 1 freezes
-at v1 (issue #2113). `api/aicr/v1/schemas/*.schema.json` are JSON Schema
+Artifact schemas are the second of the four surfaces
+[ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#api-stability)
+freezes at v1 (issue #2113). `api/aicr/v1/schemas/*.schema.json` are JSON Schema
 documents for `Snapshot`, `RecipeResult`, `RecipeMetadata`, `RecipeMixin` and
 `RecipeCriteria`, generated from the Go types by
 [`tools/schemagen`](https://github.com/NVIDIA/aicr/tree/main/tools/schemagen)

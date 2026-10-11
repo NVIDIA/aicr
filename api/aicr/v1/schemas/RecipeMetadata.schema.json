@@ -187,6 +187,7 @@
                 "any",
                 "dynamo",
                 "kubeflow",
+                "kueue",
                 "nim",
                 "runai",
                 "slurm"

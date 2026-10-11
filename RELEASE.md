@@ -42,7 +42,7 @@ when they disagree.
 ## Deprecation Policy
 
 AICR freezes four public surfaces at v1
-([ROADMAP §1](ROADMAP.md#1-defensible-api-stability)):
+([ROADMAP](ROADMAP.md#api-stability)):
 the `aicr` CLI, the REST API, the Go SDK (`pkg/client/v1`), and the bundle
 layout plus artifact schemas. This section defines what counts as a breaking
 change on each, the notice a removal owes, and how a deprecation reaches the
@@ -136,7 +136,7 @@ debugging, and the runtime warning reaches the user who never read either.
 
 ### Exercising the channel before `v1.0.0`
 
-ROADMAP [§1](ROADMAP.md#1-defensible-api-stability) requires this file to define
+[ROADMAP](ROADMAP.md#api-stability) requires this file to define
 breaking changes and the deprecation policy for every surface; it does not
 require a rehearsal. Manufacturing a deprecation to prove the channel works
 would prove only that we can manufacture one.

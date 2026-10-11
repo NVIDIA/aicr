@@ -39,7 +39,7 @@ kind-scoped version evolution as an amendment to ADR-011.
 ## Problem
 
 Every artifact AICR generates today carries an alpha `apiVersion`. ROADMAP
-[§1](../../ROADMAP.md#1-defensible-api-stability) promises a frozen, diff-gated surface at v1,
+[§1](https://github.com/NVIDIA/aicr/blob/d8d6d9bb56a5bc53d2549dbae40f1e285c816bcb/ROADMAP.md#1-defensible-api-stability) promises a frozen, diff-gated surface at v1,
 and the Kubernetes convention that `v1alpha2` invokes — may be dropped or changed
 without notice — is the opposite of that promise. Two alpha schema tracks coexist:
 `aicr.run/v1alpha2` for general kinds and default/catalog forms, and
@@ -382,5 +382,5 @@ intent; silent downgrade is not.
 - [ADR-011](011-artifact-apiversion-policy.md) — artifact `apiVersion` policy and compatibility gate
 - [ADR-013](013-aicr-run-domain-migration.md) — `aicr.run` domain migration, the precedent for a pre-v1 hard break
 - [ADR-015](015-recipe-configuration-profiles.md) — recipe configuration profiles, which introduced kind-scoped evolution
-- [ROADMAP §1 Defensible API stability](../../ROADMAP.md#1-defensible-api-stability)
+- [ROADMAP §1 Defensible API stability](https://github.com/NVIDIA/aicr/blob/d8d6d9bb56a5bc53d2549dbae40f1e285c816bcb/ROADMAP.md#1-defensible-api-stability)
 - [Kubernetes deprecation policy](https://kubernetes.io/docs/reference/using-api/deprecation-policy/)

@@ -17,12 +17,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
@@ -383,5 +385,62 @@ func TestLocalBundleDigest(t *testing.T) {
 	placeholder, err := localBundleDigest(t.TempDir(), true)
 	if err != nil || placeholder != "local" {
 		t.Fatalf("dry-run fallback = (%q, %v), want (local, nil)", placeholder, err)
+	}
+}
+
+func TestValidateRunURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{"empty", "", false},
+		{"github run", "https://github.com/NVIDIA/aicr/actions/runs/123", false},
+		{"github run attempt", "https://github.com/NVIDIA/aicr/actions/runs/123/attempts/2", false},
+		{"dotted repo name", "https://github.com/my.org/my.repo/actions/runs/123", false},
+		{"dot segments", "https://github.com/./../actions/runs/1", true},
+		{"dot-only repo", "https://github.com/NVIDIA/../actions/runs/1", true},
+		{"github root", "https://github.com/", true},
+		{"issue page", "https://github.com/NVIDIA/aicr/issues/3140", true},
+		{"actions page", "https://github.com/NVIDIA/aicr/actions", true},
+		{"run job page", "https://github.com/NVIDIA/aicr/actions/runs/123/job/456", true},
+		{"query", "https://github.com/NVIDIA/aicr/actions/runs/123?x=1", true},
+		{"fragment", "https://github.com/NVIDIA/aicr/actions/runs/123#step:1:1", true},
+		{"empty query", "https://github.com/NVIDIA/aicr/actions/runs/123?", true},
+		{"empty fragment", "https://github.com/NVIDIA/aicr/actions/runs/123#", true},
+		{"uppercase scheme", "HTTPS://github.com/NVIDIA/aicr/actions/runs/123", true},
+		{"percent-encoded path", "https://github.com/%4eVIDIA/aicr/actions/runs/123", true},
+		{"http", "http://github.com/NVIDIA/aicr/actions/runs/123", true},
+		{"other host", "https://evil.example/NVIDIA/aicr/actions/runs/123", true},
+		{"lookalike host", "https://github.com.evil.example/runs/1", true},
+		{"userinfo", "https://user@github.com/NVIDIA/aicr/actions/runs/123", true},
+		{"javascript", "javascript:alert(1)", true},
+		{"unparseable", "https://github.com/%zz", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRunURL(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateRunURL(%q) error = %v, wantErr %v", tt.raw, err, tt.wantErr)
+			}
+			if err != nil && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("validateRunURL(%q) error code = %v, want ErrCodeInvalidRequest", tt.raw, err)
+			}
+		})
+	}
+}
+
+// TestRunRejectsInvalidRunURL verifies run() refuses a non-GitHub run URL
+// before touching the bundle.
+func TestRunRejectsInvalidRunURL(t *testing.T) {
+	err := run(context.Background(), runConfig{
+		bundleDir:   t.TempDir(),
+		bucket:      "test-bucket",
+		sourceClass: sourceClassUAT,
+		runURL:      "https://evil.example/runs/1",
+		dryRun:      true,
+	})
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("run() error = %v, want ErrCodeInvalidRequest", err)
 	}
 }

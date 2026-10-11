@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 
@@ -166,6 +167,81 @@ func (l NodeLabel) Validate() error {
 			fmt.Sprintf("invalid node label value %q: %s", l.Value, strings.Join(errs, "; ")))
 	}
 	return nil
+}
+
+// ValidateNodeSelector returns an error if any entry of selector is not a valid
+// node label.
+func ValidateNodeSelector(selector map[string]string) error {
+	// Sorted keys make the reported entry deterministic.
+	for _, key := range slices.Sorted(maps.Keys(selector)) {
+		if err := (NodeLabel{Key: key, Value: selector[key]}).Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateTolerations returns an error for any toleration the API server would
+// reject, and for the Lt and Gt operators, which need a feature gate the bundle
+// cannot see.
+func ValidateTolerations(tolerations []corev1.Toleration) error {
+	for _, t := range tolerations {
+		if err := validateToleration(t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateToleration(t corev1.Toleration) error {
+	// Rules from ValidateTolerations in k8s.io/kubernetes pkg/apis/core/validation.
+	if t.Key == "" {
+		if t.Operator != corev1.TolerationOpExists {
+			return invalidTolerationf("toleration with an empty key must use operator Exists, got %q", t.Operator)
+		}
+	} else if errs := validation.IsQualifiedName(t.Key); len(errs) > 0 {
+		return invalidTolerationf("invalid toleration key %q: %s", t.Key, strings.Join(errs, "; "))
+	}
+	if t.TolerationSeconds != nil && t.Effect != corev1.TaintEffectNoExecute {
+		return invalidTolerationf("toleration %q sets tolerationSeconds, which requires effect NoExecute, got %q", t.Key, t.Effect)
+	}
+
+	switch t.Operator {
+	case "", corev1.TolerationOpEqual:
+		if errs := validation.IsValidLabelValue(t.Value); len(errs) > 0 {
+			return invalidTolerationf("invalid toleration value for key %q: %s", t.Key, strings.Join(errs, "; "))
+		}
+	case corev1.TolerationOpExists:
+		if t.Value != "" {
+			return invalidTolerationf("toleration %q uses operator Exists, which requires an empty value, got %q", t.Key, t.Value)
+		}
+	case corev1.TolerationOpLt, corev1.TolerationOpGt:
+		return invalidTolerationf("toleration %q uses operator %s, which needs a Kubernetes feature gate AICR cannot verify", t.Key, t.Operator)
+	default:
+		return invalidTolerationf("invalid toleration operator %q for key %q", t.Operator, t.Key)
+	}
+
+	// An empty effect matches every taint effect.
+	if t.Effect == "" {
+		return nil
+	}
+	return ValidateTaintEffect(t.Effect)
+}
+
+func invalidTolerationf(format string, args ...any) error {
+	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(format, args...))
+}
+
+// ValidateTaintEffect returns an error unless effect is NoSchedule,
+// PreferNoSchedule, or NoExecute.
+func ValidateTaintEffect(effect corev1.TaintEffect) error {
+	switch effect {
+	case corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute:
+		return nil
+	default:
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid taint effect %q, expected %s, %s, or %s",
+			effect, corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute))
+	}
 }
 
 // ParseNodeLabel parses and validates a single node label in key=value form.
@@ -606,8 +682,29 @@ func (c *Config) Bundlers() []string {
 	return result
 }
 
-// Validate checks if the Config has valid settings.
+// Validate returns an error if any setting of c is invalid, including a node
+// selector or toleration the API server would reject.
 func (c *Config) Validate() error {
+	selectors := []struct {
+		option   string
+		selector map[string]string
+	}{
+		{"WithSystemNodeSelector", c.systemNodeSelector},
+		{"WithAcceleratedNodeSelector", c.acceleratedNodeSelector},
+		{"WithWorkloadSelector", c.workloadSelector},
+	}
+	for _, s := range selectors {
+		if err := ValidateNodeSelector(s.selector); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+s.option, err)
+		}
+	}
+	if err := ValidateTolerations(c.systemNodeTolerations); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid WithSystemNodeTolerations", err)
+	}
+	if err := ValidateTolerations(c.acceleratedNodeTolerations); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid WithAcceleratedNodeTolerations", err)
+	}
+
 	// The zero label means the DRA eviction contract was not requested, which
 	// is the default (issue #2469). Only a configured label is validated.
 	if c.draEvictionNodeLabel == (NodeLabel{}) {

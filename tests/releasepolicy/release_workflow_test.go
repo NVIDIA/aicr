@@ -1095,8 +1095,8 @@ func TestReleaseCompositeValidationUsesSharedLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat shared release input validation: %v", err)
 	}
-	if info.Mode().Perm() != 0o644 {
-		t.Errorf("shared release input validation mode = %04o, want 0644", info.Mode().Perm())
+	if mode := gitFileMode(info); mode != 0o644 {
+		t.Errorf("shared release input validation git mode = %04o (disk %04o), want 0644", mode, info.Mode().Perm())
 	}
 
 	for _, path := range []string{

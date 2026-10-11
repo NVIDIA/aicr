@@ -17,7 +17,7 @@ package k8s
 import (
 	"context"
 	"log/slog"
-	"slices"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -238,10 +238,13 @@ func listPerconaServerMongoDBs(
 		"PerconaServerMongoDB listing exceeded the page bound")
 }
 
-// perconaAICRReleases are the Helm release names AICR's psmdb-operator pods
-// carry in app.kubernetes.io/instance: the component name under the helm,
-// helmfile and Argo CD deployers, and Flux's default <targetNamespace>-<name>.
-var perconaAICRReleases = []string{"psmdb-operator", "nvsentinel-psmdb-operator"}
+// perconaAICRRelease is the suffix of every Helm release name AICR gives
+// psmdb-operator, which its pods carry in app.kubernetes.io/instance: the
+// component name under the helm and helmfile deployers, <namePrefix><name>
+// under Argo CD's deployer:namePrefix, and Flux's default
+// <targetNamespace>-<name>. A foreign operator installed in AICR's namespace
+// under such a release name is therefore read as AICR's own.
+const perconaAICRRelease = "psmdb-operator"
 
 // foreignPerconaOperatorRunning reports whether a Percona operator pod runs
 // that AICR did not install: outside AICR's namespace, or inside it under
@@ -262,7 +265,7 @@ func (k *Collector) foreignPerconaOperatorRunning(ctx context.Context) (bool, er
 		for i := range pods.Items {
 			pod := &pods.Items[i]
 			aicrOwned := pod.Namespace == perconaAICRNamespace &&
-				slices.Contains(perconaAICRReleases, pod.Labels["app.kubernetes.io/instance"])
+				strings.HasSuffix(pod.Labels["app.kubernetes.io/instance"], perconaAICRRelease)
 			if !aicrOwned {
 				return true, nil
 			}

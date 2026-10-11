@@ -67,24 +67,23 @@ func stringSliceFlagOrConfig(cmd *cli.Command, flagName string, fallback []strin
 	return slices.Clone(fallback)
 }
 
-// resolveNodeSelector returns the parsed map for a CLI selector flag,
-// preferring CLI input over the supplied fallback map. Errors from
-// parsing carry ErrCodeInvalidRequest. The fallback is defensively
-// cloned even though spec accessors already clone — this is the
-// canonical entry point and should not require the caller to remember
-// who copies what.
+// resolveNodeSelector returns the selector parsed from flagName when it is
+// set, and otherwise a clone of fallback. A parse error carries
+// ErrCodeInvalidRequest and names the flag.
 func resolveNodeSelector(cmd *cli.Command, flagName string, fallback map[string]string) (map[string]string, error) {
 	if cmd.IsSet(flagName) {
 		parsed, err := snapshotter.ParseNodeSelectors(cmd.StringSlice(flagName))
 		if err != nil {
-			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("invalid --%s", flagName))
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid --%s", flagName), err)
 		}
 		if len(fallback) > 0 {
 			slog.Info("CLI flag replacing config selector", "flag", flagName)
 		}
 		return parsed, nil
 	}
+	// Spec accessors already clone. Cloning here too spares callers from
+	// tracking who copies what.
 	return maps.Clone(fallback), nil
 }
 

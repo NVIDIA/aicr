@@ -337,4 +337,4 @@ aicr recipe \
 | accelerator | GPU.smi.gpu.model | h100, h200, gb200, b200, a100, l40s, l40, rtx-pro-6000 |
 | os | OS.release.ID | ubuntu, rhel, cos, amazonlinux, talos, ol |
 | intent | User-specified | training, inference |
-| platform | User-specified | dynamo, kubeflow, nim, runai, slurm |
+| platform | User-specified | dynamo, kubeflow, kueue, nim, runai, slurm |

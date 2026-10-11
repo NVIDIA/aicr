@@ -55,7 +55,7 @@ transitions:
       The v1.25.0 CRDs stay applied; their changes are cosmetic, so v1.22.0
       runs against them unchanged. This rests on the CRD diff and on the
       v1.22.0 bundle running no NVSentinel datastore (the remediation steps
-      first ship with v1.25.0); the rollback itself was not exercised.
+      first ship with the v1.26.0 pin); the rollback itself was not exercised.
     stepsByDeployer:
       - deployers: [helmfile]
         steps:

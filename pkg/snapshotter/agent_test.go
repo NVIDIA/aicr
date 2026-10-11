@@ -204,10 +204,22 @@ func TestParseNodeSelectors(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:      "selector with equals in value",
+			name:      "invalid value - contains equals",
 			selectors: []string{"label=key=value"},
-			want:      map[string]string{"label": "key=value"},
-			wantErr:   false,
+			want:      nil,
+			wantErr:   true,
+		},
+		{
+			name:      "invalid key - contains whitespace",
+			selectors: []string{"bad key=v"},
+			want:      nil,
+			wantErr:   true,
+		},
+		{
+			name:      "invalid value - template syntax",
+			selectors: []string{"k={{ .Values.x }}"},
+			want:      nil,
+			wantErr:   true,
 		},
 		{
 			name:      "invalid selector no equals",
@@ -486,6 +498,36 @@ func TestParseTolerations(t *testing.T) {
 			wantLen:     1,
 			wantErr:     false,
 		},
+		{
+			name:        "empty key with Exists",
+			tolerations: []string{":NoSchedule"},
+			wantLen:     1,
+			wantErr:     false,
+		},
+		{
+			name:        "empty key with a value",
+			tolerations: []string{"=v:NoSchedule"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "empty key with an explicit empty value",
+			tolerations: []string{"=:NoSchedule"},
+			wantLen:     1,
+			wantErr:     false,
+		},
+		{
+			name:        "invalid key - contains whitespace",
+			tolerations: []string{"bad key=v:NoSchedule"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "invalid value - not a label value",
+			tolerations: []string{"dedicated=a=b:NoSchedule"},
+			wantLen:     0,
+			wantErr:     true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -527,6 +569,14 @@ func TestParseTolerationsOperator(t *testing.T) {
 			wantKey:      "nvidia.com/gpu",
 			wantValue:    "",
 			wantEffect:   corev1.TaintEffectNoExecute,
+		},
+		{
+			name:         "explicit empty value uses Exists operator",
+			toleration:   "dedicated=:NoSchedule",
+			wantOperator: corev1.TolerationOpExists,
+			wantKey:      "dedicated",
+			wantValue:    "",
+			wantEffect:   corev1.TaintEffectNoSchedule,
 		},
 		{
 			name:         "wildcard toleration produces Exists with empty key",

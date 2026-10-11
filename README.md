@@ -89,7 +89,7 @@ See the full [Component Catalog](docs/user/component-catalog.md) for every compo
 | **Accelerators** | A100, B200, GB200, GB300, H100, H200, L40, L40S, RTX PRO 6000, VR200 (Preview) |
 | **Operating systems** | Amazon Linux, COS, Oracle Linux, RHEL, Talos, Ubuntu |
 | **Workload intents** | Inference, Training |
-| **Platforms** | Dynamo, Kubeflow, NIM, Run:ai, Slurm (Slinky) |
+| **Platforms** | Dynamo, Kubeflow, Kueue, NIM, Run:ai, Slurm (Slinky) |
 
 ## How It Works
 
@@ -131,7 +131,7 @@ For contributors:
 
 ## Resources
 
-- **[Roadmap](ROADMAP.md)** — Feature priorities and development timeline
+- **[Roadmap](ROADMAP.md)** — Focus areas, outcomes, and tracking issues
 - **[Adopters](ADOPTERS.md)** — Organizations and projects using or building on AICR
 - **[Security](SECURITY.md)** — Supply chain security, vulnerability reporting, and verification
 - **[Releases](https://github.com/NVIDIA/aicr/releases)** — Binaries, SBOMs, and attestations

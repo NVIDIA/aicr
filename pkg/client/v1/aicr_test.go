@@ -3511,7 +3511,7 @@ func TestResolveRecipeInheritSelectionRejects(t *testing.T) {
 			req := inheritTestRequest(tt.source)
 			req.Inherit = tt.mode
 			_, err := client.ResolveRecipe(t.Context(), req)
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) ||
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest ||
 				!strings.Contains(err.Error(), tt.want) {
 
 				t.Fatalf("error = %v, want INVALID_REQUEST containing %q", err, tt.want)

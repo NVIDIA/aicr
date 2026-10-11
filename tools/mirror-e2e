@@ -26,9 +26,12 @@
 # 1. Builds the aicr binary
 # 2. Ensures a Kind cluster + local registry (ctlptl, reuses .ctlptl.yaml)
 # 3. Generates a recipe via query parameters, with the
-#    nvsentinel-object-monitor and nvsentinel-preflight mixins composed, so
-#    their mixin-gated images are asserted in every manifest format and the
-#    three small controller images are carried through the transfer
+#    nvsentinel-object-monitor, nvsentinel-preflight,
+#    nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor and
+#    nvsentinel-remediation mixins composed, so their mixin-gated images are
+#    asserted in every manifest format and the three small controller images
+#    (object monitor, preflight, slurm drain monitor) are carried through the
+#    transfer
 # 4. Runs `aicr mirror list` in all formats (validates the full pipeline)
 # 5. Trims Hauler/Zarf manifests to public images only (avoids NGC auth)
 # 6. Syncs trimmed manifest via Hauler into the local registry
@@ -224,12 +227,14 @@ ensure_cluster() {
 }
 
 generate_recipe() {
-    msg "Generating recipe (with the nvsentinel-object-monitor and nvsentinel-preflight mixins composed)..."
+    msg "Generating recipe (with the nvsentinel-object-monitor, nvsentinel-preflight, nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor and nvsentinel-remediation mixins composed)..."
     # No --os: the Kind overlay tree is OS-agnostic, and a stated OS that no
     # Kind overlay distinguishes fails criteria coverage (issue #1542).
     #
     # The recipe is generated through an external --data overlay that composes
-    # both nvsentinel mixins, so every mixin-gated image is discovered by
+    # the nvsentinel-object-monitor, nvsentinel-preflight,
+    # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor and
+    # nvsentinel-remediation mixins, so every mixin-gated image is discovered by
     # `mirror list` and asserted in the generated Hauler and Zarf manifests.
     # Only the three small controller images are carried through the sync,
     # package and registry verification -- the three preflight check images
@@ -254,7 +259,7 @@ REGISTRY_EOF
 
     # Derived from the shipped overlay rather than duplicated, so its base,
     # constraints and validation cannot drift out of sync with the real one;
-    # the only difference is the composed mixin. An external overlay of the
+    # the only difference is the composed mixins. An external overlay of the
     # same name replaces its embedded counterpart.
     # nvsentinel-slurm-drain-monitor is composed on a non-Slurm leaf here only
     # because this lane never bundles: CheckNVSentinelSlurmDrainMonitorRequiresSlinky

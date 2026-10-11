@@ -28,6 +28,7 @@ func TestCriteriaPlatformConstantsMatchGetter(t *testing.T) {
 	declared := []string{
 		string(CriteriaPlatformDynamo),
 		string(CriteriaPlatformKubeflow),
+		string(CriteriaPlatformKueue),
 		string(CriteriaPlatformNIM),
 		string(CriteriaPlatformRunai),
 		string(CriteriaPlatformSlurm),

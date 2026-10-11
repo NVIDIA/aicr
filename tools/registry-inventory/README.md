@@ -13,7 +13,7 @@ inventory and a CI gate so a newly introduced registry can't slip in unnoticed.
 | Source | Extracted |
 |--------|-----------|
 | `recipes/registry.yaml` | Helm chart repositories (HTTP + `oci://`), pinned versions — target-cluster pulls |
-| `.settings.yaml` | pinned infra container images + chart repo URLs |
+| `.settings.yaml` | pinned infra container images + the host of every `https://`/`oci://` value (chart repos, the Docker Hub mirror) |
 | `.goreleaser.yaml`, `.ko.yaml` | compiled-in base image (pull) + ko `repositories:` (push) |
 | `**/Dockerfile`, `**/*.Dockerfile` | `FROM` base images (build-stage aliases and `scratch` skipped) |
 | `.github/**/*.y{a,}ml` | GitHub Actions `uses:` refs + pin quality |

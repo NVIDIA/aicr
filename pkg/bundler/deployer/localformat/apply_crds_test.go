@@ -570,6 +570,9 @@ func TestApplyCRDsScript_TranslatesHelmConnectionFlags(t *testing.T) {
 				// The script reads KUBE_CONTEXT now, so an inherited one would
 				// add flags no row asked for.
 				"KUBE_CONTEXT=",
+				// Same for KUBECONFIG: a developer's own multi-path value
+				// conflicts with the KUBECONFIG_FLAG rows below.
+				"KUBECONFIG=",
 				"KUBECTL_ARGLOG="+argLog)
 			if tt.setFlag {
 				cmd.Env = append(cmd.Env, "KUBECONFIG_FLAG="+tt.flag)
@@ -772,7 +775,7 @@ func TestApplyCRDsScript_BoundsStalledApply(t *testing.T) {
 	})
 
 	cmd := exec.Command("bash", scriptPath)
-	cmd.Env = append(os.Environ(), "PATH="+stalledPATH, "AICR_CRD_STEP_TIMEOUT=2")
+	cmd.Env = append(os.Environ(), "PATH="+stalledPATH, "AICR_CRD_STEP_TIMEOUT=5")
 
 	start := time.Now()
 	out, err := cmd.CombinedOutput()
@@ -794,7 +797,7 @@ func TestApplyCRDsScript_BoundsStalledApply(t *testing.T) {
 	}
 	if elapsed < time.Second {
 		t.Fatalf("returned in %s, faster than the %s bound; the apply cannot have been "+
-			"reached and waited on\n%s", elapsed, 2*time.Second, out)
+			"reached and waited on\n%s", elapsed, 5*time.Second, out)
 	}
 	// Generous ceiling: the point is that it returned at all rather than
 	// running for the stub's full 300s.

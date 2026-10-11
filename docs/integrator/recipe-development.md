@@ -164,7 +164,7 @@ When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-t
 
 **`nvsentinel-object-monitor`** turns on NVSentinel's Kubernetes Object Monitor for a leaf that opts in (`spec.mixins: [nvsentinel-object-monitor]`), carrying policies that watch GPU Operator and Network Operator DaemonSet pod health. It uses the same allowlist mechanism, via the `global.kubernetesObjectMonitor.enabled`/`kubernetes-object-monitor.policies` entries on `nvsentinel`'s registry entry. See [component catalog](../user/component-catalog.md#kubernetes-object-monitor) for the policies it sets and the deliberate `isFatal`/quarantine/`node-not-ready` decisions.
 
-**`nvsentinel-preflight`** turns on NVSentinel's preflight admission webhook for a leaf that opts in (`spec.mixins: [nvsentinel-preflight]`), so GPU pods in an opted-in namespace run node checks before the workload starts. It reaches `nvsentinel` through the same `mixinSafeOverridePaths` allowlist as `nvsentinel-observability`, with its own `preflight.*` paths. It is also the one mixin that adds a `dependencyRefs` entry to an already-chained component (`kai-scheduler`, which must be applied before the preflight controller starts): `dependencyRefs` merges as a deduplicated union rather than a replacement, which is why it is in `mixinComponentRefSafeForMerge`'s safe set while `valuesFile`, `patches` and `version` are not. See [component catalog](../user/component-catalog.md#preflight-checks) for the values it sets, the namespace label that actually enables injection, and its limitations.
+**`nvsentinel-preflight`** turns on NVSentinel's preflight admission webhook for a leaf that opts in (`spec.mixins: [nvsentinel-preflight]`), so GPU pods in an opted-in namespace run node checks before the workload starts. It reaches `nvsentinel` through the same `mixinSafeOverridePaths` allowlist as `nvsentinel-observability`, with its own `preflight.*` paths. It also adds a `dependencyRefs` entry to an already-chained component (`kai-scheduler`, which must be applied before the preflight controller starts), as the `nvsentinel-observe`, `nvsentinel-quarantine` and `nvsentinel-remediation` mixins do (`nvsentinel-mongodb`, which must be deployed before NVSentinel, which connects to it at startup): `dependencyRefs` merges as a deduplicated union rather than a replacement, which is why it is in `mixinComponentRefSafeForMerge`'s safe set while `valuesFile`, `patches` and `version` are not. See [component catalog](../user/component-catalog.md#preflight-checks) for the values it sets, the namespace label that actually enables injection, and its limitations.
 
 **`nvsentinel-slurm-drain-monitor`** turns on NVSentinel's Slurm drain monitor; every `platform: slurm` leaf composes it (`spec.mixins: [nvsentinel-slurm-drain-monitor]`), turning Slurm drain reasons on Slinky worker pods into `STORE_ONLY` health events. It uses the same allowlist mechanism, via `global.slurmDrainMonitor.enabled` and `slurm-drain-monitor.*` entries on `nvsentinel`'s registry entry, and `CheckNVSentinelSlurmDrainMonitorRequiresSlinky` fails the bundle on a recipe without `slinky-slurm`. See [component catalog](../user/component-catalog.md#slurm-drain-monitor) for what it reads, where its events are visible, and its limitations.
 
@@ -394,6 +394,16 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 > applied by any deployer. An enabled ref that sets `patches` is rejected at
 > recipe resolution (rather than silently producing an unpatched bundle), so do
 > not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
+
+### Kueue topology-aware scheduling
+
+The `platform=kueue` leaves (`h100-kind-training-kueue`, `h100-gke-cos-training-kueue`, `h100-eks-ubuntu-training-kueue`) show the pattern for an opt-in that differs per provider. Each leaf declares `topograph` (the Kubernetes-scoped component, `k8s` engine, labels nodes) and `kueue` with `topograph` in its `dependencyRefs`, and sets only what is provider-specific:
+
+- `topograph` `overrides.provider.name`: `gcp`, `aws`, or `dra` (Kind, reading the existing `nvidia.com/gpu.clique` node label).
+- `kueue` `manifestFiles`: the `Topology` whose levels match the depth that provider produces (`topology-accelerator.yaml` or `topology-tiers-3.yaml`, widest level first, ending in `kubernetes.io/hostname`), then `tas-flavor.yaml`, `cluster-queue-tas.yaml`, and `local-queue.yaml`. Hook weights order them Topology (0), flavor (1), ClusterQueue (5), LocalQueue (10).
+- `kueue` `healthCheckAsserts`: required whenever `manifestFiles` is overridden, since the registry check pins `default-flavor`. Assert existence and ClusterQueue `Active`, never node labels; Topograph labels nodes after install.
+
+`default-flavor` stays topology-free, so recipes that do not select `platform: kueue` render as before. See [Topology-aware scheduling](../user/component-catalog.md#topology-aware-scheduling-with-kueue-and-topograph) for IAM requirements and a sample Job.
 
 ## Preview recipes
 

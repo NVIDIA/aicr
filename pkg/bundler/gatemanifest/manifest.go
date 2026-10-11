@@ -20,15 +20,12 @@ package gatemanifest
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/yaml"
 )
 
@@ -74,62 +71,17 @@ func NewPlacement(sched Scheduling) (Placement, error) {
 	return Placement{block: indentBlock(string(out), "      ") + "\n"}, nil
 }
 
-// validate applies the API server's pod nodeSelector and toleration rules
-// (ValidateTolerations in k8s.io/kubernetes pkg/apis/core/validation), and
-// rejects Lt and Gt, which need a feature gate the bundle cannot see. The
-// manifest is later executed as a Go template, and no key or value these rules
-// admit can carry template syntax.
+// validate returns an error for scheduling the API server would reject.
 func (s Scheduling) validate() error {
-	for _, key := range slices.Sorted(maps.Keys(s.NodeSelector)) {
-		if err := (config.NodeLabel{Key: key, Value: s.NodeSelector[key]}).Validate(); err != nil {
-			return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "readiness gate: invalid node selector")
-		}
+	// Render executes the manifest as a Go template, and no key or value these
+	// rules admit can carry template syntax.
+	if err := config.ValidateNodeSelector(s.NodeSelector); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "readiness gate: invalid node selector", err)
 	}
-	for _, t := range s.Tolerations {
-		if err := validateToleration(t); err != nil {
-			return err
-		}
+	if err := config.ValidateTolerations(s.Tolerations); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "readiness gate: invalid toleration", err)
 	}
 	return nil
-}
-
-func validateToleration(t corev1.Toleration) error {
-	if t.Key == "" {
-		if t.Operator != corev1.TolerationOpExists {
-			return invalidSchedulingf("toleration with an empty key must use operator Exists, got %q", t.Operator)
-		}
-	} else if errs := validation.IsQualifiedName(t.Key); len(errs) > 0 {
-		return invalidSchedulingf("invalid toleration key %q: %s", t.Key, strings.Join(errs, "; "))
-	}
-	if t.TolerationSeconds != nil && t.Effect != corev1.TaintEffectNoExecute {
-		return invalidSchedulingf("toleration %q sets tolerationSeconds, which requires effect NoExecute, got %q", t.Key, t.Effect)
-	}
-
-	switch t.Operator {
-	case "", corev1.TolerationOpEqual:
-		if errs := validation.IsValidLabelValue(t.Value); len(errs) > 0 {
-			return invalidSchedulingf("invalid toleration value for key %q: %s", t.Key, strings.Join(errs, "; "))
-		}
-	case corev1.TolerationOpExists:
-		if t.Value != "" {
-			return invalidSchedulingf("toleration %q uses operator Exists, which requires an empty value, got %q", t.Key, t.Value)
-		}
-	case corev1.TolerationOpLt, corev1.TolerationOpGt:
-		return invalidSchedulingf("toleration %q uses operator %s, which readiness gates do not support", t.Key, t.Operator)
-	default:
-		return invalidSchedulingf("invalid toleration operator %q for key %q", t.Operator, t.Key)
-	}
-
-	switch t.Effect {
-	case "", corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute:
-	default:
-		return invalidSchedulingf("invalid toleration effect %q for key %q", t.Effect, t.Key)
-	}
-	return nil
-}
-
-func invalidSchedulingf(format string, args ...any) error {
-	return errors.New(errors.ErrCodeInvalidRequest, "readiness gate: "+fmt.Sprintf(format, args...))
 }
 
 // Render builds the multi-document gate chart manifest for one component. The

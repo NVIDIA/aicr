@@ -17,7 +17,7 @@ package main
 // Column metadata key schema — emitted in started.json and configured
 // as column_header entries in tools/config-gen (aicr-testgrid repo).
 //
-// These constants define the single source of truth for the 7-key schema
+// These constants define the single source of truth for the 8-key schema
 // specified in docs/design/012-recipe-coordinate-mapping.md (PR #1409).
 // Both the publish tool (here) and config-gen must use the same names;
 // drift causes column headers to show "missing" in the TestGrid UI.
@@ -29,6 +29,7 @@ const (
 	metaKeySignerIssuer   = "signer_issuer"
 	metaKeySourceClass    = "source_class"
 	metaKeyEvidenceDigest = "evidence_digest"
+	metaKeyAICRRunURL     = "aicr_run_url"
 )
 
 // MetaKeys returns all metadata keys in stable order.
@@ -42,6 +43,7 @@ func MetaKeys() []string {
 		metaKeySignerIssuer,
 		metaKeySourceClass,
 		metaKeyEvidenceDigest,
+		metaKeyAICRRunURL,
 	}
 }
 
