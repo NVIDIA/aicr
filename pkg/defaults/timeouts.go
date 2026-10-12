@@ -1687,6 +1687,13 @@ const (
 // response.
 const AtRiskListPageSize int64 = 200
 
+// MetadataListResponseLimit caps the bytes one PartialObjectMetadataList
+// response may carry. It is sized for an AtRiskListPageSize page. An object's
+// annotations are capped at 256 KiB, and 200 objects at that cap come to
+// 50 MiB, which leaves room for labels and managed fields. Exceeding it is an
+// error, so a page is never silently truncated.
+const MetadataListResponseLimit int64 = 64 * 1024 * 1024 // 64 MiB
+
 // AtRiskScanTimeout bounds the whole advisory at-risk scan: one discovery
 // mapping and one paged cluster-wide List per affected kind. Shorter than
 // ArgoInventoryTimeout per kind is not expressible here, so the budget covers

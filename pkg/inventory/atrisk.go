@@ -25,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/metadata"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -127,7 +126,7 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 	if err != nil {
 		return AtRiskResult{}, err
 	}
-	metaClient, err := k8sclient.NewMetadataClientForConfig(restConfig)
+	lister, err := k8sclient.NewMetadataListClientForConfig(restConfig)
 	if err != nil {
 		return AtRiskResult{}, err
 	}
@@ -136,12 +135,12 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 		return AtRiskResult{}, err
 	}
 
-	return scanAtRisk(ctx, metaClient, mapper, groups, opts.Kinds)
+	return scanAtRisk(ctx, lister, mapper, groups, opts.Kinds)
 }
 
 // scanAtRisk is ScanAtRisk with the client, the mapper and the discovery the
 // mapper resolves through supplied.
-func scanAtRisk(ctx context.Context, client metadata.Interface, mapper meta.RESTMapper,
+func scanAtRisk(ctx context.Context, client k8sclient.MetadataLister, mapper meta.RESTMapper,
 	groups k8sclient.GroupResourceLister, kinds []ResourceKind) (AtRiskResult, error) {
 
 	if len(kinds) == 0 {
@@ -249,7 +248,7 @@ func resolveKind(ctx context.Context, mapper meta.RESTMapper, groups k8sclient.G
 }
 
 // scanKind lists kind cluster-wide and returns the objects nothing owns.
-func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
+func scanKind(ctx context.Context, client k8sclient.MetadataLister, kind ResourceKind,
 	gvr schema.GroupVersionResource) (ScannedKind, []AtRiskObject, error) {
 
 	scanned := ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components, Present: true}
@@ -260,7 +259,7 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 			return ScannedKind{}, nil, err
 		}
 		// Metadata only, so no object's spec or Secret's data is ever held.
-		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, opts)
+		page, err := client.List(ctx, gvr, opts)
 		if err != nil {
 			// A CRD deleted between the mapping and this List answers the same
 			// way one that was never installed does. Only the first request
