@@ -192,7 +192,7 @@ runs:
         bash kwok/scripts/lib/image-cache.sh settings .settings.yaml | tee -a "$GITHUB_OUTPUT"
 
     - name: Restore registry image
-      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: /tmp/kwok-image-cache/registry
         key: ${{ steps.images.outputs.registry_key }}
@@ -201,7 +201,7 @@ runs:
     # the other lanes skip a ~250MB restore they would never use.
     - name: Restore Gitea image
       if: endsWith(inputs.deployer, '-git')
-      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: /tmp/kwok-image-cache/gitea
         key: ${{ steps.images.outputs.gitea_key }}
@@ -211,14 +211,14 @@ runs:
     # never use. This covers argocd-oci, argocd-helm-oci and argocd-git.
     - name: Restore Argo CD Redis image
       if: startsWith(inputs.deployer, 'argocd-')
-      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: /tmp/kwok-image-cache/argocd_redis
         key: ${{ steps.images.outputs.argocd_redis_key }}
 
     # `kind create cluster` pulls this roughly 1 GB Docker Hub image in every lane.
     - name: Restore Kind node image
-      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: /tmp/kwok-image-cache/kind_node
         key: ${{ steps.images.outputs.kind_node_key }}
