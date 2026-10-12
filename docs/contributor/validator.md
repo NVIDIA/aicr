@@ -936,14 +936,32 @@ service or accelerator — `creQualifiedEntries` in
 `validators/performance/cre_qualification.go` records which combinations are
 qualified and the catalog entry and node cap each was measured with, so a new
 combination is an entry there plus a measured threshold rather than a new code
-path. On `eks` x `h100` the entries are `communication/nccl-all-reduce` and
-`training/nemotron5-8b`. Both create the
+path. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100` with
+`communication/nccl-all-reduce`; `cre-training-goodput` has no qualified
+combination while the `training/nemotron5-8b` entry it drives does not run on
+the pinned CRE version, so it skips wherever it is declared. Both create the
 CR on an explicitly named set of nodes, wait with a timeout, and tear it down on
 success or failure — deleting the CR and then confirming the `TrainJob`s and
 workload pods it started are gone, since CRE's controller drops its finalizer
 without waiting for them. An unconfirmed teardown fails the check rather than
-warning, because surviving work still holds the GPUs. Inference:
-`inference-perf` (Dynamo + AIPerf).
+warning, because surviving work still holds the GPUs. The catalog timeout
+budgets that whole serial path — Certification wait, measurement finalize, then
+teardown — because the Job's `activeDeadlineSeconds` is the catalog timeout plus
+only `ValidatorJobDeadlineHeadroom`, and a pod killed partway through teardown
+leaves the `TrainJob`s holding GPUs with nothing reporting it.
+
+A terminal Certification does not mean its measurements are readable. CRE marks
+the Job Succeeded before the final log read, and only a measurement with
+configured thresholds keeps the Workflow waiting for it — the Certifications
+AICR builds set none. Results are provisional until `Complete` is `True` with
+reason `JobSucceeded`, and a provisional sweep can stop before the largest
+message sizes, where peak bandwidth is printed. Both readers therefore wait for
+every measurement the run owns to finalize, bounded by
+`CREMeasurementFinalizeTimeout`, and fail closed on expiry. The other
+completion reasons are not weaker evidence but no evidence: `LogsUnavailable`
+completes while leaving the provisional results in place and `NoDataCollected`
+has none, and CRE declines to evaluate a threshold against either.
+Inference: `inference-perf` (Dynamo + AIPerf).
 
 > **Constraint-name contract.** Each NCCL variant looks up a
 > constraint with the *exact* same name as the check. A recipe
