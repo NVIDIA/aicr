@@ -1677,10 +1677,9 @@ const (
 )
 
 // AtRiskListPageSize caps how many objects one List pulls while scanning for
-// resources an upgrade could disturb. Sized between the two inventory page
-// sizes: the objects are ordinary custom resources rather than Helm storage
-// records carrying rendered manifests, but a tenant's CR can hold an arbitrary
-// spec, so the page stays well under the Argo ceiling.
+// resources an upgrade could disturb. The scan reads each object's metadata
+// only, so a page's size is set by labels, annotations and managed fields.
+// MetadataListResponseLimit is sized for a page of this many objects.
 //
 // Nothing is retained across pages beyond the objects found at risk, which on
 // a healthy cluster is none, so the page bounds the peak as well as the

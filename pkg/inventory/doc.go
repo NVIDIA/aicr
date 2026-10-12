@@ -170,8 +170,9 @@
 //
 // Helm's CLI and SDK both read release records from the Kubernetes API. This
 // package reads the same records directly, which buys three things. One
-// authentication path, since the at-risk scan needs a dynamic client anyway
-// and a second path through the helm binary could resolve a different context.
+// authentication path, since the Argo CD reader and the at-risk scan read the
+// cluster through client-go anyway and a second path through the helm binary
+// could resolve a different context.
 // One paged List per storage driver instead of the N+1 subprocesses
 // `helm list` plus `helm get metadata` per release would cost. And no
 // dependency on helm.sh/helm/v4, whose linked module graph adds 38
@@ -200,10 +201,19 @@
 //
 // ScanAtRisk is advisory and asks what an upgrade might destroy rather than
 // what is installed. Given the group/kind pairs the crossed transition records
-// name, it resolves each through a RESTMapper and lists it cluster-wide,
-// reporting every object carrying neither Helm ownership (the managed-by label
-// together with a release-name annotation, because the label alone is written
-// by anything) nor Argo CD's tracking id.
+// name, it resolves each through a RESTMapper and lists its metadata
+// cluster-wide. The list is requested and accepted only as a meta.k8s.io/v1
+// PartialObjectMetadataList, so the scan never reads an object's spec or a
+// Secret's data, and a response of any other kind, a 406 included, fails the
+// scan.
+//
+// It reports every object carrying none of the ownership markers. Helm owns
+// an object carrying the app.kubernetes.io/managed-by=Helm label together with
+// a nonblank meta.helm.sh/release-name annotation, or together with a nonblank
+// helm.sh/hook annotation, since Helm never writes the release name on a
+// hook. The label alone is not ownership, because anything can write it. Argo
+// CD owns an object carrying a nonblank argocd.argoproj.io/tracking-id
+// annotation.
 //
 // The check is positive, so an unrecognized object is at risk by default. The
 // failure it guards is an operator's own custom resources being
