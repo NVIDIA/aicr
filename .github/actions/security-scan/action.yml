@@ -42,7 +42,7 @@ runs:
   steps:
     - name: Run Anchore Security Scan
       id: scan
-      uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
+      uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
       with:
         path: ${{ inputs.image == '' && inputs.path || '' }}
         image: ${{ inputs.image }}
@@ -67,7 +67,7 @@ runs:
     - name: Upload SARIF to GitHub Security
       if: steps.check_sarif.outputs.exists == 'true'
       id: upload_sarif
-      uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30  # v4.32.0
+      uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d  # v4.38.3
       with:
         sarif_file: ${{ inputs.output_file }}
         category: ${{ inputs.category }}
