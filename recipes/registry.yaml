@@ -654,7 +654,7 @@ components:
       defaultRepository: https://percona.github.io/percona-helm-charts/
       defaultChart: psmdb-operator
       # renovate: datasource=helm depName=psmdb-operator registryUrl=https://percona.github.io/percona-helm-charts/
-      defaultVersion: "1.23.1"
+      defaultVersion: "1.23.2"
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
