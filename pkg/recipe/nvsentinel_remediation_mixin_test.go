@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -353,8 +354,9 @@ func assertComponentResetIsGPUReset(t *testing.T, leaf string, values map[string
 // The static BOM cannot see mixin-gated images, so the scan, mirror and docs
 // surfaces are their only coverage; dropping one leaves every other test green.
 // NVIDIA images move with nvsentinel's defaultVersion. The Percona images are
-// AICR's digest pins in the psmdb-operator and nvsentinel-mongodb values, and
-// the render test fails when a chart bump renders another one.
+// read from AICR's digest pins in the psmdb-operator and nvsentinel-mongodb
+// values, so a bump to those files alone fails here; the render test fails
+// when a chart bump renders another one.
 func TestRemediationImagesPinnedEverywhere(t *testing.T) {
 	registry, err := GetComponentRegistry()
 	if err != nil {
@@ -370,9 +372,7 @@ func TestRemediationImagesPinnedEverywhere(t *testing.T) {
 	for _, name := range []string{"fault-quarantine", "node-drainer", "fault-remediation", "janitor", "janitor-provider", "gpu-reset"} {
 		images["ghcr.io/nvidia/nvsentinel/"+name] = version
 	}
-	for image, tag := range remediationThirdPartyImages {
-		images[image] = tag
-	}
+	maps.Copy(images, perconaPinnedImages(t))
 
 	surfaces := []struct{ path, why string }{
 		{"../../tools/mirror-e2e", "the mirror job must cover this image"},
@@ -410,15 +410,118 @@ func assertScanned(t *testing.T, image, tag string) {
 	}
 }
 
-// remediationThirdPartyImages are the Percona datastore images the steps
-// add, pinned by AICR in recipes/components/{psmdb-operator,nvsentinel-mongodb}.
-var remediationThirdPartyImages = map[string]string{
-	"docker.io/percona/percona-server-mongodb-operator": "1.23.1@sha256:78c87b933e184b9af36dbb0078751862c75934c1521c33d3be4d0a38aa58dd0a",
-	"docker.io/percona/percona-server-mongodb":          "8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c",
-	"docker.io/percona/mongodb_exporter":                "0.53.0@sha256:0214e482b2cd4b1849f9f4dcef90d328a99ba3727dd1103e7da48b42060bcec1",
-	"docker.io/percona/percona-backup-mongodb":          "2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5",
-	"docker.io/percona/fluentbit":                       "5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913",
-	"docker.io/percona/pmm-client":                      "3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b",
+// perconaValuesFiles hold every Percona datastore image the steps add.
+var perconaValuesFiles = []string{
+	"components/psmdb-operator/values.yaml",
+	"components/nvsentinel-mongodb/values.yaml",
+}
+
+// perconaDigest is the immutable suffix every Percona tag must carry. Copies
+// that agree with each other are not enough: a tag-only pin can move upstream.
+var perconaDigest = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
+
+// perconaPinnedImages maps each image repository pinned in perconaValuesFiles
+// to its tag. Every image reference counts, so a pin added to either file is
+// covered without being listed here.
+func perconaPinnedImages(t *testing.T) map[string]string {
+	t.Helper()
+	pins := map[string]string{}
+	pinnedIn := map[string]string{}
+	for _, path := range perconaValuesFiles {
+		var values map[string]any
+		readComponentYAML(t, path, &values)
+		refs := imageRefs(values)
+		if len(refs) == 0 {
+			t.Fatalf("%s has no image references; imageRefs no longer matches its layout", path)
+		}
+		for _, ref := range refs {
+			repo, tag, ok := splitImageRef(ref)
+			if !ok {
+				t.Errorf("%s: image %q has no string tag", path, ref)
+				continue
+			}
+			if !perconaDigest.MatchString(tag) {
+				t.Errorf("%s pins %s:%s without a sha256 digest", path, repo, tag)
+			}
+			if prev, seen := pins[repo]; seen && prev != tag {
+				t.Errorf("%s pins %s at %q, but %s pins it at %q", path, repo, tag, pinnedIn[repo], prev)
+				continue
+			}
+			pins[repo] = tag
+			pinnedIn[repo] = path
+		}
+	}
+	return pins
+}
+
+// imageRefs collects the image references in a values tree: a map with a
+// repository, joined to its tag when the tag is a string, and any string under
+// an image key.
+func imageRefs(node any) []string {
+	var refs []string
+	switch n := node.(type) {
+	case map[string]any:
+		if repo, ok := n["repository"].(string); ok {
+			if tag, ok := n["tag"].(string); ok && tag != "" {
+				repo += ":" + tag
+			}
+			refs = append(refs, repo)
+		}
+		if ref, ok := n["image"].(string); ok {
+			refs = append(refs, ref)
+		}
+		for _, v := range n {
+			refs = append(refs, imageRefs(v)...)
+		}
+	case []any:
+		for _, v := range n {
+			refs = append(refs, imageRefs(v)...)
+		}
+	}
+	return refs
+}
+
+// splitImageRef splits repo:tag[@digest] into the repository and the tag with
+// its digest. The tag separator is the last colon after the last slash, so a
+// registry port is not mistaken for one.
+func splitImageRef(ref string) (repo, tag string, ok bool) {
+	name, digest, pinned := strings.Cut(ref, "@")
+	colon := strings.LastIndex(name, ":")
+	if colon <= strings.LastIndex(name, "/") || colon == len(name)-1 {
+		return "", "", false
+	}
+	repo, tag = name[:colon], name[colon+1:]
+	if pinned {
+		tag += "@" + digest
+	}
+	return repo, tag, true
+}
+
+func TestSplitImageRef(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref      string
+		wantRepo string
+		wantTag  string
+		wantOK   bool
+	}{
+		{"tag", "docker.io/percona/pmm-client:3.9.1", "docker.io/percona/pmm-client", "3.9.1", true},
+		{"tag and digest", "docker.io/percona/fluentbit:5.1.2-1@sha256:abc", "docker.io/percona/fluentbit", "5.1.2-1@sha256:abc", true},
+		{"registry port", "registry.local:5000/percona/pmm-client:3.9.1", "registry.local:5000/percona/pmm-client", "3.9.1", true},
+		{"no tag", "docker.io/percona/pmm-client", "", "", false},
+		{"registry port, no tag", "registry.local:5000/percona/pmm-client", "", "", false},
+		{"digest, no tag", "docker.io/percona/pmm-client@sha256:abc", "", "", false},
+		{"empty tag", "docker.io/percona/pmm-client:", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, tag, ok := splitImageRef(tt.ref)
+			if repo != tt.wantRepo || tag != tt.wantTag || ok != tt.wantOK {
+				t.Errorf("splitImageRef(%q) = (%q, %q, %v), want (%q, %q, %v)",
+					tt.ref, repo, tag, ok, tt.wantRepo, tt.wantTag, tt.wantOK)
+			}
+		})
+	}
 }
 
 // TestRemediationRebootImageIsInitContainerImage pins the generic reboot Job's
