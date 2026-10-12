@@ -14,7 +14,13 @@
 
 package main
 
-import "github.com/NVIDIA/aicr/pkg/recipe"
+import (
+	"fmt"
+	"strings"
+
+	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+)
 
 // creCombination is a recipe criteria pair a Cluster Readiness Engine check can
 // be qualified on.
@@ -29,8 +35,22 @@ type creCombination struct {
 // accelerator, so qualifying a new combination is an entry here plus a measured
 // threshold in the recipe, never a new code path.
 //
-// eks x h100 was measured on 2026-09-02 against 2x p5.48xlarge: 489.80 GB/s bus
-// bandwidth and a 0.7671 goodput ratio.
+// nccl-cre-all-reduce-bw is qualified on eks x h100. It was re-measured on the
+// CRE version the registry pins, v0.6.0, on 2026-10-09 against 2x p5.48xlarge:
+// 489.51 GB/s bus bandwidth, against 489.80 GB/s at the original 2026-09-02
+// qualification on v0.1.0.
+//
+// cre-training-goodput carries no qualified combination. It measured 0.7671 on
+// eks x h100 on CRE v0.1.0, but the nemotron5-8b catalog entry it drives does
+// not run on v0.6.0: every rank exits in GPTModel.__init__ because the entry
+// passes --attention-backend flash without clearing NVTE_FUSED_ATTN, which its
+// base image sets to 1 and megatron-core rejects. The entry installs
+// megatron-core at pod start from an unpinned revision, so that assertion
+// arrived without a change on either side. Reproduced on 2026-10-09 from a
+// hand-written Certification, which puts it upstream of AICR's driver. An empty
+// map reports the check unqualified, so it skips instead of failing a healthy
+// cluster for a broken workload, and the qualification returns by fixing the
+// entry rather than by changing code here.
 var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 	checkNameCRENCCLAllReduceBW: {
 		{Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorH100}: {
@@ -39,13 +59,26 @@ var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 			MaxNodes: 2,
 		},
 	},
-	checkNameCRETrainingGoodput: {
-		{Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorH100}: {
-			Domain:   creTrainingDomain,
-			Variant:  creTrainingVariant,
-			MaxNodes: 2,
-		},
-	},
+	checkNameCRETrainingGoodput: {},
+}
+
+// creThreshold parses a CRE check's constraint and refuses an operator the
+// check cannot honor. Both CRE checks compare measured >= threshold, so any
+// other operator would be evaluated as a floor while the trace line printed
+// the operator the recipe actually asked for — "<= 0.5" reported as satisfied
+// by a ratio above it. Refusing runs before the Certification is created, so
+// no GPU work starts on a constraint the verdict cannot keep.
+func creThreshold(checkName, value string) (float64, error) {
+	trimmed := strings.TrimSpace(value)
+	end := 0
+	for end < len(trimmed) && strings.ContainsRune("><=!", rune(trimmed[end])) {
+		end++
+	}
+	if operator := trimmed[:end]; operator != "" && operator != ">=" {
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s compares with >= and cannot honor constraint %q", checkName, value))
+	}
+	return parseThreshold(value)
 }
 
 // lookupCREQualification reports the catalog entry checkName was qualified with

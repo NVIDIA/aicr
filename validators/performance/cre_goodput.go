@@ -21,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -52,7 +51,7 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 		))
 	}
 
-	threshold, err := parseThreshold(constraint.Value)
+	threshold, err := creThreshold(checkNameCRETrainingGoodput, constraint.Value)
 	if err != nil {
 		return err
 	}
@@ -213,9 +212,9 @@ func parseGoodputRatio(status map[string]any) (float64, error) {
 		if err != nil {
 			return 0, aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest, "invalid goodput result", err)
 		}
-		return ratio, nil
+		return finiteMeasurement("goodput result", ratio)
 	case float64:
-		return value, nil
+		return finiteMeasurement("goodput result", value)
 	default:
 		return 0, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported goodput result type %T", raw))
@@ -229,17 +228,14 @@ func getGoodputStatus(
 	createdAt metav1.Time,
 ) (map[string]any, error) {
 
-	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
-	defer cancel()
-	list, err := client.Resource(goodputMeasurementGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
+	measurements, err := waitForFinalMeasurements(
+		ctx, client, goodputMeasurementGVR, namespace, workflowName, "GoodputMeasurement", createdAt,
+	)
 	if err != nil {
-		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list GoodputMeasurements", err)
+		return nil, err
 	}
-	for i := range list.Items {
-		if !measurementBelongsToRun(&list.Items[i], workflowName, createdAt) {
-			continue
-		}
-		status, found, nestedErr := unstructured.NestedMap(list.Items[i].Object, "status")
+	for _, obj := range measurements {
+		status, found, nestedErr := unstructured.NestedMap(obj.Object, "status")
 		if nestedErr != nil {
 			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read GoodputMeasurement status", nestedErr)
 		}

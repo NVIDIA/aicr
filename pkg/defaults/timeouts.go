@@ -786,6 +786,16 @@ const (
 	// (podDrainGracePeriod in pkg/controller/pod_drain.go), plus the
 	// termination grace of the multi-node GPU pods left behind.
 	CRECertificationTeardownTimeout = 10 * time.Minute
+
+	// CREMeasurementFinalizeTimeout bounds the wait for CRE to finalize a
+	// BandwidthMeasurement or GoodputMeasurement after its Job succeeded.
+	// Certification success does not imply the measurement is final: CRE marks
+	// the Job Succeeded first and only then performs the final log read, which
+	// it retries for as long as the measurement's own measurementTimeout (5m by
+	// default, and never less than two minutes) before completing as
+	// LogsUnavailable. Sized to that retry window, because expiry here fails
+	// the check rather than falling back to the provisional results.
+	CREMeasurementFinalizeTimeout = 5 * time.Minute
 )
 
 // Inference performance validation timeouts.

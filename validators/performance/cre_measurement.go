@@ -16,8 +16,11 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"sort"
 	"strconv"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -25,12 +28,207 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 )
 
 // bandwidthMeasurementGVR is where CRE records a run's measured bandwidth.
 var bandwidthMeasurementGVR = schema.GroupVersionResource{
 	Group: creAPIGroup, Version: versionV1alpha1, Resource: "bandwidthmeasurements",
+}
+
+// Measurement completion state, mirrored from cluster-readiness-engine v0.6.0.
+//
+// A measurement's results are provisional while its Job runs and final only
+// once Complete is True with reason JobSucceeded. Certification success does
+// not establish that: CRE marks the Job Succeeded before evaluating
+// thresholds, and only a measurement with configured thresholds keeps the
+// Workflow waiting for the final read. The Certifications AICR builds set no
+// thresholds, so a terminal Certification says nothing about whether its
+// measurements have been finalized.
+//
+// Every other completion reason — NoDataCollected, LogsUnavailable, JobFailed,
+// LogProfileNotFound — means CRE either never matched the result pattern or
+// could not read the log in full. CRE refuses to evaluate a threshold against
+// those, and so does this validator: LogsUnavailable in particular completes
+// while leaving the provisional results in place, so reading them would judge
+// a cluster on a partial sweep.
+const (
+	measurementConditionComplete  = "Complete"
+	measurementReasonJobSucceeded = "JobSucceeded"
+)
+
+// measurementCompletion reports the reason and message on a True Complete
+// condition. A measurement with no such condition is still being written.
+func measurementCompletion(obj *unstructured.Unstructured) (reason, message string, complete bool) {
+	conds, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if err != nil || !found {
+		return "", "", false
+	}
+	for _, raw := range conds {
+		cond, ok := raw.(map[string]any)
+		if !ok || unstructuredString(cond["type"]) != measurementConditionComplete ||
+			unstructuredString(cond["status"]) != conditionStatusTrue {
+
+			continue
+		}
+		return unstructuredString(cond["reason"]), unstructuredString(cond["message"]), true
+	}
+	return "", "", false
+}
+
+// finalizedMeasurements reports the run's measurements once CRE has finalized
+// every one of them, in name order. It returns an error as soon as any one
+// completes without usable results rather than aggregating over the rest,
+// because a run that lost part of its data is not a measured run.
+func finalizedMeasurements(byName map[string]*unstructured.Unstructured, kind string) ([]*unstructured.Unstructured, bool, error) {
+	if len(byName) == 0 {
+		return nil, false, nil
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	final := make([]*unstructured.Unstructured, 0, len(names))
+	for _, name := range names {
+		obj := byName[name]
+		reason, message, complete := measurementCompletion(obj)
+		switch {
+		case !complete:
+			return nil, false, nil
+		case reason != measurementReasonJobSucceeded:
+			return nil, false, aicrErrors.NewWithContext(aicrErrors.ErrCodeInternal,
+				fmt.Sprintf("%s %s completed without final results (%s): %s", kind, name, reason, message),
+				map[string]any{"reason": reason, "message": message})
+		}
+		final = append(final, obj)
+	}
+	return final, true, nil
+}
+
+// waitForFinalMeasurements returns the measurements of one kind that this run
+// owns, once CRE has finalized all of them. It fails closed on expiry: the
+// provisional results are there to be read, and reading them is the failure
+// mode this exists to prevent.
+func waitForFinalMeasurements(
+	ctx context.Context,
+	client dynamic.Interface,
+	gvr schema.GroupVersionResource,
+	namespace, workflowName, kind string,
+	createdAt metav1.Time,
+) ([]*unstructured.Unstructured, error) {
+
+	waitCtx, cancel := context.WithTimeout(ctx, defaults.CREMeasurementFinalizeTimeout)
+	defer cancel()
+
+	byName := make(map[string]*unstructured.Unstructured)
+	for {
+		listCtx, listCancel := context.WithTimeout(waitCtx, defaults.DiagnosticTimeout)
+		list, err := client.Resource(gvr).Namespace(namespace).List(listCtx, metav1.ListOptions{})
+		listCancel()
+		if err != nil {
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+				fmt.Sprintf("failed to list %ss", kind), err)
+		}
+		for i := range list.Items {
+			item := &list.Items[i]
+			if measurementBelongsToRun(item, workflowName, createdAt) {
+				byName[item.GetName()] = item
+			}
+		}
+		if final, done, err := finalizedMeasurements(byName, kind); err != nil || done {
+			return final, err
+		}
+
+		if err := watchUntilFinal(waitCtx, client, gvr, namespace, workflowName, kind,
+			createdAt, list.GetResourceVersion(), byName); err != nil {
+			if stderrors.Is(err, errWatchRestart) {
+				// The channel closed without the budget expiring — an
+				// apiserver hiccup or a rolling restart, not a verdict. Re-list
+				// and resume rather than reporting the run unmeasured.
+				continue
+			}
+			return nil, err
+		}
+		return finalizedMeasurementsOrTimeout(byName, kind)
+	}
+}
+
+// errWatchRestart asks waitForFinalMeasurements to re-list and watch again.
+var errWatchRestart = stderrors.New("watch closed")
+
+func watchUntilFinal(
+	ctx context.Context,
+	client dynamic.Interface,
+	gvr schema.GroupVersionResource,
+	namespace, workflowName, kind string,
+	createdAt metav1.Time,
+	resourceVersion string,
+	byName map[string]*unstructured.Unstructured,
+) error {
+
+	watcher, err := client.Resource(gvr).Namespace(namespace).Watch(ctx, metav1.ListOptions{
+		ResourceVersion: resourceVersion,
+	})
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("failed to watch %ss", kind), err)
+	}
+	defer watcher.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case event, open := <-watcher.ResultChan():
+			if !open {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return errWatchRestart
+			}
+			obj, ok := event.Object.(*unstructured.Unstructured)
+			if !ok {
+				continue
+			}
+			if event.Type == watch.Deleted {
+				delete(byName, obj.GetName())
+				continue
+			}
+			if !measurementBelongsToRun(obj, workflowName, createdAt) {
+				continue
+			}
+			byName[obj.GetName()] = obj
+			if _, done, err := finalizedMeasurements(byName, kind); err != nil || done {
+				return err
+			}
+		}
+	}
+}
+
+// finalizedMeasurementsOrTimeout converts an exhausted budget into the reason
+// the check could not reach a verdict.
+func finalizedMeasurementsOrTimeout(
+	byName map[string]*unstructured.Unstructured,
+	kind string,
+) ([]*unstructured.Unstructured, error) {
+
+	final, done, err := finalizedMeasurements(byName, kind)
+	switch {
+	case err != nil:
+		return nil, err
+	case done:
+		return final, nil
+	case len(byName) == 0:
+		return nil, aicrErrors.New(aicrErrors.ErrCodeTimeout,
+			fmt.Sprintf("no %s was created for this run within %s", kind, defaults.CREMeasurementFinalizeTimeout))
+	default:
+		return nil, aicrErrors.NewWithContext(aicrErrors.ErrCodeTimeout,
+			fmt.Sprintf("%s was not finalized within %s", kind, defaults.CREMeasurementFinalizeTimeout),
+			map[string]any{"pending": len(byName)})
+	}
 }
 
 func certificationWorkflowName(obj *unstructured.Unstructured, domain, variant string) (string, error) {
@@ -65,22 +263,19 @@ func certificationWorkflowName(obj *unstructured.Unstructured, domain, variant s
 }
 
 func listMaxBusBandwidth(ctx context.Context, client dynamic.Interface, namespace, workflowName string, createdAt metav1.Time) (float64, error) {
-	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
-	defer cancel()
-	list, err := client.Resource(bandwidthMeasurementGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
+	measurements, err := waitForFinalMeasurements(
+		ctx, client, bandwidthMeasurementGVR, namespace, workflowName, "BandwidthMeasurement", createdAt,
+	)
 	if err != nil {
-		return 0, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list BandwidthMeasurements", err)
+		return 0, err
 	}
 	var maxBW float64
 	var found bool
-	for i := range list.Items {
-		if !measurementBelongsToRun(&list.Items[i], workflowName, createdAt) {
-			continue
-		}
-		results, _, _ := unstructured.NestedSlice(list.Items[i].Object, "status", "results")
+	for _, obj := range measurements {
+		results, _, _ := unstructured.NestedSlice(obj.Object, "status", "results")
 		bw, err := maxBusBandwidthGBps(results)
 		if err != nil {
-			slog.Debug("skipping BandwidthMeasurement without results", "name", list.Items[i].GetName(), "error", err)
+			slog.Debug("skipping BandwidthMeasurement without results", "name", obj.GetName(), "error", err)
 			continue
 		}
 		if !found || bw > maxBW {
@@ -139,9 +334,9 @@ func parseBusBWField(v any) (float64, error) {
 		if err != nil {
 			return 0, aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest, "invalid busBW", err)
 		}
-		return bw, nil
+		return finiteMeasurement("busBW", bw)
 	case float64:
-		return t, nil
+		return finiteMeasurement("busBW", t)
 	case int64:
 		return float64(t), nil
 	case int:
@@ -150,4 +345,15 @@ func parseBusBWField(v any) (float64, error) {
 		return 0, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported busBW type %T", v))
 	}
+}
+
+// finiteMeasurement rejects the values ParseFloat accepts but a threshold
+// cannot judge. Both checks fail only on "measured < threshold", so NaN —
+// which compares false against everything — and +Inf would otherwise pass.
+func finiteMeasurement(field string, v float64) (float64, error) {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s is not a finite number: %v", field, v))
+	}
+	return v, nil
 }

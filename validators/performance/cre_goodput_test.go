@@ -15,6 +15,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
@@ -130,6 +131,13 @@ func TestParseGoodputRatio(t *testing.T) {
 		{name: "JSON number", status: map[string]any{"result": float64(0.9)}, want: 0.9},
 		{name: "missing", status: map[string]any{}, wantErr: true},
 		{name: "invalid", status: map[string]any{"result": "bad"}, wantErr: true},
+		// The verdict fails only on "ratio < threshold". NaN compares false
+		// against every threshold and +Inf is above all of them, so both would
+		// have passed while the trace line printed the opposite.
+		{name: "NaN string", status: map[string]any{"result": "NaN"}, wantErr: true},
+		{name: "positive infinity string", status: map[string]any{"result": "+Inf"}, wantErr: true},
+		{name: "NaN number", status: map[string]any{"result": math.NaN()}, wantErr: true},
+		{name: "infinite number", status: map[string]any{"result": math.Inf(1)}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

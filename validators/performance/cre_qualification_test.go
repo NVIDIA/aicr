@@ -15,9 +15,11 @@
 package main
 
 import (
+	stderrors "errors"
 	"strings"
 	"testing"
 
+	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -37,9 +39,17 @@ func buildCRENCCLCertification(t *testing.T, namespace string, gpuConfig *gpuCon
 	return mustBuildCRECertification(t, namespace, creNCCLRunName, gpuConfig, creQualifiedEntries[checkNameCRENCCLAllReduceBW][creEKSH100])
 }
 
+// The entry is spelled out rather than read from creQualifiedEntries, which
+// holds no training combination while the upstream catalog entry is broken.
+// What the driver renders for the training domain is independent of whether a
+// combination is qualified to run it, and stays worth asserting.
 func buildCRETrainingCertification(t *testing.T, namespace, name string, gpuConfig *gpuConfiguration) *unstructured.Unstructured {
 	t.Helper()
-	return mustBuildCRECertification(t, namespace, name, gpuConfig, creQualifiedEntries[checkNameCRETrainingGoodput][creEKSH100])
+	return mustBuildCRECertification(t, namespace, name, gpuConfig, creCatalogEntry{
+		Domain:   creTrainingDomain,
+		Variant:  creTrainingVariant,
+		MaxNodes: 2,
+	})
 }
 
 func mustBuildCRECertification(
@@ -74,7 +84,6 @@ func TestCREQualifiedEntries(t *testing.T) {
 		wantVariant string
 	}{
 		{"nccl on eks h100", checkNameCRENCCLAllReduceBW, creNCCLDomain, creNCCLVariant},
-		{"goodput on eks h100", checkNameCRETrainingGoodput, creTrainingDomain, creTrainingVariant},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,13 +103,39 @@ func TestCREQualifiedEntries(t *testing.T) {
 	}
 }
 
-// Every check that consults the record must appear in it, or it silently skips
-// on every combination.
+// Every check that consults the record must appear in it. Presence is what is
+// asserted, not population: a check keyed to an empty set skips everywhere,
+// which is a deliberate state, while a check missing from the record entirely
+// is an authoring slip that looks identical from the outside.
 func TestCREQualifiedEntriesCoverBothChecks(t *testing.T) {
 	for _, checkName := range []string{checkNameCRENCCLAllReduceBW, checkNameCRETrainingGoodput} {
-		if len(creQualifiedEntries[checkName]) == 0 {
-			t.Errorf("%s has no qualified combinations", checkName)
+		if _, ok := creQualifiedEntries[checkName]; !ok {
+			t.Errorf("%s is absent from the qualification record", checkName)
 		}
+	}
+}
+
+// cre-training-goodput has no qualified combination while the nemotron5-8b
+// catalog entry does not run on the CRE version the registry pins; see
+// creQualifiedEntries for the upstream cause. This asserts the consequence
+// that matters — the check skips rather than failing a healthy cluster. When
+// the entry is fixed and re-measured, this test is what says to delete it.
+func TestCRETrainingGoodputIsUnqualifiedPendingUpstreamFix(t *testing.T) {
+	if _, ok := lookupCREQualification(
+		checkNameCRETrainingGoodput, creEKSH100.Service, creEKSH100.Accelerator,
+	); ok {
+		t.Fatal("cre-training-goodput reports qualified on eks x h100; " +
+			"if it has been re-measured on the pinned CRE version, remove this test")
+	}
+
+	ctx := ctxWithCriteriaAndPerfConstraints(
+		recipe.CriteriaServiceEKS,
+		recipe.CriteriaAcceleratorH100,
+		recipe.Constraint{Name: checkNameCRETrainingGoodput, Value: ">= 0.5"},
+	)
+	err := checkCRETrainingGoodput(ctx)
+	if !validators.IsSkip(err) {
+		t.Fatalf("error = %v, want Skip while the check is unqualified", err)
 	}
 }
 
@@ -167,6 +202,50 @@ func TestLookupCREQualificationUnqualified(t *testing.T) {
 			}
 			if entry != (creCatalogEntry{}) {
 				t.Errorf("entry = %+v, want zero value on an unqualified lookup", entry)
+			}
+		})
+	}
+}
+
+// Both CRE checks compare measured >= threshold. parseThreshold strips the
+// operator, so a recipe asking for anything else would have been evaluated as
+// a floor while the trace line echoed the operator it was given — "<= 0.5"
+// reported satisfied by a ratio above it. The refusal has to land before the
+// Certification is created so no GPU work starts on a constraint the verdict
+// cannot keep.
+func TestCREThreshold(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		want    float64
+		wantErr bool
+	}{
+		{name: "greater or equal", value: ">= 300", want: 300},
+		{name: "greater or equal without a space", value: ">=0.5", want: 0.5},
+		{name: "bare number is a floor", value: "300", want: 300},
+		{name: "units are tolerated", value: ">= 300 GB/s", want: 300},
+		{name: "strictly greater is refused", value: "> 0.5", wantErr: true},
+		{name: "at most is refused", value: "<= 0.5", wantErr: true},
+		{name: "strictly less is refused", value: "< 0.5", wantErr: true},
+		{name: "equality is refused", value: "== 0.5", wantErr: true},
+		{name: "inequality is refused", value: "!= 0.5", wantErr: true},
+		{name: "no number at all", value: ">=", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := creThreshold(checkNameCRETrainingGoodput, tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("threshold = %v, want %v", got, tt.want)
 			}
 		})
 	}

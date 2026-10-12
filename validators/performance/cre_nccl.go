@@ -52,7 +52,7 @@ func validateCRENcclAllReduceBw(
 		return fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkNameCRENCCLAllReduceBW, service, accelerator), true, nil
 	}
 
-	threshold, err := parseThreshold(constraint.Value)
+	threshold, err := creThreshold(checkNameCRENCCLAllReduceBW, constraint.Value)
 	if err != nil {
 		return "", false, err
 	}
@@ -103,7 +103,10 @@ func validateCRENcclAllReduceBw(
 		return "", false, err
 	}
 	if unstructuredConditionTrue(run, "Failed") {
-		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "CRE Certification failed")
+		// Teardown deletes the Certification, so CRE's reason is only
+		// recoverable from the error this returns.
+		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("CRE Certification failed: %s", creTerminalConditionSummary(run)))
 	}
 
 	workflowName, err := certificationWorkflowName(run, entry.Domain, entry.Variant)
