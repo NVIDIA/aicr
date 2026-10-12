@@ -80,6 +80,10 @@ type installedRelease struct {
 	// unversioned, which fails the run, rather than as absent, which reads as
 	// newly installed and does not.
 	Unproven bool
+
+	// Unplaced marks a readable record the mapping matched outside every one
+	// of its component's namespaces.
+	Unplaced bool
 }
 
 // The storage resources the readers list, as they appear in a GVR, an RBAC

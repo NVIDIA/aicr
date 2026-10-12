@@ -142,8 +142,40 @@ type Result struct {
 	// no sentinel to invent.
 	Versions map[string]string
 
+	// Unproven names, per component, the records that placed it when none of
+	// them could establish a version. A component unversioned by a record
+	// that was read, such as a failed Helm release, has no entry.
+	Unproven map[string][]UnprovenRecord
+
 	// Source is what was read and what was skipped.
 	Source SourceInfo
+}
+
+// UnprovenReason is why a record placed a component without establishing its
+// version. UnprovenUnreadable is a record the reader found and could not
+// decode. UnprovenUnplaced is a readable Argo CD Application matched by a
+// prefixed name whose destination is none of the component's namespaces.
+type UnprovenReason string
+
+const (
+	UnprovenUnreadable UnprovenReason = "unreadable"
+	UnprovenUnplaced   UnprovenReason = "unplaced"
+)
+
+// UnprovenRecord is one record that placed a component without establishing
+// its version.
+type UnprovenRecord struct {
+	// Source is "helm" for a Helm release record or "argocd" for an Argo CD
+	// Application.
+	Source string
+
+	Name string
+
+	// Namespace is where a Helm record is stored, or an Application's
+	// destination. Empty for an unreadable Application that states none.
+	Namespace string
+
+	Reason UnprovenReason
 }
 
 // SourceInfo accounts for both readers separately. The two sets of counts are
@@ -211,6 +243,10 @@ type ArgoInfo struct {
 	// Remote is Applications matching a component that deploy to another
 	// cluster, which on an Argo CD management cluster is most of them.
 	Remote int
+
+	// Unplaced is readable Applications matched to a component by a prefixed
+	// name whose destination is none of its namespaces.
+	Unplaced int
 }
 
 // Read reads the installed inventory from the cluster opts names.
@@ -346,30 +382,39 @@ const (
 // is the reader saying it found the component and could not establish its
 // version, which is a finding rather than a gap.
 func combine(d Deployer, comps []Component, helmRead, argoRead inventoryRead) (Result, error) {
-	versions, helmCounts, err := installedVersions(d, comps, helmRead.Releases)
+	helmMapped, err := installedVersions(d, comps, helmRead.Releases)
 	if err != nil {
 		return Result{}, err
 	}
-	argoVersions, _, err := installedVersions(d, comps, argoRead.Releases)
+	argoMapped, err := installedVersions(d, comps, argoRead.Releases)
 	if err != nil {
 		return Result{}, err
 	}
-	for name, version := range argoVersions {
-		if _, answered := versions[name]; !answered {
-			versions[name] = version
+	versions, unproven := helmMapped.versions, helmMapped.unproven
+	for name, version := range argoMapped.versions {
+		if _, answered := versions[name]; answered {
+			continue
+		}
+		versions[name] = version
+		if records, ok := argoMapped.unproven[name]; ok {
+			if unproven == nil {
+				unproven = make(map[string][]UnprovenRecord)
+			}
+			unproven[name] = records
 		}
 	}
 
 	return Result{
 		Versions: versions,
+		Unproven: unproven,
 		Source: SourceInfo{
 			Helm: HelmInfo{
 				Read:             readsHelm(d),
 				Records:          helmRead.Records,
 				Unattributed:     helmRead.Unattributed,
 				Unreadable:       helmRead.Unreadable,
-				Uninstalled:      helmCounts.uninstalled,
-				StampedUnmatched: helmCounts.stampedUnmatched,
+				Uninstalled:      helmMapped.counts.uninstalled,
+				StampedUnmatched: helmMapped.counts.stampedUnmatched,
 			},
 			Argo: ArgoInfo{
 				Read:         !readsHelm(d),
@@ -377,23 +422,34 @@ func combine(d Deployer, comps []Component, helmRead, argoRead inventoryRead) (R
 				Unattributed: argoRead.Unattributed,
 				Unreadable:   argoRead.Unreadable,
 				Remote:       argoRead.Remote,
+				Unplaced:     argoMapped.counts.unplaced,
 			},
 		},
 	}, nil
 }
 
-// mappingCounts is what the mapping dropped, as opposed to what the readers
-// did. Argo records can produce neither: they carry no status and no
-// annotations. See ArgoInfo.
+// mapping is one reader's records mapped onto components.
+type mapping struct {
+	versions map[string]string
+
+	// unproven names the records behind each component this reader left
+	// unversioned.
+	unproven map[string][]UnprovenRecord
+
+	counts mappingCounts
+}
+
+// mappingCounts is what the mapping dropped or could not place, as opposed to
+// what the readers did. Only Helm records can be uninstalled or stamped, and
+// only Argo records can be unplaced.
 type mappingCounts struct {
 	uninstalled      int
 	stampedUnmatched int
+	unplaced         int
 }
 
 // installedVersions maps one reader's records onto component versions.
-func installedVersions(d Deployer, comps []Component,
-	records []installedRelease) (map[string]string, mappingCounts, error) {
-
+func installedVersions(d Deployer, comps []Component, records []installedRelease) (mapping, error) {
 	var counts mappingCounts
 	candidates := make(map[int][]installedRelease, len(comps))
 	for _, record := range records {
@@ -413,6 +469,12 @@ func installedVersions(d Deployer, comps []Component,
 		case record.Source == sourceHelm && record.Status == helmStatusUninstalled:
 			counts.uninstalled++
 		case kind == matchUnplaced:
+			// An unreadable record stays unreadable. The reader already
+			// counted it.
+			if !record.Unproven {
+				record.Unplaced = true
+				counts.unplaced++
+			}
 			record.Unproven = true
 			candidates[index] = append(candidates[index], record)
 		default:
@@ -422,7 +484,7 @@ func installedVersions(d Deployer, comps []Component,
 
 	// Walked in component order rather than map order so that a cluster with
 	// two ambiguous components reports the same one every run.
-	versions := make(map[string]string, len(candidates))
+	out := mapping{versions: make(map[string]string, len(candidates)), counts: counts}
 	for i := range comps {
 		found := candidates[i]
 		if len(found) == 0 {
@@ -431,18 +493,42 @@ func installedVersions(d Deployer, comps []Component,
 		// Present with no version, which fails the run: there is no install
 		// to choose between when none of them establishes one.
 		if allUnproven(found) {
-			versions[comps[i].Name] = ""
+			out.versions[comps[i].Name] = ""
+			if out.unproven == nil {
+				out.unproven = make(map[string][]UnprovenRecord)
+			}
+			out.unproven[comps[i].Name] = unprovenRecords(found)
 
 			continue
 		}
 		record, err := resolveInstall(comps[i], found)
 		if err != nil {
-			return nil, mappingCounts{}, err
+			return mapping{}, err
 		}
-		versions[comps[i].Name] = versionFor(record, comps[i])
+		out.versions[comps[i].Name] = versionFor(record, comps[i])
 	}
 
-	return versions, counts, nil
+	return out, nil
+}
+
+// unprovenRecords names records none of which could version their component,
+// in reader order.
+func unprovenRecords(records []installedRelease) []UnprovenRecord {
+	out := make([]UnprovenRecord, len(records))
+	for i, record := range records {
+		reason := UnprovenUnreadable
+		if record.Unplaced {
+			reason = UnprovenUnplaced
+		}
+		out[i] = UnprovenRecord{
+			Source:    string(record.Source),
+			Name:      record.Name,
+			Namespace: record.Namespace,
+			Reason:    reason,
+		}
+	}
+
+	return out
 }
 
 // allUnproven reports records none of which can establish a version.

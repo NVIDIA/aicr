@@ -223,14 +223,13 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 
 	fromNames, toNames, skipped := c.objectNames(ctx, req, to)
 	fromTable, toTable := componentIdentities(from, fromNames), componentIdentities(to, toNames)
-	var source *upgrade.ReportSource
+	var cluster clusterRead
 	if fromCluster {
-		var versions map[string]string
-		versions, source, err = c.clusterVersions(ctx, dp, req, deployer, to)
+		cluster, err = c.clusterVersions(ctx, dp, req, deployer, to)
 		if err != nil {
 			return nil, err
 		}
-		fromTable = clusterIdentities(versions, toTable)
+		fromTable = clusterIdentities(cluster.versions, toTable)
 	}
 
 	set, comps, err := recipe.LoadUpgradeRecords(ctx, dp)
@@ -276,11 +275,20 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 		From:                req.From,
 		To:                  req.To,
 		Deployer:            deployer,
-		Source:              source,
+		Source:              cluster.source,
+		Unproven:            cluster.unproven,
 		AtRisk:              atRisk,
 		ObjectNamesCompared: skipped == "",
 		ObjectNamesSkipped:  skipped,
 	}), nil
+}
+
+// clusterRead is a cluster read restated for the report. The zero value is an
+// artifact comparison.
+type clusterRead struct {
+	versions map[string]string
+	source   *upgrade.ReportSource
+	unproven map[string][]upgrade.ReportUnproven
 }
 
 // clusterVersions reads the installed inventory as the `from` table, and
@@ -291,11 +299,11 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 // thing separating a bare cluster from a mapping that no longer matches what
 // AICR installed.
 func (c *Client) clusterVersions(ctx context.Context, dp recipe.DataProvider, req UpgradeCheckRequest,
-	deployer string, to *RecipeResult) (map[string]string, *upgrade.ReportSource, error) {
+	deployer string, to *RecipeResult) (clusterRead, error) {
 
 	registry, err := recipe.GetComponentRegistryFor(dp)
 	if err != nil {
-		return nil, nil, err
+		return clusterRead{}, err
 	}
 	result, err := c.deps.readInventory(ctx, inventory.Options{
 		Kubeconfig: req.Kubeconfig,
@@ -303,12 +311,38 @@ func (c *Client) clusterVersions(ctx context.Context, dp recipe.DataProvider, re
 		Components: withRecipeNamespaces(recipe.InventoryComponents(registry), to),
 	})
 	if err != nil {
-		return nil, nil, err
+		return clusterRead{}, err
 	}
 
-	return result.Versions,
-		reportSourceFrom(result.Source, k8sclient.ResolveKubeconfigPath(req.Kubeconfig), len(result.Versions)),
-		nil
+	return clusterRead{
+		versions: result.Versions,
+		source: reportSourceFrom(result.Source, k8sclient.ResolveKubeconfigPath(req.Kubeconfig),
+			len(result.Versions)),
+		unproven: reportUnprovenFrom(result.Unproven),
+	}, nil
+}
+
+// reportUnprovenFrom restates the records behind each component a read placed
+// without a version.
+func reportUnprovenFrom(unproven map[string][]inventory.UnprovenRecord) map[string][]upgrade.ReportUnproven {
+	if len(unproven) == 0 {
+		return nil
+	}
+	out := make(map[string][]upgrade.ReportUnproven, len(unproven))
+	for component, records := range unproven {
+		restated := make([]upgrade.ReportUnproven, len(records))
+		for i, r := range records {
+			restated[i] = upgrade.ReportUnproven{
+				Source:    r.Source,
+				Name:      r.Name,
+				Namespace: r.Namespace,
+				Reason:    string(r.Reason),
+			}
+		}
+		out[component] = restated
+	}
+
+	return out
 }
 
 // withRecipeNamespaces adds, to each component, the namespace the target
@@ -398,6 +432,7 @@ func reportSourceFrom(info inventory.SourceInfo, kubeconfig string, matched int)
 			Unattributed: info.Argo.Unattributed,
 			Unreadable:   info.Argo.Unreadable,
 			Remote:       info.Argo.Remote,
+			Unplaced:     info.Argo.Unplaced,
 		},
 	}
 }

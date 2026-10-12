@@ -204,7 +204,7 @@ check_eq "source-summary-helm-line" \
 # and neither is a total: storage records are per revision, Applications are
 # per component.
 check_eq "source-summary-argo-line" \
-    "  argo: 0 application(s), 0 unattributed, 0 unreadable, no stamp to check" \
+    "  argo: 0 application(s), 0 unattributed, 0 unreadable, 0 remote, 0 unplaced, no stamp to check" \
     "$(sed -n 3p <<< "${summary}")"
 
 report "${WORK}/from-artifact.json" "${AGREED}"
