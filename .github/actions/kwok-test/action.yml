@@ -118,7 +118,7 @@ runs:
         echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH} (job_timeout_minutes=${JOB_TIMEOUT_MINUTES}, margin=240s, job kill in ~$(( 10#${JOB_TIMEOUT_MINUTES} * 60 ))s)"
 
     - name: Cache KWOK tools
-      uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: |
           /usr/local/bin/kind
