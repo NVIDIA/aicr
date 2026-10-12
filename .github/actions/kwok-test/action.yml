@@ -306,7 +306,7 @@ runs:
     # outcome so a green lane leaves structured evidence too, not only a red one.
     - name: Upload CTRF results
       if: always() && inputs.upload_artifacts == 'true'
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: kwok-results-${{ inputs.recipe }}-${{ inputs.deployer }}${{ inputs.mixins && format('-{0}', inputs.mixins) || '' }}-${{ github.run_id }}-${{ github.run_attempt }}
         path: /tmp/kwok-debug-artifacts/kwok-results.json
@@ -315,7 +315,7 @@ runs:
 
     - name: Upload debug artifacts
       if: failure() && inputs.upload_artifacts == 'true'
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: kwok-debug-${{ inputs.recipe }}-${{ inputs.deployer }}${{ inputs.mixins && format('-{0}', inputs.mixins) || '' }}-${{ github.run_id }}
         path: |
