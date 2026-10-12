@@ -1237,10 +1237,28 @@ func TestReleaseHomebrewWorkflowPolicy(t *testing.T) {
 	jobs := mapValue(t, doc, "jobs")
 	homebrew := mapValue(t, jobs, "publish-homebrew")
 	assertPermissions(t, homebrew, map[string]string{"actions": "read", "contents": "read"})
+	// Each action must be pinned to a commit SHA, but not to one particular SHA:
+	// Dependabot moves the SHA on every release and cannot update this test.
+	for _, action := range []string{"actions/checkout@", "actions/download-artifact@"} {
+		pinned := regexp.MustCompile(`^` + regexp.QuoteMeta(action) + `[0-9a-f]{40}$`)
+		used := false
+		for _, raw := range sliceValue(t, homebrew, "steps") {
+			step, _ := raw.(map[string]any)
+			uses, _ := step["uses"].(string)
+			if !strings.HasPrefix(uses, action) {
+				continue
+			}
+			used = true
+			if !pinned.MatchString(uses) {
+				t.Errorf("Homebrew workflow must use %s pinned to a 40-character commit SHA, got %q", action, uses)
+			}
+		}
+		if !used {
+			t.Errorf("Homebrew workflow no longer uses %s", strings.TrimSuffix(action, "@"))
+		}
+	}
 	text := marshalYAML(t, homebrew)
 	for _, required := range []string{
-		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-		"actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
 		"name: ${{ needs.build-ko.outputs.homebrew_artifact_name }}",
 		"path: /tmp/aicr-homebrew-formula",
 		"timeout 30s ssh-keyscan -t rsa github.com",
