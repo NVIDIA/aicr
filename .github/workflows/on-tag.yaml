@@ -301,7 +301,7 @@ jobs:
 
       - name: Upload Homebrew formula
         if: steps.release.outcome == 'success' && needs.detect.outputs.is_prerelease == 'false'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: ${{ steps.homebrew-artifact.outputs.name }}
           path: /tmp/aicr.rb
@@ -673,7 +673,7 @@ jobs:
           echo "digest_map=${digest_map}" >> "$GITHUB_OUTPUT"
 
       - name: Upload candidate digest map
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: release-candidate-digests-${{ needs.detect.outputs.candidate_tag }}-attempt-${{ github.run_attempt }}
           path: candidate-digests.json

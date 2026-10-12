@@ -886,7 +886,7 @@ jobs:
       # step ran, mirroring the snapshot-result.json upload above.
       - name: Upload sxidfault result
         if: always() && steps.sxidfault.outcome != 'skipped'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-sxidfault-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: sxidfault-result.json
@@ -913,7 +913,7 @@ jobs:
       # scoped tighter (30d).
       - name: Upload evidence pointer
         if: always() && steps.conformance.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-evidence-pointer-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/pointer.yaml
@@ -926,7 +926,7 @@ jobs:
       # so the step has a machine-readable record on green and red runs alike.
       - name: Upload snapshot result
         if: always() && steps.prep.outcome != 'skipped'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-snapshot-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: snapshot-result.json
@@ -953,7 +953,7 @@ jobs:
 
       - name: Upload failure debug
         if: failure() && (steps.prep.outcome != 'skipped' || steps.client.outcome == 'success')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-debug-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
