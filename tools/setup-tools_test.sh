@@ -674,6 +674,32 @@ if grep -q '^INSTALL' <<< "${output}"; then
 fi
 echo "Pinned yq: installs the pinned asset against checksums-bsd; fails when the download fails, when shadowed on PATH, or when unpinned"
 
+# A Linux oasdiff archive installs on macOS without error, then fails every run
+# with "exec format error". CI runs only on Linux, so this is the only guard.
+oasdiff_asset_for() {
+    local os="$1" arch="$2" version="$3"
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+        OS="${os}"
+        GO_ARCH="${arch}"
+        oasdiff_release_asset "${version}"
+    )
+}
+
+for oasdiff_case in "darwin arm64 darwin_all" "darwin amd64 darwin_all" \
+    "linux amd64 linux_amd64" "linux arm64 linux_arm64"; do
+    read -r case_os case_arch case_platform <<< "${oasdiff_case}"
+    want="oasdiff_1.33.0_${case_platform}.tar.gz"
+    got=$(oasdiff_asset_for "${case_os}" "${case_arch}" "v1.33.0")
+    if [[ "${got}" != "${want}" ]]; then
+        echo "FAIL: oasdiff asset for ${case_os}/${case_arch} = '${got}', want '${want}'" >&2
+        exit 1
+    fi
+done
+echo "oasdiff release asset: darwin_all on macOS, linux_<arch> on Linux"
+
 # Calling install_pinned_yq directly proves nothing if setup-tools stops calling it.
 if ! grep -qE '^[^#]*(^|[[:space:]])install_pinned_yq([[:space:]]|$)' "${SETUP_TOOLS}"; then
     echo "FAIL: setup-tools no longer calls install_pinned_yq" >&2
