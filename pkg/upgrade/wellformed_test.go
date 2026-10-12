@@ -936,6 +936,38 @@ func TestValidateHooks(t *testing.T) {
 	}
 }
 
+func TestValidateAffectedResources(t *testing.T) {
+	tests := []struct {
+		name     string
+		affected []AffectedResource
+		wantErr  bool
+	}{
+		{"a CRD kind", []AffectedResource{{Group: "grove.io", Kinds: []string{"ClusterTopology"}}}, false},
+		{"another core kind", []AffectedResource{{Kinds: []string{"PersistentVolume"}}}, false},
+		{"core Secret", []AffectedResource{{Kinds: []string{"Secret"}}}, true},
+		{"core Secret lowercased", []AffectedResource{{Kinds: []string{"secret"}}}, true},
+		{"core Secret padded", []AffectedResource{{Group: " ", Kinds: []string{" Secret "}}}, true},
+		{"core Secret among other kinds", []AffectedResource{{Kinds: []string{"ConfigMap", "Secret"}}}, true},
+		{
+			// The same kind name in another API group is not the core resource.
+			"a Secret kind in a CRD group",
+			[]AffectedResource{{Group: "external-secrets.io", Kinds: []string{"Secret"}}}, false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, comps := rec("v0.18.0", tr(func(x *Transition) { x.AffectedResources = tt.affected }))
+			err := set.Validate(comps)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), "names core Secret") {
+				t.Errorf("error %q does not name the core Secret violation", err.Error())
+			}
+		})
+	}
+}
+
 // grove (recipes/registry.yaml:637) is pinned at a prerelease,
 // v0.1.0-alpha.12, and its history crosses a second prerelease boundary
 // before that pin. A ban on a prerelease in `from` made this shape

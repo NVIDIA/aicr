@@ -27,12 +27,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/metadata"
+	metadatafake "k8s.io/client-go/metadata/fake"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -106,11 +105,13 @@ func (d discovered) ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.AP
 	return nil, nil, d.err
 }
 
-// topologyObject is one ClusterTopology carrying exactly the labels and
-// annotations given.
-func topologyObject(namespace, name string, objLabels, annotations map[string]string) *unstructured.Unstructured {
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(topologyGVK)
+// partialObject returns the metadata of a gvk object carrying exactly
+// objLabels and annotations.
+func partialObject(gvk schema.GroupVersionKind, namespace, name string,
+	objLabels, annotations map[string]string) *metav1.PartialObjectMetadata {
+
+	obj := &metav1.PartialObjectMetadata{}
+	obj.SetGroupVersionKind(gvk)
 	obj.SetNamespace(namespace)
 	obj.SetName(name)
 	if len(objLabels) > 0 {
@@ -123,38 +124,40 @@ func topologyObject(namespace, name string, objLabels, annotations map[string]st
 	return obj
 }
 
-func policyObject(name string, objLabels, annotations map[string]string) *unstructured.Unstructured {
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(policyGVK)
-	obj.SetName(name)
-	if len(objLabels) > 0 {
-		obj.SetLabels(objLabels)
-	}
-	if len(annotations) > 0 {
-		obj.SetAnnotations(annotations)
-	}
-
-	return obj
+func topologyObject(namespace, name string, objLabels, annotations map[string]string) *metav1.PartialObjectMetadata {
+	return partialObject(topologyGVK, namespace, name, objLabels, annotations)
 }
 
-func scanClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
-	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{
-			topologyGVR: "ClusterTopologyList",
-			policyGVR:   "ClusterPolicyList",
-		}, objects...)
+func policyObject(name string, objLabels, annotations map[string]string) *metav1.PartialObjectMetadata {
+	return partialObject(policyGVK, "", name, objLabels, annotations)
+}
+
+func scanClient(objects ...runtime.Object) *metadatafake.FakeMetadataClient {
+	scheme := metadatafake.NewTestScheme()
+	metav1.AddMetaToScheme(scheme)
+
+	return metadatafake.NewSimpleMetadataClient(scheme, objects...)
+}
+
+// metadataPage returns a List response holding items and continueToken, for a
+// reactor to return. The fake metadata client accepts only a metav1.List from
+// a reactor, not a PartialObjectMetadataList.
+func metadataPage(continueToken string, items ...*metav1.PartialObjectMetadata) *metav1.List {
+	page := &metav1.List{ListMeta: metav1.ListMeta{Continue: continueToken}}
+	for _, item := range items {
+		page.Items = append(page.Items, runtime.RawExtension{Object: item})
+	}
+
+	return page
 }
 
 func topologyKind() ResourceKind {
 	return ResourceKind{Group: "grove.io", Kind: "ClusterTopology", Components: []string{"grove"}}
 }
 
-// TestScanAtRiskOwnership is the ownership rule, one object per case.
-//
-// The Helm pair is the mutation this table exists for: the managed-by label
-// alone is not ownership. Any controller, any hand-written manifest and any
-// chart rendered by something other than Helm can carry it, while
-// meta.helm.sh/release-name is written only by Helm's own install path.
+// TestScanAtRiskOwnership checks each marker owned recognizes, one object per
+// case. The Helm pairs are the cases that matter. Neither the managed-by label
+// nor a Helm annotation is ownership on its own.
 func TestScanAtRiskOwnership(t *testing.T) {
 	t.Parallel()
 
@@ -190,6 +193,29 @@ func TestScanAtRiskOwnership(t *testing.T) {
 			name:        "an empty release name is not a release",
 			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
 			annotations: map[string]string{helmReleaseNameAnnotation: ""},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "a helm hook is owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "post-install,post-upgrade"},
+			wantAtRisk:  false,
+		},
+		{
+			name:        "hook annotation alone is not ownership",
+			annotations: map[string]string{helmHookAnnotation: "post-install,post-upgrade"},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "a hook managed by something other than Helm",
+			objLabels:   map[string]string{labels.ManagedBy: "kustomize"},
+			annotations: map[string]string{helmHookAnnotation: "post-install"},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "an empty hook annotation is not a hook",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "  "},
 			wantAtRisk:  true,
 		},
 		{
@@ -536,11 +562,10 @@ func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 	t.Run("keeps the findings from every page", func(t *testing.T) {
 		t.Parallel()
 
-		pages := []*unstructured.UnstructuredList{
-			{Items: []unstructured.Unstructured{*topologyObject("tenant-a", "first-page", nil, nil)}},
-			{Items: []unstructured.Unstructured{*topologyObject("tenant-b", "second-page", nil, nil)}},
+		pages := []*metav1.List{
+			metadataPage("page-2", topologyObject("tenant-a", "first-page", nil, nil)),
+			metadataPage("", topologyObject("tenant-b", "second-page", nil, nil)),
 		}
-		pages[0].SetContinue("page-2")
 
 		listed := 0
 		client := scanClient()
@@ -579,10 +604,7 @@ func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 		client := scanClient()
 		client.PrependReactor("list", "clustertopologies",
 			func(k8stesting.Action) (bool, runtime.Object, error) {
-				page := &unstructured.UnstructuredList{}
-				page.SetContinue("same-token-forever")
-
-				return true, page, nil
+				return true, metadataPage("same-token-forever"), nil
 			})
 
 		_, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
@@ -751,7 +773,7 @@ func TestScanAtRiskWithNoKindsContactsNothing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var noClient dynamic.Interface
+			var noClient metadata.Interface
 			got, err := scanAtRisk(t.Context(), noClient, nil, nil, tt.kinds)
 			if err != nil {
 				t.Fatalf("scanAtRisk: %v", err)
@@ -814,12 +836,7 @@ func TestScanAtRiskSkipsAnUnnamedObject(t *testing.T) {
 	client := scanClient()
 	client.PrependReactor("list", "clustertopologies",
 		func(k8stesting.Action) (bool, runtime.Object, error) {
-			nameless := &unstructured.Unstructured{}
-			nameless.SetGroupVersionKind(topologyGVK)
-			nameless.SetNamespace("tenant-a")
-			page := &unstructured.UnstructuredList{Items: []unstructured.Unstructured{*nameless}}
-
-			return true, page, nil
+			return true, metadataPage("", topologyObject("tenant-a", "", nil, nil)), nil
 		})
 
 	got, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})

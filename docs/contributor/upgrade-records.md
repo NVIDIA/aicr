@@ -255,6 +255,11 @@ duplicate another group's. A group is one ordered sequence a reader follows top
 to bottom, not a fragment to be assembled. Step ids may repeat across groups,
 since a consumer addresses a step as (deployer, id).
 
+**`affectedResources` may not name core `Secret`.** The at-risk scan lists every
+kind a crossed record names, cluster-wide, and the permission to list Secrets
+reads every Secret's data whatever the scan keeps. A `Secret` kind in a CRD
+group is unaffected.
+
 ### Where your lowest `from` floor starts is a real decision
 
 A record is *crossed* when the operator's source version sits below the floor

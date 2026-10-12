@@ -349,8 +349,8 @@ func TestLoadAllowsNilSourceWhenNothingReferencesAFile(t *testing.T) {
 	}
 }
 
-// No other test asserts that a realistic record satisfies all nine rules at
-// once, so nothing proved they are jointly satisfiable — and `replaces` was
+// No other test asserts that a realistic record satisfies all ten rules at
+// once, so nothing proved they are jointly satisfiable, and `replaces` was
 // never exercised through a YAML decode at all. Every clause here is load
 // bearing: rule 3 needs the two `from` domains to meet and to reach the pin,
 // rule 7 needs each `from` to stop at its own `to` floor, rule 8 needs the two

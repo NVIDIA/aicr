@@ -24,9 +24,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/metadata"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -34,12 +33,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 )
 
-// The markers that make an object somebody's. Helm writes the label and the
-// annotation together on everything it installs; Argo CD writes its tracking
-// id on everything it syncs.
+// Ownership markers recognized by owned.
 const (
 	helmManagedByValue        = "Helm"
 	helmReleaseNameAnnotation = "meta.helm.sh/release-name"
+	helmHookAnnotation        = "helm.sh/hook"
 	argoTrackingIDAnnotation  = "argocd.argoproj.io/tracking-id"
 )
 
@@ -129,7 +127,7 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 	if err != nil {
 		return AtRiskResult{}, err
 	}
-	dyn, err := k8sclient.NewDynamicClientForConfig(restConfig)
+	metaClient, err := k8sclient.NewMetadataClientForConfig(restConfig)
 	if err != nil {
 		return AtRiskResult{}, err
 	}
@@ -138,12 +136,12 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 		return AtRiskResult{}, err
 	}
 
-	return scanAtRisk(ctx, dyn, mapper, groups, opts.Kinds)
+	return scanAtRisk(ctx, metaClient, mapper, groups, opts.Kinds)
 }
 
 // scanAtRisk is ScanAtRisk with the client, the mapper and the discovery the
 // mapper resolves through supplied.
-func scanAtRisk(ctx context.Context, client dynamic.Interface, mapper meta.RESTMapper,
+func scanAtRisk(ctx context.Context, client metadata.Interface, mapper meta.RESTMapper,
 	groups k8sclient.GroupResourceLister, kinds []ResourceKind) (AtRiskResult, error) {
 
 	if len(kinds) == 0 {
@@ -250,8 +248,8 @@ func resolveKind(ctx context.Context, mapper meta.RESTMapper, groups k8sclient.G
 	return schema.GroupVersionResource{}, false, nil
 }
 
-// scanKind lists one kind cluster-wide and returns the objects nothing owns.
-func scanKind(ctx context.Context, client dynamic.Interface, kind ResourceKind,
+// scanKind lists kind cluster-wide and returns the objects nothing owns.
+func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 	gvr schema.GroupVersionResource) (ScannedKind, []AtRiskObject, error) {
 
 	scanned := ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components, Present: true}
@@ -261,6 +259,7 @@ func scanKind(ctx context.Context, client dynamic.Interface, kind ResourceKind,
 		if err := ctxErr(ctx, atRiskSubject); err != nil {
 			return ScannedKind{}, nil, err
 		}
+		// Metadata only, so no object's spec or Secret's data is ever held.
 		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, opts)
 		if err != nil {
 			// A CRD deleted between the mapping and this List answers the same
@@ -326,28 +325,32 @@ func scanKind(ctx context.Context, client dynamic.Interface, kind ResourceKind,
 	return scanned, findings, nil
 }
 
-// owned reports an object carrying a deployer's ownership marker.
-//
-// The check is positive, so an object with no recognized marker is at risk by
-// default. That is the correct direction here: the failure being guarded is an
-// operator's own custom resources being cascade-deleted when a CRD is removed,
-// so a marker this build does not recognize over-warns rather than
-// under-warns, and the scan is advisory either way. The reverse — a denylist
-// of markers meaning "not ours" — would let every unrecognized shape pass
-// silently, which is the failure mode with no recovery.
-//
-// Helm's label alone is not ownership. Any controller, any hand-written
-// manifest and any chart rendered by something other than Helm can carry
-// app.kubernetes.io/managed-by, while meta.helm.sh/release-name is written by
-// Helm's own install path and by nothing else.
-func owned(item *unstructured.Unstructured) bool {
+// owned reports whether item carries a deployer ownership marker. The markers
+// are:
+//   - a non-blank argocd.argoproj.io/tracking-id annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a non-blank
+//     meta.helm.sh/release-name annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a non-blank
+//     helm.sh/hook annotation
+func owned(item metav1.Object) bool {
+	// An allowlist, so an unrecognized marker over-warns. A denylist of "not
+	// ours" markers would let every unrecognized shape pass silently, and a
+	// CRD removal that cascade-deletes an operator's own objects has no
+	// recovery.
 	annotations := item.GetAnnotations()
 	if strings.TrimSpace(annotations[argoTrackingIDAnnotation]) != "" {
 		return true
 	}
+	// The label alone is not ownership. Any controller, hand-written manifest
+	// or non-Helm renderer can write it, while only Helm's install path writes
+	// the release name. Helm never writes the release name on a hook, so a
+	// hook pairs the label with helm.sh/hook.
+	if item.GetLabels()[labels.ManagedBy] != helmManagedByValue {
+		return false
+	}
 
-	return item.GetLabels()[labels.ManagedBy] == helmManagedByValue &&
-		strings.TrimSpace(annotations[helmReleaseNameAnnotation]) != ""
+	return strings.TrimSpace(annotations[helmReleaseNameAnnotation]) != "" ||
+		strings.TrimSpace(annotations[helmHookAnnotation]) != ""
 }
 
 // kindDescription names a kind the way an operator writes it into a kubectl
