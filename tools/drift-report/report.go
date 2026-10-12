@@ -17,33 +17,42 @@ package main
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // schemaVersion is the contract between this tool and the
 // aicr-reviewing-component-drift skill. Bump it on any incompatible change to
-// the emitted JSON.
-const schemaVersion = 1
+// the emitted JSON. 2 added the publish-date screen: Latest stopped being
+// Renovate's highest version, and a chart whose every candidate was withheld
+// moved from Drift to Withheld, which a version-1 consumer would silently miss.
+const schemaVersion = 2
 
 // Row is one chart's drift. Components lists every AICR component sharing the
 // chart pin — the OpenShift twins (prometheus-adapter, nvidia-dra-driver-gpu,
 // k8s-nim-operator) always move together, so they collapse into one row.
 //
-// Alternatives lists the candidates Latest beat, smaller step first, and is
-// omitted when there are none. Latest is never repeated in it: the row already
-// names that version, and listing it twice would read as two distinct options.
-// The field is additive, so schemaVersion stays 1 -- a consumer that ignores it
-// reads exactly what it read before.
+// Latest is the highest-ranked candidate screen offered, and Alternatives the
+// other offers, smaller step first, omitted when there are none. Latest is
+// never repeated there: listing it twice would read as two distinct options.
+// Predating lists what screen withheld for having been published before
+// Current. Unscreened is non-empty when an offered version went unchecked for
+// want of a publish date, so its absence means every offer was checked. A row
+// in Report.Withheld has Predating and no Latest.
 type Row struct {
-	Components   []string    `json:"components"`
-	Chart        string      `json:"chart"`
-	Registry     string      `json:"registry"`
-	Datasource   string      `json:"datasource"`
-	Current      string      `json:"current"`
-	Latest       string      `json:"latest"`
-	UpdateType   string      `json:"updateType"`
-	Alternatives []Candidate `json:"alternatives,omitempty"`
+	Components       []string    `json:"components"`
+	Chart            string      `json:"chart"`
+	Registry         string      `json:"registry"`
+	Datasource       string      `json:"datasource"`
+	Current          string      `json:"current"`
+	CurrentPublished time.Time   `json:"currentPublished,omitzero"`
+	Latest           string      `json:"latest,omitempty"`
+	UpdateType       string      `json:"updateType,omitempty"`
+	LatestPublished  time.Time   `json:"latestPublished,omitzero"`
+	Alternatives     []Candidate `json:"alternatives,omitempty"`
+	Predating        []Candidate `json:"predating,omitempty"`
+	Unscreened       string      `json:"unscreened,omitempty"`
 }
 
 // Unresolved is a pin Renovate could not look up. It is reported as unknown and
@@ -55,12 +64,21 @@ type Unresolved struct {
 	Reason     string   `json:"reason"`
 }
 
+// Summary counts pins in Tracked and chart rows in the rest. Every tracked pin
+// lands in exactly one of Drift, Current, Unresolved, or Withheld. Unscreened
+// counts the Drift rows whose Unscreened is set, a subset of Behind; a Withheld
+// row is never unscreened, since withholding needs every date.
 type Summary struct {
 	Tracked    int `json:"tracked"`
 	Behind     int `json:"behind"`
 	Unresolved int `json:"unresolved"`
+	Withheld   int `json:"withheld"`
+	Unscreened int `json:"unscreened"`
 }
 
+// Report is the drift-report.json artifact. Withheld holds charts whose every
+// candidate was published before the pinned version: nothing is proposed, and a
+// reviewer decides explicitly whether any of them is a real upgrade.
 type Report struct {
 	SchemaVersion int          `json:"schemaVersion"`
 	GeneratedAt   string       `json:"generatedAt,omitempty"`
@@ -68,6 +86,7 @@ type Report struct {
 	RunURL        string       `json:"runUrl,omitempty"`
 	Summary       Summary      `json:"summary"`
 	Drift         []Row        `json:"drift"`
+	Withheld      []Row        `json:"withheld"`
 	Current       []string     `json:"current"`
 	Unresolved    []Unresolved `json:"unresolved"`
 }
@@ -82,18 +101,27 @@ type Meta struct {
 
 type groupKey struct{ chart, registry, current string }
 
-// alternativesTo returns the candidates other than the one Latest names,
-// preserving the safest-first order ParseRenovateReport established. It matches
-// on version rather than update type because Latest is itself a version, so the
-// comparison needs no assumption about types being unique.
-func alternativesTo(l Lookup) []Candidate {
-	var out []Candidate
-	for _, c := range l.Candidates {
-		if c.Version != l.Latest {
-			out = append(out, c)
+// newRow builds a chart's row from what screen decided. The last offer is the
+// highest-ranked, since screen returns offers safest first.
+func newRow(p Pin, l Lookup, s screening) *Row {
+	row := &Row{
+		Components:       []string{p.Component},
+		Chart:            p.Chart,
+		Registry:         p.Repository,
+		Datasource:       p.Datasource,
+		Current:          p.Version,
+		CurrentPublished: l.CurrentPublished,
+		Predating:        s.predating,
+		Unscreened:       s.unscreened(p.Version),
+	}
+	if n := len(s.offered); n > 0 {
+		latest := s.offered[n-1]
+		row.Latest, row.UpdateType, row.LatestPublished = latest.Version, latest.UpdateType, latest.Published
+		if n > 1 {
+			row.Alternatives = s.offered[:n-1]
 		}
 	}
-	return out
+	return row
 }
 
 // BuildReport joins the registry's annotated pins against Renovate's lookups.
@@ -104,11 +132,13 @@ func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, erro
 		Commit:        meta.Commit,
 		RunURL:        meta.RunURL,
 		Drift:         []Row{},
+		Withheld:      []Row{},
 		Current:       []string{},
 		Unresolved:    []Unresolved{},
 	}
 
 	drift := map[groupKey]*Row{}
+	withheld := map[groupKey]*Row{}
 	unresolved := map[groupKey]*Unresolved{}
 	// resolved counts pins whose DepName appeared in lookups — including
 	// Problem-bearing ones — so the guard below only fires on total join
@@ -149,25 +179,21 @@ func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, erro
 			appendUnresolved(unresolved, key, p, fmt.Sprintf(
 				"Renovate reported currentValue %q for depName %q; this pin is %q (duplicate depName)",
 				l.Current, p.DepName, p.Version))
-		case l.Latest == "":
+		case len(l.Candidates) == 0:
 			resolved++
 			r.Current = append(r.Current, p.Component)
 		default:
 			resolved++
-			if row, seen := drift[key]; seen {
+			s := screen(l)
+			rows := drift
+			if len(s.offered) == 0 {
+				rows = withheld
+			}
+			if row, seen := rows[key]; seen {
 				row.Components = append(row.Components, p.Component)
 				continue
 			}
-			drift[key] = &Row{
-				Components:   []string{p.Component},
-				Chart:        p.Chart,
-				Registry:     p.Repository,
-				Datasource:   p.Datasource,
-				Current:      p.Version,
-				Latest:       l.Latest,
-				UpdateType:   l.UpdateType,
-				Alternatives: alternativesTo(l),
-			}
+			rows[key] = newRow(p, l, s)
 		}
 	}
 
@@ -177,11 +203,8 @@ func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, erro
 				"refusing to report a clean fleet")
 	}
 
-	for _, row := range drift {
-		sort.Strings(row.Components)
-		r.Drift = append(r.Drift, *row)
-	}
-	sort.Slice(r.Drift, func(i, j int) bool { return r.Drift[i].Components[0] < r.Drift[j].Components[0] })
+	r.Drift = sortedRows(drift)
+	r.Withheld = sortedRows(withheld)
 	for _, u := range unresolved {
 		sort.Strings(u.Components)
 		r.Unresolved = append(r.Unresolved, *u)
@@ -193,7 +216,23 @@ func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, erro
 
 	r.Summary.Behind = len(r.Drift)
 	r.Summary.Unresolved = len(r.Unresolved)
+	r.Summary.Withheld = len(r.Withheld)
+	for _, row := range r.Drift {
+		if row.Unscreened != "" {
+			r.Summary.Unscreened++
+		}
+	}
 	return r, nil
+}
+
+func sortedRows(m map[groupKey]*Row) []Row {
+	out := make([]Row, 0, len(m))
+	for _, row := range m {
+		sort.Strings(row.Components)
+		out = append(out, *row)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Components[0] < out[j].Components[0] })
+	return out
 }
 
 func appendUnresolved(m map[groupKey]*Unresolved, key groupKey, p Pin, reason string) {

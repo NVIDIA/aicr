@@ -18,46 +18,49 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// Candidate is one version Renovate offers for a pin. Renovate emits at most
-// one per update type.
+// Candidate is one version Renovate offers for a pin. Published is zero when
+// no source recorded when the version was published.
 type Candidate struct {
-	Version    string `json:"version"`
-	UpdateType string `json:"updateType"`
+	Version    string    `json:"version"`
+	UpdateType string    `json:"updateType"`
+	Published  time.Time `json:"published,omitzero"`
 }
 
-// Lookup is what Renovate found for one annotated pin. An empty Latest means
-// the pin is current; a non-empty Problem means Renovate could not resolve it,
+// Lookup is what Renovate found for one annotated pin. No Candidates means the
+// pin is current; a non-empty Problem means Renovate could not resolve it,
 // which is reported as unknown and never as current.
 //
-// Candidates carries every recognized update, not just the winning one.
-// Reporting only Latest hid the safer step whenever both existed: in the
-// 2026-09-28 run kube-prometheus-stack offered minor 84.5.0 next to major
-// 91.5.2, and a reviewer reading the digest saw only the major (#2791). Latest
-// still names the highest-ranked candidate, because Summary.Behind counts rows
-// by it and changing the winner would move the headline counts.
+// Candidates carries every recognized update, safest first, and choosing among
+// them is BuildReport's job. Reporting only the largest step hid the safer one
+// whenever both existed: in the 2026-09-28 run kube-prometheus-stack offered
+// minor 84.5.0 next to major 91.5.2, and a reviewer reading the digest saw only
+// the major (#2791).
 type Lookup struct {
-	DepName    string
-	Current    string
-	Latest     string
-	UpdateType string
-	Candidates []Candidate
-	Problem    string
+	DepName          string
+	Datasource       string
+	Current          string
+	CurrentPublished time.Time
+	Candidates       []Candidate
+	Problem          string
 }
 
 // registryChartDepType is the depTypeTemplate set by the custom manager in
 // .github/renovate.json5. Deps of any other type belong to another manager.
 const registryChartDepType = "registry-chart"
 
-// renovateUpdate is one entry in a dep's `updates` array.
+// renovateUpdate is one entry in a dep's `updates` array. ReleaseTimestamp is
+// absent for datasource=docker, where Renovate does not read publish dates.
 type renovateUpdate struct {
-	NewValue   string `json:"newValue"`
-	UpdateType string `json:"updateType"`
+	NewValue         string `json:"newValue"`
+	UpdateType       string `json:"updateType"`
+	ReleaseTimestamp string `json:"releaseTimestamp"`
 }
 
 type rawReport struct {
@@ -69,8 +72,10 @@ type rawReport struct {
 				DepType      string `json:"depType"`
 				Datasource   string `json:"datasource"`
 				CurrentValue string `json:"currentValue"`
-				SkipReason   string `json:"skipReason"`
-				Warnings     []struct {
+				// Absent for datasource=docker, like ReleaseTimestamp.
+				CurrentVersionTimestamp string `json:"currentVersionTimestamp"`
+				SkipReason              string `json:"skipReason"`
+				Warnings                []struct {
 					Message string `json:"message"`
 				} `json:"warnings"`
 				// Pointer so an absent `updates` key (Renovate lookup never ran)
@@ -83,10 +88,9 @@ type rawReport struct {
 }
 
 // updateRank orders update types by distance traveled, so a dep offering both
-// a patch and a minor reports the minor. Renovate emits one entry per type.
-// Unknown types (rollback, replacement, lockFileMaintenance, bump, pinDigest)
-// are not selectable — a rollback is not forward drift and must never be
-// reported as Latest.
+// a patch and a minor reports the minor. Unknown types (rollback, replacement,
+// lockFileMaintenance, bump, pinDigest) are not selectable — a rollback is not
+// forward drift and must never be reported as Latest.
 var updateRank = map[string]int{"digest": 1, "pin": 2, "patch": 3, "minor": 4, "major": 5}
 
 // versionLess orders two chart versions by SemVer precedence. String order
@@ -125,6 +129,30 @@ func versionLess(a, b string) bool {
 	return av.LessThan(bv)
 }
 
+// candidateLess orders candidates safest first: by update rank, then by
+// version so the order is total. separateMultipleMajor and
+// separateMultipleMinor make Renovate emit one update per release line, so
+// several candidates routinely share a type, and falling back to Renovate's
+// array order on that tie is exactly the non-contractual ordering this sort
+// exists to remove.
+func candidateLess(a, b Candidate) bool {
+	if ra, rb := updateRank[a.UpdateType], updateRank[b.UpdateType]; ra != rb {
+		return ra < rb
+	}
+	return versionLess(a.Version, b.Version)
+}
+
+// parseTimestamp reads a Renovate timestamp, returning zero for an absent or
+// malformed one so the version is treated as undated rather than failing the
+// whole report.
+func parseTimestamp(s string) time.Time {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
+}
+
 // ParseRenovateReport extracts the registry-chart deps from a Renovate report
 // written with RENOVATE_REPORT_TYPE=file.
 func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
@@ -140,7 +168,12 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 					if dep.DepType != registryChartDepType {
 						continue
 					}
-					l := Lookup{DepName: dep.DepName, Current: dep.CurrentValue}
+					l := Lookup{
+						DepName:          dep.DepName,
+						Datasource:       dep.Datasource,
+						Current:          dep.CurrentValue,
+						CurrentPublished: parseTimestamp(dep.CurrentVersionTimestamp),
+					}
 					var msgs []string
 					if dep.SkipReason != "" {
 						msgs = append(msgs, dep.SkipReason)
@@ -157,8 +190,6 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 					if dep.Updates != nil {
 						updates = *dep.Updates
 					}
-					best := 0
-					hasRecognizedUpdate := false
 					var unsupportedType string
 					var malformed []string
 					for _, u := range updates {
@@ -173,48 +204,33 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 							malformed = append(malformed, "update missing updateType")
 							continue
 						}
-						r, ok := updateRank[u.UpdateType]
-						if !ok {
+						if _, ok := updateRank[u.UpdateType]; !ok {
 							// Unrecognized type; remember it but don't select it.
 							if unsupportedType == "" {
 								unsupportedType = u.UpdateType
 							}
 							continue
 						}
-						hasRecognizedUpdate = true
-						l.Candidates = append(l.Candidates, Candidate{Version: u.NewValue, UpdateType: u.UpdateType})
-						if r >= best {
-							best, l.Latest, l.UpdateType = r, u.NewValue, u.UpdateType
-						}
+						l.Candidates = append(l.Candidates, Candidate{
+							Version:    u.NewValue,
+							UpdateType: u.UpdateType,
+							Published:  parseTimestamp(u.ReleaseTimestamp),
+						})
 					}
-					// Safest-first, by the same rank that picks Latest. Renovate's
-					// array order is not contractual, and an unstable order here
-					// would churn the committed artifact between identical runs --
+					// Renovate's array order is not contractual, and an unstable
+					// order here would churn the artifact between identical runs --
 					// the reproducibility the report is read for.
-					//
-					// Version breaks a rank tie so the order is total. Renovate
-					// emits at most one update per type, which would make ties
-					// unreachable, but that is its behavior rather than a
-					// guarantee -- and falling back to array order on a tie is
-					// exactly the non-contractual ordering this sort exists to
-					// remove.
 					sort.Slice(l.Candidates, func(i, j int) bool {
-						a, b := l.Candidates[i], l.Candidates[j]
-						if ra, rb := updateRank[a.UpdateType], updateRank[b.UpdateType]; ra != rb {
-							return ra < rb
-						}
-						return versionLess(a.Version, b.Version)
+						return candidateLess(l.Candidates[i], l.Candidates[j])
 					})
 					// If no recognized updates exist, surface the unsupported type and
 					// any malformed entries as diagnostics instead of leaving the pin
 					// looking current.
-					if !hasRecognizedUpdate {
+					if len(l.Candidates) == 0 {
 						if unsupportedType != "" {
 							msgs = append(msgs, "unsupported update type: "+unsupportedType)
 						}
 						msgs = append(msgs, malformed...)
-						l.Latest = ""
-						l.UpdateType = ""
 					}
 					l.Problem = strings.Join(msgs, ": ")
 					out[dep.DepName] = l

@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -37,13 +38,13 @@ func main() {
 
 	if err := run(*repoRoot, *renovateReport, *out, *slackOut, Meta{
 		GeneratedAt: *generatedAt, Commit: *commit, RunURL: *runURL,
-	}); err != nil {
+	}, ociPublished); err != nil {
 		slog.Error("drift-report failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(repoRoot, renovateReport, out, slackOut string, meta Meta) error {
+func run(repoRoot, renovateReport, out, slackOut string, meta Meta, fetch publishedFunc) error {
 	pins, err := LoadPins(repoRoot)
 	if err != nil {
 		return err
@@ -57,6 +58,9 @@ func run(repoRoot, renovateReport, out, slackOut string, meta Meta) error {
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), publishedBudget)
+	defer cancel()
+	FillPublished(ctx, lookups, fetch)
 	report, err := BuildReport(pins, lookups, meta)
 	if err != nil {
 		return err
@@ -83,7 +87,8 @@ func run(repoRoot, renovateReport, out, slackOut string, meta Meta) error {
 			return errors.Wrap(errors.ErrCodeInternal, "write Slack payload", err)
 		}
 	}
-	fmt.Fprintf(os.Stdout, "tracked=%d behind=%d unresolved=%d\n",
-		report.Summary.Tracked, report.Summary.Behind, report.Summary.Unresolved)
+	fmt.Fprintf(os.Stdout, "tracked=%d behind=%d unresolved=%d withheld=%d unscreened=%d\n",
+		report.Summary.Tracked, report.Summary.Behind, report.Summary.Unresolved,
+		report.Summary.Withheld, report.Summary.Unscreened)
 	return nil
 }

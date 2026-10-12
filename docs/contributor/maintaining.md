@@ -480,6 +480,20 @@ manual `workflow_dispatch` run has Slack posting off by default so it can be
 validated silently, and a same-repo PR touching the drift surface also runs
 the report against its own branch, always without posting.
 
+Renovate offers the highest version number per release line, which is not the
+same as the newest release: a registry can carry a frozen or retracted line
+numbered above the maintained one. The report therefore screens candidates by
+publish date. Helm dates come from Renovate, and OCI dates come from each chart
+manifest's `org.opencontainers.image.created` annotation. Within each update
+type, the report walks down from the highest version. A version published more
+than a day before the current pin is withheld and listed in the row's
+`predating` field. The first version that is not withheld is offered, and lower
+versions of that type are dropped. A chart whose every candidate was withheld
+is counted as `withheld` rather than behind, so a reviewer decides it
+explicitly. A version that could not be dated is still offered, as before the
+screen existed. Its row's `unscreened` field says why, and the digest counts
+such rows.
+
 On receiving the Monday digest, review it with the
 [`aicr-reviewing-component-drift`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-reviewing-component-drift/SKILL.md)
 skill: it turns "what moved" into a ranked take/hold/defer recommendation per
