@@ -163,6 +163,12 @@ jobs:
       # v0.5.17. Keep the release tag for update visibility and the digest for
       # execution identity. Review the upstream release and verify its signature
       # before rotating both values; never use a tag-only actuator reference.
+      #
+      # v0.5.19 is available and provenance-verified, but is NOT taken here:
+      # v0.5.17..v0.5.19 reworks provider/gke/terraform/compute.tf
+      # (a3-megagpu-8g gVNIC guard, host maintenance interval) and moves the
+      # google provider pin, which is a real provisioning change and wants a
+      # GCP lane run of its own rather than riding along with an EKS bump.
       GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.17@sha256:8bfffd412d98276ee1000a6c083514e6b28928416cc37602ec637ed3a2167c99"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"

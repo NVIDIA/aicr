@@ -145,10 +145,12 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      # v0.1.7 — carries the 60m worker-pool create/update timeouts
-      # (mchmarny/cluster#31); the prior pin's 30m cap killed H100 pool
-      # provisioning mid-allocation (run 29116054044).
-      AKS_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks@sha256:70f049e45cd0025e0d2172503f9d0569baeabff27080919e2fa04f3339b9f9ee"
+      # v0.1.9 — still carries the 60m worker-pool create/update timeouts
+      # (mchmarny/cluster#31); the pin before those killed H100 pool
+      # provisioning mid-allocation at 30m (run 29116054044). Nothing in
+      # v0.1.7..v0.1.9 touches AKS provisioning: only image/aks.dockerfile and
+      # a CDPATH guard in provider/aks/tools change.
+      AKS_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks:v0.1.9@sha256:1439c350c218b0507ddefdad6ef0c5040d1ebf9f21282b0d0ec7ce9c0f428d37"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
