@@ -145,10 +145,12 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      # v0.1.7 — carries the 60m worker-pool create/update timeouts
-      # (mchmarny/cluster#31); the prior pin's 30m cap killed H100 pool
-      # provisioning mid-allocation (run 29116054044).
-      AKS_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks@sha256:70f049e45cd0025e0d2172503f9d0569baeabff27080919e2fa04f3339b9f9ee"
+      # v0.1.9 — still carries the 60m worker-pool create/update timeouts
+      # (mchmarny/cluster#31); the pin before those killed H100 pool
+      # provisioning mid-allocation at 30m (run 29116054044). Nothing in
+      # v0.1.7..v0.1.9 touches AKS provisioning: only image/aks.dockerfile and
+      # a CDPATH guard in provider/aks/tools change.
+      AKS_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks:v0.1.9@sha256:1439c350c218b0507ddefdad6ef0c5040d1ebf9f21282b0d0ec7ce9c0f428d37"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
@@ -886,7 +888,7 @@ jobs:
       # step ran, mirroring the snapshot-result.json upload above.
       - name: Upload sxidfault result
         if: always() && steps.sxidfault.outcome != 'skipped'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-sxidfault-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: sxidfault-result.json
@@ -913,7 +915,7 @@ jobs:
       # scoped tighter (30d).
       - name: Upload evidence pointer
         if: always() && steps.conformance.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-evidence-pointer-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/pointer.yaml
@@ -926,7 +928,7 @@ jobs:
       # so the step has a machine-readable record on green and red runs alike.
       - name: Upload snapshot result
         if: always() && steps.prep.outcome != 'skipped'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-snapshot-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: snapshot-result.json
@@ -953,7 +955,7 @@ jobs:
 
       - name: Upload failure debug
         if: failure() && (steps.prep.outcome != 'skipped' || steps.client.outcome == 'success')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-debug-${{ github.run_id }}-${{ github.run_attempt }}
           path: |

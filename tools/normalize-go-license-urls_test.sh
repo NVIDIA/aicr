@@ -31,17 +31,25 @@ printf '%s\n' "$*" >> "${STUB_ARGV_LOG:-/dev/null}"
 head_request=false
 config=""
 prev=""
+prevprev=""
 rc=0
 for arg in "$@"; do
     if [[ "${prev}" == "--config" ]]; then
         config=${arg}
     fi
+    # The normalizer passes each URL as "--output /dev/null <url>", and real
+    # curl reports a result for every one, even a string that is not a URL.
+    is_url=false
+    if [[ "${prevprev}" == "--output" && "${prev}" == "/dev/null" ]]; then
+        is_url=true
+    fi
+    prevprev=${prev}
     prev=${arg}
     if [[ "${arg}" == "--head" ]]; then
         head_request=true
         continue
     fi
-    [[ "${arg}" == https://* ]] || continue
+    "${is_url}" || continue
     lookup=${arg}
     if [[ "${arg}" =~ ^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)$ ]]; then
         if [[ -z "${config}" ]] || ! grep -q '^header = "Authorization: Bearer ' "${config}"; then
@@ -64,7 +72,16 @@ for arg in "$@"; do
         https://github.com/flaky/repo/blob/v1.0.0/sub/LICENSE | \
         https://github.com/flaky/repo/blob/v2.0.0/LICENSE | \
         https://github.com/kyverno/kyverno/blob/48769d003e55/LICENSE | \
-        https://github.com/root/module/blob/v1.2.3/LICENSE)
+        https://github.com/root/module/blob/v1.2.3/LICENSE | \
+        https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE | \
+        https://github.com/evanphx/json-patch/blob/v4.13.0/LICENSE | \
+        https://github.com/go-pseudo/pseudo/blob/0123456789ab/LICENSE | \
+        https://github.com/go-pseudo3/pseudo3/blob/0123456789ab/LICENSE | \
+        https://github.com/go-mdlicense/mdlicense/blob/v2.1.0/LICENSE.md | \
+        https://github.com/go-nested/nested/blob/v2.0.0/LICENSE | \
+        https://github.com/go-nested/nested/blob/v2.0.0/sub/LICENSE | \
+        https://github.com/go-copying/copying/blob/v1.0.0/COPYING | \
+        https://github.com/go-copying/copying/blob/v1.0.0/LICENSE)
             printf '%s\t200\t\n' "${arg}"
             ;;
         # Like real curl, a failed transfer is still reported, and fails the exit status.
@@ -75,6 +92,11 @@ for arg in "$@"; do
             ;;
         https://github.com/throttled/*)
             printf '%s\t503\t\n' "${arg}"
+            ;;
+        # go-licenses' placeholder when it cannot discover a license URL.
+        Unknown)
+            printf '%s\t000\tCould not resolve host: Unknown\n' "${arg}"
+            rc=6
             ;;
         *)
             printf '%s\t404\t\n' "${arg}"
@@ -88,6 +110,35 @@ fi
 exit "${rc}"
 EOF
 chmod +x "${TMP}/curl"
+
+# The stub answers `go list -m` for the gopkg.in modules the cases below use,
+# with a module directory under ${GO_STUB_MODCACHE}, and fails like go for any
+# other module.
+cat > "${TMP}/go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" != "list -m -f {{if not .Replace}}{{.Version}} {{.Dir}}{{end}} "* ]]; then
+    echo "unexpected go invocation: $*" >&2
+    exit 2
+fi
+module=${*: -1}
+case "${module}" in
+    gopkg.in/yaml.v3) version=v3.0.1 ;;
+    gopkg.in/evanphx/json-patch.v4) version=v4.13.0 ;;
+    gopkg.in/pseudo.v1) version=v1.0.0-20200102030405-0123456789ab ;;
+    gopkg.in/pseudo3.v1) version=v1.2.4-0.20200102030405-0123456789ab ;;
+    gopkg.in/mdlicense.v2) version=v2.1.0 ;;
+    gopkg.in/nested.v2) version=v2.0.0 ;;
+    gopkg.in/copying.v1) version=v1.0.0 ;;
+    # The format prints nothing for a replaced module.
+    gopkg.in/replaced.v1) exit 0 ;;
+    *) echo "go: module ${module}: not a known dependency" >&2; exit 1 ;;
+esac
+printf '%s %s\n' "${version}" "${GO_STUB_MODCACHE}/${module}@${version}"
+EOF
+chmod +x "${TMP}/go"
+
+modcache="${TMP}/modcache"
 
 cat > "${TMP}/input.csv" <<'EOF'
 github.com/root/module,https://github.com/root/module/blob/v1.2.3/LICENSE,MIT
@@ -240,6 +291,56 @@ if grep -qF "github.com/flaky/repo/sub," "${TMP}/flaky-blocking.out"; then
     echo "normalizer emitted a fallback URL for a package whose preferred probe failed" >&2
     exit 1
 fi
+
+# When gopkg.in is down, go-licenses cannot read the go-source tag that names a
+# gopkg.in module's repository and emits "Unknown". The URL is derived from
+# gopkg.in's fixed naming rule, the module version and the license file
+# go-licenses chose (the fourth column), then probed like any other candidate.
+# copying.v1 also has a reachable COPYING, which go-licenses did not choose.
+m="${modcache}/gopkg.in"
+cat > "${TMP}/gopkgin.csv" <<EOF
+gopkg.in/yaml.v3,Unknown,MIT,${m}/yaml.v3@v3.0.1/LICENSE
+gopkg.in/evanphx/json-patch.v4,Unknown,BSD-3-Clause,${m}/evanphx/json-patch.v4@v4.13.0/LICENSE
+gopkg.in/pseudo.v1/sub,Unknown,MIT,${m}/pseudo.v1@v1.0.0-20200102030405-0123456789ab/LICENSE
+gopkg.in/pseudo3.v1,Unknown,MIT,${m}/pseudo3.v1@v1.2.4-0.20200102030405-0123456789ab/LICENSE
+gopkg.in/mdlicense.v2,Unknown,MIT,${m}/mdlicense.v2@v2.1.0/LICENSE.md
+gopkg.in/nested.v2/sub,Unknown,BSD-3-Clause,${m}/nested.v2@v2.0.0/sub/LICENSE
+gopkg.in/copying.v1,Unknown,MIT,${m}/copying.v1@v1.0.0/LICENSE
+EOF
+GO_STUB_MODCACHE="${modcache}" GO_BIN="${TMP}/go" CURL_BIN="${TMP}/curl" \
+    "${TOOL}" "${TMP}/gopkgin.csv" > "${TMP}/gopkgin.out"
+cat > "${TMP}/gopkgin.expected" <<'EOF'
+gopkg.in/yaml.v3,https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE,MIT
+gopkg.in/evanphx/json-patch.v4,https://github.com/evanphx/json-patch/blob/v4.13.0/LICENSE,BSD-3-Clause
+gopkg.in/pseudo.v1/sub,https://github.com/go-pseudo/pseudo/blob/0123456789ab/LICENSE,MIT
+gopkg.in/pseudo3.v1,https://github.com/go-pseudo3/pseudo3/blob/0123456789ab/LICENSE,MIT
+gopkg.in/mdlicense.v2,https://github.com/go-mdlicense/mdlicense/blob/v2.1.0/LICENSE.md,MIT
+gopkg.in/nested.v2/sub,https://github.com/go-nested/nested/blob/v2.0.0/sub/LICENSE,BSD-3-Clause
+gopkg.in/copying.v1,https://github.com/go-copying/copying/blob/v1.0.0/LICENSE,MIT
+EOF
+diff -u "${TMP}/gopkgin.expected" "${TMP}/gopkgin.out"
+
+# An "Unknown" URL is still fatal outside gopkg.in, for a gopkg.in module whose
+# version go cannot resolve, for a replaced one, and when go-licenses chose no
+# license file or one outside the module's copy.
+for row in \
+    "example.com/vanity,Unknown,MIT" \
+    "gopkg.in/unresolvable.v1,Unknown,MIT,${m}/unresolvable.v1@v1.0.0/LICENSE" \
+    "gopkg.in/replaced.v1,Unknown,MIT,${m}/replaced.v1@v1.0.0/LICENSE" \
+    "gopkg.in/yaml.v3,Unknown,MIT,Unknown" \
+    "gopkg.in/yaml.v3,Unknown,MIT,${m}/yaml.v3@v3.0.0/LICENSE" \
+    "gopkg.in/yaml.v3,Unknown,MIT"; do
+    printf '%s\n' "${row}" > "${TMP}/unknown.csv"
+    if GO_STUB_MODCACHE="${modcache}" GO_BIN="${TMP}/go" CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/unknown.csv" \
+        > /dev/null 2> "${TMP}/unknown.err"; then
+        echo "normalizer accepted an Unknown license URL for ${row}" >&2
+        exit 1
+    fi
+    if ! grep -qF "no reachable license source URL for ${row%%,*}:" "${TMP}/unknown.err"; then
+        echo "normalizer did not report ${row%%,*} as unreachable" >&2
+        exit 1
+    fi
+done
 
 # curl failing outright, without a result per URL, is still fatal.
 printf '#!/usr/bin/env bash\nexit 2\n' > "${TMP}/curl-broken"

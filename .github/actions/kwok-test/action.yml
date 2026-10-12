@@ -118,7 +118,7 @@ runs:
         echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH} (job_timeout_minutes=${JOB_TIMEOUT_MINUTES}, margin=240s, job kill in ~$(( 10#${JOB_TIMEOUT_MINUTES} * 60 ))s)"
 
     - name: Cache KWOK tools
-      uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: |
           /usr/local/bin/kind
@@ -156,7 +156,7 @@ runs:
     # Built once per run by the build-aicr job. The artifact name must match
     # that job's upload.
     - name: Download aicr binary
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
       with:
         name: kwok-aicr-bin
         path: dist
@@ -192,7 +192,7 @@ runs:
         bash kwok/scripts/lib/image-cache.sh settings .settings.yaml | tee -a "$GITHUB_OUTPUT"
 
     - name: Restore registry image
-      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: /tmp/kwok-image-cache/registry
         key: ${{ steps.images.outputs.registry_key }}
@@ -201,7 +201,7 @@ runs:
     # the other lanes skip a ~250MB restore they would never use.
     - name: Restore Gitea image
       if: endsWith(inputs.deployer, '-git')
-      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: /tmp/kwok-image-cache/gitea
         key: ${{ steps.images.outputs.gitea_key }}
@@ -211,14 +211,14 @@ runs:
     # never use. This covers argocd-oci, argocd-helm-oci and argocd-git.
     - name: Restore Argo CD Redis image
       if: startsWith(inputs.deployer, 'argocd-')
-      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: /tmp/kwok-image-cache/argocd_redis
         key: ${{ steps.images.outputs.argocd_redis_key }}
 
     # `kind create cluster` pulls this roughly 1 GB Docker Hub image in every lane.
     - name: Restore Kind node image
-      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: /tmp/kwok-image-cache/kind_node
         key: ${{ steps.images.outputs.kind_node_key }}
@@ -306,7 +306,7 @@ runs:
     # outcome so a green lane leaves structured evidence too, not only a red one.
     - name: Upload CTRF results
       if: always() && inputs.upload_artifacts == 'true'
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: kwok-results-${{ inputs.recipe }}-${{ inputs.deployer }}${{ inputs.mixins && format('-{0}', inputs.mixins) || '' }}-${{ github.run_id }}-${{ github.run_attempt }}
         path: /tmp/kwok-debug-artifacts/kwok-results.json
@@ -315,7 +315,7 @@ runs:
 
     - name: Upload debug artifacts
       if: failure() && inputs.upload_artifacts == 'true'
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: kwok-debug-${{ inputs.recipe }}-${{ inputs.deployer }}${{ inputs.mixins && format('-{0}', inputs.mixins) || '' }}-${{ github.run_id }}
         path: |
