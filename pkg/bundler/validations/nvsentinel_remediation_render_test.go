@@ -89,12 +89,12 @@ const perconaSetupImage = "docker.io/percona/percona-server-mongodb:8.0.26-11@sh
 // perconaImages are every image the separately bundled datastore renders,
 // pinned in recipes/components/{psmdb-operator,nvsentinel-mongodb}.
 var perconaImages = []string{
-	"docker.io/percona/percona-server-mongodb-operator:1.23.0@sha256:feaff989e25346716d85be9ea918593f89ad7481d30e033df21e0a764a6a484e",
+	"docker.io/percona/percona-server-mongodb-operator:1.23.1@sha256:78c87b933e184b9af36dbb0078751862c75934c1521c33d3be4d0a38aa58dd0a",
 	perconaSetupImage,
-	"docker.io/percona/mongodb_exporter:0.40.0@sha256:d66daa6aff0513860d1577cee3b55ab82fde43394f8319d7b4674411b9153cce",
+	"docker.io/percona/mongodb_exporter:0.53.0@sha256:0214e482b2cd4b1849f9f4dcef90d328a99ba3727dd1103e7da48b42060bcec1",
 	"docker.io/percona/percona-backup-mongodb:2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5",
-	"docker.io/percona/fluentbit:5.0.9-1@sha256:030e3faf454e93c19d9cfa1ec85ba6943fe293f5bd29fb04533a1b3de8c78bd6",
-	"docker.io/percona/pmm-client:3.8.1@sha256:ea4061a6d9bd59d9c7aecbe75b91989bbddad55208b898d75064ac436014ca16",
+	"docker.io/percona/fluentbit:5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913",
+	"docker.io/percona/pmm-client:3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b",
 }
 
 // genericRebootImage is the image janitor-provider's generic reboot Job runs.

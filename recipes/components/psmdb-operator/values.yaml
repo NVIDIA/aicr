@@ -17,7 +17,7 @@
 # where nvsentinel-mongodb runs.
 image:
   repository: docker.io/percona/percona-server-mongodb-operator
-  tag: "1.23.0@sha256:feaff989e25346716d85be9ea918593f89ad7481d30e033df21e0a764a6a484e"
+  tag: "1.23.1@sha256:78c87b933e184b9af36dbb0078751862c75934c1521c33d3be4d0a38aa58dd0a"
   pullPolicy: IfNotPresent
 watchAllNamespaces: false
 disableTelemetry: true
