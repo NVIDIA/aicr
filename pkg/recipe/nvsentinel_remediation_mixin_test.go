@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -415,6 +416,10 @@ var perconaValuesFiles = []string{
 	"components/nvsentinel-mongodb/values.yaml",
 }
 
+// perconaDigest is the immutable suffix every Percona tag must carry. Copies
+// that agree with each other are not enough: a tag-only pin can move upstream.
+var perconaDigest = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
+
 // perconaPinnedImages maps each image repository pinned in perconaValuesFiles
 // to its tag. Every image reference counts, so a pin added to either file is
 // covered without being listed here.
@@ -434,6 +439,9 @@ func perconaPinnedImages(t *testing.T) map[string]string {
 			if !ok {
 				t.Errorf("%s: image %q has no string tag", path, ref)
 				continue
+			}
+			if !perconaDigest.MatchString(tag) {
+				t.Errorf("%s pins %s:%s without a sha256 digest", path, repo, tag)
 			}
 			if prev, seen := pins[repo]; seen && prev != tag {
 				t.Errorf("%s pins %s at %q, but %s pins it at %q", path, repo, tag, pinnedIn[repo], prev)
