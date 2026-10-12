@@ -23,7 +23,8 @@ trap 'rm -rf "${TMP}"' EXIT
 unset GITHUB_TOKEN
 
 # The stub answers for github.com blob URLs and their raw.githubusercontent.com
-# equivalents alike, and fails if the auth config travels with any other host.
+# equivalents alike, except that raw.githubusercontent.com rate-limits the
+# rawthrottled owner, and fails if the auth config travels with any other host.
 cat > "${TMP}/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -56,6 +57,10 @@ for arg in "$@"; do
             echo "raw.githubusercontent.com probed without the auth config" >&2
             exit 1
         fi
+        if [[ "${BASH_REMATCH[1]}" == "rawthrottled" ]]; then
+            printf '%s\t429\t\n' "${arg}"
+            continue
+        fi
         lookup="https://github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/blob/${BASH_REMATCH[3]}"
     elif [[ -n "${config}" ]]; then
         echo "auth config sent with a non-raw URL: ${arg}" >&2
@@ -81,7 +86,10 @@ for arg in "$@"; do
         https://github.com/go-nested/nested/blob/v2.0.0/LICENSE | \
         https://github.com/go-nested/nested/blob/v2.0.0/sub/LICENSE | \
         https://github.com/go-copying/copying/blob/v1.0.0/COPYING | \
-        https://github.com/go-copying/copying/blob/v1.0.0/LICENSE)
+        https://github.com/go-copying/copying/blob/v1.0.0/LICENSE | \
+        https://github.com/rawthrottled/repo/blob/v1.0.0/sub/LICENSE | \
+        https://github.com/rawthrottled/repo/blob/v1.0.0/LICENSE | \
+        https://github.com/rawthrottled/repo/blob/v2.0.0/LICENSE)
             printf '%s\t200\t\n' "${arg}"
             ;;
         # Like real curl, a failed transfer is still reported, and fails the exit status.
@@ -213,8 +221,9 @@ if ! grep -qF "github.com/root/module," "${TMP}/multi.out"; then
 fi
 
 # With a token, github.com blob URLs are probed through raw.githubusercontent.com
-# with the token in a curl config file. The output still cites github.com, and
-# the token never reaches curl's argv.
+# with the token in a curl config file. The output still cites github.com, the
+# token never reaches curl's argv, and while raw answers every probe no
+# github.com blob URL is probed.
 GITHUB_TOKEN=stub-token-value STUB_ARGV_LOG="${TMP}/argv.log" CURL_BIN="${TMP}/curl" \
     "${TOOL}" "${TMP}/input.csv" > "${TMP}/actual-token.csv"
 diff -u "${TMP}/expected.csv" "${TMP}/actual-token.csv"
@@ -251,6 +260,53 @@ for msg in "rate-limited (HTTP 429/503)" "Set GITHUB_TOKEN"; do
         exit 1
     fi
 done
+
+# raw.githubusercontent.com can rate-limit a whole repository, with or without a
+# token, while github.com still serves the same files. An inconclusive raw probe
+# is repeated at the github.com URL for the same ref and path, without the token
+# and two at a time, and that answer stands in for it: a 200 resolves the
+# top-ranked candidate and a 404 moves on to the next one. Rows raw answered are
+# left alone.
+cat > "${TMP}/raw-throttled.csv" <<'EOF'
+github.com/rawthrottled/repo/sub,https://github.com/rawthrottled/repo/blob/v1.0.0/sub/LICENSE,MIT
+github.com/rawthrottled/repo/v2/sub,https://github.com/rawthrottled/repo/blob/v2.0.0/sub/LICENSE,MIT
+github.com/blang/semver/v4,https://github.com/blang/semver/blob/v4.0.0/v4/LICENSE,MIT
+EOF
+if ! GITHUB_TOKEN=stub-token-value STUB_ARGV_LOG="${TMP}/raw-throttled-argv.log" CURL_BIN="${TMP}/curl" \
+    "${TOOL}" "${TMP}/raw-throttled.csv" > "${TMP}/raw-throttled.out" 2> "${TMP}/raw-throttled.err"; then
+    echo "normalizer failed on URLs only raw.githubusercontent.com rate-limited:" >&2
+    cat "${TMP}/raw-throttled.err" >&2
+    exit 1
+fi
+cat > "${TMP}/raw-throttled.expected" <<'EOF'
+github.com/rawthrottled/repo/sub,https://github.com/rawthrottled/repo/blob/v1.0.0/sub/LICENSE,MIT
+github.com/rawthrottled/repo/v2/sub,https://github.com/rawthrottled/repo/blob/v2.0.0/LICENSE,MIT
+github.com/blang/semver/v4,https://github.com/blang/semver/blob/v4.0.0/LICENSE,MIT
+EOF
+diff -u "${TMP}/raw-throttled.expected" "${TMP}/raw-throttled.out"
+recheck_argv=$(grep -F https://github.com/rawthrottled/ "${TMP}/raw-throttled-argv.log")
+if [[ "${recheck_argv}" != *"--parallel-max 2 "* ]]; then
+    echo "normalizer did not recheck two at a time: ${recheck_argv}" >&2
+    exit 1
+fi
+if [[ "${recheck_argv}" == *--config* || "${recheck_argv}" == *blang/semver* ]]; then
+    echo "normalizer rechecked with the token or rechecked a conclusive probe: ${recheck_argv}" >&2
+    exit 1
+fi
+
+# A URL that stays inconclusive on github.com too still fails, and the report
+# says both hosts were tried.
+if GITHUB_TOKEN=stub-token-value CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/throttled.csv" \
+    > /dev/null 2> "${TMP}/throttled-token.err"; then
+    echo "normalizer accepted a URL rate-limited on both hosts" >&2
+    exit 1
+fi
+if ! grep -qF "tried (503: after raw.githubusercontent.com answered 503): https://github.com/throttled/repo/blob/v1.0.0/LICENSE" \
+    "${TMP}/throttled-token.err"; then
+    echo "normalizer did not report the github.com recheck:" >&2
+    cat "${TMP}/throttled-token.err" >&2
+    exit 1
+fi
 
 # One failed transfer makes curl exit non-zero for the whole batch. When every
 # package still resolves, that must not fail the run.
@@ -289,6 +345,24 @@ for msg in \
 done
 if grep -qF "github.com/flaky/repo/sub," "${TMP}/flaky-blocking.out"; then
     echo "normalizer emitted a fallback URL for a package whose preferred probe failed" >&2
+    exit 1
+fi
+
+# The same holds with a token when the github.com recheck fails too, and the
+# report keeps the error from each host.
+if GITHUB_TOKEN=stub-token-value CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/flaky-blocking.csv" \
+    > "${TMP}/flaky-blocking-token.out" 2> "${TMP}/flaky-blocking-token.err"; then
+    echo "normalizer skipped past a candidate whose probe failed on both hosts" >&2
+    exit 1
+fi
+if ! grep -qF "tried (000: Connection reset by peer, after raw.githubusercontent.com failed: Connection reset by peer): https://github.com/flaky/repo/blob/v2.0.0/sub/LICENSE" \
+    "${TMP}/flaky-blocking-token.err"; then
+    echo "normalizer did not report the failed probe on each host:" >&2
+    cat "${TMP}/flaky-blocking-token.err" >&2
+    exit 1
+fi
+if grep -qF "github.com/flaky/repo/sub," "${TMP}/flaky-blocking-token.out"; then
+    echo "normalizer emitted a fallback URL for a package whose preferred probe failed on both hosts" >&2
     exit 1
 fi
 

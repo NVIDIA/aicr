@@ -121,3 +121,83 @@ transitions:
 		t.Errorf("Reversible = %v, want nil when the key is absent", u.Transitions[0].Reversible)
 	}
 }
+
+func TestComponentUpgradesCovers(t *testing.T) {
+	u := &ComponentUpgrades{
+		Component: "widget-operator",
+		Transitions: []Transition{
+			{From: "<0.18.0", To: ">=0.18.0 <=0.19.1", Verdict: VerdictManual},
+			{From: ">=0.19.1 <0.20.0", To: "=0.20.0", Verdict: VerdictSafe},
+			{From: "<1.0.0", To: "1.0.0-alpha.3", Verdict: VerdictManual},
+			{From: "<0.30.0", To: "not a range", Verdict: VerdictSafe},
+		},
+	}
+	tests := []struct {
+		name    string
+		u       *ComponentUpgrades
+		version string
+		want    bool
+	}{
+		{"floor of a closed range", u, "0.18.0", true},
+		{"ceiling of a closed range", u, "0.19.1", true},
+		{"v prefix", u, "v0.19.0", true},
+		{"exact to", u, "0.20.0", true},
+		{"prerelease named exactly", u, "1.0.0-alpha.3", true},
+		{"between two to ranges", u, "0.19.2", false},
+		{"below every to", u, "0.17.9", false},
+		{"above every to", u, "0.20.1", false},
+		{"a to that does not parse covers nothing", u, "0.30.0", false},
+		{"not semver", u, "main", false},
+		{"empty version", u, "", false},
+		{"no transitions", &ComponentUpgrades{Component: "widget-operator"}, "0.18.0", false},
+		{"nil record", nil, "0.18.0", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.u.Covers(tt.version); got != tt.want {
+				t.Errorf("Covers(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestComponentUpgradesAheadOf(t *testing.T) {
+	ahead := &ComponentUpgrades{
+		Component: "widget-operator",
+		Transitions: []Transition{
+			{From: "<1.26.0", To: "=1.26.0", Verdict: VerdictManual},
+			{From: ">=1.26.0 <1.27.0", To: ">1.27.0 <=1.28.0", Verdict: VerdictManual},
+		},
+	}
+	tests := []struct {
+		name    string
+		u       *ComponentUpgrades
+		version string
+		want    bool
+	}{
+		{"below every floor", ahead, "1.25.3", true},
+		{"v prefix", ahead, "v1.25.3", true},
+		{"at an inclusive floor", ahead, "1.26.0", false},
+		{"between two to ranges", ahead, "1.27.0", false},
+		{"above every floor", ahead, "1.29.0", false},
+		{"exclusive floor reached only above it", &ComponentUpgrades{Transitions: []Transition{
+			{To: ">1.0.0 <=1.1.0"},
+		}}, "1.0.0", true},
+		{"a to with no floor reaches everything", &ComponentUpgrades{Transitions: []Transition{
+			{To: "=2.0.0"}, {To: "<=1.5.0"},
+		}}, "0.1.0", false},
+		{"a to that does not parse is never ahead", &ComponentUpgrades{Transitions: []Transition{
+			{To: "=2.0.0"}, {To: "not a range"},
+		}}, "1.0.0", false},
+		{"not semver", ahead, "main", false},
+		{"no transitions", &ComponentUpgrades{Component: "widget-operator"}, "1.0.0", false},
+		{"nil record", nil, "1.0.0", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.u.AheadOf(tt.version); got != tt.want {
+				t.Errorf("AheadOf(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}

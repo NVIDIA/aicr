@@ -19,6 +19,7 @@ readonly CONNECT_TIMEOUT_SECONDS=10
 readonly TOTAL_TIMEOUT_SECONDS=30
 readonly RETRIES=2
 readonly PARALLEL_REQUESTS=8
+readonly RECHECK_PARALLEL_REQUESTS=2
 
 # Input rows are package,url,license[,license_path]; output rows drop the path.
 if [[ $# -ne 1 || ! -s "$1" ]]; then
@@ -35,7 +36,8 @@ readonly UNKNOWN_URL=Unknown
 # (HTTP 429/503) even when every URL is valid, which fails the notices build for
 # reasons unrelated to the licenses. With a token, each github.com blob URL is
 # probed through its raw.githubusercontent.com equivalent, authenticated; the
-# emitted URL is still the github.com one.
+# emitted URL is still the github.com one. A raw probe that stays inconclusive
+# is repeated anonymously on github.com (recheck_raw_on_github).
 readonly PROBE_TOKEN=${GITHUB_TOKEN:-}
 
 if ! command -v "${CURL_BIN}" >/dev/null 2>&1; then
@@ -203,8 +205,9 @@ while IFS=, read -r package url license license_path; do
     url_candidates "${url}" "${package}" "${license_path}" >> "${CANDIDATE_URLS}"
 done < "${INPUT}"
 
-# Probes every URL in $1 and appends "<url>\t<status>\t<curl error>" lines to $2.
-# Extra arguments are passed to curl ahead of the URLs.
+# Probes every URL in $1, at most $3 at a time, and appends
+# "<url>\t<status>\t<curl error>" lines to $2. Extra arguments are passed to
+# curl ahead of the URLs.
 #
 # curl exits non-zero when any one transfer fails, yet still reports that
 # transfer as status 000 with its error. The resolution below decides whether a
@@ -213,7 +216,8 @@ done < "${INPUT}"
 probe() {
     local input=$1
     local output=$2
-    shift 2
+    local parallel=$3
+    shift 3
     local -a requests=()
     local url
     while IFS= read -r url; do
@@ -229,7 +233,7 @@ probe() {
     "${CURL_BIN}" \
         "$@" \
         --parallel \
-        --parallel-max "${PARALLEL_REQUESTS}" \
+        --parallel-max "${parallel}" \
         --head \
         --location \
         --silent \
@@ -269,10 +273,50 @@ check_urls() {
     if [[ -s "${raw}" ]]; then
         local auth="${TMP}/curl-auth.conf"
         (umask 077 && printf 'header = "Authorization: Bearer %s"\n' "${PROBE_TOKEN}" > "${auth}")
-        probe "${raw}" "${output}" --config "${auth}"
+        probe "${raw}" "${output}" "${PARALLEL_REQUESTS}" --config "${auth}"
         rm -f "${auth}"
     fi
-    probe "${other}" "${output}"
+    probe "${other}" "${output}" "${PARALLEL_REQUESTS}"
+    recheck_raw_on_github "${output}"
+}
+
+# raw.githubusercontent.com can rate-limit a whole repository, with or without
+# a token, while github.com still serves the same files. An inconclusive raw
+# probe is therefore repeated at the github.com URL for the same ref and path,
+# without the token and at lower parallelism, and that answer replaces it. The
+# candidate is unchanged, so this is not a fallback to a lower-ranked one.
+recheck_raw_on_github() {
+    local status_file=$1
+    local pairs="${TMP}/recheck-pairs" urls="${TMP}/recheck-urls" results="${TMP}/recheck-status"
+    local url status
+    : > "${pairs}"
+    : > "${results}"
+    while IFS=$'\t' read -r url status _; do
+        if inconclusive_status "${status}" &&
+            [[ "${url}" =~ ^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)$ ]]; then
+            printf '%s\thttps://github.com/%s/%s/blob/%s\n' \
+                "${url}" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" >> "${pairs}"
+        fi
+    done < "${status_file}"
+    [[ -s "${pairs}" ]] || return 0
+
+    cut -f 2 "${pairs}" > "${urls}"
+    probe "${urls}" "${results}" "${RECHECK_PARALLEL_REQUESTS}"
+    awk -F '\t' -v OFS='\t' '
+        FILENAME == ARGV[1] { raw_of[$2] = $1; next }
+        FILENAME == ARGV[2] { status[raw_of[$1]] = $2; error[raw_of[$1]] = $3; next }
+        $1 in status {
+            if ($2 == "000") {
+                note = "after raw.githubusercontent.com failed" ($3 == "" ? "" : ": " $3)
+            } else {
+                note = "after raw.githubusercontent.com answered " $2
+            }
+            print $1, status[$1], (error[$1] == "" ? note : error[$1] ", " note)
+            next
+        }
+        { print }
+    ' "${pairs}" "${results}" "${status_file}" > "${TMP}/status-rechecked"
+    mv "${TMP}/status-rechecked" "${status_file}"
 }
 
 check_urls "${CANDIDATE_URLS}" "${CANDIDATE_STATUS}"

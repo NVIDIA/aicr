@@ -78,6 +78,16 @@ jobs:
           oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
           privileged_ci: ${{ inputs.privileged_ci }}
 
+      # The merge-base half of the ADR-021 upgrade record coverage gate; `make
+      # test` above already ran the half that needs no history. Pull requests
+      # only: a push's merge base with main is the commit itself.
+      - name: Check Upgrade Record Coverage
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          AICR_UPGRADE_BASE_REF: origin/${{ github.base_ref }}
+        run: ./tools/check-upgrade-records
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

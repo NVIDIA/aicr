@@ -14,6 +14,8 @@
 
 package upgrade
 
+import "github.com/Masterminds/semver/v3"
+
 // ComponentUpgradesKind is the kind expected on a ComponentUpgrades document.
 const ComponentUpgradesKind = "ComponentUpgrades"
 
@@ -52,6 +54,54 @@ type ComponentUpgrades struct {
 	Component   string       `yaml:"component"`
 	Transitions []Transition `yaml:"transitions,omitempty"`
 	Replaces    *Replaces    `yaml:"replaces,omitempty"`
+}
+
+// Covers reports whether some transition's `to` range contains version. No
+// record assesses an upgrade into a version outside every `to`: the matcher
+// reports unknown, or blocked when the version lies past the highest ceiling.
+// ADR-021 Decision 10 gates on exactly this. A version that is not semver,
+// like a `to` that does not parse, covers nothing.
+func (u *ComponentUpgrades) Covers(version string) bool {
+	if u == nil {
+		return false
+	}
+	v, err := semver.NewVersion(version)
+	if err != nil {
+		return false
+	}
+	for i := range u.Transitions {
+		b, err := parseBounds(u.Transitions[i].To)
+		if err == nil && b.contains(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// AheadOf reports whether every transition's `to` range starts above version,
+// so the record describes only boundaries version has not reached: guidance
+// written ahead of the bump it describes. It fails toward false, the reading
+// that holds version to Covers: on a nil or empty record, a version that is
+// not semver, and a `to` that does not parse or names no floor.
+func (u *ComponentUpgrades) AheadOf(version string) bool {
+	if u == nil || len(u.Transitions) == 0 {
+		return false
+	}
+	v, err := semver.NewVersion(version)
+	if err != nil {
+		return false
+	}
+	for i := range u.Transitions {
+		b, err := parseBounds(u.Transitions[i].To)
+		if err != nil || b.lower.unbounded || b.lower.ver == nil {
+			return false
+		}
+		cmp := v.Compare(b.lower.ver)
+		if cmp > 0 || (cmp == 0 && b.lower.inclusive) {
+			return false
+		}
+	}
+	return true
 }
 
 // Transition describes one version boundary and what crossing it requires.

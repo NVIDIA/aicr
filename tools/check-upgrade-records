@@ -2,30 +2,69 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Verify every committed ComponentUpgrades record is well-formed (ADR-021 AC7).
+# Verify every committed ComponentUpgrades record is well-formed (ADR-021 AC7),
+# and run the ADR-021 Decision 10 coverage gate against the merge base: a
+# record must cover every pin it has reached, a pin no record covers
+# may not move, and a record may not disappear. pkg/recipe's
+# upgrade_coverage_test.go holds the rules; this script supplies the base.
 #
-# A malformed or reverse-matching record must fail `make lint` rather than be
-# silently skipped. Inert while no components/<name>/upgrades.yaml exists.
+# The merge base is taken against AICR_UPGRADE_BASE_REF, else upstream/main
+# when that ref exists (a fork clone's NVIDIA/aicr remote), else origin/main.
+# It must be reachable: a missing base fails rather than skipping the
+# comparison.
 
 set -euo pipefail
 
-readonly TEST_NAME=TestRealUpgradeRecordsWellFormed
+readonly TEST_NAMES=(
+	TestRealUpgradeRecordsWellFormed
+	TestRecordedComponentsCoverTheirPins
+	TestBaseCoverageViewMatchesEmbedded
+	TestChangedPinsHaveUpgradeRecords
+)
+
+if [[ -n "${AICR_UPGRADE_BASE_REF:-}" ]]; then
+	base_ref="${AICR_UPGRADE_BASE_REF}"
+elif git rev-parse --verify --quiet upstream/main >/dev/null; then
+	base_ref=upstream/main
+else
+	base_ref=origin/main
+fi
 
 echo "Checking upgrade transition records..."
 
-# -v, and then a grep for the PASS line, because `go test -run` exits 0 with
-# "[no tests to run]" when the pattern matches nothing: renaming or deleting
-# the test would otherwise disable this gate silently and permanently.
+if ! merge_base="$(git merge-base HEAD "${base_ref}")"; then
+	hint="make ${base_ref} reachable"
+	if [[ "${base_ref}" == */* ]]; then
+		hint="fetch it (git fetch ${base_ref%%/*} ${base_ref#*/})"
+	fi
+	echo "check-upgrade-records: no merge base between HEAD and ${base_ref}; ${hint} or set AICR_UPGRADE_BASE_REF" >&2
+	exit 1
+fi
+
+base_dir="$(mktemp -d "${TMPDIR:-/tmp}/check-upgrade-records.XXXXXX")"
+trap 'rm -rf "${base_dir}"' EXIT
+git archive "${merge_base}" recipes | tar -x -C "${base_dir}"
+echo "Comparing against merge base ${merge_base} (${base_ref})"
+
+pattern="^($(IFS='|'; printf '%s' "${TEST_NAMES[*]}"))\$"
+
+# -v, and then a grep for each PASS line, because `go test -run` exits 0 with
+# "[no tests to run]" when the pattern matches nothing, and a skipped test
+# exits 0 too: renaming, deleting, or skipping a test would otherwise disable
+# its gate silently and permanently.
 output=""
-if ! output="$(go test ./pkg/recipe/... -run "^${TEST_NAME}\$" -count=1 -v 2>&1)"; then
+if ! output="$(AICR_UPGRADE_BASE_RECIPES="${base_dir}/recipes" \
+	go test ./pkg/recipe/... -run "${pattern}" -count=1 -v 2>&1)"; then
 	printf '%s\n' "${output}"
 	exit 1
 fi
 
-if ! printf '%s\n' "${output}" | grep -qE -- "^--- PASS: ${TEST_NAME} \("; then
-	printf '%s\n' "${output}"
-	echo "check-upgrade-records: ${TEST_NAME} did not run to a PASS; the gate is not checking anything" >&2
-	exit 1
-fi
+for name in "${TEST_NAMES[@]}"; do
+	if ! printf '%s\n' "${output}" | grep -qE -- "^--- PASS: ${name} \("; then
+		printf '%s\n' "${output}"
+		echo "check-upgrade-records: ${name} did not run to a PASS; the gate is not checking anything" >&2
+		exit 1
+	fi
+done
 
-printf '%s\n' "${output}" | grep -E -- "^--- PASS: ${TEST_NAME} \(|checking [0-9]+ component"
+printf '%s\n' "${output}" | grep -E -- "^--- PASS: |checking [0-9]+ component|pin\(s\)"
