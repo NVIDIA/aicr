@@ -95,7 +95,7 @@ replsets:
             storage: 8Gi
     sidecars:
       - name: mongodb-exporter
-        image: "docker.io/percona/mongodb_exporter:0.40.0@sha256:d66daa6aff0513860d1577cee3b55ab82fde43394f8319d7b4674411b9153cce"
+        image: "docker.io/percona/mongodb_exporter:0.53.0@sha256:0214e482b2cd4b1849f9f4dcef90d328a99ba3727dd1103e7da48b42060bcec1"
         imagePullPolicy: IfNotPresent
         args:
           - --discovering-mode
