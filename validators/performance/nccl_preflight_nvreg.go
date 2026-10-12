@@ -515,6 +515,12 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 // hostPath type check failed, and "" otherwise. Best effort: an event read that
 // fails, or finds nothing, yields "" so the caller keeps the original wait error
 // rather than guessing a cause.
+//
+// A mount-failure event is reported only while it's still the pod's most
+// recent news: if any later event exists for the pod — the mount retry
+// succeeded and the pod went on to stall on something else, e.g. an image
+// pull — the driver-absent finding would be stale, so this returns "" and
+// the caller keeps the plain timeout error instead (#3144).
 func nvregProbeMountFailure(ctx context.Context, clientset kubernetes.Interface, namespace, podName string) string {
 	events, err := clientset.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{
 		FieldSelector: "involvedObject.name=" + podName,
@@ -522,20 +528,55 @@ func nvregProbeMountFailure(ctx context.Context, clientset kubernetes.Interface,
 	if err != nil {
 		return ""
 	}
-	for _, ev := range events.Items {
+
+	var mountFailure *corev1.Event
+	var mountFailureAt time.Time
+	for i := range events.Items {
+		ev := &events.Items[i]
 		// Filter again client-side: not every apiserver or fake honors the
 		// field selector, and an event for another pod must never be attributed
 		// to this one.
 		if ev.InvolvedObject.Name != podName || !strings.Contains(ev.Message, nvregMountFailureMarker) {
 			continue
 		}
-		msg := strings.TrimSpace(ev.Message)
-		if len(msg) > maxProbeErrorOutputBytes {
-			msg = msg[:maxProbeErrorOutputBytes] + "..."
+		if at := nvregEventTime(ev); mountFailure == nil || at.After(mountFailureAt) {
+			mountFailure, mountFailureAt = ev, at
 		}
-		return msg
 	}
-	return ""
+	if mountFailure == nil {
+		return ""
+	}
+
+	for i := range events.Items {
+		ev := &events.Items[i]
+		if ev.InvolvedObject.Name != podName || ev == mountFailure {
+			continue
+		}
+		if nvregEventTime(ev).After(mountFailureAt) {
+			return ""
+		}
+	}
+
+	msg := strings.TrimSpace(mountFailure.Message)
+	if len(msg) > maxProbeErrorOutputBytes {
+		msg = msg[:maxProbeErrorOutputBytes] + "..."
+	}
+	return msg
+}
+
+// nvregEventTime returns the most meaningful timestamp on a kubelet event,
+// preferring LastTimestamp (bumped on every repeat of the same event) over
+// EventTime (the events.k8s.io/v1 field) and FirstTimestamp, so events can be
+// ordered against each other regardless of which timestamp field a given
+// apiserver or fake populates.
+func nvregEventTime(ev *corev1.Event) time.Time {
+	if !ev.LastTimestamp.IsZero() {
+		return ev.LastTimestamp.Time
+	}
+	if !ev.EventTime.IsZero() {
+		return ev.EventTime.Time
+	}
+	return ev.FirstTimestamp.Time
 }
 
 // waitForPreflightPodPhase watches a pod until it reaches a terminal phase
