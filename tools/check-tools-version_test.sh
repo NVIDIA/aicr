@@ -39,6 +39,12 @@ ORAS_MISMATCH_VERSION="1.3.4"
 HELM_PINNED_VERSION="v4.3.0"
 HELM_MISMATCH_VERSION="v4.2.4"
 DOCKER_VERSION="27.3.1"
+HOST_GOOS="$(host_goos)"
+FOREIGN_GOOS="linux"
+if [[ "${HOST_GOOS}" == "linux" ]]; then
+    FOREIGN_GOOS="darwin"
+fi
+export HOST_GOOS FOREIGN_GOOS
 export APIDIFF_PINNED_VERSION APIDIFF_MISMATCH_VERSION
 export ADDLICENSE_PINNED_VERSION ADDLICENSE_MISMATCH_VERSION
 export GO_LICENSES_PINNED_VERSION GO_LICENSES_MISMATCH_VERSION
@@ -71,12 +77,19 @@ case "${binary_name}" in
         pinned_version="${GO_LICENSES_PINNED_VERSION}"
         mismatch_version="${GO_LICENSES_MISMATCH_VERSION}"
         ;;
+    docker)
+        command_path="github.com/docker/cli/cmd/docker"
+        module_path="github.com/docker/cli"
+        pinned_version="v${DOCKER_VERSION}"
+        mismatch_version="${pinned_version}"
+        ;;
     *)
         exit 2
         ;;
 esac
 
 version="${pinned_version}"
+goos="${HOST_GOOS}"
 if [[ "${TOOL_TARGET:-}" == "${binary_name}" ]]; then
     case "${TOOL_MODE:-correct}" in
         correct)
@@ -87,6 +100,12 @@ if [[ "${TOOL_TARGET:-}" == "${binary_name}" ]]; then
         unreadable)
             exit 1
             ;;
+        foreign-os)
+            goos="${FOREIGN_GOOS}"
+            ;;
+        no-goos)
+            goos=""
+            ;;
         *)
             exit 2
             ;;
@@ -96,6 +115,9 @@ fi
 printf '%s: go1.26.0\n' "$3"
 printf '\tpath\t%s\n' "${command_path}"
 printf '\tmod\t%s\t%s\th1:stub\n' "${module_path}" "${version}"
+if [[ -n "${goos}" ]]; then
+    printf '\tbuild\tGOOS=%s\n' "${goos}"
+fi
 STUB
 
 cat >"${STUB_DIR}/yq" <<'STUB'
@@ -214,7 +236,7 @@ check_helper() {
     local rc
 
     output=$(TOOL_TARGET=apidiff TOOL_MODE="${mode}" \
-        go_binary_module_version "${STUB_DIR}/apidiff" golang.org/x/exp)
+        go_binary_module_version "${STUB_DIR}/apidiff" golang.org/x/exp 2>/dev/null)
     rc=$?
     if [[ "${rc}" == "${want_rc}" && "${output}" == "${want_output}" ]]; then
         pass "${name}"
@@ -297,6 +319,9 @@ check_helper "extracts-exact-module-version" correct 0 \
 check_helper "extracts-mismatched-module-version" mismatch 0 \
     "${APIDIFF_MISMATCH_VERSION}"
 check_helper "rejects-unreadable-build-metadata" unreadable 1 ""
+check_helper "rejects-binary-built-for-another-os" foreign-os 1 ""
+check_helper "accepts-binary-without-recorded-goos" no-goos 0 \
+    "${APIDIFF_PINNED_VERSION}"
 
 check_gomod_version "reads-block-require" \
     'module m
@@ -367,6 +392,8 @@ check_tools_row "rejects-unreadable-apidiff" apidiff unreadable 1 \
     "${APIDIFF_PINNED_VERSION}|unknown|⚠"
 check_tools_row "rejects-missing-apidiff" apidiff missing 1 \
     "${APIDIFF_PINNED_VERSION}|-|✗"
+check_tools_row "names-apidiff-built-for-another-os" apidiff foreign-os 1 \
+    "${APIDIFF_PINNED_VERSION}|${FOREIGN_GOOS}-binary|⚠"
 
 check_tools_row "accepts-exact-addlicense" addlicense correct 0 \
     "${ADDLICENSE_PINNED_VERSION}|${ADDLICENSE_PINNED_VERSION}|✓"
@@ -410,6 +437,8 @@ check_tools_row "warns-when-docker-is-not-running" docker not-running 0 \
     "any|not running|⚠"
 check_tools_row "reports-missing-docker" docker missing 0 \
     "any|-|✗"
+check_tools_row "names-docker-built-for-another-os" docker foreign-os 0 \
+    "any|${FOREIGN_GOOS}-binary|⚠"
 
 if (( fails > 0 )); then
     echo "${fails} test(s) failed"

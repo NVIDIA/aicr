@@ -53,6 +53,11 @@ hosts:
   - helm.ngc.nvidia.com              # NVIDIA NGC Helm (gpu-operator, network-operator, nim, dynamo)
   - jmcgrath207.github.io            # k8s-ephemeral-storage-metrics Helm repo
   - kubernetes-sigs.github.io        # node-feature-discovery, aws-ebs-csi-driver Helm repos
+  # Not new egress: CI and `make cluster-create` already pulled through this
+  # mirror, but from workflow/Makefile literals this gate does not parse.
+  # Declaring it as build.dockerhub_mirror in .settings.yaml (#3170) makes it
+  # visible.
+  - mirror.gcr.io                    # Docker Hub pull-through mirror (CI, cluster-create)
   - nvcr.io                          # distroless/static base image (compiled-in)
   - open-policy-agent.github.io      # gatekeeper Helm repo
   - percona.github.io                # psmdb-operator, psmdb-db Helm repo (NVSentinel remediation datastore)

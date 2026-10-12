@@ -104,25 +104,25 @@ jobs:
         with:
           persist-credentials: false
 
-      # Docker Hub rate-limits anonymous pulls per runner IP and its token
-      # endpoint timed out for this matrix (main red 2026-10-09). Pull the
-      # BuildKit image, and resolve docker.io FROM images (aiperf-bench's
-      # python:3.13-slim builder), through Google's mirror; BuildKit falls back
-      # to Docker Hub on a mirror miss.
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
-        with:
-          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
-          buildkitd-config-inline: |
-            [registry."docker.io"]
-              mirrors = ["mirror.gcr.io"]
-
-      - name: Authenticate to registry
-        uses: ./.github/actions/ghcr-login
-
       - name: Load versions
         id: versions
         uses: ./.github/actions/load-versions
+
+      # Docker Hub rate-limits anonymous pulls per runner IP and its token
+      # endpoint timed out for this matrix (main red 2026-10-09). Pull the
+      # BuildKit image, and resolve docker.io FROM images (aiperf-bench's
+      # python:3.13-slim builder), through the Docker Hub mirror; BuildKit
+      # falls back to Docker Hub on a mirror miss.
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
+        with:
+          driver-opts: image=${{ steps.versions.outputs.dockerhub_mirror_host }}/moby/buildkit:buildx-stable-1
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["${{ steps.versions.outputs.dockerhub_mirror_host }}"]
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
 
       - name: Setup Go
         if: matrix.phase != 'aiperf-bench'
