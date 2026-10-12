@@ -320,23 +320,32 @@ validators:
   # CRE-driven NCCL check. Opt-in only: no embedded overlay references this
   # check, and shipped EKS H100 training keeps TrainJob nccl-all-reduce-bw.
   # The check itself is provider-independent; creQualifiedEntries records the
-  # qualified combinations. Qualified on EKS H100 — live UAT 2026-09-02
-  # (2× p5.48xlarge, public CRE v0.1.0): 489.80 GB/s vs >= 300.
+  # qualified combinations. Qualified on EKS H100 — re-measured on the pinned
+  # CRE v0.6.0, live UAT 2026-10-09 (2× p5.48xlarge): 489.51 GB/s vs >= 300,
+  # against 489.80 GB/s at the original 2026-09-02 run on v0.1.0.
+  #
+  # The timeout covers the Certification wait, the measurement-finalize wait,
+  # and the teardown in series, because the Job's activeDeadlineSeconds is this
+  # value plus only ValidatorJobDeadlineHeadroom — a shorter budget kills the
+  # pod partway through teardown and leaves the TrainJobs holding GPUs.
+  # TestCRECatalogTimeoutCoversTeardown pins the relation.
   - name: nccl-cre-all-reduce-bw
     phase: performance
     description: "Verify NCCL All Reduce Bus Bandwidth via a Cluster Readiness Engine Certification"
     image: ghcr.io/nvidia/aicr-validators/performance:latest
-    timeout: 30m
+    timeout: 50m
     args: ["nccl-cre-all-reduce-bw"]
     env: []
-  # Qualified on EKS H100 — live UAT 2026-09-02 (same 2× p5 cluster): the
-  # Nemotron-5 8B catalog entry, goodput 0.7671 vs >= 0.5. The entry is per
+  # Not currently qualified on any combination, so this check skips wherever it
+  # is declared. It measured 0.7671 on EKS H100 on CRE v0.1.0, but the
+  # Nemotron-5 8B catalog entry it drives does not run on the pinned v0.6.0 —
+  # see creQualifiedEntries for the upstream cause. The entry is per
   # combination because training/nemotron5-56b needs minGPUs=32 and fails on
   # this SKU.
   - name: cre-training-goodput
     phase: performance
     description: "Verify training goodput via a Cluster Readiness Engine Certification"
     image: ghcr.io/nvidia/aicr-validators/performance:latest
-    timeout: 30m
+    timeout: 50m
     args: ["cre-training-goodput"]
     env: []

@@ -1289,6 +1289,39 @@ func TestEmbeddedCatalog_CRETrainingGoodputEntryExists(t *testing.T) {
 	t.Fatalf("no embedded catalog entry named %q", v1.CRETrainingGoodputCheckName)
 }
 
+// TestCRECatalogTimeoutCoversTeardown asserts both CRE checks budget the whole
+// serial path inside their catalog timeout: the Certification wait, the wait
+// for CRE to finalize the measurement, and the teardown that confirms the
+// TrainJobs are gone. The Job's activeDeadlineSeconds is the catalog timeout
+// plus only ValidatorJobDeadlineHeadroom, so a timeout that merely equals the
+// Certification wait gets the pod killed partway through teardown — the
+// creCleanupFailure guard never reports it and the TrainJobs keep holding GPUs
+// until CRE's own cleanup catches up.
+func TestCRECatalogTimeoutCoversTeardown(t *testing.T) {
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	required := defaults.CRECertificationTimeout +
+		defaults.CREMeasurementFinalizeTimeout +
+		defaults.CRECertificationTeardownTimeout
+
+	seen := 0
+	for _, v := range catalog.Validators {
+		if v.Name != v1.CRENCCLAllReduceBWCheckName && v.Name != v1.CRETrainingGoodputCheckName {
+			continue
+		}
+		seen++
+		if v.Timeout < required {
+			t.Errorf("%s: catalog timeout %v must cover Certification wait + measurement finalize + teardown (%v)",
+				v.Name, v.Timeout, required)
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("found %d CRE catalog entries, want 2", seen)
+	}
+}
+
 func TestCatalogEmbedding(t *testing.T) {
 	// Simulate embedding in a CR spec
 	type ValidatorCatalogSpec struct {

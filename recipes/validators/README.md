@@ -52,8 +52,8 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `nccl-all-reduce-bw-net` | Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | 30m |
 | `nccl-all-reduce-bw-nvls` | Verify NCCL All Reduce Bus Bandwidth on the NVLS transport (MNNVL across an NVL72 IMEX domain) | 30m |
 | `inference-perf` | Verify inference throughput and TTFT p99 meet thresholds using AIPerf | 65m |
-| `nccl-cre-all-reduce-bw` | NCCL bus bandwidth via a CRE `Certification` (opt-in). Qualified on EKS H100 — live UAT 2026-09-02 2× p5.48xlarge: 489.80 GB/s vs `>= 300`. | 30m |
-| `cre-training-goodput` | Training goodput via a CRE `Certification` (opt-in). Qualified on EKS H100 — live UAT 2026-09-02 2× p5.48xlarge: ratio 0.7671 vs `>= 0.5`. | 30m |
+| `nccl-cre-all-reduce-bw` | NCCL bus bandwidth via a CRE `Certification` (opt-in). Qualified on EKS H100 — live UAT 2026-10-09 on the pinned CRE v0.6.0, 2× p5.48xlarge: 489.51 GB/s vs `>= 300`. | 50m |
+| `cre-training-goodput` | Training goodput via a CRE `Certification` (opt-in). No qualified combination: the `training/nemotron5-8b` entry does not run on the pinned CRE v0.6.0, so the check skips. | 50m |
 
 The NCCL checks derive applicability from the recipe's `criteria` by default;
 a recipe outside the embedded service + accelerator matrix (e.g. registered
