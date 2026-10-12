@@ -68,4 +68,4 @@ Benefits (icon + two to four words each):
 - No header bar, title text, or logo inside the image: the hosting slide carries the title and the conference branding
 - Exactly one command per step, rendered in a terminal overlay; copy the commands above character for character and do not invent flags
 - Minimum text size: every caption and command must stay legible when the whole image is projected at 1600 px wide. Prefer fewer, larger labels; if a command does not fit on two lines at that size, drop the Step 1 `--os` and `--platform` flags before shrinking the font
-- Footer: dark background, white text: "Snapshot → Recipe → Bundle → Validate. One recipe, any deployer."
+- Footer: dark background, white text: "Recipe → Bundle → Deploy → Validate. One recipe, any deployer."
