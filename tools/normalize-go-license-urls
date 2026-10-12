@@ -20,6 +20,7 @@ readonly TOTAL_TIMEOUT_SECONDS=30
 readonly RETRIES=2
 readonly PARALLEL_REQUESTS=8
 
+# Input rows are package,url,license[,license_path]; output rows drop the path.
 if [[ $# -ne 1 || ! -s "$1" ]]; then
     echo "Usage: $0 <go-licenses.csv>" >&2
     exit 2
@@ -109,50 +110,32 @@ remapped_candidate() {
     printf '%s\n' "${url}"
 }
 
-# go-licenses' license file name pattern (licenses/find.go licenseRegexp).
-readonly LICENSE_FILE_PATTERN='^((UN)?LICEN(S|C)E|COPYING|README|NOTICE)'
-
 # go-licenses finds a gopkg.in module's repository through the go-source tag
 # gopkg.in serves, so a gopkg.in outage turns the URL into "Unknown" and fails
 # the build. gopkg.in's naming rule is fixed (gopkg.in/pkg.vN is
 # github.com/go-pkg/pkg, gopkg.in/user/pkg.vN is github.com/user/pkg), so the
-# candidates are derived from it, the module version, and the license files in
-# the local module copy, in go-licenses' search order: the package's directory
-# first, then each parent up to the module root, files in name order. A
-# replaced module derives nothing, so its row still fails.
-gopkgin_candidates() {
+# URL is derived from it, the module version, and the license file go-licenses
+# chose, as a path relative to the module's local copy. A replaced module, or a
+# license file outside that copy, derives nothing, so its row still fails.
+gopkgin_candidate() {
     local package=$1
-    [[ "${package}" =~ ^gopkg\.in/(([^/]+)/)?([^/]+)\.v([0-9]+)(/(.+))?$ ]] || return 0
+    local license_path=$2
+    [[ "${package}" =~ ^gopkg\.in/(([^/]+)/)?([^/]+)\.v([0-9]+)(/|$) ]] || return 0
     local repo=${BASH_REMATCH[3]}
     local owner=${BASH_REMATCH[2]:-go-${repo}}
     local module="gopkg.in/${BASH_REMATCH[1]}${repo}.v${BASH_REMATCH[4]}"
-    local rel=${BASH_REMATCH[6]}
     local info ref dir
     info=$("${GO_BIN}" list -m -f '{{if not .Replace}}{{.Version}} {{.Dir}}{{end}}' "${module}" 2>/dev/null) || return 0
     ref=${info%% *}
     dir=${info#* }
-    [[ -n "${ref}" && "${dir}" != "${info}" && -d "${dir}" ]] || return 0
+    [[ -n "${ref}" && -n "${dir}" && "${dir}" != "${info}" ]] || return 0
+    [[ "${license_path}" == "${dir}/"* ]] || return 0
     # A pseudo-version names a commit rather than a tag.
     if [[ "${ref}" =~ [-.][0-9]{14}-([0-9a-f]{12})$ ]]; then
         ref=${BASH_REMATCH[1]}
     fi
-    local path file
-    while :; do
-        path="${dir}${rel:+/${rel}}"
-        if [[ -d "${path}" ]]; then
-            while IFS= read -r file; do
-                printf 'https://github.com/%s/%s/blob/%s/%s\n' \
-                    "${owner}" "${repo}" "${ref}" "${rel:+${rel}/}${file}"
-            done < <(find "${path}" -mindepth 1 -maxdepth 1 -type f -print | sed 's|.*/||' \
-                | LC_ALL=C sort | grep -iE "${LICENSE_FILE_PATTERN}" || true)
-        fi
-        [[ -n "${rel}" ]] || break
-        if [[ "${rel}" == */* ]]; then
-            rel=${rel%/*}
-        else
-            rel=""
-        fi
-    done
+    printf 'https://github.com/%s/%s/blob/%s/%s\n' \
+        "${owner}" "${repo}" "${ref}" "${license_path#"${dir}/"}"
 }
 
 # Every URL worth probing for one CSV row, best-provenance first and deduplicated
@@ -161,9 +144,10 @@ gopkgin_candidates() {
 url_candidates() {
     local url=$1
     local package=$2
+    local license_path=$3
     if [[ "${url}" == "${UNKNOWN_URL}" ]]; then
         local derived
-        derived=$(gopkgin_candidates "${package}")
+        derived=$(gopkgin_candidate "${package}" "${license_path}")
         if [[ -n "${derived}" ]]; then
             printf '%s\n' "${derived}"
             return
@@ -214,9 +198,9 @@ readonly CANDIDATE_URLS="${TMP}/candidate-urls"
 readonly CANDIDATE_STATUS="${TMP}/candidate-status"
 
 : > "${CANDIDATE_URLS}"
-while IFS=, read -r package url license; do
+while IFS=, read -r package url license license_path; do
     [[ -z "${package}" ]] && continue
-    url_candidates "${url}" "${package}" >> "${CANDIDATE_URLS}"
+    url_candidates "${url}" "${package}" "${license_path}" >> "${CANDIDATE_URLS}"
 done < "${INPUT}"
 
 # Probes every URL in $1 and appends "<url>\t<status>\t<curl error>" lines to $2.
@@ -297,7 +281,7 @@ check_urls "${CANDIDATE_URLS}" "${CANDIDATE_STATUS}"
 # already probed every candidate by this point, so reporting only the first
 # failure hides the rest behind another full release cycle.
 unreachable=0
-while IFS=, read -r package url license; do
+while IFS=, read -r package url license license_path; do
     [[ -z "${package}" ]] && continue
 
     # Stop at an inconclusive candidate rather than falling through: it may be
@@ -313,7 +297,7 @@ while IFS=, read -r package url license; do
         if inconclusive_status "${status}"; then
             break
         fi
-    done < <(url_candidates "${url}" "${package}")
+    done < <(url_candidates "${url}" "${package}" "${license_path}")
 
     if [[ -n "${resolved}" ]]; then
         printf '%s,%s,%s\n' "${package}" "${resolved}" "${license}"
@@ -327,7 +311,7 @@ while IFS=, read -r package url license; do
             code=$(url_status "${candidate}")
             err=$(url_error "${candidate}")
             echo "  tried (${code:-no response}${err:+: ${err}}): ${candidate}"
-        done < <(url_candidates "${url}" "${package}")
+        done < <(url_candidates "${url}" "${package}" "${license_path}")
     } >&2
 done < "${INPUT}"
 
