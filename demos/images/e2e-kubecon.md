@@ -64,6 +64,7 @@ Benefits (icon + two to four words each):
 **Design Notes:**
 - Do not include the word "Section" in panel titles; use the titles above
 - Flow: Problem (standalone) → 4-step workflow chain → Outcome
+- Step order is fixed and must be numbered in the image exactly as above: 1 Recipe (top-left), 2 Bundle (top-right), 3 Deploy (bottom-left), 4 Validate (bottom-right). Validate is the last step; it never precedes Bundle or Deploy
 - No header bar, title text, or logo inside the image: the hosting slide carries the title and the conference branding
 - Exactly one command per step, rendered in a terminal overlay; copy the commands above character for character and do not invent flags
 - Minimum text size: every caption and command must stay legible when the whole image is projected at 1600 px wide. Prefer fewer, larger labels; if a command does not fit on two lines at that size, drop the Step 1 `--os` and `--platform` flags before shrinking the font
