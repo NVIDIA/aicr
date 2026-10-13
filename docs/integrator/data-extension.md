@@ -329,6 +329,7 @@ mechanics:
             - name: gpu-operator
               overrides: {devicePlugin: {enabled: false}}
             - name: nvsentinel
+              optional: true
               overrides: {labeler: {assumeDriverInstalled: true}}
   ```
 
