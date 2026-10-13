@@ -462,7 +462,8 @@ gh api repos/NVIDIA/aicr/releases | \
 # --log fails. Open it in a browser or narrow to one job.
 gh run list --repo NVIDIA/aicr --workflow=on-tag.yaml
 gh run view 34368619680 --repo NVIDIA/aicr --web
-gh run view 34368619680 --repo NVIDIA/aicr --job <job-id> --log
+JOB_ID="71284569301"  # replace with a job ID that gh run view lists for the run
+gh run view 34368619680 --repo NVIDIA/aicr --job "${JOB_ID}" --log
 ```
 
 **Verify in the transparency log (Rekor):**
@@ -472,7 +473,8 @@ gh run view 34368619680 --repo NVIDIA/aicr --job <job-id> --log
 rekor-cli search --sha "${DIGEST#sha256:}"
 
 # Get entry details
-rekor-cli get --uuid <entry-uuid>
+ENTRY_UUID="24296fb24b8ad77a9b24515adba040a49ac89311d9f6dbf097c125e7315c9d60e31b3e2ac55b9030"  # replace with a UUID that rekor-cli search printed
+rekor-cli get --uuid "${ENTRY_UUID}"
 ```
 
 ## Verifying the SBOM

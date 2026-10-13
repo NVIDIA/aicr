@@ -584,9 +584,10 @@ clusters is covered by [UAT](uat.md).
 
 - `test-coverage` — `go test -race ./...` plus the 83% coverage floor.
 - `lint` — golangci-lint with `.golangci.yaml`, yamllint, and the docs checks
-  (filenames, MDX patterns, MDX parse, YAML fences — see
-  [Docs MDX Gate](#docs-mdx-gate) and
-  [Docs YAML Fence Gate](#docs-yaml-fence-gate)).
+  (filenames, MDX patterns, MDX parse, YAML fences, shell placeholders — see
+  [Docs MDX Gate](#docs-mdx-gate),
+  [Docs YAML Fence Gate](#docs-yaml-fence-gate), and
+  [Docs Shell Placeholder Gate](#docs-shell-placeholder-gate)).
 - `tuning-check` — node-tuning profile freshness.
 - `coverage-check` — the committed CUJ/CLI coverage matrix against the tree.
 - `e2e` — the Chainsaw CLI suites via `tools/e2e` (see [E2E Tests](#e2e-tests)).
@@ -615,7 +616,8 @@ link check on `docs/**`, CodeQL, and the GPU test lanes — so a green local
 you must also run:
 
 ```bash
-golangci-lint run -c .golangci.yaml ./pkg/<affected>/...
+AFFECTED="recipe"  # replace with the changed package path under pkg/
+golangci-lint run -c .golangci.yaml "./pkg/${AFFECTED}/..."
 golangci-lint run -c .golangci.yaml ./...           # full sweep
 ```
 
@@ -701,6 +703,35 @@ comma-suffixed labels such as `yaml,no-parse` are rejected. Relabel Helm or
 Go-template examples as `gotemplate`, and intentionally invalid examples as
 `text`. The checker needs Node 20+; without Node it warns and skips locally, but
 hard-fails in CI so the docs-only merge gate cannot pass without running it.
+
+## Docs Shell Placeholder Gate
+
+`make check-docs-shell` checks fenced code blocks labelled `bash`, `sh`, `shell`,
+or `zsh` in every Markdown and MDX file under `docs/**`, except the ADRs in
+`docs/design/`. It fails on any `<placeholder>` the shell would read as
+redirection. `kubectl delete namespace <namespace>` is a syntax error when
+pasted. `kubectl get pods <name> -n default` is valid syntax: it fails only
+because no file named `name` exists, and where one does, it runs
+`kubectl get pods default` and writes the output to a file named `-n`.
+
+Do not replace a placeholder with a bare `${VAR}`. An unset variable expands to
+nothing and the command runs with an argument missing, which is worse than a
+syntax error for `kubectl delete` or `helm uninstall`. Assign every variable in
+the same block before its first use, and quote every expansion:
+
+```bash
+NAMESPACE="my-namespace"  # replace with your namespace
+kubectl delete namespace "${NAMESPACE}"
+```
+
+Placeholders inside quotes, comments, or heredoc bodies are not read as
+redirection and pass. Command substitution is the exception: `$(...)` and
+backticks are parsed as commands inside double quotes and inside a heredoc
+whose delimiter is unquoted (`<<EOF`, not `<<'EOF'`), so
+`"$(kubectl get pods -n <ns>)"` still fails. Command synopses such as `aicr verify <bundle-dir> [flags]` and
+command output are not runnable, so label them `text`; `console` transcripts
+are not checked. The checker needs Node 20+ and has the same local-skip and
+CI-hard-fail behavior as the YAML fence gate.
 
 ## Common Gotchas
 

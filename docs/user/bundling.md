@@ -568,7 +568,8 @@ same `key=value` pair you passed to `--dra-eviction-node-label` — the examples
 below use the documented default:
 
 ```bash
-kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
+NODE="my-gpu-node"  # replace with the GPU node to repair
+kubectl label node "${NODE}" nvidia.com/dra-kubelet-plugin=true
 kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 ```
 
@@ -718,12 +719,16 @@ hook-injected resource (name and kind from the new
 `templates/` if you still have that bundle):
 
 ```bash
-# Include -n <ns> for namespaced kinds (same <ns> as release-namespace below).
-# Omit -n for cluster-scoped kinds (CRD, ClusterRole, NicClusterPolicy, …).
-kubectl label -n <ns> <kind>/<name> app.kubernetes.io/managed-by=Helm --overwrite
-kubectl annotate -n <ns> <kind>/<name> \
-  meta.helm.sh/release-name=<component>-post \
-  meta.helm.sh/release-namespace=<ns> --overwrite
+COMPONENT="my-component"  # replace with the component that owns the -post chart
+NAMESPACE="my-namespace"  # replace with the component's release namespace
+KIND="configmap"          # replace with the resource kind
+NAME="my-resource"        # replace with the resource name
+# Omit -n "${NAMESPACE}" from both commands for cluster-scoped kinds (CRD,
+# ClusterRole, NicClusterPolicy, …); release-namespace keeps it either way.
+kubectl label -n "${NAMESPACE}" "${KIND}/${NAME}" app.kubernetes.io/managed-by=Helm --overwrite
+kubectl annotate -n "${NAMESPACE}" "${KIND}/${NAME}" \
+  meta.helm.sh/release-name="${COMPONENT}-post" \
+  meta.helm.sh/release-namespace="${NAMESPACE}" --overwrite
 ```
 
 Prefer `kubectl delete` only for kinds where cascade is acceptable (for example

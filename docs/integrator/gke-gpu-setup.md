@@ -65,6 +65,8 @@ requires `--gke-gpu-pools`.
 from step 1 on (recipe takes the snapshot, bundle takes the recipe):
 
 ```shell
+TCPXO_INTERFACES="eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3,eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"  # replace with the ordered mapping from your cluster's provisioner
+
 # 1. Snapshot: no provider dump or extra flag needed for gke-default. For
 #    bundle-installer, also project the pool dump (step 2 needs the
 #    reading to verify the pool-creation constraint):
@@ -78,7 +80,7 @@ aicr snapshot -o snapshot.yaml
 aicr recipe --service gke --accelerator h100 --os cos --intent training \
   --platform kubeflow \
   --snapshot snapshot.yaml -o recipe.yaml \
-  --gke-tcpxo-interfaces eth1=<net0>,eth2=<net1>,eth3=<net2>,eth4=<net3>,eth5=<net4>,eth6=<net5>,eth7=<net6>,eth8=<net7>  # required: the recipe ships
+  --gke-tcpxo-interfaces "${TCPXO_INTERFACES}"  # required: the recipe ships
 #   # the torch-distributed-tcpxo runtime; take the ordered mapping from the
 #   # cluster's provisioner (see gke-tcpxo-networking.md), not from name order
 #   ... or, for labeled pools (bundle-carried driver installer):
@@ -222,7 +224,8 @@ supplies an observable driver pod.
 **Labeling the nodes by hand does not persist.** Applying the label manually:
 
 ```shell
-kubectl label node <node> nvsentinel.dgxc.nvidia.com/driver.installed=true
+NODE="my-gpu-node"  # replace with the GPU node name
+kubectl label node "${NODE}" nvsentinel.dgxc.nvidia.com/driver.installed=true
 ```
 
 takes effect immediately and then silently reverts — with no driver pod to
@@ -237,10 +240,12 @@ If you prefer the GPU Operator's device plugin to own `nvidia.com/gpu`
 advertisement, select the mode at recipe generation:
 
 ```shell
+TCPXO_INTERFACES="eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3,eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"  # replace with the ordered mapping from your cluster's provisioner
+
 aicr recipe --service gke --accelerator h100 --os cos --intent training \
   --platform kubeflow \
   --profile gpuStack=bundle-installer \
-  --gke-tcpxo-interfaces eth1=<net0>,eth2=<net1>,eth3=<net2>,eth4=<net3>,eth5=<net4>,eth6=<net5>,eth7=<net6>,eth8=<net7> \
+  --gke-tcpxo-interfaces "${TCPXO_INTERFACES}" \
   -o recipe.yaml
 aicr bundle -r recipe.yaml -o ./bundles
 ```
@@ -466,11 +471,13 @@ aicr bundle --recipe recipe.yaml \
 
 # Provisioning the label yourself instead: disable the labeler and put the
 # same pair on the pool.
+CLUSTER="my-cluster"   # replace with your GKE cluster name
+POOL="my-gpu-pool"     # replace with the GPU node pool to create
 aicr bundle --recipe recipe.yaml \
   --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
   --set dra-node-labeler:enabled=false \
   --output bundle
-gcloud container node-pools create <pool> --cluster <cluster> \
+gcloud container node-pools create "${POOL}" --cluster "${CLUSTER}" \
   --node-labels="nvidia.com/dra-kubelet-plugin=true"
 ```
 
