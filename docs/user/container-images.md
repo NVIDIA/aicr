@@ -491,7 +491,8 @@ across every image in a component and prints a summary report.
 ### Is it signed?
 
 ```bash
-cosign tree <image>
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.1"  # replace with an image from the inventory above
+cosign tree "${IMAGE}"
 ```
 
 A `Signatures for an image tag:` line in the output indicates a cosign
@@ -501,7 +502,8 @@ attached — the image is unsigned.
 ### Does it have an SBOM?
 
 ```bash
-cosign tree <image>
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.1"  # replace with an image from the inventory above
+cosign tree "${IMAGE}"
 ```
 
 The same `cosign tree` output also reports SBOMs. An `SBOMs for an image
@@ -512,7 +514,8 @@ publishers attach SBOMs as registry referrers rather than the legacy
 ### Does it have build provenance?
 
 ```bash
-cosign download attestation <image> \
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.1"  # replace with an image from the inventory above
+cosign download attestation "${IMAGE}" \
   | jq -r 'select(.payload != null) | .payload' \
   | base64 -d \
   | jq -r '.predicateType'

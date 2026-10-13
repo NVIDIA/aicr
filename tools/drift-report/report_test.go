@@ -39,16 +39,17 @@ func testPins() []Pin {
 
 func TestBuildReportCollapsesTwins(t *testing.T) {
 	lookups := map[string]Lookup{
-		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0", Latest: "v1.23.0", UpdateType: "minor"},
-		"prometheus-adapter":        {Current: "5.3.0", Latest: "5.4.0", UpdateType: "minor"},
+		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0", Candidates: []Candidate{{Version: "v1.23.0", UpdateType: "minor"}}},
+		"prometheus-adapter":        {Current: "5.3.0", Candidates: []Candidate{{Version: "5.4.0", UpdateType: "minor"}}},
 		"cert-manager":              {Current: "v1.20.2"},
 	}
 	got, err := BuildReport(testPins(), lookups, Meta{Commit: "abc1234", RunURL: "https://example/run/1"})
 	if err != nil {
 		t.Fatalf("BuildReport: %v", err)
 	}
-	if got.Summary != (Summary{Tracked: 4, Behind: 2, Unresolved: 0}) {
-		t.Errorf("summary = %+v, want {4 2 0}", got.Summary)
+	// No fixture carries a publish date, so both drift rows are unscreened.
+	if got.Summary != (Summary{Tracked: 4, Behind: 2, Unscreened: 2}) {
+		t.Errorf("summary = %+v, want {Tracked:4 Behind:2 Unscreened:2}", got.Summary)
 	}
 	if len(got.Drift) != 2 {
 		t.Fatalf("drift rows = %d, want 2 (the -ocp twin collapses)", len(got.Drift))
@@ -73,7 +74,7 @@ func TestBuildReportCollapsesTwins(t *testing.T) {
 
 func TestBuildReportMissingLookupIsUnresolved(t *testing.T) {
 	lookups := map[string]Lookup{
-		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0", Latest: "v1.23.0", UpdateType: "minor"},
+		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0", Candidates: []Candidate{{Version: "v1.23.0", UpdateType: "minor"}}},
 		"prometheus-adapter":        {Current: "5.3.0"},
 		// cert-manager absent: Renovate never reported it.
 	}
@@ -148,7 +149,7 @@ func TestBuildReportEmptyCurrentIsUnresolved(t *testing.T) {
 	// means current" and a pin Renovate never actually resolved is reported
 	// as up to date.
 	lookups := map[string]Lookup{
-		"ghcr.io/nvidia/nvsentinel": {Current: "", Latest: ""},
+		"ghcr.io/nvidia/nvsentinel": {Current: ""},
 		"prometheus-adapter":        {Current: "5.3.0"},
 		"cert-manager":              {Current: "v1.20.2"},
 	}
@@ -221,12 +222,12 @@ func TestBuildReportIsDeterministic(t *testing.T) {
 	// ordering in the artifact, so the determinism this test names has to cover
 	// it rather than only the single-candidate rows it covered before.
 	lookups := map[string]Lookup{
-		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0", Latest: "v1.23.0", UpdateType: "minor",
+		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0",
 			Candidates: []Candidate{
 				{Version: "v1.20.3", UpdateType: "patch"},
 				{Version: "v1.23.0", UpdateType: "minor"},
 			}},
-		"prometheus-adapter": {Current: "5.3.0", Latest: "5.4.0", UpdateType: "minor"},
+		"prometheus-adapter": {Current: "5.3.0", Candidates: []Candidate{{Version: "5.4.0", UpdateType: "minor"}}},
 		"cert-manager":       {Current: "v1.20.2"},
 	}
 	a, err := BuildReport(testPins(), lookups, Meta{Commit: "abc1234"})
@@ -253,7 +254,6 @@ func TestBuildReportSurfacesAlternatives(t *testing.T) {
 	}}
 	lookups := map[string]Lookup{"kube-prometheus-stack": {
 		DepName: "kube-prometheus-stack", Current: "84.4.0",
-		Latest: "91.5.2", UpdateType: "major",
 		Candidates: []Candidate{
 			{Version: "84.5.0", UpdateType: "minor"},
 			{Version: "91.5.2", UpdateType: "major"},
@@ -287,7 +287,7 @@ func TestBuildReportOmitsAlternativesWhenOnlyOneCandidate(t *testing.T) {
 		Datasource: "docker", Version: "0.19.3", DepName: "kueue",
 	}}
 	lookups := map[string]Lookup{"kueue": {
-		DepName: "kueue", Current: "0.19.3", Latest: "0.19.6", UpdateType: "patch",
+		DepName: "kueue", Current: "0.19.3",
 		Candidates: []Candidate{{Version: "0.19.6", UpdateType: "patch"}},
 	}}
 
@@ -304,5 +304,174 @@ func TestBuildReportOmitsAlternativesWhenOnlyOneCandidate(t *testing.T) {
 	}
 	if strings.Contains(string(blob), "alternatives") {
 		t.Errorf("alternatives key present in JSON for a single-candidate row: %s", blob)
+	}
+}
+
+func kaiPin() Pin {
+	return Pin{
+		Component: "kai-scheduler", Chart: "kai-scheduler", Repository: "oci://ghcr.io/kai-scheduler/kai-scheduler",
+		Datasource: "docker", Version: "v0.16.9", DepName: "ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler",
+	}
+}
+
+// The 2026-09-28 report proposed kai-scheduler v0.20.1, a version upstream
+// retracted, and hid both v0.16.10 and the v0.18.x line upstream marks Latest
+// (#2791). With one candidate per release line and publish dates attached,
+// the row must propose the maintained line and keep the retracted one visible
+// beside it rather than dropping it.
+func TestBuildReportOffersMaintainedLineOverPredatingOne(t *testing.T) {
+	lookups := map[string]Lookup{kaiPin().DepName: {
+		Current: "v0.16.9", CurrentPublished: mustTime(t, "2026-08-16T10:29:50Z"),
+		Candidates: []Candidate{
+			{Version: "v0.16.11", UpdateType: "patch", Published: mustTime(t, "2026-10-11T10:16:51Z")},
+			{Version: "v0.17.2", UpdateType: "minor", Published: mustTime(t, "2026-09-16T12:00:00Z")},
+			{Version: "v0.18.5", UpdateType: "minor", Published: mustTime(t, "2026-10-09T12:00:00Z")},
+			{Version: "v0.20.1", UpdateType: "minor", Published: mustTime(t, "2025-11-30T13:27:49Z")},
+		},
+	}}
+	r, err := BuildReport([]Pin{kaiPin()}, lookups, Meta{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if r.Summary != (Summary{Tracked: 1, Behind: 1}) {
+		t.Errorf("summary = %+v, want {Tracked:1 Behind:1}", r.Summary)
+	}
+	if len(r.Drift) != 1 {
+		t.Fatalf("drift rows = %d, want 1", len(r.Drift))
+	}
+	row := r.Drift[0]
+	if row.Latest != "v0.18.5" || row.UpdateType != "minor" {
+		t.Errorf("latest = %s %s, want minor v0.18.5", row.UpdateType, row.Latest)
+	}
+	if !row.LatestPublished.Equal(mustTime(t, "2026-10-09T12:00:00Z")) {
+		t.Errorf("latestPublished = %v, want v0.18.5's date", row.LatestPublished)
+	}
+	if got := versions(row.Alternatives); !reflect.DeepEqual(got, []string{"patch v0.16.11"}) {
+		t.Errorf("alternatives = %v, want [patch v0.16.11]", got)
+	}
+	if got := versions(row.Predating); !reflect.DeepEqual(got, []string{"minor v0.20.1"}) {
+		t.Errorf("predating = %v, want [minor v0.20.1]", got)
+	}
+	if row.Unscreened != "" {
+		t.Errorf("unscreened = %q, want empty: every offer was dated", row.Unscreened)
+	}
+}
+
+// agentgateway as the 2026-09-16 report saw it: the only candidate was the
+// kgateway-lineage v2.2.1. Nothing is proposed, so the chart must not count as
+// behind, must not read as current, and must stay visible for a reviewer.
+func TestBuildReportWithholdsChartWhoseEveryCandidatePredates(t *testing.T) {
+	pin := Pin{
+		Component: "agentgateway", Chart: "agentgateway", Repository: "oci://cr.agentgateway.dev/charts",
+		Datasource: "docker", Version: "v1.5.0", DepName: "cr.agentgateway.dev/charts/agentgateway",
+	}
+	lookups := map[string]Lookup{pin.DepName: {
+		Current: "v1.5.0", CurrentPublished: mustTime(t, "2026-08-27T17:26:27Z"),
+		Candidates: []Candidate{
+			{Version: "v2.2.1", UpdateType: "major", Published: mustTime(t, "2026-02-17T22:12:11Z")},
+		},
+	}}
+	r, err := BuildReport([]Pin{pin}, lookups, Meta{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if r.Summary != (Summary{Tracked: 1, Withheld: 1}) {
+		t.Errorf("summary = %+v, want {Tracked:1 Withheld:1}", r.Summary)
+	}
+	if len(r.Drift) != 0 || len(r.Current) != 0 {
+		t.Errorf("drift = %v, current = %v; a withheld chart is neither", r.Drift, r.Current)
+	}
+	if len(r.Withheld) != 1 {
+		t.Fatalf("withheld rows = %d, want 1", len(r.Withheld))
+	}
+	row := r.Withheld[0]
+	if got := versions(row.Predating); !reflect.DeepEqual(got, []string{"major v2.2.1"}) {
+		t.Errorf("predating = %v, want [major v2.2.1]", got)
+	}
+	blob, err := json.Marshal(row)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var fields map[string]any
+	if err = json.Unmarshal(blob, &fields); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"latest", "updateType", "latestPublished", "alternatives"} {
+		if _, ok := fields[key]; ok {
+			t.Errorf("withheld row carries %q, which would read as a proposal: %s", key, blob)
+		}
+	}
+	if !strings.Contains(string(blob), `"currentPublished":"2026-08-27T17:26:27Z"`) {
+		t.Errorf("withheld row must show the date its candidates were compared to: %s", blob)
+	}
+}
+
+// Without publish dates -- a registry outage, or a chart pushed without the
+// created annotation -- nothing can be withheld. The row must say so rather
+// than read like a screened one.
+func TestBuildReportMarksUndatedRowUnscreened(t *testing.T) {
+	lookups := map[string]Lookup{kaiPin().DepName: {
+		Current:    "v0.16.9",
+		Candidates: []Candidate{{Version: "v0.20.1", UpdateType: "minor"}},
+	}}
+	r, err := BuildReport([]Pin{kaiPin()}, lookups, Meta{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if len(r.Drift) != 1 || r.Drift[0].Latest != "v0.20.1" {
+		t.Fatalf("drift = %+v, want v0.20.1 offered unchecked", r.Drift)
+	}
+	if !strings.Contains(r.Drift[0].Unscreened, "no publish date for current v0.16.9") {
+		t.Errorf("unscreened = %q, want it to name the undated current version", r.Drift[0].Unscreened)
+	}
+	if r.Summary.Unscreened != 1 {
+		t.Errorf("summary.unscreened = %d, want 1: a registry outage must show in the counts", r.Summary.Unscreened)
+	}
+}
+
+// Every tracked pin lands in exactly one of drift, withheld, current, or
+// unresolved; the twins share a row, so rows are counted by component.
+func TestBuildReportPartitionsEveryTrackedPin(t *testing.T) {
+	pins := append(testPins(), kaiPin())
+	lookups := map[string]Lookup{
+		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0", CurrentPublished: mustTime(t, "2026-08-01T00:00:00Z"),
+			Candidates: []Candidate{{Version: "v1.23.0", UpdateType: "minor", Published: mustTime(t, "2025-01-01T00:00:00Z")}}},
+		"prometheus-adapter": {Current: "5.3.0", Candidates: []Candidate{{Version: "5.4.0", UpdateType: "minor"}}},
+		"cert-manager":       {Current: "v1.20.2"},
+		// kai-scheduler absent: unresolved.
+	}
+	r, err := BuildReport(pins, lookups, Meta{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	seen := map[string]int{}
+	for _, row := range r.Drift {
+		for _, c := range row.Components {
+			seen[c]++
+		}
+	}
+	for _, row := range r.Withheld {
+		for _, c := range row.Components {
+			seen[c]++
+		}
+	}
+	for _, c := range r.Current {
+		seen[c]++
+	}
+	for _, u := range r.Unresolved {
+		for _, c := range u.Components {
+			seen[c]++
+		}
+	}
+	for _, p := range pins {
+		if p.Repository == "" {
+			continue
+		}
+		if seen[p.Component] != 1 {
+			t.Errorf("component %q appears %d times across the report, want exactly 1", p.Component, seen[p.Component])
+		}
+	}
+	if r.Summary != (Summary{Tracked: 5, Behind: 1, Unresolved: 1, Withheld: 1, Unscreened: 1}) {
+		t.Errorf("summary = %+v", r.Summary)
 	}
 }

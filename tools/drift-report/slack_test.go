@@ -50,7 +50,7 @@ func TestSlackPayloadDrift(t *testing.T) {
 	}
 	text := payloadText(t, r)
 	for _, want := range []string{
-		"34 pins, 2 charts behind, 1 charts unresolved",
+		"34 pins, 2 charts behind, 1 charts unresolved, 0 charts withheld",
 		"https://example/run/1",
 		"Review with /aicr-reviewing-component-drift (Codex: $aicr-reviewing-component-drift)",
 	} {
@@ -119,5 +119,49 @@ func TestSlackPayloadUnresolvedOnly(t *testing.T) {
 	text := payloadText(t, r)
 	if !strings.Contains(text, "Review with /aicr-reviewing-component-drift (Codex: $aicr-reviewing-component-drift)") {
 		t.Errorf("unresolved-only report missing call to action:\n%s", text)
+	}
+}
+
+// A chart whose every candidate predates its pin proposes nothing, but it is
+// not current either: a reviewer has to decide it explicitly (#2791). The
+// digest must count it and must not announce a clean week.
+func TestSlackPayloadWithheldOnly(t *testing.T) {
+	r := Report{
+		SchemaVersion: schemaVersion,
+		GeneratedAt:   "2026-09-21T07:00:11Z",
+		RunURL:        "https://example/run/1",
+		Summary:       Summary{Tracked: 34, Withheld: 1},
+		Withheld: []Row{{Components: []string{"agentgateway"}, Chart: "agentgateway", Current: "v1.5.0",
+			Predating: []Candidate{{Version: "v2.2.1", UpdateType: "major"}}}},
+	}
+	text := payloadText(t, r)
+	if strings.Contains(text, "pins current") {
+		t.Errorf("withheld chart reported as a clean week:\n%s", text)
+	}
+	for _, want := range []string{
+		"34 pins, 0 charts behind, 0 charts unresolved, 1 charts withheld",
+		"Review with /aicr-reviewing-component-drift",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("message missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// If a registry refuses the publish-date lookups, every affected row goes back
+// to offering whatever Renovate ranked highest -- the #2791 failure. That must
+// be visible in the channel, not only in the artifact.
+func TestSlackPayloadCountsUnscreenedRows(t *testing.T) {
+	r := Report{
+		SchemaVersion: schemaVersion,
+		GeneratedAt:   "2026-09-21T07:00:11Z",
+		Summary:       Summary{Tracked: 34, Behind: 2, Unscreened: 2},
+	}
+	if text := payloadText(t, r); !strings.Contains(text, "; 2 charts unscreened") {
+		t.Errorf("unscreened rows missing from the digest:\n%s", text)
+	}
+	r.Summary.Unscreened = 0
+	if text := payloadText(t, r); strings.Contains(text, "unscreened") {
+		t.Errorf("a fully screened week must not mention unscreened rows:\n%s", text)
 	}
 }

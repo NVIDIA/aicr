@@ -19,9 +19,19 @@
 # go:embed-compiled into the manager binary. Mirror tooling reads this file to
 # learn what a disconnected install has to carry beyond the controller image.
 #
-# Scope follows ADR-025's benchmark execution safety gate: the supported
-# certification paths only, not every dormant catalog entry. Re-derive whenever
-# the chart pin moves, because the catalog ships inside the manager image.
+# Scope follows ADR-025's benchmark execution safety gate, which covers the
+# supported certification paths only, not every dormant catalog entry.
+# Re-derive whenever the chart pin moves, because the catalog ships inside the
+# manager image.
+#
+# Each digest is what its tag resolved to when this file was derived. The
+# workloads pull by tag, not by digest, so the digest tells a mirror which bytes
+# to copy but does not guarantee what runs. If upstream repoints a tag, pods
+# pull bytes this file does not describe. A mirror has to serve each tag, and
+# serving it at the recorded digest keeps the cluster on the derived bytes.
+#
+# sourceCommit is the upstream commit sourceVersion pointed to at derivation.
+# Tags are mutable, so the commit is the input that reproduces this file.
 component: nvcre
 entries:
   - communication/nccl-all-reduce
@@ -38,4 +48,5 @@ platform: aws
 runtimeFetches:
   - ref: core_v0.15.2
     url: https://github.com/NVIDIA/Megatron-LM.git
+sourceCommit: 5d0cea50f59e3866b5b4491683c26ebee334cfae
 sourceVersion: v0.6.0

@@ -17,9 +17,10 @@
 #   - component: nvsentinel
 #     from: v1.20.0
 #     to: v1.23.0
-#     candidates:            # verbatim from the report: latest + alternatives[]
+#     candidates:            # verbatim from the report: latest + alternatives[] + predating[]
 #       - minor v1.23.0
 #       - patch v1.20.3
+#       - predating major v2.0.0
 #     recommends: v1.20.3    # omit when the row had no alternatives
 #     verdict: hold          # take | hold | defer
 #     reviewed: 2026-09-21

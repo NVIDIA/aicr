@@ -44,7 +44,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
 | **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. The `platform=kueue` leaves (`h100-kind-training-kueue`, `h100-gke-cos-training-kueue`, `h100-eks-ubuntu-training-kueue`) do exactly that to enable topology-aware scheduling; see [Topology-aware scheduling](#topology-aware-scheduling-with-kueue-and-topograph). Upgrading from a 0.18.x bundle needs two checks first: see [Upgrade Notes](#kueue-018x-to-019x) below. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
-| **nvcre** | NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification controller. Runs training and NCCL workloads, measures goodput and bandwidth. **Not installed by default** — enabling it takes both a `valuesFile` and a Trainer source; see [Enabling NVCRE](#enabling-nvcre) for a fragment that resolves. With that values file referenced, `metrics.serviceMonitor.enabled` is **false** so install does not require prometheus-operator CRDs; turn it on with `--set cre:metrics.serviceMonitor.enabled=true` only after those CRDs exist, and add `prometheus-operator-crds` to `dependencyRefs`. The chart has no manager `nodeSelector`; for hard placement, set `manager.affinity` in `recipes/components/nvcre/values.yaml` or a complete JSON object, for example `--set-json cre:manager.affinity='{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"Exists"}]}]}}}'` (scalar `--set cre:manager.affinity=...` renders an invalid string). CLI aliases: `cre`, `cluster-readiness-engine`. Shipped EKS H100 training still uses the TrainJob NCCL check. Opt-in AICR validators drive CRE with `Certification` (create, wait, delete), not `WorkloadRun`. **Disconnected installs:** the certification workloads pull images the chart does not render, because the workload catalog is compiled into the manager binary — mirror the set in `recipes/components/nvcre/workload-images.yaml`, regenerated with `make nvcre-closure`. That committed set is scoped, not universal: it resolves the catalog for `platform: aws`, `gpuArchitecture: h100`, and the two certification entries `communication/nccl-all-reduce` and `training/nemotron5-8b`. The NCCL image it names is an EFA build, so another platform or accelerator pulls a different set and mirroring this one leaves those images unmirrored. Derive the set you need instead of reusing this one, writing it somewhere other than the committed path: `go run ./tools/nvcre-closure -platform gcp -arch h100 -entries communication/nccl-all-reduce -out /tmp/nvcre-gcp.yaml`. The training path additionally needs Megatron-LM at pod start, and the clone recorded in the closure is its last resort: the init container uses an already-populated workspace if one is mounted, else copies from `/opt/megatron-lm` in the image, and only clones when neither is there. So it can run disconnected, but only once you have provided the source by one of those two routes — unlike the NCCL path, which needs nothing beyond the mirrored images. | [Cluster Readiness Engine](https://github.com/NVIDIA/cluster-readiness-engine) |
+| **nvcre** | NVIDIA Cluster Readiness Engine, a GPU cluster burn-in certification controller. Runs training and NCCL workloads, measures goodput and bandwidth. **Not installed by default.** Enabling it takes both a `valuesFile` and a Trainer source. See [Enabling NVCRE](#enabling-nvcre) for a fragment that resolves. With that values file referenced, `metrics.serviceMonitor.enabled` is **false** so install does not require prometheus-operator CRDs. Turn it on with `--set cre:metrics.serviceMonitor.enabled=true` only after those CRDs exist, and add `prometheus-operator-crds` to `dependencyRefs`. The chart has no manager `nodeSelector`. For hard placement, set `manager.affinity` in `recipes/components/nvcre/values.yaml` or a complete JSON object, for example `--set-json cre:manager.affinity='{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"Exists"}]}]}}}'` (scalar `--set cre:manager.affinity=...` renders an invalid string). CLI aliases: `cre`, `cluster-readiness-engine`. Shipped EKS H100 training still uses the TrainJob NCCL check. Opt-in AICR validators drive CRE with `Certification` (create, wait, delete), not `WorkloadRun`. **Disconnected installs.** The certification workloads pull images the chart does not render, because the workload catalog is compiled into the manager binary. Mirror the set in `recipes/components/nvcre/workload-images.yaml`, regenerated with `make nvcre-closure`. Each image is listed by tag with the digest that tag resolved to when the file was generated, and `sourceCommit` records the upstream commit it was derived from. The workloads pull by tag, so the mirror has to serve each tag, and serving it at the recorded digest keeps the cluster on the bytes the file describes. That committed set is scoped, not universal. It resolves the catalog for `platform: aws`, `gpuArchitecture: h100`, and the two certification entries `communication/nccl-all-reduce` and `training/nemotron5-8b`. The NCCL image it names is an EFA build, so another platform or accelerator pulls a different set and mirroring this one leaves those images unmirrored. Derive the set you need instead of reusing this one, writing it somewhere other than the committed path, for example `go run ./tools/nvcre-closure -platform gcp -arch h100 -entries communication/nccl-all-reduce -out /tmp/nvcre-gcp.yaml`. The training path additionally needs Megatron-LM at pod start, and the clone recorded in the closure is its last resort. The init container uses an already-populated workspace if one is mounted, else copies from `/opt/megatron-lm` in the image, and only clones when neither is there. So it can run disconnected, but only once you have provided the source by one of those two routes. The NCCL path needs nothing beyond the mirrored images. | [Cluster Readiness Engine](https://github.com/NVIDIA/cluster-readiness-engine) |
 | **mariadb-operator-crds** | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **mariadb-operator** | Official MariaDB Operator controller, webhook, and certificate controller. AICR installs it only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **slurm-accounting-mariadb** | Installation-managed MariaDB instance whose initial database, all-privileges accounting user, and generated Secret reference are configured atomically on the MariaDB resource. Declared in every Slurm recipe and rendered only for `accounting.mode: aicr-provided`. | [MariaDB Cluster chart](https://artifacthub.io/packages/helm/mariadb-operator/mariadb-cluster) |
@@ -256,7 +256,8 @@ global:
 You must still supply the endpoint yourself -- either on your own leaf's `componentRefs` (the mixin's allowlist deliberately excludes it, but your leaf owns its own values) or at bundle time. `aicr bundle` fails closed without it:
 
 ```shell
-aicr bundle -r <your-recipe>.yaml \
+RECIPE="recipe.yaml"  # replace with your recipe file
+aicr bundle -r "${RECIPE}" \
   --set nv-sentinel:global.tracing.endpoint=otel-collector.example:4317 \
   -o ./bundles
 ```
@@ -351,7 +352,8 @@ The catalog-registration rule described under [Audit Logging and Tracing](#audit
 **Two gates, not one.** Adopting the mixin only deploys the webhook. Nothing is injected until you also label the namespaces whose pods should be checked:
 
 ```shell
-kubectl label namespace <ns> nvsentinel.nvidia.com/preflight=enabled
+NAMESPACE="my-namespace"  # replace with a namespace whose GPU pods should be checked
+kubectl label namespace "${NAMESPACE}" nvsentinel.nvidia.com/preflight=enabled
 ```
 
 Within a labeled namespace, only pods that request a GPU resource (`nvidia.com/gpu`) are mutated; everything else passes through untouched.
@@ -359,7 +361,8 @@ Within a labeled namespace, only pods that request a GPU resource (`nvidia.com/g
 **Adopting this on a cluster that already runs NVSentinel needs one manual step.** The preflight subchart ships its `PreflightConfig` CRD under `crds/`, and Helm installs a `crds/` directory only on `helm install`, never on `helm upgrade`. A cluster that installed NVSentinel *before* adopting this mixin had the subchart — and therefore its CRD — pruned by the `global.preflight.enabled` condition, so enabling the mixin later cannot backfill it. The controller still admits and injects correctly, but its `preflightconfig` controller never starts and it logs `no matches for kind "PreflightConfig"` every 10 seconds. Apply the CRD once, from the chart:
 
 ```shell
-kubectl apply -f <chart>/charts/preflight/crds/preflight.nvsentinel.nvidia.com_preflightconfigs.yaml
+CHART="path/to/nvsentinel"  # replace with the path to the unpacked nvsentinel chart
+kubectl apply -f "${CHART}/charts/preflight/crds/preflight.nvsentinel.nvidia.com_preflightconfigs.yaml"
 ```
 
 A fresh bundle install is unaffected, which is also why CI does not catch this — every bundle in CI is a first install.
@@ -870,8 +873,11 @@ On the stock EKS overlay, `kube-prometheus-stack` creates a PVC for Prometheus, 
 A `Pending` PVC alone does not identify the cause. Confirm it from the driver's own diagnostics:
 
 ```shell
+NAMESPACE="monitoring"  # replace with the namespace of the Pending claim
+NAME="my-claim"         # replace with the Pending claim's name
+
 # Provisioning events on the stuck claim
-kubectl describe pvc <name> -n <namespace>
+kubectl describe pvc "${NAME}" -n "${NAMESPACE}"
 
 # The sidecar that issues CreateVolume, and the driver that calls the EBS API.
 # The controller runs two replicas and only the leader provisions, so read both pods.
@@ -1425,7 +1431,10 @@ before deleting rather than passing `--all`:
 # Review what exists and who owns it; delete only what this release should own.
 kubectl get aiboms.aibom.k8saibom.dev --all-namespaces \
   -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,OWNER:.metadata.ownerReferences[0].name
-kubectl -n <namespace> delete aiboms.aibom.k8saibom.dev <name>
+
+NAMESPACE="my-namespace"  # replace with the namespace from the listing above
+NAME="my-aibom"           # replace with the AIBOM to delete
+kubectl -n "${NAMESPACE}" delete aiboms.aibom.k8saibom.dev "${NAME}"
 
 # CRDs last, and only once no other release uses them — deletion removes every
 # stored custom resource of these kinds cluster-wide.
@@ -1672,8 +1681,11 @@ to the original checksum digest. Regenerate instead, using the same
 overrides added:
 
 ```bash
+# Replace with every flag from your original aicr bundle command.
+ORIGINAL_FLAGS=(--system-node-selector nodeGroup=system-worker)
+
 aicr bundle --recipe recipe.yaml \
-  <your original --accelerated-node-selector / --system-node-selector / etc. flags> \
+  "${ORIGINAL_FLAGS[@]}" \
   --set dynamoplatform:global.nats.install=true \
   --output ./bundle
 ```
@@ -1689,7 +1701,7 @@ dot-path parser rejects qualified Kubernetes label keys that contain a `/`
 (e.g. `eks.amazonaws.com/nodegroup`), and there is no scalar form for a
 tolerations list at all:
 
-```bash
+```text
   --set-json 'dynamoplatform:nats.podTemplate.merge.spec.nodeSelector={"<key>":"<value>"}' \
   --set-json 'dynamoplatform:nats.podTemplate.merge.spec.tolerations=[{"key":"<key>","operator":"Equal","value":"<value>","effect":"NoSchedule"}]' \
   --set dynamoplatform:nats.config.jetstream.fileStore.pvc.storageClassName=<name>

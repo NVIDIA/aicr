@@ -157,6 +157,19 @@ jobs:
           # the patch v0.16.10 released that same day never appeared at all
           # (#2791). Separating them costs one extra entry per dep and is what
           # lets tools/drift-report list the safer step beside the larger one.
+          #
+          # separateMultipleMajor and separateMultipleMinor go further and split
+          # every release line into its own entry. Renovate offers the highest
+          # version per bucket, and a registry can carry a frozen or retracted
+          # line numbered above the maintained one: kai-scheduler's retracted
+          # v0.20.1 hid the v0.18.x line upstream marks Latest, and
+          # agentgateway's registry carries kgateway's v2.2.x above its own
+          # v1.x (#2791). tools/drift-report walks each update type from the
+          # highest version down, withholds versions published before the
+          # current pin until it reaches one that is not, offers that one, and
+          # drops the rest, so the report shape does not grow with the raw
+          # entry count.
+          #
           # The third rule forces `semver` versioning on registry-chart OCI
           # pins (datasource=docker). Docker's default `docker` versioning
           # treats everything after a tag's first hyphen as a compatibility
@@ -187,7 +200,7 @@ jobs:
           # SHA-suffixed tags so the RC never wins the comparison.
           RENOVATE_FORCE: >-
             {"packageRules":[{"matchPackageNames":["*"],"enabled":false},
-            {"matchDepTypes":["registry-chart"],"enabled":true,"separateMinorPatch":true},
+            {"matchDepTypes":["registry-chart"],"enabled":true,"separateMinorPatch":true,"separateMultipleMajor":true,"separateMultipleMinor":true},
             {"matchDepTypes":["registry-chart"],"matchDatasources":["docker"],"versioning":"semver"},
             {"matchDepNames":["ghcr.io/ai-dynamo/grove/grove-charts"],"versioning":"regex:^v(?<major>[0-9]+)[.](?<minor>[0-9]+)[.](?<patch>[0-9]+)-alpha[.](?<build>[0-9]+)$"}]}
           RENOVATE_REPORT_TYPE: file
@@ -212,6 +225,10 @@ jobs:
       - name: Copy the report into the workspace
         run: cp /tmp/drift-report-raw.json ./drift-report-raw.json
 
+      # Besides normalizing the report, the tool reads each OCI chart's publish
+      # date from its registry, anonymously. A failed lookup is logged here and
+      # never fails the step; a row left offering an undated version is marked
+      # unscreened and counted in the digest.
       - name: Build the drift report
         env:
           SERVER: ${{ github.server_url }}
