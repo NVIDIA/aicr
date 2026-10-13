@@ -181,6 +181,52 @@ func TestCREChecksSkipUnqualifiedCombination(t *testing.T) {
 	})
 }
 
+// TestCREChecksRejectBadConstraintBeforeQualification pins the ordering that
+// makes the documented promise true: a constraint the check cannot honor is
+// refused even on a combination that would otherwise skip. Validating it after
+// the qualification lookup would hide every malformed constraint behind a skip,
+// which is every combination for goodput today.
+func TestCREChecksRejectBadConstraintBeforeQualification(t *testing.T) {
+	for _, value := range []string{"<= 0.5", ">= NaN"} {
+		t.Run("nccl "+value, func(t *testing.T) {
+			ctx := ctxWithCriteriaAndPerfConstraints(
+				recipe.CriteriaServiceEKS,
+				recipe.CriteriaAcceleratorGB200,
+				recipe.Constraint{Name: checkNameCRENCCLAllReduceBW, Value: value},
+			)
+			constraint, found := findPerformanceConstraint(ctx, checkNameCRENCCLAllReduceBW)
+			if !found {
+				t.Fatal("constraint not found in the test context")
+			}
+			_, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
+			if err == nil {
+				t.Fatalf("error = nil, want a refusal for constraint %q", value)
+			}
+			if passed {
+				t.Error("passed = true, want false")
+			}
+			if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error %v, want ErrCodeInvalidRequest", err)
+			}
+		})
+
+		t.Run("goodput "+value, func(t *testing.T) {
+			ctx := ctxWithCriteriaAndPerfConstraints(
+				recipe.CriteriaServiceEKS,
+				recipe.CriteriaAcceleratorGB200,
+				recipe.Constraint{Name: checkNameCRETrainingGoodput, Value: value},
+			)
+			err := checkCRETrainingGoodput(ctx)
+			if validators.IsSkip(err) {
+				t.Fatalf("error = %v, want a refusal rather than a skip for constraint %q", err, value)
+			}
+			if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error %v, want ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
 func TestLookupCREQualificationUnqualified(t *testing.T) {
 	tests := []struct {
 		name        string

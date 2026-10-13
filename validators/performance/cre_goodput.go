@@ -37,6 +37,14 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 	if ctx.ValidationInput == nil {
 		return validators.Skip("no validation input")
 	}
+	// Before the qualification lookup, so a constraint the check cannot honor
+	// is reported rather than hidden behind a skip on an unqualified
+	// combination. It needs no cluster access, and the docs promise it fails.
+	threshold, err := creThreshold(checkNameCRETrainingGoodput, constraint.Value)
+	if err != nil {
+		return err
+	}
+
 	entry, qualified := lookupCREQualification(
 		checkNameCRETrainingGoodput,
 		ctx.ValidationInput.Criteria.Service,
@@ -49,11 +57,6 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 			ctx.ValidationInput.Criteria.Service,
 			ctx.ValidationInput.Criteria.Accelerator,
 		))
-	}
-
-	threshold, err := creThreshold(checkNameCRETrainingGoodput, constraint.Value)
-	if err != nil {
-		return err
 	}
 
 	gpuConfig, err := determineGPUConfig(

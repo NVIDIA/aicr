@@ -47,14 +47,17 @@ func validateCRENcclAllReduceBw(
 	}
 	service := ctx.ValidationInput.Criteria.Service
 	accelerator := ctx.ValidationInput.Criteria.Accelerator
-	entry, qualified := lookupCREQualification(checkNameCRENCCLAllReduceBW, service, accelerator)
-	if !qualified {
-		return fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkNameCRENCCLAllReduceBW, service, accelerator), true, nil
-	}
-
+	// Before the qualification lookup, so a constraint the check cannot honor
+	// is reported rather than hidden behind a skip on an unqualified
+	// combination. It needs no cluster access, and the docs promise it fails.
 	threshold, err := creThreshold(checkNameCRENCCLAllReduceBW, constraint.Value)
 	if err != nil {
 		return "", false, err
+	}
+
+	entry, qualified := lookupCREQualification(checkNameCRENCCLAllReduceBW, service, accelerator)
+	if !qualified {
+		return fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkNameCRENCCLAllReduceBW, service, accelerator), true, nil
 	}
 
 	gpuConfig, err := determineGPUConfig(ctx, service, accelerator, ctx.NodeSelector)

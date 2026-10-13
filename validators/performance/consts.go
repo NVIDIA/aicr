@@ -29,7 +29,6 @@ const (
 	keyMetadata                 = "metadata"
 	keyNamespace                = "namespace"
 	keySpec                     = "spec"
-	keyMountPath                = "mountPath"
 	keyValue                    = "value"
 	kindDeployment              = "Deployment"
 	kindService                 = "Service"

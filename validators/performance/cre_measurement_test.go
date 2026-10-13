@@ -26,6 +26,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/fake"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
 )
 
 const creTestWorkflow = "aicr-cre-nccl-abcd1234-workflow"
@@ -420,6 +422,51 @@ func TestMeasurementDeleted(t *testing.T) {
 			}
 			if tt.wantErr && !strings.Contains(err.Error(), "deleted before CRE finalized it") {
 				t.Errorf("error does not name the cause: %v", err)
+			}
+		})
+	}
+}
+
+// TestWaitEndedBecause pins which limit the timeout message names. The finalize
+// window is derived from the check's context, so when the check's own budget
+// expires first the finalize timeout never fired and naming it would point at a
+// limit that was never reached.
+func TestWaitEndedBecause(t *testing.T) {
+	tests := []struct {
+		name string
+		ctx  func(t *testing.T) context.Context
+		want string
+	}{
+		{
+			name: "finalize window expired",
+			ctx:  func(*testing.T) context.Context { return context.Background() },
+			want: defaults.CREMeasurementFinalizeTimeout.String(),
+		},
+		{
+			name: "check's overall budget expired first",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				t.Cleanup(cancel)
+				return ctx
+			},
+			want: "overall timeout",
+		},
+		{
+			name: "run canceled",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			want: "canceled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := waitEndedBecause(tt.ctx(t))
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("waitEndedBecause() = %q, want it to mention %q", got, tt.want)
 			}
 		})
 	}

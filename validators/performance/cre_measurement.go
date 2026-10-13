@@ -152,7 +152,7 @@ func waitForFinalMeasurements(
 			}
 			return nil, err
 		}
-		return finalizedMeasurementsOrTimeout(byName, kind)
+		return finalizedMeasurementsOrTimeout(ctx, byName, kind)
 	}
 }
 
@@ -230,8 +230,11 @@ func watchUntilFinal(
 }
 
 // finalizedMeasurementsOrTimeout converts an exhausted budget into the reason
-// the check could not reach a verdict.
+// the check could not reach a verdict. ctx is the caller's context, not the
+// finalize window derived from it, so the message can name which of the two
+// actually ran out.
 func finalizedMeasurementsOrTimeout(
+	ctx context.Context,
 	byName map[string]*unstructured.Unstructured,
 	kind string,
 ) ([]*unstructured.Unstructured, error) {
@@ -244,11 +247,26 @@ func finalizedMeasurementsOrTimeout(
 		return final, nil
 	case len(byName) == 0:
 		return nil, aicrErrors.New(aicrErrors.ErrCodeTimeout,
-			fmt.Sprintf("no %s was created for this run within %s", kind, defaults.CREMeasurementFinalizeTimeout))
+			fmt.Sprintf("no %s was created for this run %s", kind, waitEndedBecause(ctx)))
 	default:
 		return nil, aicrErrors.NewWithContext(aicrErrors.ErrCodeTimeout,
-			fmt.Sprintf("%s was not finalized within %s", kind, defaults.CREMeasurementFinalizeTimeout),
+			fmt.Sprintf("%s was not finalized %s", kind, waitEndedBecause(ctx)),
 			map[string]any{"pending": len(byName)})
+	}
+}
+
+// waitEndedBecause names what ended the wait. The finalize window is a child of
+// the check's context, so a parent already done means the check's own budget ran
+// out first and the finalize timeout never fired — reporting it would name a
+// limit that was not reached.
+func waitEndedBecause(ctx context.Context) string {
+	switch {
+	case stderrors.Is(ctx.Err(), context.DeadlineExceeded):
+		return "before the check's overall timeout"
+	case ctx.Err() != nil:
+		return "before the run was canceled"
+	default:
+		return fmt.Sprintf("within %s", defaults.CREMeasurementFinalizeTimeout)
 	}
 }
 
