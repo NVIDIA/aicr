@@ -153,12 +153,16 @@ type Result struct {
 
 // UnprovenReason is why a record placed a component without establishing its
 // version. UnprovenUnreadable is a record the reader found and could not
-// decode. UnprovenUnplaced is a readable Argo CD Application matched by a
-// prefixed name whose destination is none of the component's namespaces.
+// decode. UnprovenDualDriver is a Helm release with records under both
+// storage drivers, whose revisions cannot be compared, so neither driver's
+// newest is provably the release's. UnprovenUnplaced is a readable Argo CD
+// Application matched by a prefixed name whose destination is none of the
+// component's namespaces.
 type UnprovenReason string
 
 const (
 	UnprovenUnreadable UnprovenReason = "unreadable"
+	UnprovenDualDriver UnprovenReason = "dual-driver"
 	UnprovenUnplaced   UnprovenReason = "unplaced"
 )
 
@@ -472,7 +476,7 @@ func installedVersions(d Deployer, comps []Component, records []installedRelease
 			// An unreadable record stays unreadable. The reader already
 			// counted it.
 			if !record.Unproven {
-				record.Unplaced = true
+				record.UnprovenReason = UnprovenUnplaced
 				counts.unplaced++
 			}
 			record.Unproven = true
@@ -516,9 +520,9 @@ func installedVersions(d Deployer, comps []Component, records []installedRelease
 func unprovenRecords(records []installedRelease) []UnprovenRecord {
 	out := make([]UnprovenRecord, len(records))
 	for i, record := range records {
-		reason := UnprovenUnreadable
-		if record.Unplaced {
-			reason = UnprovenUnplaced
+		reason := record.UnprovenReason
+		if reason == "" {
+			reason = UnprovenUnreadable
 		}
 		out[i] = UnprovenRecord{
 			Source:    string(record.Source),

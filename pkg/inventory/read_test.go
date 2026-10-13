@@ -875,6 +875,33 @@ func TestReadNamesUnplacedApplication(t *testing.T) {
 	}
 }
 
+// TestReadNamesDualDriverRelease drives a release whose records both decode,
+// one under each storage driver, through the whole read.
+func TestReadNamesDualDriverRelease(t *testing.T) {
+	comps := []Component{fixtureGPUOperator, fixtureCertManager}
+	client := fake.NewSimpleClientset(
+		helmSecret("nvidia-gpu-operator", "gpu-operator", 1, "deployed",
+			releasePayload(t, "gpu-operator", "nvidia-gpu-operator", "deployed", "gpu-operator", "v25.3.3", 1)),
+		helmConfigMap("nvidia-gpu-operator", "gpu-operator", 7, "deployed",
+			releasePayload(t, "gpu-operator", "nvidia-gpu-operator", "deployed", "gpu-operator", "v24.9.0", 7)),
+	)
+
+	got, err := read(context.Background(), client, argoClient(), Options{Deployer: DeployerHelm, Components: comps})
+	if err != nil {
+		t.Fatalf("read() error = %v", err)
+	}
+
+	if want := map[string]string{"gpu-operator": ""}; !reflect.DeepEqual(got.Versions, want) {
+		t.Errorf("read() versions = %v, want %v", got.Versions, want)
+	}
+	wantUnproven := map[string][]UnprovenRecord{"gpu-operator": {
+		{Source: "helm", Name: "gpu-operator", Namespace: "nvidia-gpu-operator", Reason: UnprovenDualDriver},
+	}}
+	if !reflect.DeepEqual(got.Unproven, wantUnproven) {
+		t.Errorf("read() unproven = %+v, want %+v", got.Unproven, wantUnproven)
+	}
+}
+
 // TestDeployersMatchBundlerConfig fails when a deployer is added to the
 // bundler without a name transform here.
 //

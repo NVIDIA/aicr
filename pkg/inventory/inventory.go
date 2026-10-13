@@ -81,9 +81,9 @@ type installedRelease struct {
 	// newly installed and does not.
 	Unproven bool
 
-	// Unplaced marks a readable record the mapping matched outside every one
-	// of its component's namespaces.
-	Unplaced bool
+	// UnprovenReason is why Unproven is set, and empty for a record that
+	// could not be read.
+	UnprovenReason UnprovenReason
 }
 
 // The storage resources the readers list, as they appear in a GVR, an RBAC

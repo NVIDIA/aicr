@@ -93,12 +93,13 @@ func (r storedRecord) empty() bool {
 
 // helmWalk is the state the two drivers' paged reads fold into: which
 // components the read answers for, the newest record seen per release, the
-// releases no revision of which can be trusted, how many storage objects were
-// examined in total, and how many of them named no release at all.
+// releases no revision of which can be trusted and why, how many storage
+// objects were examined in total, and how many of them named no release at
+// all.
 type helmWalk struct {
 	within       scope
 	newest       map[releaseID]storedRecord
-	poisoned     map[releaseID]struct{}
+	poisoned     map[releaseID]UnprovenReason
 	drivers      map[releaseID]string
 	records      int
 	unattributed int
@@ -127,15 +128,16 @@ func (w *helmWalk) tolerate(id releaseID, c confidence) bool {
 	if c == confident {
 		return false
 	}
-	w.poison(id)
+	w.poison(id, UnprovenUnreadable)
 
 	return true
 }
 
-// poison withholds a release's version, counting the release once.
-func (w *helmWalk) poison(id releaseID) {
+// poison withholds a release's version, counting the release once and keeping
+// the first reason given.
+func (w *helmWalk) poison(id releaseID, reason UnprovenReason) {
 	if _, already := w.poisoned[id]; !already {
-		w.poisoned[id] = struct{}{}
+		w.poisoned[id] = reason
 		w.unreadable++
 	}
 }
@@ -152,7 +154,7 @@ func (w *helmWalk) poison(id releaseID) {
 func (w *helmWalk) keep(record storedRecord) {
 	id := releaseID{namespace: record.namespace, name: record.release}
 	if driver, seen := w.drivers[id]; seen && driver != record.driver {
-		w.poison(id)
+		w.poison(id, UnprovenDualDriver)
 	}
 	w.drivers[id] = record.driver
 	keepNewest(w.newest, record)
@@ -185,7 +187,7 @@ func helmReleases(ctx context.Context, client kubernetes.Interface, within scope
 	walk := &helmWalk{
 		within:   within,
 		newest:   make(map[releaseID]storedRecord),
-		poisoned: make(map[releaseID]struct{}),
+		poisoned: make(map[releaseID]UnprovenReason),
 		drivers:  make(map[releaseID]string),
 	}
 
@@ -408,15 +410,15 @@ func decodeNewest(ctx context.Context, walk *helmWalk) ([]installedRelease, erro
 		// and loses its version, whatever survived into newest, since what
 		// survived is by definition not its newest revision. Withholding it
 		// instead would report the component as newly installed.
-		if _, bad := walk.poisoned[id]; bad {
-			releases = append(releases, unprovenRelease(id))
+		if reason, bad := walk.poisoned[id]; bad {
+			releases = append(releases, unprovenRelease(id, reason))
 
 			continue
 		}
 		record := newest[id]
 		if record.empty() {
 			if walk.tolerate(id, record.confidence) {
-				releases = append(releases, unprovenRelease(id))
+				releases = append(releases, unprovenRelease(id, UnprovenUnreadable))
 
 				continue
 			}
@@ -432,7 +434,7 @@ func decodeNewest(ctx context.Context, walk *helmWalk) ([]installedRelease, erro
 		release, err := decodeRelease(record.release, record.payload())
 		if err != nil {
 			if walk.tolerate(id, record.confidence) {
-				releases = append(releases, unprovenRelease(id))
+				releases = append(releases, unprovenRelease(id, UnprovenUnreadable))
 
 				continue
 			}
@@ -459,9 +461,11 @@ func decodeNewest(ctx context.Context, walk *helmWalk) ([]installedRelease, erro
 
 // unprovenRelease is a release the read found and could not version. Its
 // namespace is where the record is stored, since the one it installed into is
-// in the payload that could not be read.
-func unprovenRelease(id releaseID) installedRelease {
-	return installedRelease{Source: sourceHelm, Name: id.name, Namespace: id.namespace, Unproven: true}
+// in a payload this read did not use.
+func unprovenRelease(id releaseID, reason UnprovenReason) installedRelease {
+	return installedRelease{
+		Source: sourceHelm, Name: id.name, Namespace: id.namespace, Unproven: true, UnprovenReason: reason,
+	}
 }
 
 // releaseContext builds the structured-error context for a release, which

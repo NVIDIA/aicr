@@ -205,9 +205,11 @@ type ReportUnproven struct {
 	// destination. Empty for an unreadable Application that states none.
 	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 
-	// Reason is "unreadable" for a record the read could not decode, or
-	// "unplaced" for an Application matched by a prefixed name that deploys
-	// into none of the component's namespaces.
+	// Reason is "unreadable" for a record the read could not decode,
+	// "dual-driver" for a Helm release with records under both storage
+	// drivers, whose revisions cannot be compared, or "unplaced" for an
+	// Application matched by a prefixed name that deploys into none of the
+	// component's namespaces.
 	Reason string `json:"reason" yaml:"reason"`
 }
 
