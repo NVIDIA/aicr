@@ -132,11 +132,11 @@ on:
         default: false
       nvsentinel_remediation:
         # Composes the opt-in nvsentinel-quarantine or nvsentinel-remediation
-        # mixin onto the cell's recipe so the sxidfault phase runs Stage 2
+        # mixin onto the cell's recipe so the faultinject phase runs Stage 2
         # (cordon) or Stages 2 and 3 (cordon, reboot, uncordon) on real
         # hardware (#2625). The `Resolve reservation row` step bounds where it
         # is accepted. The nightly batch never sets it.
-        description: 'NVSentinel mixin to compose so sxidfault runs Stage 2 (quarantine) or 2-3 (remediation). Nightly training, helmfile, from source; gcp: quarantine only.'
+        description: 'NVSentinel mixin to compose so faultinject runs Stage 2 (quarantine) or 2-3 (remediation). Nightly training, helmfile, from source; gcp: quarantine only.'
         type: choice
         options: [none, quarantine, remediation]
         default: none
@@ -365,7 +365,7 @@ jobs:
           # honor, for the same publish-last reason as the platform gate. Each
           # bound has a cause:
           #   - training only: the inference budget has no room for the longer
-          #     sxidfault step, and a serving workload left on the node would
+          #     faultinject step, and a serving workload left on the node would
           #     hold node-drainer, so janitor would never reboot it.
           #   - nightly only: quarantine leaves the node cordoned with the fault
           #     set, which a held daytime cluster would keep.

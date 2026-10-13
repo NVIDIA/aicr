@@ -14,8 +14,8 @@
 # limitations under the License.
 
 # Unit tests for the #2625 stage gates: uat_nvsentinel_remediation_mode
-# (sxid-fault-inject.sh), which decides from the deployed recipe whether the
-# sxidfault phase runs Stages 2 and 3, and uat_compose_nvsentinel_mixin
+# (fault-inject.sh), which decides from the deployed recipe whether the
+# faultinject phase runs Stages 2 and 3, and uat_compose_nvsentinel_mixin
 # (phases.sh), which composes the mixin a manual dispatch asks for.
 #
 # Hermetic: aicr is a stub that writes a fixture recipe. A missing yq is a
@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 command -v yq >/dev/null 2>&1 || { echo "FAIL: yq is not on PATH; the functions under test are yq programs" >&2; exit 1; }
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/sxid-test.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/fault-inject-test.XXXXXX")"
 trap 'rm -rf "${WORK}"' EXIT
 fails=0
 ran=0
@@ -48,8 +48,8 @@ recipe() {
     } > "${f}"
 }
 
-# shellcheck source=tests/uat/lib/sxid-fault-inject.sh
-source "${SCRIPT_DIR}/sxid-fault-inject.sh"
+# shellcheck source=tests/uat/lib/fault-inject.sh
+source "${SCRIPT_DIR}/fault-inject.sh"
 
 mode_case() { # <desc> <want> <global>
     local f="${WORK}/recipe-${ran}.yaml" got
@@ -137,4 +137,4 @@ if (( fails > 0 )); then
     echo "${fails} test(s) failed (${ran} attempted)" >&2
     exit 1
 fi
-echo "All ${ran} sxid-fault-inject_test cases passed"
+echo "All ${ran} fault-inject_test cases passed"

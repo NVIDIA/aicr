@@ -38,11 +38,11 @@
 # accepts the knob on the nightly lifecycle only, whose cluster is destroyed
 # right after this phase.
 #
-# Sourced by tests/uat/lib/phases.sh, which calls phase_sxid_fault_inject()
-# from its phase dispatcher (uat_main) and runs it as the `sxidfault` phase,
+# Sourced by tests/uat/lib/phases.sh, which calls phase_fault_inject()
+# from its phase dispatcher (uat_main) and runs it as the `faultinject` phase,
 # AFTER phase_verify (see the function's own comment below for why).
 #
-# Results are recorded as CTRF (sxidfault-result.json, mirroring phase_prep's
+# Results are recorded as CTRF (faultinject-result.json, mirroring phase_prep's
 # snapshot-result.json pattern, #1806) so they show up in the UAT report
 # alongside the other CUJ lanes, win or lose.
 #
@@ -85,22 +85,22 @@ uat_nvsentinel_remediation_mode() {
   fi
 }
 
-# Set by _sxid_fault_inject_impl once it knows them, so the outer wrapper can
+# Set by _fault_inject_impl once it knows them, so the outer wrapper can
 # clean up the debug pod on every exit path (including a `return` deep inside
 # the impl) without threading the values back up as return values.
-_SXID_POD_NAME=""
-_SXID_NS=""
-_SXID_START_MS=""
+_FAULT_INJECT_POD_NAME=""
+_FAULT_INJECT_NS=""
+_FAULT_INJECT_START_MS=""
 
-phase_sxid_fault_inject() {
+phase_fault_inject() {
   ctrf_init "aicr-uat"
-  _SXID_START_MS="$(ctrf_now_ms)"
+  _FAULT_INJECT_START_MS="$(ctrf_now_ms)"
 
-  trap 'uat_sxidfault_on_signal TERM 15' TERM
-  trap 'uat_sxidfault_on_signal INT 2' INT
+  trap 'uat_faultinject_on_signal TERM 15' TERM
+  trap 'uat_faultinject_on_signal INT 2' INT
 
   local rc=0
-  _sxid_fault_inject_impl || rc=$?
+  _fault_inject_impl || rc=$?
 
   trap - TERM INT
 
@@ -110,38 +110,38 @@ phase_sxid_fault_inject() {
     message=""
   else
     status=failed
-    message="phase_sxid_fault_inject exited ${rc}; see the job log above for the failing stage"
+    message="phase_fault_inject exited ${rc}; see the job log above for the failing stage"
   fi
-  _sxid_fault_inject_finalize "${status}" "${message}"
+  _fault_inject_finalize "${status}" "${message}"
 
   return "${rc}"
 }
 
-# Armed only while _sxid_fault_inject_impl runs. A TERM/INT (job cancellation
+# Armed only while _fault_inject_impl runs. A TERM/INT (job cancellation
 # or this step's own timeout-minutes firing) would otherwise kill this shell
-# before it reaches the pod delete / CTRF write in _sxid_fault_inject_finalize
+# before it reaches the pod delete / CTRF write in _fault_inject_finalize
 # -- #2625 requires the debug pod removed on every exit path, not just
 # ordinary pass/fail. Mirrors uat_snapshot_on_signal's pattern.
-uat_sxidfault_on_signal() {
+uat_faultinject_on_signal() {
   local sig="$1" num="$2"
   trap - TERM INT
-  _sxid_fault_inject_finalize other "sxid fault injection interrupted by SIG${sig}"
+  _fault_inject_finalize other "fault injection interrupted by SIG${sig}"
   kill -"${sig}" "${BASHPID:-$$}"
   exit $(( 128 + num ))
 }
 
-_sxid_fault_inject_finalize() {
+_fault_inject_finalize() {
   local status="$1" message="${2:-}"
-  if [[ -n "${_SXID_POD_NAME}" ]]; then
-    kubectl delete pod "${_SXID_POD_NAME}" -n "${_SXID_NS}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  if [[ -n "${_FAULT_INJECT_POD_NAME}" ]]; then
+    kubectl delete pod "${_FAULT_INJECT_POD_NAME}" -n "${_FAULT_INJECT_NS}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   fi
-  ctrf_add sxidfault "${status}" "$(ctrf_elapsed_ms "${_SXID_START_MS}")" "${message}" || true
-  if ! ctrf_write sxidfault-result.json; then
-    echo "::warning::failed to write sxidfault-result.json; the sxidfault outcome is unaffected" >&2
+  ctrf_add faultinject "${status}" "$(ctrf_elapsed_ms "${_FAULT_INJECT_START_MS}")" "${message}" || true
+  if ! ctrf_write faultinject-result.json; then
+    echo "::warning::failed to write faultinject-result.json; the faultinject outcome is unaffected" >&2
   fi
 }
 
-_sxid_fault_inject_impl() {
+_fault_inject_impl() {
   local node_selector="${FAULT_INJECT_NODE_SELECTOR:-nvidia.com/gpu.present=true}"
   local nvs_ns="${FAULT_INJECT_NVSENTINEL_NAMESPACE:-nvsentinel}"
   local condition="${FAULT_INJECT_CONDITION:-SysLogsXIDError}"
@@ -152,14 +152,14 @@ _sxid_fault_inject_impl() {
   local quarantine_timeout_seconds="${FAULT_INJECT_QUARANTINE_TIMEOUT_SECONDS:-180}"
   local recovery_timeout_seconds="${FAULT_INJECT_RECOVERY_TIMEOUT_SECONDS:-720}"
   local unquarantine_timeout_seconds="${FAULT_INJECT_UNQUARANTINE_TIMEOUT_SECONDS:-300}"
-  _SXID_NS="${nvs_ns}"
-  _SXID_POD_NAME="sxid-fault-inject-${RUN_ID}"
+  _FAULT_INJECT_NS="${nvs_ns}"
+  _FAULT_INJECT_POD_NAME="fault-inject-${RUN_ID}"
 
   # Read before injecting: a recipe that cannot be read must fail the phase,
   # not inject a fault and then skip the stages that would have acted on it.
   local mode
   if ! mode="$(uat_nvsentinel_remediation_mode bundle/recipe.yaml)"; then
-    ctrf_add sxidfault-detect failed 0 "could not read the deployed recipe's NVSentinel remediation step"
+    ctrf_add faultinject-detect failed 0 "could not read the deployed recipe's NVSentinel remediation step"
     return 1
   fi
   echo "NVSentinel remediation step in the deployed recipe: ${mode}"
@@ -174,7 +174,7 @@ _sxid_fault_inject_impl() {
       cat /tmp/breaker-err.log >&2
       echo "::error::could not read circuit-breaker ConfigMap ${breaker_cm} in ${nvs_ns} (see above); failing closed rather than assuming the breaker is clear" >&2
       rm -f /tmp/breaker-err.log
-      ctrf_add sxidfault-detect failed 0 "circuit-breaker precheck failed closed"
+      ctrf_add faultinject-detect failed 0 "circuit-breaker precheck failed closed"
       return 1
     fi
   else
@@ -183,14 +183,14 @@ _sxid_fault_inject_impl() {
     if (( breaker_jq_rc != 0 )); then
       echo "::error::could not parse circuit-breaker ConfigMap ${breaker_cm} JSON in ${nvs_ns}; failing closed rather than assuming the breaker is clear" >&2
       rm -f /tmp/breaker-err.log
-      ctrf_add sxidfault-detect failed 0 "circuit-breaker precheck failed closed (unparseable JSON)"
+      ctrf_add faultinject-detect failed 0 "circuit-breaker precheck failed closed (unparseable JSON)"
       return 1
     fi
     echo "circuit-breaker ${breaker_cm}.${breaker_field}=${breaker_state}"
     if [[ "${breaker_state}" == "TRIPPED" ]]; then
       echo "::error::fault-quarantine circuit breaker is TRIPPED; refusing to inject another fault" >&2
       rm -f /tmp/breaker-err.log
-      ctrf_add sxidfault-detect failed 0 "circuit breaker TRIPPED"
+      ctrf_add faultinject-detect failed 0 "circuit breaker TRIPPED"
       return 1
     fi
   fi
@@ -206,7 +206,7 @@ _sxid_fault_inject_impl() {
     | .metadata.name')"
   if [[ -z "${candidates}" ]]; then
     echo "::error::no Ready, uncordoned, GPU-labeled (${node_selector}) node found; cannot run fault injection" >&2
-    ctrf_add sxidfault-detect failed 0 "no eligible GPU node"
+    ctrf_add faultinject-detect failed 0 "no eligible GPU node"
     return 1
   fi
 
@@ -224,7 +224,7 @@ _sxid_fault_inject_impl() {
   done
   if [[ -z "${node}" ]]; then
     echo "::error::no candidate node has a Ready syslog-health-monitor pod; cannot run fault injection" >&2
-    ctrf_add sxidfault-detect failed 0 "no node with a Ready syslog-health-monitor pod"
+    ctrf_add faultinject-detect failed 0 "no node with a Ready syslog-health-monitor pod"
     return 1
   fi
   echo "selected node: ${node}"
@@ -232,19 +232,19 @@ _sxid_fault_inject_impl() {
   local pre_state
   if ! pre_state="$(kubectl get node "${node}" -o jsonpath="{.status.conditions[?(@.type==\"${condition}\")].status}")"; then
     echo "::error::could not read ${condition} on ${node} before injection; refusing to proceed on an unconfirmed baseline" >&2
-    ctrf_add sxidfault-detect failed 0 "could not read pre-injection node condition"
+    ctrf_add faultinject-detect failed 0 "could not read pre-injection node condition"
     return 1
   fi
   if [[ "${pre_state}" == "True" ]]; then
     echo "::error::${node} already carries ${condition}=True before injection; a pre-existing condition cannot produce a trustworthy pass" >&2
-    ctrf_add sxidfault-detect failed 0 "${node} already carried ${condition}=True before injection"
+    ctrf_add faultinject-detect failed 0 "${node} already carried ${condition}=True before injection"
     return 1
   fi
 
   local pre_boot_id
   if ! pre_boot_id="$(kubectl get node "${node}" -o jsonpath='{.status.nodeInfo.bootID}')" || [[ -z "${pre_boot_id}" ]]; then
     echo "::error::could not read ${node}'s bootID before injection; refusing to proceed on an unconfirmed baseline" >&2
-    ctrf_add sxidfault-detect failed 0 "could not read pre-injection bootID"
+    ctrf_add faultinject-detect failed 0 "could not read pre-injection bootID"
     return 1
   fi
   echo "::endgroup::"
@@ -263,10 +263,10 @@ _sxid_fault_inject_impl() {
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ${_SXID_POD_NAME}
+  name: ${_FAULT_INJECT_POD_NAME}
   namespace: ${nvs_ns}
   labels:
-    app.kubernetes.io/name: sxid-fault-inject
+    app.kubernetes.io/name: fault-inject
     app.kubernetes.io/part-of: aicr-uat
 spec:
   nodeName: ${node}
@@ -289,26 +289,26 @@ spec:
         path: /
 MANIFEST
 
-  kubectl wait pod "${_SXID_POD_NAME}" -n "${nvs_ns}" --for=condition=Ready --timeout=120s &
+  kubectl wait pod "${_FAULT_INJECT_POD_NAME}" -n "${nvs_ns}" --for=condition=Ready --timeout=120s &
   wait $!
   if [[ $? -ne 0 ]]; then
     echo "::error::fault-injection debug pod did not become Ready" >&2
-    kubectl describe pod "${_SXID_POD_NAME}" -n "${nvs_ns}" || true
-    ctrf_add sxidfault-detect failed 0 "debug pod never became Ready"
+    kubectl describe pod "${_FAULT_INJECT_POD_NAME}" -n "${nvs_ns}" || true
+    ctrf_add faultinject-detect failed 0 "debug pod never became Ready"
     return 1
   fi
 
   local kmsg_line="<3>[6085126.134786] NVRM: Xid (PCI:0002:00:00): 79, pid=1582259, name=nvc:[driver], GPU has fallen off the bus."
-  if ! kubectl exec "${_SXID_POD_NAME}" -n "${nvs_ns}" -- chroot /host sh -c "echo '${kmsg_line}' > /dev/kmsg"; then
+  if ! kubectl exec "${_FAULT_INJECT_POD_NAME}" -n "${nvs_ns}" -- chroot /host sh -c "echo '${kmsg_line}' > /dev/kmsg"; then
     echo "::error::failed to write synthetic XID to ${node}'s /dev/kmsg" >&2
-    ctrf_add sxidfault-detect failed 0 "could not write to ${node}'s /dev/kmsg"
+    ctrf_add faultinject-detect failed 0 "could not write to ${node}'s /dev/kmsg"
     return 1
   fi
   echo "wrote synthetic XID 79 to ${node}:/dev/kmsg"
   # The pod has done its job. Left running, it is a user pod node-drainer
   # waits on before janitor may reboot the node, which would hold Stage 3 for
   # up to its 300s sleep. The finalize step deletes it again on every exit.
-  kubectl delete pod "${_SXID_POD_NAME}" -n "${nvs_ns}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kubectl delete pod "${_FAULT_INJECT_POD_NAME}" -n "${nvs_ns}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   echo "::endgroup::"
 
   echo "::group::Stage 1 -- wait for ${condition}=True"
@@ -329,15 +329,15 @@ MANIFEST
 
   if [[ "${state}" != "True" ]]; then
     echo "::error::${condition} did not appear on ${node} within ${detect_timeout_seconds}s of injection -- a missing signal is a FAIL, not a pass" >&2
-    ctrf_add sxidfault-detect failed "$(( waited * 1000 ))" "${condition} never reached True"
+    ctrf_add faultinject-detect failed "$(( waited * 1000 ))" "${condition} never reached True"
     return 1
   fi
   echo "Stage 1 (detection) OK: ${node} carries ${condition}=True ${waited}s after injection"
-  ctrf_add sxidfault-detect passed "$(( waited * 1000 ))" ""
+  ctrf_add faultinject-detect passed "$(( waited * 1000 ))" ""
 
   if [[ "${mode}" == "none" ]]; then
     echo "Stage 2 (quarantine) SKIPPED: the deployed recipe composes neither nvsentinel-quarantine nor nvsentinel-remediation"
-    ctrf_add sxidfault-quarantine skipped 0 "fault quarantine not enabled"
+    ctrf_add faultinject-quarantine skipped 0 "fault quarantine not enabled"
   else
     echo "::group::Stage 2 -- wait for ${node} to be cordoned"
     local qwaited=0 cordoned=false
@@ -355,16 +355,16 @@ MANIFEST
     echo "::endgroup::"
     if [[ "${cordoned}" != "true" ]]; then
       echo "::error::${node} was not cordoned within ${quarantine_timeout_seconds}s of ${condition}=True, with fault quarantine enabled -- a missing quarantine is a FAIL" >&2
-      ctrf_add sxidfault-quarantine failed "$(( qwaited * 1000 ))" "${node} was never cordoned"
+      ctrf_add faultinject-quarantine failed "$(( qwaited * 1000 ))" "${node} was never cordoned"
       return 1
     fi
     echo "Stage 2 (quarantine) OK: ${node} cordoned ${qwaited}s after detection"
-    ctrf_add sxidfault-quarantine passed "$(( qwaited * 1000 ))" ""
+    ctrf_add faultinject-quarantine passed "$(( qwaited * 1000 ))" ""
   fi
 
   if [[ "${mode}" != "remediation" ]]; then
     echo "Stage 3 (recovery) SKIPPED: the deployed recipe does not compose nvsentinel-remediation, so nothing repairs the node"
-    ctrf_add sxidfault-recovery skipped 0 "janitor-driven recovery not enabled"
+    ctrf_add faultinject-recovery skipped 0 "janitor-driven recovery not enabled"
   else
     echo "::group::Stage 3 -- wait for ${node}'s boot ID to change (reboot)"
     local rwaited=0 rebooted=false post_boot_id=""
@@ -383,7 +383,7 @@ MANIFEST
     echo "::endgroup::"
     if [[ "${rebooted}" != "true" ]]; then
       echo "::error::${node}'s boot ID did not change within ${recovery_timeout_seconds}s, with nvsentinel-remediation deployed -- a missing reboot is a FAIL" >&2
-      ctrf_add sxidfault-recovery failed "$(( rwaited * 1000 ))" "${node} never rebooted (boot ID unchanged)"
+      ctrf_add faultinject-recovery failed "$(( rwaited * 1000 ))" "${node} never rebooted (boot ID unchanged)"
       return 1
     fi
     echo "${node} rebooted ${rwaited}s after quarantine (boot ID ${pre_boot_id} -> ${post_boot_id})"
@@ -410,11 +410,11 @@ MANIFEST
     echo "::endgroup::"
     if [[ "${uncordoned}" != "true" ]]; then
       echo "::error::${node} rebooted but was still cordoned ${unquarantine_timeout_seconds}s later -- a node that never returns to service is a FAIL" >&2
-      ctrf_add sxidfault-recovery failed "$(( (rwaited + uwaited) * 1000 ))" "${node} rebooted but was never uncordoned"
+      ctrf_add faultinject-recovery failed "$(( (rwaited + uwaited) * 1000 ))" "${node} rebooted but was never uncordoned"
       return 1
     fi
     echo "Stage 3 (recovery) OK: ${node} rebooted and was uncordoned $(( rwaited + uwaited ))s after quarantine"
-    ctrf_add sxidfault-recovery passed "$(( (rwaited + uwaited) * 1000 ))" ""
+    ctrf_add faultinject-recovery passed "$(( (rwaited + uwaited) * 1000 ))" ""
   fi
 
   return 0

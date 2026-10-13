@@ -113,7 +113,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/platform-crd-map.sh"
 # Lives alongside this file in tests/uat/lib/.
 # shellcheck source=./cuj-dispatch.sh
 source "$(dirname "${BASH_SOURCE[0]}")/cuj-dispatch.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/sxid-fault-inject.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/fault-inject.sh"
 
 # Train-job knobs (overridable for local reproduction or future inference variant).
 TRAINJOB_NAMESPACE="${TRAINJOB_NAMESPACE:-kubeflow}"
@@ -437,7 +437,7 @@ inject_push_target() {
 
 # uat_compose_nvsentinel_mixin re-resolves recipe.yaml with the opt-in
 # NVSentinel mixin named by UAT_NVSENTINEL_MIXIN composed onto its leaf
-# overlay, so the sxidfault phase can run Stage 2 (nvsentinel-quarantine) or
+# overlay, so the faultinject phase can run Stage 2 (nvsentinel-quarantine) or
 # Stages 2 and 3 (nvsentinel-remediation) on real hardware (#2625). Unset is a
 # no-op: no shipped recipe composes either mixin.
 #
@@ -1942,7 +1942,7 @@ uat_main() {
 
   if [[ -z "${phase}" || -z "${config}" ]]; then
     echo "Usage: $0 <phase> <test-config.yaml>" >&2
-    echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
+    echo "Phases: prep | install | readiness | conformance | train | serve | verify | faultinject | debug | all" >&2
     exit 2
   fi
 
@@ -1962,7 +1962,7 @@ uat_main() {
     train)       phase_train ;;
     serve)       phase_serve ;;
     verify)      phase_verify ;;
-    sxidfault)   phase_sxid_fault_inject ;;
+    faultinject) phase_fault_inject ;;
     debug)
       # Refresh cloud credentials first (no-op on AWS/GCP; Azure redeems a fresh
       # federated session). A failure that surfaces after a long phase can leave a
@@ -2006,7 +2006,7 @@ uat_main() {
       ;;
     *)
       echo "unknown phase: ${phase}" >&2
-      echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
+      echo "Phases: prep | install | readiness | conformance | train | serve | verify | faultinject | debug | all" >&2
       exit 2
       ;;
   esac
