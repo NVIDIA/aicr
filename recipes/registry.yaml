@@ -361,11 +361,12 @@ components:
       # by discovery rather than assuming either one (#2593). v0.19.0 then made
       # drain wait for evicted pods to terminate rather than to be accepted, so
       # interrupts start later and an undrainable pod holds a node in
-      # in_progress without bound. Both boundaries carry transition records.
-      # v0.19.1 raises the interrupt pod's memory to 256Mi so the agent is not
-      # OOM-killed mid-reboot on 64K-page arm64 nodes (#3101). v0.20.0 refuses
-      # to start on a runtime-required taint key with a DNS prefix or over 53
-      # characters (#3207). The legacy skyhook.nvidia.com group, taint key, and
+      # in_progress without bound. v0.19.1 raises the interrupt pod's memory to
+      # 256Mi so the agent is not OOM-killed mid-reboot on 64K-page arm64 nodes
+      # (#3101). v0.20.0 refuses to start on a runtime-required taint key with a
+      # DNS prefix or over 53 characters, and stops releasing cordons it did not
+      # place (#3207). Every boundary here carries a transition record.
+      # The legacy skyhook.nvidia.com group, taint key, and
       # metrics remain served through v0.20.x and are removed in v0.21.0, which
       # is not reachable until the remaining skyhook.nvidia.com references in
       # health checks and overlays are migrated.
