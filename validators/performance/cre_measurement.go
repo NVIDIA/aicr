@@ -159,6 +159,25 @@ func waitForFinalMeasurements(
 // errWatchRestart asks waitForFinalMeasurements to re-list and watch again.
 var errWatchRestart = stderrors.New("watch closed")
 
+// measurementDeleted reports whether a deletion ends the wait. CRE never
+// deletes a measurement itself — the Workflow owns them through an
+// OwnerReference — so one this run owns disappearing before it was finalized
+// means the Workflow is being garbage-collected under the check, and the
+// remaining measurements describe a partial sweep. A measurement already read
+// as final is kept: the object going away does not unmake the reading.
+func measurementDeleted(byName map[string]*unstructured.Unstructured, name, kind string) error {
+	obj, tracked := byName[name]
+	if !tracked {
+		return nil
+	}
+	if reason, _, complete := measurementCompletion(obj); complete && reason == measurementReasonJobSucceeded {
+		return nil
+	}
+	delete(byName, name)
+	return aicrErrors.New(aicrErrors.ErrCodeInternal,
+		fmt.Sprintf("%s %s was deleted before CRE finalized it", kind, name))
+}
+
 func watchUntilFinal(
 	ctx context.Context,
 	client dynamic.Interface,
@@ -194,7 +213,9 @@ func watchUntilFinal(
 				continue
 			}
 			if event.Type == watch.Deleted {
-				delete(byName, obj.GetName())
+				if err := measurementDeleted(byName, obj.GetName(), kind); err != nil {
+					return err
+				}
 				continue
 			}
 			if !measurementBelongsToRun(obj, workflowName, createdAt) {

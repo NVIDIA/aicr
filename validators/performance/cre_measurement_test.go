@@ -368,6 +368,63 @@ func TestListMaxBusBandwidthWaitsForEveryMeasurement(t *testing.T) {
 	}
 }
 
+// A measurement disappearing mid-wait is the Workflow being collected under
+// the check, since CRE never deletes one itself. The wait has to end there
+// rather than ride out the finalize budget and then read whatever survived.
+func TestMeasurementDeleted(t *testing.T) {
+	tests := []struct {
+		name      string
+		tracked   map[string]any
+		deleteKey string
+		wantErr   bool
+		wantKept  bool
+	}{
+		{
+			name:      "untracked name belongs to another run",
+			tracked:   final(busBWStatus("300")),
+			deleteKey: "other",
+			wantKept:  true,
+		},
+		{
+			name:      "already final, the reading stands",
+			tracked:   final(busBWStatus("300")),
+			deleteKey: "m-1",
+			wantKept:  true,
+		},
+		{
+			name:      "still provisional",
+			tracked:   busBWStatus("300"),
+			deleteKey: "m-1",
+			wantErr:   true,
+		},
+		{
+			name:      "completed without usable results",
+			tracked:   completedWith(busBWStatus("300"), "LogsUnavailable"),
+			deleteKey: "m-1",
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			byName := map[string]*unstructured.Unstructured{
+				"m-1": creMeasurement("BandwidthMeasurement", "m-1", creTestWorkflow, time.Minute, tt.tracked),
+			}
+
+			err := measurementDeleted(byName, tt.deleteKey, "BandwidthMeasurement")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("measurementDeleted() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if _, kept := byName["m-1"]; kept != tt.wantKept {
+				t.Errorf("m-1 retained = %v, want %v", kept, tt.wantKept)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), "deleted before CRE finalized it") {
+				t.Errorf("error does not name the cause: %v", err)
+			}
+		})
+	}
+}
+
 func TestMeasurementCompletion(t *testing.T) {
 	tests := []struct {
 		name         string
