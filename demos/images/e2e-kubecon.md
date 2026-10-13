@@ -22,7 +22,7 @@ Caption: "Generate hardware-specific optimizations for workload intent"
 
 **Step 2 - BUNDLE**
 Icon: Shipping box with a GitOps logo
-Command: `aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundle --attest`
+Command: `aicr bundle --recipe recipe.yaml --deployer argocd --repo <gitops-repo-url> --output ./bundle --attest`
 Visual: The recipe transforms into deployment-ready artifacts:
 
 ```shell
@@ -66,6 +66,7 @@ Benefits (icon + two to four words each):
 - Flow: Problem (standalone) → 4-step workflow chain → Outcome
 - Step order is fixed and must be numbered in the image exactly as above: 1 Recipe (top-left), 2 Bundle (top-right), 3 Deploy (bottom-left), 4 Validate (bottom-right). Validate is the last step; it never precedes Bundle or Deploy
 - No header bar, title text, or logo inside the image: the hosting slide carries the title and the conference branding
+- `--repo` is the Git repository the bundle will be committed to; Argo CD Applications embed it, and it must be set before `--attest` signs the inventory
 - Exactly one command per step, rendered in a terminal overlay; copy the commands above character for character and do not invent flags
 - Terminal overlays: light text on the dark panel with strong contrast; dim grey on navy is not acceptable
 - Minimum text size: every caption and command must stay legible when the whole image is projected at 1600 px wide. Prefer fewer, larger labels; if a command does not fit on two lines at that size, drop the Step 1 `--os` and `--platform` flags before shrinking the font
