@@ -16,6 +16,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,6 +89,7 @@ func TestRenderIsDeterministic(t *testing.T) {
 	doc := &closure{
 		Component:     "nvcre",
 		SourceVersion: "v0.2.0",
+		SourceCommit:  "0123456789abcdef0123456789abcdef01234567",
 		Platform:      "aws",
 		Architecture:  "h100",
 		Entries:       []string{"communication/nccl-all-reduce"},
@@ -119,6 +121,89 @@ func TestRenderIsDeterministic(t *testing.T) {
 	if !strings.Contains(out, "sha256:aa") || !strings.Contains(out, "sha256:bb") {
 		t.Errorf("rendered output dropped an image digest:\n%s", out)
 	}
+	if !strings.Contains(out, "sourceCommit: "+doc.SourceCommit) {
+		t.Errorf("rendered output dropped the source commit:\n%s", out)
+	}
+	if !strings.Contains(out, "workloads pull by tag, not by digest") {
+		t.Errorf("rendered header no longer states that the workloads pull by tag:\n%s", out)
+	}
+}
+
+// gitRepo returns a new repository dir whose single commit, commit, adds
+// entries/a.yaml.
+func gitRepo(t *testing.T) (dir, commit string) {
+	t.Helper()
+	dir = t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
+		// Isolated from the caller's git configuration and hooks.
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "--quiet", "--template=")
+	if err := os.MkdirAll(filepath.Join(dir, "entries"), 0o750); err != nil {
+		t.Fatalf("mkdir entries: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "entries", "a.yaml"), []byte("dependencies: []\n"), 0o600); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+	git("add", ".")
+	git("-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "fixture")
+	return dir, git("rev-parse", "HEAD")
+}
+
+func TestSourceCommit(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clean checkout records HEAD", func(t *testing.T) {
+		t.Parallel()
+
+		dir, want := gitRepo(t)
+		got, err := sourceCommit(t.Context(), filepath.Join(dir, "entries"))
+		if err != nil {
+			t.Fatalf("sourceCommit: %v", err)
+		}
+		if got != want {
+			t.Errorf("sourceCommit = %q, want %q", got, want)
+		}
+	})
+
+	// An edit under the entries directory means HEAD no longer describes the
+	// files read.
+	for _, tt := range []struct {
+		name string
+		path string
+	}{
+		{"modified tracked file", "a.yaml"},
+		{"untracked file", "b.yaml"},
+	} {
+		t.Run(tt.name+" is rejected", func(t *testing.T) {
+			t.Parallel()
+
+			dir, _ := gitRepo(t)
+			entries := filepath.Join(dir, "entries")
+			if err := os.WriteFile(filepath.Join(entries, tt.path), []byte("image: x\n"), 0o600); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			if _, err := sourceCommit(t.Context(), entries); err == nil {
+				t.Error("sourceCommit on a dirty catalog = nil error, want rejection")
+			}
+		})
+	}
+
+	t.Run("directory outside a git checkout is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		if _, err := sourceCommit(t.Context(), dir); err == nil {
+			t.Error("sourceCommit outside a checkout = nil error, want rejection")
+		}
+	})
 }
 
 func TestDedupeFetches(t *testing.T) {
