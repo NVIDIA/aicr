@@ -85,6 +85,7 @@ jobs:
       renovate: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.renovate }}
       settings: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.settings }}
       bom: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.bom }}
+      nvcre: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.nvcre }}
       tuning: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.tuning }}
       notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
       coverage: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.coverage }}
@@ -175,6 +176,18 @@ jobs:
               - 'recipes/components/*/values.yaml'
               - 'tools/bom/**'
               - 'pkg/bom/**'
+            nvcre:
+              # The NVCRE wiring guard reads the "Enabling NVCRE" fragment out
+              # of the component catalog and resolves it against the real
+              # overlay, mixins and registry. The `tests` job already runs it
+              # on any code change, but the fragment itself lives in docs/, and
+              # a docs-only PR yields code=false and skips `tests` — so an edit
+              # that breaks the documented wiring would merge green. The guard
+              # test is listed too so renaming it re-runs the check rather than
+              # silently disarming this gate.
+              - 'docs/user/component-catalog.md'
+              - 'pkg/recipe/nvcre_wiring_guard_test.go'
+              - 'recipes/components/nvcre/**'
             tuning:
               # Inputs that can change the committed tuning-status table
               # WITHOUT tripping pkg/tuning's TestCompute_Structure — which runs
@@ -686,6 +699,51 @@ jobs:
       - run: echo "No BOM/registry changes — BOM freshness check not required"
 
   # ---------------------------------------------------------------------------
+  # NVCRE documented-wiring guard — ensures the "Enabling NVCRE" fragment in
+  # docs/user/component-catalog.md still resolves to a working wiring, on
+  # docs-only PRs that skip the `tests` job (mirrors bom-freshness).
+  # ---------------------------------------------------------------------------
+
+  nvcre-wiring:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.nvcre == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+      - name: Verify the documented NVCRE wiring still resolves
+        # `go test -run <name>` exits 0 with "no tests to run" if a test is
+        # renamed or removed, which would let this gate silently no-op. Assert
+        # the named test actually executed by requiring its PASS line.
+        run: |
+          set -uo pipefail
+          out=$(go test ./pkg/recipe/... -run '^TestNVCREDocumentedWiringResolves$' -v -count=1 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          if ! grep -q "^--- PASS: TestNVCREDocumentedWiringResolves" <<<"$out"; then
+            echo "::error::TestNVCREDocumentedWiringResolves did not execute (renamed or removed?); the NVCRE wiring gate would silently pass. Update this job to run the guard."
+            exit 1
+          fi
+
+  nvcre-wiring-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.nvcre != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No NVCRE wiring inputs changed — wiring guard not required"
+
+  # ---------------------------------------------------------------------------
   # Tuning-status doc freshness — ensures the committed tuning table in
   # docs/integrator/components/nodewright.md matches the recipe catalog and the
   # nodewright package pins, on PRs touching its inputs (mirrors bom-freshness).
@@ -838,6 +896,8 @@ jobs:
       - docs-mdx-skip
       - bom-freshness
       - bom-freshness-skip
+      - nvcre-wiring
+      - nvcre-wiring-skip
       - tuning-freshness
       - tuning-freshness-skip
       - notices-generator
