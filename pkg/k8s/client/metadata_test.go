@@ -400,7 +400,8 @@ func TestMetadataListClientStopsRetryingOnCancel(t *testing.T) {
 	c := metadataListServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
 		dropConnection(t, w)
-		cancel()
+		// Late enough that List is waiting to retry, not reading the response.
+		time.AfterFunc(100*time.Millisecond, cancel)
 	})
 	c.retryInterval = time.Hour
 
