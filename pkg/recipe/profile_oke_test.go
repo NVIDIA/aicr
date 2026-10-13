@@ -29,6 +29,77 @@ func okeCriteria() *Criteria {
 	}
 }
 
+// TestOKENetworkOperatorAddonGate checks that an OKE recipe requires the
+// NvidiaNetworkOperator add-on to be absent exactly when it deploys
+// network-operator.
+func TestOKENetworkOperatorAddonGate(t *testing.T) {
+	t.Parallel()
+
+	const gatePath = "K8s.oke-addons.nvidia-network-operator"
+	ol, ubuntu := CriteriaOSOracleLinux, CriteriaOSUbuntu
+	training, inference := CriteriaIntentTraining, CriteriaIntentInference
+	tests := []struct {
+		accelerator CriteriaAcceleratorType
+		os          CriteriaOSType
+		intent      CriteriaIntentType
+		platform    CriteriaPlatformType
+	}{
+		{CriteriaAcceleratorA100, ol, training, ""},
+		{CriteriaAcceleratorA100, ubuntu, training, ""},
+		{CriteriaAcceleratorA100, ubuntu, training, CriteriaPlatformKubeflow},
+		{CriteriaAcceleratorGB200, ol, inference, ""},
+		{CriteriaAcceleratorGB200, ol, training, ""},
+		{CriteriaAcceleratorGB200, ubuntu, inference, ""},
+		{CriteriaAcceleratorGB200, ubuntu, inference, CriteriaPlatformDynamo},
+		{CriteriaAcceleratorGB200, ubuntu, training, ""},
+		{CriteriaAcceleratorGB200, ubuntu, training, CriteriaPlatformKubeflow},
+		{CriteriaAcceleratorL40S, ol, inference, ""},
+		{CriteriaAcceleratorL40S, ol, training, ""},
+		{CriteriaAcceleratorL40S, ol, training, CriteriaPlatformKubeflow},
+	}
+
+	var gated int
+	for _, tt := range tests {
+		criteria := &Criteria{
+			Service:     CriteriaServiceOKE,
+			Accelerator: tt.accelerator,
+			OS:          tt.os,
+			Intent:      tt.intent,
+			Platform:    tt.platform,
+		}
+		result, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), criteria, "")
+		if err != nil {
+			t.Fatalf("%s: BuildFromCriteriaWithProfile() failed: %v", criteria.String(), err)
+		}
+		deploysNetworkOperator := false
+		for _, ref := range result.ComponentRefs {
+			if ref.Name == "network-operator" {
+				deploysNetworkOperator = true
+			}
+		}
+		var gate *Constraint
+		for i := range result.Constraints {
+			if result.Constraints[i].Name == gatePath {
+				gate = &result.Constraints[i]
+			}
+		}
+		switch {
+		case deploysNetworkOperator && gate == nil:
+			t.Errorf("%s deploys network-operator without a %s constraint", criteria.String(), gatePath)
+		case deploysNetworkOperator && (gate.Value != "absent" || gate.Remediation == ""):
+			t.Errorf("%s: %s = %q (remediation set: %v), want absent with remediation",
+				criteria.String(), gatePath, gate.Value, gate.Remediation != "")
+		case !deploysNetworkOperator && gate != nil:
+			t.Errorf("%s gates %s but does not deploy network-operator", criteria.String(), gatePath)
+		case deploysNetworkOperator:
+			gated++
+		}
+	}
+	if gated == 0 {
+		t.Fatal("no OKE recipe deploys network-operator, so the gate invariant checked nothing")
+	}
+}
+
 // TestOKEGpuStackProfileResolution pins the OKE family conversion: the
 // oke-ol overlay declares gpuStack with default oci-managed (the
 // Oracle-managed cluster — image driver + the NvidiaGpuPlugin add-on as

@@ -49,41 +49,46 @@ func TestProjectOKEAddons(t *testing.T) {
 		name       string
 		content    string
 		wantPlugin string
+		wantNNO    string
 		wantCount  int
 		wantErr    bool
 	}{
 		{
-			name: "add-on ACTIVE → installed (oci-managed shape)",
+			name: "add-on ACTIVE -> installed (oci-managed shape)",
 			content: `{"data": [
 				{"name": "CoreDNS", "lifecycle-state": "ACTIVE"},
 				{"name": "NvidiaGpuPlugin", "lifecycle-state": "ACTIVE"}
 			]}`,
 			wantPlugin: "installed",
+			wantNNO:    "absent",
 			wantCount:  2,
 		},
 		{
 			// The terraform-oci-okecluster shape: NvidiaGpuPlugin removed at
 			// creation, only system add-ons remain.
-			name:       "add-on absent → absent (operator-managed shape)",
+			name:       "add-on absent -> absent (operator-managed shape)",
 			content:    dgxcShaped,
 			wantPlugin: "absent",
+			wantNNO:    "absent",
 			wantCount:  3,
 		},
 		{
 			// Mid-delete must qualify NEITHER ownership mode.
-			name: "add-on DELETING → fail-closed marker naming the state",
+			name: "add-on DELETING -> fail-closed marker naming the state",
 			content: `{"data": [
 				{"name": "NvidiaGpuPlugin", "lifecycle-state": "DELETING"}
 			]}`,
 			wantPlugin: "addon-deleting",
+			wantNNO:    "absent",
 			wantCount:  1,
 		},
 		{
-			name: "add-on NEEDS_ATTENTION → fail-closed marker",
+			name: "add-on NEEDS_ATTENTION -> fail-closed marker",
 			content: `{"data": [
 				{"name": "NvidiaGpuPlugin", "lifecycle-state": "NEEDS_ATTENTION"}
 			]}`,
 			wantPlugin: "addon-needs_attention",
+			wantNNO:    "absent",
 			wantCount:  1,
 		},
 		{
@@ -91,17 +96,40 @@ func TestProjectOKEAddons(t *testing.T) {
 			// canonical casing and AICR must not silently miss a variant.
 			name: "case-insensitive add-on name and state",
 			content: `{"data": [
-				{"name": "nvidiagpuplugin", "lifecycle-state": "active"}
+				{"name": "nvidiagpuplugin", "lifecycle-state": "active"},
+				{"name": "nvidianetworkoperator", "lifecycle-state": "active"}
 			]}`,
 			wantPlugin: "installed",
+			wantNNO:    "installed",
+			wantCount:  2,
+		},
+		{
+			name: "network operator add-on ACTIVE -> installed",
+			content: `{"data": [
+				{"name": "NvidiaGpuPlugin", "lifecycle-state": "ACTIVE"},
+				{"name": "NvidiaNetworkOperator", "lifecycle-state": "ACTIVE"}
+			]}`,
+			wantPlugin: "installed",
+			wantNNO:    "installed",
+			wantCount:  2,
+		},
+		{
+			// A CREATING add-on reconciles NicClusterPolicy once ready.
+			name: "network operator add-on CREATING -> fail-closed marker",
+			content: `{"data": [
+				{"name": "NvidiaNetworkOperator", "lifecycle-state": "CREATING"}
+			]}`,
+			wantPlugin: "absent",
+			wantNNO:    "addon-creating",
 			wantCount:  1,
 		},
 		{
 			// A live OKE cluster always reports system add-ons; an empty
 			// data array is a plausible dump, projecting absent.
-			name:       "empty data array → absent",
+			name:       "empty data array -> absent",
 			content:    `{"data": []}`,
 			wantPlugin: "absent",
+			wantNNO:    "absent",
 			wantCount:  0,
 		},
 		{
@@ -139,6 +167,9 @@ func TestProjectOKEAddons(t *testing.T) {
 			}
 			if got := subtype.Data["nvidia-gpu-plugin"].Any(); got != tt.wantPlugin {
 				t.Errorf("nvidia-gpu-plugin = %v, want %q", got, tt.wantPlugin)
+			}
+			if got := subtype.Data["nvidia-network-operator"].Any(); got != tt.wantNNO {
+				t.Errorf("nvidia-network-operator = %v, want %q", got, tt.wantNNO)
 			}
 			if got := subtype.Data["addon-count"].Any(); got != tt.wantCount {
 				t.Errorf("addon-count = %v, want %d", got, tt.wantCount)

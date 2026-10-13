@@ -33,6 +33,17 @@ spec:
   constraints:
     - name: K8s.server.version
       value: ">= 1.32"
+    - name: K8s.oke-addons.nvidia-network-operator
+      value: absent
+      remediation: >-
+        Oracle's NvidiaNetworkOperator cluster add-on is present on this
+        cluster, but this recipe deploys AICR's network-operator component,
+        and two controllers would reconcile the same NicClusterPolicy. Remove
+        the add-on with `oci ce cluster disable-addon --cluster-id
+        <cluster-ocid> --addon-name NvidiaNetworkOperator
+        --is-remove-existing-add-on true`, then recapture the snapshot with
+        aicr snapshot --oke-addons <path to `oci ce cluster list-addons
+        --cluster-id <cluster-ocid> --all --output json` dump>.
 
   componentRefs:
     # L40S-specific GPU Operator overrides (inherits valuesFile from oke-training).
@@ -64,7 +75,8 @@ spec:
     # nvidia-peermem stays off (base default) — inert on this topology.
     # Present in every gpuStack value: the fabric is orthogonal to GPU
     # driver/plugin ownership. Incompatible with Oracle's opt-in
-    # NvidiaNetworkOperator add-on (two lifecycle managers, one release).
+    # NvidiaNetworkOperator add-on (two lifecycle managers, one release),
+    # which the K8s.oke-addons.nvidia-network-operator constraint rejects.
     - name: network-operator
       type: Helm
       valuesFile: components/network-operator/values-oke-l40s.yaml

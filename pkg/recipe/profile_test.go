@@ -742,6 +742,9 @@ func TestProfileResolutionGuards(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "removed by snapshot constraint filtering") {
 			t.Fatalf("BuildRecipeResultWithEvaluator() error = %v, want survival failure", err)
 		}
+		if want := "failed constraints [owner signal (expected installed, got operator)]"; !strings.Contains(err.Error(), want) {
+			t.Fatalf("BuildRecipeResultWithEvaluator() error = %v, want it to name %q", err, want)
+		}
 	})
 
 	t.Run("selected constraints fail closed", func(t *testing.T) {

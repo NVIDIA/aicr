@@ -147,6 +147,21 @@ itself, and two lifecycle managers fight over the same releases. The only
 Oracle GPU add-on compatible with AICR bundles is the device plugin
 (`NvidiaGpuPlugin`), and only under `oci-managed`.
 
+The recipes that deploy `network-operator` (`gb200-oke-training`,
+`l40s-oke-training`, and their descendants) enforce this for
+`NvidiaNetworkOperator`. They require the
+`K8s.oke-addons.nvidia-network-operator` reading from the same
+`--oke-addons` dump to be `absent`, so a cluster with the add-on fails
+recipe generation and the `aicr validate` pre-flight. Remove the add-on
+before deploying:
+
+```shell
+CLUSTER_ID="ocid1.cluster.oc1.iad.aaaaaaaaexample"  # replace with your OKE cluster OCID
+
+oci ce cluster disable-addon --cluster-id "${CLUSTER_ID}" \
+  --addon-name NvidiaNetworkOperator --is-remove-existing-add-on true
+```
+
 ## References
 
 - [OKE: Running GPU Workloads](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contengrunninggpunodes.htm)
