@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -326,11 +327,24 @@ func creCleanupFailure(label string, primary, deleteErr error) error {
 		return primary
 	}
 	slog.Warn("CRE Certification teardown failed", "check", label, "error", deleteErr)
-	if primary != nil {
-		return primary
+	if primary == nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			label+" workloads may still be running: teardown could not be confirmed", deleteErr)
 	}
-	return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
-		label+" workloads may still be running: teardown could not be confirmed", deleteErr)
+
+	// Both failed. The primary error keeps its code, because that is what
+	// callers and exit codes switch on, and stays in the Unwrap chain so a
+	// code buried in it still matches. But a leak the operator never hears
+	// about keeps GPU nodes busy, so the teardown failure — which is what
+	// names the objects that survived — goes in the message rather than
+	// living only in the log.
+	code := aicrErrors.ErrCodeInternal
+	if structured, ok := stderrors.AsType[*aicrErrors.StructuredError](primary); ok {
+		code = structured.Code
+	}
+	return aicrErrors.WrapWithContext(code,
+		label+" workloads may still be running: "+deleteErr.Error(), primary,
+		map[string]any{"cleanupError": deleteErr.Error()})
 }
 
 // deleteCRECertification removes a Certification under its own delete budget.

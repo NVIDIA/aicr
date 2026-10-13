@@ -663,6 +663,7 @@ func TestCreCleanupFailure(t *testing.T) {
 		deleteErr error
 		wantCode  error
 		wantMsg   string
+		wantAlso  string
 	}{
 		{
 			name: "clean run and clean teardown pass",
@@ -680,11 +681,15 @@ func TestCreCleanupFailure(t *testing.T) {
 			wantMsg:  "no GoodputMeasurement",
 		},
 		{
-			name:      "primary error wins over a teardown failure",
+			// The primary error keeps the code, but the operator still has to
+			// learn the GPUs may be held: a timed-out run that reported only
+			// the timeout left the leak invisible.
+			name:      "primary error keeps its code and carries the leak",
 			primary:   primary,
 			deleteErr: deleteErr,
 			wantCode:  errors.New(errors.ErrCodeNotFound, ""),
-			wantMsg:   "no GoodputMeasurement",
+			wantMsg:   "finalizer still held",
+			wantAlso:  "no GoodputMeasurement",
 		},
 	}
 	for _, tt := range tests {
@@ -704,6 +709,9 @@ func TestCreCleanupFailure(t *testing.T) {
 			}
 			if !strings.Contains(got.Error(), tt.wantMsg) {
 				t.Errorf("error = %q, want it to contain %q", got.Error(), tt.wantMsg)
+			}
+			if tt.wantAlso != "" && !strings.Contains(got.Error(), tt.wantAlso) {
+				t.Errorf("error = %q, want it to also contain %q", got.Error(), tt.wantAlso)
 			}
 		})
 	}
