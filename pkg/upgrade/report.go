@@ -45,9 +45,8 @@ type ReportOptions struct {
 	// all-clear. Copied for the reason Source is.
 	AtRisk *AtRiskReport
 
-	// Unproven names, per component, the cluster records that placed it when
-	// none could establish its version. NewReport copies each list onto that
-	// component's row.
+	// Unproven names, per component, the cluster records that left it
+	// unversioned. NewReport copies each list onto that component's row.
 	Unproven map[string][]ReportUnproven
 
 	// ObjectNamesCompared says the object-name axis was assessed, and
@@ -236,8 +235,8 @@ type ReportComponent struct {
 	// Notes is the one-line justification the table's last column shows.
 	Notes string `json:"notes,omitempty" yaml:"notes,omitempty"`
 
-	// Unproven names the cluster records that placed this component when
-	// none of them could establish its version.
+	// Unproven names the cluster records that left this component
+	// unversioned.
 	Unproven []ReportUnproven `json:"unproven,omitempty" yaml:"unproven,omitempty"`
 
 	// Reason is the stable code for why Verdict is what it is, and Explanation

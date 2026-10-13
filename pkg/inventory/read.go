@@ -142,9 +142,11 @@ type Result struct {
 	// no sentinel to invent.
 	Versions map[string]string
 
-	// Unproven names, per component, the records that placed it when none of
-	// them could establish a version. A component unversioned by a record
-	// that was read, such as a failed Helm release, has no entry.
+	// Unproven names, per component, the records that left it unversioned.
+	// That is every record that placed it when none could establish a
+	// version, or the one chosen as its install when that one could not. A
+	// component unversioned by a record that was read, such as a failed Helm
+	// release, has no entry.
 	Unproven map[string][]UnprovenRecord
 
 	// Source is what was read and what was skipped.
@@ -494,14 +496,11 @@ func installedVersions(d Deployer, comps []Component, records []installedRelease
 		if len(found) == 0 {
 			continue
 		}
-		// Present with no version, which fails the run: there is no install
+		// Present with no version, which fails the run. There is no install
 		// to choose between when none of them establishes one.
 		if allUnproven(found) {
 			out.versions[comps[i].Name] = ""
-			if out.unproven == nil {
-				out.unproven = make(map[string][]UnprovenRecord)
-			}
-			out.unproven[comps[i].Name] = unprovenRecords(found)
+			out.markUnproven(comps[i].Name, found)
 
 			continue
 		}
@@ -510,9 +509,20 @@ func installedVersions(d Deployer, comps []Component, records []installedRelease
 			return mapping{}, err
 		}
 		out.versions[comps[i].Name] = versionFor(record, comps[i])
+		if record.Unproven {
+			out.markUnproven(comps[i].Name, []installedRelease{record})
+		}
 	}
 
 	return out, nil
+}
+
+// markUnproven names records as the ones that left component unversioned.
+func (m *mapping) markUnproven(component string, records []installedRelease) {
+	if m.unproven == nil {
+		m.unproven = make(map[string][]UnprovenRecord)
+	}
+	m.unproven[component] = unprovenRecords(records)
 }
 
 // unprovenRecords names records none of which could version their component,

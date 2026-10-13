@@ -601,6 +601,20 @@ func TestInstalledVersions(t *testing.T) {
 			}},
 		},
 		{
+			name: "an unproven install chosen over a healthy tenant is named", deployer: DeployerHelm, comps: comps,
+			records: []installedRelease{
+				{
+					Source: sourceHelm, Name: "gpu-operator", Namespace: "nvidia-gpu-operator",
+					Unproven: true, UnprovenReason: UnprovenDualDriver,
+				},
+				helmRec("gpu-operator", "tenant-a", "deployed", "v24.9.0", nil),
+			},
+			want: map[string]string{"gpu-operator": ""},
+			wantUnproven: map[string][]UnprovenRecord{"gpu-operator": {
+				{Source: "helm", Name: "gpu-operator", Namespace: "nvidia-gpu-operator", Reason: UnprovenDualDriver},
+			}},
+		},
+		{
 			// The reader already counted it as unreadable.
 			name: "an unreadable flux record matched loosely is not counted unplaced", deployer: DeployerFlux,
 			comps: comps,
