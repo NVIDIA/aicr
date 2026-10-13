@@ -420,8 +420,9 @@ including a missing one, fails recipe generation and the `aicr validate`
 pre-flight, because the add-on and AICR's `network-operator` would both
 reconcile the same `NicClusterPolicy`.
 
-The constraint path is `K8s.oke-addons.nvidia-gpu-plugin` in profile value
-constraints; `K8s.oke-addons.addon-count` uses the same non-item path form.
+The constraint paths are `K8s.oke-addons.nvidia-gpu-plugin` in profile value
+constraints and `K8s.oke-addons.nvidia-network-operator` in recipe
+constraints. `K8s.oke-addons.addon-count` uses the same non-item path form.
 
 ## K8s gke-gpu-pools shape
 
