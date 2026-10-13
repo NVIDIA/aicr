@@ -94,53 +94,6 @@ whose fabric matches its hardware, or, for a private service whose fabric
 matches no embedded template, by
 [supplying its own benchmark runtime](#supplying-a-benchmark-runtime-for-a-private-service).
 
-### Cluster Readiness Engine checks
-
-An opt-in pair of Cluster Readiness Engine (CRE) checks runs against public CRE
-(`nvcre.nvidia.com`, [cluster-readiness-engine](https://github.com/NVIDIA/cluster-readiness-engine)).
-Neither check branches on service or accelerator; which combinations are
-qualified is recorded as data. Shipped overlays keep the TrainJob
-`nccl-all-reduce-bw` path, so nothing below runs unless you ask for it.
-
-Enabling a CRE check takes two steps and needs both. Add the `nvcre` component
-as described in
-[Enabling NVCRE](component-catalog.md#enabling-nvcre) — a bare component
-reference without that section's `valuesFile` and Trainer dependency hits the
-failures documented there — and then declare the check with a same-named
-constraint:
-
-```yaml
-validation:
-  performance:
-    checks:
-      - nccl-cre-all-reduce-bw
-      - cre-training-goodput
-    constraints:
-      - name: nccl-cre-all-reduce-bw
-        value: '>= 300'   # bus bandwidth in GB/s
-      - name: cre-training-goodput
-        value: '>= 0.5'   # ratio between 0 and 1, not a percentage
-```
-
-Both constraints are floors. The checks compare the measured value with `>=`
-and refuse any other operator rather than evaluating it as a floor anyway, so a
-constraint they cannot honor fails before any GPU work starts. Note the goodput
-units: the measurement is a ratio between 0 and 1, so a constraint written as a
-percentage (`>= 50`) can never be satisfied.
-
-| Check | What it measures | Qualified combinations |
-|---|---|---|
-| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100` |
-| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | none at present |
-
-The catalog entry each check drives, and the node footprint it runs on, come
-from the qualification record rather than the check: for
-`nccl-cre-all-reduce-bw` on `eks` x `h100`, `communication/nccl-all-reduce` on
-two nodes. A combination with no entry skips, because it has no calibrated
-threshold to judge against. `cre-training-goodput` skips everywhere today — the
-`training/nemotron5-8b` entry it drives does not run on the CRE version the
-registry pins, so declaring the check reports a skip rather than a verdict.
-
 On EKS, the `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
 (e.g. DGXC GB300 `p6e-gb300r`), set `AICR_NCCL_FABRIC=roce` in the `aicr
 validate` environment to run the NET test over NCCL's built-in IB/verbs
@@ -547,6 +500,53 @@ it into AICR is a copy: move the file into the repo, add the accelerator/service
 tuple to the compiled `supportedNCCLCombinations` matrix, and drop the
 `nccl-benchmark-runtime-ref` constraint — the benchmark then runs from the
 recipe's plain criteria like any other embedded one.
+
+### Cluster Readiness Engine checks
+
+An opt-in pair of Cluster Readiness Engine (CRE) checks runs against public CRE
+(`nvcre.nvidia.com`, [cluster-readiness-engine](https://github.com/NVIDIA/cluster-readiness-engine)).
+Neither check branches on service or accelerator; which combinations are
+qualified is recorded as data. Shipped overlays keep the TrainJob
+`nccl-all-reduce-bw` path, so nothing below runs unless you ask for it.
+
+Enabling a CRE check takes two steps and needs both. Add the `nvcre` component
+as described in
+[Enabling NVCRE](component-catalog.md#enabling-nvcre) — a bare component
+reference without that section's `valuesFile` and Trainer dependency hits the
+failures documented there — and then declare the check with a same-named
+constraint:
+
+```yaml
+validation:
+  performance:
+    checks:
+      - nccl-cre-all-reduce-bw
+      - cre-training-goodput
+    constraints:
+      - name: nccl-cre-all-reduce-bw
+        value: '>= 300'   # bus bandwidth in GB/s
+      - name: cre-training-goodput
+        value: '>= 0.5'   # ratio between 0 and 1, not a percentage
+```
+
+Both constraints are floors. The checks compare the measured value with `>=`
+and refuse any other operator rather than evaluating it as a floor anyway, so a
+constraint they cannot honor fails before any GPU work starts. Note the goodput
+units: the measurement is a ratio between 0 and 1, so a constraint written as a
+percentage (`>= 50`) can never be satisfied.
+
+| Check | What it measures | Qualified combinations |
+|---|---|---|
+| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100` |
+| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | none at present |
+
+The catalog entry each check drives, and the node footprint it runs on, come
+from the qualification record rather than the check: for
+`nccl-cre-all-reduce-bw` on `eks` x `h100`, `communication/nccl-all-reduce` on
+two nodes. A combination with no entry skips, because it has no calibrated
+threshold to judge against. `cre-training-goodput` skips everywhere today — the
+`training/nemotron5-8b` entry it drives does not run on the CRE version the
+registry pins, so declaring the check reports a skip rather than a verdict.
 
 ## Inference performance validation
 
