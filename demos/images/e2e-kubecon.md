@@ -16,7 +16,7 @@ Caption: "Config complexity: manual errors, drift, version mismatches"
 **Step 1 - RECIPE**
 Icon: Mixing bowl with ingredients
 Command: `aicr recipe --service eks --accelerator h100 --intent training --os ubuntu --platform kubeflow --output recipe.yaml`
-Visual: Cluster snapshot + an Intent toggle (Training / Inference) → a glowing recipe.yaml
+Visual: Environment criteria (service, accelerator, OS, platform) + an Intent toggle (Training / Inference) → a glowing recipe.yaml
 Callouts (three short pills): "Driver 580.173.02", "GPU Operator v26.7.1", "DRA enabled"
 Caption: "Generate hardware-specific optimizations for workload intent"
 
@@ -32,15 +32,15 @@ bundle/
 ├── 001-cert-manager/
 ├── 002-gpu-operator/
 │   ├── values.yaml
-│   └── argocd/application.yaml
+│   └── application.yaml
 └── ...
 ```
 
 Caption: "Create GitOps-ready artifacts with Sigstore attestations"
 
 **Step 3 - DEPLOY**
-Icon: Argo CD and Helm logos
-Visual: GitOps tooling syncing the Step 2 artifacts into the cluster
+Icon: Argo CD logo
+Visual: Argo CD syncing the Step 2 bundle into the cluster. A bundle is generated for one deployer; a small side note lists the others (Helm, Helmfile, Flux) as `--deployer` values that regenerate the bundle, not as consumers of the same `./bundle`
 Caption: "Use the open source CD tooling you already run"
 
 **Step 4 - VALIDATE**
