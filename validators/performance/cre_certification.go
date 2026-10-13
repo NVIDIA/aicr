@@ -383,24 +383,51 @@ func teardownCRECertification(
 	tdCtx, cancel := context.WithTimeout(ctx, defaults.CRECertificationTeardownTimeout)
 	defer cancel()
 
-	// Enumerate first: the Job names that identify the TrainJobs and pods are
-	// reachable only through the Certification's Workflows, which the delete
-	// below takes with it.
-	jobNames, listErr := creCertificationJobNames(tdCtx, client, namespace, name)
+	// Seed before the delete. Garbage collection removes a Job as soon as its
+	// Workflow goes, so a name not recorded by then identifies pods the
+	// confirmation below would never think to look for.
+	tracker := newCREWorkloadTracker()
+	_, seedErr := tracker.observe(tdCtx, client, namespace, name)
 
 	if err := deleteCREResourceWithin(tdCtx, client, certificationGVR, "Certification", namespace, name); err != nil {
 		return err
 	}
-	if listErr != nil {
+	if seedErr != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
-			"deleted Certification but could not enumerate its workloads to confirm they stopped", listErr)
+			"deleted Certification but could not enumerate its workloads to confirm they stopped", seedErr)
 	}
-	return waitForCREWorkloadsGone(tdCtx, client, clientset, namespace, jobNames)
+	return waitForCREWorkloadsGone(tdCtx, client, clientset, namespace, name, tracker)
 }
 
-// creCertificationJobNames returns the names of the CRE Jobs a Certification
-// created, walking Certification → Workflows → Jobs by label.
-func creCertificationJobNames(
+// creWorkloadTracker accumulates the identities of the workloads a
+// Certification produced. Names are only ever added, never dropped: garbage
+// collection removes a Job the moment its Workflow goes, and a name forgotten
+// that way is a pod nobody would look for again.
+type creWorkloadTracker struct {
+	workflows map[string]struct{}
+	jobs      map[string]struct{}
+}
+
+func newCREWorkloadTracker(jobNames ...string) *creWorkloadTracker {
+	tracker := &creWorkloadTracker{
+		workflows: map[string]struct{}{},
+		jobs:      map[string]struct{}{},
+	}
+	for _, name := range jobNames {
+		tracker.jobs[name] = struct{}{}
+	}
+	return tracker
+}
+
+// observe folds one pass over Certification → Workflows → Jobs into the
+// tracker and returns the Workflows still carrying the Certification's label.
+//
+// That return is the shutdown barrier. Workflow controllers are what create
+// Jobs, so while one survives the Job set is still open and an empty workload
+// list proves nothing. The label lives on the Workflow rather than on the
+// Certification, so the walk keeps working after the Certification is gone,
+// which is what lets teardown re-run it instead of trusting one snapshot.
+func (t *creWorkloadTracker) observe(
 	ctx context.Context,
 	client dynamic.Interface,
 	namespace, certName string,
@@ -415,61 +442,83 @@ func creCertificationJobNames(
 	if err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list CRE Workflows", err)
 	}
-
-	seen := map[string]struct{}{}
-	names := make([]string, 0, len(workflows.Items))
+	present := make([]string, 0, len(workflows.Items))
 	for i := range workflows.Items {
+		name := workflows.Items[i].GetName()
+		present = append(present, name)
+		t.workflows[name] = struct{}{}
+	}
+	sort.Strings(present)
+
+	// Every Workflow ever seen is queried, not only those still present: a Job
+	// outlives the Workflow that created it until garbage collection catches
+	// up, and that interval is exactly when a stranded pod is still findable.
+	for _, workflowName := range sortedNames(t.workflows) {
 		jobs, jobErr := client.Resource(creJobGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{
-			LabelSelector: creLabelWorkflow + "=" + workflows.Items[i].GetName(),
+			LabelSelector: creLabelWorkflow + "=" + workflowName,
 		})
 		if jobErr != nil {
 			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list CRE Jobs", jobErr)
 		}
 		for j := range jobs.Items {
-			jobName := jobs.Items[j].GetName()
-			if _, dup := seen[jobName]; dup {
-				continue
-			}
-			seen[jobName] = struct{}{}
-			names = append(names, jobName)
+			t.jobs[jobs.Items[j].GetName()] = struct{}{}
 		}
 	}
-	sort.Strings(names)
-	return names, nil
+	return present, nil
 }
 
-// waitForCREWorkloadsGone blocks until no TrainJob or live pod remains for any
-// of jobNames, and fails closed when the deadline expires with work still
-// running.
+func (t *creWorkloadTracker) jobNames() []string { return sortedNames(t.jobs) }
+
+func sortedNames(set map[string]struct{}) []string {
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// waitForCREWorkloadsGone blocks until the Certification has no Workflow left
+// that could start more work and no TrainJob or live pod remains for any Job it
+// produced, and fails closed when the deadline expires with either still true.
 func waitForCREWorkloadsGone(
 	ctx context.Context,
 	client dynamic.Interface,
 	clientset kubernetes.Interface,
-	namespace string,
-	jobNames []string,
+	namespace, certName string,
+	tracker *creWorkloadTracker,
 ) error {
-
-	if len(jobNames) == 0 {
-		return nil
-	}
-	if clientset == nil {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal,
-			"cannot confirm CRE workload pods stopped: no Kubernetes client")
-	}
 
 	ticker := time.NewTicker(creWorkloadGonePollInterval)
 	defer ticker.Stop()
 
-	var remaining []string
 	for {
-		var err error
-		remaining, err = creActiveWorkloads(ctx, client, clientset, namespace, jobNames)
+		// Re-observed every pass rather than trusted from the seed: a
+		// reconcile already in flight when the Certification was deleted can
+		// still create a Workflow or a Job, and only a pass that finds no
+		// Workflow left shows that no further one is coming.
+		present, err := tracker.observe(ctx, client, namespace, certName)
 		if err != nil {
 			return err
 		}
-		if len(remaining) == 0 {
+		if len(tracker.jobs) > 0 && clientset == nil {
+			return aicrErrors.New(aicrErrors.ErrCodeInternal,
+				"cannot confirm CRE workload pods stopped: no Kubernetes client")
+		}
+		active, err := creActiveWorkloads(ctx, client, clientset, namespace, tracker.jobNames())
+		if err != nil {
+			return err
+		}
+
+		blocking := make([]string, 0, len(present)+len(active))
+		for _, name := range present {
+			blocking = append(blocking, "Workflow/"+name)
+		}
+		blocking = append(blocking, active...)
+		if len(blocking) == 0 {
 			return nil
 		}
+
 		select {
 		case <-ctx.Done():
 			// The names belong in the message, not only the context map:
@@ -477,8 +526,8 @@ func waitForCREWorkloadsGone(
 			// delete before the nodes are usable again.
 			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
 				"CRE workloads still running after Certification teardown: "+
-					strings.Join(remaining, ", "), ctx.Err(),
-				map[string]interface{}{"namespace": namespace, "remaining": strings.Join(remaining, ",")})
+					strings.Join(blocking, ", "), ctx.Err(),
+				map[string]interface{}{"namespace": namespace, "remaining": strings.Join(blocking, ",")})
 		case <-ticker.C:
 		}
 	}

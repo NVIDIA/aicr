@@ -325,6 +325,25 @@ func TestCRECertificationTeardownTimeoutOutlastsCREDrainGrace(t *testing.T) {
 	}
 }
 
+// creCascadeWorkflowDelete stands in for the garbage collector the fake
+// dynamic client does not have. In a real cluster deleting a Certification
+// removes the Workflows carrying its label, and teardown's shutdown barrier
+// waits for exactly that, so a fixture without it never finishes.
+//
+// The removal goes through the object tracker rather than the client: the
+// fake holds its own lock across the whole reactor chain, so a reactor that
+// calls back into the client deadlocks.
+func creCascadeWorkflowDelete(client *fake.FakeDynamicClient, namespace string, workflowNames ...string) {
+	tracker := client.Tracker()
+	client.PrependReactor("delete", certificationGVR.Resource,
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			for _, name := range workflowNames {
+				_ = tracker.Delete(workflowGVR, namespace, name)
+			}
+			return false, nil, nil
+		})
+}
+
 // TestTeardownCRECertificationConfirmsWorkloadsStopped enumerates the workload
 // chain before the delete removes it, then confirms the workloads stopped. A
 // pass here is the only outcome that lets a check report success.
@@ -337,6 +356,7 @@ func TestTeardownCRECertificationConfirmsWorkloadsStopped(t *testing.T) {
 		creLabeled(creAPI, "Workflow", "wf-ours", creLabelCertification, "cert-ours"),
 		creLabeled(creAPI, "Job", "job-ours", creLabelWorkflow, "wf-ours"),
 	)
+	creCascadeWorkflowDelete(client, ns, "wf-ours")
 
 	if err := teardownCRECertification(context.Background(), client, k8sfake.NewSimpleClientset(), ns, "cert-ours"); err != nil {
 		t.Fatalf("teardownCRECertification() error = %v", err)
@@ -359,6 +379,7 @@ func TestTeardownCRECertificationFailsOnStrandedWorkload(t *testing.T) {
 		creLabeled(creAPI, "Job", "job-ours", creLabelWorkflow, "wf-ours"),
 		creLabeled("trainer.kubeflow.org/v1alpha1", "TrainJob", "job-ours", creLabelJob, "job-ours"),
 	)
+	creCascadeWorkflowDelete(client, ns, "wf-ours")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -371,11 +392,11 @@ func TestTeardownCRECertificationFailsOnStrandedWorkload(t *testing.T) {
 	}
 }
 
-// TestCRECertificationJobNamesWalksLabelChain covers the reason the walk exists:
-// CRE labels only Workflows with the Certification name, so the Job names that
-// identify the TrainJobs and pods are reachable one hop at a time. Objects
-// belonging to a different Certification must not be collected.
-func TestCRECertificationJobNamesWalksLabelChain(t *testing.T) {
+// TestCREWorkloadTrackerObserveWalksLabelChain covers the reason the walk
+// exists: CRE labels only Workflows with the Certification name, so the Job
+// names that identify the TrainJobs and pods are reachable one hop at a time.
+// Objects belonging to a different Certification must not be collected.
+func TestCREWorkloadTrackerObserveWalksLabelChain(t *testing.T) {
 	const ns = creTestNamespace
 	creAPI := creAPIGroup + "/" + versionV1alpha1
 
@@ -387,13 +408,133 @@ func TestCRECertificationJobNamesWalksLabelChain(t *testing.T) {
 		creLabeled(creAPI, "Job", "job-theirs", creLabelWorkflow, "wf-theirs"),
 	)
 
-	got, err := creCertificationJobNames(context.Background(), client, ns, "cert-ours")
+	tracker := newCREWorkloadTracker()
+	present, err := tracker.observe(context.Background(), client, ns, "cert-ours")
 	if err != nil {
-		t.Fatalf("creCertificationJobNames() error = %v", err)
+		t.Fatalf("observe() error = %v", err)
+	}
+	if strings.Join(present, ",") != "wf-ours" {
+		t.Errorf("present workflows = %v, want only wf-ours", present)
 	}
 	want := []string{"job-ours-a", "job-ours-b"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("job names = %v, want %v", got, want)
+	if strings.Join(tracker.jobNames(), ",") != strings.Join(want, ",") {
+		t.Errorf("job names = %v, want %v", tracker.jobNames(), want)
+	}
+}
+
+// TestCREWorkloadTrackerKeepsNamesAfterGarbageCollection pins the accumulation
+// rule. CRE removes a Job as soon as its Workflow goes, so a tracker that
+// reported only what the latest pass found would forget the Job whose pods are
+// the thing teardown is looking for.
+func TestCREWorkloadTrackerKeepsNamesAfterGarbageCollection(t *testing.T) {
+	const ns = creTestNamespace
+	creAPI := creAPIGroup + "/" + versionV1alpha1
+
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(),
+		creLabeled(creAPI, "Workflow", "wf-ours", creLabelCertification, "cert-ours"),
+		creLabeled(creAPI, "Job", "job-ours", creLabelWorkflow, "wf-ours"),
+	)
+
+	tracker := newCREWorkloadTracker()
+	if _, err := tracker.observe(context.Background(), client, ns, "cert-ours"); err != nil {
+		t.Fatalf("first observe() error = %v", err)
+	}
+
+	for _, gvr := range []schema.GroupVersionResource{creJobGVR, workflowGVR} {
+		name := "job-ours"
+		if gvr == workflowGVR {
+			name = "wf-ours"
+		}
+		if err := client.Resource(gvr).Namespace(ns).
+			Delete(context.Background(), name, metav1.DeleteOptions{}); err != nil {
+			t.Fatalf("deleting %s: %v", name, err)
+		}
+	}
+
+	present, err := tracker.observe(context.Background(), client, ns, "cert-ours")
+	if err != nil {
+		t.Fatalf("second observe() error = %v", err)
+	}
+	if len(present) != 0 {
+		t.Errorf("present workflows = %v, want none after deletion", present)
+	}
+	if strings.Join(tracker.jobNames(), ",") != "job-ours" {
+		t.Errorf("job names = %v, want the collected Job to still be tracked", tracker.jobNames())
+	}
+}
+
+// TestWaitForCREWorkloadsGoneWaitsOutASurvivingWorkflow is the shutdown
+// barrier. A Workflow that outlives the Certification can still create another
+// Job, so an empty workload list while one is present proves nothing: teardown
+// must keep waiting and, if the budget runs out, name the Workflow rather than
+// report a clean sweep over work that had not started yet.
+func TestWaitForCREWorkloadsGoneWaitsOutASurvivingWorkflow(t *testing.T) {
+	const ns = creTestNamespace
+	creAPI := creAPIGroup + "/" + versionV1alpha1
+
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(),
+		creLabeled(creAPI, "Workflow", "wf-ours", creLabelCertification, "cert-ours"),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := waitForCREWorkloadsGone(
+		ctx, client, k8sfake.NewSimpleClientset(), ns, "cert-ours", newCREWorkloadTracker())
+	if err == nil {
+		t.Fatal("teardown reported success while a Workflow could still create work")
+	}
+	if !strings.Contains(err.Error(), "Workflow/wf-ours") {
+		t.Errorf("error = %q, want it to name the surviving Workflow", err)
+	}
+}
+
+// TestWaitForCREWorkloadsGoneCatchesAJobCreatedAfterTheSeed is the race the
+// barrier exists for. CRE can create a Job between the seed snapshot and the
+// moment its Workflow controller observes the deletion, including from a
+// reconcile already in flight. A teardown that checked only the seeded names
+// would return nil while that Job's pod kept holding GPUs.
+func TestWaitForCREWorkloadsGoneCatchesAJobCreatedAfterTheSeed(t *testing.T) {
+	const ns = creTestNamespace
+	creAPI := creAPIGroup + "/" + versionV1alpha1
+
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(),
+		creLabeled(creAPI, "Workflow", "wf-ours", creLabelCertification, "cert-ours"),
+	)
+	pods := k8sfake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "late-worker-0",
+			Namespace: ns,
+			Labels:    map[string]string{creLabelJob: "job-late"},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	})
+
+	// The seed saw no Jobs at all, which is what makes this the dangerous case.
+	tracker := newCREWorkloadTracker()
+	if _, err := tracker.observe(context.Background(), client, ns, "cert-ours"); err != nil {
+		t.Fatalf("seed observe() error = %v", err)
+	}
+	if len(tracker.jobNames()) != 0 {
+		t.Fatalf("seed recorded %v, want no Jobs", tracker.jobNames())
+	}
+
+	// The in-flight reconcile lands after the seed.
+	if _, err := client.Resource(creJobGVR).Namespace(ns).Create(context.Background(),
+		creLabeled(creAPI, "Job", "job-late", creLabelWorkflow, "wf-ours"),
+		metav1.CreateOptions{}); err != nil {
+		t.Fatalf("creating the late Job: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := waitForCREWorkloadsGone(ctx, client, pods, ns, "cert-ours", tracker)
+	if err == nil {
+		t.Fatal("teardown reported success while a pod from a late Job was running")
+	}
+	if !strings.Contains(err.Error(), "late-worker-0") {
+		t.Errorf("error = %q, want it to name the stranded pod from the late Job", err)
 	}
 }
 
@@ -467,7 +608,7 @@ func TestWaitForCREWorkloadsGoneFailsClosedOnTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := waitForCREWorkloadsGone(ctx, dyn, pods, ns, []string{"job-a"})
+	err := waitForCREWorkloadsGone(ctx, dyn, pods, ns, "cert-a", newCREWorkloadTracker("job-a"))
 	if err == nil {
 		t.Fatal("teardown reported success while a pod was still running")
 	}
@@ -482,14 +623,16 @@ func TestWaitForCREWorkloadsGoneFailsClosedOnTimeout(t *testing.T) {
 func TestWaitForCREWorkloadsGoneReturnsWhenClear(t *testing.T) {
 	dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds())
 
-	// No Jobs means the Certification never produced workloads, so there is
-	// nothing to prove stopped.
-	if err := waitForCREWorkloadsGone(context.Background(), dyn, k8sfake.NewSimpleClientset(), "nvcre", nil); err != nil {
+	// No Workflows and no Jobs means the Certification is fully torn down and
+	// nothing remains that could start more work.
+	if err := waitForCREWorkloadsGone(
+		context.Background(), dyn, k8sfake.NewSimpleClientset(), "nvcre", "cert-a", newCREWorkloadTracker(),
+	); err != nil {
 		t.Errorf("waitForCREWorkloadsGone() with no jobs error = %v", err)
 	}
 
 	if err := waitForCREWorkloadsGone(
-		context.Background(), dyn, k8sfake.NewSimpleClientset(), "nvcre", []string{"job-a"},
+		context.Background(), dyn, k8sfake.NewSimpleClientset(), "nvcre", "cert-a", newCREWorkloadTracker("job-a"),
 	); err != nil {
 		t.Errorf("waitForCREWorkloadsGone() with drained job error = %v", err)
 	}
@@ -500,7 +643,8 @@ func TestWaitForCREWorkloadsGoneReturnsWhenClear(t *testing.T) {
 // rather than pass vacuously.
 func TestWaitForCREWorkloadsGoneFailsClosedWithoutClientset(t *testing.T) {
 	dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds())
-	err := waitForCREWorkloadsGone(context.Background(), dyn, nil, "nvcre", []string{"job-a"})
+	err := waitForCREWorkloadsGone(
+		context.Background(), dyn, nil, "nvcre", "cert-a", newCREWorkloadTracker("job-a"))
 	if err == nil {
 		t.Fatal("teardown passed without any way to observe pods")
 	}
