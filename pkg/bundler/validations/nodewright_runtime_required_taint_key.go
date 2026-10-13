@@ -101,11 +101,11 @@ func CheckNodewrightRuntimeRequiredTaintKey(ctx context.Context, componentName s
 	}
 
 	for _, key := range slices.Compact(slices.Sorted(slices.Values(taintKeys))) {
-		if len(validation.IsQualifiedName(nodewrightAutoTaintAnnotationPrefix+key)) > 0 {
+		if errs := validation.IsQualifiedName(nodewrightAutoTaintAnnotationPrefix + key); len(errs) > 0 {
 			msg := fmt.Sprintf("%s: runtime-required taint key %q cannot be used: the operator writes it into "+
-				"the node annotation %s<key>, so it must have no DNS prefix and be at most 53 characters; "+
-				"use an unprefixed key such as the default nodewright.nvidia.com",
-				componentName, key, nodewrightAutoTaintAnnotationPrefix)
+				"the node annotation %s<key>, which is invalid (%s); use an unprefixed key of at most 53 "+
+				"characters, such as the default nodewright.nvidia.com",
+				componentName, key, nodewrightAutoTaintAnnotationPrefix, strings.Join(errs, "; "))
 			slog.Warn(msg, logKeyComponent, componentName)
 			warnings = append(warnings, msg)
 		}

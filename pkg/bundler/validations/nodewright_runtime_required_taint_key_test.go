@@ -59,7 +59,14 @@ func TestCheckNodewrightRuntimeRequiredTaintKey(t *testing.T) {
 			recipeResult: withOperator(),
 			opts:         []config.Option{gate(strings.Repeat("a", 54))},
 			wantWarnings: 1,
-			wantContains: "at most 53 characters",
+			wantContains: "no more than 63 bytes",
+		},
+		{
+			name:         "unprefixed key with trailing punctuation via --set",
+			recipeResult: withOperator(),
+			opts:         []config.Option{set(map[string]string{taintPath: "gate-=true:NoSchedule"})},
+			wantWarnings: 1,
+			wantContains: "must consist of alphanumeric characters",
 		},
 		{
 			name:         "DNS-prefixed key via workload gate",
