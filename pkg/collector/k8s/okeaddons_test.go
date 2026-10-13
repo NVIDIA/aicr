@@ -49,7 +49,7 @@ func TestProjectOKEAddons(t *testing.T) {
 		name       string
 		content    string
 		wantPlugin string
-		wantNNO    string
+		wantNNO    string // NNO is the NVIDIA Network Operator add-on.
 		wantCount  int
 		wantErr    bool
 	}{

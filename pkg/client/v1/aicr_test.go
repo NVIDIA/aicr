@@ -2061,7 +2061,7 @@ func TestResolveRecipeFromSnapshot_OKENetworkOperatorAddonGate(t *testing.T) {
 	tests := []struct {
 		name        string
 		accelerator string
-		nnoState    string
+		nnoState    string // NNO is the NVIDIA Network Operator add-on.
 		wantErr     string // "" => resolution succeeds
 	}{
 		{name: "l40s add-on absent qualifies", accelerator: "l40s", nnoState: "absent"},
@@ -2134,7 +2134,7 @@ func okeQualificationSnapshot(addonState, legacyState string) *aicr.Snapshot {
 }
 
 // okeAddonsSnapshot returns an OKE Snapshot at Kubernetes v1.34.0 with the
-// given NvidiaGpuPlugin, NvidiaNetworkOperator, and legacy device-plugin
+// given NvidiaGpuPlugin, NvidiaNetworkOperator (NNO), and legacy device-plugin
 // readings. Constraints on an omitted reading fail as unavailable. Special
 // cases are:
 //
