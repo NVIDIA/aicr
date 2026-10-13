@@ -1693,6 +1693,14 @@ const AtRiskListPageSize int64 = 200
 // error, so a page is never silently truncated.
 const MetadataListResponseLimit int64 = 64 * 1024 * 1024 // 64 MiB
 
+// MetadataListRetries is how many times a metadata List is retried after a
+// dropped connection, waiting MetadataListRetryInterval before each retry.
+// Both values match client-go's rest.Request.Do for a GET.
+const (
+	MetadataListRetries       = 10
+	MetadataListRetryInterval = 1 * time.Second
+)
+
 // AtRiskScanTimeout bounds the whole advisory at-risk scan: one discovery
 // mapping and one paged cluster-wide List per affected kind. Shorter than
 // ArgoInventoryTimeout per kind is not expressible here, so the budget covers

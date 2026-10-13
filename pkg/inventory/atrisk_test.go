@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -985,5 +986,45 @@ func TestScanAtRiskReadsOnlyMetadataLists(t *testing.T) {
 				t.Errorf("Findings = %#v, want %#v", got.Findings, tt.wantFindings)
 			}
 		})
+	}
+}
+
+func TestScanAtRiskRetriesADroppedConnection(t *testing.T) {
+	t.Parallel()
+
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			conn, _, err := http.NewResponseController(w).Hijack()
+			if err != nil {
+				t.Errorf("Hijack: %v", err)
+				return
+			}
+			_ = conn.Close()
+
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1","items":[` +
+			`{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",` +
+			`"metadata":{"name":"topology-1","namespace":"tenant-a"}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	lister, err := k8sclient.NewMetadataListClientForConfig(&rest.Config{Host: srv.URL})
+	if err != nil {
+		t.Fatalf("NewMetadataListClientForConfig: %v", err)
+	}
+
+	got, err := scanAtRisk(t.Context(), lister, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
+	if err != nil {
+		t.Fatalf("scanAtRisk: %v", err)
+	}
+	if n := requests.Load(); n != 2 {
+		t.Errorf("requests = %d, want the dropped List and its retry", n)
+	}
+	want := []AtRiskObject{{Group: "grove.io", Kind: "ClusterTopology", Components: []string{"grove"},
+		Namespace: "tenant-a", Name: "topology-1"}}
+	if !reflect.DeepEqual(got.Findings, want) {
+		t.Errorf("Findings = %#v, want %#v", got.Findings, want)
 	}
 }

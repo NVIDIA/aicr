@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -91,6 +92,10 @@ func TestNewMetadataListClientForConfig(t *testing.T) {
 		}
 		if got.limit != defaults.MetadataListResponseLimit {
 			t.Errorf("limit = %d, want %d", got.limit, defaults.MetadataListResponseLimit)
+		}
+		if got.retries != defaults.MetadataListRetries || got.retryInterval != defaults.MetadataListRetryInterval {
+			t.Errorf("retries = %d every %v, want %d every %v", got.retries, got.retryInterval,
+				defaults.MetadataListRetries, defaults.MetadataListRetryInterval)
 		}
 	})
 }
@@ -328,6 +333,89 @@ func TestMetadataListClientKeepsContextErrors(t *testing.T) {
 			}
 			errorstest.WantReportedCode(t, err, tt.wantCode)
 		})
+	}
+}
+
+// dropConnection closes w's connection without writing a response.
+func dropConnection(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+
+	conn, _, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		t.Errorf("Hijack: %v", err)
+		return
+	}
+	_ = conn.Close()
+}
+
+func TestMetadataListClientRetriesADroppedConnection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		drops        int32
+		retries      int
+		status       int
+		wantRequests int32
+		wantCode     errors.ErrorCode
+	}{
+		{"one drop is retried", 1, 2, http.StatusOK, 2, ""},
+		{"drops past the budget fail", 5, 2, http.StatusOK, 3, errors.ErrCodeUnavailable},
+		{"an error response is not retried", 0, 2, http.StatusForbidden, 1, errors.ErrCodeUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var requests atomic.Int32
+			c := metadataListServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				if requests.Add(1) <= tt.drops {
+					dropConnection(t, w)
+					return
+				}
+				writeBody(w, tt.status, validMetadataList)
+			})
+			c.retries = tt.retries
+			c.retryInterval = time.Millisecond
+
+			list, err := c.List(t.Context(), testTopologyGVR, metav1.ListOptions{})
+			if got := requests.Load(); got != tt.wantRequests {
+				t.Errorf("requests = %d, want %d", got, tt.wantRequests)
+			}
+			if tt.wantCode != "" {
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+				return
+			}
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if len(list.Items) != 1 || list.Items[0].Name != "topology-1" {
+				t.Errorf("Items = %#v, want topology-1 from the retried request", list.Items)
+			}
+		})
+	}
+}
+
+func TestMetadataListClientStopsRetryingOnCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	var requests atomic.Int32
+	c := metadataListServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		dropConnection(t, w)
+		cancel()
+	})
+	c.retryInterval = time.Hour
+
+	_, err := c.List(ctx, testTopologyGVR, metav1.ListOptions{})
+	if !stderrors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to chain context.Canceled", err)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+	if got := requests.Load(); got != 1 {
+		t.Errorf("requests = %d, want 1, with no retry after the cancel", got)
 	}
 }
 

@@ -19,11 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	metainternalversionscheme "k8s.io/apimachinery/pkg/apis/meta/internalversion/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/client-go/rest"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -49,8 +51,10 @@ type MetadataLister interface {
 // metadata answers 406 rather than sending every object in full, spec and
 // Secret data included.
 type MetadataListClient struct {
-	client *rest.RESTClient
-	limit  int64
+	client        *rest.RESTClient
+	limit         int64
+	retries       int
+	retryInterval time.Duration
 }
 
 // NewMetadataListClientForConfig returns a MetadataListClient for restConfig,
@@ -78,14 +82,22 @@ func NewMetadataListClientForConfig(restConfig *rest.Config) (*MetadataListClien
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create metadata list client", err)
 	}
 
-	return &MetadataListClient{client: restClient, limit: defaults.MetadataListResponseLimit}, nil
+	return &MetadataListClient{
+		client:        restClient,
+		limit:         defaults.MetadataListResponseLimit,
+		retries:       defaults.MetadataListRetries,
+		retryInterval: defaults.MetadataListRetryInterval,
+	}, nil
 }
 
-// List lists gvr across all namespaces with opts. A response that is not a
-// meta.k8s.io/v1 PartialObjectMetadataList, including a 406, is an
-// ErrCodeUnavailable error, as is one larger than
-// defaults.MetadataListResponseLimit. A gvr with no version or resource is an
-// ErrCodeInvalidRequest error.
+// List lists gvr across all namespaces. It retries a request lost to a
+// connection reset, a probable EOF or a lost HTTP/2 connection up to
+// defaults.MetadataListRetries times. The error codes are:
+//   - ErrCodeInvalidRequest if gvr has no version or resource
+//   - ErrCodeUnavailable if the response is not a meta.k8s.io/v1
+//     PartialObjectMetadataList, a 406 included, or exceeds
+//     defaults.MetadataListResponseLimit
+//   - ErrCodeCanceled or ErrCodeTimeout if ctx ends first
 func (c *MetadataListClient) List(ctx context.Context, gvr schema.GroupVersionResource,
 	opts metav1.ListOptions) (*metav1.PartialObjectMetadataList, error) {
 
@@ -95,10 +107,7 @@ func (c *MetadataListClient) List(ctx context.Context, gvr schema.GroupVersionRe
 	}
 	errCtx := map[string]any{"resource": gvr.String()}
 
-	body, err := c.client.Get().
-		AbsPath(resourcePath(gvr)...).
-		SpecificallyVersionedParams(&opts, metav1.ParameterCodec, metav1.SchemeGroupVersion).
-		Stream(ctx)
+	body, err := c.stream(ctx, gvr, opts)
 	if err != nil {
 		return nil, listErr(ctx, err, fmt.Sprintf("failed to list %s metadata", gvr.String()), errCtx)
 	}
@@ -129,6 +138,37 @@ func (c *MetadataListClient) List(ctx context.Context, gvr schema.GroupVersionRe
 	}
 
 	return &list, nil
+}
+
+// stream returns the body of a List of gvr, retrying a dropped connection. It
+// returns ctx.Err() if ctx ends between attempts.
+func (c *MetadataListClient) stream(ctx context.Context, gvr schema.GroupVersionResource,
+	opts metav1.ListOptions) (io.ReadCloser, error) {
+
+	for attempt := 0; ; attempt++ {
+		body, err := c.client.Get().
+			AbsPath(resourcePath(gvr)...).
+			SpecificallyVersionedParams(&opts, metav1.ParameterCodec, metav1.SchemeGroupVersion).
+			Stream(ctx)
+		if err == nil || attempt >= c.retries || !retryableTransportErr(err) {
+			return body, err
+		}
+
+		timer := time.NewTimer(c.retryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// retryableTransportErr reports whether err is a connection reset, a probable
+// EOF or a lost HTTP/2 connection.
+func retryableTransportErr(err error) bool {
+	// The errors client-go's rest.Request.Do retries a GET on.
+	return utilnet.IsConnectionReset(err) || utilnet.IsProbableEOF(err) || utilnet.IsHTTP2ConnectionLost(err)
 }
 
 // listErr classifies a failed request or read. A dead ctx keeps its
