@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -62,12 +63,14 @@ var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 	checkNameCRETrainingGoodput: {},
 }
 
-// creThreshold parses a CRE check's constraint and refuses an operator the
-// check cannot honor. Both CRE checks compare measured >= threshold, so any
-// other operator would be evaluated as a floor while the trace line printed
-// the operator the recipe actually asked for — "<= 0.5" reported as satisfied
-// by a ratio above it. Refusing runs before the Certification is created, so
-// no GPU work starts on a constraint the verdict cannot keep.
+// creThreshold parses a CRE check's constraint and refuses one the check cannot
+// honor: an operator other than >=, since both CRE checks compare measured >=
+// threshold and any other would be evaluated as a floor while the trace line
+// printed the operator the recipe actually asked for — "<= 0.5" reported as
+// satisfied by a ratio above it — and a non-finite threshold, which ParseFloat
+// accepts but no measurement can be judged against. Refusing runs before the
+// Certification is created, so no GPU work starts on a constraint the verdict
+// cannot keep.
 func creThreshold(checkName, value string) (float64, error) {
 	trimmed := strings.TrimSpace(value)
 	end := 0
@@ -78,7 +81,15 @@ func creThreshold(checkName, value string) (float64, error) {
 		return 0, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"%s compares with >= and cannot honor constraint %q", checkName, value))
 	}
-	return parseThreshold(value)
+	threshold, err := parseThreshold(value)
+	if err != nil {
+		return 0, err
+	}
+	if math.IsNaN(threshold) || math.IsInf(threshold, 0) {
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s cannot judge a measurement against non-finite threshold %q", checkName, value))
+	}
+	return threshold, nil
 }
 
 // lookupCREQualification reports the catalog entry checkName was qualified with

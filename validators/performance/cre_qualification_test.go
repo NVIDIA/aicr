@@ -230,6 +230,11 @@ func TestCREThreshold(t *testing.T) {
 		{name: "equality is refused", value: "== 0.5", wantErr: true},
 		{name: "inequality is refused", value: "!= 0.5", wantErr: true},
 		{name: "no number at all", value: ">=", wantErr: true},
+		{name: "NaN is refused", value: ">= NaN", wantErr: true},
+		{name: "positive infinity is refused", value: ">= +Inf", wantErr: true},
+		{name: "negative infinity is refused", value: ">= -Inf", wantErr: true},
+		{name: "spelled-out infinity is refused", value: ">= infinity", wantErr: true},
+		{name: "bare NaN is refused", value: "NaN", wantErr: true},
 	}
 
 	for _, tt := range tests {
