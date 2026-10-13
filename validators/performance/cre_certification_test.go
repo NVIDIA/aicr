@@ -208,6 +208,39 @@ func TestWaitForCRETerminalReturnsInitialGetWhenAlreadyTerminal(t *testing.T) {
 	}
 }
 
+// TestWaitForCRETerminalKeepsPartialStatusOnTimeout covers #2688's criterion
+// that an expired run still produces the partial report. Teardown deletes the
+// Certification as soon as the wait returns, so a timeout that discarded the
+// object would leave the caller with nothing to report but the timeout itself,
+// even when CRE had already finished several categories.
+func TestWaitForCRETerminalKeepsPartialStatusOnTimeout(t *testing.T) {
+	obj := buildTestCertification(t, "ns", "aicr-cre-nccl-slow", twoNodeGPUConfig())
+	obj.Object["status"] = map[string]any{
+		"categoryStatuses": []any{
+			map[string]any{"domain": "communication", "status": "Succeeded"},
+		},
+	}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(), obj)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	got, err := waitForCertificationTerminal(ctx, client, "ns", obj.GetName())
+	if err == nil {
+		t.Fatal("waitForCertificationTerminal() = nil error, want a timeout")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("error = %v, want ErrCodeTimeout", err)
+	}
+	if got == nil {
+		t.Fatal("timed-out wait returned no object, so the partial report is lost")
+	}
+	status, _, _ := unstructured.NestedSlice(got.Object, "status", "categoryStatuses")
+	if len(status) != 1 {
+		t.Errorf("categoryStatuses = %v, want the partial report CRE had completed", status)
+	}
+}
+
 func TestDeleteCREResourceWaitsUntilGone(t *testing.T) {
 	obj := buildTestCertification(t, "ns", "aicr-cre-nccl-gone", twoNodeGPUConfig())
 	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(), obj)

@@ -261,6 +261,13 @@ func waitForCertificationTerminal(ctx context.Context, client dynamic.Interface,
 	return waitForCRETerminal(ctx, client, certificationGVR, "Certification", namespace, name)
 }
 
+// waitForCRETerminal blocks until the object reaches Succeeded or Failed.
+//
+// On timeout it returns the last state it observed alongside the error. The
+// object is not terminal and its verdict is not usable, but its status still
+// carries whatever CRE finished before the budget ran out, and teardown
+// deletes the object immediately afterwards — so this return is the only
+// chance the caller has to report a partial result instead of a bare timeout.
 func waitForCRETerminal(
 	ctx context.Context,
 	client dynamic.Interface,
@@ -273,11 +280,14 @@ func waitForCRETerminal(
 
 	res := client.Resource(gvr).Namespace(namespace)
 
+	var last *unstructured.Unstructured
+
 	watchOpts := metav1.ListOptions{FieldSelector: "metadata.name=" + name}
 	if obj, err := res.Get(waitCtx, name, metav1.GetOptions{}); err == nil {
 		if unstructuredConditionTrue(obj, "Succeeded") || unstructuredConditionTrue(obj, "Failed") {
 			return obj, nil
 		}
+		last = obj
 		// Seed Watch from the observed RV so a terminal update between Get
 		// and Watch is replayed rather than missed.
 		if rv := obj.GetResourceVersion(); rv != "" {
@@ -294,17 +304,21 @@ func waitForCRETerminal(
 	for {
 		select {
 		case <-waitCtx.Done():
-			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for "+kind, waitCtx.Err())
+			return last, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for "+kind, waitCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				obj, getErr := res.Get(waitCtx, name, metav1.GetOptions{})
-				if getErr == nil && (unstructuredConditionTrue(obj, "Succeeded") || unstructuredConditionTrue(obj, "Failed")) {
-					return obj, nil
+				if getErr == nil {
+					if unstructuredConditionTrue(obj, "Succeeded") || unstructuredConditionTrue(obj, "Failed") {
+						return obj, nil
+					}
+					last = obj
 				}
 				if waitCtx.Err() != nil {
-					return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for "+kind, waitCtx.Err())
+					return last, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for "+kind, waitCtx.Err())
 				}
-				return nil, aicrErrors.New(aicrErrors.ErrCodeUnavailable, kind+" watch channel closed before terminal condition")
+				return last, aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+					kind+" watch channel closed before terminal condition")
 			}
 			obj, ok := event.Object.(*unstructured.Unstructured)
 			if !ok {
@@ -313,6 +327,7 @@ func waitForCRETerminal(
 			if unstructuredConditionTrue(obj, "Succeeded") || unstructuredConditionTrue(obj, "Failed") {
 				return obj, nil
 			}
+			last = obj
 		}
 	}
 }
