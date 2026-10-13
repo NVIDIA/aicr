@@ -846,11 +846,19 @@ validator-binaries: ## Builds Linux validator binaries (VALIDATOR_PHASES, VALIDA
 		./tools/build-validator-binaries
 
 .PHONY: image-validators
-image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG)
+image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG, VALIDATOR_ARCHES)
 	@set -e; \
 	arch="$(VALIDATOR_ARCHES)"; \
 	if [ -z "$${arch}" ]; then arch="$$(go env GOARCH)"; fi; \
-	arch="$${arch%% *}"; arch="$${arch%%,*}"; \
+	arch="$$(echo "$${arch}" | tr ',' ' ')"; \
+	if [ "$$(echo $${arch} | wc -w)" -gt 1 ]; then \
+		echo "VALIDATOR_ARCHES=\"$${arch}\" names more than one architecture;" >&2; \
+		echo "each image is tagged per phase without an architecture suffix, so" >&2; \
+		echo "a second arch would overwrite the first. Build one at a time, or" >&2; \
+		echo "use validator-binaries, which does accept a list." >&2; \
+		exit 1; \
+	fi; \
+	echo "Building validator images for linux/$${arch}"; \
 	VALIDATOR_ARCHES="$${arch}" ./tools/build-validator-binaries; \
 	for phase in deployment performance conformance; do \
 		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
