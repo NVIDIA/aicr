@@ -1,4 +1,4 @@
-**Title:** AICR Recipes at a Glance
+**Title (prompt reference only, not rendered in the image):** AICR Recipes at a Glance
 **Style:** Clean flat-design infographic, 2:1 landscape (it sits under a slide header, so wider than 16:9), three-column content area, minimal text, bold iconography, consistent card panels throughout
 **Colors:** NVIDIA Green (#76B900) primary, Slate (#1A1A1A) for the environments and footer bars, White card bodies, Cool Grey (#6B7280) secondary text, Soft Blue (#3B82F6) for component chip borders
 
@@ -81,7 +81,7 @@ Card 6 — icon: plug connecting to pipeline
 ---
 
 **Environments Row**
-Light grey bar (#D1D5DB), full width. Left-aligned dark slate label: "Supported Environments". Then five equal-width groups in a single horizontal line, separated by thin vertical dividers. Each group has: a small dark grey label above, pill badges on one line below, and "and more…" in grey italic on a second line below the badges where noted. No group wraps onto a third line — size badges small enough to guarantee single-line fit.
+Light grey bar (#D1D5DB), full width. Left-aligned dark slate label: "Supported Environments · values with a shipped recipe". Then five equal-width groups in a single horizontal line, separated by thin vertical dividers. Each group has: a small dark grey label above, pill badges on one line below, and "and more…" in grey italic on a second line below the badges where noted. No group wraps onto a third line — size badges small enough to guarantee single-line fit.
 - Services: badges "EKS · GKE · AKS · OKE · LKE" then "+ OpenShift, RKE2, BCM, k0s…" below
 - GPUs: badges "H100 · GB200 · GB300 · B200" then "and more…" below
 - OS: badges "Ubuntu · COS · Oracle Linux" (no second line)
@@ -102,6 +102,7 @@ Dark slate, centered white text: "You bring the cluster and your deployment tool
 - Layer-cake in the left column is the visual anchor of the whole piece; use smooth color graduation from dark slate at the base to NVIDIA Green at the top
 - Component chips in the center column are the densest element; keep chip text small and rows tightly spaced — this is the "ingredient list" feel. Chip names must match the list above exactly; do not invent components
 - The six value cards in the right column are the payoff; trust and auditability sit beside the others as equals, not as the headline
+- Environments row lists only values that have at least one shipped recipe overlay (`recipes/overlays/`); values the CLI accepts but no recipe provides (RHEL, Amazon Linux, Talos, Run:ai) are deliberately omitted
 - Environments row uses pill badges not icons; keep them small so the row reads as a compact reference strip, not a feature callout
 - Minimum text size: every label must stay legible when the whole image is projected at 1600 px wide; prefer fewer, larger labels over more, smaller ones
 - Generous whitespace between columns; do not let chips or cards touch the column boundaries

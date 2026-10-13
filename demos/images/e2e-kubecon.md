@@ -1,4 +1,4 @@
-**Title:** AI Cluster Runtime: Validated Kubernetes for GPU Infrastructure
+**Title (prompt reference only, not rendered in the image):** AI Cluster Runtime: Validated Kubernetes for GPU Infrastructure
 **Style:** Modern technical diagram, isometric icons, terminal overlays, left-to-right flow, 2:1 landscape (it sits under a slide header, so wider than 16:9)
 **Colors:** NVIDIA Green (#76B900), Slate Grey (#1A1A1A), White
 
