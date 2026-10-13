@@ -1793,6 +1793,21 @@ func TestValidateProfileLockOptionalComponent(t *testing.T) {
 			}
 		})
 	}
+
+	// A bundle's emitted recipe no longer carries the omitted optional
+	// component; the artifact gate and a re-bundle must still accept it.
+	t.Run("baseline without optional component", func(t *testing.T) {
+		emitted := *result
+		emitted.ComponentRefs = []ComponentRef{gpuOperatorRef}
+		if err := emitted.ValidateProfileValuesWithContext(ctx); err != nil {
+			t.Fatalf("ValidateProfileValuesWithContext() error = %v", err)
+		}
+		err := emitted.ValidateProfileLock(ctx, []ComponentRef{gpuOperatorRef},
+			map[string]map[string]any{"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator)}, nil)
+		if err != nil {
+			t.Fatalf("ValidateProfileLock() error = %v", err)
+		}
+	})
 }
 
 type readCountingProvider struct {

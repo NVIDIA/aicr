@@ -337,6 +337,9 @@ mechanics:
   or adds no values. Union totality is checked over the merged values, so
   each added value must assign exactly the path set the embedded values
   assign. A value that assigns other paths or leaves some out fails closed.
+  An added value must also mark each component `optional` exactly where the
+  embedded values do; the GKE-COS and OKE `gpuStack` values reference
+  `nvsentinel` with `optional: true`.
   An overlay that also carries `spec.criteria`, `componentRefs` or any other
   field is not a patch and follows the replacement rule below.
 - **A same-path replacement replaces the declaration too.** An external
@@ -365,7 +368,9 @@ mechanics:
   entries in `ownedPaths` are different: they are the SYNTHETIC
   component-presence locks — fragments are forbidden from assigning
   `enabled`, and the lock instead rejects removing (or bundle-subsetting
-  away) an owned component. Review those overlays when converting a family — a
+  away) an owned component. A component every value references with
+  `optional: true` carries no `enabled` entry and may be left out of a
+  bundle. Review those overlays when converting a family — a
   static assignment that used to take effect no longer does.
 - **Owned paths lock per surface.** The enforcement matrix:
   1. *`aicr bundle` static overrides* (ANY static source — `--set`,
@@ -394,7 +399,8 @@ mechanics:
      changeable by profile reselection — fragments cannot assign
      `enabled`, so no `--profile` choice adds or removes a component;
      the lock rejects removing (or bundle-subsetting away) an owned
-     component. Presence changes are catalog/composition changes.
+     component, except one referenced with `optional: true`. Presence
+     changes are catalog/composition changes.
      Reselecting a profile changes owned VALUE paths only.
 - **Selection is explicit.** Pick a value with `aicr recipe --profile
   name=value` (or `spec.recipe.profile` in `--config`); omission applies the

@@ -855,6 +855,11 @@ func (r *RecipeResult) validateProfileValuesWithContext(
 		paths := lockSet[component]
 		ref := r.GetComponentRef(component)
 		if ref == nil || !ref.IsEnabled() {
+			// A bundle's emitted recipe omits an optional component the
+			// bundle left out; composition still requires it (#2978).
+			if !slices.Contains(paths, profileComponentEnabledPath) {
+				continue
+			}
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile-owned component %q is missing or disabled", component))
 		}
@@ -1232,15 +1237,16 @@ func (r *RecipeResult) ValidateProfileLock(
 				errors.ErrCodeTimeout, "profile lock validation canceled", ctxErr)
 		}
 		paths := lockSet[component]
+		presenceOwned := slices.Contains(paths, profileComponentEnabledPath)
 		baselineRef := r.GetComponentRef(component)
+		if !presenceOwned && (baselineRef == nil || !baselineRef.IsEnabled() || !candidateEnabled[component]) {
+			continue
+		}
 		if baselineRef == nil {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile-owned component %q is absent from the recipe", component))
 		}
 		if !candidateEnabled[component] {
-			if !slices.Contains(paths, profileComponentEnabledPath) {
-				continue
-			}
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile-owned component %q is absent or disabled in the output", component))
 		}

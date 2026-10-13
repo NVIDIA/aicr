@@ -1053,6 +1053,8 @@ A fragment's `componentRefs` entry may now declare `optional: true`:
   omits the synthetic `enabled` path for that component.
 - The bundle may omit the component. Its owned paths are enforced only
   when it ships, and the argocd-helm guard is emitted only then.
+- The bundle's emitted recipe, which no longer lists the component, still
+  passes the artifact gate and can be re-bundled.
 - Recipe resolution is unchanged: the component must still be enabled in
   the surviving composition.
 - Every value must agree on `optional` for a component, and an optional

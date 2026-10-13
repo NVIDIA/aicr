@@ -80,6 +80,10 @@ func TestMake_OptionalProfileComponent(t *testing.T) {
 				if lock := readBundleFile(t, dir, profileLockTemplate); strings.Contains(lock, nvsentinelComponent) {
 					t.Fatalf("profile lock guards omitted nvsentinel:\n%s", lock)
 				}
+				reloaded := assertBundleRecipeReloads(t, dir)
+				// Re-bundling the emitted recipe keeps working once nvsentinel is
+				// absent from the baseline itself.
+				assertNoFile(t, makeOptionalProfileBundle(t, reloaded), nvsentinelAppTmpl)
 			})
 
 			t.Run("omitted by bundlers filter", func(t *testing.T) {
@@ -87,6 +91,7 @@ func TestMake_OptionalProfileComponent(t *testing.T) {
 					// dra-node-labeler renders only with DRA eviction opted in.
 					nvsentinelComponent, "dra-node-labeler")))
 				assertNoFile(t, dir, nvsentinelAppTmpl)
+				assertBundleRecipeReloads(t, dir)
 			})
 
 			t.Run("shipped keeps value guard", func(t *testing.T) {
@@ -183,6 +188,18 @@ func bundledExcept(rr *recipe.RecipeResult, skip ...string) []string {
 		}
 	}
 	return names
+}
+
+// assertBundleRecipeReloads loads the bundle's emitted recipe the way
+// post-deployment validation does, so an artifact gate that still requires an
+// omitted optional component fails here.
+func assertBundleRecipeReloads(t *testing.T, dir string) *recipe.RecipeResult {
+	t.Helper()
+	loaded, err := recipe.LoadFromFileWithProvider(t.Context(), filepath.Join(dir, RecipeFileName), "", "", nil)
+	if err != nil {
+		t.Fatalf("reload bundle %s: %v", RecipeFileName, err)
+	}
+	return loaded
 }
 
 func readBundleFile(t *testing.T, dir, rel string) string {
