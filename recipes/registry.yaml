@@ -362,12 +362,15 @@ components:
       # drain wait for evicted pods to terminate rather than to be accepted, so
       # interrupts start later and an undrainable pod holds a node in
       # in_progress without bound. Both boundaries carry transition records.
-      # v0.20.0 removes the legacy skyhook.nvidia.com group outright and is not
-      # reachable until the CRs shipped under nodewright-customizations are
-      # renamed (#2594). v0.19.1 raises the interrupt pod's memory to 256Mi so
-      # the agent is not OOM-killed mid-reboot on 64K-page arm64 nodes (#3101).
+      # v0.19.1 raises the interrupt pod's memory to 256Mi so the agent is not
+      # OOM-killed mid-reboot on 64K-page arm64 nodes (#3101). v0.20.0 refuses
+      # to start on a runtime-required taint key with a DNS prefix or over 53
+      # characters (#3207). The legacy skyhook.nvidia.com group, taint key, and
+      # metrics remain served through v0.20.x and are removed in v0.21.0, which
+      # is not reachable until the remaining skyhook.nvidia.com references in
+      # health checks and overlays are migrated.
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
-      defaultVersion: v0.19.1
+      defaultVersion: v0.20.0
       defaultNamespace: nodewright
     nodeScheduling:
       nodeCountPaths:
