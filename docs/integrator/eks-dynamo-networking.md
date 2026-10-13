@@ -88,14 +88,19 @@ target the **worker Pod IP directly, not a Service**: the operator-generated
 worker Service only forwards the health port (`9090`), not `5557`.
 
 ```shell
-# <workload-namespace> is wherever your DynamoGraphDeployment actually runs
+# NAMESPACE is wherever your DynamoGraphDeployment actually runs
 # (e.g. dynamo-workload for the demo; aicr-inference-perf-<run-id> for the
 # inference-perf validator) -- check `kubectl get dynamographdeployments -A`
 # if unsure.
-kubectl get pod -n <workload-namespace> -l nvidia.com/dynamo-component-type=worker -o wide  # find the worker Pod IP
+NAMESPACE="dynamo-workload"  # replace with your workload namespace
+kubectl get pod -n "${NAMESPACE}" -l nvidia.com/dynamo-component-type=worker -o wide  # find the worker Pod IP
+
+WORKER_POD_IP="10.0.12.34"  # replace with the worker Pod IP from the output above
+# Also replace the nodeSelector key and value in --overrides with a label on
+# the Frontend node group, so the probe runs where the Frontend does.
 kubectl run tcp-probe --rm -i --restart=Never --image=busybox:1.36 \
   --overrides='{"spec":{"nodeSelector":{"<frontend-node-label-key>":"<value>"},"tolerations":[{"operator":"Exists"}]}}' \
-  -- sh -c 'nc -zv -w 5 <worker-pod-ip> 5557'
+  -- sh -c "nc -zv -w 5 ${WORKER_POD_IP} 5557"
 ```
 
 The bare `"tolerations":[{"operator":"Exists"}]` above tolerates every taint
@@ -199,47 +204,56 @@ above. `kube-prometheus-stack` is a third, separate group in the general
 case — it lands on whatever `--system-node-selector` targets, which is
 often but not always the same group as your Frontend (e.g. the demo's
 Frontend runs on `cpu-worker`, not AICR's system group, so Prometheus
-there is a distinct SG). Don't assume `<frontend-sg-id>` and
-`<prometheus-sg-id>` are the same without checking:
+there is a distinct SG). Don't assume `FRONTEND_SG_ID` and
+`PROMETHEUS_SG_ID` are the same without checking:
 
 ```shell
+FRONTEND_NODEGROUP="cpu-worker"   # replace with your Frontend/router nodegroup
+WORKER_NODEGROUP="gpu-worker"     # replace with your Worker nodegroup
+SYSTEM_NODEGROUP="system-worker"  # replace with the nodegroup Prometheus runs on
+
 # 1) Find SG IDs for the Frontend/router, Worker, and Prometheus nodegroups
 aws ec2 describe-instances \
-  --filters "Name=tag:eks:nodegroup-name,Values=<frontend-nodegroup>" \
+  --filters "Name=tag:eks:nodegroup-name,Values=${FRONTEND_NODEGROUP}" \
   --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
   --output text
 
 aws ec2 describe-instances \
-  --filters "Name=tag:eks:nodegroup-name,Values=<worker-nodegroup>" \
+  --filters "Name=tag:eks:nodegroup-name,Values=${WORKER_NODEGROUP}" \
   --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
   --output text
 
 aws ec2 describe-instances \
-  --filters "Name=tag:eks:nodegroup-name,Values=<system-nodegroup>" \
+  --filters "Name=tag:eks:nodegroup-name,Values=${SYSTEM_NODEGROUP}" \
   --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
   --output text
+
+# Set these from the step 1 output.
+FRONTEND_SG_ID="sg-0123456789abcdef0"    # replace with the Frontend/router nodegroup SG
+WORKER_SG_ID="sg-0fedcba9876543210"      # replace with the Worker nodegroup SG
+PROMETHEUS_SG_ID="sg-0a1b2c3d4e5f60789"  # replace with the SYSTEM_NODEGROUP SG
 
 # 2a) ZMQ KV-events: frontend/router → worker on 5557
-aws ec2 authorize-security-group-ingress --group-id <worker-sg-id> \
-  --protocol tcp --port 5557 --source-group <frontend-sg-id>
+aws ec2 authorize-security-group-ingress --group-id "${WORKER_SG_ID}" \
+  --protocol tcp --port 5557 --source-group "${FRONTEND_SG_ID}"
 
 # 2b) Request plane: frontend/router → worker (ephemeral range)
-aws ec2 authorize-security-group-ingress --group-id <worker-sg-id> \
-  --protocol tcp --port 1024-65535 --source-group <frontend-sg-id>
+aws ec2 authorize-security-group-ingress --group-id "${WORKER_SG_ID}" \
+  --protocol tcp --port 1024-65535 --source-group "${FRONTEND_SG_ID}"
 
 # 2c) Response stream: worker → frontend/router (ephemeral range)
-aws ec2 authorize-security-group-ingress --group-id <frontend-sg-id> \
-  --protocol tcp --port 1024-65535 --source-group <worker-sg-id>
+aws ec2 authorize-security-group-ingress --group-id "${FRONTEND_SG_ID}" \
+  --protocol tcp --port 1024-65535 --source-group "${WORKER_SG_ID}"
 
 # 3) Prometheus: always required, from every SG that can host the
 #    conformance orchestrator -- worker-sg and frontend-sg here, but
 #    repeat for any other worker security group in the cluster (this
 #    rule applies even if Frontend and Worker are co-located and skip
-#    rules 2a-2c above). <prometheus-sg-id> is NOT assumed to equal
-#    <frontend-sg-id> -- use the SG you found for <system-nodegroup> above.
-aws ec2 authorize-security-group-ingress --group-id <prometheus-sg-id> \
-  --protocol tcp --port 9090 --source-group <worker-sg-id>
+#    rules 2a-2c above). PROMETHEUS_SG_ID is NOT assumed to equal
+#    FRONTEND_SG_ID -- use the SG you found for SYSTEM_NODEGROUP above.
+aws ec2 authorize-security-group-ingress --group-id "${PROMETHEUS_SG_ID}" \
+  --protocol tcp --port 9090 --source-group "${WORKER_SG_ID}"
 
-aws ec2 authorize-security-group-ingress --group-id <prometheus-sg-id> \
-  --protocol tcp --port 9090 --source-group <frontend-sg-id>
+aws ec2 authorize-security-group-ingress --group-id "${PROMETHEUS_SG_ID}" \
+  --protocol tcp --port 9090 --source-group "${FRONTEND_SG_ID}"
 ```

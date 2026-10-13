@@ -71,7 +71,7 @@ aicr --debug snapshot --output system.yaml
 Capture comprehensive system configuration including OS, GPU, Kubernetes, and SystemD settings.
 
 **Synopsis:**
-```shell
+```text
 aicr snapshot [flags]
 ```
 
@@ -188,7 +188,8 @@ aicr snapshot \
   --add-roles-to-service-account irsa-snapshotter
 
 # Review what each file grants, then apply them yourself.
-kubectl apply -f snapshot-rbac-<run-id>/
+RUN_ID="20260821-142233-9f3a1c0b7e2d4a55"  # replace with the run ID in the directory name printed above
+kubectl apply -f "snapshot-rbac-${RUN_ID}/"
 
 # Capture as that ServiceAccount. Because it already exists, the name is used
 # verbatim and this run creates and deletes no RBAC of its own.
@@ -344,7 +345,7 @@ measurements:
 Generate optimized configuration recipes from query parameters or captured snapshots.
 
 **Synopsis:**
-```shell
+```text
 aicr recipe [flags]
 ```
 
@@ -774,7 +775,7 @@ overlays are not scored — only leaf overlays resolve to a concrete combination
 
 **Synopsis:**
 
-```shell
+```text
 aicr recipe list [flags]
 ```
 
@@ -901,7 +902,7 @@ Exit code is 0 on success, non-zero on any verification failure.
 
 **Synopsis:**
 
-```shell
+```text
 aicr recipe verify-catalog <bundle-path> [flags]
 ```
 
@@ -947,7 +948,7 @@ silently extracting a value from an unrelated recipe. `--nodes` remains advisory
 is never required to be covered.
 
 **Synopsis:**
-```shell
+```text
 aicr query --selector <path> [flags]
 ```
 
@@ -1074,7 +1075,7 @@ For a task-oriented walkthrough (capture snapshot → generate recipe → run ea
 phase, with worked training and inference examples), see [Validation](validation.md).
 
 **Synopsis:**
-```shell
+```text
 aicr validate [flags]
 ```
 
@@ -1495,7 +1496,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 Compare two snapshots field-by-field to surface configuration drift between cluster states. Reports added, removed, and modified readings across every measurement type (K8s, GPU, OS, SystemD, NodeTopology, NetworkTopology).
 
 **Synopsis:**
-```shell
+```text
 aicr diff --baseline <path|cm://...> --target <path|cm://...> [flags]
 ```
 
@@ -1569,7 +1570,7 @@ Compare two recipes or bundles component by component and report, for each compo
 An artifact comparison inspects no cluster state, which makes it the CI and GitOps path: it reads two artifacts and nothing else. A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself. Two opt-in flags do read a cluster: `--from cluster` takes the source side from what the deployers recorded they installed, and `--scan-cluster` adds an advisory pass over live objects the upgrade might disturb.
 
 **Synopsis:**
-```shell
+```text
 aicr upgrade-check --from <recipe|bundle|cluster> [--to <recipe|bundle>] [--deployer <name>] [flags]
 ```
 
@@ -1775,7 +1776,7 @@ aicr upgrade-check --from old.yaml --to new.yaml \
 Generate deployment-ready bundles from recipes containing Helm values, manifests, scripts, and documentation.
 
 **Synopsis:**
-```shell
+```text
 aicr bundle [flags]
 ```
 
@@ -1991,7 +1992,8 @@ This does not apply where the driver is provider-installed (`driver.enabled=fals
 **If you disable the labeler, every GPU node must carry the label.** Set it in the **node pool definition** — an EKS managed nodegroup `labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for your provisioner. An ad hoc `kubectl label node` is a repair, not a configuration: it does not survive node replacement, recycling, autoscaling, or a nodegroup scaled from zero. With the labeler in the bundle (the default once opted in) none of this is required; the remaining gap is a GPU node GFD has not labeled that does not already carry the configured `key=value` (for example from a node pool that still provisions it): such a node runs no kubelet plugin until `nvidia.com/gpu.present` appears.
 
 ```bash
-kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
+NODE="my-gpu-node"  # replace with your GPU node name
+kubectl label node "${NODE}" nvidia.com/dra-kubelet-plugin=true
 kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 ```
 
@@ -2027,7 +2029,8 @@ Three invariants govern the order, and every step below exists to preserve one o
 1. **Fence the node. This is the very first operation — before touching any workload.**
 
    ```bash
-   kubectl taint node <node-name> aicr.nvidia.com/dra-recovery=true:NoSchedule
+   NODE="my-gpu-node"  # replace with the failed GPU node name
+   kubectl taint node "${NODE}" aicr.nvidia.com/dra-recovery=true:NoSchedule
    ```
 
    `NoSchedule` blocks *new* pods while leaving running ones alone, so the taint fences the node without disturbing the plugin, which is still needed. Every later step assumes this fence is up.
@@ -2041,9 +2044,10 @@ Three invariants govern the order, and every step below exists to preserve one o
 4. **Only then delete the plugin on that node.**
 
    ```bash
+   NODE="my-gpu-node"  # replace with the failed GPU node name
    kubectl -n nvidia-dra-driver delete pod \
      -l nvidia-dra-driver-gpu-component=kubelet-plugin \
-     --field-selector spec.nodeName=<node-name>
+     --field-selector "spec.nodeName=${NODE}"
    ```
 
    Select on `nvidia-dra-driver-gpu-component=kubelet-plugin`, the DaemonSet's own selector. The chart-wide `app.kubernetes.io/name=nvidia-dra-driver-gpu` label also matches the DRA *controller*, which can be colocated on a GPU node.
@@ -2055,7 +2059,8 @@ Three invariants govern the order, and every step below exists to preserve one o
 7. **Only now remove the taint.**
 
    ```bash
-   kubectl taint node <node-name> aicr.nvidia.com/dra-recovery-
+   NODE="my-gpu-node"  # replace with the failed GPU node name
+   kubectl taint node "${NODE}" aicr.nvidia.com/dra-recovery-
    ```
 
 8. **Confirm the plugin returns `Ready` on that node and its `ResourceSlices` are republished**, then restore the controllers quiesced in step 2. Until the slices are back the node cannot serve DRA allocations, even though the pod is running.
@@ -2093,7 +2098,8 @@ aicr bundle --recipe recipe.yaml \
   --dra-eviction-node-label example.com/dra-ready=enabled \
   --output bundle
 
-kubectl label node <node-name> example.com/dra-ready=enabled
+NODE="my-gpu-node"  # replace with your GPU node name
+kubectl label node "${NODE}" example.com/dra-ready=enabled
 ```
 
 GPU Operator's Driver Manager receives only the label key; it does not receive
@@ -2712,12 +2718,15 @@ Manifest-only components and mixed-component raw manifests are supported by `--d
 **Recommended deploy flow:**
 
 ```shell
+CHART_REPO="ghcr.io/my-org/charts"  # replace with your OCI registry and path
+CHART_VERSION="1.0.0"               # replace with the version in ./bundle/Chart.yaml
+
 # 1. Generate the bundle (URL-agnostic)
 aicr bundle -r recipe.yaml --deployer argocd-helm --dynamic gpuoperator:driver.version -o ./bundle
 
 # 2. Publish to your chart registry (any HTTPS-capable OCI / Helm chart repo)
 helm package ./bundle -d /tmp/
-helm push /tmp/aicr-bundle-*.tgz oci://<your-registry>/<path>
+helm push /tmp/aicr-bundle-*.tgz "oci://${CHART_REPO}"
 
 # 3. Install — the URL is supplied here, not at bundle time
 #    `--set repoURL` is the PARENT NAMESPACE (no trailing chart name).
@@ -2726,10 +2735,10 @@ helm push /tmp/aicr-bundle-*.tgz oci://<your-registry>/<path>
 #    their rendered `source.repoURL`. For non-OCI Helm repositories, the
 #    parent uses `source.chart` instead. Including the chart name in
 #    --set repoURL double-appends it and the children fail to resolve.
-helm install aicr-bundle oci://<your-registry>/<path>/aicr-bundle --version <chart-version> \
+helm install aicr-bundle "oci://${CHART_REPO}/aicr-bundle" --version "${CHART_VERSION}" \
   -n argocd \
-  --set repoURL=oci://<your-registry>/<path> \
-  --set targetRevision=<chart-version>
+  --set "repoURL=oci://${CHART_REPO}" \
+  --set "targetRevision=${CHART_VERSION}"
 ```
 
 The chart's `templates/aicr-stack.yaml` renders the parent Argo Application with `.Values.repoURL` and `.Values.targetRevision` substituted in. The parent Application then triggers Argo to render the chart again from the OCI source, creating the per-component child Applications with sync-wave ordering preserved. Child Applications whose source is path-based (manifest-only and mixed-component `-pre` / `-post` folders) inherit `.Values.repoURL` and append `.Chart.Name` so they pull from the same published artifact as the parent.
@@ -3235,13 +3244,16 @@ If the GPU Operator is still migrating the driver when this step runs, the scrip
 If DRA pods fail with this error after redeployment, the DaemonSet restart alone may not be sufficient — a **node reboot** is required to reset the kubelet's plugin registration state. To reboot GPU nodes:
 
 ```bash
+NODE="my-gpu-node"                 # replace with the affected GPU node name
+INSTANCE_ID="i-0123456789abcdef0"  # replace with the instance ID at the end of the node's .spec.providerID
+
 # Cordon, drain, and reboot the affected node
-kubectl cordon <node-name>
-kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
+kubectl cordon "${NODE}"
+kubectl drain "${NODE}" --ignore-daemonsets --delete-emptydir-data
 # Reboot via cloud provider (e.g., AWS EC2 console or CLI)
-aws ec2 reboot-instances --instance-ids <instance-id>
+aws ec2 reboot-instances --instance-ids "${INSTANCE_ID}"
 # Uncordon after node returns
-kubectl uncordon <node-name>
+kubectl uncordon "${NODE}"
 ```
 
 #### Bundle Uninstall
@@ -3257,8 +3269,11 @@ Uninstall releases in **reverse** deployment order — the same order the
 generated `README.md` lists under `## Uninstall`:
 
 ```bash
+RELEASE="my-release"      # replace with a release listed under Uninstall in the bundle README
+NAMESPACE="my-namespace"  # replace with that release's namespace
+
 # For each NNN-<component>/ folder in descending order:
-helm uninstall <release> -n <namespace>
+helm uninstall "${RELEASE}" -n "${NAMESPACE}"
 ```
 
 Helm intentionally does not delete CRDs declared under `crds/`. PVC lifecycle
@@ -3269,16 +3284,21 @@ Review the chart and the bound PersistentVolume reclaim policy before removing
 storage:
 
 ```bash
+CRD_PATTERN='example\.com'  # replace with a pattern matching the component's CRD group
+CRD="widgets.example.com"   # replace with a CRD you reviewed in the listing
+NAMESPACE="my-namespace"    # replace with the component's namespace
+PVC="my-pvc"                # replace with a PVC you selected in the listing
+
 # CRDs — review first; deletion cascades to every custom resource cluster-wide
-kubectl get crd -o name | grep -E '<component-prefix>'
-kubectl delete crd <name>
+kubectl get crd -o name | grep -E "${CRD_PATTERN}"
+kubectl delete crd "${CRD}"
 
 # PVCs — list and select explicitly; deletion can destroy backing data
-kubectl -n <namespace> get pvc
-kubectl -n <namespace> delete pvc <name>
+kubectl -n "${NAMESPACE}" get pvc
+kubectl -n "${NAMESPACE}" delete pvc "${PVC}"
 
 # Namespace
-kubectl delete namespace <namespace>
+kubectl delete namespace "${NAMESPACE}"
 ```
 
 Resources created by Helm hooks are not tracked as ordinary release resources
@@ -3290,7 +3310,9 @@ If a release is stuck in `pending-install` or `pending-upgrade` (interrupted
 deploy), retry with `--no-hooks`:
 
 ```bash
-helm uninstall <release> -n <namespace> --no-hooks
+RELEASE="my-release"      # replace with the stuck release name
+NAMESPACE="my-namespace"  # replace with that release's namespace
+helm uninstall "${RELEASE}" -n "${NAMESPACE}" --no-hooks
 ```
 
 See [Helm 3 uninstall docs](https://helm.sh/docs/helm/helm_uninstall/) for
@@ -3311,17 +3333,20 @@ resources. For default bundles, use one of the cascade-aware flows
 instead:
 
 ```bash
+APP="my-bundle"  # replace with the parent Application: --app-name, default aicr-stack (argocd-helm) or nvidia-stack (argocd)
+
 # Argo CD CLI — cascade is the default; foreground waits for resources
-argocd app delete <bundle-parent-app> --cascade --propagation-policy foreground
+argocd app delete "${APP}" --cascade --propagation-policy foreground
 ```
 
 If you can only use `kubectl`, add the finalizer first so the controller
 performs the cascade for you:
 
 ```bash
-kubectl -n argocd patch application <bundle-parent-app> --type=merge \
+APP="my-bundle"  # replace with the parent Application: --app-name, default aicr-stack (argocd-helm) or nvidia-stack (argocd)
+kubectl -n argocd patch application "${APP}" --type=merge \
   -p '{"metadata":{"finalizers":["resources-finalizer.argocd.argoproj.io"]}}'
-kubectl -n argocd delete application <bundle-parent-app>
+kubectl -n argocd delete application "${APP}"
 ```
 
 The CRD and PVC notes from the **helm** walkthrough above still apply, but
@@ -3345,7 +3370,8 @@ Argo CD tracks; it does **not** run `helm uninstall`, and `helm ls` will
 not show the bundle's releases.
 
 ```bash
-argocd app delete <bundle-parent-app> --cascade --propagation-policy foreground
+APP="my-bundle"  # replace with the parent Application: --app-name, default aicr-stack (argocd-helm) or nvidia-stack (argocd)
+argocd app delete "${APP}" --cascade --propagation-policy foreground
 ```
 
 The kubectl + finalizer-patch fallback from the **argocd** walkthrough
@@ -3364,7 +3390,9 @@ AICR's `flux` bundle emits one `HelmRelease` per component (plus the
 `spec.uninstall` settings (`disableHooks`, `keepHistory`, etc.):
 
 ```bash
-kubectl -n <namespace> delete helmrelease <release>
+RELEASE="my-release"      # replace with the HelmRelease name
+NAMESPACE="my-namespace"  # replace with that HelmRelease's namespace
+kubectl -n "${NAMESPACE}" delete helmrelease "${RELEASE}"
 ```
 
 Delete the bundle's source objects (`HelmRepository` / `OCIRepository`)
@@ -3406,7 +3434,7 @@ For an end-to-end walkthrough covering Hauler and Zarf workflows, see
 [Air-Gapped Mirroring](air-gap-mirror.md).
 
 **Synopsis:**
-```shell
+```text
 aicr mirror list [flags]
 ```
 
@@ -3461,7 +3489,7 @@ exception is `--key` with a KMS URI, which reaches the KMS provider to fetch
 the public key (see the `--key` network behavior note below).
 
 **Synopsis:**
-```shell
+```text
 aicr verify <bundle-dir> [flags]
 ```
 
@@ -3575,10 +3603,10 @@ aicr verify ./my-bundle --format json
 
 # Sign a bundle with a KMS key, then verify it with the same key
 aicr bundle -r recipe.yaml --attest --signing-key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k -o ./bundles
-aicr verify ./bundles/<bundle-dir> --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k
+aicr verify ./bundles --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k
 
 # Or verify against an exported PEM public key (no KMS access needed)
-aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub
+aicr verify ./bundles --key ./bundle-signer.pub
 
 # Verify a privately-signed bundle against an org trusted root
 aicr verify ./my-bundle --trust-root ./trusted_root.json
@@ -3588,7 +3616,7 @@ aicr verify ./my-bundle --trust-root ./trusted_root.json
 aicr bundle -r recipe.yaml --attest --signing-key awskms://alias/my-key --tlog-upload=false -o ./bundles
 cosign public-key --key awskms://alias/my-key > bundle-signer.pub
 # Verify anywhere offline against the exported PEM (a KMS --key URI would make a live GetPublicKey call):
-aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub --insecure-ignore-tlog
+aicr verify ./bundles --key ./bundle-signer.pub --insecure-ignore-tlog
 ```
 
 > **`--key` network behavior:** Resolving a **KMS URI** (`awskms://`, `gcpkms://`, `azurekms://`, `hashivault://`) makes network calls to the KMS provider to fetch the public key, so credentials for that provider must be available in the environment. A **local PEM** public-key file is read from disk with no provider calls; export it once with `cosign public-key --key <kms-uri>` (or your provider's console) and verify anywhere.
@@ -3607,7 +3635,7 @@ Use this to detect drift between a signed evidence pointer and the current recip
 
 **Synopsis:**
 
-```shell
+```text
 aicr evidence digest -r <recipe-or-overlay> [flags]
 ```
 
@@ -3645,11 +3673,15 @@ aicr evidence digest -r recipes/overlays/h100-aks-ubuntu-training.yaml \
 # h100 GKE kubeflow training leaf (ships torch-distributed-tcpxo), replay
 # the recorded configuration.gke.tcpxoInterfaces too — overlay-direct
 # digest fails closed without it; hydrate the recipe first, then digest it.
-ptr=recipes/evidence/<slug>/<src>/<digest>.yaml
+SLUG="h100-aks-ubuntu-training-gpustack-operator-managed"  # replace with the evidence directory name
+SRC="0123456789abcdef0123456789abcdef"  # replace with the signer slug directory
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer file name, without .yaml
+OVERLAY="h100-aks-ubuntu-training"  # replace with the overlay the evidence was produced from
+ptr="recipes/evidence/${SLUG}/${SRC}/${DIGEST}.yaml"
 prof=$(yq -r '.profile // ""' "$ptr")
 signed=$(aicr evidence verify "$ptr" --format json \
          | jq -r .predicate.recipe.digest)
-current=$(aicr evidence digest -r recipes/overlays/<file>.yaml ${prof:+--profile "$prof"})
+current=$(aicr evidence digest -r "recipes/overlays/${OVERLAY}.yaml" ${prof:+--profile "$prof"})
 [[ "$signed" == "$current" ]] || echo "evidence is stale"
 ```
 
@@ -3665,7 +3697,7 @@ The **unsigned** subject/predicate — and therefore the OCI bundle digest — i
 
 **Synopsis:**
 
-```shell
+```text
 aicr evidence publish <bundle-dir> --push <ref> [flags]
 ```
 
@@ -3720,7 +3752,7 @@ The fork CI signing leg runs this with `--relocate` on the committed flat pendin
 
 **Synopsis:**
 
-```shell
+```text
 aicr evidence sign <pointer> [flags]
 ```
 
@@ -3763,7 +3795,7 @@ Verify a recipe-evidence bundle (predicateType v3 for newly produced evidence; v
 It does not replay the recipe's inline constraints against the bundled snapshot.
 
 **Synopsis:**
-```shell
+```text
 aicr evidence verify <input> [flags]
 ```
 
@@ -3816,8 +3848,12 @@ Verdicts 1 and 2 are indistinguishable at the process level because both map thr
 
 **Examples:**
 ```shell
+RECIPE="h100-eks-ubuntu-training"  # replace with the recipe slug
+SRC="0123456789abcdef0123456789abcdef"  # replace with the signer slug directory
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer file name, without .yaml
+
 # Verify a pointer that a contributor committed alongside their recipe change.
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 
 # Verify a pushed OCI bundle directly (no repo checkout required).
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
@@ -3826,12 +3862,12 @@ aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
 aicr evidence verify ./out/summary-bundle
 
 # Pin the expected OIDC signer.
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" \
   --expected-issuer https://token.actions.githubusercontent.com \
   --expected-identity-regexp '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.+$'
 
 # CI pipelines: JSON output.
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml -o result.json -t json
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" -o result.json -t json
 ```
 
 See [`demos/evidence.md`](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md) for a full producer-and-consumer walkthrough.
@@ -3845,7 +3881,7 @@ See [`demos/evidence.md`](https://github.com/NVIDIA/aicr/blob/main/demos/evidenc
 Fetch the latest Sigstore trusted root **and Rekor v2 signing config** from the TUF CDN and update the local cache at `~/.sigstore/root/`. This is needed when Sigstore rotates signing keys (a few times per year). The trusted root is verification material (which signatures are valid); the signing config is sign-side (which Rekor/timestamp endpoints signing writes to — AICR signs to Rekor v2 by default).
 
 **Synopsis:**
-```shell
+```text
 aicr trust update [--emit-signing-config <path>]
 ```
 
@@ -3876,7 +3912,7 @@ Generate an AI agent skill file that teaches a coding agent how to use the AICR 
 
 **Synopsis:**
 
-```shell
+```text
 aicr skill --agent <agent> [flags]
 ```
 

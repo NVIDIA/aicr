@@ -304,9 +304,12 @@ on its own" into something the tool says rather than something prose asks for.
 ## Checking your work
 
 ```bash
+OLD_RECIPE="old-recipe.yaml"  # replace with a recipe generated before your pin change
+NEW_RECIPE="new-recipe.yaml"  # replace with a recipe generated after it
+
 make lint                                   # includes check-upgrade-records
 ./tools/check-upgrade-records               # just this gate
-aicr upgrade-check --from <old> --to <new> --deployer helm
+aicr upgrade-check --from "${OLD_RECIPE}" --to "${NEW_RECIPE}" --deployer helm
 ```
 
 The gate runs every well-formedness rule over every record the registry

@@ -270,8 +270,8 @@ jobs:
               - '.github/workflows/merge-gate.yaml'
             docs:
               # Inputs to the documentation parser gates. MDX parsing follows
-              # the Fern-published page list, while YAML fence parsing covers
-              # every Markdown file under docs/.
+              # the Fern-published page list, while YAML fence parsing and the
+              # shell placeholder check cover Markdown files under docs/.
               #
               # docs/index.yml is Fern's navigation manifest and supplies the
               # MDX checker's file list, so it is both an input and a trigger:
@@ -288,6 +288,7 @@ jobs:
               - 'tools/check-docs-mdx'
               - 'tools/check-docs-mdx-parse'
               - 'tools/check-docs-yaml*'
+              - 'tools/check-docs-shell*'
               - 'tools/docs-published-files'
               - 'tools/mdx/**'
               - 'Makefile'
@@ -590,8 +591,9 @@ jobs:
       - run: echo "No .settings.yaml or refresh-script changes — checksum freshness not required"
 
   # ---------------------------------------------------------------------------
-  # Docs parser gates — parse every Fern-published doc as MDX and every YAML
-  # fence under docs/ as YAML.
+  # Docs parser gates — parse every Fern-published doc as MDX, every YAML
+  # fence under docs/ as YAML, and every shell fence for placeholders that bash
+  # would read as redirection.
   #
   # `fern check` (Fern Docs CI) does not parse MDX, and the job that does
   # (`fern generate --docs --preview`) runs in a workflow_run companion whose
@@ -624,6 +626,8 @@ jobs:
         run: make check-docs-mdx-parse
       - name: Validate YAML examples in documentation
         run: make check-docs-yaml
+      - name: Check shell examples for unquoted placeholders
+        run: make check-docs-shell
 
   docs-mdx-skip:
     needs: [check-paths]

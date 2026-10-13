@@ -200,7 +200,7 @@ schemes are `awskms://`, `gcpkms://`, `azurekms://`, and `hashivault://`.
 aicr bundle -r recipe.yaml --attest \
   --signing-key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k \
   -o ./bundles
-aicr verify ./bundles/<bundle-dir> \
+aicr verify ./bundles \
   --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k
 ```
 
@@ -217,7 +217,7 @@ against the local PEM file; this part makes no provider calls:
 cosign public-key --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k > bundle-signer.pub
 
 # Verify anywhere afterward, with no KMS access needed.
-aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub
+aicr verify ./bundles --key ./bundle-signer.pub
 ```
 
 A local PEM key is read from disk only. The bundle's Rekor transparency-log
@@ -323,8 +323,11 @@ The positional argument is auto-detected. Prefer the committed **pointer file**,
 which pins the bundle by digest:
 
 ```shell
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 # Verify a pointer a contributor committed alongside a recipe change (preferred).
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 
 # Verify a pushed OCI bundle directly, pinned by digest.
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
@@ -336,7 +339,10 @@ aicr evidence verify ./out/summary-bundle
 To require a specific signer, pin the OIDC issuer and identity:
 
 ```shell
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" \
   --expected-issuer https://token.actions.githubusercontent.com \
   --expected-identity-regexp '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.+$'
 ```
@@ -428,11 +434,14 @@ full input-detection rules and the `--allow-unpinned-tag` escape hatch.
 Both verifiers emit machine-readable JSON for pipeline gating.
 
 ```shell
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 # Bundle verification as JSON.
 aicr verify ./my-bundle --format json
 
 # Evidence verification as JSON to a file.
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" --format json -o result.json
 ```
 
 `aicr evidence verify` exits `0` when every check passes, `2` when the
@@ -450,8 +459,11 @@ non-zero exit would otherwise propagate through the pipeline and abort the scrip
 before the `case` runs. The `|| true` keeps that exit from tripping `set -e`:
 
 ```shell
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 rm -f result.json
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json || true
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" --format json -o result.json || true
 if [ ! -s result.json ]; then
   echo "verifier wrote no result — treat as a failure"; exit 1
 fi

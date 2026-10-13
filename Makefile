@@ -121,7 +121,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
@@ -191,6 +191,10 @@ check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node
 .PHONY: check-docs-yaml
 check-docs-yaml: ## Validates YAML-labelled code blocks throughout docs/ (requires Node; CI-blocking)
 	@./tools/check-docs-yaml
+
+.PHONY: check-docs-shell
+check-docs-shell: ## Rejects unquoted <placeholder>s that bash reads as redirection in docs/ shell blocks (requires Node; CI-blocking)
+	@./tools/check-docs-shell
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet

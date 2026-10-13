@@ -108,14 +108,17 @@ personal one.
 ### 1. Validate and push an unsigned bundle (local, on VPN)
 
 ```shell
+SLUG="h100-eks-ubuntu-training"  # replace with the target overlay's file name, without .yaml
+OWNER="my-github-user"           # replace with your fork's GitHub owner
 aicr snapshot -o snapshot.yaml
 aicr validate \
-  -r recipes/overlays/<slug>.yaml \
+  -r "recipes/overlays/${SLUG}.yaml" \
   -s snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/<your-fork-owner>/aicr-evidence \
+  --push "ghcr.io/${OWNER}/aicr-evidence" \
   --no-sign
-cp ./out/pointer.yaml recipes/evidence/<recipe>.yaml
+RECIPE="h100-eks-ubuntu-training"  # replace with the recipe: field of ./out/pointer.yaml
+cp ./out/pointer.yaml "recipes/evidence/${RECIPE}.yaml"
 ```
 
 **Profiled families (the AKS and GKE `gpuStack` recipes)** need two
@@ -123,16 +126,20 @@ adjustments, because validating the raw overlay resolves only the
 declaration default and `aicr validate` has no `--profile` flag:
 
 ```shell
+RESOURCE_GROUP="my-resource-group"  # AKS only: replace with your cluster's resource group
+CLUSTER="my-cluster"                # replace with your AKS or GKE cluster name
+INTENT="training"                   # replace with training or inference, from the target overlay's criteria
+GPU_STACK="azure-managed"           # replace with the profile to attest: azure-managed or operator-managed (AKS), gke-default or bundle-installer (GKE)
 # AKS only: capture the pool projection first.
-az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json
+az aks nodepool list -g "${RESOURCE_GROUP}" --cluster-name "${CLUSTER}" -o json > pools.json
 aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml
 # GKE gke-default: a plain `aicr snapshot -o snapshot.yaml` suffices.
 # GKE bundle-installer: also capture the pool projection.
-#   gcloud container node-pools list --cluster <cluster> --format=json > pools.json
+#   gcloud container node-pools list --cluster "${CLUSTER}" --format=json > pools.json
 #   aicr snapshot --gke-gpu-pools pools.json -o snapshot.yaml
 aicr recipe -s snapshot.yaml \
-  --intent <training|inference> \
-  --profile gpuStack=<value> \
+  --intent "${INTENT}" \
+  --profile "gpuStack=${GPU_STACK}" \
   -o recipe.yaml
 # Add --platform <kubeflow|dynamo|slurm> ONLY when the target leaf's
 # criteria pin one (e.g. h100-gke-cos-training is platformless — no flag).
@@ -202,10 +209,11 @@ is signed. See
 ### 2. Commit the unsigned pointer and push your branch
 
 ```shell
-git add recipes/evidence/<recipe>.yaml
+RECIPE="h100-eks-ubuntu-training"  # replace with the pointer's recipe: field
+git add "recipes/evidence/${RECIPE}.yaml"
 # Every commit from every contributor must be both signed off (-s, DCO) and
 # cryptographically signed (-S). See CONTRIBUTING.md.
-git commit -s -S -m "evidence: <recipe> (unsigned; sign in CI)"
+git commit -s -S -m "evidence: ${RECIPE} (unsigned; sign in CI)"
 git push
 ```
 
@@ -294,8 +302,10 @@ If you have a host with Sigstore egress (a jump box, CI runner, or
 hotspot), you can run the signing leg there instead of in Actions:
 
 ```shell
+SLUG="h100-eks-ubuntu-training"  # replace with the target overlay's file name, without .yaml
+OWNER="my-github-user"           # replace with your fork's GitHub owner
 # On VPN, where the cluster is: produce an unsigned bundle.
-aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml --emit-attestation ./out
+aicr validate -r "recipes/overlays/${SLUG}.yaml" -s snapshot.yaml --emit-attestation ./out
 # Profiled families (AKS/GKE gpuStack): validate the hydrated recipe
 # instead, built from an --aks-gpu-pools snapshot (AKS; a plain snapshot
 # on GKE) with the target leaf's criteria and the pointer's recorded
@@ -311,7 +321,7 @@ aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml --emit-attestatio
 #     --profile gpuStack=<value> --gke-tcpxo-interfaces eth1=<net>,...,eth8=<net> -o recipe.yaml
 
 # Off VPN, where Sigstore is reachable: sign, push, and write the pointer.
-aicr evidence publish ./out --push ghcr.io/<your-fork-owner>/aicr-evidence
+aicr evidence publish ./out --push "ghcr.io/${OWNER}/aicr-evidence"
 ```
 
 `aicr evidence publish` signs the pointer, so commit it directly at its
@@ -321,8 +331,9 @@ destination (`copyTo=…`) — copy the pointer there:
 ```shell
 # The path is recipes/evidence/<recipe>/<src>/<digest>.yaml; <src> is
 # derived from your signer identity. Use the copyTo path the command printed.
-mkdir -p recipes/evidence/<recipe>/<src>
-cp ./out/pointer.yaml recipes/evidence/<recipe>/<src>/<digest>.yaml
+DEST="recipes/evidence/h100-eks-ubuntu-training/0123456789abcdef0123456789abcdef/sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.yaml"  # replace with the printed copyTo path
+mkdir -p "$(dirname "${DEST}")"
+cp ./out/pointer.yaml "${DEST}"
 ```
 
 The flat commit-then-CI-sign flow above is only for the unsigned case: a

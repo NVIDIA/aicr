@@ -702,7 +702,8 @@ AICR_VALIDATOR_IMAGE_TAG=edge aicr validate -r recipe.yaml -s snapshot.yaml --ph
 
 # Immutable pin (reproducible) — use a published main commit, not blindly HEAD
 # (a docs-only HEAD has no image; verify with the registry check below):
-AICR_VALIDATOR_IMAGE_TAG=sha-<published-main-commit> aicr validate -r recipe.yaml -s snapshot.yaml ...
+SHA="0123456789abcdef0123456789abcdef01234567"  # replace with the full SHA of a published main commit
+AICR_VALIDATOR_IMAGE_TAG="sha-${SHA}" aicr validate -r recipe.yaml -s snapshot.yaml --phase performance
 ```
 
 **Not when emitting evidence.** `aicr validate --emit-attestation` refuses a

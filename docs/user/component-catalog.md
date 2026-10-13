@@ -256,7 +256,8 @@ global:
 You must still supply the endpoint yourself -- either on your own leaf's `componentRefs` (the mixin's allowlist deliberately excludes it, but your leaf owns its own values) or at bundle time. `aicr bundle` fails closed without it:
 
 ```shell
-aicr bundle -r <your-recipe>.yaml \
+RECIPE="recipe.yaml"  # replace with your recipe file
+aicr bundle -r "${RECIPE}" \
   --set nv-sentinel:global.tracing.endpoint=otel-collector.example:4317 \
   -o ./bundles
 ```
@@ -351,7 +352,8 @@ The catalog-registration rule described under [Audit Logging and Tracing](#audit
 **Two gates, not one.** Adopting the mixin only deploys the webhook. Nothing is injected until you also label the namespaces whose pods should be checked:
 
 ```shell
-kubectl label namespace <ns> nvsentinel.nvidia.com/preflight=enabled
+NAMESPACE="my-namespace"  # replace with a namespace whose GPU pods should be checked
+kubectl label namespace "${NAMESPACE}" nvsentinel.nvidia.com/preflight=enabled
 ```
 
 Within a labeled namespace, only pods that request a GPU resource (`nvidia.com/gpu`) are mutated; everything else passes through untouched.
@@ -359,7 +361,8 @@ Within a labeled namespace, only pods that request a GPU resource (`nvidia.com/g
 **Adopting this on a cluster that already runs NVSentinel needs one manual step.** The preflight subchart ships its `PreflightConfig` CRD under `crds/`, and Helm installs a `crds/` directory only on `helm install`, never on `helm upgrade`. A cluster that installed NVSentinel *before* adopting this mixin had the subchart — and therefore its CRD — pruned by the `global.preflight.enabled` condition, so enabling the mixin later cannot backfill it. The controller still admits and injects correctly, but its `preflightconfig` controller never starts and it logs `no matches for kind "PreflightConfig"` every 10 seconds. Apply the CRD once, from the chart:
 
 ```shell
-kubectl apply -f <chart>/charts/preflight/crds/preflight.nvsentinel.nvidia.com_preflightconfigs.yaml
+CHART="path/to/nvsentinel"  # replace with the path to the unpacked nvsentinel chart
+kubectl apply -f "${CHART}/charts/preflight/crds/preflight.nvsentinel.nvidia.com_preflightconfigs.yaml"
 ```
 
 A fresh bundle install is unaffected, which is also why CI does not catch this — every bundle in CI is a first install.
@@ -870,8 +873,11 @@ On the stock EKS overlay, `kube-prometheus-stack` creates a PVC for Prometheus, 
 A `Pending` PVC alone does not identify the cause. Confirm it from the driver's own diagnostics:
 
 ```shell
+NAMESPACE="monitoring"  # replace with the namespace of the Pending claim
+NAME="my-claim"         # replace with the Pending claim's name
+
 # Provisioning events on the stuck claim
-kubectl describe pvc <name> -n <namespace>
+kubectl describe pvc "${NAME}" -n "${NAMESPACE}"
 
 # The sidecar that issues CreateVolume, and the driver that calls the EBS API.
 # The controller runs two replicas and only the leader provisions, so read both pods.
@@ -1425,7 +1431,10 @@ before deleting rather than passing `--all`:
 # Review what exists and who owns it; delete only what this release should own.
 kubectl get aiboms.aibom.k8saibom.dev --all-namespaces \
   -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,OWNER:.metadata.ownerReferences[0].name
-kubectl -n <namespace> delete aiboms.aibom.k8saibom.dev <name>
+
+NAMESPACE="my-namespace"  # replace with the namespace from the listing above
+NAME="my-aibom"           # replace with the AIBOM to delete
+kubectl -n "${NAMESPACE}" delete aiboms.aibom.k8saibom.dev "${NAME}"
 
 # CRDs last, and only once no other release uses them — deletion removes every
 # stored custom resource of these kinds cluster-wide.
@@ -1672,8 +1681,11 @@ to the original checksum digest. Regenerate instead, using the same
 overrides added:
 
 ```bash
+# Replace with every flag from your original aicr bundle command.
+ORIGINAL_FLAGS=(--system-node-selector nodeGroup=system-worker)
+
 aicr bundle --recipe recipe.yaml \
-  <your original --accelerated-node-selector / --system-node-selector / etc. flags> \
+  "${ORIGINAL_FLAGS[@]}" \
   --set dynamoplatform:global.nats.install=true \
   --output ./bundle
 ```
@@ -1689,7 +1701,7 @@ dot-path parser rejects qualified Kubernetes label keys that contain a `/`
 (e.g. `eks.amazonaws.com/nodegroup`), and there is no scalar form for a
 tolerations list at all:
 
-```bash
+```text
   --set-json 'dynamoplatform:nats.podTemplate.merge.spec.nodeSelector={"<key>":"<value>"}' \
   --set-json 'dynamoplatform:nats.podTemplate.merge.spec.tolerations=[{"key":"<key>","operator":"Equal","value":"<value>","effect":"NoSchedule"}]' \
   --set dynamoplatform:nats.config.jetstream.fileStore.pvc.storageClassName=<name>
