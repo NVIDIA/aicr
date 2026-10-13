@@ -611,6 +611,26 @@ func TestCheckNVSentinelSlurmCustomDrainCoherent(t *testing.T) {
 				Namespace: "db", Overrides: map[string]any{"mariadb": map[string]any{"nodeSelector": map[string]any{}}}}),
 		},
 		{
+			name: "MariaDB selector dynamic with customDrain → blocked",
+			recipeResult: result(ok, slinky, plugin("slurm"), recipe.ComponentRef{Name: slurmAccountingMariaDBComponent,
+				Namespace: "slurm"}),
+			bundlerConfig: dynamic("slurmaccountingmariadb", "mariadb.nodeSelector"),
+			wantBlocked:   "--dynamic",
+		},
+		{
+			name: "MariaDB toggle dynamic with customDrain → blocked",
+			recipeResult: result(ok, slinky, plugin("slurm"), recipe.ComponentRef{Name: slurmAccountingMariaDBComponent,
+				Namespace: "slurm"}),
+			bundlerConfig: dynamic("slurmaccountingmariadb", "enabled"),
+			wantBlocked:   "--dynamic",
+		},
+		{
+			name: "MariaDB selector dynamic without customDrain → passes",
+			recipeResult: result(sentinel(false, nil, nil, nil), slinky, recipe.ComponentRef{
+				Name: slurmAccountingMariaDBComponent, Namespace: "slurm"}),
+			bundlerConfig: dynamic("slurmaccountingmariadb", "mariadb.nodeSelector"),
+		},
+		{
 			name:          "accounting toggle dynamic with customDrain → blocked",
 			recipeResult:  result(ok, slinky, plugin("slurm")),
 			bundlerConfig: dynamic("slinkyslurm", "accounting.enabled"),

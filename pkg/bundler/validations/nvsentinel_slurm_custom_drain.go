@@ -143,9 +143,11 @@ func CheckNVSentinelSlurmCustomDrainCoherent(ctx context.Context, componentName 
 
 	drainerKeys := componentOverrideKeys(slinkyDrainerComponent, provider)
 	crdsKeys := componentOverrideKeys(slinkyDrainerCRDsComponent, provider)
+	mariadbKeys := componentOverrideKeys(slurmAccountingMariaDBComponent, provider)
 	dynMsgs := slurmCustomDrainDynamicViolations(bundlerConfig, componentName, sentinelKeys, slinkyKeys, drainerKeys,
-		crdsKeys, customDrain, remediation, union.GetComponentRef(slinkyDrainerComponent) != nil,
-		union.GetComponentRef(slinkyDrainerCRDsComponent) != nil)
+		crdsKeys, mariadbKeys, customDrain, remediation, union.GetComponentRef(slinkyDrainerComponent) != nil,
+		union.GetComponentRef(slinkyDrainerCRDsComponent) != nil,
+		union.GetComponentRef(slurmAccountingMariaDBComponent) != nil)
 	if len(dynMsgs) > 0 {
 		for _, msg := range dynMsgs {
 			slog.Warn(msg, logKeyComponent, componentName)
@@ -497,7 +499,7 @@ func selectorsConflict(a, b map[string]string) bool {
 // reads, as in CheckNVSentinelRemediationPipelineCoherent, so a
 // monitoring-only Slurm recipe keeps its --dynamic freedom. On a Slurm recipe,
 // or once customDrain is on, the customDrain subtree is always guarded.
-func slurmCustomDrainDynamicViolations(bundlerConfig *config.Config, componentName string, sentinelKeys, slinkyKeys, drainerKeys, crdsKeys []string, customDrain, remediation, pluginDeclared, crdsDeclared bool) []string {
+func slurmCustomDrainDynamicViolations(bundlerConfig *config.Config, componentName string, sentinelKeys, slinkyKeys, drainerKeys, crdsKeys, mariadbKeys []string, customDrain, remediation, pluginDeclared, crdsDeclared, mariadbDeclared bool) []string {
 	const reason = "decides whether node-drainer drains a Slurm node through the slinky-drainer plugin " +
 		"or by pod eviction, and what the plugin needs to do it"
 	sentinelGuarded := []string{nodeDrainerCustomDrainPath}
@@ -525,6 +527,10 @@ func slurmCustomDrainDynamicViolations(bundlerConfig *config.Config, componentNa
 	if customDrain && crdsDeclared {
 		msgs = append(msgs, nvsentinelDynamicGuardViolations(bundlerConfig, slinkyDrainerCRDsComponent, crdsKeys,
 			[]string{slinkyDrainerEnabledPath}, reason)...)
+	}
+	if customDrain && mariadbDeclared {
+		msgs = append(msgs, nvsentinelDynamicGuardViolations(bundlerConfig, slurmAccountingMariaDBComponent,
+			mariadbKeys, []string{slinkyDrainerEnabledPath, slurmAccountingMariaDBSelectorPath}, reason)...)
 	}
 	return msgs
 }
