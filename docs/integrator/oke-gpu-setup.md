@@ -28,9 +28,11 @@ Select the mode at recipe generation; the paths it owns are locked at every
 output boundary:
 
 ```shell
+CLUSTER_ID="ocid1.cluster.oc1.iad.aaaaaaaaexample"  # replace with your OKE cluster OCID
+
 # Capture the qualification signal alongside the snapshot: the
 # NvidiaGpuPlugin add-on's control-plane state.
-oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json > addons.json
+oci ce cluster list-addons --cluster-id "${CLUSTER_ID}" --all --output json > addons.json
 aicr snapshot --oke-addons addons.json --output snapshot.yaml
 
 # Oracle-managed cluster (the default) — add-on installed and ACTIVE

@@ -960,11 +960,12 @@ the two flag families produce independent outputs and may run from a
 single `aicr validate` invocation.
 
 ```bash
+OWNER="my-github-org"  # replace with your GHCR owner
 aicr validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/<owner>/aicr-evidence
+  --push "ghcr.io/${OWNER}/aicr-evidence"
 ```
 
 The `--push` tag is just a human-readable label — the `sha256:` digest is
@@ -1011,7 +1012,10 @@ same verifier runs against the committed pointer in the CI gate, so exit 0
 locally means the gate will pass:
 
 ```bash
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the copyTo recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the copyTo signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the copyTo file name, without .yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 ```
 
 **Flag reference:** the evidence flags (`--emit-attestation`, `--full`,
@@ -1246,15 +1250,18 @@ Each performance check has a Job-level `activeDeadlineSeconds` set by the catalo
 kubectl -n aicr-validation get jobs | grep -E 'aicr-inference-perf-|aicr-aiperf-'
 
 # tail each by full job name (label selectors require exact match)
-kubectl -n aicr-validation logs -l job-name=aicr-inference-perf-<hash> --tail=200
-kubectl -n aicr-validation logs -l job-name=aicr-aiperf-<run-id-hash>  --tail=200
+ORCHESTRATOR_JOB="aicr-inference-perf-5d1e8a42"  # replace with the aicr-inference-perf- Job listed above
+AIPERF_JOB="aicr-aiperf-3f9a1c2b"                # replace with the aicr-aiperf- Job listed above
+kubectl -n aicr-validation logs -l "job-name=${ORCHESTRATOR_JOB}" --tail=200
+kubectl -n aicr-validation logs -l "job-name=${AIPERF_JOB}" --tail=200
 
 # the Dynamo workload (DynamoGraphDeployment, Frontend, worker pods)
 # lives in a separate per-run namespace:
 kubectl get ns | grep aicr-inference-perf-
+WORKLOAD_NAMESPACE="aicr-inference-perf-3f9a1c2b"  # replace with the namespace listed above
 # (resourceclaimtemplates is populated in DRA wiring mode; empty in
 # device-plugin mode — both are normal)
-kubectl -n aicr-inference-perf-<suffix> get dynamographdeployments,pods,svc,resourceclaimtemplates
+kubectl -n "${WORKLOAD_NAMESPACE}" get dynamographdeployments,pods,svc,resourceclaimtemplates
 ```
 
 Common causes: image pull throttling, vLLM model load slowness, and every

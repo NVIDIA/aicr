@@ -1302,6 +1302,8 @@ and add `--emit-attestation` (writes the bundle to disk) and
 `--push` (signs and uploads the OCI artifact):
 
 ```bash
+OWNER="my-github-org"  # replace with your GHCR owner (or replace the whole --push ref below)
+
 # 1. Capture snapshot and resolve the recipe you're contributing.
 aicr snapshot --output snapshot.yaml
 aicr recipe --service eks --accelerator gb200 --os ubuntu \
@@ -1316,7 +1318,7 @@ aicr validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/<owner>/aicr-evidence
+  --push "ghcr.io/${OWNER}/aicr-evidence"
 
 # 3. Commit the SIGNED pointer. The bundle bytes live in OCI; the repo
 #    only stores the locator. The blocking Evidence Pointer Contract gate
@@ -1328,10 +1330,10 @@ aicr validate \
 #    hand: step 2 already logged the exact destination as the `copyTo`
 #    field of its "evidence pointer written" line, e.g.
 #      copyTo=recipes/evidence/<recipe>/<src>/sha256-<digest>.yaml
-DEST=recipes/evidence/<recipe>/<src>/sha256-<digest>.yaml   # from the copyTo log line
-mkdir -p "$(dirname "$DEST")"
-cp ./out/pointer.yaml "$DEST"
-git add "$DEST"
+DEST="recipes/evidence/gb200-eks-ubuntu-training/0123456789abcdef0123456789abcdef/sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.yaml"  # replace with the copyTo path step 2 logged
+mkdir -p "$(dirname "${DEST}")"
+cp ./out/pointer.yaml "${DEST}"
+git add "${DEST}"
 ```
 
 > **The signer must be allowlisted.** The blocking *Evidence Pointer Contract*
@@ -1366,10 +1368,13 @@ committing the nested pointer, as above, satisfies it.) A clean local
 run keeps the sticky comment green:
 
 ```bash
+RECIPE="gb200-eks-ubuntu-training"                                                # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 # Verify the emitted pointer before committing it...
 aicr evidence verify ./out/pointer.yaml
 # ...or the committed nested pointer after copying it into place:
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 ```
 
 Exit 0 means the signature verified, the predicate parsed, every
