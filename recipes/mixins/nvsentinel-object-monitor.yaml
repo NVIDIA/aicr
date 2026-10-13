@@ -34,15 +34,18 @@
 # in these namespaces would, once unhealthy for 30m, raise a fatal event blaming
 # the operator. Each policy therefore also requires a label that only that
 # operator's own operands carry. They are not the same label, and neither was
-# guessable -- both were read off live deployments at the versions this repo
-# pins:
+# guessable -- both were read off live deployments:
 #
-#   gpu-operator v26.7.1      app.kubernetes.io/managed-by = gpu-operator
+#   gpu-operator v26.7.2      app.kubernetes.io/managed-by = gpu-operator
 #                             Confirmed on a live EKS H100 cluster at v26.7.0 and
 #                             re-read on a live EKS GB300 cluster at v26.7.1: all
 #                             9 operand DaemonSets including driver, toolkit and
-#                             dcgm, and the running Pods inherit it. The bundled
-#                             NFD subchart does not carry it and is out of scope.
+#                             dcgm, and the running Pods inherit it. At v26.7.2
+#                             checked in source only: the chart's operand-labels
+#                             helper is unchanged and the reworked
+#                             applyCommonDaemonsetMetadata still copies it onto
+#                             every operand pod template. The bundled NFD
+#                             subchart does not carry it and is out of scope.
 #   network-operator 26.4.1   ds-owner = NicClusterPolicy
 #                             Kind-only, and the label is per-operand rather than
 #                             universal: mofed + rdma-shared-dp carry it,

@@ -41,3 +41,21 @@ transitions:
       - https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/26.7/release-notes.html#v26-7-1
       - https://github.com/NVIDIA/gpu-operator/pull/2863
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#gpu-operator-and-nvidia-dra-driver-gpu-shared-computedomain-crd
+  - from: ">=26.7.1 <26.7.2"
+    to: "=26.7.2"
+    verdict: safe
+    verifiedBy: >-
+      Upstream v26.7.2 milestone and the v26.7.1...v26.7.2 commit range,
+      plus a diff of the two NGC charts: no ClusterPolicy or computedomains
+      CRD change, two added ClusterRole verbs, and the GPUCluster-only
+      draDriver image moved to v0.5.1 (AICR deploys ClusterPolicy, so that
+      value does not render).
+    summary: >-
+      Patch release. The chart stamps its version (helm.sh/chart) on every
+      operand pod template, so the driver DaemonSet changes and, with
+      driver.upgradePolicy.autoUpgrade, the operator cycles the driver pod
+      node by node and evicts GPU workloads on each node in turn; the driver
+      version itself is unchanged.
+    references:
+      - https://github.com/NVIDIA/gpu-operator/milestone/7?closed=1
+      - https://github.com/NVIDIA/gpu-operator/compare/v26.7.1...v26.7.2

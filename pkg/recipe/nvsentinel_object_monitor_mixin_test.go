@@ -371,7 +371,9 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 // The two were verified to different depths, and that difference matters:
 //
 //	gpu-operator     confirmed on a live EKS H100 cluster (v26.7.0) and re-read
-//	                 on a live EKS GB300 cluster (v26.7.1). All 9 operand
+//	                 on a live EKS GB300 cluster (v26.7.1); at v26.7.2 checked
+//	                 in source only (chart operand-labels helper unchanged,
+//	                 operator still copies it to pod templates). All 9 operand
 //	                 DaemonSets carry it, INCLUDING nvidia-driver-daemonset,
 //	                 nvidia-container-toolkit-daemonset and nvidia-dcgm, and
 //	                 the running Pods inherit it (the predicate matches Pods,
@@ -395,7 +397,7 @@ var objectMonitorOperandIdentities = []struct {
 }{
 	{
 		component:    "gpu-operator",
-		verifiedAt:   "v26.7.1",
+		verifiedAt:   "v26.7.2",
 		label:        "app.kubernetes.io/managed-by",
 		policy:       "gpu-operator-pods-health",
 		notCoveredBy: "the bundled node-feature-discovery subchart, which is a Helm dependency rather than a ClusterPolicy operand",

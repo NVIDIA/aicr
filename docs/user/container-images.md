@@ -45,7 +45,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.7.1 | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.13 | 1 |
@@ -179,7 +179,7 @@ _No images extracted._
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
 - `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.1`
 - `nvcr.io/nvidia/driver:580.173.02`
-- `nvcr.io/nvidia/gpu-operator:v26.7.1`
+- `nvcr.io/nvidia/gpu-operator:v26.7.2`
 - `nvcr.io/nvidia/k8s-device-plugin:v0.20.1`
 - `nvcr.io/nvidia/k8s/container-toolkit:v1.20.1`
 - `nvcr.io/nvidia/k8s/dcgm-exporter:4.6.1-4.8.4-distroless`
@@ -491,7 +491,7 @@ across every image in a component and prints a summary report.
 ### Is it signed?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.1"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
 cosign tree "${IMAGE}"
 ```
 
@@ -502,7 +502,7 @@ attached — the image is unsigned.
 ### Does it have an SBOM?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.1"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
 cosign tree "${IMAGE}"
 ```
 
@@ -514,7 +514,7 @@ publishers attach SBOMs as registry referrers rather than the legacy
 ### Does it have build provenance?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.1"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
 cosign download attestation "${IMAGE}" \
   | jq -r 'select(.payload != null) | .payload' \
   | base64 -d \
