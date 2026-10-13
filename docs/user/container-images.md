@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **52**
-- Unique images: **122**
+- Components: **54**
+- Unique images: **123**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -77,6 +77,8 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
+| slinky-drainer | manifest | — | — | 1 |
+| slinky-drainer-crds | manifest | — | — | 0 |
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
@@ -360,6 +362,14 @@ _No images extracted._
 
 - `docker.io/percona/percona-server-mongodb-operator:1.23.1@sha256:78c87b933e184b9af36dbb0078751862c75934c1521c33d3be4d0a38aa58dd0a`
 
+### slinky-drainer
+
+- `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.26.0@sha256:29f8bbe52449ca0dccc34c1dba39c60c7c8a00cda00a5c5076dde9604dd27690`
+
+### slinky-drainer-crds
+
+_No images extracted._
+
 ### slinky-slurm
 
 - `docker.io/library/alpine:3.23.3`
@@ -449,6 +459,8 @@ The three remediation mixins (see [Graded Remediation](component-catalog.md#grad
 Every step also adds the `psmdb-operator` and `nvsentinel-mongodb` components, NVSentinel's datastore. Their six Percona images are pinned in those components' values files, so the BOM above lists them; NVSentinel's datastore setup Job reuses `docker.io/percona/percona-server-mongodb` from that list. The six NVIDIA images and the six Percona images are in the weekly image scan and the mirror lane. `TestNVSentinelRemediationChartRender` pins each step's images against the rendered chart, and `TestNVSentinelMongoDBChartRender` pins the two Percona components to exactly their listed images.
 
 The `nvsentinel-remediation` mixin pins the reboot Job image through `janitor-provider.csp.generic.rebootImage`, replacing the chart's `public.ecr.aws/docker/library/busybox:1.37.0` with the busybox already in the scan. `aicr mirror` cannot discover it, because janitor-provider passes it as the `GENERIC_REBOOT_IMAGE` environment variable rather than an `image:` field; mirror it yourself unless another component in the recipe already pulls it.
+
+The opt-in `nvsentinel-slinky-drainer` mixin (see [Slurm Drain Through Slinky](component-catalog.md#slurm-drain-through-slinky)) adds the image-less `slinky-drainer-crds` component and the `slinky-drainer` component, whose one image, `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.26.0`, is digest-pinned in its vendored manifest, so the BOM above lists it. Only recipes that compose the mixin deploy it. It is in the weekly image scan and the mirror lane, and `TestSlinkyDrainerImagePinnedEverywhere` keeps its tag at `nvsentinel`'s chart version.
 
 ### Registries spanned
 

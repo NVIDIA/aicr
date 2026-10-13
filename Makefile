@@ -426,6 +426,12 @@ nvsentinel-remediation-e2e: ## Live Kind test: nvsentinel-observe dry-run carrie
 	echo "Running nvsentinel-observe mixin dry-run e2e test..."; \
 	tests/e2e/nvsentinel-remediation/run.sh
 
+.PHONY: nvsentinel-slinky-drainer-e2e
+nvsentinel-slinky-drainer-e2e: ## Live Kind test: nvsentinel-slinky-drainer mixin drains a quarantined Slurm node through Slurm, not eviction (#2615)
+	@set -e; \
+	echo "Running nvsentinel-slinky-drainer mixin e2e test..."; \
+	tests/e2e/nvsentinel-slinky-drainer/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \
