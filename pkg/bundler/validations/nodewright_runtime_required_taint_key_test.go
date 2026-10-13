@@ -85,6 +85,13 @@ func TestCheckNodewrightRuntimeRequiredTaintKey(t *testing.T) {
 			wantWarnings: 1,
 		},
 		{
+			name:         "dynamic declaration on the taint path",
+			recipeResult: withOperator(),
+			opts:         []config.Option{config.WithDynamicValues(map[string][]string{component: {taintPath}})},
+			wantWarnings: 1,
+			wantContains: "--dynamic",
+		},
+		{
 			name:         "disabled component skipped",
 			recipeResult: withOperator(),
 			opts: []config.Option{
@@ -110,10 +117,34 @@ func TestCheckNodewrightRuntimeRequiredTaintKey(t *testing.T) {
 	}
 }
 
+// TestCheckNodewrightRuntimeRequiredTaintKeyNilConfig covers the values-only SDK
+// path, which runs validations without a bundler config.
 func TestCheckNodewrightRuntimeRequiredTaintKeyNilConfig(t *testing.T) {
-	rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: "nodewright-operator"}}}
-	if w, e := CheckNodewrightRuntimeRequiredTaintKey(context.Background(), "nodewright-operator", rr, nil, nil); len(w) != 0 || len(e) != 0 {
-		t.Errorf("CheckNodewrightRuntimeRequiredTaintKey(nil config) = %v, %v; want nothing", w, e)
+	const component = "nodewright-operator"
+	withOverrides := func(overrides map[string]any) *recipe.RecipeResult {
+		return &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: component, Overrides: overrides}}}
+	}
+	badRecipeValue := map[string]any{"controllerManager": map[string]any{"manager": map[string]any{"env": map[string]any{
+		"runtimeRequiredTaint": "example.com/gate=true:NoSchedule",
+	}}}}
+	tests := []struct {
+		name         string
+		recipeResult *recipe.RecipeResult
+		wantWarnings int
+	}{
+		{name: "nothing set", recipeResult: withOverrides(nil)},
+		{name: "bad key in recipe values", recipeResult: withOverrides(badRecipeValue), wantWarnings: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings, errs := CheckNodewrightRuntimeRequiredTaintKey(context.Background(), component, tt.recipeResult, nil, nil)
+			if len(errs) != 0 {
+				t.Fatalf("errors = %v, want none", errs)
+			}
+			if len(warnings) != tt.wantWarnings {
+				t.Errorf("warnings = %v, want %d", warnings, tt.wantWarnings)
+			}
+		})
 	}
 }
 

@@ -44,9 +44,12 @@ const nodewrightAutoTaintAnnotationPrefix = "nodewright.nvidia.com/autoTaint_"
 // Every source that can land on the component's accelerated taintStrPaths is
 // checked: the workload-gate taint, and the effective value after --set,
 // --set-json and --set-file. Rejecting a bad key from any of them avoids
-// re-deriving which one the bundler lets win.
+// re-deriving which one the bundler lets win. A nil bundlerConfig (the
+// values-only SDK path) still checks the recipe's own values. A --dynamic
+// declaration on a taint path is rejected, because its install-time value in
+// cluster-values.yaml is never checked.
 func CheckNodewrightRuntimeRequiredTaintKey(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
-	if recipeResult == nil || bundlerConfig == nil || !checkConditions(recipeResult, conditions) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
 		return nil, nil
 	}
 	ref := recipeResult.GetComponentRef(componentName)
@@ -60,8 +63,10 @@ func CheckNodewrightRuntimeRequiredTaintKey(ctx context.Context, componentName s
 	}
 
 	var taintKeys []string
-	if gate := bundlerConfig.WorkloadGateTaint(); gate != nil {
-		taintKeys = append(taintKeys, gate.Key)
+	if bundlerConfig != nil {
+		if gate := bundlerConfig.WorkloadGateTaint(); gate != nil {
+			taintKeys = append(taintKeys, gate.Key)
+		}
 	}
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
@@ -69,7 +74,9 @@ func CheckNodewrightRuntimeRequiredTaintKey(ctx context.Context, componentName s
 			"cannot verify the runtime-required taint key: failed to load the component registry",
 			err, map[string]any{logKeyComponent: componentName})}
 	}
-	if paths := registry.Get(componentName).GetAcceleratedTaintStrPaths(); len(paths) > 0 {
+	var warnings []string
+	paths := registry.Get(componentName).GetAcceleratedTaintStrPaths()
+	if len(paths) > 0 {
 		values, valuesErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, keys, "the runtime-required taint key")
 		if valuesErr != nil {
 			return nil, []error{valuesErr}
@@ -81,9 +88,18 @@ func CheckNodewrightRuntimeRequiredTaintKey(ctx context.Context, componentName s
 				}
 			}
 		}
+		if bundlerConfig != nil {
+			for _, hit := range dynamicPathIntersections(bundlerConfig, keys, paths) {
+				msg := fmt.Sprintf("%s: --dynamic %s:%s targets the runtime-required taint path %s, whose "+
+					"install-time value in cluster-values.yaml is never checked; set the taint statically "+
+					"(--workload-gate or --set) instead",
+					componentName, hit.key, hit.path, hit.guard)
+				slog.Warn(msg, logKeyComponent, componentName)
+				warnings = append(warnings, msg)
+			}
+		}
 	}
 
-	var warnings []string
 	for _, key := range slices.Compact(slices.Sorted(slices.Values(taintKeys))) {
 		if len(validation.IsQualifiedName(nodewrightAutoTaintAnnotationPrefix+key)) > 0 {
 			msg := fmt.Sprintf("%s: runtime-required taint key %q cannot be used: the operator writes it into "+
