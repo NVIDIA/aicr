@@ -591,6 +591,19 @@ func TestInstalledVersions(t *testing.T) {
 			counts: mappingCounts{unplaced: 1},
 		},
 		{
+			name: "an unplaced application beside an unversioned placed one is named alone", deployer: DeployerArgoCD,
+			comps: comps,
+			records: []installedRelease{
+				argoRec("teamfoo-gpu-operator", "team-foo", "v24.9.0", nil),
+				argoRec("aicr-gpu-operator", "nvidia-gpu-operator", "", nil),
+			},
+			want: map[string]string{"gpu-operator": ""},
+			wantUnproven: map[string][]UnprovenRecord{"gpu-operator": {
+				{Source: "argocd", Name: "teamfoo-gpu-operator", Namespace: "team-foo", Reason: UnprovenUnplaced},
+			}},
+			counts: mappingCounts{unplaced: 1},
+		},
+		{
 			name: "an unreadable helm record is named", deployer: DeployerHelm, comps: comps,
 			records: []installedRelease{
 				{Source: sourceHelm, Name: "gpu-operator", Namespace: "nvidia-gpu-operator", Unproven: true},

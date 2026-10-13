@@ -143,10 +143,9 @@ type Result struct {
 	Versions map[string]string
 
 	// Unproven names, per component, the records that left it unversioned.
-	// That is every record that placed it when none could establish a
-	// version, or the one chosen as its install when that one could not. A
-	// component unversioned by a record that was read, such as a failed Helm
-	// release, has no entry.
+	// That is every record that placed it without establishing a version,
+	// whenever the component reads unversioned. A component unversioned only
+	// by records that were read, such as a failed Helm release, has no entry.
 	Unproven map[string][]UnprovenRecord
 
 	// Source is what was read and what was skipped.
@@ -508,13 +507,26 @@ func installedVersions(d Deployer, comps []Component, records []installedRelease
 		if err != nil {
 			return mapping{}, err
 		}
-		out.versions[comps[i].Name] = versionFor(record, comps[i])
-		if record.Unproven {
-			out.markUnproven(comps[i].Name, []installedRelease{record})
+		version := versionFor(record, comps[i])
+		out.versions[comps[i].Name] = version
+		if unproven := unprovenOf(found); version == "" && len(unproven) > 0 {
+			out.markUnproven(comps[i].Name, unproven)
 		}
 	}
 
 	return out, nil
+}
+
+// unprovenOf is the records that cannot establish a version, in reader order.
+func unprovenOf(records []installedRelease) []installedRelease {
+	var out []installedRelease
+	for _, record := range records {
+		if record.Unproven {
+			out = append(out, record)
+		}
+	}
+
+	return out
 }
 
 // markUnproven names records as the ones that left component unversioned.
