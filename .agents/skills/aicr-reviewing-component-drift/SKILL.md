@@ -39,7 +39,9 @@ whose candidates have not changed since last week is confirmed, not re-derived.
 Update it in Step 5.
 
 **Reuse a verdict only after comparing the whole candidate set** — `current`,
-`latest`, and every entry in `alternatives[]` — against what the entry records.
+`latest`, and every entry in `alternatives[]` and `predating[]` — against what
+the entry records. A chart in `withheld[]` has no `latest`; its set is
+`current` plus `predating[]`.
 A verdict keyed on the version pair alone goes stale silently, because a new
 candidate can appear while `current` and `latest` both stay put: `kai-scheduler`
 sat at `v0.16.9 -> v0.20.1` across two runs while a `patch v0.16.10` arrived
@@ -83,28 +85,61 @@ In order of preference:
    set from `recipes/registry.yaml` and the upstream registry (`helm show
    chart` for HTTP repos, `crane ls` for `oci://`). That re-derivation is
    unfiltered: it does not apply Renovate's `minimumReleaseAge` (3 days,
-   `.github/renovate.json5`) or `internalChecksFilter: "strict"`, so it can
-   surface a release younger than the cooldown or one Renovate's strict
-   filter would reject. Use it only to identify which components to look at —
+   `.github/renovate.json5`), `internalChecksFilter: "strict"`, or the
+   report's publish-date screen. It can surface a release younger than the
+   cooldown, one Renovate's strict filter would reject, or a frozen line
+   numbered above the maintained one (the highest `crane ls` tag for
+   `kai-scheduler` is the retracted `v0.20.1`). Use it only to identify which
+   components to look at —
    never to justify a bump on its own; the artifact remains the authoritative
    source for whether a version is actually eligible.
 
-Confirm `schemaVersion` is `1`. A higher number means this skill is stale —
-read `tools/drift-report/report.go` before trusting the field names.
+Confirm `schemaVersion` is `2`. A higher number means this skill is stale —
+read `tools/drift-report/report.go` before trusting the field names. A `1` is
+an artifact from before the publish-date screen: its `latest` can be a
+retracted or frozen line, so verify every candidate's release date by hand.
 
 Report `unresolved[]` to the user before reviewing anything: those pins are
 unknown, not current, and a persistent entry is a broken datasource worth
 fixing ahead of any bump.
 
 **Read `alternatives[]` on every row that has one.** `latest` is the largest
-step Renovate offers, not the only one and not necessarily the one to take. A
-row carrying `alternatives` has a smaller step available — usually the one worth
+step on offer, not the only one and not necessarily the one to take. A row
+carrying `alternatives` has a smaller step available — usually the one worth
 recommending, since it crosses fewer upstream changes. Name both in the verdict
 and say which you are recommending; a verdict that discusses only `latest` when
 the row offered a minor beside a major has reviewed the wrong upgrade (#2791).
+The field is absent when only one candidate was offered, the common case.
 
-The field is absent when Renovate offered exactly one candidate, which is the
-common case. It is additive, so `schemaVersion` stays `1`.
+**Read `predating[]` and `withheld[]`.** A registry can carry a frozen or
+retracted line numbered above the maintained one, and Renovate offers the
+highest number. That is how `kai-scheduler`'s retracted `v0.20.1` and
+`agentgateway`'s kgateway-lineage `v2.2.1` were proposed for weeks (#2791). The
+tool walks each update type from the highest version down. It withholds
+versions published more than a day before the current pin (`currentPublished`)
+until it reaches one that is not, offers that one, and drops lower versions of
+that type unexamined. A withheld version stays visible in the row's
+`predating[]`; a chart whose every candidate was withheld moves out of
+`drift[]` into `withheld[]` and has no `latest`. Publish order is a signal, not
+a verdict: a maintained parallel line is withheld too when its newest release
+is older than the pin, as when the pin is itself a recent patch on an older
+line. Never recommend a withheld version without confirming upstream still
+maintains its line (`gh release list`, the release being marked Latest, no
+retraction), and say in the verdict that you did.
+
+**Treat `unscreened` as unchecked.** It is set when an offered version could
+not be checked against the pin: the pin itself has no publish date (then
+nothing was withheld), or an offered version has none. Causes are a failed
+registry lookup, an OCI chart without a usable
+`org.opencontainers.image.created` annotation, or a Helm entry Renovate left
+undated. An unscreened version is offered exactly as before the screen
+existed, and lower lines of its type were not examined. Check the dates
+yourself (`crane manifest <image>:<tag>` for `oci://`, `helm search repo -l`
+or the repo index for Helm) and look for a maintained line below it
+(`crane ls`) before recommending one. `summary.unscreened` counts these rows,
+and the digest names the count when it is not zero; a sudden jump usually means
+a registry refused the lookups. A row without `unscreened` had every offered
+version checked.
 
 ## Step 3 — Gather evidence per component
 
@@ -172,8 +207,9 @@ summarize it in chat. Rank components by (blocking findings, then update type,
 then age of the pin). Per component:
 
 - **Verdict:** take / hold / defer, one line of why. When the row carries
-  `alternatives`, name which version the verdict is about — a bare "take" is
-  ambiguous once more than one is on offer
+  `alternatives` or `predating`, name which version the verdict is about — a
+  bare "take" is ambiguous once more than one is on offer, and a `withheld[]`
+  row has no `latest` to default to
 - **Evidence:** the findings from Step 3 that produced the verdict, with the
   specific values path, image, or release note that matters
 - **Cost:** what a bump would require — a values-file edit, a new upgrade
@@ -192,9 +228,12 @@ repeating with it.
 
 `candidates` is what Step 1 compares against, so record it verbatim from the
 report rather than summarizing: an entry that omits a candidate makes next
-week's run confirm a verdict that never considered it. `recommends` is only
-meaningful when the row had alternatives; omit it otherwise, since the single
-candidate is already named by `to`.
+week's run confirm a verdict that never considered it. Record a `predating[]`
+entry with a `predating` prefix (`predating major v2.2.1`) so a withheld version
+is never read back as one that was offered. `recommends` is only meaningful
+when the row had alternatives or predating versions; omit it otherwise, since
+the single candidate is already named by `to`. A `withheld[]` row has no `latest`, so omit `to` and set
+`recommends` to the predating version the verdict names, if any.
 
 ## Gotchas
 
