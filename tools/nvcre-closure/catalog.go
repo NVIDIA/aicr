@@ -17,6 +17,7 @@ package main
 import (
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -27,7 +28,11 @@ import (
 // rejects them before any image reference can be read. The scan below is
 // therefore line-based over whole blocks rather than a document walk.
 var (
-	libRefPattern   = regexp.MustCompile(`\{\{-?\s*lib\s+"([^"]+)"`)
+	templateActionPattern = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
+	// A whole string literal is its own alternative, so a directive name
+	// inside a string argument is consumed with the literal and never matches.
+	directivePattern = regexp.MustCompile(`(?:^|[\s(|])(lib|includeTemplate|includeFile)\b(?:\s+(` +
+		stringLiteralRegex + `))?|(?:` + stringLiteralRegex + `)`)
 	imageRefPattern = regexp.MustCompile(`^\s*(?:-\s+)?image:\s*["']?([^"'\s]+)["']?\s*$`)
 	// Runtime fetches defeat digest pinning: the bytes arrive at pod start from
 	// outside the image, so a mirrored registry is not sufficient to run the
@@ -56,6 +61,62 @@ const (
 	fieldPlatform = "platform"
 	fieldArch     = "arch"
 )
+
+// Template functions that splice another file into a catalog entry:
+//   - lib renders a file from the shared _lib tree.
+//   - includeTemplate renders a file from the entry's own directory.
+//   - includeFile inserts a file from the entry's own directory verbatim.
+//
+// A rendered file may splice in further files.
+const (
+	directiveLib             = "lib"
+	directiveIncludeTemplate = "includeTemplate"
+	directiveIncludeFile     = "includeFile"
+)
+
+// stringLiteralRegex matches an interpreted or raw Go string literal.
+const stringLiteralRegex = `"(?:\\.|[^"\\])*"|` + "`[^`]*`"
+
+// directive is one file-splicing template call and the file it names.
+type directive struct {
+	fn  string
+	ref string
+}
+
+// scanDirectives returns the file-splicing calls in body's template actions,
+// skipping template comments. It returns an error for a call whose argument is
+// not a string literal.
+func scanDirectives(body string) ([]directive, error) {
+	var out []directive
+	for _, action := range templateActionPattern.FindAllString(body, -1) {
+		inner := strings.TrimSuffix(strings.TrimPrefix(action, "{{"), "}}")
+		inner = strings.TrimSuffix(strings.TrimPrefix(inner, "-"), "-")
+		if strings.HasPrefix(strings.TrimSpace(inner), "/*") {
+			continue
+		}
+		for _, m := range directivePattern.FindAllStringSubmatch(inner, -1) {
+			if m[1] == "" {
+				continue
+			}
+			// A non-literal target is known only at render time, so skipping
+			// it would leave its content out of the closure.
+			if m[2] == "" {
+				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+					"template directive target is not a string literal, so the scan cannot follow it "+
+						"and the closure would omit whatever it splices in", nil,
+					map[string]interface{}{"action": action})
+			}
+			ref, err := strconv.Unquote(m[2])
+			if err != nil {
+				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+					"template directive target is not a valid string literal", err,
+					map[string]interface{}{"action": action})
+			}
+			out = append(out, directive{fn: m[1], ref: ref})
+		}
+	}
+	return out, nil
+}
 
 // selector is the subset of a catalog `when:` clause that decides whether a
 // block applies. A nil field matches anything, which is how the base
@@ -98,9 +159,8 @@ func slicesContains(haystack []string, needle string) bool {
 // block is one selectable unit of a catalog entry: either the base
 // `dependencies:` section or a single `- when:` override.
 type block struct {
-	sel     selector
-	body    string
-	libRefs []string
+	sel  selector
+	body string
 }
 
 // runtimeFetch is a network fetch performed at pod start rather than baked into
@@ -126,10 +186,10 @@ func splitBlocks(entry string) []block {
 
 	var blocks []block
 	if overridesAt == -1 {
-		return []block{newBlock(selector{}, strings.Join(lines, "\n"))}
+		return []block{{body: strings.Join(lines, "\n")}}
 	}
 
-	blocks = append(blocks, newBlock(selector{}, strings.Join(lines[:overridesAt], "\n")))
+	blocks = append(blocks, block{body: strings.Join(lines[:overridesAt], "\n")})
 
 	start := -1
 	for i := overridesAt + 1; i <= len(lines); i++ {
@@ -137,20 +197,12 @@ func splitBlocks(entry string) []block {
 		if isItem || i == len(lines) {
 			if start != -1 {
 				body := strings.Join(lines[start:i], "\n")
-				blocks = append(blocks, newBlock(parseSelector(body), body))
+				blocks = append(blocks, block{sel: parseSelector(body), body: body})
 			}
 			start = i
 		}
 	}
 	return blocks
-}
-
-func newBlock(sel selector, body string) block {
-	b := block{sel: sel, body: body}
-	for _, m := range libRefPattern.FindAllStringSubmatch(body, -1) {
-		b.libRefs = append(b.libRefs, m[1])
-	}
-	return b
 }
 
 // parseSelector reads the `when:` clause of an override block. It is a hand
