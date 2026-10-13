@@ -18,7 +18,7 @@
 #   AICR_UPDATE_GOLDEN=1 go test ./validators/deployment/ -run '^TestChartContractsMatchPinnedCharts$' -count=1
 
 nodewright-operator:
-  bundleValuesSHA256: sha256:7456a758ef4b79cf20e43430528e2685934216c7ba289ee360735a9e37e8b6d1
+  bundleValuesSHA256: sha256:8f3b8cac1cda62a24bccfc32419c39797f1f4406be45b0c71d0a16c0fdb54014
   controllerLabels:
     app.kubernetes.io/component: manager
     control-plane: controller-manager
