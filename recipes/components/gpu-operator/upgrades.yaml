@@ -45,11 +45,15 @@ transitions:
     to: "=26.7.2"
     verdict: safe
     verifiedBy: >-
-      Upstream v26.7.2 milestone and the v26.7.1...v26.7.2 commit range,
-      plus a diff of the two NGC charts: no ClusterPolicy or computedomains
-      CRD change, two added ClusterRole verbs, and the GPUCluster-only
-      draDriver image moved to v0.5.1 (AICR deploys ClusterPolicy, so that
-      value does not render).
+      Live Helm upgrade on an EKS GB300 cluster (2x p6e-gb300r.36xlarge,
+      k8s 1.35.6), 2026-10-13: v26.7.1 to v26.7.2 with DRA driver 0.5.0.
+      Both nodes went from upgrade-required straight to pod-restart-required,
+      the driver manager kept the loaded driver and the driver container did
+      a userspace-only install; a GPU pod on each node kept running with no
+      restart, and ClusterPolicy returned to ready. A two-node ComputeDomain
+      then came up Ready with IMEX channels injected. Upstream v26.7.2
+      milestone and chart diff: no ClusterPolicy or computedomains CRD
+      change.
     summary: >-
       Patch release. The chart stamps its version (helm.sh/chart) on every
       operand pod template, so the driver DaemonSet changes. Its install

@@ -304,7 +304,7 @@ Both policies fire when a **DaemonSet-owned Pod** in a watched namespace has bee
 
 | Operator | Required label | Coverage |
 |---|---|---|
-| `gpu-operator` (v26.7.2) | `app.kubernetes.io/managed-by: gpu-operator` | Confirmed on a live H100 cluster at v26.7.0 and re-read on a live GB300 cluster at v26.7.1: all nine operand DaemonSets (driver, toolkit, device-plugin, DCGM, DCGM exporter, validator, GFD, MIG manager, MPS control), and the running Pods inherit it. Checked in source only at v26.7.2. The bundled node-feature-discovery subchart does not carry it and is out of scope. |
+| `gpu-operator` (v26.7.2) | `app.kubernetes.io/managed-by: gpu-operator` | Confirmed on a live H100 cluster at v26.7.0 and re-read on a live GB300 cluster at v26.7.1 and v26.7.2: all nine operand DaemonSets (driver, toolkit, device-plugin, DCGM, DCGM exporter, validator, GFD, MIG manager, MPS control), and the running Pods inherit it. The bundled node-feature-discovery subchart does not carry it and is out of scope. |
 | `network-operator` (26.4.1) | `ds-owner: NicClusterPolicy` | Verified on Kind only. The label is applied per-operand, not uniformly, so coverage depends on which `NicClusterPolicy` a recipe ships -- see below. |
 
 **Network Operator coverage is partial, and it varies by recipe.** The `ds-owner` label is stamped per operand rather than by a shared helper, so which components a policy watches depends on what that recipe's `NicClusterPolicy` enables:
