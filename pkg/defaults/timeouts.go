@@ -1677,9 +1677,8 @@ const (
 )
 
 // AtRiskListPageSize caps how many objects one List pulls while scanning for
-// resources an upgrade could disturb. The scan reads each object's metadata
-// only, so a page's size is set by labels, annotations and managed fields.
-// MetadataListResponseLimit is sized for a page of this many objects.
+// resources an upgrade could disturb. MetadataListResponseLimit is sized for a
+// page of this many objects.
 //
 // Nothing is retained across pages beyond the objects found at risk, which on
 // a healthy cluster is none, so the page bounds the peak as well as the
@@ -1687,10 +1686,8 @@ const (
 const AtRiskListPageSize int64 = 200
 
 // MetadataListResponseLimit caps the bytes one PartialObjectMetadataList
-// response may carry. It is sized for an AtRiskListPageSize page. An object's
-// annotations are capped at 256 KiB, and 200 objects at that cap come to
-// 50 MiB, which leaves room for labels and managed fields. Exceeding it is an
-// error, so a page is never silently truncated.
+// response may carry. An AtRiskListPageSize page at the 256 KiB annotation cap
+// is 50 MiB, which leaves room for labels and managed fields.
 const MetadataListResponseLimit int64 = 64 * 1024 * 1024 // 64 MiB
 
 // MetadataListRetries is how many times a metadata List is retried after a

@@ -136,8 +136,8 @@ func policyObject(name string, objLabels, annotations map[string]string) *metav1
 	return partialObject(policyGVK, "", name, objLabels, annotations)
 }
 
-// fakeLister is the fake metadata client behind the k8sclient.MetadataLister
-// the scan takes. TestScanAtRiskReadsOnlyMetadataLists covers the real one.
+// fakeLister is a k8sclient.MetadataLister backed by the client-go fake
+// metadata client.
 type fakeLister struct {
 	*metadatafake.FakeMetadataClient
 }
@@ -155,9 +155,9 @@ func scanClient(objects ...runtime.Object) fakeLister {
 	return fakeLister{metadatafake.NewSimpleMetadataClient(scheme, objects...)}
 }
 
-// metadataPage returns a List response holding items and continueToken, for a
-// reactor to return. The fake metadata client accepts only a metav1.List from
-// a reactor, not a PartialObjectMetadataList.
+// metadataPage returns a reactor response holding items and continueToken. The
+// fake metadata client accepts only a metav1.List from a reactor, not a
+// PartialObjectMetadataList.
 func metadataPage(continueToken string, items ...*metav1.PartialObjectMetadata) *metav1.List {
 	page := &metav1.List{ListMeta: metav1.ListMeta{Continue: continueToken}}
 	for _, item := range items {
@@ -171,9 +171,8 @@ func topologyKind() ResourceKind {
 	return ResourceKind{Group: "grove.io", Kind: "ClusterTopology", Components: []string{"grove"}}
 }
 
-// TestScanAtRiskOwnership checks each marker owned recognizes, one object per
-// case. The Helm pairs are the cases that matter. Neither the managed-by label
-// nor a Helm annotation is ownership on its own.
+// TestScanAtRiskOwnership checks each marker owned recognizes, and that neither
+// the managed-by label nor a Helm annotation is ownership on its own.
 func TestScanAtRiskOwnership(t *testing.T) {
 	t.Parallel()
 
@@ -867,12 +866,10 @@ func TestScanAtRiskSkipsAnUnnamedObject(t *testing.T) {
 	}
 }
 
-// TestScanAtRiskReadsOnlyMetadataLists runs the scan through the real
-// MetadataListClient against an apiserver stand-in. The scan lists each kind
-// cluster-wide, since a scan scoped to one namespace would miss the tenant
-// objects this warning exists for. A response that could carry a spec or a
-// Secret's data fails the scan, and nothing it held reaches the result or the
-// error.
+// TestScanAtRiskReadsOnlyMetadataLists runs the scan through a real
+// MetadataListClient. It checks that each kind is listed cluster-wide, and
+// that a full-object response fails the scan without its body reaching the
+// result or the error.
 func TestScanAtRiskReadsOnlyMetadataLists(t *testing.T) {
 	t.Parallel()
 

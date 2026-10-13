@@ -205,13 +205,12 @@
 // cluster-wide. The scan requests only metadata, and a response that is not a
 // meta.k8s.io/v1 PartialObjectMetadataList, a 406 included, fails the scan.
 //
-// It reports every object carrying none of the ownership markers. Helm owns
-// an object carrying the app.kubernetes.io/managed-by=Helm label together with
-// a nonblank meta.helm.sh/release-name annotation, or together with a nonblank
-// helm.sh/hook annotation, since Helm never writes the release name on a
-// hook. The label alone is not ownership, because anything can write it. Argo
-// CD owns an object carrying a nonblank argocd.argoproj.io/tracking-id
-// annotation.
+// It reports every object carrying none of these ownership markers:
+//   - a nonblank argocd.argoproj.io/tracking-id annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a nonblank
+//     meta.helm.sh/release-name annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a nonblank
+//     helm.sh/hook annotation
 //
 // The check is positive, so an unrecognized object is at risk by default. The
 // failure it guards is an operator's own custom resources being

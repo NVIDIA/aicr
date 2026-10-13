@@ -333,18 +333,15 @@ func scanKind(ctx context.Context, client k8sclient.MetadataLister, kind Resourc
 //   - the app.kubernetes.io/managed-by=Helm label with a non-blank
 //     helm.sh/hook annotation
 func owned(item metav1.Object) bool {
-	// An allowlist, so an unrecognized marker over-warns. A denylist of "not
-	// ours" markers would let every unrecognized shape pass silently, and a
-	// CRD removal that cascade-deletes an operator's own objects has no
-	// recovery.
+	// An allowlist, so an unrecognized marker over-warns rather than letting a
+	// cascade-deleted object, which has no recovery, go unreported.
 	annotations := item.GetAnnotations()
 	if strings.TrimSpace(annotations[argoTrackingIDAnnotation]) != "" {
 		return true
 	}
-	// The label alone is not ownership. Any controller, hand-written manifest
-	// or non-Helm renderer can write it, while only Helm's install path writes
-	// the release name. Helm never writes the release name on a hook, so a
-	// hook pairs the label with helm.sh/hook.
+	// Anything can write the label, but only Helm's install path writes the
+	// release name. Helm gives a hook no release name, so a hook pairs the
+	// label with helm.sh/hook.
 	if item.GetLabels()[labels.ManagedBy] != helmManagedByValue {
 		return false
 	}

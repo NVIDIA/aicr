@@ -100,9 +100,6 @@ func TestNewMetadataListClientForConfig(t *testing.T) {
 	})
 }
 
-// TestMetadataListClientAdvertisesOnlyMetadataLists checks every media type
-// the Accept header offers. A bare application/json among them lets the
-// apiserver answer with full objects.
 func TestMetadataListClientAdvertisesOnlyMetadataLists(t *testing.T) {
 	t.Parallel()
 
@@ -189,8 +186,7 @@ func TestMetadataListClientList(t *testing.T) {
 }
 
 // TestMetadataListClientRejects covers every response that is not a
-// meta.k8s.io/v1 PartialObjectMetadataList. client-go's metadata client
-// decodes most of these into one, keeping whatever metadata they carry.
+// meta.k8s.io/v1 PartialObjectMetadataList.
 func TestMetadataListClientRejects(t *testing.T) {
 	t.Parallel()
 
@@ -282,8 +278,7 @@ func TestMetadataListClientRejectsAnOversizedList(t *testing.T) {
 }
 
 // TestMetadataListClientKeepsContextErrors checks that an aborted request
-// reports the abort, so a caller can tell an operator's Ctrl-C from an
-// unavailable apiserver.
+// reports ErrCodeCanceled or ErrCodeTimeout, not ErrCodeUnavailable.
 func TestMetadataListClientKeepsContextErrors(t *testing.T) {
 	t.Parallel()
 

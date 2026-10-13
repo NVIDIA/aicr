@@ -619,12 +619,11 @@ func checkHooks(where string, t *Transition) []string {
 	return v
 }
 
-// checkAffectedResources implements rule 10, an addition to ADR-021. It
-// returns one violation for each core Secret kind t's affectedResources name,
-// matching the kind case-insensitively and ignoring surrounding space.
+// checkAffectedResources implements rule 10. It returns one violation for each
+// core Secret kind t's affectedResources name, matching the kind
+// case-insensitively and ignoring surrounding space.
 func checkAffectedResources(where string, t *Transition) []string {
-	// Listing Secrets cluster-wide needs a permission that reads every
-	// Secret's data, whatever the at-risk scan itself keeps.
+	// Listing Secrets needs a permission that reads every Secret's data.
 	var v []string
 	for i, a := range t.AffectedResources {
 		if strings.TrimSpace(a.Group) != "" {

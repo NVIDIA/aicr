@@ -45,11 +45,9 @@ type MetadataLister interface {
 		opts metav1.ListOptions) (*metav1.PartialObjectMetadataList, error)
 }
 
-// MetadataListClient is a MetadataLister that accepts nothing but a
-// PartialObjectMetadataList. Its Accept header carries no plain
-// application/json fallback, so an apiserver that cannot serve the list as
-// metadata answers 406 rather than sending every object in full, spec and
-// Secret data included.
+// MetadataListClient is a MetadataLister that requests and accepts only a
+// meta.k8s.io/v1 PartialObjectMetadataList, so an apiserver that cannot serve
+// one answers 406 rather than sending full objects.
 type MetadataListClient struct {
 	client        *rest.RESTClient
 	limit         int64
@@ -58,14 +56,16 @@ type MetadataListClient struct {
 }
 
 // NewMetadataListClientForConfig returns a MetadataListClient for restConfig,
-// with the request timeout BoundedConfig applies. A nil restConfig is an
-// ErrCodeInvalidRequest error.
+// with the request timeout BoundedConfig applies. It returns
+// ErrCodeInvalidRequest if restConfig is nil.
 func NewMetadataListClientForConfig(restConfig *rest.Config) (*MetadataListClient, error) {
 	if restConfig == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "no kubernetes client configuration available")
 	}
 
 	cfg := BoundedConfig(restConfig)
+	// No plain application/json fallback, which would let the apiserver send
+	// full objects.
 	cfg.AcceptContentTypes = partialObjectMetadataListAccept
 	cfg.ContentType = runtime.ContentTypeJSON
 	cfg.NegotiatedSerializer = metainternalversionscheme.Codecs.WithoutConversion()
@@ -171,8 +171,8 @@ func retryableTransportErr(err error) bool {
 	return utilnet.IsConnectionReset(err) || utilnet.IsProbableEOF(err) || utilnet.IsHTTP2ConnectionLost(err)
 }
 
-// listErr classifies a failed request or read. A dead ctx keeps its
-// cancellation or timeout, and anything else is ErrCodeUnavailable.
+// listErr wraps err as ErrCodeCanceled or ErrCodeTimeout if ctx has ended, and
+// as ErrCodeUnavailable otherwise.
 func listErr(ctx context.Context, err error, message string, errCtx map[string]any) error {
 	if ctx.Err() != nil {
 		return errors.WrapCtxErrWithContext(err, errors.ErrCodeTimeout, message, errCtx)
@@ -181,7 +181,7 @@ func listErr(ctx context.Context, err error, message string, errCtx map[string]a
 	return errors.WrapWithContext(errors.ErrCodeUnavailable, message, err, errCtx)
 }
 
-// resourcePath is the cluster-wide collection path for gvr.
+// resourcePath returns the segments of gvr's cluster-wide collection path.
 func resourcePath(gvr schema.GroupVersionResource) []string {
 	if gvr.Group == "" {
 		return []string{"api", gvr.Version, gvr.Resource}
