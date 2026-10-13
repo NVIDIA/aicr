@@ -258,7 +258,8 @@ func scanKind(ctx context.Context, client k8sclient.MetadataLister, kind Resourc
 		if err := ctxErr(ctx, atRiskSubject); err != nil {
 			return ScannedKind{}, nil, err
 		}
-		// Metadata only, so no object's spec or Secret's data is ever held.
+		// Requests only metadata, whose annotations can still hold a whole
+		// object in kubectl's last-applied-configuration.
 		page, err := client.List(ctx, gvr, opts)
 		if err != nil {
 			// A CRD deleted between the mapping and this List answers the same

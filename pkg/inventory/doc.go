@@ -202,10 +202,8 @@
 // ScanAtRisk is advisory and asks what an upgrade might destroy rather than
 // what is installed. Given the group/kind pairs the crossed transition records
 // name, it resolves each through a RESTMapper and lists its metadata
-// cluster-wide. The list is requested and accepted only as a meta.k8s.io/v1
-// PartialObjectMetadataList, so the scan never reads an object's spec or a
-// Secret's data, and a response of any other kind, a 406 included, fails the
-// scan.
+// cluster-wide. The scan requests only metadata, and a response that is not a
+// meta.k8s.io/v1 PartialObjectMetadataList, a 406 included, fails the scan.
 //
 // It reports every object carrying none of the ownership markers. Helm owns
 // an object carrying the app.kubernetes.io/managed-by=Helm label together with
