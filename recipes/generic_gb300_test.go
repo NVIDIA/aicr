@@ -116,9 +116,9 @@ func TestGenericGB300MaintenanceOperatorSizing(t *testing.T) {
 		subOp, _ := sub["operator"].(map[string]any)
 		res, _ := subOp["resources"].(map[string]any)
 		limits, _ := res["limits"].(map[string]any)
-		if limits["memory"] != "1Gi" {
-			t.Fatalf("maintenance-operator-chart.operator.resources.limits.memory = %v, want 1Gi "+
-				"(the subchart default 128Mi is below the operator's working set)", limits["memory"])
+		if limits["memory"] != "12Gi" {
+			t.Fatalf("maintenance-operator-chart.operator.resources.limits.memory = %v, want 12Gi "+
+				"(the subchart default 128Mi is below the operator's working set, about 5.1Gi at 2500 nodes)", limits["memory"])
 		}
 
 		op, _ := values["operator"].(map[string]any)
