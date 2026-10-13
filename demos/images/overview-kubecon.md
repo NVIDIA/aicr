@@ -49,7 +49,7 @@ Row 4 — Amber left edge (label "Workload Platforms"):
 
 Each chip row has a small version-lock padlock icon to its far right in grey, suggesting pinned versions.
 
-Below the chips, a short NVIDIA Green callout pill: "Version/digest pinned · SBOM generated"
+Below the chips, a short NVIDIA Green callout pill: "Versions pinned · SBOM generated"
 
 Short grey caption below: "Curated, version-locked, validated together"
 
@@ -64,13 +64,13 @@ Card 1 — icon: speedometer gauge
 **Optimized** — Tuned for hardware × OS × workload × service
 
 Card 2 — icon: circular arrows (reproducibility)
-**Reproducible** — Same inputs → identical, digest-pinned artifacts
+**Reproducible** — Same inputs → identical, version-pinned, checksummed artifacts
 
 Card 3 — icon: checklist with magnifying glass
 **Validated** — Constraint, deployment, performance, and conformance checks
 
 Card 4 — icon: chain link with shield
-**Trusted** — SLSA L3 provenance · Sigstore attestations · SBOM
+**Trusted** — SLSA provenance (Build L3 images) · Sigstore attestations · SBOM
 
 Card 5 — icon: magnifying glass over a document
 **Auditable** — query, diff, upgrade-check, signed evidence

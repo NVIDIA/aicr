@@ -40,7 +40,7 @@ Caption: "Create GitOps-ready artifacts with Sigstore attestations"
 
 **Step 3 - DEPLOY**
 Icon: Argo CD logo
-Visual: Argo CD syncing the Step 2 bundle into the cluster. A bundle is generated for one deployer; a small side note lists the others (Helm, Helmfile, Flux) as `--deployer` values that regenerate the bundle, not as consumers of the same `./bundle`
+Visual: the Step 2 bundle committed to a Git repository, then Argo CD syncing it into the cluster. A bundle is generated for one deployer; a small side note lists the others (Helm, Helmfile, Flux) as `--deployer` values that regenerate the bundle, not as consumers of the same `./bundle`
 Caption: "Use the open source CD tooling you already run"
 
 **Step 4 - VALIDATE**
@@ -55,7 +55,7 @@ Caption: "Verify the recipe was correctly reconciled in your cluster"
 Visual: Clean Kubernetes cluster
 Benefits (icon + two to four words each):
 - Deterministic: same input, same output
-- Secure: SLSA L3, SBOM, Sigstore attestations
+- Secure: SLSA provenance, SBOM, Sigstore attestations
 - Conformant: CNCF AI Conformance verified
 - Optimized: tuned for hardware + OS + K8s + workload
 
@@ -67,5 +67,6 @@ Benefits (icon + two to four words each):
 - Step order is fixed and must be numbered in the image exactly as above: 1 Recipe (top-left), 2 Bundle (top-right), 3 Deploy (bottom-left), 4 Validate (bottom-right). Validate is the last step; it never precedes Bundle or Deploy
 - No header bar, title text, or logo inside the image: the hosting slide carries the title and the conference branding
 - Exactly one command per step, rendered in a terminal overlay; copy the commands above character for character and do not invent flags
+- Terminal overlays: light text on the dark panel with strong contrast; dim grey on navy is not acceptable
 - Minimum text size: every caption and command must stay legible when the whole image is projected at 1600 px wide. Prefer fewer, larger labels; if a command does not fit on two lines at that size, drop the Step 1 `--os` and `--platform` flags before shrinking the font
 - Footer: dark background, white text: "Recipe → Bundle → Deploy → Validate. One recipe, any deployer."
