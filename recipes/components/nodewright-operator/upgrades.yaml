@@ -252,9 +252,11 @@ transitions:
       for the behavior changes.
     summary: >-
       The operator now exits at startup on a runtime-required taint key with
-      a DNS prefix or over 53 characters, a value that already stopped
-      reconciliation under AICR's default autoTaintNewNodes, and no longer
-      uncordons a node it did not cordon. Nothing to change on upgrade.
+      a DNS prefix or over 53 characters, and no longer uncordons a node it
+      did not cordon. Such a key already stalled every NodeWright on older
+      versions once autoTaintNewNodes, on by default in AICR's tuning,
+      tainted a node, and aicr bundle now rejects it, so a bundle that
+      builds carries a valid key. Nothing to change on upgrade.
     references:
       - https://github.com/NVIDIA/nodewright/releases/tag/operator%2Fv0.20.0
       - https://github.com/NVIDIA/nodewright/releases/tag/agent%2Fv7.0.0

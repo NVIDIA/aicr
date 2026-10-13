@@ -384,6 +384,11 @@ components:
       accelerated:
         taintStrPaths:
           - controllerManager.manager.env.runtimeRequiredTaint
+    validations:
+      - function: CheckNodewrightRuntimeRequiredTaintKey
+        # Blocking: from v0.20.0 the operator refuses to start on such a key,
+        # and before it every NodeWright stalled once auto-taint fired.
+        severity: error
 
   - name: nodewright-customizations
     displayName: nodewright-customizations

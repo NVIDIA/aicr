@@ -177,8 +177,10 @@ Workload-gate taint key: operator v0.18.0 changed the chart default
 to `nodewright.nvidia.com=runtime-required:NoSchedule`. The operator recognizes
 both through v0.20.x (tolerates, removes on completion, never double-taints)
 and drops the legacy key in v0.21.0, but auto-taints newly joined nodes with
-the configured key only. From v0.20.0 the key must have no DNS prefix and be at
-most 53 characters, or the operator refuses to start. Node pools that
+the configured key only. The key must have no DNS prefix and be at most 53
+characters, since it names the `nodewright.nvidia.com/autoTaint_<key>` node
+annotation; `aicr bundle` rejects any other key, which operator v0.20.0 refuses
+to start on. Node pools that
 pre-taint with the legacy key should pass
 `--workload-gate skyhook.nvidia.com=runtime-required:NoSchedule` to
 `aicr bundle` so the cluster carries a single key.
