@@ -1035,7 +1035,7 @@ spec:
 # recipes/registry.yaml
 - name: gpu-operator
   helm:
-    defaultVersion: v26.7.1  # Changed from v26.7.0
+    defaultVersion: v26.7.2  # Changed from v26.7.1
 ```
 
 **Adding components:**

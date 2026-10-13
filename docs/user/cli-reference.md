@@ -2446,7 +2446,7 @@ my-bundle/
     install.sh                     # helm upgrade --install <name> ./<dir> ...
   002-gpu-operator/
     Chart.yaml
-    charts/gpu-operator-v26.7.1.tgz
+    charts/gpu-operator-v26.7.2.tgz
     values.yaml
     cluster-values.yaml
     install.sh
@@ -2469,10 +2469,10 @@ kind: BundleProvenance
 vendoredCharts:
   - name: gpu-operator
     chart: gpu-operator
-    version: v26.7.1
+    version: v26.7.2
     repository: https://helm.ngc.nvidia.com/nvidia
     sha256: abc123...
-    tarballName: gpu-operator-v26.7.1.tgz
+    tarballName: gpu-operator-v26.7.2.tgz
     pullerVersion: helm-cli v3.20.2
 ```
 
