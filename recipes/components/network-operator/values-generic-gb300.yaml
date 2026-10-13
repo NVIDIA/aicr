@@ -34,21 +34,25 @@ maintenanceOperator:
 maintenance-operator-chart:
   operator:
     # The subchart's 128Mi default limit is below the operator's working set,
-    # which scales with node count (about 1Gi per 1000 nodes).
+    # which scales with node count (about 5.1Gi peak at 2500 nodes, #3148).
+    # The limit covers that; the request stays sized for small clusters.
     resources:
       limits:
         cpu: 500m
-        memory: 1Gi
+        memory: 12Gi
       requests:
         cpu: 10m
         memory: 256Mi
 # Operator placement comes from the bundler's system-node scheduling
 # injection (registry nodeScheduling) — no hardcoded affinity here.
+#
+# The working set grows with node count (about 7.9Gi peak at 2500 nodes,
+# #3148). The limit covers that; the request stays sized for small clusters.
 operator:
   resources:
     limits:
       cpu: "1"
-      memory: 2Gi
+      memory: 12Gi
     requests:
       cpu: 500m
       memory: 2Gi
