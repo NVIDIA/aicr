@@ -1,0 +1,75 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: network-operator
+transitions:
+  - from: ">=26.4.1 <26.7.0"
+    to: "=26.7.0"
+    verdict: blocked
+    summary: >-
+      The in-place upgrade remains unqualified: 26.7.0 updates CRDs and rolls
+      the operator and operand images, and no live run yet proves that
+      NicClusterPolicy reconciliation and RDMA workload continuity survive the
+      transition.
+    precondition: >-
+      Do not upgrade an existing 26.4.1 deployment until a representative
+      cluster passes live qualification with the AICR NicClusterPolicy and
+      DOCA driver combinations it actually runs.
+    reversible: false
+    reversibleNotes: >-
+      No rollback was validated after the chart updates CRDs in place. Fresh
+      installations at 26.7.0 do not cross this transition.
+    affectedResources:
+      - group: mellanox.com
+        kinds: [NicClusterPolicy]
+    stepsByDeployer:
+      - deployers: [helmfile]
+        steps:
+          - id: hold-current-bundle
+            description: >-
+              Do not run helmfile apply from a bundle that moves Network
+              Operator to 26.7.0. Continue using the last qualified bundle at
+              26.4.1 until the live upgrade qualification is recorded.
+            reason: >-
+              Helmfile applies the operator and its post-chart
+              NicClusterPolicy, but the CRD migration, operand rollout, and
+              RDMA workload continuity have not been exercised together.
+      - deployers: [helm]
+        steps:
+          - id: hold-current-bundle
+            description: >-
+              Do not run install.sh from a bundle that moves Network Operator
+              to 26.7.0. Continue using the last qualified bundle at 26.4.1
+              until the live upgrade qualification is recorded.
+            reason: >-
+              The installer updates the chart CRDs before rolling the operator
+              and operands, and that in-place path has not been exercised with
+              AICR's NicClusterPolicy and DOCA driver pins.
+      - deployers: [argocd, argocd-helm, flux]
+        steps:
+          - id: hold-current-bundle
+            description: >-
+              Do not sync or reconcile a bundle that moves Network Operator to
+              26.7.0. Keep the previously deployed 26.4.1 bundle revision until
+              the live upgrade qualification is recorded.
+            reason: >-
+              GitOps reconciliation updates CRDs and then rolls the operator
+              and operands, and that in-place path has not been exercised with
+              AICR's NicClusterPolicy and DOCA driver pins.
+    references:
+      - https://github.com/Mellanox/network-operator/releases/tag/v26.7.0
+      - https://github.com/Mellanox/network-operator/blob/v26.7.0/deployment/network-operator/values.yaml
+      - https://github.com/Mellanox/network-operator/blob/v26.7.0/docs/heterogeneous-cluster-support.md
