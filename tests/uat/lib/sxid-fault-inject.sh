@@ -18,24 +18,25 @@
 # NVSentinel upstream's tests/uat/tests.sh ladder: write a synthetic XID 79
 # ("GPU has fallen off the bus") line to a real node's /dev/kmsg and assert,
 # in order:
-#   Stage 1 (detection) -- SysLogsXIDError appears on the node. Always run.
-#   Stage 2 (quarantine) -- the node is cordoned. Gated on
-#                           FAULT_INJECT_REMEDIATION_ENABLED; SKIPPED (not
-#                           failed) otherwise.
-#   Stage 3 (recovery)  -- the node's boot ID changes (a reboot occurred).
-#                           Gated on FAULT_INJECT_REMEDIATION_ENABLED AND
-#                           FAULT_INJECT_JANITOR_ENABLED; SKIPPED otherwise.
+#   Stage 1 (detection)  -- SysLogsXIDError appears on the node. Always run.
+#   Stage 2 (quarantine) -- the node is cordoned. Run when the deployed recipe
+#                           composes nvsentinel-quarantine or
+#                           nvsentinel-remediation; SKIPPED otherwise.
+#   Stage 3 (recovery)   -- the node's boot ID changes (janitor rebooted it)
+#                           and fault-quarantine uncordons it. Run when the
+#                           deployed recipe composes nvsentinel-remediation;
+#                           SKIPPED otherwise.
 #
-# No shipped recipe enables fault quarantine or remediation today (#2609),
-# so both gates default to false and Stages 2/3 are SKIPPED on every lane as
-# shipped -- this is the "skipped otherwise rather than failing" Success
-# Criterion on #2625, implemented now so no further wiring is needed once a
-# recipe opts in. CONFIRM BEFORE FLIPPING EITHER GATE ON A REAL LANE: there
-# is currently no recipe-level field this repo can read to detect "fault
-# quarantine enabled" (that lands with #1014/#2609) -- the two env vars
-# below are an explicit, manually-set stand-in until that field exists, at
-# which point they should be derived from the resolved recipe instead of set
-# by hand.
+# The stage gates come from the deployed recipe (bundle/recipe.yaml), not from
+# hand-set env vars: see uat_nvsentinel_remediation_mode below. No shipped
+# recipe composes either mixin, so nightly lanes run Stage 1 only. A manual
+# uat-run dispatch with nvsentinel_remediation=quarantine|remediation composes
+# the mixin in phase_prep (uat_compose_nvsentinel_mixin in phases.sh).
+#
+# A quarantine-only run leaves the node cordoned with SysLogsXIDError set,
+# because a syslog fault clears only on a reboot. That is why the dispatch
+# accepts the knob on the nightly lifecycle only, whose cluster is destroyed
+# right after this phase.
 #
 # Sourced by tests/uat/lib/phases.sh, which calls phase_sxid_fault_inject()
 # from its phase dispatcher (uat_main) and runs it as the `sxidfault` phase,
@@ -47,8 +48,42 @@
 #
 # Verified against upstream's tests/uat/tests.sh (not vendored in this
 # repo): the circuit-breaker ConfigMap name/namespace/field (FAULT_INJECT_*
-# below) and the synthetic kmsg line format (see the XID 79 line below)
-# match upstream as of this writing.
+# below), the synthetic kmsg line format (see the XID 79 line below), and the
+# reboot-then-uncordon recovery sequence match upstream as of this writing.
+
+# uat_nvsentinel_remediation_mode prints the NVSentinel remediation step the
+# recipe at $1 deploys: "remediation" (quarantine plus janitor repair),
+# "quarantine" (cordon only), or "none". It reads the resolved nvsentinel
+# overrides the nvsentinel-* mixins set; the dry-run nvsentinel-observe step
+# cordons nothing and so reports "none". Returns non-zero when the recipe
+# cannot be read, so a caller fails closed instead of skipping a stage.
+uat_nvsentinel_remediation_mode() {
+  local recipe="$1"
+  if [[ ! -f "${recipe}" ]]; then
+    echo "::error::recipe ${recipe} not found; cannot tell which NVSentinel remediation step it deploys" >&2
+    return 1
+  fi
+  # One line of five booleans. An absent dryRun is live, the chart default;
+  # every other absent key reads as disabled.
+  local flags
+  if ! flags="$(yq -r '
+      [.componentRefs[]? | select(.name == "nvsentinel") | .overrides.global // {}][0] // {}
+      | [.dryRun != true, .faultQuarantine.enabled == true, .faultRemediation.enabled == true,
+         .janitor.enabled == true, .janitorProvider.enabled == true]
+      | join(" ")' "${recipe}")"; then
+    echo "::error::could not parse ${recipe}; cannot tell which NVSentinel remediation step it deploys" >&2
+    return 1
+  fi
+  local live quarantine remediation janitor provider
+  read -r live quarantine remediation janitor provider <<<"${flags}"
+  if [[ "${live}" != "true" || "${quarantine}" != "true" ]]; then
+    echo none
+  elif [[ "${remediation}" == "true" && "${janitor}" == "true" && "${provider}" == "true" ]]; then
+    echo remediation
+  else
+    echo quarantine
+  fi
+}
 
 # Set by _sxid_fault_inject_impl once it knows them, so the outer wrapper can
 # clean up the debug pod on every exit path (including a `return` deep inside
@@ -114,19 +149,27 @@ _sxid_fault_inject_impl() {
   local breaker_field="${FAULT_INJECT_CIRCUIT_BREAKER_FIELD:-status}"
   local poll_wait_seconds="${FAULT_INJECT_MONITOR_POLL_SECONDS:-60}"
   local detect_timeout_seconds="${FAULT_INJECT_DETECT_TIMEOUT_SECONDS:-300}"
-  local remediation_enabled="${FAULT_INJECT_REMEDIATION_ENABLED:-false}"
-  local janitor_enabled="${FAULT_INJECT_JANITOR_ENABLED:-false}"
   local quarantine_timeout_seconds="${FAULT_INJECT_QUARANTINE_TIMEOUT_SECONDS:-180}"
-  local recovery_timeout_seconds="${FAULT_INJECT_RECOVERY_TIMEOUT_SECONDS:-900}"
+  local recovery_timeout_seconds="${FAULT_INJECT_RECOVERY_TIMEOUT_SECONDS:-720}"
+  local unquarantine_timeout_seconds="${FAULT_INJECT_UNQUARANTINE_TIMEOUT_SECONDS:-300}"
   _SXID_NS="${nvs_ns}"
   _SXID_POD_NAME="sxid-fault-inject-${RUN_ID}"
+
+  # Read before injecting: a recipe that cannot be read must fail the phase,
+  # not inject a fault and then skip the stages that would have acted on it.
+  local mode
+  if ! mode="$(uat_nvsentinel_remediation_mode bundle/recipe.yaml)"; then
+    ctrf_add sxidfault-detect failed 0 "could not read the deployed recipe's NVSentinel remediation step"
+    return 1
+  fi
+  echo "NVSentinel remediation step in the deployed recipe: ${mode}"
 
   echo "::group::Fault-injection circuit-breaker precheck"
   local breaker_json="" breaker_rc=0
   breaker_json="$(kubectl get configmap "${breaker_cm}" -n "${nvs_ns}" -o json 2>/tmp/breaker-err.log)" || breaker_rc=$?
   if (( breaker_rc != 0 )); then
     if grep -qi "notfound" /tmp/breaker-err.log; then
-      echo "circuit-breaker ConfigMap ${breaker_cm} not found in ${nvs_ns} -- expected with fault quarantine disabled (no shipped recipe enables it yet); continuing"
+      echo "circuit-breaker ConfigMap ${breaker_cm} not found in ${nvs_ns} (remediation step: ${mode}); a breaker that does not exist has not tripped, continuing"
     else
       cat /tmp/breaker-err.log >&2
       echo "::error::could not read circuit-breaker ConfigMap ${breaker_cm} in ${nvs_ns} (see above); failing closed rather than assuming the breaker is clear" >&2
@@ -262,6 +305,10 @@ MANIFEST
     return 1
   fi
   echo "wrote synthetic XID 79 to ${node}:/dev/kmsg"
+  # The pod has done its job. Left running, it is a user pod node-drainer
+  # waits on before janitor may reboot the node, which would hold Stage 3 for
+  # up to its 300s sleep. The finalize step deletes it again on every exit.
+  kubectl delete pod "${_SXID_POD_NAME}" -n "${nvs_ns}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   echo "::endgroup::"
 
   echo "::group::Stage 1 -- wait for ${condition}=True"
@@ -288,8 +335,8 @@ MANIFEST
   echo "Stage 1 (detection) OK: ${node} carries ${condition}=True ${waited}s after injection"
   ctrf_add sxidfault-detect passed "$(( waited * 1000 ))" ""
 
-  if [[ "${remediation_enabled}" != "true" ]]; then
-    echo "Stage 2 (quarantine) SKIPPED: fault quarantine is not enabled on this recipe (#2609 has not landed; FAULT_INJECT_REMEDIATION_ENABLED is unset/false)"
+  if [[ "${mode}" == "none" ]]; then
+    echo "Stage 2 (quarantine) SKIPPED: the deployed recipe composes neither nvsentinel-quarantine nor nvsentinel-remediation"
     ctrf_add sxidfault-quarantine skipped 0 "fault quarantine not enabled"
   else
     echo "::group::Stage 2 -- wait for ${node} to be cordoned"
@@ -307,7 +354,7 @@ MANIFEST
     done
     echo "::endgroup::"
     if [[ "${cordoned}" != "true" ]]; then
-      echo "::error::${node} was not cordoned within ${quarantine_timeout_seconds}s of ${condition}=True, with remediation enabled -- a missing quarantine is a FAIL" >&2
+      echo "::error::${node} was not cordoned within ${quarantine_timeout_seconds}s of ${condition}=True, with fault quarantine enabled -- a missing quarantine is a FAIL" >&2
       ctrf_add sxidfault-quarantine failed "$(( qwaited * 1000 ))" "${node} was never cordoned"
       return 1
     fi
@@ -315,8 +362,8 @@ MANIFEST
     ctrf_add sxidfault-quarantine passed "$(( qwaited * 1000 ))" ""
   fi
 
-  if [[ "${remediation_enabled}" != "true" || "${janitor_enabled}" != "true" ]]; then
-    echo "Stage 3 (recovery) SKIPPED: janitor-driven reboot is not enabled on this recipe (FAULT_INJECT_REMEDIATION_ENABLED and/or FAULT_INJECT_JANITOR_ENABLED unset/false)"
+  if [[ "${mode}" != "remediation" ]]; then
+    echo "Stage 3 (recovery) SKIPPED: the deployed recipe does not compose nvsentinel-remediation, so nothing repairs the node"
     ctrf_add sxidfault-recovery skipped 0 "janitor-driven recovery not enabled"
   else
     echo "::group::Stage 3 -- wait for ${node}'s boot ID to change (reboot)"
@@ -335,12 +382,39 @@ MANIFEST
     done
     echo "::endgroup::"
     if [[ "${rebooted}" != "true" ]]; then
-      echo "::error::${node}'s boot ID did not change within ${recovery_timeout_seconds}s, with remediation+janitor enabled -- a missing reboot is a FAIL" >&2
+      echo "::error::${node}'s boot ID did not change within ${recovery_timeout_seconds}s, with nvsentinel-remediation deployed -- a missing reboot is a FAIL" >&2
       ctrf_add sxidfault-recovery failed "$(( rwaited * 1000 ))" "${node} never rebooted (boot ID unchanged)"
       return 1
     fi
-    echo "Stage 3 (recovery) OK: ${node} rebooted ${rwaited}s after quarantine (boot ID ${pre_boot_id} -> ${post_boot_id})"
-    ctrf_add sxidfault-recovery passed "$(( rwaited * 1000 ))" ""
+    echo "${node} rebooted ${rwaited}s after quarantine (boot ID ${pre_boot_id} -> ${post_boot_id})"
+
+    # A reboot alone is not recovery: the fault clears on the new boot ID and
+    # fault-quarantine must then hand the node back. Mirrors upstream's
+    # wait_for_node_unquarantine after wait_for_boot_id_change.
+    echo "::group::Stage 3 -- wait for ${node} to be uncordoned"
+    # Only a successful read counts: an apiserver error must keep waiting, not
+    # read as an empty, uncordoned spec.
+    local uwaited=0 uncordoned=false unschedulable
+    while (( uwaited < unquarantine_timeout_seconds )); do
+      if unschedulable="$(kubectl get node "${node}" -o jsonpath='{.spec.unschedulable}' 2>/dev/null)" \
+          && [[ "${unschedulable}" != "true" ]]; then
+        uncordoned=true
+        break
+      fi
+      sleep 10 &
+      if ! wait $!; then
+        return 1
+      fi
+      uwaited=$(( uwaited + 10 ))
+    done
+    echo "::endgroup::"
+    if [[ "${uncordoned}" != "true" ]]; then
+      echo "::error::${node} rebooted but was still cordoned ${unquarantine_timeout_seconds}s later -- a node that never returns to service is a FAIL" >&2
+      ctrf_add sxidfault-recovery failed "$(( (rwaited + uwaited) * 1000 ))" "${node} rebooted but was never uncordoned"
+      return 1
+    fi
+    echo "Stage 3 (recovery) OK: ${node} rebooted and was uncordoned $(( rwaited + uwaited ))s after quarantine"
+    ctrf_add sxidfault-recovery passed "$(( (rwaited + uwaited) * 1000 ))" ""
   fi
 
   return 0

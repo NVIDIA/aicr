@@ -130,6 +130,16 @@ on:
         description: 'Run a release below its tests/uat/compat.yaml harness-compat floor anyway (warns instead of refusing; for reproducing the incompatibility).'
         type: boolean
         default: false
+      nvsentinel_remediation:
+        # Composes the opt-in nvsentinel-quarantine or nvsentinel-remediation
+        # mixin onto the cell's recipe so the sxidfault phase runs Stage 2
+        # (cordon) or Stages 2 and 3 (cordon, reboot, uncordon) on real
+        # hardware (#2625). The `Resolve reservation row` step bounds where it
+        # is accepted. The nightly batch never sets it.
+        description: 'NVSentinel mixin to compose so sxidfault runs Stage 2 (quarantine) or 2-3 (remediation). Nightly training, helmfile, from source; gcp: quarantine only.'
+        type: choice
+        options: [none, quarantine, remediation]
+        default: none
   workflow_call:
     inputs:
       reservation:
@@ -165,6 +175,9 @@ on:
       allow_below_compat_floor:
         type: boolean
         default: false
+      nvsentinel_remediation:
+        type: string
+        default: none
 
 permissions:
   contents: read
@@ -287,6 +300,11 @@ jobs:
           RESERVATION: ${{ inputs.reservation }}
           SLOT: ${{ inputs.slot }}
           PLATFORM: ${{ inputs.platform }}
+          NVSENTINEL_REMEDIATION: ${{ inputs.nvsentinel_remediation }}
+          INTENT: ${{ inputs.intent }}
+          LIFECYCLE: ${{ inputs.lifecycle }}
+          DEPLOYER: ${{ inputs.deployer }}
+          AICR_VERSION: ${{ inputs.aicr_version }}
         run: |
           set -euo pipefail
           # Only slot 0 is provisioned today (ADR-017). Reject any other value at
@@ -343,6 +361,43 @@ jobs:
             esac
           fi
 
+          # Fail closed on an nvsentinel_remediation the dispatched cell cannot
+          # honor, for the same publish-last reason as the platform gate. Each
+          # bound has a cause:
+          #   - training only: the inference budget has no room for the longer
+          #     sxidfault step, and a serving workload left on the node would
+          #     hold node-drainer, so janitor would never reboot it.
+          #   - nightly only: quarantine leaves the node cordoned with the fault
+          #     set, which a held daytime cluster would keep.
+          #   - helmfile only: the argocd budget has no room either.
+          #   - built from source: phase_prep composes the mixin onto the leaf
+          #     overlay in this checkout, which must match the binary.
+          #   - aws/azure/gcp only, and gcp quarantine only: janitor's GPU reset
+          #     cannot run on GKE's managed driver, so the bundle refuses
+          #     nvsentinel-remediation there.
+          case "${NVSENTINEL_REMEDIATION}" in
+            none|quarantine|remediation) ;;
+            *) echo "::error::nvsentinel_remediation must be none, quarantine or remediation; got '${NVSENTINEL_REMEDIATION}'"; exit 1 ;;
+          esac
+          if [[ "${NVSENTINEL_REMEDIATION}" != "none" ]]; then
+            CLOUD="$(printf '%s\n' "${ROW}" | sed -n 's/^cloud=//p')"
+            reasons=()
+            case "${CLOUD}:${NVSENTINEL_REMEDIATION}" in
+              aws:*|azure:*|gcp:quarantine) ;;
+              *) reasons+=("cloud '${CLOUD:-<unresolved>}' does not support it (aws and azure take either step; gcp takes quarantine only)") ;;
+            esac
+            [[ "${INTENT}" == "training" ]] || reasons+=("intent must be training, got '${INTENT}'")
+            [[ "${LIFECYCLE}" == "nightly" ]] || reasons+=("lifecycle must be nightly, got '${LIFECYCLE}'")
+            [[ "${DEPLOYER}" == "helmfile" ]] || reasons+=("deployer must be helmfile, got '${DEPLOYER}'")
+            [[ -z "${AICR_VERSION}" ]] || reasons+=("aicr_version must be empty (build from source), got '${AICR_VERSION}'")
+            if (( ${#reasons[@]} > 0 )); then
+              for r in "${reasons[@]}"; do
+                echo "::error::nvsentinel_remediation=${NVSENTINEL_REMEDIATION}: ${r}"
+              done
+              exit 1
+            fi
+          fi
+
           # Publish LAST, so no gate above it can be bypassed by a lane reading
           # an output that was written before the check ran. The broker emits
           # plain `key=value` lines (tools/uat-broker/main.go), never the
@@ -384,6 +439,7 @@ jobs:
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
       deployer: ${{ inputs.deployer }}
+      nvsentinel_remediation: ${{ inputs.nvsentinel_remediation }}
 
   run-gcp:
     needs: resolve
@@ -415,6 +471,7 @@ jobs:
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
+      nvsentinel_remediation: ${{ inputs.nvsentinel_remediation }}
 
   run-azure:
     needs: resolve
@@ -442,6 +499,7 @@ jobs:
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
+      nvsentinel_remediation: ${{ inputs.nvsentinel_remediation }}
 
   # nvkind real-silicon lane (DC5 #1278). "kind" is not a cloud but a
   # self-hosted GPU-runner lane; it slots into the same dispatch model so it

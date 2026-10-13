@@ -435,6 +435,59 @@ inject_push_target() {
   echo "evidence push target: $(yq '.spec.validate.evidence.attestation.push' "${config}")"
 }
 
+# uat_compose_nvsentinel_mixin re-resolves recipe.yaml with the opt-in
+# NVSentinel mixin named by UAT_NVSENTINEL_MIXIN composed onto its leaf
+# overlay, so the sxidfault phase can run Stage 2 (nvsentinel-quarantine) or
+# Stages 2 and 3 (nvsentinel-remediation) on real hardware (#2625). Unset is a
+# no-op: no shipped recipe composes either mixin.
+#
+# The leaf is replaced through a --data overlay of the same name, the way the
+# KWOK lane composes KWOK_MIXINS; the empty registry merges into the embedded
+# one unchanged. The overlay is read from this checkout, so the aicr binary
+# must be built from the same tree: uat-run.yaml refuses the knob with a
+# released aicr_version. Bundle and validate need no --data, because both
+# mixins reference only embedded components.
+uat_compose_nvsentinel_mixin() {
+  local mixin="${UAT_NVSENTINEL_MIXIN:-}" want
+  case "${mixin}" in
+    "") return 0 ;;
+    nvsentinel-quarantine) want=quarantine ;;
+    nvsentinel-remediation) want=remediation ;;
+    *)
+      echo "::error::UAT_NVSENTINEL_MIXIN='${mixin}' is not nvsentinel-quarantine or nvsentinel-remediation" >&2
+      return 1
+      ;;
+  esac
+
+  local leaf overlay data_dir="uat-data"
+  leaf="$(yq -r '.metadata.appliedOverlays[-1] // ""' recipe.yaml)"
+  overlay="$(dirname "${BASH_SOURCE[0]}")/../../../recipes/overlays/${leaf}.yaml"
+  if [[ -z "${leaf}" || ! -f "${overlay}" ]]; then
+    echo "::error::cannot compose ${mixin}: leaf overlay '${leaf}' not found at ${overlay}" >&2
+    return 1
+  fi
+
+  rm -rf "${data_dir}"
+  mkdir -p "${data_dir}/overlays"
+  printf '%s\n' 'kind: ComponentRegistry' 'apiVersion: aicr.run/v1beta1' \
+    'metadata:' '  name: uat-nvsentinel-mixin' 'components: []' > "${data_dir}/registry.yaml"
+  MIXIN="${mixin}" yq '.spec.mixins = ((.spec.mixins // []) + [strenv(MIXIN)])' \
+    "${overlay}" > "${data_dir}/overlays/${leaf}.yaml"
+
+  echo "composing ${mixin} onto ${leaf}"
+  "${AICR_BIN}" recipe --config "${config}" --data "${data_dir}"
+  test -f recipe.yaml
+
+  # Fail closed if the mixin did not land: a run asked to prove Stage 2 or 3
+  # must not report green after silently running Stage 1 only.
+  local got
+  got="$(uat_nvsentinel_remediation_mode recipe.yaml)"
+  if [[ "${got}" != "${want}" ]]; then
+    echo "::error::recipe composed with ${mixin} deploys NVSentinel remediation step '${got}', want '${want}'" >&2
+    return 1
+  fi
+}
+
 phase_prep() {
   # Capture cluster state on snapshot failure so the post-mortem has
   # actual pod scheduling / image pull / event data instead of just the
@@ -492,6 +545,7 @@ phase_prep() {
   echo "::group::Generate recipe"
   "${AICR_BIN}" recipe --config "${config}"
   test -f recipe.yaml
+  uat_compose_nvsentinel_mixin
   echo "::endgroup::"
 
   echo "::group::Validate (dry-run, --no-cluster)"
