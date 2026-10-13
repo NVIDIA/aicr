@@ -287,7 +287,13 @@ Resolution enforces these invariants:
 6. Stamp the result `aicr.run/v1beta2` and persist
    `metadata.selectedProfile`. Its sorted `ownedPaths` is the
    declaration-wide path union plus synthetic `enabled` for each referenced
-   component.
+   component, except a component every value references with
+   `optional: true`. An optional reference owns its override paths but not
+   presence, so the bundle may omit the component; its paths are locked
+   only when it ships. Optionality must agree across values, an optional
+   reference must assign at least one override, and #1327 descriptor
+   components cannot be optional (an advertisement-owning profile's
+   closure re-locks their presence).
 
 The shared raw-artifact gate checks version/profile coupling and hydrates
 profile-owned values. Bundle and mirror compare final candidate state with the

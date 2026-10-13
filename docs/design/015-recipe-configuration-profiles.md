@@ -1040,6 +1040,32 @@ any check runs. This ADR therefore **amends the #1327 model**:
   accepted, so the older artifact still loads against the shrunken
   descriptor.
 
+### Amendment: optional component references (2026-10)
+
+[#2978](https://github.com/NVIDIA/aicr/issues/2978) found that a value-only
+reference also locks presence. The GKE-COS and OKE `gpuStack` profiles name
+`nvsentinel` only to set `labeler.assumeDriverInstalled`. Operators who run
+NVSentinel outside AICR therefore could not remove it from the bundle.
+
+A fragment's `componentRefs` entry may now declare `optional: true`:
+
+- The reference owns its override paths but not presence. `ownedPaths`
+  omits the synthetic `enabled` path for that component.
+- The bundle may omit the component. Its owned paths are enforced only
+  when it ships, and the argocd-helm guard is emitted only then.
+- Recipe resolution is unchanged: the component must still be enabled in
+  the surviving composition.
+- Every value must agree on `optional` for a component, and an optional
+  reference must assign at least one override.
+- Descriptor components cannot be optional. When a profile owns
+  advertisement, the closure re-adds `enabled` for every enabled descriptor
+  component, which would silently void the marker.
+
+The artifact gate now requires each `ownedPaths` entry to be non-empty
+instead of requiring `enabled`. Older binaries reject an artifact that uses
+the marker, which fails closed. The AKS profile keeps NVSentinel's presence
+locked ([#2181](https://github.com/NVIDIA/aicr/issues/2181)).
+
 ### Artifact compatibility gate
 
 `selectedProfile` cannot ship as an additive field: recipe

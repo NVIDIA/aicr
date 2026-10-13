@@ -366,7 +366,9 @@ profile's owned paths are locked. The lock is enforced per surface:
   cannot assign `enabled`, so no `--profile` choice adds or removes a
   component. The lock rejects removing (or bundle-subsetting away) an
   owned component; changing which components are present is a
-  catalog/composition change.
+  catalog/composition change. A component the profile references as
+  `optional` has no presence lock: it may be removed, and its owned
+  value paths are enforced only when it ships.
 
 Change owned **value** paths by regenerating with
 `aicr recipe --profile name=value` instead; component presence is not
@@ -502,8 +504,12 @@ toggling the component).
 
 A component whose presence a configuration profile owns cannot be removed
 at all — `enabled=false` on it is rejected regardless of the rule above.
-NVSentinel is in that position on the AKS and GKE-COS families, whose
-`gpuStack` profiles name it; see
+NVSentinel is in that position on the AKS family, whose `gpuStack`
+profile names it. On the GKE-COS and OKE families the `gpuStack` profile
+references NVSentinel as optional, so `--set nv-sentinel:enabled=false`
+removes it, for example when NVSentinel is deployed outside AICR. The
+profile's `labeler.assumeDriverInstalled` value still applies whenever
+the bundle includes NVSentinel; see
 [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms).
 
 The same rule applies to `--set-json`, `--set-file`, `--dynamic`, and

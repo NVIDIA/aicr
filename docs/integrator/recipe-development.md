@@ -822,6 +822,16 @@ lock on owned paths is enforced per surface:
   `enabled` — so reselecting a profile changes owned **value** paths
   only, never which components are present. Presence changes are
   catalog/composition changes.
+- **Optional references**: a `componentRefs` entry with `optional: true`
+  owns its override paths but not presence. The bundle may omit the
+  component (`--set <component>:enabled=false` or a `bundlers=` list);
+  when it ships, its owned paths are locked as above. Recipe resolution
+  still requires the component to be enabled. Every value must agree on
+  `optional` for a component, an optional reference must assign at least
+  one override, and GPU allocation-policy components (`gpu-operator`,
+  `nvidia-dra-driver-gpu` and their OCP variants) cannot be optional.
+  The GKE-COS and OKE `gpuStack` profiles reference `nvsentinel` this
+  way.
 
 **Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is
 resolved from a snapshot (via `aicr recipe --snapshot` or

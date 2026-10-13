@@ -148,6 +148,9 @@ spec:
           # The bundle-carried installer IS a driver pod the NVSentinel
           # labeler detects, so no preinstalled-driver assumption.
           - name: nvsentinel
+            # optional: the bundle may omit NVSentinel when it is deployed
+            # outside AICR (#2978); this value applies whenever it ships.
+            optional: true
             overrides:
               labeler: {assumeDriverInstalled: false}
         constraints:
@@ -204,6 +207,7 @@ spec:
               devicePlugin:
                 enabled: false
           - name: nvsentinel
+            optional: true
             overrides:
               labeler: {assumeDriverInstalled: true}
         constraints:
