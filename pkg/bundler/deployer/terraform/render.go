@@ -257,16 +257,20 @@ func overrideNote(ov deployer.ComponentOverride) string {
 
 // componentTitle is the comment above a module call: the chart folder and what
 // is in it, so a reader of main.tf need not open the directory.
+//
+// Generate rejects control characters in these values before rendering;
+// commentText is the second line of defense, so the comment can never end
+// early whatever reaches it.
 func componentTitle(c component) string {
 	f := c.Primary
 	u := f.Upstream
 	switch {
 	case f.Kind == localformat.KindUpstreamHelm && u != nil && u.Version != "":
-		return fmt.Sprintf("%s — %s %s", f.Dir, u.Chart, u.Version)
+		return commentText(fmt.Sprintf("%s — %s %s", f.Dir, u.Chart, u.Version))
 	case f.Kind == localformat.KindUpstreamHelm && u != nil:
-		return fmt.Sprintf("%s — %s", f.Dir, u.Chart)
+		return commentText(fmt.Sprintf("%s — %s", f.Dir, u.Chart))
 	default:
-		return fmt.Sprintf("%s — chart bundled in this directory", f.Dir)
+		return commentText(fmt.Sprintf("%s — chart bundled in this directory", f.Dir))
 	}
 }
 
@@ -280,7 +284,7 @@ func extraFolders(c component) string {
 			dirs = append(dirs, f.Dir)
 		}
 	}
-	return strings.Join(dirs, ", ")
+	return commentText(strings.Join(dirs, ", "))
 }
 
 // generatedFile pairs a template with the path it renders to, relative to the
@@ -337,8 +341,9 @@ func (g *Generator) writeTerraform(outputDir string, data bundleData, output *de
 // the point of emission because the same value is also used unquoted in
 // README prose.
 var templateFuncs = template.FuncMap{
-	"quote": hclString,
-	"align": align,
+	"quote":      hclString,
+	"modulePath": modulePath,
+	"align":      align,
 }
 
 func renderTemplate(name, text string, data bundleData) ([]byte, error) {

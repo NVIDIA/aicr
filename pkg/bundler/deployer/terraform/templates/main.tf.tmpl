@@ -24,7 +24,7 @@ module "{{ .Label }}" {
 
   values_files = [
 {{- range .ValuesFiles }}
-    "${path.module}/{{ . }}",
+    {{ modulePath . }},
 {{- end }}
   ]
 {{- if .Phases }}

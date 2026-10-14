@@ -202,6 +202,19 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("unsafe component name: %q", ref.Name))
 		}
+		// These values reach main.tf, some of them in comments. A newline
+		// would end a comment and hand the remainder to the HCL parser as
+		// configuration, and an apply of that runs on the operator's host.
+		// Recipe validation rejects only surrounding whitespace, so refuse
+		// here, where the values are about to become HCL.
+		for field, value := range map[string]string{
+			"name": ref.Name, "chart name": ref.Chart, "chart version": ref.Version, "source": ref.Source,
+		} {
+			if hasControl(value) {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q: %s %q contains a control character", ref.Name, field, value))
+			}
+		}
 		if strings.EqualFold(string(ref.Type), string(recipe.ComponentTypeKustomize)) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("component %q is a Kustomize component; --deployer terraform supports Helm components only",

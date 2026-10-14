@@ -289,6 +289,72 @@ func TestGenerate_RejectsKustomizeComponent(t *testing.T) {
 	}
 }
 
+// TestGenerate_RejectsControlCharacters: a recipe value with a newline would
+// end the `# <dir> — <chart> <version>` comment above a module call and put
+// the rest of the value at the top level of main.tf, where a resource with a
+// local-exec provisioner runs on the operator's host at apply. Generate
+// refuses such a value before writing anything.
+func TestGenerate_RejectsControlCharacters(t *testing.T) {
+	const payload = "resource \"terraform_data\" \"pwn\" {}"
+	cases := map[string]recipe.ComponentRef{
+		"version": ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2\n"+payload, "https://charts.jetstack.io"),
+		"chart":   ref("cert-manager", "cert-manager", "cert-manager\r\n"+payload, "v1.17.2", "https://charts.jetstack.io"),
+		"source":  ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io\n"+payload),
+		"name":    ref("cert-manager\n"+payload, "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
+	}
+	for field, r := range cases {
+		t.Run(field, func(t *testing.T) {
+			dir := t.TempDir()
+			g := &Generator{RecipeResult: recipeWith(r), Version: testBundlerVersion}
+			_, err := g.Generate(context.Background(), dir)
+			if err == nil {
+				t.Fatalf("Generate() accepted a %s with a newline", field)
+			}
+			if !strings.Contains(err.Error(), "control character") {
+				t.Errorf("error does not name the problem: %v", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, fileMain)); statErr == nil {
+				t.Errorf("main.tf was written despite the rejection")
+			}
+			if strings.Contains(err.Error(), "\n") {
+				t.Errorf("error echoes the raw newline: %q", err.Error())
+			}
+		})
+	}
+}
+
+// TestCommentText guards the second line of defense: whatever reaches a
+// comment, it stays one line.
+func TestCommentText(t *testing.T) {
+	cases := map[string]string{
+		"plain":                      "plain",
+		"011-x — chart v1\nresource": "011-x — chart v1 resource",
+		"a\r\nb\tc\x1b[0m":           "a  b c [0m",
+		"unicode — kept":             "unicode — kept",
+	}
+	for in, want := range cases {
+		if got := commentText(in); got != want {
+			t.Errorf("commentText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestModulePath: the path.module interpolation stays live and the folder
+// name is escaped, so a folder name cannot close the string.
+func TestModulePath(t *testing.T) {
+	cases := map[string]string{
+		`011-gpu-operator`:  `"${path.module}/011-gpu-operator"`,
+		`a"b`:               `"${path.module}/a\"b"`,
+		`a${var.x}`:         `"${path.module}/a$${var.x}"`,
+		"011-x/values.yaml": `"${path.module}/011-x/values.yaml"`,
+	}
+	for in, want := range cases {
+		if got := modulePath(in); got != want {
+			t.Errorf("modulePath(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
 func TestGenerate_RejectsCyclicGraph(t *testing.T) {
 	a := ref("a", "default", "a", "1.0.0", "https://example.com/charts")
 	b := ref("b", "default", "b", "1.0.0", "https://example.com/charts")
