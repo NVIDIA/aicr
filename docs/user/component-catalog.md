@@ -129,7 +129,8 @@ To retire nfd permanently, first uninstall every component that selects on those
 
 ```bash
 RECIPE="recipe.yaml"  # replace with the recipe the bundle was generated from
-aicr bundle -r "${RECIPE}" --set nfd:postDeleteCleanup=true -o ./bundles
+DEPLOYER="helm"       # replace with the deployer the bundle was generated with, e.g. argocd
+aicr bundle -r "${RECIPE}" --deployer "${DEPLOYER}" --set nfd:postDeleteCleanup=true -o ./bundles
 ```
 
 Redeploy only the nfd component from the regenerated bundle, then uninstall it. With the `helm` deployer, run `./bundles/NNN-nfd/install.sh` followed by `helm uninstall nfd -n node-feature-discovery`. With an Argo CD deployer, sync the regenerated nfd Application and then delete it. This needs Argo CD 3.4.1 or later, because earlier versions never finish deleting an Application whose post-delete hooks include cluster-scoped objects.
