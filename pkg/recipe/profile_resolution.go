@@ -20,6 +20,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/constraints/expr"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -97,9 +98,18 @@ func ensureProfileDeclarationSurvived(
 	if after != nil && after.Source == before.Source {
 		return nil
 	}
+	msg := fmt.Sprintf("profile declaration from overlay %q was removed by snapshot constraint filtering", before.Source)
+	if len(warnings) > 0 {
+		failed := make([]string, 0, len(warnings))
+		for _, w := range warnings {
+			failed = append(failed, fmt.Sprintf("%s %s (%s)", w.Overlay, w.Constraint, w.Reason))
+		}
+		sort.Strings(failed)
+		msg += fmt.Sprintf(", failed constraints [%s]", strings.Join(failed, ", "))
+	}
 	return errors.NewWithContext(
 		errors.ErrCodeInvalidRequest,
-		fmt.Sprintf("profile declaration from overlay %q was removed by snapshot constraint filtering", before.Source),
+		msg,
 		map[string]any{
 			"excludedOverlays":   excluded,
 			"constraintWarnings": warnings,

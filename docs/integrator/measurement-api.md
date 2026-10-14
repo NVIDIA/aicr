@@ -1,7 +1,7 @@
 # Measurement Schema
 
 The `Measurement` type in `github.com/NVIDIA/aicr/pkg/measurement` is the
-on-wire shape used throughout aicr's Snapshot → Recipe → Validate → Bundle
+on-wire shape used throughout aicr's Snapshot -> Recipe -> Validate -> Bundle
 pipeline. Snapshots serialize a `[]*Measurement` to YAML/JSON; recipes and
 validators consume the same shape. This page is the schema contract — any
 external producer (cross-repo Go library, CI tool, custom collector) emitting
@@ -369,7 +369,9 @@ constraints; `K8s.aks-gpu-pools.gpu-pool-count` and
 ## K8s oke-addons shape
 
 `K8s.oke-addons` projects the OKE `NvidiaGpuPlugin` cluster add-on's
-control-plane state for `gpuStack` profile qualification on the OKE family.
+control-plane state for `gpuStack` profile qualification on the OKE family,
+and the `NvidiaNetworkOperator` add-on's state for the OKE recipes that
+deploy `network-operator`.
 Like `aks-gpu-pools`, it is not produced by a cluster collector: the
 projection is attached at the snapshot orchestration layer from the
 operator-supplied dump
@@ -377,7 +379,9 @@ operator-supplied dump
 passed to `aicr snapshot --oke-addons` (merged
 controller-side in both agent Job mode and local mode). A missing, truncated,
 or malformed dump fails the command — a file error is never degraded into a
-"reading unavailable" measurement.
+"reading unavailable" measurement. A dump capturing a partial page, with
+`opc-next-page` set, fails the same way. Capturing with `--page` is not
+supported, because a final page alone looks like a complete list.
 
 ```yaml
 type: K8s
@@ -386,6 +390,7 @@ subtypes:
     data:
       addon-count: 3
       nvidia-gpu-plugin: installed
+      nvidia-network-operator: absent
 ```
 
 The fields are:
@@ -396,6 +401,9 @@ The fields are:
   or, for any other lifecycle state, the state preserved verbatim, lowercased
   with an `addon-` prefix (e.g. `addon-deleting`, `addon-needs_attention`).
   Always emitted.
+- `nvidia-network-operator` (`string`) is the `NvidiaNetworkOperator`
+  add-on's state, normalized the same way as `nvidia-gpu-plugin`. Always
+  emitted.
 - `addon-count` (`int`) — the number of add-ons in the dump. Always emitted,
   including `0`.
 
@@ -407,8 +415,17 @@ observed lifecycle state as the actual. When the subtype is absent (no
 `--oke-addons` dump), constraint evaluation reports the reading unavailable
 and fails closed rather than guessing an ownership mode.
 
-The constraint path is `K8s.oke-addons.nvidia-gpu-plugin` in profile value
-constraints; `K8s.oke-addons.addon-count` uses the same non-item path form.
+The OKE recipes that deploy `network-operator` (`gb200-oke-training`,
+`l40s-oke-training`, and their descendants) declare
+`K8s.oke-addons.nvidia-network-operator: absent`. Any other reading,
+including a missing one, fails snapshot-based recipe generation and the
+`aicr validate` pre-flight, because the add-on and AICR's `network-operator`
+would both reconcile the same `NicClusterPolicy`. Criteria-only generation
+evaluates no reading and only records the constraint in the recipe.
+
+The constraint paths are `K8s.oke-addons.nvidia-gpu-plugin` in profile value
+constraints and `K8s.oke-addons.nvidia-network-operator` in recipe
+constraints. `K8s.oke-addons.addon-count` uses the same non-item path form.
 
 ## K8s gke-gpu-pools shape
 
