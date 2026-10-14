@@ -161,6 +161,10 @@ Criteria-only generation evaluates no reading and only records the
 constraint, so the gate fires at the pre-flight. Remove the add-on,
 wait for the removal to finish, then recapture the snapshot. An add-on that
 is still being removed reads `addon-deleting`, which also fails the gate.
+A snapshot captured with `--oke-addons` by an earlier `aicr` has no
+`nvidia-network-operator` reading, so these recipes reject it as not found
+without printing a remediation. Recapture it with the current
+`aicr snapshot --oke-addons`.
 
 ```shell
 CLUSTER_ID="ocid1.cluster.oc1.iad.aaaaaaaaexample"  # replace with your OKE cluster OCID
