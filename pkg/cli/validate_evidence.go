@@ -133,7 +133,8 @@ func oidcResolveOptionsFromFlags(cmd *cli.Command) aicr.OIDCResolveOptions {
 	}
 }
 
-// emitRecipeEvidence is the CLI shim over Client.EmitRecipeEvidence. The
+// emitRecipeEvidence is the CLI shim over Client.EmitRecipeEvidenceWithResult,
+// returning what was pushed so runValidation can write --image-refs. The
 // catalog load, facade→internal PhaseResult conversion, and attestation.Emit
 // orchestration now live behind the Client facade so a non-CLI caller can emit
 // recipe evidence with facade types alone. The CLI retains only the
@@ -146,7 +147,7 @@ func emitRecipeEvidence(
 	snap *aicr.Snapshot,
 	results []*aicr.PhaseResult,
 	cfg *recipeEvidenceConfig,
-) error {
+) (*aicr.EvidenceEmission, error) {
 
 	// Signing happens only when --push is set without --no-sign (see
 	// attestation.Emit). Gate the interactive keyless login behind the
@@ -156,11 +157,11 @@ func emitRecipeEvidence(
 	// flow runs.
 	if cfg.Push != "" && !cfg.NoSign {
 		if err := confirmKeylessSigningDisclosure(cfg.OIDCResolve, cfg.AssumeYes, os.Stdin, os.Stderr); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return client.EmitRecipeEvidence(ctx, rec, snap, results, aicr.EvidenceOptions{
+	return client.EmitRecipeEvidenceWithResult(ctx, rec, snap, results, aicr.EvidenceOptions{
 		OutDir:      cfg.OutDir,
 		BOMPath:     cfg.BOMPath,
 		Push:        cfg.Push,

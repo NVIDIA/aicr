@@ -1743,7 +1743,12 @@ aicr.ValidateIdentityPattern(
 
 The producing half of the supply chain is on the facade too.
 `EmitRecipeEvidence` builds a bundle from a completed validation run;
-`PublishEvidence` signs and pushes one that already exists on disk:
+`EmitRecipeEvidenceWithResult` does the same and also returns an
+`EvidenceEmission` carrying the pushed reference and digest (the `bundle.oci`
+and `bundle.digest` values in `pointer.yaml`; both empty without `Push`), so a
+caller can hand on what was published without reading `pointer.yaml` back. It
+is not in v1.0.0 or earlier. `PublishEvidence` signs and pushes a bundle that
+already exists on disk:
 
 ```go
 err := client.PublishEvidence(ctx, aicr.EvidencePublishOptions{
