@@ -52,6 +52,7 @@ func init() {
 	registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
+	registerCheck("CheckNodewrightRuntimeRequiredTaintKey", CheckNodewrightRuntimeRequiredTaintKey)
 	registerCheck("CheckGB300HostKernelGranule", CheckGB300HostKernelGranule)
 	registerCheck("CheckNPDNotDuplicatingProviderNPD", CheckNPDNotDuplicatingProviderNPD)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
