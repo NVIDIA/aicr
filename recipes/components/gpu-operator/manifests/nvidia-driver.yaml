@@ -111,8 +111,10 @@ spec:
   gdrcopy:
     {{- toYaml $vals.gdrcopy | nindent 4 }}
   {{- end }}
-  {{- if $vals.daemonsets.tolerations }}
+  {{- with $vals.daemonsets }}
+    {{- if .tolerations }}
   tolerations:
-    {{- toYaml $vals.daemonsets.tolerations | nindent 4 }}
+      {{- toYaml .tolerations | nindent 4 }}
+    {{- end }}
   {{- end }}
 {{- end }}

@@ -15,8 +15,13 @@
 package recipe
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"gopkg.in/yaml.v3"
@@ -53,6 +58,25 @@ func TestNVIDIADriverCRMixinIsOptInManifestOnly(t *testing.T) {
 	}
 	if !gpuOperator.ManifestsUseChartCRDs {
 		t.Error("gpu-operator manifestsUseChartCRDs must be enabled for fresh Helmfile installs")
+	}
+	baseValuesBody, err := store.provider.ReadFile(ctx, "components/gpu-operator/values.yaml")
+	if err != nil {
+		t.Fatalf("read gpu-operator base values: %v", err)
+	}
+	var baseValues map[string]any
+	if unmarshalErr := yaml.Unmarshal(baseValuesBody, &baseValues); unmarshalErr != nil {
+		t.Fatalf("parse gpu-operator base values: %v", unmarshalErr)
+	}
+	for _, tree := range []string{"gds", "gdrcopy"} {
+		values, ok := baseValues[tree].(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"repository", "image", "version"} {
+			if _, pinned := values[key]; pinned {
+				t.Errorf("shared gpu-operator values pin %s.%s; the consuming overlay must own sidecar image identity", tree, key)
+			}
+		}
 	}
 
 	body, err := store.provider.ReadFile(ctx, nvidiaDriverCRManifest)
@@ -221,6 +245,57 @@ func TestNVIDIADriverCRMixinIsOptInManifestOnly(t *testing.T) {
 	}
 }
 
+func TestNVIDIADriverCRManifestHelmRenderWithoutDaemonsets(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("helm is required in CI but not on PATH")
+		}
+		t.Skip("helm not available; skipping Helm-semantics render test")
+	}
+
+	ctx, store := objectMonitorStore(t)
+	body, err := store.provider.ReadFile(ctx, nvidiaDriverCRManifest)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	valuesBody, err := yaml.Marshal(map[string]any{
+		"gpu-operator": nvidiaDriverCRValues(),
+	})
+	if err != nil {
+		t.Fatalf("marshal values: %v", err)
+	}
+
+	chartDir := t.TempDir()
+	files := map[string][]byte{
+		"Chart.yaml":  []byte("apiVersion: v2\nname: nvidia-driver-test\nversion: 0.1.0\n"),
+		"values.yaml": valuesBody,
+		filepath.Join("templates", "nvidia-driver.yaml"): body,
+	}
+	for name, content := range files {
+		path := filepath.Join(chartDir, name)
+		if mkdirErr := os.MkdirAll(filepath.Dir(path), 0o755); mkdirErr != nil {
+			t.Fatalf("create chart directory for %s: %v", name, mkdirErr)
+		}
+		if writeErr := os.WriteFile(path, content, 0o600); writeErr != nil {
+			t.Fatalf("write chart file %s: %v", name, writeErr)
+		}
+	}
+
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", chartDir, "--namespace", "gpu-operator") //nolint:gosec // controlled test arguments
+	rendered, err := cmd.CombinedOutput()
+	if cmdCtx.Err() != nil {
+		t.Fatalf("helm template timed out: %v", cmdCtx.Err())
+	}
+	if err != nil {
+		t.Fatalf("helm template with daemonsets omitted failed: %v\noutput:\n%s", err, rendered)
+	}
+	if !strings.Contains(string(rendered), "kind: NVIDIADriver") {
+		t.Fatalf("helm template did not render NVIDIADriver:\n%s", rendered)
+	}
+}
+
 func nvidiaDriverCRValues() map[string]any {
 	return map[string]any{
 		"driver": map[string]any{
@@ -246,13 +321,26 @@ func nvidiaDriverCRValues() map[string]any {
 			"driverType":       "gpu",
 			"kernelModuleType": "auto",
 			"usePrecompiled":   false,
-			"manager":          map[string]any{"image": "k8s-driver-manager"},
+			"manager": map[string]any{
+				"repository":      "nvcr.io/nvidia/cloud-native",
+				"image":           "k8s-driver-manager",
+				"version":         "v0.12.1",
+				"imagePullPolicy": "IfNotPresent",
+				"env":             []any{},
+			},
 			"upgradePolicy": map[string]any{
 				"autoUpgrade":         true,
 				"maxParallelUpgrades": 5,
 				"maxUnavailable":      "25%",
-				"waitForCompletion":   map[string]any{"timeoutSeconds": 0},
-				"gpuPodDeletion":      map[string]any{"timeoutSeconds": 300},
+				"waitForCompletion": map[string]any{
+					"timeoutSeconds": 0,
+					"podSelector":    "",
+				},
+				"gpuPodDeletion": map[string]any{
+					"force":          false,
+					"timeoutSeconds": 300,
+					"deleteEmptyDir": false,
+				},
 				"drain": map[string]any{
 					"enable":         true,
 					"force":          true,
@@ -263,18 +351,24 @@ func nvidiaDriverCRValues() map[string]any {
 			},
 		},
 		"gds": map[string]any{
-			"enabled":         false,
-			"repository":      "nvcr.io/nvidia/cloud-native",
-			"image":           "nvidia-fs",
-			"version":         "2.29.4",
-			"imagePullPolicy": "IfNotPresent",
+			"enabled":          false,
+			"repository":       "nvcr.io/nvidia/cloud-native",
+			"image":            "nvidia-fs",
+			"version":          "2.29.4",
+			"imagePullPolicy":  "IfNotPresent",
+			"imagePullSecrets": []any{},
+			"env":              []any{},
+			"args":             []any{},
 		},
 		"gdrcopy": map[string]any{
-			"enabled":         true,
-			"repository":      "nvcr.io/nvidia/cloud-native",
-			"image":           "gdrdrv",
-			"version":         "v2.6",
-			"imagePullPolicy": "IfNotPresent",
+			"enabled":          true,
+			"repository":       "nvcr.io/nvidia/cloud-native",
+			"image":            "gdrdrv",
+			"version":          "v2.6",
+			"imagePullPolicy":  "IfNotPresent",
+			"imagePullSecrets": []any{},
+			"env":              []any{},
+			"args":             []any{},
 		},
 	}
 }

@@ -16,10 +16,11 @@
 # from ClusterPolicy.spec.driver to a separately managed NVIDIADriver CR. The
 # consuming overlay owns the policy decision and must enable
 # driver.nvidiaDriverCRD, explicitly set deployDefaultCR to false, clear the
-# legacy driver identity/upgradePolicy, and provide the nvidiaDriver values
-# consumed by the manifest. Keeping those values out of this mixin avoids
-# imposing one fleet's driver version and rollout policy on every AICR
-# consumer. The manifest renders in one pass for every deployer.
+# legacy driver identity/upgradePolicy, and provide the nvidiaDriver, gds, and
+# gdrcopy values consumed by the manifest. Keeping those values out of this
+# mixin and the shared component values avoids imposing one fleet's driver and
+# sidecar image versions or rollout policy on every AICR consumer. The manifest
+# renders in one pass for every deployer.
 kind: RecipeMixin
 apiVersion: aicr.run/v1beta1
 metadata:
