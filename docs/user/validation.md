@@ -1047,6 +1047,17 @@ per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g.
 distinct attestations never collide on a shared tag. Pass an explicit tag to
 override.
 
+When the run's workspace does not outlive it, for example in a Kubernetes Job
+or an ephemeral CI step, add `--image-refs <file>` to write the pushed
+bundle's digest (the `bundle.digest` value in `pointer.yaml`) to a file you
+choose, such as the container's termination-message path
+(`/dev/termination-log` by default). The file gets the same `sha256:…` line
+`aicr bundle --image-refs` writes. Its path, and that it can be written, are
+checked before validation starts. The kubelet bind-mounts the
+termination-message file, so aicr writes it in place rather than renaming a
+new file over it. A failed run leaves the file as it was, so gate on the exit
+status before reading it.
+
 After the command finishes:
 
 ```text
