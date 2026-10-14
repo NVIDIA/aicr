@@ -66,9 +66,9 @@ func renderedWorkload(rendered, name string) (string, bool) {
 }
 
 // nvsentinelRenderedValues resolves the nvsentinel values a real bundle
-// produces, optionally composing one mixin on top of the base chain. Passing
-// "" renders the shipped non-AKS/OKE shape.
-func nvsentinelRenderedValues(t *testing.T, store *recipe.MetadataStore, mixinName string) map[string]any {
+// produces, composing the named mixins on top of the base chain in order.
+// Passing "" renders the shipped non-AKS/OKE shape.
+func nvsentinelRenderedValues(t *testing.T, store *recipe.MetadataStore, mixinNames ...string) map[string]any {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), nvsentinelObservabilityChartTimeout)
 	defer cancel()
@@ -89,7 +89,10 @@ func nvsentinelRenderedValues(t *testing.T, store *recipe.MetadataStore, mixinNa
 	composed := map[string]any{}
 	mergeValuesForRender(composed, baseRef.Overrides)
 
-	if mixinName != "" {
+	for _, mixinName := range mixinNames {
+		if mixinName == "" {
+			continue
+		}
 		mixin, ok := store.Mixins[mixinName]
 		if !ok {
 			t.Fatalf("%s mixin not present; check recipes/mixins/", mixinName)
