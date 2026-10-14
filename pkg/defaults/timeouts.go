@@ -763,6 +763,29 @@ const (
 	// bound instead of the much shorter DiagnosticTimeout used for the rest of
 	// createUnstructured's calls.
 	NCCLResourceRecreateWait = 5 * time.Minute
+
+	// CRECertificationTimeout is AICR's wait budget for a Cluster Readiness
+	// Engine Certification to reach Succeeded or Failed. The same duration is
+	// written on spec.timeoutPerJob, but that is a backstop against a job left
+	// running forever, not a deadline matched to this one: CRE starts the
+	// per-job clock when the workload is first observed running, and starts it
+	// over when a workload is replaced, while AICR's starts at creation. CRE's
+	// bound can therefore fire well after AICR gives up, which is why teardown
+	// confirms the workloads stopped rather than trusting it.
+	CRECertificationTimeout = 30 * time.Minute
+
+	// CRECertificationDeleteTimeout bounds the removal of the Certification
+	// object itself. The shorter DiagnosticTimeout would expire while the CR is
+	// still held by finalizers.
+	CRECertificationDeleteTimeout = 5 * time.Minute
+
+	// CRECertificationTeardownTimeout bounds the whole teardown: removing the
+	// Certification and then confirming the TrainJobs and GPU pods it started
+	// are gone. It must outlast CRE's own drain barrier, which waits up to five
+	// minutes for workload pods to exit and then proceeds regardless
+	// (podDrainGracePeriod in pkg/controller/pod_drain.go), plus the
+	// termination grace of the multi-node GPU pods left behind.
+	CRECertificationTeardownTimeout = 10 * time.Minute
 )
 
 // Inference performance validation timeouts.
