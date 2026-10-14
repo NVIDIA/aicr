@@ -100,6 +100,11 @@ components:
     # mitigation used for kube-prometheus-stack does not apply.
     # See https://github.com/NVIDIA/aicr/issues/914.
     hasSelfRefCRDs: true
+    # The opt-in gpu-operator-nvidia-driver-cr mixin attaches a
+    # NVIDIADriver CR as a post-manifest. Its CRD is installed by this chart,
+    # but helmfile diffs the post release before applying the primary release
+    # on a fresh cluster. Skip live REST-mapper validation for that wrapper.
+    manifestsUseChartCRDs: true
     healthCheck:
       assertFile: checks/gpu-operator/health-check.yaml
     upgrades:

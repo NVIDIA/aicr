@@ -342,7 +342,8 @@ spec:
 ```
 
 Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
-`platform-inference`, `platform-kubeflow`, `nvsentinel-observability`,
+`platform-inference`, `platform-kubeflow`, `gpu-operator-nvidia-driver-cr`,
+`nvsentinel-observability`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
 `nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
 `nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
