@@ -118,6 +118,36 @@ The `platform` input appends an optional `-<platform>` segment to the test-confi
 
 The two gates are deliberately separate: `uat-run.yaml`'s answers "can this lane serve a platform at all" and is an allowlist of *lanes*, `uat-kind.yaml`'s answers "is this a value this lane admits" and is an allowlist of *values*. Both are covered by `tests/uat/lib/platform-gate_test.sh`, which extracts each step from its workflow with `yq` and runs it verbatim, so the test cannot drift from the gate it protects. The comparison stays verbatim rather than normalizing: `tests/uat/lib/cuj-dispatch.sh` lowercases instead, because it reads a resolved `recipe.yaml` where `ParsePlatform` has already done so.
 
+## Proving NVSentinel remediation
+
+The `faultinject` step runs after `verify` on every cloud lane. It writes a synthetic XID 79 to a GPU node's `/dev/kmsg` and asserts what NVSentinel does about it, in up to three stages ([#2625](https://github.com/NVIDIA/aicr/issues/2625)):
+
+| Stage | Asserts | Runs when the deployed recipe composes |
+|---|---|---|
+| 1. Detection | `SysLogsXIDError=True` appears on the node | always |
+| 2. Quarantine | the node is cordoned | `nvsentinel-quarantine` or `nvsentinel-remediation` |
+| 3. Recovery | the node's boot ID changes, then the node is uncordoned | `nvsentinel-remediation` |
+
+A stage that does not apply is recorded as `skipped` in `faultinject-result.json`, not failed. The gates are read from `bundle/recipe.yaml`, the recipe the bundle deployed. No shipped recipe composes either mixin, so nightly cells run Stage 1 only.
+
+**Running Stages 2 and 3.** Dispatch with `nvsentinel_remediation=quarantine` or `remediation`. `phase_prep` then composes the matching mixin onto the cell's leaf overlay through a `--data` overlay of the same name, and fails if the re-resolved recipe does not deploy that step:
+
+```bash
+# Stages 1-3 on AWS H100 training: cordon, janitor reboot, uncordon
+gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
+  -f reservation=aws-h100-ct-2 -f intent=training -f nvsentinel_remediation=remediation
+```
+
+**Where it is accepted.** `uat-run.yaml`'s `resolve` job refuses the input before anything is provisioned unless every bound below holds. `tests/uat/lib/platform-gate_test.sh` covers each one.
+
+- **`intent=training`.** The `faultinject` step grows to 15 minutes with quarantine and 30 with remediation, and only the training budget has room. A serving workload left on the node would also hold `node-drainer`, so janitor would never reboot it.
+- **`lifecycle=nightly`.** Quarantine leaves the node cordoned with the fault set, because a syslog fault clears only on a reboot. A held daytime cluster would keep that node out of service.
+- **`deployer=helmfile`.** The Argo CD budget has no room either.
+- **Built from source (`aicr_version` empty).** The leaf overlay is read from the checkout, so it must match the binary.
+- **AWS or Azure for either step, GCP for quarantine only.** Janitor's GPU reset cannot run on GKE's managed driver install, so `aicr bundle` refuses `nvsentinel-remediation` there.
+
+**Evidence is not ingested.** A run with a mixin validated a recipe no catalog leaf ships. Its `ingest-evidence` job is skipped, so the evidence is not recorded against the shipped recipe. Conformance and `verify` still run.
+
 ## The simulated-GPU Slurm lane
 
 `platform=slurm` needs **four schedulable nodes**, and the reservation-bound kind lane has one. A Slurm topology block groups *slurmd pods*, the Slinky operator attaches a hard per-hostname `podAntiAffinity` to every NodeSet pod, so four replicas need four nodes; on single-node nvkind one pod would run and three would stay `Pending`. That is why the leased lane refuses the dispatch outright rather than accepting one it could only fail.

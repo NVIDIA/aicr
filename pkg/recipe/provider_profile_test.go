@@ -183,12 +183,20 @@ func TestExternalOverlayContributesProfileValue(t *testing.T) {
 			patch: `spec: {profile: {values: {custom: {advertiser: external, componentRefs: [
   {name: gcp-driver-installer, overrides: {installer: {enabled: false}}},
   {name: gpu-operator, overrides: {devicePlugin: {enabled: false}}},
-  {name: nvsentinel, overrides: {labeler: {assumeDriverInstalled: true}}}]}}}}`,
+  {name: nvsentinel, optional: true, overrides: {labeler: {assumeDriverInstalled: true}}}]}}}}`,
 			wantSelected: map[string]string{
 				"":                          "gke-default",
 				"gpuStack=custom":           "custom",
 				"gpuStack=bundle-installer": "bundle-installer",
 			},
+		},
+		{
+			name: "value disagreeing on optionality fails at catalog load",
+			patch: `spec: {profile: {values: {custom: {advertiser: external, componentRefs: [
+  {name: gcp-driver-installer, overrides: {installer: {enabled: false}}},
+  {name: gpu-operator, overrides: {devicePlugin: {enabled: false}}},
+  {name: nvsentinel, overrides: {labeler: {assumeDriverInstalled: true}}}]}}}}`,
+			wantLoadErr: "as optional in some values but not others",
 		},
 		{
 			name: "value assigning only a DRA path fails union totality at catalog load",

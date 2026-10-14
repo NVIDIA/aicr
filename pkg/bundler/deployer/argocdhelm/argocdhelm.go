@@ -88,6 +88,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -498,7 +499,14 @@ func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64
 	// allocation-policy selector paths at install time (ADR-015).
 	lockSet := g.RecipeResult.EffectiveLockSet()
 	components := make([]string, 0, len(lockSet))
-	for component := range lockSet {
+	for component, paths := range lockSet {
+		// A component the profile references as optional and the bundle
+		// omits has no Application to guard.
+		if !slices.Contains(paths, bundlercfg.ComponentEnabledKey) {
+			if ref := g.RecipeResult.GetComponentRef(component); ref == nil || !ref.IsEnabled() {
+				continue
+			}
+		}
 		components = append(components, component)
 	}
 	sort.Strings(components)

@@ -221,7 +221,7 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 				},
 				"nvidia-dra-driver-gpu": {"enabled", "nvidiaDriverRoot"},
 				"nvsentinel": {
-					"enabled", "janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
+					"janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
 					"janitor.config.controllers.gpuReset.serviceManager.name",
 					"janitor.config.controllers.gpuReset.serviceManager.spec.apps",
 					"janitor.config.controllers.gpuReset.serviceManager.spec.namespace",
