@@ -956,7 +956,7 @@ componentRefs: []
 		if opts.ociRef.Tag != "1.2.3_build.5" || opts.targetRevision != "1.2.3+build.5" {
 			t.Fatalf("raw tag=%q targetRevision=%q", opts.ociRef.Tag, opts.targetRevision)
 		}
-		if out.OutputDir != bundle.path || refs == nil || refs.bundle != bundle {
+		if out.OutputDir != bundle.path || refs == nil || refs.guard != bundle {
 			t.Fatalf("retained owners do not match generated output")
 		}
 		return bundle.validate(publishCtx)
