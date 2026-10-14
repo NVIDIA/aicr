@@ -1282,6 +1282,10 @@ results, err := client.ValidateState(ctx, rec, snap,
     aicr.WithValidationNoCluster(opts.NoCluster),
     aicr.WithValidationCleanup(opts.Cleanup),
     aicr.WithValidatorServiceAccountName(opts.ValidatorServiceAccountName),
+    // Phases, SkipChecks, FailFast and Timeout map the same way, through
+    // WithValidationPhases, WithValidationSkipChecks, WithValidationFailFast
+    // and WithValidationTimeout; FailFast and Timeout are pointers, so pass
+    // them only when non-nil.
 )
 ```
 
