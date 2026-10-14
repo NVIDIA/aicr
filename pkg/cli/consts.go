@@ -73,6 +73,7 @@ const (
 	flagInsecureTLS       = "insecure-tls"
 	flagPlainHTTP         = "plain-http"
 	flagPush              = "push"
+	flagImageRefs         = "image-refs"
 	// flagNoSign pushes an unsigned evidence bundle and writes a pointer whose
 	// attestation has a nil Signer (the unsigned state — distinct from a
 	// signed-without-Rekor pointer, which has a Signer with a nil

@@ -473,6 +473,10 @@ type validationConfig struct {
 
 	// Recipe-evidence bundle config; nil disables --emit-attestation work.
 	evidence *recipeEvidenceConfig
+
+	// imageRefs receives the pushed evidence bundle's digest; nil when
+	// --image-refs is unset.
+	imageRefs *imageRefsTarget
 }
 
 // runValidation runs validation using the container-per-validator engine.
@@ -623,7 +627,11 @@ func runValidation(
 	// source), and attestation.Emit; the CLI shim only adds the interactive
 	// signing-disclosure prompt.
 	if cfg.evidence != nil {
-		if err := emitRecipeEvidence(ctx, client, rec, snap, results, cfg.evidence); err != nil {
+		emission, err := emitRecipeEvidence(ctx, client, rec, snap, results, cfg.evidence)
+		if err != nil {
+			return err
+		}
+		if err := writeEvidenceImageRefs(ctx, cfg.imageRefs, emission); err != nil {
 			return err
 		}
 	}
@@ -863,6 +871,15 @@ func validateEvidenceFlags() []cli.Flag {
 	--oidc-device-flow > interactive browser flow.`,
 			Category: catEvidence,
 		},
+		&cli.StringFlag{
+			Name: flagImageRefs,
+			Usage: `File to receive the digest of the evidence bundle --push published (sha256:...), the value pointer.yaml
+	records as bundle.digest, in the format aicr bundle --image-refs writes. Requires --emit-attestation and --push.
+	The parent must be an existing real directory; the target must be absent or a regular file, clear of
+	--emit-attestation and --output. A mount point such as a Kubernetes termination-message file is written in place.
+	The target is checked, including that it can be written, before validation starts.`,
+			Category: catEvidence,
+		},
 		&cli.BoolFlag{
 			Name: flagNoSign,
 			Usage: `Push the evidence bundle unsigned (requires --emit-attestation and --push) and write a pointer with an empty signer block.
@@ -894,6 +911,14 @@ func validateEvidenceFlags() []cli.Flag {
 		},
 		assumeYesFlag(catEvidence),
 	}
+}
+
+// warnIgnoredProjections notes each provider projection flag a pre-captured
+// --snapshot makes inert.
+func warnIgnoredProjections(cmd *cli.Command, snapshotFilePath string) {
+	warnIgnoredAKSGPUPools(cmd, snapshotFilePath)
+	warnIgnoredOKEAddons(cmd, snapshotFilePath)
+	warnIgnoredGKEGPUPools(cmd, snapshotFilePath)
 }
 
 // warnIgnoredAKSGPUPools notes that the pool projection only applies to live
@@ -994,7 +1019,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", flagValidatorSA, "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", "gke-gpu-pools", flagPush, flagIdentityToken); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", flagValidatorSA, "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", "gke-gpu-pools", flagPush, flagImageRefs, flagIdentityToken); err != nil {
 				return err
 			}
 
@@ -1033,6 +1058,12 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				return err
 			}
 
+			evidenceCfg, imageRefs, err := prepareRecipeEvidence(ctx, cmd, cfg, cncfSubmission, noCluster)
+			if err != nil {
+				return err
+			}
+			defer closeEvidenceImageRefs(imageRefs)
+
 			// recipeFilePath is resolved once here (flag > config) so both the
 			// --cncf-submission short-circuit below and the normal validation path
 			// further down consume the same value, rather than each resolving it
@@ -1061,9 +1092,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			}
 
 			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", input.SnapshotPath)
-			warnIgnoredAKSGPUPools(cmd, snapshotFilePath)
-			warnIgnoredOKEAddons(cmd, snapshotFilePath)
-			warnIgnoredGKEGPUPools(cmd, snapshotFilePath)
+			warnIgnoredProjections(cmd, snapshotFilePath)
 			kubeconfig := cmd.String("kubeconfig")
 
 			if recipeFilePath == "" {
@@ -1219,12 +1248,6 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 
 			warnRetainedValidatorBinding(shared, validatorSA)
 
-			attOpts, _, err := cfg.EvidenceAttestationOptions()
-			if err != nil {
-				return err
-			}
-			evidenceCfg := evidenceConfigForRunMode(noCluster, buildRecipeEvidenceConfig(cmd, attOpts))
-
 			return runValidation(ctx, client, rec, snap, validationConfig{
 				phases:                      phases,
 				skipChecks:                  skipChecks,
@@ -1245,6 +1268,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				imageTagOverride:            os.Getenv("AICR_VALIDATOR_IMAGE_TAG"),
 				evidenceDir:                 evidenceDir,
 				evidence:                    evidenceCfg,
+				imageRefs:                   imageRefs,
 			})
 		},
 	}
