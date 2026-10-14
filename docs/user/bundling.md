@@ -162,13 +162,13 @@ the upgrade steps instead.
 ### Bundle info
 
 Every bundle carries a `bundle-info.yaml` at its root, written unconditionally
-by all five deployers — no flag turns it off. It answers three questions a
+by all six deployers — no flag turns it off. It answers three questions a
 bundle cannot answer for itself: which deployer built it, which `aicr` binary
 built it, and which Helm release landed in which directory.
 
 `layout.entrypoint` names the file a consumer invokes or applies —
-`deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`, or
-`kustomization.yaml` — so automation reads one key instead of branching on
+`deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`,
+`kustomization.yaml`, or `main.tf` — so automation reads one key instead of branching on
 `build.deployer`.
 
 `layout.releases` lists every Helm release the bundle installs, in deployment

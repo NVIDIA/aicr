@@ -31,7 +31,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// valuesFileName and clusterValuesFileName are the two files four of the five
+// valuesFileName and clusterValuesFileName are the two files five of the six
 // deployers write per release, layered in the order install.sh applies them
 // (`-f values.yaml -f cluster-values.yaml`). The second carries install-time
 // values and is usually empty.
@@ -64,7 +64,7 @@ var injectedSuffixes = []string{"-pre", "-post", "-readiness"}
 // Locations come from bundle-info.yaml's releases, so this reads paths the
 // bundle recorded about itself. That is not the deployer-layout fingerprinting
 // upgrade-check refuses to do: nothing here guesses a filename from the shape
-// of the directory. Four deployers write <path>/values.yaml with
+// of the directory. Five deployers write <path>/values.yaml with
 // cluster-values.yaml layered over it; flux inlines the same values under
 // spec.values in the HelmRelease named by <manifest>.
 //
@@ -216,7 +216,7 @@ func vendoredSubchartName(dir, relDir string) (string, error) {
 }
 
 // readValuesFile reads dir/relDir/name, reporting whether it existed. Absence
-// is a state rather than a failure: three of the five layouts write no
+// is a state rather than a failure: three of the six layouts write no
 // cluster-values.yaml, and flux writes no values.yaml at all.
 func readValuesFile(dir, relDir, name string) (map[string]any, bool, error) {
 	data, found, err := readBounded(dir, filepath.Join(relDir, name))
