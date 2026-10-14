@@ -128,8 +128,10 @@ transitions:
               the operator Deployment before helm recreates it. The hook runs
               inside the helm_release upgrade terraform apply performs. If
               that hook's Job fails or exceeds its deadline, the upgrade aborts
-              with the Deployment already gone, so the namespace is left with
-              no operator at all and the release sits in `failed`. Re-run
+              with the Deployment already gone. With atomic at its default of
+              false the namespace is left with no operator at all and the
+              release sits in `failed`; with atomic = true Helm rolls the
+              release back and the old operator returns. Either way, re-run
               terraform apply to recover; it completes once the hook Job
               passes.
             reason: >-

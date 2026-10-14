@@ -19,7 +19,7 @@ kind: ComponentUpgrades
 component: psmdb-operator
 transitions:
   # A patch boundary that still changes the CRDs. Manual rather than safe
-  # because helmfile never applies a changed crds/ directory.
+  # because helmfile and terraform never apply a changed crds/ directory.
   - from: ">=1.23.0 <1.23.2"
     to: "=1.23.2"
     verdict: manual

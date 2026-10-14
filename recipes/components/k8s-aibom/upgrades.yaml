@@ -96,6 +96,20 @@ transitions:
               operator is left mid-rollout on a failed revision. Applying
               the v1.5.1 CRDs first makes the identical upgrade succeed and
               store the field.
+          - id: verify-crd-update
+            description: >-
+              After the manual apply, confirm the new schema actually landed
+              by looking for the field the v1.5.1 CRDs add: kubectl get crd
+              aibomcontrollerconfigs.aibom.k8saibom.dev -o
+              jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.verification.type}'
+              and expect "object". An empty result means the v1.3.0 schema
+              is still in place.
+            reason: >-
+              Storage version and health are both useless as signals here:
+              v1beta1 was already the storage version at v1.3.0, and a
+              cluster stranded on the v1.3.0 CRDs reports the release
+              deployed and the controller Ready on the v1.5.1 image. Only
+              the schema itself distinguishes the two.
           - id: verify-reconcile
             description: >-
               kubectl get aibomcontrollerconfig default -o yaml and confirm

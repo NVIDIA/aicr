@@ -69,6 +69,32 @@ transitions:
             reason: >-
               AICR's generated install.sh already passes --force-conflicts on
               Helm 4.
+      - deployers: [terraform]
+        steps:
+          - id: delete-legacy-crd
+            description: >-
+              kubectl delete crd clustertopologies.grove.io
+            reason: >-
+              The new CRD reuses shortname ct, so applying it while the
+              obsolete one still exists blocks it from ever reaching
+              Established.
+          - id: apply-new-crds
+            description: >-
+              helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts
+              --version v0.1.0-alpha.12 | sed -n '/^---$/,$p' |
+              kubectl apply --server-side --force-conflicts
+              --field-manager=terraform-provider-helm -f -
+            reason: >-
+              helm_release upgrades through Helm, which never applies a
+              changed crds/ directory; the provider installed the CRDs as
+              manager terraform-provider-helm, so the apply adopts that
+              fieldset.
+          - id: apply-bundle
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply.
+            reason: >-
+              The release picks the new chart up once the CRDs are
+              Established.
       - steps:
           - id: delete-legacy-crd
             description: >-
@@ -128,6 +154,25 @@ transitions:
             reason: >-
               AICR's generated install.sh already passes --force-conflicts on
               Helm 4.
+      - deployers: [terraform]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts
+              --version v0.1.0-alpha.13 | sed -n '/^---$/,$p' |
+              kubectl apply --server-side --force-conflicts
+              --field-manager=terraform-provider-helm -f -
+            reason: >-
+              Installs the alpha.13 CRDs before the operator that writes
+              the new status field starts; the provider installed the CRDs
+              as manager terraform-provider-helm, so the apply adopts that
+              fieldset.
+          - id: apply-bundle
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply.
+            reason: >-
+              The release picks the new chart up once the CRDs are
+              Established.
       - steps:
           - id: apply-new-crds
             description: >-
