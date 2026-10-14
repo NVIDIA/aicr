@@ -170,7 +170,9 @@ When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-t
 
 **`npd`** installs the upstream `node-problem-detector` DaemonSet, whose Node Conditions the `nvsentinel-object-monitor` policies read. Unlike the four mixins above it contributes a brand-new component name rather than composing overrides onto `nvsentinel`, so it needs no `mixinSafeOverridePaths` entry — a mixin may always carry a full `componentRefs` entry for a component no overlay in the chain declares. It is supported only on EKS, Kind and RKE2 — the platforms verified to run no NPD of their own. `CheckNPDNotDuplicatingProviderNPD` fails the bundle on every other platform, including GKE and AKS (which run their own), OKE, OpenShift, Talos and anything unverified. See [component catalog](../user/component-catalog.md#node-problem-detector) for which platforms need it and why the policies ship `STORE_ONLY`.
 
-**`nvsentinel-observe`, `nvsentinel-quarantine` and `nvsentinel-remediation`** are the three steps of NVSentinel remediation, adopted one at a time (`spec.mixins: [nvsentinel-observe]`, then swap the name). They set `global.*` toggles and pin `processingStrategy: EXECUTE_REMEDIATION` on the GPU and syslog monitors; observe and remediation also carry the `COMPONENT_RESET` → `GPUReset` action map, and remediation adds the pinned reboot Job image and a three-attempt repair cap, all through the same `mixinSafeOverridePaths` allowlist; every pair sets a shared path, so composing two is a collision error, which is what makes them mutually exclusive. Mixin override keys may not contain a dot, so the GPU-reset template key is `gpureset` rather than upstream's `gpureset-template.yaml`. No step sets a `node-drainer` mode, so the chart's wait-for-completion drain applies. Like `npd`, each step also carries full `componentRefs` for two components no overlay declares, `psmdb-operator` and `nvsentinel-mongodb`, and wires NVSentinel's `global.datastore.*` to them in place of the chart's embedded `mongodbStore`. A bundle composing a step therefore needs `--system-node-selector`, which `nvsentinel-mongodb` requires. The GPU reset Job's driver root and RuntimeClass are platform facts, set by the platform overlays rather than the mixin. See [component catalog](../user/component-catalog.md#graded-remediation) for what each step does, how to choose a drain mode, and its prerequisites.
+**`nvsentinel-observe`, `nvsentinel-quarantine` and `nvsentinel-remediation`** are the three steps of NVSentinel remediation, adopted one at a time (`spec.mixins: [nvsentinel-observe]`, then swap the name). They set `global.*` toggles and pin `processingStrategy: EXECUTE_REMEDIATION` on the GPU and syslog monitors; observe and remediation also carry the `COMPONENT_RESET` → `GPUReset` action map, and remediation adds the pinned reboot Job image and a three-attempt repair cap, all through the same `mixinSafeOverridePaths` allowlist; every pair sets a shared path, so composing two is a collision error, which is what makes them mutually exclusive. Mixin override keys may not contain a dot, so the GPU-reset template key is `gpureset` rather than upstream's `gpureset-template.yaml`. No step sets a `node-drainer` mode, so the chart's wait-for-completion drain applies, except where `nvsentinel-slinky-drainer` is composed alongside. Like `npd`, each step also carries full `componentRefs` for two components no overlay declares, `psmdb-operator` and `nvsentinel-mongodb`, and wires NVSentinel's `global.datastore.*` to them in place of the chart's embedded `mongodbStore`. A bundle composing a step therefore needs `--system-node-selector`, which `nvsentinel-mongodb` requires. The GPU reset Job's driver root and RuntimeClass are platform facts, set by the platform overlays rather than the mixin. See [component catalog](../user/component-catalog.md#graded-remediation) for what each step does, how to choose a drain mode, and its prerequisites.
+
+**`nvsentinel-slinky-drainer`** drains quarantined Slurm nodes through Slurm. It composes on a `platform: slurm` leaf alongside `nvsentinel-quarantine` or `nvsentinel-remediation` (`spec.mixins: [nvsentinel-quarantine, nvsentinel-slinky-drainer]`), never with `nvsentinel-observe`. It turns on `node-drainer.customDrain` and empties `node-drainer.userNamespaces` through `nvsentinel`'s `mixinSafeOverridePaths`, adds `dependencyRefs` entries so the plugin's CRD and template exist before NVSentinel starts, and carries full `componentRefs` entries for `slinky-drainer-crds` and `slinky-drainer` (which depends on the CRD component), manifest-only components no overlay declares. `CheckNVSentinelSlurmCustomDrainCoherent` fails the bundle on any other combination, including a Slurm leaf with `nvsentinel-remediation` but without this mixin. See [component catalog](../user/component-catalog.md#slurm-drain-through-slinky).
 
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
 
@@ -759,7 +761,7 @@ Profile declarations are intentionally narrow:
   so `Operator-Managed` and `operator-managed` would collapse onto one evidence
   directory.
 - A value permits only `constraints` and
-  `componentRefs{name,overrides}` in the core mechanism. `valuesFile`,
+  `componentRefs{name,optional,overrides}` in the core mechanism. `valuesFile`,
   component identity/deployment fields, literal dotted keys, nested empty
   maps, and root `overrides.enabled` are rejected.
 - Override leaves must be JSON/YAML scalar values. Finite numbers and YAML
@@ -820,6 +822,16 @@ lock on owned paths is enforced per surface:
   `enabled` — so reselecting a profile changes owned **value** paths
   only, never which components are present. Presence changes are
   catalog/composition changes.
+- **Optional references**: a `componentRefs` entry with `optional: true`
+  owns its override paths but not presence. The bundle may omit the
+  component (`--set <component>:enabled=false` or a `bundlers=` list);
+  when it ships, its owned paths are locked as above. Recipe resolution
+  still requires the component to be enabled. Every value must agree on
+  `optional` for a component, an optional reference must assign at least
+  one override, and GPU allocation-policy components (`gpu-operator`,
+  `nvidia-dra-driver-gpu` and their OCP variants) cannot be optional.
+  The GKE-COS and OKE `gpuStack` profiles reference `nvsentinel` this
+  way.
 
 **Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is
 resolved from a snapshot (via `aicr recipe --snapshot` or

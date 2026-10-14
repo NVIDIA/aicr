@@ -1,0 +1,118 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: network-operator
+transitions:
+  # Manual rather than safe: the in-place path has not been run live. A run
+  # covering the AICR NicClusterPolicy and DOCA driver pins can flip this to
+  # safe with that run in verifiedBy.
+  - from: ">=26.4.1 <26.7.0"
+    to: "=26.7.0"
+    verdict: manual
+    summary: >-
+      26.7.0 updates the NicClusterPolicy CRD in place and then rolls the
+      operator and its operands: the DOCA/OFED driver and the RDMA shared
+      device plugin restart on every RDMA node. The CRD change only adds
+      fields, but the in-place path has not been run live with AICR's
+      NicClusterPolicy and DOCA driver pins, so confirm reconciliation after
+      the upgrade.
+    precondition: >-
+      The NicClusterPolicy is healthy. Check with `kubectl get
+      nicclusterpolicy nic-cluster-policy`; STATUS must be ready.
+    reversible: false
+    reversibleNotes: >-
+      The chart updates CRDs in place, which a Helm rollback does not revert.
+      Fresh installations at 26.7.0 do not cross this transition.
+    affectedResources:
+      - group: mellanox.com
+        kinds: [NicClusterPolicy]
+    stepsByDeployer:
+      - deployers: [helmfile]
+        steps:
+          - id: save-nicclusterpolicy
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy -o yaml >
+              nic-cluster-policy-backup.yaml
+            reason: >-
+              Helm rollback does not revert the CRD update, so the saved copy
+              is the only record of the pre-upgrade policy.
+          - id: apply-bundle
+            description: >-
+              Run helmfile apply from a bundle generated at the new pins.
+            reason: >-
+              The chart's CRD-upgrade hook updates the CRD before the operator
+              rolls, and keepNCP keeps the existing NicClusterPolicy.
+          - id: verify
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy reports ready,
+              and the DOCA/OFED driver and RDMA shared device plugin pods in
+              nvidia-network-operator are Ready and still carry the
+              ds-owner=NicClusterPolicy label.
+            reason: >-
+              Ready means the 26.7.0 operator reconciled the 26.4.1 policy.
+              NVSentinel selects these pods by the ds-owner label.
+      - deployers: [helm]
+        steps:
+          - id: save-nicclusterpolicy
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy -o yaml >
+              nic-cluster-policy-backup.yaml
+            reason: >-
+              Helm rollback does not revert the CRD update, so the saved copy
+              is the only record of the pre-upgrade policy.
+          - id: apply-bundle
+            description: >-
+              Run install.sh from a bundle generated at the new pins.
+            reason: >-
+              The chart's CRD-upgrade hook updates the CRD before the operator
+              rolls, and keepNCP keeps the existing NicClusterPolicy.
+          - id: verify
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy reports ready,
+              and the DOCA/OFED driver and RDMA shared device plugin pods in
+              nvidia-network-operator are Ready and still carry the
+              ds-owner=NicClusterPolicy label.
+            reason: >-
+              Ready means the 26.7.0 operator reconciled the 26.4.1 policy.
+              NVSentinel selects these pods by the ds-owner label.
+      - steps:
+          - id: save-nicclusterpolicy
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy -o yaml >
+              nic-cluster-policy-backup.yaml
+            reason: >-
+              Helm rollback does not revert the CRD update, so the saved copy
+              is the only record of the pre-upgrade policy.
+          - id: reconcile
+            description: >-
+              Commit a bundle generated at the new pins, then reconcile or sync
+              it.
+            reason: >-
+              The chart's CRD-upgrade hook updates the CRD before the operator
+              rolls, and keepNCP keeps the existing NicClusterPolicy.
+          - id: verify
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy reports ready,
+              and the DOCA/OFED driver and RDMA shared device plugin pods in
+              nvidia-network-operator are Ready and still carry the
+              ds-owner=NicClusterPolicy label.
+            reason: >-
+              Ready means the 26.7.0 operator reconciled the 26.4.1 policy.
+              NVSentinel selects these pods by the ds-owner label.
+    references:
+      - https://github.com/Mellanox/network-operator/releases/tag/v26.7.0
+      - https://github.com/Mellanox/network-operator/blob/v26.7.0/deployment/network-operator/values.yaml
+      - https://github.com/Mellanox/network-operator/blob/v26.7.0/docs/heterogeneous-cluster-support.md

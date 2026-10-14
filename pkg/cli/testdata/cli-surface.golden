@@ -227,6 +227,7 @@ flag    aicr validate  --gke-gpu-pools  type=string default= required=false hidd
 flag    aicr validate  --identity-token  type=string default= required=false hidden=false env=COSIGN_IDENTITY_TOKEN
 flag    aicr validate  --image  type=string default="ghcr.io/nvidia/aicr:latest" required=false hidden=false env=AICR_VALIDATOR_IMAGE
 flag    aicr validate  --image-pull-secret  type=string default= required=false hidden=false env=
+flag    aicr validate  --image-refs  type=string default= required=false hidden=false env=
 flag    aicr validate  --insecure-tls  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --job-name  type=string default="aicr-validate" required=false hidden=false env=
 flag    aicr validate  --kubeconfig,-k  type=string default= required=false hidden=false env=
@@ -248,6 +249,7 @@ flag    aicr validate  --skip-check  type=string default= required=false hidden=
 flag    aicr validate  --snapshot,-s  type=string default= required=false hidden=false env=
 flag    aicr validate  --timeout  type=duration default=5m0s required=false hidden=false env=
 flag    aicr validate  --toleration  type=string default= required=false hidden=false env=
+flag    aicr validate  --validator-service-account-name  type=string default= required=false hidden=false env=
 flag    aicr validate  --yes,--assume-yes  type=bool default=false required=false hidden=false env=AICR_ASSUME_YES
 flag    aicr verify  --certificate-identity-regexp  type=string default= required=false hidden=false env=
 flag    aicr verify  --cli-version-constraint  type=string default= required=false hidden=false env=

@@ -29,8 +29,26 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// imageRefsGuard is the output an image-reference file must stay out of: the
+// target may not be inside it, reach it through a symlinked parent, or share a
+// file with any of its entries. The bundle tree is one such output; the
+// recipe-evidence attestation directory is another.
+type imageRefsGuard interface {
+	// checkPlannedPath rejects absTarget, the target as given, when it is in
+	// the guarded output.
+	checkPlannedPath(ctx context.Context, absTarget string) error
+	// checkResolvedPath rejects resolvedTarget, the target with its parent's
+	// symlinks resolved, when it is in the guarded output.
+	checkResolvedPath(resolvedTarget string) error
+	// preflightAliases runs checkAliases when the guarded output exists yet.
+	preflightAliases(ctx context.Context, t *imageRefsTarget) error
+	// checkAliases rejects a target whose parent directory, or whose existing
+	// file, is the same file as an entry of the guarded output.
+	checkAliases(ctx context.Context, t *imageRefsTarget) error
+}
+
 type imageRefsTarget struct {
-	bundle     *bundleOutputTarget
+	guard      imageRefsGuard
 	parentPath string
 	baseName   string
 	root       *os.Root
@@ -39,6 +57,11 @@ type imageRefsTarget struct {
 	deps       imageRefsTargetDependencies
 	closeOnce  sync.Once
 	closeErr   error
+
+	// inPlace writes the existing target through its own descriptor instead
+	// of renaming a temporary file over it. Set by preflightWrite for a mount
+	// point, which rename cannot replace.
+	inPlace bool
 }
 
 type imageRefsTargetDependencies struct {
@@ -54,6 +77,7 @@ type imageRefsTargetDependencies struct {
 	rootRename             func(*os.Root, string, string) error
 	closeRoot              func(*os.Root) error
 	sameFile               func(fs.FileInfo, fs.FileInfo) bool
+	onOtherDevice          func(fs.FileInfo, fs.FileInfo) bool
 	randomName             func() (string, error)
 	beforeParentOpen       func(string) error
 	beforeTargetOpen       func(*imageRefsTarget) error
@@ -82,9 +106,10 @@ func defaultImageRefsTargetDependencies() imageRefsTargetDependencies {
 		rootRename: func(root *os.Root, oldName, newName string) error {
 			return root.Rename(oldName, newName)
 		},
-		closeRoot:  func(root *os.Root) error { return root.Close() },
-		sameFile:   os.SameFile,
-		randomName: randomImageRefsTempName,
+		closeRoot:     func(root *os.Root) error { return root.Close() },
+		sameFile:      os.SameFile,
+		onOtherDevice: onOtherDevice,
+		randomName:    randomImageRefsTempName,
 		beforeParentOpen: func(string) error {
 			return nil
 		},
@@ -144,6 +169,9 @@ func normalizeImageRefsTargetDependencies(
 	if deps.sameFile == nil {
 		deps.sameFile = defaults.sameFile
 	}
+	if deps.onOtherDevice == nil {
+		deps.onOtherDevice = defaults.onOtherDevice
+	}
 	if deps.randomName == nil {
 		deps.randomName = defaults.randomName
 	}
@@ -182,13 +210,20 @@ func prepareImageRefsTargetWithDependencies(
 	deps imageRefsTargetDependencies,
 ) (*imageRefsTarget, error) {
 
-	deps = normalizeImageRefsTargetDependencies(deps)
 	if bundle == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "bundle output target is required")
 	}
-	if err := bundle.validateAncestor(ctx); err != nil {
-		return nil, err
-	}
+	return prepareGuardedImageRefsTarget(ctx, bundle, targetPath, deps)
+}
+
+func prepareGuardedImageRefsTarget(
+	ctx context.Context,
+	guard imageRefsGuard,
+	targetPath string,
+	deps imageRefsTargetDependencies,
+) (*imageRefsTarget, error) {
+
+	deps = normalizeImageRefsTargetDependencies(deps)
 	absTarget, absErr := filepath.Abs(targetPath)
 	if absErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -200,24 +235,16 @@ func prepareImageRefsTargetWithDependencies(
 	if baseName == "." || baseName == string(filepath.Separator) || baseName == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "image-reference target must name a file")
 	}
-	if pathsConflict(absTarget, bundle.path) {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"image-reference target must be outside the bundle output")
+	if err := guard.checkPlannedPath(ctx, absTarget); err != nil {
+		return nil, err
 	}
 	resolvedParent, parentResolveErr := filepath.EvalSymlinks(parentPath)
 	if parentResolveErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"image-reference target parent is unavailable", parentResolveErr)
 	}
-	resolvedAncestor, ancestorResolveErr := filepath.EvalSymlinks(bundle.ancestorPath)
-	if ancestorResolveErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"bundle output ancestor cannot be resolved", ancestorResolveErr)
-	}
-	resolvedBundle := filepath.Join(resolvedAncestor, bundle.relativePath)
-	if pathsConflict(filepath.Join(resolvedParent, baseName), resolvedBundle) {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"image-reference target aliases the bundle output")
+	if err := guard.checkResolvedPath(filepath.Join(resolvedParent, baseName)); err != nil {
+		return nil, err
 	}
 
 	// Resolve platform symlinks in the parent (e.g. macOS /var -> /private/var,
@@ -259,7 +286,7 @@ func prepareImageRefsTargetWithDependencies(
 		return nil, joinInternalCleanup(primary, deps.closeRoot(root), "image-reference target parent")
 	}
 	target := &imageRefsTarget{
-		bundle:     bundle,
+		guard:      guard,
 		parentPath: parentPath,
 		baseName:   baseName,
 		root:       root,
@@ -303,10 +330,8 @@ func prepareImageRefsTargetWithDependencies(
 	if err := target.validateTarget(ctx); err != nil {
 		return nil, joinInternalCleanup(err, target.close(), "image-reference target")
 	}
-	if bundle.generated != nil {
-		if err := target.validateBundleAliases(ctx); err != nil {
-			return nil, joinInternalCleanup(err, target.close(), "image-reference target")
-		}
+	if err := guard.preflightAliases(ctx, target); err != nil {
+		return nil, joinInternalCleanup(err, target.close(), "image-reference target")
 	}
 	return target, nil
 }
@@ -383,8 +408,45 @@ func (t *imageRefsTarget) validateTarget(ctx context.Context) error {
 	return nil
 }
 
-func (t *imageRefsTarget) validateBundleAliases(ctx context.Context) error {
-	bundleInfos, err := t.bundle.entryInfos(ctx)
+// validateGuardAliases rejects a target that aliases its guarded output.
+func (t *imageRefsTarget) validateGuardAliases(ctx context.Context) error {
+	return t.guard.checkAliases(ctx, t)
+}
+
+func (b *bundleOutputTarget) checkPlannedPath(ctx context.Context, absTarget string) error {
+	if err := b.validateAncestor(ctx); err != nil {
+		return err
+	}
+	if pathsConflict(absTarget, b.path) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"image-reference target must be outside the bundle output")
+	}
+	return nil
+}
+
+func (b *bundleOutputTarget) checkResolvedPath(resolvedTarget string) error {
+	resolvedAncestor, err := filepath.EvalSymlinks(b.ancestorPath)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "bundle output ancestor cannot be resolved", err)
+	}
+	if pathsConflict(resolvedTarget, filepath.Join(resolvedAncestor, b.relativePath)) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"image-reference target aliases the bundle output")
+	}
+	return nil
+}
+
+// preflightAliases is a no-op until the bundle is generated: before then the
+// planned tree has no entries to alias.
+func (b *bundleOutputTarget) preflightAliases(ctx context.Context, t *imageRefsTarget) error {
+	if b.generated == nil {
+		return nil
+	}
+	return b.checkAliases(ctx, t)
+}
+
+func (b *bundleOutputTarget) checkAliases(ctx context.Context, t *imageRefsTarget) error {
+	bundleInfos, err := b.entryInfos(ctx)
 	if err != nil {
 		return err
 	}
@@ -413,6 +475,120 @@ func (t *imageRefsTarget) validateBundleAliases(ctx context.Context) error {
 	return nil
 }
 
+// preflightWrite chooses how the target will be written and proves, before
+// the caller does any work it would regret, that the write can succeed. An
+// existing target on a different device from its parent is a mount point,
+// such as a kubelet terminationMessagePath: rename onto it fails with EBUSY,
+// and its parent is often not writable, so it is written in place and is
+// opened for writing now. Any other target is renamed into place, so a
+// temporary file is created in its parent and removed now.
+func (t *imageRefsTarget) preflightWrite(ctx context.Context) error {
+	if err := cliFilesystemContextError(ctx, "image-reference write preflight canceled"); err != nil {
+		return err
+	}
+	if t.targetInfo != nil && t.deps.onOtherDevice(t.targetInfo, t.parentInfo) {
+		t.inPlace = true
+		file, err := t.openRetainedTarget(os.O_WRONLY)
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				"image-reference target is a mount point that cannot be opened for writing", err)
+		}
+		if err := t.deps.closeFile(file); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to close image-reference target", err)
+		}
+		return nil
+	}
+	tempName, err := t.deps.randomName()
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to allocate image-reference temporary name")
+	}
+	if !validImageRefsTempName(tempName) || tempName == t.baseName {
+		return errors.New(errors.ErrCodeInternal, "image-reference temporary name is unsafe")
+	}
+	temp, err := t.deps.rootOpenFile(t.root, tempName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			"image-reference target parent is not writable", err)
+	}
+	tempInfo, statErr := t.deps.fileStat(temp)
+	closeErr := t.deps.closeFile(temp)
+	if statErr != nil || closeErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to inspect image-reference write probe",
+			stderrors.Join(statErr, closeErr))
+	}
+	return t.removeOwnedTemp(tempName, tempInfo)
+}
+
+// openRetainedTarget opens the existing target and proves the descriptor is
+// the file retained at preflight before the caller writes through it. The
+// open does not truncate, so a target swapped for another file is never
+// modified.
+func (t *imageRefsTarget) openRetainedTarget(flag int) (*os.File, error) {
+	if t.targetInfo == nil {
+		return nil, errors.New(errors.ErrCodeInternal, "image-reference target was not retained")
+	}
+	file, err := t.deps.rootOpenFile(t.root, t.baseName, flag, 0)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to open image-reference target", err)
+	}
+	opened, statErr := t.deps.fileStat(file)
+	if statErr != nil || !opened.Mode().IsRegular() || !t.deps.sameFile(t.targetInfo, opened) {
+		return nil, joinInternalCleanup(errors.Wrap(errors.ErrCodeInternal,
+			"image-reference target changed before write", statErr), t.deps.closeFile(file), "image-reference target")
+	}
+	return file, nil
+}
+
+// write publishes data the way preflightWrite chose: in place for a mount
+// point, otherwise by writeAtomic.
+func (t *imageRefsTarget) write(ctx context.Context, data []byte) error {
+	if t == nil {
+		return errors.New(errors.ErrCodeInternal, "image-reference target is required")
+	}
+	if !t.inPlace {
+		return t.writeAtomic(ctx, data)
+	}
+	if err := t.validateParent(ctx); err != nil {
+		return err
+	}
+	if err := t.validateTarget(ctx); err != nil {
+		return err
+	}
+	if err := t.validateGuardAliases(ctx); err != nil {
+		return err
+	}
+	file, err := t.openRetainedTarget(os.O_WRONLY)
+	if err != nil {
+		return err
+	}
+	writeErr := func() error {
+		if truncErr := file.Truncate(0); truncErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to truncate image-reference target", truncErr)
+		}
+		written, fileWriteErr := t.deps.fileWrite(file, data)
+		if fileWriteErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to write image references", fileWriteErr)
+		}
+		if written != len(data) {
+			return errors.New(errors.ErrCodeInternal, "short write while writing image references")
+		}
+		return nil
+	}()
+	if closeErr := t.deps.closeFile(file); closeErr != nil {
+		writeErr = joinInternalCleanup(writeErr, closeErr, "image-reference target")
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	written, err := t.deps.rootLstat(t.root, t.baseName)
+	if err != nil || !t.deps.sameFile(t.targetInfo, written) || written.Size() != int64(len(data)) {
+		return errors.Wrap(errors.ErrCodeInternal,
+			"image-reference target failed revalidation after write", err)
+	}
+	return cliFilesystemContextError(ctx, "image-reference write canceled after validation")
+}
+
 func randomImageRefsTempName() (string, error) {
 	var bytes [16]byte
 	if _, err := rand.Read(bytes[:]); err != nil {
@@ -438,7 +614,7 @@ func (t *imageRefsTarget) writeAtomic(ctx context.Context, data []byte) (retErr 
 	if err := t.validateTarget(ctx); err != nil {
 		return err
 	}
-	if err := t.validateBundleAliases(ctx); err != nil {
+	if err := t.validateGuardAliases(ctx); err != nil {
 		return err
 	}
 
@@ -518,7 +694,7 @@ func (t *imageRefsTarget) writeAtomic(ctx context.Context, data []byte) (retErr 
 	if err := t.validateTarget(ctx); err != nil {
 		return err
 	}
-	if err := t.validateBundleAliases(ctx); err != nil {
+	if err := t.validateGuardAliases(ctx); err != nil {
 		return err
 	}
 	if err := t.deps.beforeTempRevalidate(t, tempName, tempInfo); err != nil {
@@ -548,7 +724,7 @@ func (t *imageRefsTarget) writeAtomic(ctx context.Context, data []byte) (retErr 
 	if err := t.validateTemp(ctx, tempName, tempInfo, int64(len(data))); err != nil {
 		return err
 	}
-	if err := t.validateBundleAliases(ctx); err != nil {
+	if err := t.validateGuardAliases(ctx); err != nil {
 		return err
 	}
 	if err := cliFilesystemContextError(ctx, "image-reference write canceled"); err != nil {

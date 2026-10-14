@@ -25,8 +25,10 @@ spec:
     Full attestation chain tests. Requires an attested binary (AICR_ATTESTED=true)
     and OIDC authentication. Only runs in CI via the cli-e2e action.
     Use --selector 'requires!=attested-binary' to skip locally.
+  # Above the CLI's own Sigstore signing budget (defaults.SigstoreSignTimeout,
+  # 2m), so a Rekor retry finishes inside the step instead of tripping it.
   timeouts:
-    exec: 60s
+    exec: 150s
   steps:
     - name: setup
       description: Generate recipe for attested bundle tests.

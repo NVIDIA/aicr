@@ -52,6 +52,7 @@ func init() {
 	registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
+	registerCheck("CheckNodewrightRuntimeRequiredTaintKey", CheckNodewrightRuntimeRequiredTaintKey)
 	registerCheck("CheckGB300HostKernelGranule", CheckGB300HostKernelGranule)
 	registerCheck("CheckNPDNotDuplicatingProviderNPD", CheckNPDNotDuplicatingProviderNPD)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
@@ -65,6 +66,7 @@ func init() {
 	registerCheck("CheckNVSentinelNicHealthMonitorRequiresMetadataCollector", CheckNVSentinelNicHealthMonitorRequiresMetadataCollector)
 	registerCheck("CheckNVSentinelSlurmDrainMonitorRequiresSlinky", CheckNVSentinelSlurmDrainMonitorRequiresSlinky)
 	registerCheck("CheckNVSentinelRemediationPipelineCoherent", CheckNVSentinelRemediationPipelineCoherent)
+	registerCheck("CheckNVSentinelSlurmCustomDrainCoherent", CheckNVSentinelSlurmCustomDrainCoherent)
 	registerCheck("CheckNVSentinelMongoDBCoherent", CheckNVSentinelMongoDBCoherent)
 	registerCheck("CheckNVSentinelDatastorePrerequisites", CheckNVSentinelDatastorePrerequisites)
 }

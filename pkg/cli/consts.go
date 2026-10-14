@@ -48,6 +48,10 @@ const (
 	// permissions to a named ServiceAccount and applies none of them. No
 	// cluster is contacted and no snapshot is taken.
 	flagAddRolesToSA = "add-roles-to-service-account"
+
+	// flagValidatorSA names the existing ServiceAccount `aicr validate` runs
+	// its validator Jobs as, in place of per-run RBAC.
+	flagValidatorSA = "validator-service-account-name"
 )
 
 // criteriaAny is the wildcard value for any criteria dimension.
@@ -69,6 +73,7 @@ const (
 	flagInsecureTLS       = "insecure-tls"
 	flagPlainHTTP         = "plain-http"
 	flagPush              = "push"
+	flagImageRefs         = "image-refs"
 	// flagNoSign pushes an unsigned evidence bundle and writes a pointer whose
 	// attestation has a nil Signer (the unsigned state — distinct from a
 	// signed-without-Rekor pointer, which has a Signer with a nil

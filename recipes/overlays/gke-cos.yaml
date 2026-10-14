@@ -100,10 +100,10 @@ spec:
   # AKS azure-managed, which retargets it to nvidia-container-runtime and so
   # must own both names.)
   #
-  # Naming nvsentinel in the declaration also makes its presence
-  # profile-owned, so it cannot be disabled or filtered out of a profiled
-  # GKE-COS bundle. That is intended: NVSentinel is a required component for
-  # these deployments (#2181).
+  # Both values reference nvsentinel as optional (#2978): the profile owns
+  # labeler.assumeDriverInstalled but not presence, so a bundle may omit
+  # NVSentinel (for example, when it is deployed outside AICR). The owned
+  # value stays locked whenever NVSentinel ships.
   profile:
     name: gpuStack
     description: >-
@@ -148,6 +148,9 @@ spec:
           # The bundle-carried installer IS a driver pod the NVSentinel
           # labeler detects, so no preinstalled-driver assumption.
           - name: nvsentinel
+            # optional: the bundle may omit NVSentinel when it is deployed
+            # outside AICR (#2978); this value applies whenever it ships.
+            optional: true
             overrides:
               labeler: {assumeDriverInstalled: false}
         constraints:
@@ -204,6 +207,7 @@ spec:
               devicePlugin:
                 enabled: false
           - name: nvsentinel
+            optional: true
             overrides:
               labeler: {assumeDriverInstalled: true}
         constraints:

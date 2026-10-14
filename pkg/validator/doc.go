@@ -27,7 +27,10 @@
 //     short-lived Kubernetes Job. RBAC (ServiceAccount + a per-run
 //     ClusterRoleBinding to the built-in cluster-admin ClusterRole) is
 //     provisioned via server-side apply under the "aicr" field manager
-//     so concurrent validators converge on a single owner. Job logs and
+//     so concurrent validators converge on a single owner, unless
+//     WithServiceAccountName names an administrator-provisioned
+//     ServiceAccount, in which case the run creates no RBAC and verifies
+//     that ServiceAccount's cluster-admin grant instead. Job logs and
 //     exit codes are aggregated into a CTRF-formatted report.
 //
 // Test isolation is mandatory: callers operating without cluster credentials

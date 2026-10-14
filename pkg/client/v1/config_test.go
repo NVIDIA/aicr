@@ -1741,6 +1741,7 @@ spec:
       image: example.com/val:1
       jobName: val-job
       serviceAccountName: val-sa
+      validatorServiceAccountName: val-validator-sa
       requireGpu: true
     execution:
       phases: [deployment]
@@ -1770,6 +1771,7 @@ func TestConfig_ValidateSettings_FoldsValues(t *testing.T) {
 		{"Image", got.Image, "example.com/val:1"},
 		{"JobName", got.JobName, "val-job"},
 		{"ServiceAccountName", got.ServiceAccountName, "val-sa"},
+		{"ValidatorServiceAccountName", got.ValidatorServiceAccountName, "val-validator-sa"},
 	} {
 		if tt.got != tt.want {
 			t.Errorf("%s = %q, want %q", tt.field, tt.got, tt.want)
