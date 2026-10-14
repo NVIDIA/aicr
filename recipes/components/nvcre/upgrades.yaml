@@ -90,7 +90,7 @@ transitions:
           - Certification
           - WorkloadRun
     stepsByDeployer:
-      - deployers: [helmfile]
+      - deployers: [helmfile, terraform]
         steps:
           - id: apply-new-crds
             description: >-
@@ -100,8 +100,8 @@ transitions:
               CHART=oci://ghcr.io/nvidia/cluster-readiness-engine and
               VERSION=v0.6.0.
             reason: >-
-              helmfile has no automated CRD-update path for ownsCRDs
-              components, and the whole of this release's admission change is
+              helmfile and terraform have no automated CRD-update path for
+              ownsCRDs components, and the whole of this release's admission change is
               CRD-level CEL. Skipping this leaves the v0.2.0 CRDs in place, so
               the controller advances to v0.6.0 while the new transition rules
               never exist — the upgrade is reported successful and the

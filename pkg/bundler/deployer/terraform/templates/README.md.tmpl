@@ -225,8 +225,10 @@ this directory, then `terraform plan` and read the diff:
   component earlier in the order renumbers the folders after it, which
   changes the `chart` path of every bundled chart behind them — an in-place
   update each, and a hook re-run on each gate among them.
-- Helm installs a chart's `crds/` once and never upgrades them. Before
-  upgrading a component whose CRDs changed, apply the new CRDs with `kubectl`
+- Helm installs a chart's `crds/` once and never upgrades them, and this
+  bundle has no CRD step of its own. Before upgrading a component whose CRDs
+  changed, apply the new CRDs with the CRD-apply command under "Upgrade,
+  uninstall, and troubleshooting" in AICR's component catalog
   (the helm deployer's `apply-crds.sh` does the same), or the chart's new
   resources may fail validation.
 

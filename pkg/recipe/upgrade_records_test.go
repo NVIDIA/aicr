@@ -20,6 +20,7 @@ import (
 	"path"
 	"reflect"
 	stdsort "sort"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -54,6 +55,67 @@ func TestRealUpgradeRecordsWellFormed(t *testing.T) {
 		t.Errorf("upgrade record(s) %v are not referenced by any registry entry's upgrades.file, so nothing reads or validates them",
 			orphans)
 	}
+}
+
+// crdManualDeployers are the deployers whose bundles never apply a changed
+// crds/ directory: helmfile emits no hook (ADR-021), and terraform upgrades
+// through helm_release, which skips crds/ like Helm and has no CRD step.
+var crdManualDeployers = []string{"helmfile", "terraform"}
+
+// TestOwnsCRDsRecordsCarryCRDStepForManualDeployers checks the authoring
+// obligation ADR-021 records: a manual or blocked transition of an ownsCRDs
+// component must give helmfile and terraform a step that applies the CRDs,
+// rather than letting them fall into a remainder group written for deployers
+// that apply CRDs on their own. It asserts that a step exists, not a verdict.
+func TestOwnsCRDsRecordsCarryCRDStepForManualDeployers(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+	set, _, err := LoadUpgradeRecords(context.Background(), defaultEmbeddedProvider)
+	if err != nil {
+		t.Fatalf("loading upgrade records: %v", err)
+	}
+
+	checked := 0
+	for _, name := range registry.Names() {
+		cfg := registry.Get(name)
+		if cfg == nil || !cfg.OwnsCRDs {
+			continue
+		}
+		rec, ok := set[name]
+		if !ok {
+			continue
+		}
+		for i := range rec.Transitions {
+			tr := &rec.Transitions[i]
+			if tr.Verdict != upgrade.VerdictManual && tr.Verdict != upgrade.VerdictBlocked {
+				continue
+			}
+			checked++
+			for _, d := range crdManualDeployers {
+				if !hasCRDStep(tr.StepsFor(d)) {
+					t.Errorf("%s transition %q -> %q is %s but gives deployer %q no step that applies the CRDs; "+
+						"add an explicit group for it (ADR-021)", name, tr.From, tr.To, tr.Verdict, d)
+				}
+			}
+		}
+	}
+	t.Logf("checked %d manual/blocked transition(s) of ownsCRDs components", checked)
+}
+
+// hasCRDStep reports whether some step applies CRDs, by id: an "apply" step
+// that names CRDs. A verify step that mentions CRDs does not count, since the
+// remainder groups verify what the deployer applied and that is the group
+// helmfile and terraform must not inherit.
+func hasCRDStep(steps []upgrade.Step) bool {
+	for _, s := range steps {
+		id := strings.ToLower(s.ID)
+		if strings.Contains(id, "apply") && strings.Contains(id, "crd") {
+			return true
+		}
+	}
+	return false
 }
 
 // orphanUpgradeRecords returns the components/<name>/upgrades.yaml files that

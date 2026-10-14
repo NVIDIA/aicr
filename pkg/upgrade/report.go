@@ -451,6 +451,13 @@ func unprovenPhrase(records []ReportUnproven) string {
 	return strings.Join(parts, ", ")
 }
 
+// StepsFor returns the steps the transition records for deployer: the group
+// naming it, else the remainder group. Nil when no group covers it, which
+// Set.Validate rules out for a manual or blocked transition.
+func (t *Transition) StepsFor(deployer string) []Step {
+	return stepsFor(t.StepsByDeployer, deployer)
+}
+
 // stepsFor selects the group covering deployer: the one naming it, else the
 // remainder group that omits deployers entirely. It mirrors checkStepGroups'
 // partition, including that `deployers: []` is not the remainder: an explicit
