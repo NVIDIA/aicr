@@ -211,7 +211,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		signingConfigPath: cmd.String(flagSigningConfig),
 		insecureTLS:       boolFlagOrConfig(cmd, flagInsecureTLS, bundleInput.InsecureTLS),
 		plainHTTP:         boolFlagOrConfig(cmd, flagPlainHTTP, bundleInput.PlainHTTP),
-		imageRefsPath:     stringFlagOrConfig(cmd, "image-refs", bundleInput.ImageRefsPath),
+		imageRefsPath:     stringFlagOrConfig(cmd, flagImageRefs, bundleInput.ImageRefsPath),
 	}
 
 	// Rekor v2 is the default for both keyless and KMS --attest signing: the
@@ -1021,7 +1021,7 @@ Package with explicit tag (overrides CLI version):
 				Category: catOCIRegistry,
 			},
 			&cli.StringFlag{
-				Name:     "image-refs",
+				Name:     flagImageRefs,
 				Usage:    "Path to file where the published image reference will be written (only used with OCI output)",
 				Category: catOCIRegistry,
 			},
@@ -1594,7 +1594,7 @@ func pushOCIBundleWithDependencies(
 		if err := imageRefs.validateTarget(publishCtx); err != nil {
 			return err
 		}
-		if err := imageRefs.validateBundleAliases(publishCtx); err != nil {
+		if err := imageRefs.validateGuardAliases(publishCtx); err != nil {
 			return err
 		}
 	}
@@ -1637,7 +1637,7 @@ func pushOCIBundleWithDependencies(
 		return err
 	}
 	if imageRefs != nil {
-		if err := imageRefs.validateBundleAliases(publishCtx); err != nil {
+		if err := imageRefs.validateGuardAliases(publishCtx); err != nil {
 			return err
 		}
 	}
@@ -1700,7 +1700,7 @@ func pushOCIBundleWithDependencies(
 		return err
 	}
 	if imageRefs != nil {
-		if err := imageRefs.validateBundleAliases(publishCtx); err != nil {
+		if err := imageRefs.validateGuardAliases(publishCtx); err != nil {
 			return err
 		}
 	}
