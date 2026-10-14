@@ -160,16 +160,17 @@ runs:
         SAFE="$(basename "${IMAGE%%:*}")"  # strip tag if present, then basename
         echo "safe=$SAFE" >> "$GITHUB_OUTPUT"
 
-    # Syft's cyclonedx-json output defaults to CycloneDX spec 1.6 and emits no
-    # `vulnerabilities` key, so the SBOM needs no post-processing: what syft
-    # writes is what gets attested.
+    # The spec version is pinned because syft's cyclonedx-json default moves
+    # with the syft the action bundles (1.7 in the syft v0.24.3 ships), while
+    # SECURITY.md and the integrator docs promise 1.6. Syft emits no
+    # `vulnerabilities` key, so what it writes is what gets attested.
     - name: Generate amd64 SBOM
       uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0.24.3
       env:
         SYFT_PLATFORM: linux/amd64
       with:
         image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.amd64_digest }}"
-        format: cyclonedx-json
+        format: cyclonedx-json@1.6
         artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-amd64-attempt-${{ github.run_attempt }}.cdx.json
         output-file: sbom-${{ steps.name.outputs.safe }}-linux-amd64.cdx.json
         upload-artifact: true
@@ -181,7 +182,7 @@ runs:
         SYFT_PLATFORM: linux/arm64
       with:
         image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.arm64_digest }}"
-        format: cyclonedx-json
+        format: cyclonedx-json@1.6
         artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-arm64-attempt-${{ github.run_attempt }}.cdx.json
         output-file: sbom-${{ steps.name.outputs.safe }}-linux-arm64.cdx.json
         upload-artifact: true
@@ -205,6 +206,11 @@ runs:
           bom_format="$(jq -r '.bomFormat // ""' "${sbom_file}")"
           if [[ "${bom_format}" != "CycloneDX" ]]; then
             echo "::error::${sbom_file} has bomFormat ${bom_format:-<absent>}, want CycloneDX"
+            exit 1
+          fi
+          spec_version="$(jq -r '.specVersion // ""' "${sbom_file}")"
+          if [[ "${spec_version}" != "1.6" ]]; then
+            echo "::error::${sbom_file} has specVersion ${spec_version:-<absent>}, want 1.6"
             exit 1
           fi
         done

@@ -845,7 +845,7 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     "workload-gate",
-				Usage:    "Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
+				Usage:    "Taint for nodewright-operator runtime required (format: key=value:effect or key:effect; the key must have no DNS prefix and be at most 53 characters). This is a day 2 option for cluster scaling operations.",
 				Category: catScheduling,
 			},
 			&cli.StringSliceFlag{

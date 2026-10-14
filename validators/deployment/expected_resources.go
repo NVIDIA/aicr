@@ -106,7 +106,7 @@ const nodewrightRenameVersion = "0.18.0"
 var (
 	// nodewrightGVR is the CR kind nodewright-operator v0.18.0+ reconciles and
 	// writes status on; legacySkyhookGVR is the pre-rename kind, mirrored from
-	// but never written to, and removed upstream in v0.20.0.
+	// but never written to, and removed upstream in v0.21.0.
 	nodewrightGVR = schema.GroupVersionResource{
 		Group: "nodewright.nvidia.com", Version: "v1alpha1", Resource: "nodewrights",
 	}
