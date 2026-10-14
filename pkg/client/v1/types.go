@@ -622,10 +622,11 @@ type SelectedProfile struct {
 
 	// OwnedPaths maps each locked component to its sorted dotted value
 	// paths, and is the union across every value of the declaration rather
-	// than only the selected one. Every listed component carries the
-	// synthetic "enabled" path recording that the profile owns its
-	// presence. Overriding any listed path is rejected at bundle time
-	// unless the override agrees with the selected value.
+	// than only the selected one. A listed component carries the synthetic
+	// "enabled" path when the profile owns its presence; a component the
+	// profile references as optional lists only its override paths and may
+	// be omitted from a bundle. Overriding any listed path is rejected at
+	// bundle time unless the override agrees with the selected value.
 	OwnedPaths map[string][]string
 }
 

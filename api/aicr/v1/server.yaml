@@ -1413,7 +1413,10 @@ components:
                   type: object
                   description: >
                     Canonical component names mapped to sorted owned dotted
-                    paths. Every listed component includes synthetic "enabled".
+                    paths. A listed component includes synthetic "enabled"
+                    when the profile owns its presence; a component the
+                    profile references as optional lists only its override
+                    paths and may be omitted from a bundle.
                   additionalProperties:
                     type: array
                     items:
