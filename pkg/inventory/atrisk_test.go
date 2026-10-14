@@ -206,6 +206,36 @@ func TestScanAtRiskOwnership(t *testing.T) {
 			wantAtRisk:  false,
 		},
 		{
+			name:        "a pre-upgrade hook is owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "pre-upgrade"},
+			wantAtRisk:  false,
+		},
+		{
+			name:        "hook phases are trimmed and case-insensitive",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "pre-install, Post-Upgrade "},
+			wantAtRisk:  false,
+		},
+		{
+			name:        "a post-install hook is not owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "post-install"},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "a pre-delete hook is not owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "pre-delete"},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "a test hook is not owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "test"},
+			wantAtRisk:  true,
+		},
+		{
 			name:        "hook annotation alone is not ownership",
 			annotations: map[string]string{helmHookAnnotation: "post-install,post-upgrade"},
 			wantAtRisk:  true,
@@ -213,7 +243,7 @@ func TestScanAtRiskOwnership(t *testing.T) {
 		{
 			name:        "a hook managed by something other than Helm",
 			objLabels:   map[string]string{labels.ManagedBy: "kustomize"},
-			annotations: map[string]string{helmHookAnnotation: "post-install"},
+			annotations: map[string]string{helmHookAnnotation: "post-upgrade"},
 			wantAtRisk:  true,
 		},
 		{

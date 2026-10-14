@@ -39,6 +39,8 @@ const (
 	helmManagedByValue        = "Helm"
 	helmReleaseNameAnnotation = "meta.helm.sh/release-name"
 	helmHookAnnotation        = "helm.sh/hook"
+	helmPreUpgradeHook        = "pre-upgrade"
+	helmPostUpgradeHook       = "post-upgrade"
 	argoTrackingIDAnnotation  = "argocd.argoproj.io/tracking-id"
 )
 
@@ -383,8 +385,8 @@ func expiredContinue(err error) string {
 //   - a non-blank argocd.argoproj.io/tracking-id annotation
 //   - the app.kubernetes.io/managed-by=Helm label with a non-blank
 //     meta.helm.sh/release-name annotation
-//   - the app.kubernetes.io/managed-by=Helm label with a non-blank
-//     helm.sh/hook annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a helm.sh/hook
+//     annotation naming a pre-upgrade or post-upgrade phase
 func owned(item metav1.Object) bool {
 	// An allowlist, since over-warning costs a line of output and
 	// under-warning costs an object a CRD removal deletes for good.
@@ -392,14 +394,28 @@ func owned(item metav1.Object) bool {
 	if strings.TrimSpace(annotations[argoTrackingIDAnnotation]) != "" {
 		return true
 	}
-	// Anything can write the label, but only Helm writes the release name,
-	// or helm.sh/hook on a hook, which gets no release name.
+	// Anything can write the label, but only Helm writes the release name. A
+	// hook gets no release name, only its chart's helm.sh/hook annotation, and
+	// an upgrade re-creates only pre-upgrade and post-upgrade hooks.
 	if item.GetLabels()[labels.ManagedBy] != helmManagedByValue {
 		return false
 	}
 
 	return strings.TrimSpace(annotations[helmReleaseNameAnnotation]) != "" ||
-		strings.TrimSpace(annotations[helmHookAnnotation]) != ""
+		upgradeHook(annotations[helmHookAnnotation])
+}
+
+// upgradeHook reports whether a helm.sh/hook value names a phase helm upgrade
+// runs. It splits, trims and lowercases the phases as Helm does.
+func upgradeHook(value string) bool {
+	for _, phase := range strings.Split(value, ",") {
+		switch strings.ToLower(strings.TrimSpace(phase)) {
+		case helmPreUpgradeHook, helmPostUpgradeHook:
+			return true
+		}
+	}
+
+	return false
 }
 
 // kindDescription names a kind the way an operator writes it into a kubectl

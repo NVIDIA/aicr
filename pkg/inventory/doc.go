@@ -210,8 +210,9 @@
 //   - a nonblank argocd.argoproj.io/tracking-id annotation
 //   - the app.kubernetes.io/managed-by=Helm label with a nonblank
 //     meta.helm.sh/release-name annotation
-//   - the app.kubernetes.io/managed-by=Helm label with a nonblank
-//     helm.sh/hook annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a helm.sh/hook
+//     annotation naming a pre-upgrade or post-upgrade phase, the only hooks
+//     an upgrade re-creates
 //
 // The check is positive, so an unrecognized object is at risk by default. The
 // failure it guards is an operator's own custom resources being
