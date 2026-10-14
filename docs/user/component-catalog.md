@@ -2314,26 +2314,21 @@ kubectl get skyhooks.skyhook.nvidia.com \
   -o custom-columns=NAME:.metadata.name,STATUS:.status.status,INPROGRESS:.status.nodesInProgress
 ```
 
-`aicr upgrade-check` reports both boundaries. The transition record at
-`recipes/components/nodewright-operator/upgrades.yaml` describes `v0.18.0` —
-the rename, the prerequisite above, and per-deployer steps — and `v0.19.0`
-separately, which is `safe`: it changes when a drain is considered complete but
-asks nothing of an operator on upgrade. Crossing the rename is `manual`
-whatever you land on, and you do **not** have to stop at `v0.18.0` to get past
-it:
+`aicr upgrade-check` reports every boundary. The transition record at
+`recipes/components/nodewright-operator/upgrades.yaml` describes `v0.18.0` (the
+rename, the prerequisite above, and per-deployer steps), then `v0.19.0`,
+`v0.19.1` and `v0.20.0` separately, each `safe`. Crossing the rename is
+`manual` whatever you land on, and you do **not** have to stop at `v0.18.0` to
+get past it:
 
 ```console
-$ aicr upgrade-check --from old.yaml --to new.yaml --deployer helm
+$ aicr upgrade-check --from older.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.17.1  v0.18.0  manual   1 minor, 4 steps
+nodewright-operator  v0.16.0  v0.20.0  manual   4 minors, 5 steps
 
-$ aicr upgrade-check --from older.yaml --to newer.yaml --deployer helm
+$ aicr upgrade-check --from cur.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.16.0  v0.19.0  manual   3 minors, 4 steps
-
-$ aicr upgrade-check --from cur.yaml --to newer.yaml --deployer helm
-COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.18.0  v0.19.0  safe     1 minor, verified
+nodewright-operator  v0.18.0  v0.20.0  safe     2 minors, verified
 ```
 
 `v0.19.0` also changes drain timing: an interrupt now begins roughly the
@@ -2343,7 +2338,13 @@ than time-to-accept-evictions. AICR's tuning CRs declare interrupts and set no
 timeout, so an undrainable pod holds its node in `in_progress` without bound.
 Set a timeout on the CRs you author if you need that wait bounded.
 
-The legacy `Skyhook` group is removed upstream in `v0.20.0`, so the CRs AICR
-ships under `nodewright-customizations` still need renaming before a pin at or
-above that is reachable. Tracked in
-[#2594](https://github.com/NVIDIA/aicr/issues/2594).
+`v0.20.0` refuses to start on a runtime-required taint key with a DNS prefix or
+longer than 53 characters, and `aicr bundle` rejects such a `--workload-gate`
+key, so a bundle that builds carries a valid one. It also no longer uncordons a
+node it did not cordon.
+
+The legacy `Skyhook` group, its `runtime-required` taint key and the
+`skyhook_*` metrics are served through `v0.20.x` and removed upstream in
+`v0.21.0`. A pin at or above that is not reachable until the remaining
+`skyhook.nvidia.com` references in the `nodewright-operator` health check and
+the `vr200-rke2-ubuntu-*` overlays are migrated.
