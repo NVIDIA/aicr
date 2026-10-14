@@ -306,8 +306,8 @@ func read(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface
 // readsHelm reports whether d installs components as Helm releases, which
 // decides the one reader a read runs.
 //
-// The two are exclusive per deployer. helm, helmfile and flux write a Helm
-// release per component and no Application. argocd and argocd-helm write an
+// The two are exclusive per deployer. helm, helmfile, terraform and flux write
+// a Helm release per component and no Application. argocd and argocd-helm write an
 // Application per component and no per-component release; argocd-helm's one
 // Helm release is the app-of-apps, which is no component. Reading the other
 // source would only let a record the deployer never wrote stand in for the

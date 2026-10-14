@@ -94,8 +94,9 @@ const (
 )
 
 // installNamespace is where r's workload runs: the release's own target when
-// the payload states one, else where the record is stored, which for the helm
-// and helmfile deployers and for an Argo CD destination is the same place.
+// the payload states one, else where the record is stored, which for the helm,
+// helmfile and terraform deployers and for an Argo CD destination is the same
+// place.
 func (r installedRelease) installNamespace() string {
 	if r.TargetNamespace != "" {
 		return r.TargetNamespace

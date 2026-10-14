@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"path"
 	"reflect"
+	"slices"
 	stdsort "sort"
 	"strings"
 	"testing"
@@ -94,6 +95,12 @@ func TestOwnsCRDsRecordsCarryCRDStepForManualDeployers(t *testing.T) {
 			}
 			checked++
 			for _, d := range crdManualDeployers {
+				if !hasExplicitGroup(tr, d) {
+					t.Errorf("%s transition %q -> %q is %s but leaves deployer %q to the remainder group, "+
+						"whose steps describe another deployer's CRD path; add an explicit group for it (ADR-021)",
+						name, tr.From, tr.To, tr.Verdict, d)
+					continue
+				}
 				if !hasCRDStep(tr.StepsFor(d)) {
 					t.Errorf("%s transition %q -> %q is %s but gives deployer %q no step that applies the CRDs; "+
 						"add an explicit group for it (ADR-021)", name, tr.From, tr.To, tr.Verdict, d)
@@ -102,6 +109,17 @@ func TestOwnsCRDsRecordsCarryCRDStepForManualDeployers(t *testing.T) {
 		}
 	}
 	t.Logf("checked %d manual/blocked transition(s) of ownsCRDs components", checked)
+}
+
+// hasExplicitGroup reports whether some group names d, so that the steps d
+// receives were written for it rather than inherited from the remainder.
+func hasExplicitGroup(tr *upgrade.Transition, d string) bool {
+	for _, g := range tr.StepsByDeployer {
+		if slices.Contains(g.Deployers, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasCRDStep reports whether some step applies CRDs, by id: an "apply" step

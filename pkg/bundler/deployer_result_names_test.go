@@ -15,9 +15,11 @@
 package bundler
 
 import (
+	"context"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // TestDeployerResultNames pins the display names the CLI prints: a terraform
@@ -42,6 +44,48 @@ func TestDeployerResultNames(t *testing.T) {
 			if string(gotResult) != tt.wantResult || gotDeploy != tt.wantDeploy {
 				t.Errorf("deployerResultNames(%q, %v) = (%q, %q), want (%q, %q)",
 					tt.deployer, tt.childModule, gotResult, gotDeploy, tt.wantResult, tt.wantDeploy)
+			}
+		})
+	}
+}
+
+// TestMake_TerraformReportsTheForm runs the bundler end to end for both
+// terraform forms, so the child-module option is proven to reach the
+// reported type rather than only the pure function above.
+func TestMake_TerraformReportsTheForm(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		child bool
+		want  string
+	}{
+		{"root module", false, "Terraform root module"},
+		{"child module", true, "Terraform child module"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithDeployer(config.DeployerTerraform),
+				config.WithTerraformChildModule(tt.child),
+				config.WithVersion("v1.0.0"),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			recipeResult := &recipe.RecipeResult{
+				APIVersion: "aicr.run/v1",
+				Kind:       "Recipe",
+				Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+				},
+				DeploymentOrder: []string{"gpu-operator"},
+			}
+			output, err := b.Make(context.Background(), recipeResult, t.TempDir())
+			if err != nil {
+				t.Fatalf("Make() error = %v", err)
+			}
+			if output.Deployment == nil || output.Deployment.Type != tt.want {
+				t.Fatalf("deployment type = %+v, want %q", output.Deployment, tt.want)
 			}
 		})
 	}

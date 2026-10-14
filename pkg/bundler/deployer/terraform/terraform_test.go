@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -303,6 +304,9 @@ func TestGenerate_RejectsControlCharacters(t *testing.T) {
 		"source":    ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io\n"+payload),
 		"name":      ref("cert-manager\n"+payload, "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
 		"namespace": ref("cert-manager", "cert-manager\n"+payload, "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
+		// DEL and a C1 control (NEL) are not newlines and still count.
+		"del": ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2\x7f"+payload, "https://charts.jetstack.io"),
+		"c1":  ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2\u0085"+payload, "https://charts.jetstack.io"),
 	}
 	for field, r := range cases {
 		t.Run(field, func(t *testing.T) {
@@ -310,7 +314,7 @@ func TestGenerate_RejectsControlCharacters(t *testing.T) {
 			g := &Generator{RecipeResult: recipeWith(r), Version: testBundlerVersion}
 			_, err := g.Generate(context.Background(), dir)
 			if err == nil {
-				t.Fatalf("Generate() accepted a %s with a newline", field)
+				t.Fatalf("Generate() accepted a %s with a control character", field)
 			}
 			if !strings.Contains(err.Error(), "control character") {
 				t.Errorf("error does not name the problem: %v", err)
@@ -318,8 +322,8 @@ func TestGenerate_RejectsControlCharacters(t *testing.T) {
 			if _, statErr := os.Stat(filepath.Join(dir, fileMain)); statErr == nil {
 				t.Errorf("main.tf was written despite the rejection")
 			}
-			if strings.Contains(err.Error(), "\n") {
-				t.Errorf("error echoes the raw newline: %q", err.Error())
+			if strings.ContainsFunc(err.Error(), unicode.IsControl) {
+				t.Errorf("error echoes the raw control character: %q", err.Error())
 			}
 		})
 	}

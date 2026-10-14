@@ -163,6 +163,33 @@ func TestConfigSerial(t *testing.T) {
 	}
 }
 
+// TestTerraformOptions pins the two terraform-only options: off unless set,
+// and independent of each other.
+func TestTerraformOptions(t *testing.T) {
+	tests := []struct {
+		name         string
+		cfg          *Config
+		wantChild    bool
+		wantRollover bool
+	}{
+		{"default off", NewConfig(), false, false},
+		{"child module", NewConfig(WithTerraformChildModule(true)), true, false},
+		{"cluster rollover", NewConfig(WithTerraformClusterRollover(true)), false, true},
+		{"both", NewConfig(WithTerraformChildModule(true), WithTerraformClusterRollover(true)), true, true},
+		{"explicit off", NewConfig(WithTerraformChildModule(false), WithTerraformClusterRollover(false)), false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.TerraformChildModule(); got != tt.wantChild {
+				t.Errorf("TerraformChildModule() = %v, want %v", got, tt.wantChild)
+			}
+			if got := tt.cfg.TerraformClusterRollover(); got != tt.wantRollover {
+				t.Errorf("TerraformClusterRollover() = %v, want %v", got, tt.wantRollover)
+			}
+		})
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	seconds := int64(30)
 	tests := []struct {
