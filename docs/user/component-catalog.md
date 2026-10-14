@@ -1591,7 +1591,8 @@ CI. `nvsentinel` excludes the Percona CRDs its `mongodb-store` subchart embeds
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the
 `helm` and `helmfile` deployers install releases by name, and a release the new
-bundle no longer mentions is simply left alone. Skipping the explicit uninstall
+bundle no longer mentions is simply left alone (`terraform` is the exception:
+the release is in state, so applying the regenerated bundle uninstalls it). Skipping the explicit uninstall
 leaves the controller running while the next step deletes the CRs and CRDs
 underneath it, so it reconciles against resources that are disappearing.
 
@@ -1605,7 +1606,8 @@ underneath it, so it reconciles against resources that are disappearing.
    helm uninstall k8s-aibom -n k8s-aibom-system
    ```
 
-   For Argo CD, delete the owning `Application`; for Flux, the `HelmRelease`.
+   For Argo CD, delete the owning `Application`; for Flux, the `HelmRelease`;
+   under Terraform, `terraform apply` of the regenerated bundle already removed it.
    Confirm the controller Deployment is gone before continuing.
 
    **Do not use `helmfile destroy` for this.** It tears down *every* release in
@@ -1817,7 +1819,8 @@ Fresh installs are unaffected. To migrate an existing cluster:
      | kubectl apply --server-side --force-conflicts -f -
    ```
 4. Resume whichever deployer you use (`helm`/`helmfile`: re-run `install.sh`
-   or `helmfile apply`; `flux`/`argocd`/`argocd-helm`: reconcile/sync as
+   or `helmfile apply`; `terraform`: `terraform apply` on a bundle regenerated
+   at the new pin; `flux`/`argocd`/`argocd-helm`: reconcile/sync as
    usual). AICR's generated `install.sh` already passes `--force-conflicts`
    on Helm 4.
 

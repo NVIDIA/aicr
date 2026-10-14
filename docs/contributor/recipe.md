@@ -300,8 +300,8 @@ profile-owned values. Bundle and mirror compare final candidate state with the
 hydrated recipe before creating output. Exact, ancestor, or descendant dynamic
 paths reject unconditionally; static writes reject only when the effective
 three-state observation (present bytes, absent, or blocked) diverges.
-That bundle-time rejection is the whole enforcement for `helm`, `flux`, and
-`helmfile`, whose install-time surface is closed — only the paths `--dynamic`
+That bundle-time rejection is the whole enforcement for `helm`, `flux`,
+`helmfile`, and `terraform`, whose install-time surface is closed — only the paths `--dynamic`
 declares. The `argocd-helm` deployer additionally emits a structural
 template-time guard, because it exposes component values through the parent
 chart's `.Values`, an open-ended surface the bundle-time gate cannot

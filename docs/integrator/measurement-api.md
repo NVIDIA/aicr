@@ -275,7 +275,7 @@ Operator for MongoDB: API group `psmdb.percona.com`, resource
 labeled `app.kubernetes.io/name` `psmdb-operator` or
 `percona-server-mongodb-operator`. AICR's own `nvsentinel-mongodb` CR and
 AICR's own operator pods (namespace `nvsentinel`, `app.kubernetes.io/instance`
-ending in `psmdb-operator`: bare under helm and helmfile,
+ending in `psmdb-operator`: bare under helm, helmfile and terraform,
 `<namePrefix>psmdb-operator` under Argo CD, `nvsentinel-psmdb-operator` under
 Flux) are not counted as conflicts. A foreign operator installed in
 `nvsentinel` under such a release name is read as AICR's own.

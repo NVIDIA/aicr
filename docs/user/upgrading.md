@@ -149,7 +149,7 @@ This is the better of the two outcomes: the running component is untouched, ther
 
 - **The bundle applies partially.** Components ordered before the relocated one are already upgraded when the failure hits, so the cluster is left in a mixed state. Re-running after you fix the cause is safe, since every component's install is `helm upgrade --install`.
 - **The error names nothing you can act on.** It talks about ownership annotations, not about namespaces moving, not about AICR, and not about this page. Seeing `must equal "<new-namespace>": current value is "<old-namespace>"` is the tell that you are in this situation.
-- **It depends on the deployer reaching Helm.** `helm`, `helmfile`, and Flux `HelmRelease` all perform this ownership validation. A deployer that renders manifests and applies them directly does not, so it is not protected by this check.
+- **It depends on the deployer reaching Helm.** `helm`, `helmfile`, Terraform's `helm_release`, and Flux `HelmRelease` all perform this ownership validation. A deployer that renders manifests and applies them directly does not, so it is not protected by this check.
 
 Either way the fix is the same, and `upgrade-check` flags the move before you apply anything: pin the namespace with `--inherit-from`, below, or move the release deliberately and re-run the check.
 

@@ -113,7 +113,7 @@ terraform/
 Two kinds of name appear in these trees, and only one is a promise:
 
 - **Fixed names are contract.** `deploy.sh`, `app-of-apps.yaml`,
-  `kustomization.yaml`, `bundle-info.yaml`, `checksums.txt`, `values.yaml`,
+  `kustomization.yaml`, `main.tf` with `modules/component/`, `bundle-info.yaml`, `checksums.txt`, `values.yaml`,
   `helmrelease.yaml`, and the `NNN-<component>` convention itself.
 - **Derived names are not.** Flux writes one `helmrepo-<host>.yaml` per chart
   repository and helmfile one `level-N.yaml` per dependency depth, so both sets
@@ -298,7 +298,7 @@ That test is applied per deployer, so `repoURL`, `targetRevision` and
 `repoURL` and `targetRevision` under `flux`, `appName` alone under
 `argocd-helm` (whose chart is URL-portable and takes the publish location at
 `helm install --set repoURL=...` time, which is also why `--repo` warns that
-it is ignored there), and none of the three under `helm` or `helmfile`. Where
+it is ignored there), and none of the three under `helm`, `helmfile` or `terraform`. Where
 a key does not apply it is omitted entirely rather than written empty.
 
 Each deployer reports what it resolved, so the recorded value is the one the
@@ -851,6 +851,16 @@ For the default `helm` deployer, verify the bundle before installing it:
 ```bash
 cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh
 ```
+
+For the `terraform` deployer, verify in the step that generates the bundle,
+then let Terraform install it:
+
+```bash
+aicr verify ./bundles && terraform -chdir=bundles init && terraform -chdir=bundles apply
+```
+
+(A bundle generated with `--terraform-child-module` is applied from the
+configuration that calls it instead.)
 
 For GitOps deployers, commit/publish the manifests per your Argo CD or Flux
 workflow. Verify the bundle directory before it enters the repository or

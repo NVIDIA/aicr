@@ -2164,7 +2164,7 @@ The `--deployer` flag controls how deployment artifacts are generated:
 | `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All non-profile-owned values overridable at install time via `helm --set`; a profiled recipe ships a lock template that rejects overrides on profile-owned paths. Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
 | `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
 | `helmfile` | Generates a `helmfile.yaml` release graph driven by the upstream [helmfile](https://helmfile.readthedocs.io/) CLI (`helmfile apply` / `diff` / `destroy`). Supports `--dynamic` via per-release `cluster-values.yaml`. Requires the `helmfile` binary at deploy time. |
-| `terraform` | Generates a Terraform root module (`terraform plan` / `apply` / `destroy`). One module call per component, chaining that component's pre/post/readiness releases inside it; `depends_on` carries the recipe's `dependencyRefs` exactly. Supports `--dynamic` via per-release `cluster-values.yaml`. Does not create a cluster: the `helm` provider is configured from variables, or — with `--terraform-child-module` — by the calling configuration. Requires `terraform` or `tofu` at deploy time; the generated module uses no feature newer than Terraform 1.5 and is exercised on current Terraform and OpenTofu releases. |
+| `terraform` | Generates a Terraform root module (`terraform plan` / `apply` / `destroy`). One module call per component, chaining that component's pre/post/readiness releases inside it; `depends_on` carries the recipe's `dependencyRefs` exactly. Supports `--dynamic` via per-release `cluster-values.yaml`. Does not create a cluster: the `helm` provider is configured from variables, or — with `--terraform-child-module` — by the calling configuration. Helm components only: a recipe with a Kustomize component is rejected. Requires `terraform` or `tofu` at deploy time; the generated module uses no feature newer than Terraform 1.5 and was validated by hand on Terraform 1.16 and OpenTofu 1.13 (no CI runs either). |
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all non-profile-owned values are overridable at install time (a profiled recipe ships a lock template that rejects install-time values on profile-owned paths).
 
@@ -2688,6 +2688,13 @@ vim bundles/002-gpu-operator/cluster-values.yaml
 cd ./bundles && helmfile diff && helmfile apply
 ```
 
+**Bundle structure with `--dynamic`** (Terraform deployer):
+
+Each `NNN-<component>/` folder carries `values.yaml` and `cluster-values.yaml`,
+and the component's module call lists both in `values_files`, `cluster-values.yaml`
+last so it wins. Edit `cluster-values.yaml` per component before `terraform apply`;
+a change there plans as an in-place update of that component's `helm_release`.
+
 **Argo CD Helm chart structure with `--dynamic`:**
 
 The `--deployer argocd-helm` bundle is itself a Helm chart whose `templates/` create per-component Argo Applications. Each application's `helm.values` block merges static values (loaded via `.Files.Get` for upstream-helm components, or read from the wrapped chart's own `values.yaml` for local-chart components) with dynamic overrides from the parent chart's `.Values`.
@@ -3016,7 +3023,7 @@ order:
 Both interactive flows time out after 5 minutes.
 
 Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`, `flux`,
-`helmfile`). External `--data` files copied into the bundle are included in
+`helmfile`, `terraform`). External `--data` files copied into the bundle are included in
 `checksums.txt` and listed as resolved dependencies in the attestation.
 
 ##### Privacy: identity in keyless signatures
@@ -3428,6 +3435,20 @@ helmfile -f helmfile.yaml destroy
 CRD / PVC cleanup follows the **helm** walkthrough above. See the
 [Helmfile `destroy` documentation](https://github.com/helmfile/helmfile/blob/main/docs/index.md)
 for flags and behavior.
+
+##### terraform
+
+AICR's `terraform` bundle is a module whose state holds every release, so
+Terraform's own destroy is the teardown:
+
+```bash
+terraform destroy
+```
+
+Run it in the bundle directory for the root form, or in the calling
+configuration for a child module, where `terraform destroy -target=module.stack`
+removes only the bundle. Each release is uninstalled through Helm in reverse
+dependency order. CRD / PVC cleanup follows the **helm** walkthrough above.
 
 ---
 

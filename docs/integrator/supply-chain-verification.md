@@ -947,9 +947,9 @@ each one is covered separately below. Every gate is marked either *advisory* (a
 pipeline step that an operator holding cluster credentials can bypass) or
 *binding* (the cluster itself refuses to proceed).
 
-### Gating the helm and helmfile deployers
+### Gating the helm, helmfile and terraform deployers
 
-The default `helm` deployer and `helmfile` are push-based: the same pipeline
+The default `helm` deployer, `helmfile` and `terraform` are push-based: the same pipeline
 step that verifies is the one that installs, so verification and use cannot
 drift apart.
 
@@ -967,7 +967,8 @@ bundle* can reach and therefore passes an unsigned bundle. Add
 `--require-creator` to pin who built it and `--cli-version-constraint` to floor
 the `aicr` version that produced it; `--format json` emits a machine-readable
 result for a pipeline that needs to branch. For `helmfile`, run the same
-`aicr verify .` before `helmfile apply`. See [Automation](automation.md) for
+`aicr verify .` before `helmfile apply`; for `terraform`, run it in the step
+that generates the bundle, before `terraform init` resolves the module. See [Automation](automation.md) for
 the full four-stage pipeline and its GitLab, CircleCI, and Terraform
 equivalents.
 
