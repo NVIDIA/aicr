@@ -56,8 +56,8 @@ const (
 	// bundle is self-contained and air-gap deployable when combined with
 	// --vendor-charts.
 	DeployerHelmfile DeployerType = "helmfile"
-	// DeployerTerraform generates a Terraform root module: one
-	// module call per component, with depends_on carrying the recipe's
+	// DeployerTerraform generates a Terraform root module (a child module
+	// with --terraform-child-module): one module call per component, with depends_on carrying the recipe's
 	// dependency graph exactly. Per-component chart directories are
 	// emitted via the shared localformat writer, so the bundle is
 	// self-contained and air-gap deployable when combined with
@@ -419,8 +419,9 @@ type Config struct {
 
 	// serial forces every deployer to sequence components strictly one at a
 	// time in deployment order, disabling the concurrency the argocd,
-	// argocd-helm, flux, and helmfile deployers emit by default (per-tier
-	// sync-wave bands, declared-dependency dependsOn, and intra-component
+	// argocd-helm, flux, helmfile, and terraform deployers emit by default
+	// (per-tier sync-wave bands, declared-dependency dependsOn / depends_on,
+	// and intra-component
 	// needs: respectively). Off by default; opt-in via --serial. An operator
 	// escape hatch for bisecting rollout problems or reproducing the
 	// pre-parallelism ordering. The helm deploy.sh is already serial, so the
@@ -693,7 +694,7 @@ func (c *Config) ReadinessHooks() bool {
 // Serial reports whether deployers should sequence components strictly one at
 // a time in deployment order instead of parallelizing independent components.
 // Off by default; opt-in via --serial. Affects the argocd, argocd-helm, flux,
-// and helmfile deployers (helm is already serial).
+// helmfile, and terraform deployers (helm is already serial).
 func (c *Config) Serial() bool {
 	return c.serial
 }
@@ -1058,7 +1059,8 @@ func WithReadinessHooks(enabled bool) Option {
 
 // WithSerial forces deployers to sequence components strictly one at a time in
 // deployment order, disabling the per-tier / declared-dependency concurrency
-// the argocd, argocd-helm, flux, and helmfile deployers emit by default. Off
+// the argocd, argocd-helm, flux, helmfile, and terraform deployers emit by
+// default. Off
 // by default; opt-in via --serial. A rollback / debugging escape hatch.
 func WithSerial(enabled bool) Option {
 	return func(c *Config) {

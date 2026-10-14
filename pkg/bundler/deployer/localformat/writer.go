@@ -250,7 +250,7 @@ func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injection
 	// The readiness folder keeps its annotations. Unlike every other folder
 	// here it is 100% bundler-authored: gatemanifest.Render builds it from
 	// the deployer, and already picks the right annotations for that
-	// deployer -- Helm hooks for helm, argocd.argoproj.io/sync-options for
+	// deployer -- Helm hooks for helm and terraform, argocd.argoproj.io/sync-options for
 	// Argo CD, and deliberately no helm.sh/hook for Argo. Stripping
 	// afterwards overrides a decision made with strictly more information.
 	//

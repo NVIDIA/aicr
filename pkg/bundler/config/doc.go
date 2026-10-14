@@ -35,6 +35,7 @@
 //   - DeployerArgoCDHelm: Generates a Helm chart app-of-apps for Argo CD
 //   - DeployerFlux: Generates Flux HelmRelease manifests
 //   - DeployerHelmfile: Generates a helmfile.yaml release graph
+//   - DeployerTerraform: Generates a Terraform root module, or a child module
 //
 // Use ParseDeployerType() to parse user input and GetDeployerTypes() for CLI help.
 //

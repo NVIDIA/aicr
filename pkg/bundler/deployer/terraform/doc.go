@@ -13,7 +13,9 @@
 // limitations under the License.
 
 /*
-Package terraform generates a Terraform root module from an AICR recipe.
+Package terraform generates a Terraform module from an AICR recipe: a root
+module by default, or a child module to call from a configuration that owns
+the helm provider.
 
 Per-component folder content (values.yaml, cluster-values.yaml, Chart.yaml +
 templates/) is delegated to pkg/bundler/deployer/localformat, the same writer
@@ -22,8 +24,8 @@ path — install.sh and the upstream.env it sources — are removed afterwards:
 the module call carries the chart coordinates itself, and a script that
 installs the release names Terraform manages has no place beside the state
 that manages them (see stripHelmOnlyFiles). This package owns only the
-Terraform layer on top: a root module with one module call per component, plus
-the generic component module they all share.
+Terraform layer on top: a module with one module call per component, plus the
+generic component module they all share.
 
 # One module call per component
 
@@ -97,9 +99,10 @@ it — a content digest — which is a follow-up, not a property of this code.
 
 # Cluster connection
 
-The generated root module does NOT create a cluster. It configures the helm
-provider from variables, so the bundle applies against whatever cluster the
-operator points it at:
+The generated module does NOT create a cluster. In root form it configures the
+helm provider from variables, so the bundle applies against whatever cluster the
+operator points it at (a child module declares no provider and no connection
+variables, and uses the caller's):
 
   - var.kubeconfig_path / var.kube_context for an existing kubeconfig (default);
   - var.cluster_host / var.cluster_ca_certificate / var.cluster_token when the
@@ -153,10 +156,10 @@ ErrCodeInvalidRequest at generation time, matching the flux deployer.
 
 	output/
 	├── main.tf                     # one module call per component, carrying the DAG
-	├── versions.tf                 # required_providers + the helm provider config
+	├── versions.tf                 # required_providers + the helm provider config (root form)
 	├── variables.tf
 	├── outputs.tf
-	├── terraform.tfvars.example
+	├── terraform.tfvars.example    # root form only
 	├── modules/
 	│   └── component/
 	│       ├── main.tf             # the generic component module: pre/chart/post/gate

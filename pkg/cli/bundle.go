@@ -698,7 +698,7 @@ Use --deployer argocd to generate Argo CD Applications.
 Use --deployer argocd-helm to generate a Helm chart that renders the Argo CD Applications, with values overridable at install time.
 Use --deployer flux to generate Flux HelmRelease and Kustomization manifests.
 Use --deployer helmfile to generate a helmfile.yaml release graph (apply/diff/destroy with the upstream helmfile CLI).
-Use --deployer terraform to generate a Terraform root module (plan/apply with terraform).
+Use --deployer terraform to generate a Terraform root module (plan/apply with terraform), or a child module with --terraform-child-module.
 
 Helm:
   - README.md: Root deployment guide with ordered steps
@@ -753,7 +753,8 @@ Terraform:
   - main.tf: One module call per component; depends_on carries the recipe's
     dependency graph exactly, so independent components apply concurrently
   - versions.tf / variables.tf / outputs.tf: Provider config and the cluster
-    connection surface. The bundle does not create a cluster
+    connection surface (root form; a child module uses the caller's provider).
+    The bundle does not create a cluster
   - modules/component/: The shared module every call resolves to, holding the
     component's pre / chart / post / readiness releases chained in order
   - NNN-<component>/: Per-component values.yaml and cluster-values.yaml, plus
@@ -779,7 +780,7 @@ Generate Flux manifests:
 Generate Helmfile release graph:
   aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer helmfile
 
-Generate a Terraform root module:
+Generate a Terraform root module (add --terraform-child-module for a child module):
   aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer terraform
 
 Override values in generated bundle:

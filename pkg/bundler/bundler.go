@@ -806,6 +806,8 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	//   - argocd / argocd-helm: the gate folder inherits the next sync-wave,
 	//     and Argo CD's built-in batch/Job health blocks that wave until the
 	//     Job completes.
+	//   - terraform: the gate is the last helm_release in the component's
+	//     module call, and the provider blocks on the hook as helm does.
 	// Flux and helmfile wrap each folder in HelmRelease / needs semantics that
 	// need dedicated gating wiring (not yet implemented). Fail clearly rather
 	// than silently dropping the opt-in flag and shipping a bundle without the
@@ -4029,7 +4031,7 @@ func invalidDRAEvictionManagedValue(componentName, path, wantType string, value 
 // Injection point: called from DefaultBundler.Make AFTER
 // extractComponentValues (so the values map is populated and user
 // --set overrides have already been applied) and BEFORE buildDeployer
-// (so every deployer — Helm, helmfile, Flux, Argo CD, argocd-helm —
+// (so every deployer — Helm, helmfile, Flux, Argo CD, argocd-helm, terraform —
 // receives the same final map). Placing the call after --set means a
 // user override of this specific annotation key is intentionally NOT
 // honored; the annotation must always reflect the actual resolved

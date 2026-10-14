@@ -79,7 +79,8 @@ var readmeTemplate string
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
-// Generator creates a Terraform root module from recipe results.
+// Generator creates a Terraform module from recipe results: a root module, or
+// a child module when ChildModule is set.
 // Configure it with the required fields, then call Generate.
 type Generator struct {
 	// RecipeResult contains the recipe metadata and component references.
@@ -170,7 +171,7 @@ type Generator struct {
 	vendorRecords []localformat.VendorRecord
 }
 
-// Generate emits the Terraform root module, the shared component module, and
+// Generate emits the Terraform module (root or child), the shared component module, and
 // the per-component folders into outputDir.
 //
 // Per-component folder content is delegated to
