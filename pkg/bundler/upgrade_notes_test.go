@@ -207,6 +207,14 @@ func TestMake_UpgradeNotes(t *testing.T) {
 			unwantedStep: "rename-in-one-commit",
 		},
 		{
+			name:         "terraform ships the remainder steps",
+			record:       upgradeNotesManualRecord,
+			deployer:     config.DeployerTerraform,
+			wantGuide:    true,
+			wantStep:     "delete-legacy",
+			unwantedStep: "rename-in-one-commit",
+		},
+		{
 			name:     "a safe transition adds nothing",
 			record:   upgradeNotesSafeRecord,
 			deployer: config.DeployerArgoCD,

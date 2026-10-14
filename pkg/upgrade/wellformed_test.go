@@ -335,8 +335,8 @@ func TestValidateStepGroups(t *testing.T) {
 	}{
 		{"single remainder group covers everything", []StepGroup{group(nil)}, false, ""},
 		{
-			"explicit groups covering all five pass",
-			[]StepGroup{group([]string{"argocd", "argocd-helm", "flux"}), group([]string{"helm", "helmfile"})},
+			"explicit groups covering every deployer pass",
+			[]StepGroup{group([]string{"argocd", "argocd-helm", "flux"}), group([]string{"helm", "helmfile", "terraform"})},
 			false, "",
 		},
 		{
@@ -380,13 +380,13 @@ func TestValidateStepGroups(t *testing.T) {
 			"covered group with an empty steps list fails",
 			[]StepGroup{
 				group([]string{"argocd", "argocd-helm", "flux"}),
-				{Deployers: []string{"helm", "helmfile"}, Steps: nil},
+				{Deployers: []string{"helm", "helmfile", "terraform"}, Steps: nil},
 			},
 			true, "carries no steps",
 		},
 		{
 			"explicitly empty deployers list is not the remainder",
-			[]StepGroup{group([]string{"argocd", "argocd-helm", "flux"}),
+			[]StepGroup{group([]string{"argocd", "argocd-helm", "flux", "terraform"}),
 				{Deployers: []string{}, Steps: []Step{{ID: "s", Description: "d"}}}},
 			true, "omit the key entirely",
 		},

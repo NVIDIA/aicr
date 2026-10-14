@@ -24,6 +24,7 @@ re-render the same recipe for whatever pipeline you run:
 | `argocd` | Argo CD `Application` manifests (app-of-apps), published from a Git repo (`--repo`). |
 | `argocd-helm` | A Helm chart app-of-apps; `repoURL` defaults to the push-target registry — plain `helm install` works with no `--set repoURL` needed. Override with `--set repoURL=oci://mirror` when mirroring. Bringing your own root Application? Set `deployer.includeRootApp=false` to render children-only — see [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options). |
 | `flux` | Flux `HelmRelease` manifests plus their source objects, and a plain Kustomize `kustomization.yaml` at the bundle root (not a Flux `Kustomization` CR). |
+| `terraform` | A Terraform root module (or child module) calling one module per component, with `depends_on` carrying the recipe's dependency graph. |
 
 ```bash
 # GitOps with Argo CD, sourced from your config repo
@@ -40,7 +41,7 @@ shown here will not disappear or be renamed without a deliberate, reviewed
 change. Automation may read these paths.
 
 Every deployer writes `bundle-info.yaml`, `checksums.txt`, `README.md` and
-`recipe.yaml` at the bundle root. Four of the five group components into
+`recipe.yaml` at the bundle root. Five of the six group components into
 ordered `NNN-<component>` directories; Flux is the exception and uses a plain
 `<component>` directory with shared `sources/`.
 
@@ -73,6 +74,35 @@ helmfile/
   level-N.yaml                 one per dependency depth; absent when flat
   recipe.yaml
   bundle-info.yaml
+  checksums.txt
+  README.md
+```
+
+`terraform` shares Helm's per-component values and bundled charts — not its
+`install.sh` or `upstream.env`, which only the shell path reads — and adds the
+Terraform layer above them: one module call per component, with that
+component's pre, post and readiness folders chained inside the call, plus the
+single generic component module they all share. The bundle does not create a
+cluster.
+By default it is a root module that configures the `helm` provider from
+variables, so it applies against whatever cluster you point it at; with
+`--terraform-child-module` it is a child module with no provider block, for
+calling from a configuration that creates the cluster itself.
+
+```text
+terraform/
+  001-cert-manager/            values.yaml and cluster-values.yaml; Chart.yaml +
+  002-nfd/                     templates/ for a bundled chart
+  main.tf                      one module call per component; the dependency graph
+  versions.tf                  required_providers + the helm provider config
+  variables.tf                 cluster connection, wait/timeout/atomic
+  outputs.tf
+  terraform.tfvars.example     root-module form only
+  modules/component/           the shared module every call resolves to, holding
+                               the component's pre / chart / post / readiness
+                               releases chained in order
+  bundle-info.yaml
+  recipe.yaml
   checksums.txt
   README.md
 ```
@@ -808,7 +838,7 @@ Namespace removes everything inside it.
 that ships a readiness test, run as a post-component Job so the deployer blocks
 on component-specific signals (e.g. GPU Operator `ClusterPolicy` state) that
 Helm and Argo CD cannot assess natively. Supported with `--deployer helm`,
-`argocd`, and `argocd-helm`; off by default.
+`argocd`, `argocd-helm`, and `terraform`; off by default.
 
 ```bash
 aicr bundle --recipe recipe.yaml --readiness-hooks --output ./bundles

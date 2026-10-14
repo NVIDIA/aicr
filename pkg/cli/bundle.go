@@ -83,6 +83,15 @@ type bundleCmdOptions struct {
 	// components. Off by default (parallel). An escape hatch for operators.
 	serial bool
 
+	// terraformClusterRollover emits the cluster-rollover containment shim
+	// in a --deployer terraform bundle. Off by default. See
+	// config.WithTerraformClusterRollover for why it is not the default.
+	terraformClusterRollover bool
+
+	// terraformChildModule emits a --deployer terraform bundle as a child
+	// module rather than a root module. Off by default.
+	terraformChildModule bool
+
 	// attest enables bundle attestation and binary verification.
 	attest bool
 
@@ -197,6 +206,8 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		vendorCharts:              boolFlagOrConfig(cmd, "vendor-charts", bundleOpts.VendorCharts),
 		readinessHooks:            cmd.Bool("readiness-hooks"),
 		serial:                    cmd.Bool("serial"),
+		terraformClusterRollover:  cmd.Bool("terraform-cluster-rollover"),
+		terraformChildModule:      cmd.Bool("terraform-child-module"),
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", bundleOpts.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
 		signingKey:                stringFlagOrConfig(cmd, flagSigningKey, bundleOpts.OIDCResolve.SigningKey),
@@ -341,6 +352,19 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		if cmd.IsSet("flux-namespace") {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--flux-namespace is only valid with --deployer flux")
+		}
+	}
+
+	// Reject the terraform-specific flag on other deployers, for the same
+	// reason as the flux flags above: silent acceptance with no effect.
+	if opts.deployer != config.DeployerTerraform {
+		if cmd.IsSet("terraform-cluster-rollover") {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--terraform-cluster-rollover is only valid with --deployer terraform")
+		}
+		if cmd.IsSet("terraform-child-module") {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--terraform-child-module is only valid with --deployer terraform")
 		}
 	}
 
@@ -674,6 +698,7 @@ Use --deployer argocd to generate Argo CD Applications.
 Use --deployer argocd-helm to generate a Helm chart that renders the Argo CD Applications, with values overridable at install time.
 Use --deployer flux to generate Flux HelmRelease and Kustomization manifests.
 Use --deployer helmfile to generate a helmfile.yaml release graph (apply/diff/destroy with the upstream helmfile CLI).
+Use --deployer terraform to generate a Terraform root module (plan/apply with terraform).
 
 Helm:
   - README.md: Root deployment guide with ordered steps
@@ -724,6 +749,19 @@ Helmfile:
   - README.md: helmfile apply/diff/destroy walkthrough
   - checksums.txt: SHA256 checksums of generated files
 
+Terraform:
+  - main.tf: One module call per component; depends_on carries the recipe's
+    dependency graph exactly, so independent components apply concurrently
+  - versions.tf / variables.tf / outputs.tf: Provider config and the cluster
+    connection surface. The bundle does not create a cluster
+  - modules/component/: The shared module every call resolves to, holding the
+    component's pre / chart / post / readiness releases chained in order
+  - NNN-<component>/: Per-component values.yaml and cluster-values.yaml, plus
+    Chart.yaml + templates/ for a bundled chart (no install.sh: Terraform is
+    the only installer)
+  - README.md: terraform init/plan/apply walkthrough
+  - checksums.txt: SHA256 checksums of generated files
+
 Examples:
 
 Generate Helm per-component bundle (default):
@@ -740,6 +778,9 @@ Generate Flux manifests:
 
 Generate Helmfile release graph:
   aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer helmfile
+
+Generate a Terraform root module:
+  aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer terraform
 
 Override values in generated bundle:
   aicr bundle --recipe recipe.yaml --set gpuoperator:driver.version=570.133.20
@@ -922,12 +963,35 @@ Package with explicit tag (overrides CLI version):
 				Name: "serial",
 				Usage: `Sequence components strictly one at a time in deployment order,
 	disabling the parallel rollout of independent components. Affects the
-	argocd, argocd-helm, flux, and helmfile deployers (helm is already
-	serial): argocd falls back to a linear sync-wave per folder, flux chains
-	each HelmRelease dependsOn to the previous component, and helmfile chains
-	every release via needs: into one linear apply order. An escape hatch for
+	argocd, argocd-helm, flux, helmfile, and terraform deployers (helm is
+	already serial): argocd falls back to a linear sync-wave per folder, flux
+	chains each HelmRelease dependsOn to the previous component, helmfile
+	chains every release via needs:, and terraform chains every module call
+	via depends_on, into one linear apply order. An escape hatch for
 	reproducing the pre-parallelism ordering or bisecting a misbehaving
 	rollout; off by default.`,
+				Category: catDeployment,
+			},
+			&cli.BoolFlag{
+				Name: "terraform-cluster-rollover",
+				Usage: `Emit a containment shim in each component module so replacing the
+	cluster replaces every release, instead of leaving state that describes
+	objects in a cluster that no longer exists (--deployer terraform only).
+	The shim keys on var.cluster_keepers: attributes of the cluster that change
+	when it is rebuilt (its CA certificate, a provider id, an endpoint minted
+	per cluster), which the caller sets. Off by default; a root module defaults
+	the keepers to null, where the shim never fires.`,
+				Category: catDeployment,
+			},
+			&cli.BoolFlag{
+				Name: "terraform-child-module",
+				Usage: `Emit the bundle as a child module rather than a standalone root
+	module: no provider configuration and no cluster-connection variables, so
+	the calling configuration owns the provider and the module calls inherit
+	it (--deployer terraform only). Use this when the cluster is declared in
+	the same configuration as the bundle — a module carrying its own provider
+	block cannot take depends_on, count or for_each, which is exactly what a
+	caller needs to sequence the bundle behind the cluster that hosts it.`,
 				Category: catDeployment,
 			},
 			&cli.StringFlag{
@@ -1190,6 +1254,8 @@ func runBundleCmdWithDependencies(
 		outputType = "Flux manifests"
 	case config.DeployerHelmfile:
 		outputType = "Helmfile release graph"
+	case config.DeployerTerraform:
+		outputType = "Terraform root module"
 	}
 	slog.Info("generating bundle",
 		slog.String("deployer", opts.deployer.String()),
@@ -1237,6 +1303,8 @@ func runBundleCmdWithDependencies(
 		config.WithVendorCharts(opts.vendorCharts),
 		config.WithReadinessHooks(opts.readinessHooks),
 		config.WithSerial(opts.serial),
+		config.WithTerraformClusterRollover(opts.terraformClusterRollover),
+		config.WithTerraformChildModule(opts.terraformChildModule),
 		config.WithOCISourceName(opts.ociSourceName),
 		config.WithFluxNamespace(opts.fluxNamespace),
 		config.WithBundleChartName(opts.bundleChartName),

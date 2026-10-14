@@ -56,6 +56,13 @@ const (
 	// bundle is self-contained and air-gap deployable when combined with
 	// --vendor-charts.
 	DeployerHelmfile DeployerType = "helmfile"
+	// DeployerTerraform generates a Terraform root module: one
+	// module call per component, with depends_on carrying the recipe's
+	// dependency graph exactly. Per-component chart directories are
+	// emitted via the shared localformat writer, so the bundle is
+	// self-contained and air-gap deployable when combined with
+	// --vendor-charts.
+	DeployerTerraform DeployerType = "terraform"
 )
 
 // allDeployerTypes is the single source of truth for supported deployer types.
@@ -65,6 +72,7 @@ var allDeployerTypes = []DeployerType{
 	DeployerArgoCDHelm,
 	DeployerFlux,
 	DeployerHelmfile,
+	DeployerTerraform,
 }
 
 // ParseDeployerType parses a string into a DeployerType.
@@ -419,6 +427,25 @@ type Config struct {
 	// flag is a no-op for it.
 	serial bool
 
+	// terraformClusterRollover emits, in each component module of a
+	// --deployer terraform bundle, a terraform_data keyed on
+	// var.cluster_keepers plus a replace_triggered_by pointing at it, so
+	// replacing the cluster replaces every release rather than leaving state
+	// that describes objects in a cluster that no longer exists. Off by
+	// default: the keepers are the caller's statement of what identifies the
+	// cluster, and a root module defaults them to null, where the shim never
+	// fires.
+	terraformClusterRollover bool
+
+	// terraformChildModule emits a --deployer terraform bundle as a CHILD
+	// module — no provider configuration, no cluster-connection variables —
+	// so the calling configuration owns the provider and the bundle's module
+	// calls inherit it. The shape to use when the cluster is declared
+	// alongside the bundle: a module carrying its own provider block cannot
+	// take depends_on/count/for_each, which is exactly what a caller needs
+	// to sequence the bundle behind the cluster that hosts it.
+	terraformChildModule bool
+
 	// bundlers is a positive filter on recipe component names (the
 	// `bundlers` query parameter on POST /v1/bundle): when non-empty, only
 	// the named components are bundled; every other enabled component is
@@ -669,6 +696,20 @@ func (c *Config) ReadinessHooks() bool {
 // and helmfile deployers (helm is already serial).
 func (c *Config) Serial() bool {
 	return c.serial
+}
+
+// TerraformClusterRollover reports whether the terraform deployer should emit
+// the cluster-rollover containment shim in each component module. Off by
+// default; opt-in via --terraform-cluster-rollover.
+func (c *Config) TerraformClusterRollover() bool {
+	return c.terraformClusterRollover
+}
+
+// TerraformChildModule reports whether the terraform deployer should emit the
+// bundle as a child module rather than a standalone root module. Off by
+// default; opt-in via --terraform-child-module.
+func (c *Config) TerraformChildModule() bool {
+	return c.terraformChildModule
 }
 
 // Bundlers returns a copy of the positive component-name filter. Empty means
@@ -1022,6 +1063,24 @@ func WithReadinessHooks(enabled bool) Option {
 func WithSerial(enabled bool) Option {
 	return func(c *Config) {
 		c.serial = enabled
+	}
+}
+
+// WithTerraformClusterRollover enables the cluster-rollover containment shim
+// in a --deployer terraform bundle. Off by default; opt-in via
+// --terraform-cluster-rollover.
+func WithTerraformClusterRollover(enabled bool) Option {
+	return func(c *Config) {
+		c.terraformClusterRollover = enabled
+	}
+}
+
+// WithTerraformChildModule emits a --deployer terraform bundle as a child
+// module instead of a root module. Off by default; opt-in via
+// --terraform-child-module.
+func WithTerraformChildModule(enabled bool) Option {
+	return func(c *Config) {
+		c.terraformChildModule = enabled
 	}
 }
 

@@ -193,6 +193,7 @@ func TestMake_DRAIntegration_AllDeployersCarryDerivedValues(t *testing.T) {
 		{name: "flux", deployer: config.DeployerFlux},
 		{name: "argocd", deployer: config.DeployerArgoCD},
 		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm},
+		{name: "terraform", deployer: config.DeployerTerraform},
 	}
 
 	for _, tc := range deployers {

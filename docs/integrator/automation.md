@@ -169,7 +169,7 @@ syntax and artifact passing differ — the `aicr` commands are identical.
 | Snapshot | `script:` step running `aicr snapshot`, declare `artifacts: paths: [snapshot.yaml]` (or write to a ConfigMap to skip artifacts) | `run:` step; `persist_to_workspace` to pass output downstream | `null_resource` + `local-exec` provisioner running `aicr snapshot` |
 | Recipe | `script:` step running `aicr recipe`, `dependencies:` on the snapshot job | `run:` step after `attach_workspace` | `null_resource` + `local-exec`, `depends_on` the snapshot resource |
 | Bundle | `script:` step running `aicr bundle`, publish `bundles/` as artifacts | `run:` step, `persist_to_workspace` | `null_resource` + `local-exec` running `aicr bundle` |
-| Deploy | `script:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, with `when: manual` for approval gating | `run:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh` inside a held workflow | `local-exec` running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, gated by `terraform apply` approval |
+| Deploy | `script:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, with `when: manual` for approval gating | `run:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh` inside a held workflow | bundle with `--deployer terraform` and call the bundle as a module (`source = "./bundles"`), so the releases are resources in the plan `terraform apply` approves — no `local-exec` |
 
 Use a container image with the CLI preinstalled (`ghcr.io/nvidia/aicr:latest`)
 for the recipe/bundle stages, and a `kubectl`-capable image for snapshot/deploy.

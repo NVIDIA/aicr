@@ -369,12 +369,12 @@ pods depend on).
 
 ## Deployers
 
-AICR ships five output adapters in
+AICR ships six output adapters in
 [`pkg/bundler/deployer/`](https://github.com/NVIDIA/aicr/tree/main/pkg/bundler/deployer):
-`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. Each calls
+`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`. Each calls
 `localformat.Write()` and then layers its own orchestration files
 (`deploy.sh`, `helmfile.yaml`, Argo `Application` CRs, Flux
-`HelmRelease`s). **Components do not need to be deployer-aware** —
+`HelmRelease`s, Terraform module calls). **Components do not need to be deployer-aware** —
 the bundler renders per-deployer from one component definition.
 
 ### Deployment ordering
@@ -405,6 +405,26 @@ exactly its dependencies' terminal releases, nothing more. This is the
 most faithful and most parallel rendering — a component waits only for
 what it actually needs — and it reads naturally to flux users because
 `dependsOn` mirrors `dependencyRefs` one-for-one. See `declaredDependsOn`.
+
+**terraform — the exact DAG, on the module call.** Terraform's
+`depends_on` is a native dependency graph, so the terraform deployer
+projects the declared edges onto it the same way flux does, and the two
+deployers emit the same edge set for the same recipe. It differs in
+where the edge is attached: each component is **one module call**, and
+the edge sits on the call, so it orders everything the module contains
+rather than one resource inside it. A component's `-pre`, `-post` and
+`-readiness` folders become slots on that same module and chain inside
+it, so `depends_on = [module.gpu_operator]` covers the component's gate
+without naming it — the claim the module boundary is there to make. The
+slots are assigned by the same `-pre`/`-post`/`-readiness` suffix test
+argocd's `waveForFolder` uses. See `buildComponents` and `phaseOf`.
+
+The readiness slot hardcodes `wait` rather than reading the bundle-wide
+variable: an async component (see `deployer.ComponentOverrideFor`) may
+skip waiting on its own workloads, never on the gate that asserts it came
+up. The gate Job is a helm hook, so the release blocks on it without
+`wait_for_jobs`, and its `timeout` is the gate's own deadline plus the
+buffer `deploy.sh` adds, not `var.timeout`.
 
 **argocd / argocd-helm — tiers as sync-wave bands.** Argo CD's
 `sync-wave` is a single integer per Application. Applications sharing a
@@ -438,13 +458,14 @@ possible shell. The readiness gates already sequence it correctly.
 `aicr bundle --serial` forces every deployer to install components
 strictly one at a time in `DeploymentOrder`, an escape hatch for
 reproducing the pre-parallelism ordering or bisecting a misbehaving
-rollout. It affects the four concurrent deployers: argocd and
+rollout. It affects the five concurrent deployers: argocd and
 argocd-helm fall back to a linear sync-wave per folder, flux chains each
 `HelmRelease` `dependsOn` to the previous component instead of
-projecting the DAG, and helmfile chains every release to its predecessor
+projecting the DAG, helmfile chains every release to its predecessor
 via `needs:` (one linear apply chain) instead of only within a
-component. The helm `deploy.sh` is already serial, so the flag is a
-no-op for it. Off by default.
+component, and terraform chains every module call via `depends_on`. The
+helm `deploy.sh` is already serial, so the flag is a no-op for it. Off
+by default.
 
 See [index.md](index.md#community-standard-deployment-targets) for
 the deployer matrix.

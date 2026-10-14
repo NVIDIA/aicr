@@ -140,6 +140,7 @@ var k8sAIBOMDeployers = []struct {
 	{name: "argocd", deployer: config.DeployerArgoCD},
 	{name: "argocd-helm", deployer: config.DeployerArgoCDHelm},
 	{name: "flux", deployer: config.DeployerFlux},
+	{name: "terraform", deployer: config.DeployerTerraform},
 }
 
 func bundleK8sAIBOM(t *testing.T, deployer config.DeployerType) string {

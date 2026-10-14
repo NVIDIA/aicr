@@ -111,6 +111,7 @@ constrained:
       DeployerFlux: const
       DeployerHelm: const
       DeployerHelmfile: const
+      DeployerTerraform: const
       DeployerType: type
       DeployerType.String: behavioral
       GetDeployerTypes: behavioral
@@ -147,6 +148,8 @@ constrained:
       WithStorageClass: behavioral
       WithSystemNodeSelector: behavioral
       WithSystemNodeTolerations: behavioral
+      WithTerraformChildModule: behavioral
+      WithTerraformClusterRollover: behavioral
       WithTargetRevision: behavioral
       WithValueOverridePaths: behavioral
       WithValueOverridesTypedPaths: behavioral
