@@ -259,6 +259,9 @@ runs:
     - name: Install oras
       if: inputs.install_oras == 'true'
       shell: bash
+      env:
+        ORAS_INPUT_VERSION: ${{ inputs.oras_version }}
+        ORAS_INPUT_SHA256: ${{ inputs.oras_sha256 }}
       run: |
         set -euo pipefail
         ORAS_VERSION="${ORAS_INPUT_VERSION#v}"

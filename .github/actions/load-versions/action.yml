@@ -287,6 +287,7 @@ runs:
         LOADED_GORELEASER: ${{ steps.versions.outputs.goreleaser }}
         LOADED_KO: ${{ steps.versions.outputs.ko }}
         LOADED_CRANE: ${{ steps.versions.outputs.crane }}
+        LOADED_DOCKERHUB_MIRROR: ${{ steps.versions.outputs.dockerhub_mirror }}
         LOADED_GOLANGCI_LINT: ${{ steps.versions.outputs.golangci_lint }}
         LOADED_APIDIFF: ${{ steps.versions.outputs.apidiff }}
         LOADED_OASDIFF: ${{ steps.versions.outputs.oasdiff }}
@@ -334,6 +335,7 @@ runs:
         echo "  goreleaser: ${LOADED_GORELEASER}"
         echo "  ko: ${LOADED_KO}"
         echo "  crane: ${LOADED_CRANE}"
+        echo "  dockerhub_mirror: ${LOADED_DOCKERHUB_MIRROR}"
         echo "  golangci_lint: ${LOADED_GOLANGCI_LINT}"
         echo "  apidiff: ${LOADED_APIDIFF}"
         echo "  oasdiff: ${LOADED_OASDIFF}"
