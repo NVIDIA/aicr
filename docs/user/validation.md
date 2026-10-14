@@ -59,7 +59,7 @@ a component the bundler enabled at bundle time is not checked.
 
 - `aicr` CLI installed (see [installation](installation.md)).
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
-- Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run.
+- Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run. To run without that grant, have an administrator provision the ServiceAccount instead; see [Running under a pre-provisioned ServiceAccount](#running-under-a-pre-provisioned-serviceaccount).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
 - **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` additionally re-evaluates `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so the value fails closed. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
 
@@ -1170,6 +1170,157 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --no-cluster
 
 Useful for CI pipelines that validate a recipe against a captured snapshot
 without needing cluster access.
+
+## Running under a pre-provisioned ServiceAccount
+
+By default every live run creates a ServiceAccount for its validator Jobs, binds
+it to `cluster-admin` through a per-run `aicr-validator-<run-id>`
+ClusterRoleBinding, and deletes both at cleanup. That requires an identity
+allowed to grant `cluster-admin`, which automation such as a CI runner or a
+scheduled in-cluster Job often should not hold. It also leaves a privileged
+binding behind if the process dies before cleanup, and gives admission or audit
+policy keyed on a username no stable name to target.
+
+`--validator-service-account-name` (or
+`spec.validate.agent.validatorServiceAccountName` in
+[`--config`](cli-config.md)) moves that grant to an administrator. The
+validator Jobs run as the named ServiceAccount, and the run creates and deletes
+no ServiceAccount or ClusterRoleBinding and does not apply the namespace.
+Before it creates anything, the run reads the ServiceAccount and asks the API
+server, through a SubjectAccessReview, whether it may perform any verb on any
+resource cluster-wide. It stops with exit `3` when the ServiceAccount does not
+exist, with exit `2` when the ServiceAccount sets
+`automountServiceAccountToken: false` (validator pods need its token), and with
+exit `4` when it is not bound to `cluster-admin` or the caller may not ask. It
+never falls back to per-run RBAC, because that fallback would create the
+`cluster-admin` binding the flag exists to avoid.
+
+An administrator provisions the namespace, the ServiceAccount, and its binding
+once:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aicr-validation
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aicr-validator
+  namespace: aicr-validation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-validator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: aicr-validator
+    namespace: aicr-validation
+```
+
+The identity running `aicr validate` then needs the following, shown here bound
+to a `ci-runner` ServiceAccount in a `ci` namespace. Everything is scoped to the
+validation namespace except `subjectaccessreviews`, a read-only authorization
+query that persists nothing:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aicr-validate-caller
+  namespace: aicr-validation
+rules:
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create, get, update, patch, delete]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, watch, patch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aicr-validate-caller
+  namespace: aicr-validation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aicr-validate-caller
+subjects:
+  - kind: ServiceAccount
+    name: ci-runner
+    namespace: ci
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aicr-validate-caller
+rules:
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-validate-caller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aicr-validate-caller
+subjects:
+  - kind: ServiceAccount
+    name: ci-runner
+    namespace: ci
+```
+
+Then validate against a captured snapshot:
+
+```bash
+aicr validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --validator-service-account-name aicr-validator \
+  --output ctrf.json
+```
+
+- `--namespace` must name the ServiceAccount's namespace. The default is
+  `aicr-validation`.
+- The flag governs only the validator Jobs. Without `--snapshot`,
+  `aicr validate` first deploys the snapshot-capture agent, which creates or
+  labels the namespace and creates its own run-scoped RBAC unless `--service-account-name` names
+  an existing agent ServiceAccount. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity).
+  Either way the agent needs permissions beyond the Role above, so a caller
+  that holds only that Role supplies `--snapshot`. A missing or unbound
+  validator ServiceAccount is reported before the agent is deployed.
+- `--no-cleanup` keeps the validator Jobs and ConfigMaps. The validator Jobs
+  created no binding to leave behind; a live-capture agent's run-scoped RBAC
+  is kept as well.
+- Before deploying a validator that is placed next to another component's
+  pods, the run lists pods in that component's namespace (for example
+  `monitoring`) to warn when the placement selector matches nothing. Without
+  `list pods` there, the run logs a lookup-failure warning and continues.
+- This changes who grants the validators' access, and when. It does not make
+  the caller less powerful: an identity that can create Jobs in the validation
+  namespace can run any image as that ServiceAccount, and one that can write
+  its ConfigMaps can change what the validators read. Keep the namespace
+  dedicated to validation, and let only the intended caller create workloads
+  or write ConfigMaps in it.
 
 ## CI/CD integration
 

@@ -30,7 +30,8 @@ type Option func(*Client)
 
 // ValidateOption configures a validation run launched via
 // Client.ValidateState. It is a facade-owned functional option type:
-// each WithValidation* factory below captures its argument into an
+// each factory below (the WithValidation* family and
+// WithValidatorServiceAccountName) captures its argument into an
 // internal validateConfig, and Client.ValidateState translates the
 // captured config into pkg/validator options at call time.
 //
@@ -42,7 +43,7 @@ type Option func(*Client)
 type ValidateOption func(*validateConfig)
 
 // validateConfig is the internal capture struct populated by the
-// WithValidation* factories. Pointer fields distinguish "unset" (nil,
+// ValidateOption factories. Pointer fields distinguish "unset" (nil,
 // inherit validator default) from "set to zero/false/empty" (non-nil
 // pointer whose value happens to be the zero). Slice/map fields use
 // nil to mean unset because the empty slice has different semantics
@@ -99,6 +100,10 @@ type validateConfig struct {
 	// means "unset"; unlike phases, an EXPLICIT empty slice is also unset,
 	// because "skip nothing" and "say nothing" ask for the same run.
 	skipChecks []string
+
+	// serviceAccountName names the existing ServiceAccount validator Jobs run
+	// as. Empty is unset: the run creates its own per-run RBAC.
+	serviceAccountName string
 }
 
 // buildValidateConfig replays each WithValidation* option into a fresh
@@ -167,6 +172,9 @@ func validateOptionsFromConfig(cfg *validateConfig) []validator.Option {
 	}
 	if len(cfg.skipChecks) > 0 {
 		out = append(out, validator.WithSkipChecks(cfg.skipChecks...))
+	}
+	if cfg.serviceAccountName != "" {
+		out = append(out, validator.WithServiceAccountName(cfg.serviceAccountName))
 	}
 	return out
 }
@@ -333,6 +341,23 @@ func WithValidationFailFast(failFast bool) ValidateOption {
 // the slice afterwards cannot change what the run skips.
 func WithValidationSkipChecks(names ...string) ValidateOption {
 	return func(c *validateConfig) { c.skipChecks = slices.Clone(names) }
+}
+
+// WithValidatorServiceAccountName runs the validator Jobs as name, an
+// existing ServiceAccount in the validation namespace, instead of a per-run
+// ServiceAccount bound to cluster-admin. The run then creates and deletes no
+// ServiceAccount or ClusterRoleBinding and does not apply the namespace, so
+// the caller needs no permission to grant cluster-admin. An administrator
+// provisions the namespace and the ServiceAccount and binds it to
+// cluster-admin; ValidateState verifies that binding with a
+// SubjectAccessReview and fails before deploying anything when the
+// ServiceAccount is missing, is not bound, or cannot be verified.
+//
+// Unrelated to ValidateSettings.ServiceAccountName, which names the live
+// snapshot-capture agent's ServiceAccount. Empty (the default) keeps
+// per-run RBAC.
+func WithValidatorServiceAccountName(name string) ValidateOption {
+	return func(c *validateConfig) { c.serviceAccountName = name }
 }
 
 // cloneStringSlice returns a shallow copy of s, preserving the
