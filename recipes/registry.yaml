@@ -474,7 +474,8 @@ components:
     # Opt-in surface for the nvsentinel-observability (#2617),
     # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610),
     # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor (#2611),
-    # nvsentinel-observe, -quarantine and -remediation mixins: the exact leaf
+    # nvsentinel-observe, -quarantine and -remediation, and
+    # nvsentinel-slinky-drainer (#2615) mixins: the exact leaf
     # paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
@@ -553,6 +554,19 @@ components:
       - fault-remediation.maintenance.actions.COMPONENT_RESET.supersedingEquivalenceGroups
       - fault-remediation.maintenance.templates.gpureset
       - janitor-provider.csp.generic.rebootImage
+      - node-drainer.userNamespaces
+      - node-drainer.customDrain.enabled
+      - node-drainer.customDrain.templateConfigMapName
+      - node-drainer.customDrain.templateMountPath
+      - node-drainer.customDrain.templateFileName
+      - node-drainer.customDrain.namespace
+      - node-drainer.customDrain.apiGroup
+      - node-drainer.customDrain.version
+      - node-drainer.customDrain.kind
+      - node-drainer.customDrain.resource
+      - node-drainer.customDrain.statusConditionType
+      - node-drainer.customDrain.statusConditionStatus
+      - node-drainer.customDrain.timeout
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -635,6 +649,11 @@ components:
       # Job cannot work together. The rules are in the function's doc.
       - function: CheckNVSentinelRemediationPipelineCoherent
         severity: error
+      # Blocking: on a Slurm recipe node-drainer must drain through the
+      # slinky-drainer plugin (#2615), not pod eviction, and customDrain must
+      # match what that plugin needs. The rules are in the function's doc.
+      - function: CheckNVSentinelSlurmCustomDrainCoherent
+        severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
   # -quarantine and -remediation mixins. Bundled apart from NVSentinel's own
@@ -701,6 +720,45 @@ components:
       # carries no snapshot evidence or only the psmdb.percona.com CRDs.
       - function: CheckNVSentinelDatastorePrerequisites
         severity: warning
+
+  # NVSentinel's slinky-drainer plugin, added only by the
+  # nvsentinel-slinky-drainer mixin. Manifest-only: upstream ships it as
+  # Kustomize, and vendoring the v1.26.0 manifests keeps its image pinned,
+  # inventoried and mirrored under every deployer. Its DrainRequest CRD is
+  # the separate slinky-drainer-crds component, which the plugin and
+  # nvsentinel declare as a dependencyRef, so the CRD is installed and
+  # waited for before either starts (ownsCRDs does not apply to a
+  # manifest-only wrapper).
+  - name: slinky-drainer-crds
+    displayName: slinky-drainer-crds
+    valueOverrideKeys:
+      - slinkydrainercrds
+    healthCheck:
+      assertFile: checks/slinky-drainer-crds/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: nvsentinel
+    manifestFiles:
+      - components/slinky-drainer-crds/manifests/drainrequest-crd.yaml
+
+  - name: slinky-drainer
+    displayName: slinky-drainer
+    valueOverrideKeys:
+      - slinkydrainer
+    healthCheck:
+      assertFile: checks/slinky-drainer/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: nvsentinel
+    manifestFiles:
+      - components/slinky-drainer/manifests/drain-template.yaml
+      - components/slinky-drainer/manifests/slinky-drainer.yaml
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - systemNodeSelector
+        tolerationPaths:
+          - systemTolerations
 
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu

@@ -18,7 +18,7 @@
 # Chart:    oci://ghcr.io/nvidia/cluster-readiness-engine
 #
 # Chart and controller image are public on GHCR and both pull anonymously:
-# `helm pull oci://ghcr.io/nvidia/cluster-readiness-engine --version v0.2.0`
+# `helm pull oci://ghcr.io/nvidia/cluster-readiness-engine --version v0.6.0`
 # succeeds with an empty registry config, so no pull secret is required.
 #
 # This file applies only when a componentRef names it explicitly as
