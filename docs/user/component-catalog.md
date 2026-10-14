@@ -1268,11 +1268,11 @@ kubectl get crd aibomcontrollerconfigs.aibom.k8saibom.dev \
 `k8s-aibom` is marked `ownsCRDs` in the registry, so most deployers update its
 CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` through
 the generated `apply-crds.sh`, and Argo CD by applying them as ordinary
-manifests each sync. `helmfile` has no equivalent automation — see
+manifests each sync. `helmfile` and `terraform` have no equivalent automation — see
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
 for the manual step. Whether a given bump needs that step depends on whether
 the upgrade uses anything the new schema adds: a v1.3.0 to v1.5.1 bump on
-default values upgrades cleanly on `helmfile` against the old CRDs, but the
+default values upgrades cleanly on `helmfile` and `terraform` against the old CRDs, but the
 same bump setting `config.verification` aborts the release with
 `.spec.verification: field not declared in schema` after the Deployment has
 already advanced. When in doubt, apply the CRDs first; it is never harmful.
@@ -1287,10 +1287,10 @@ below — therefore upgrades the controller with **no** CRD update on those two
 deployers, silently. Such a recipe needs its own audit of the chart it points
 at and its own CRD step; the fallback command below is the manual form. Argo CD
 is unaffected, since it applies whatever CRDs the rendered chart contains
-regardless of provenance. `helmfile` is also unaffected by this particular
-caveat, in the sense that there is nothing to disable: it never acts on
-`ownsCRDs`, checked or not, so no version override can take its automation
-away. Whether a given bump actually needs the manual step is a separate
+regardless of provenance. `helmfile` and `terraform` are also unaffected by
+this particular caveat, in the sense that there is nothing to disable: neither
+acts on `ownsCRDs`, checked or not, so no version override can take their
+automation away. Whether a given bump actually needs the manual step is a separate
 question, answered per transition by the upgrade record.
 The assertion is still worth making on every deployer, because it proves the
 deployed CRDs match the pinned chart rather than merely that some deployer was
@@ -1543,8 +1543,8 @@ Which deployers need that step differs, so check yours:
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
 
-**On `helmfile`'s "assume yes".** helmfile never updates CRDs for you, so the
-deployer itself can never narrow the step — that much is unconditional. Whether
+**On the `helmfile` and `terraform` "assume yes".** Neither deployer ever
+updates CRDs for you, so the deployer itself can never narrow the step — that much is unconditional. Whether
 a *particular* version bump actually needs it is a different question, and the
 only thing that can answer it is the component's ADR-021 upgrade record for
 that transition. Some transitions genuinely do not need it: the k8s-aibom
