@@ -424,8 +424,12 @@ aicr bundle --recipe recipe.yaml \
   --output ./bundles
 ```
 
-The manifest renders when the bundle is generated, so the install-time
-overrides below do not reach it.
+The `helm`, `helmfile`, `argocd`, and `argocd-helm` deployers render this
+manifest when the bundle is generated, so the install-time overrides below do
+not reach it. A `flux` bundle ships the manifest as a template, and Flux renders
+it at install time from the values in `network-operator-post/helmrelease.yaml`.
+Edit `spec.values.network-operator.nicConfigurationOperator.configurationDaemon.resources`
+there to resize the daemon without regenerating the bundle.
 
 At bundle time, scope the path with the override key:
 
