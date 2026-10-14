@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -128,6 +129,16 @@ func TestValidateProfileDeclaration(t *testing.T) {
 			Values: map[string]ProfileValue{
 				"one": {ComponentRefs: []ProfileComponentRef{{Name: component, Overrides: overrides}}},
 				"two": {ComponentRefs: []ProfileComponentRef{{Name: component, Overrides: overrides}}},
+			},
+		}
+	}
+	withOptional := func(component string, optionalOne, optionalTwo bool, overrides map[string]any) *ProfileDeclaration {
+		return &ProfileDeclaration{
+			Name:    "mode",
+			Default: "one",
+			Values: map[string]ProfileValue{
+				"one": {ComponentRefs: []ProfileComponentRef{{Name: component, Optional: optionalOne, Overrides: overrides}}},
+				"two": {ComponentRefs: []ProfileComponentRef{{Name: component, Optional: optionalTwo, Overrides: overrides}}},
 			},
 		}
 	}
@@ -427,6 +438,34 @@ func TestValidateProfileDeclaration(t *testing.T) {
 			wantOwned: map[string][]string{
 				"gpu-operator": {"devicePlugin.enabled", "enabled"},
 			},
+		},
+		{
+			name: "optional reference owns values but not presence",
+			decl: withOptional("nvsentinel", true, true, map[string]any{
+				"labeler": map[string]any{"assumeDriverInstalled": true},
+			}),
+			wantOwned: map[string][]string{
+				"nvsentinel": {"labeler.assumeDriverInstalled"},
+			},
+		},
+		{
+			name: "mixed optionality across values rejected",
+			decl: withOptional("nvsentinel", true, false, map[string]any{
+				"labeler": map[string]any{"assumeDriverInstalled": true},
+			}),
+			wantErr: "as optional in some values but not others",
+		},
+		{
+			name:    "optional reference without overrides rejected",
+			decl:    withOptional("nvsentinel", true, true, nil),
+			wantErr: "must assign at least one override",
+		},
+		{
+			name: "optional allocation-policy component rejected",
+			decl: withOptional("nvidia-dra-driver-gpu", true, true, map[string]any{
+				"nvidiaDriverRoot": "/",
+			}),
+			wantErr: "may not be optional",
 		},
 	}
 
@@ -973,15 +1012,25 @@ func TestProfileArtifactContract(t *testing.T) {
 			wantErr: "lexicographically sorted",
 		},
 		{
-			name: "ownership component requires synthetic enabled path",
+			name: "optional ownership omits synthetic enabled path",
 			result: &RecipeResult{
 				APIVersion: RecipeProfileAPIVersion,
 				Metadata: RecipeResultMetadata{SelectedProfile: &SelectedProfile{
 					Name: "gpuStack", Value: "driver-installed",
-					OwnedPaths: map[string][]string{"gpu-operator": {"driver.enabled"}},
+					OwnedPaths: map[string][]string{"nvsentinel": {"labeler.assumeDriverInstalled"}},
 				}},
 			},
-			wantErr: "must include synthetic path",
+		},
+		{
+			name: "empty ownership entry rejected",
+			result: &RecipeResult{
+				APIVersion: RecipeProfileAPIVersion,
+				Metadata: RecipeResultMetadata{SelectedProfile: &SelectedProfile{
+					Name: "gpuStack", Value: "driver-installed",
+					OwnedPaths: map[string][]string{"gpu-operator": {}},
+				}},
+			},
+			wantErr: "must name at least one path",
 		},
 		{
 			name: "invalid selection identity",
@@ -1635,6 +1684,130 @@ func TestValidateProfileLock(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateProfileLockOptionalComponent(t *testing.T) {
+	ctx := t.Context()
+	declaration := testProfileDeclaration()
+	for name, assume := range map[string]bool{"driver-installed": true, "operator-managed": false} {
+		value := declaration.Values[name]
+		value.ComponentRefs = append(value.ComponentRefs, ProfileComponentRef{
+			Name:      "nvsentinel",
+			Optional:  true,
+			Overrides: map[string]any{"labeler": map[string]any{"assumeDriverInstalled": assume}},
+		})
+		declaration.Values[name] = value
+	}
+	store := testProfileStore(declaration)
+	store.Base.Spec.ComponentRefs = append(store.Base.Spec.ComponentRefs, ComponentRef{
+		Name: "nvsentinel",
+		Type: ComponentTypeHelm,
+	})
+	result, err := store.BuildRecipeResult(ctx, &Criteria{Service: CriteriaServiceAKS})
+	if err != nil {
+		t.Fatalf("BuildRecipeResult() error = %v", err)
+	}
+	got := result.Metadata.SelectedProfile.OwnedPaths["nvsentinel"]
+	if want := []string{"labeler.assumeDriverInstalled"}; !slices.Equal(got, want) {
+		t.Fatalf("ownedPaths[nvsentinel] = %v, want %v", got, want)
+	}
+
+	gpuOperator, err := result.GetValuesForComponentWithContext(ctx, "gpu-operator")
+	if err != nil {
+		t.Fatalf("GetValuesForComponentWithContext(gpu-operator) error = %v", err)
+	}
+	nvsentinel, err := result.GetValuesForComponentWithContext(ctx, "nvsentinel")
+	if err != nil {
+		t.Fatalf("GetValuesForComponentWithContext(nvsentinel) error = %v", err)
+	}
+	gpuOperatorRef := *result.GetComponentRef("gpu-operator")
+	nvsentinelRef := *result.GetComponentRef("nvsentinel")
+	disabledNVSentinel := nvsentinelRef
+	disabledNVSentinel.Overrides = map[string]any{"enabled": false}
+	divergedNVSentinel := serializer.DeepCopyAnyMap(nvsentinel)
+	divergedNVSentinel["labeler"].(map[string]any)["assumeDriverInstalled"] = false
+
+	tests := []struct {
+		name    string
+		refs    []ComponentRef
+		values  map[string]map[string]any
+		dynamic map[string][]string
+		wantErr string
+	}{
+		{
+			name: "optional component shipped with selected values",
+			refs: []ComponentRef{gpuOperatorRef, nvsentinelRef},
+			values: map[string]map[string]any{
+				"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator),
+				"nvsentinel":   serializer.DeepCopyAnyMap(nvsentinel),
+			},
+		},
+		{
+			name:   "optional component absent from output",
+			refs:   []ComponentRef{gpuOperatorRef},
+			values: map[string]map[string]any{"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator)},
+		},
+		{
+			name:   "optional component disabled in output",
+			refs:   []ComponentRef{gpuOperatorRef, disabledNVSentinel},
+			values: map[string]map[string]any{"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator)},
+		},
+		{
+			name: "optional component shipped with diverged value",
+			refs: []ComponentRef{gpuOperatorRef, nvsentinelRef},
+			values: map[string]map[string]any{
+				"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator),
+				"nvsentinel":   divergedNVSentinel,
+			},
+			wantErr: "nvsentinel.labeler.assumeDriverInstalled diverged",
+		},
+		{
+			name: "optional component shipped with intersecting dynamic path",
+			refs: []ComponentRef{gpuOperatorRef, nvsentinelRef},
+			values: map[string]map[string]any{
+				"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator),
+				"nvsentinel":   serializer.DeepCopyAnyMap(nvsentinel),
+			},
+			dynamic: map[string][]string{"nvsentinel": {"labeler"}},
+			wantErr: "intersects profile-owned",
+		},
+		{
+			name:    "presence-owned component still required",
+			refs:    []ComponentRef{nvsentinelRef},
+			values:  map[string]map[string]any{"nvsentinel": serializer.DeepCopyAnyMap(nvsentinel)},
+			wantErr: `profile-owned component "gpu-operator" is absent or disabled`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := result.ValidateProfileLock(ctx, tt.refs, tt.values, tt.dynamic)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateProfileLock() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateProfileLock() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	// A bundle's emitted recipe no longer carries the omitted optional
+	// component; the artifact gate and a re-bundle must still accept it.
+	t.Run("baseline without optional component", func(t *testing.T) {
+		emitted := *result
+		emitted.ComponentRefs = []ComponentRef{gpuOperatorRef}
+		if err := emitted.ValidateProfileValuesWithContext(ctx); err != nil {
+			t.Fatalf("ValidateProfileValuesWithContext() error = %v", err)
+		}
+		err := emitted.ValidateProfileLock(ctx, []ComponentRef{gpuOperatorRef},
+			map[string]map[string]any{"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator)}, nil)
+		if err != nil {
+			t.Fatalf("ValidateProfileLock() error = %v", err)
+		}
+	})
 }
 
 type readCountingProvider struct {

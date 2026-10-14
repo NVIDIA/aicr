@@ -299,29 +299,34 @@ func TestNVSentinelReferencedInEveryProfileValue(t *testing.T) {
 	}
 }
 
-// TestNVSentinelPresenceLockedOnProfiledFamilies pins the presence half of
-// the ownership contract.
+// TestNVSentinelPresenceOnProfiledFamilies pins the presence half of the
+// ownership contract.
 //
 // Naming a component in a profile declaration locks more than the leaf paths
-// it assigns: the declaration-wide synthetic "enabled" marker is added for
-// every referenced component, and ValidateProfileLock then rejects any output
-// where that component is absent or disabled. Configuring NVSentinel from the
-// profile therefore also makes it mandatory on AKS and GKE-COS —
-// `--set nv-sentinel:enabled=false` and an API `bundlers=` list omitting it
-// both fail closed.
+// it assigns: unless the reference is optional, the declaration-wide
+// synthetic "enabled" marker is added, and ValidateProfileLock then rejects
+// any output where that component is absent or disabled.
 //
-// That is the intended result, not a side effect: NVSentinel is required for
-// these deployments (#2181). The test exists so the contract is visible and
-// any future relaxation is a deliberate edit.
-func TestNVSentinelPresenceLockedOnProfiledFamilies(t *testing.T) {
+// AKS keeps NVSentinel mandatory (#2181), so `--set nv-sentinel:enabled=false`
+// and an API `bundlers=` list omitting it both fail closed there. The GKE-COS
+// and OKE gpuStack profiles reference it as optional (#2978), so the same
+// omission passes. Either outcome changing must be a deliberate edit.
+func TestNVSentinelPresenceOnProfiledFamilies(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		criteria *Criteria
+		name          string
+		criteria      *Criteria
+		presenceOwned bool
 	}{
-		{name: "aks default", criteria: aksCriteria()},
+		{name: "aks default", criteria: aksCriteria(), presenceOwned: true},
 		{name: "gke-cos default", criteria: gkeCriteria()},
+		{name: "oke default", criteria: &Criteria{
+			Service:     CriteriaServiceOKE,
+			Accelerator: CriteriaAcceleratorA100,
+			OS:          CriteriaOSOracleLinux,
+			Intent:      CriteriaIntentTraining,
+		}},
 	}
 
 	for _, tt := range tests {
@@ -338,9 +343,9 @@ func TestNVSentinelPresenceLockedOnProfiledFamilies(t *testing.T) {
 			if !ok {
 				t.Fatal("gpuStack does not own nvsentinel")
 			}
-			if !slices.Contains(owned, "enabled") {
-				t.Fatalf("nvsentinel ownedPaths = %v, want the synthetic presence marker %q",
-					owned, "enabled")
+			if got := slices.Contains(owned, "enabled"); got != tt.presenceOwned {
+				t.Fatalf("nvsentinel ownedPaths = %v, presence owned = %v, want %v",
+					owned, got, tt.presenceOwned)
 			}
 
 			hydrate := func() map[string]map[string]any {
@@ -375,6 +380,12 @@ func TestNVSentinelPresenceLockedOnProfiledFamilies(t *testing.T) {
 				t.Fatal("nvsentinel is not present in the resolved componentRefs")
 			}
 			lockErr := result.ValidateProfileLock(ctx, kept, hydrate(), nil)
+			if !tt.presenceOwned {
+				if lockErr != nil {
+					t.Fatalf("ValidateProfileLock() rejected omitting optional nvsentinel: %v", lockErr)
+				}
+				return
+			}
 			if lockErr == nil || !strings.Contains(lockErr.Error(), "absent or disabled") {
 				t.Fatalf("ValidateProfileLock() error = %v, want nvsentinel absent-or-disabled rejection", lockErr)
 			}
@@ -416,7 +427,7 @@ func TestOKENVSentinelValueIsProfileOwned(t *testing.T) {
 	}
 	owned := selected.OwnedPaths[nvsentinelComponent]
 	wantOwned := []string{
-		"enabled", "janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
+		"janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
 		"janitor.config.controllers.gpuReset.serviceManager.name",
 		"janitor.config.controllers.gpuReset.serviceManager.spec.apps",
 		"janitor.config.controllers.gpuReset.serviceManager.spec.namespace",
