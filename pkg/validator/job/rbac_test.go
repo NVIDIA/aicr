@@ -498,6 +498,7 @@ func TestVerifyServiceAccountFailsClosed(t *testing.T) {
 		getErr      error
 		reviewErr   error
 		denyReason  string
+		evalError   string
 		wantCode    errors.ErrorCode
 		wantMessage string
 	}{
@@ -546,6 +547,12 @@ func TestVerifyServiceAccountFailsClosed(t *testing.T) {
 			wantCode:  errors.ErrCodeInternal,
 		},
 		{
+			name:        "authorizer errors while denying",
+			evalError:   "webhook authorizer timed out",
+			wantCode:    errors.ErrCodeUnauthorized,
+			wantMessage: "authorizer error: webhook authorizer timed out",
+		},
+		{
 			name:        "review denies",
 			denyReason:  "no RBAC policy matched",
 			wantCode:    errors.ErrCodeUnauthorized,
@@ -568,6 +575,7 @@ func TestVerifyServiceAccountFailsClosed(t *testing.T) {
 				review := action.(clienttesting.CreateAction).GetObject().(*authorizationv1.SubjectAccessReview)
 				review.Status.Allowed = false
 				review.Status.Reason = tt.denyReason
+				review.Status.EvaluationError = tt.evalError
 				return true, review, nil
 			})
 

@@ -246,11 +246,17 @@ func VerifyServiceAccount(ctx context.Context, clientset kubernetes.Interface, n
 			fmt.Sprintf("failed to review the permissions of ServiceAccount %q in namespace %q", name, namespace), err)
 	}
 	if !result.Status.Allowed {
-		msg := fmt.Sprintf("ServiceAccount %q in namespace %q is not bound to cluster-admin, which validators require. "+
-			"Bind it with: kubectl create clusterrolebinding <name> --clusterrole=%s --serviceaccount=%s:%s",
+		msg := fmt.Sprintf("ServiceAccount %q in namespace %q is not granted \"*\" for every verb, API group and resource "+
+			"cluster-wide, which validators require. Bind it with: "+
+			"kubectl create clusterrolebinding <name> --clusterrole=%s --serviceaccount=%s:%s",
 			name, namespace, clusterAdminRole, namespace, name)
 		if result.Status.Reason != "" {
 			msg += " (apiserver: " + result.Status.Reason + ")"
+		}
+		// An authorizer that errors also answers Allowed=false, often with
+		// no Reason; without this the message would blame a missing binding.
+		if result.Status.EvaluationError != "" {
+			msg += " (authorizer error: " + result.Status.EvaluationError + ")"
 		}
 		return errors.New(errors.ErrCodeUnauthorized, msg)
 	}
