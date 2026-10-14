@@ -48,6 +48,10 @@ const (
 	// permissions to a named ServiceAccount and applies none of them. No
 	// cluster is contacted and no snapshot is taken.
 	flagAddRolesToSA = "add-roles-to-service-account"
+
+	// flagValidatorSA names the existing ServiceAccount `aicr validate` runs
+	// its validator Jobs as, in place of per-run RBAC.
+	flagValidatorSA = "validator-service-account-name"
 )
 
 // criteriaAny is the wildcard value for any criteria dimension.

@@ -248,6 +248,7 @@ flag    aicr validate  --skip-check  type=string default= required=false hidden=
 flag    aicr validate  --snapshot,-s  type=string default= required=false hidden=false env=
 flag    aicr validate  --timeout  type=duration default=5m0s required=false hidden=false env=
 flag    aicr validate  --toleration  type=string default= required=false hidden=false env=
+flag    aicr validate  --validator-service-account-name  type=string default= required=false hidden=false env=
 flag    aicr validate  --yes,--assume-yes  type=bool default=false required=false hidden=false env=AICR_ASSUME_YES
 flag    aicr verify  --certificate-identity-regexp  type=string default= required=false hidden=false env=
 flag    aicr verify  --cli-version-constraint  type=string default= required=false hidden=false env=
