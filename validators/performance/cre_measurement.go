@@ -322,8 +322,20 @@ func listMaxBusBandwidth(ctx context.Context, client dynamic.Interface, namespac
 		results, _, _ := unstructured.NestedSlice(obj.Object, "status", "results")
 		bw, err := maxBusBandwidthGBps(results)
 		if err != nil {
-			slog.Debug("skipping BandwidthMeasurement without results", "name", obj.GetName(), "error", err)
-			continue
+			// Absence is a skip; corruption is not. A sweep can legitimately
+			// finish with nothing in status.results, so NotFound means this
+			// measurement contributes no reading and the others still can.
+			// A busBW CRE did write that will not parse, or is not finite, is
+			// a different thing: dropping it silently lowers the max, and with
+			// a single measurement it resurfaces as a bare NotFound that names
+			// neither the measurement nor the value that was rejected.
+			if stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+				slog.Debug("skipping BandwidthMeasurement without results", "name", obj.GetName(), "error", err)
+				continue
+			}
+			return 0, aicrErrors.WrapWithContext(creErrorCode(err),
+				"BandwidthMeasurement "+obj.GetName()+" carries an unusable busBW", err,
+				map[string]any{"measurement": obj.GetName()})
 		}
 		if !found || bw > maxBW {
 			maxBW = bw

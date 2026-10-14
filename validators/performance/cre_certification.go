@@ -62,6 +62,14 @@ const (
 	creLabelCertification = creAPIGroup + "/certification"
 	creLabelWorkflow      = creAPIGroup + "/workflow"
 	creLabelJob           = creAPIGroup + "/job"
+
+	// Stamped on every Certification AICR submits, because the names carry a
+	// nonce and nothing else identifies them. A validator pod that dies
+	// mid-run (eviction, OOM kill, Job deleted under it) never runs its
+	// deferred teardown — validators do not handle SIGTERM — and without this
+	// label no later run could find what it left holding the GPUs.
+	creLabelManagedBy = "app.kubernetes.io/managed-by"
+	creManagedByAICR  = "aicr-validator"
 )
 
 var (
@@ -147,6 +155,9 @@ func buildCRECertification(
 			keyMetadata: map[string]any{
 				keyName:      name,
 				keyNamespace: namespace,
+				keyLabels: map[string]any{
+					creLabelManagedBy: creManagedByAICR,
+				},
 			},
 			keySpec: spec,
 		},
@@ -410,6 +421,53 @@ func deleteCRECertification(ctx context.Context, client dynamic.Interface, names
 	delCtx, cancel := context.WithTimeout(ctx, defaults.CRECertificationDeleteTimeout)
 	defer cancel()
 	return deleteCREResourceWithin(delCtx, client, certificationGVR, "Certification", namespace, name)
+}
+
+// reclaimStaleCRECertifications tears down Certifications an earlier run left
+// behind, and is what makes the creLabelManagedBy stamp worth having.
+//
+// Only those older than defaults.CREOrphanReclaimAge are touched. A live run
+// cannot have one that old — the age exceeds the whole serial path it is
+// allowed, Certification wait plus measurement finalize plus teardown — so the
+// bound is what keeps a concurrent validator in the same namespace from having
+// its run deleted out from under it. The cost of waiting that long is bounded
+// too: until the orphan is reclaimed its TrainJobs hold the qualified nodes,
+// and the next run selects those same nodes and fails on its own timeout.
+//
+// Failure to reclaim is returned rather than logged. The nodes the caller is
+// about to ask for are the ones being held.
+func reclaimStaleCRECertifications(
+	ctx context.Context,
+	client dynamic.Interface,
+	clientset kubernetes.Interface,
+	namespace string,
+) error {
+
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	certs, err := client.Resource(certificationGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{
+		LabelSelector: creLabelManagedBy + "=" + creManagedByAICR,
+	})
+	cancel()
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			"failed to list CRE Certifications left by earlier runs", err)
+	}
+
+	for i := range certs.Items {
+		name := certs.Items[i].GetName()
+		created := certs.Items[i].GetCreationTimestamp().Time
+		if age := time.Since(created); age < defaults.CREOrphanReclaimAge {
+			slog.Debug("leaving a recent CRE Certification alone; it may belong to a live run",
+				"certification", name, "age", age.String())
+			continue
+		}
+		slog.Warn("reclaiming a CRE Certification left by an earlier run",
+			"certification", name, "namespace", namespace, "created", created.Format(time.RFC3339))
+		if err := teardownCRECertification(ctx, client, clientset, namespace, name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // deleteCREResourceWithin removes a CRE object under the caller's deadline so a

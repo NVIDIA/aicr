@@ -86,8 +86,9 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	if deleteErr := deleteCRECertification(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, objName); deleteErr != nil {
-		return deleteErr
+	if reclaimErr := reclaimStaleCRECertifications(
+		ctx.Ctx, ctx.DynamicClient, ctx.Clientset, ctx.Namespace); reclaimErr != nil {
+		return reclaimErr
 	}
 	defer func() {
 		err = creCleanupFailure(checkNameCRETrainingGoodput, err, teardownCRECertification(

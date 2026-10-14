@@ -945,7 +945,11 @@ CR on an explicitly named set of nodes, wait with a timeout, and tear it down on
 success or failure — deleting the CR and then confirming the `TrainJob`s and
 workload pods it started are gone, since CRE's controller drops its finalizer
 without waiting for them. An unconfirmed teardown fails the check rather than
-warning, because surviving work still holds the GPUs. The catalog timeout
+warning, because surviving work still holds the GPUs. Teardown only runs if the
+validator pod lives to run it, so each `Certification` is stamped
+`app.kubernetes.io/managed-by=aicr-validator` and the next run reclaims any
+older than `CREOrphanReclaimAge` — the sum of every phase a live run is allowed,
+which is what keeps the sweep from deleting a concurrent validator's run. The catalog timeout
 budgets that whole serial path — Certification wait, measurement finalize, then
 teardown — because the Job's `activeDeadlineSeconds` is the catalog timeout plus
 only `ValidatorJobDeadlineHeadroom`, and a pod killed partway through teardown

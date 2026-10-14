@@ -27,6 +27,7 @@ const (
 	keyAPIVersion               = "apiVersion"
 	keyKind                     = "kind"
 	keyMetadata                 = "metadata"
+	keyLabels                   = "labels"
 	keyNamespace                = "namespace"
 	keySpec                     = "spec"
 	keyValue                    = "value"

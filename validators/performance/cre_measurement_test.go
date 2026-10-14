@@ -28,6 +28,8 @@ import (
 	"k8s.io/client-go/dynamic/fake"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 const creTestWorkflow = "aicr-cre-nccl-abcd1234-workflow"
@@ -219,6 +221,76 @@ func TestListMaxBusBandwidth(t *testing.T) {
 			}
 			if !tt.wantErr && got != tt.want {
 				t.Errorf("busBW = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestListMaxBusBandwidthRejectsCorruptBusBW separates absence from
+// corruption. An empty sweep is a skip (covered above); a busBW CRE wrote that
+// will not parse, or is not finite, has to reach the caller naming the value —
+// dropped silently it either lowers the peak or, with one measurement,
+// resurfaces as a NotFound that explains nothing.
+func TestListMaxBusBandwidthRejectsCorruptBusBW(t *testing.T) {
+	createdAt := metav1.NewTime(time.Now())
+
+	tests := []struct {
+		name         string
+		objects      []runtime.Object
+		wantMentions string
+	}{
+		{
+			name: "non-finite busBW, sole measurement",
+			objects: []runtime.Object{
+				creMeasurement("BandwidthMeasurement", "m-nan", creTestWorkflow, time.Minute,
+					final(busBWStatus("nan"))),
+			},
+			wantMentions: "busBW is not a finite number",
+		},
+		{
+			name: "non-finite busBW alongside a good one",
+			objects: []runtime.Object{
+				creMeasurement("BandwidthMeasurement", "m-nan", creTestWorkflow, time.Minute,
+					final(busBWStatus("nan"))),
+				creMeasurement("BandwidthMeasurement", "m-ours", creTestWorkflow, time.Minute,
+					final(busBWStatus("300"))),
+			},
+			wantMentions: "m-nan",
+		},
+		{
+			name: "unparseable busBW",
+			objects: []runtime.Object{
+				creMeasurement("BandwidthMeasurement", "m-junk", creTestWorkflow, time.Minute,
+					final(busBWStatus("not-a-number"))),
+			},
+			wantMentions: "not-a-number",
+		},
+		{
+			name: "unsupported busBW type",
+			objects: []runtime.Object{
+				creMeasurement("BandwidthMeasurement", "m-bool", creTestWorkflow, time.Minute,
+					final(busBWStatus(true))),
+			},
+			wantMentions: "unsupported busBW type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewSimpleDynamicClientWithCustomListKinds(
+				runtime.NewScheme(), creMeasurementListKinds(), tt.objects...)
+
+			_, err := listMaxBusBandwidth(creMeasurementCtx(t), client, creTestNamespace, creTestWorkflow, createdAt)
+			if err == nil {
+				t.Fatal("listMaxBusBandwidth() = nil, want the corrupt value rejected")
+			}
+			// InvalidRequest, not NotFound: the runner logs at Info, so a
+			// skipped measurement's reason never reaches the operator.
+			if got := errorstest.ReportedCode(err); got != errors.ErrCodeInvalidRequest {
+				t.Errorf("reported code = %v, want ErrCodeInvalidRequest", got)
+			}
+			if !strings.Contains(err.Error(), tt.wantMentions) {
+				t.Errorf("error = %q, want it to name %q", err.Error(), tt.wantMentions)
 			}
 		})
 	}

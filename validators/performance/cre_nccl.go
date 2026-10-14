@@ -84,8 +84,8 @@ func validateCRENcclAllReduceBw(
 		return "", false, err
 	}
 
-	if deleteErr := deleteCRECertification(ctx.Ctx, dyn, ctx.Namespace, objName); deleteErr != nil {
-		return "", false, deleteErr
+	if reclaimErr := reclaimStaleCRECertifications(ctx.Ctx, dyn, ctx.Clientset, ctx.Namespace); reclaimErr != nil {
+		return "", false, reclaimErr
 	}
 
 	defer func() {

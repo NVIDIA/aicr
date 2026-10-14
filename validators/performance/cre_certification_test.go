@@ -65,6 +65,60 @@ func creLabeled(apiVersion, kind, name, labelKey, labelValue string) *unstructur
 	}
 }
 
+// TestReclaimStaleCRECertifications covers the sweep that makes an
+// interrupted run's Certification recoverable. The age bound is the whole
+// point: without it the sweep would delete a concurrent validator's live run,
+// so a young Certification must survive even though it carries the label.
+func TestReclaimStaleCRECertifications(t *testing.T) {
+	const ns = creTestNamespace
+	creAPI := creAPIGroup + "/" + versionV1alpha1
+
+	aged := func(name string, age time.Duration) *unstructured.Unstructured {
+		obj := creLabeled(creAPI, "Certification", name, creLabelManagedBy, creManagedByAICR)
+		obj.SetCreationTimestamp(metav1.NewTime(time.Now().Add(-age)))
+		return obj
+	}
+	unlabelled := creLabeled(creAPI, "Certification", "someone-elses", "example.com/owner", "other")
+	unlabelled.SetCreationTimestamp(metav1.NewTime(time.Now().Add(-24 * time.Hour)))
+
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(),
+		aged("orphan", defaults.CREOrphanReclaimAge+time.Minute),
+		aged("live-run", time.Minute),
+		unlabelled,
+	)
+
+	if err := reclaimStaleCRECertifications(
+		context.Background(), client, k8sfake.NewSimpleClientset(), ns); err != nil {
+		t.Fatalf("reclaimStaleCRECertifications() error = %v", err)
+	}
+
+	for name, wantGone := range map[string]bool{
+		"orphan":        true,
+		"live-run":      false,
+		"someone-elses": false,
+	} {
+		_, err := client.Resource(certificationGVR).Namespace(ns).Get(
+			context.Background(), name, metav1.GetOptions{})
+		if gone := apierrors.IsNotFound(err); gone != wantGone {
+			t.Errorf("Certification %q gone = %v, want %v (err = %v)", name, gone, wantGone, err)
+		}
+	}
+}
+
+// TestBuildCRECertificationIsDiscoverable pins the label the sweep selects on.
+// Certification names carry a nonce, so this stamp is the only thing that
+// makes one findable after the run that created it is gone.
+func TestBuildCRECertificationIsDiscoverable(t *testing.T) {
+	obj, err := buildCRECertification(creTestNamespace, "aicr-cre-nccl-abcd1234", twoNodeGPUConfig(),
+		creCatalogEntry{Domain: creNCCLDomain, Variant: creNCCLVariant, MaxNodes: 2})
+	if err != nil {
+		t.Fatalf("buildCRECertification() error = %v", err)
+	}
+	if got := obj.GetLabels()[creLabelManagedBy]; got != creManagedByAICR {
+		t.Errorf("label %s = %q, want %q", creLabelManagedBy, got, creManagedByAICR)
+	}
+}
+
 func twoNodeGPUConfig() *gpuConfiguration {
 	return &gpuConfiguration{
 		WorkerCount:     2,
