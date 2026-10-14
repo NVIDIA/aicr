@@ -650,6 +650,7 @@ func TestStability_Config(t *testing.T) {
 	requireType[*bool](aicr.ValidateSettings{}.FailFast)
 	requireType[*time.Duration](aicr.ValidateSettings{}.Timeout)
 	requireType[bool](aicr.ValidateSettings{}.Cleanup)
+	requireType[string](aicr.ValidateSettings{}.ValidatorServiceAccountName)
 
 	var vi aicr.ValidateInputOptions
 	_ = vi.RecipePath
