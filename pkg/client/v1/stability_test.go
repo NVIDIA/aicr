@@ -346,6 +346,7 @@ func TestStability_Validate(t *testing.T) {
 
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, ...aicr.ValidateOption) ([]*aicr.PhaseResult, error)]((*aicr.Client).ValidateState)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, ...aicr.ValidateOption) error]((*aicr.Client).PreflightSkipChecks)
+	requireSignature[func(*aicr.Client, context.Context, ...aicr.ValidateOption) error]((*aicr.Client).PreflightValidatorServiceAccount)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationKubeconfig)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationNamespace)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationRunID)
@@ -361,6 +362,7 @@ func TestStability_Validate(t *testing.T) {
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationImageTagOverride)
 	requireSignature[func(bool) aicr.ValidateOption](aicr.WithValidationFailFast)
 	requireSignature[func(...string) aicr.ValidateOption](aicr.WithValidationSkipChecks)
+	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidatorServiceAccountName)
 
 	_ = []aicr.ValidateOption{
 		aicr.WithValidationKubeconfig("/path/to/kubeconfig"),
@@ -378,6 +380,7 @@ func TestStability_Validate(t *testing.T) {
 		aicr.WithValidationImageTagOverride("tag"),
 		aicr.WithValidationFailFast(true),
 		aicr.WithValidationSkipChecks("gpu-operator-health"),
+		aicr.WithValidatorServiceAccountName("aicr-validator"),
 	}
 }
 
@@ -635,6 +638,7 @@ func TestStability_Config(t *testing.T) {
 	_ = vs.ImagePullSecrets
 	_ = vs.JobName
 	_ = vs.ServiceAccountName
+	_ = vs.ValidatorServiceAccountName
 	_ = vs.NodeSelector
 	_ = vs.Tolerations
 	_ = vs.RequireGPU
@@ -646,6 +650,7 @@ func TestStability_Config(t *testing.T) {
 	requireType[*bool](aicr.ValidateSettings{}.FailFast)
 	requireType[*time.Duration](aicr.ValidateSettings{}.Timeout)
 	requireType[bool](aicr.ValidateSettings{}.Cleanup)
+	requireType[string](aicr.ValidateSettings{}.ValidatorServiceAccountName)
 
 	var vi aicr.ValidateInputOptions
 	_ = vi.RecipePath
