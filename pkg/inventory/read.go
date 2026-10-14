@@ -143,9 +143,11 @@ type Result struct {
 	Versions map[string]string
 
 	// Unproven names, per component, the records that left it unversioned.
-	// That is every record that placed it without establishing a version,
-	// whenever the component reads unversioned. A component unversioned only
-	// by records that were read, such as a failed Helm release, has no entry.
+	// Those are the install chosen for it, when that record could not
+	// establish a version, and every unplaced Application matched to it. An
+	// unproven record passed over for an install elsewhere is not named. A
+	// component unversioned only by records that were read, such as a failed
+	// Helm release, has no entry.
 	Unproven map[string][]UnprovenRecord
 
 	// Source is what was read and what was skipped.
@@ -503,25 +505,29 @@ func installedVersions(d Deployer, comps []Component, records []installedRelease
 
 			continue
 		}
-		record, err := resolveInstall(comps[i], found)
+		chosen, err := resolveInstall(comps[i], found)
 		if err != nil {
 			return mapping{}, err
 		}
-		version := versionFor(record, comps[i])
+		version := versionFor(found[chosen], comps[i])
 		out.versions[comps[i].Name] = version
-		if unproven := unprovenOf(found); version == "" && len(unproven) > 0 {
-			out.markUnproven(comps[i].Name, unproven)
+		if named := unversionedBy(found, chosen); version == "" && len(named) > 0 {
+			out.markUnproven(comps[i].Name, named)
 		}
 	}
 
 	return out, nil
 }
 
-// unprovenOf is the records that cannot establish a version, in reader order.
-func unprovenOf(records []installedRelease) []installedRelease {
+// unversionedBy is the records to name, in reader order, on a component the
+// install at chosen left unversioned. Those are that install when it is
+// unproven, and every unplaced Application. Any other unproven record was
+// passed over by resolveInstall and did not decide the row, so naming it would
+// blame an install the comparison never used.
+func unversionedBy(records []installedRelease, chosen int) []installedRelease {
 	var out []installedRelease
-	for _, record := range records {
-		if record.Unproven {
+	for i, record := range records {
+		if (i == chosen && record.Unproven) || record.UnprovenReason == UnprovenUnplaced {
 			out = append(out, record)
 		}
 	}
@@ -568,7 +574,8 @@ func allUnproven(records []installedRelease) bool {
 	return true
 }
 
-// resolveInstall picks the one record that is this component's install.
+// resolveInstall picks the one record that is this component's install and
+// returns its index in records.
 //
 // A release name is unique within a namespace and not across the cluster, so
 // two tenants can hold the same chart at different versions while the version
@@ -590,23 +597,23 @@ func allUnproven(records []installedRelease) bool {
 // namespace, so that shape is two installs in one namespace; repeating the
 // namespace per record would assert a conflict that does not exist and hide
 // the names that are the actual discriminator.
-func resolveInstall(c Component, records []installedRelease) (installedRelease, error) {
+func resolveInstall(c Component, records []installedRelease) (int, error) {
 	if len(records) == 1 {
-		return records[0], nil
+		return 0, nil
 	}
 
-	var expected []installedRelease
+	var expected []int
 	names := make([]string, 0, len(records))
 	seen := make(map[string]struct{}, len(records))
 	namespaces := make([]string, 0, len(records))
-	for _, record := range records {
+	for i, record := range records {
 		names = append(names, record.Name)
 		if _, duplicate := seen[record.Namespace]; !duplicate {
 			seen[record.Namespace] = struct{}{}
 			namespaces = append(namespaces, record.Namespace)
 		}
 		if slices.Contains(c.namespaces(), record.installNamespace()) {
-			expected = append(expected, record)
+			expected = append(expected, i)
 		}
 	}
 	if len(expected) == 1 {
@@ -618,7 +625,7 @@ func resolveInstall(c Component, records []installedRelease) (installedRelease, 
 	// len(records) is always above one here, so the plural never has to be
 	// conditioned; the namespaces are listed rather than counted for the same
 	// reason in reverse.
-	return installedRelease{}, errors.NewWithContext(errors.ErrCodeConflict,
+	return -1, errors.NewWithContext(errors.ErrCodeConflict,
 		fmt.Sprintf("component %q resolves to %d installs (%s) in namespaces (%s), and %d of them are in the %q "+
 			"the registry declares, so which install to compare cannot be decided here",
 			c.Name, len(records), strings.Join(names, ", "), strings.Join(namespaces, ", "),

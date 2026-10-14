@@ -628,6 +628,18 @@ func TestInstalledVersions(t *testing.T) {
 			}},
 		},
 		{
+			name: "an unproven tenant passed over for a failed install is not named", deployer: DeployerHelm,
+			comps: comps,
+			records: []installedRelease{
+				{
+					Source: sourceHelm, Name: "gpu-operator", Namespace: "tenant-a",
+					Unproven: true, UnprovenReason: UnprovenDualDriver,
+				},
+				helmRec("gpu-operator", "nvidia-gpu-operator", "failed", "v25.3.3", nil),
+			},
+			want: map[string]string{"gpu-operator": ""},
+		},
+		{
 			// The reader already counted it as unreadable.
 			name: "an unreadable flux record matched loosely is not counted unplaced", deployer: DeployerFlux,
 			comps: comps,
