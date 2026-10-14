@@ -246,8 +246,11 @@ reported as no drift.
 // K8s.aks-gpu-pools.gpu-driver reading (a snapshot without it fails
 // closed). On OKE, OKEAddonsPath plays the same role from an
 // `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`
-// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading. On GKE,
-// GKEGPUPoolsPath plays the same role from a
+// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading. The same
+// dump supplies K8s.oke-addons.nvidia-network-operator, which OKE recipes
+// that deploy network-operator require to be absent, so resolving them from
+// a snapshot without it fails closed. On GKE, GKEGPUPoolsPath plays the same
+// role from a
 // `gcloud container node-pools list --cluster <cluster> --format=json`
 // dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
 // It's required only when resolving the GKE `bundle-installer` gpuStack
