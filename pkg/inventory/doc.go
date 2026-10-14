@@ -201,11 +201,10 @@
 //
 // ScanAtRisk is advisory and asks what an upgrade might destroy rather than
 // what is installed. Given the group/kind pairs the crossed transition records
-// name, it resolves each through a RESTMapper and lists its metadata
-// cluster-wide, never an object's spec. A list whose continue token expires
-// resumes from the apiserver's latest state, so objects changed in between
-// may be missed or included. A token that keeps expiring with no page served
-// fails the scan.
+// name, it resolves each through a RESTMapper and requests only its metadata,
+// cluster-wide. A list whose continue token expires resumes from the
+// apiserver's latest state, so objects changed in between may be missed or
+// included. A token that keeps expiring with no page served fails the scan.
 //
 // It reports every object carrying none of these ownership markers:
 //   - a nonblank argocd.argoproj.io/tracking-id annotation
