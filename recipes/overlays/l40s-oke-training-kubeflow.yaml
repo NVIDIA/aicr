@@ -45,12 +45,14 @@ spec:
       remediation: >-
         Oracle's NvidiaNetworkOperator cluster add-on is present on this
         cluster, but this recipe deploys AICR's network-operator component,
-        and two controllers would reconcile the same NicClusterPolicy. Remove
-        the add-on with `oci ce cluster disable-addon --cluster-id
-        <cluster-ocid> --addon-name NvidiaNetworkOperator
-        --is-remove-existing-add-on true`, then recapture the snapshot with
-        aicr snapshot --oke-addons <path to `oci ce cluster list-addons
-        --cluster-id <cluster-ocid> --all --output json` dump>.
+        and two controllers would reconcile the same NicClusterPolicy. If the
+        reading is addon-deleting, a removal is already in progress, so wait
+        for it to finish. Otherwise, remove the add-on with `oci ce cluster
+        disable-addon --cluster-id <cluster-ocid> --addon-name
+        NvidiaNetworkOperator --is-remove-existing-add-on true`. Once the
+        removal finishes, recapture the snapshot with aicr snapshot
+        --oke-addons <path to `oci ce cluster list-addons --cluster-id
+        <cluster-ocid> --all --output json` dump>.
 
   componentRefs: []
 
