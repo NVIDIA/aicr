@@ -1,0 +1,141 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runtime Kind test for the nvsentinel-slinky-drainer mixin (#2615).
+#
+# Composes nvsentinel-quarantine and nvsentinel-slinky-drainer onto the Kind
+# Slurm leaf, installs the drain path via the bundle's own install.sh, sends a
+# fatal GPU event into platform-connectors, and asserts the node is drained
+# through Slurm: cordon, DrainRequest, the slurmd pod kept while a simulated
+# job runs, then deleted, DrainComplete, and no other pod evicted. The render
+# tests prove node-drainer is configured for the plugin; only a live pipeline
+# proves the two agree on the DrainRequest. Not wired into `make qualify`: it
+# needs a Kind cluster.
+
+name: NVSentinel Slinky Drainer E2E
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'recipes/mixins/nvsentinel-slinky-drainer.yaml'
+      - 'recipes/mixins/nvsentinel-quarantine.yaml'
+      - 'recipes/mixins/nvsentinel-slurm-drain-monitor.yaml'
+      - 'recipes/registry.yaml'
+      - 'recipes/components/slinky-drainer/**'
+      - 'recipes/components/slinky-drainer-crds/**'
+      - 'recipes/components/nvsentinel/**'
+      - 'recipes/components/nvsentinel-mongodb/**'
+      - 'recipes/components/psmdb-operator/**'
+      # The tested leaf inherits h100-kind-training.yaml, then kind.yaml and
+      # base.yaml, where nvsentinel enters the chain.
+      - 'recipes/overlays/h100-kind-training-slurm.yaml'
+      - 'recipes/overlays/h100-kind-training.yaml'
+      - 'recipes/overlays/kind.yaml'
+      - 'recipes/overlays/base.yaml'
+      - 'recipes/components/cert-manager/**'
+      - 'recipes/components/prometheus-operator-crds/**'
+      - 'pkg/bundler/validations/nvsentinel_slurm_custom_drain.go'
+      - 'tests/e2e/nvsentinel-slinky-drainer/**'
+      - 'pkg/bundler/deployer/localformat/templates/**'
+      - 'tools/common'
+      - 'Makefile'
+      - '.github/workflows/nvsentinel-slinky-drainer-e2e.yaml'
+      - '.github/actions/setup-build-tools/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/load-versions/**'
+      - '.settings.yaml'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: NVSentinel Slinky Drainer E2E
+    runs-on: ubuntu-latest
+    # The script's bounded waits sum to ~74 minutes worst case (node Ready 2,
+    # worker 3, cert-manager 10, Percona datastore 15, plugin and nvsentinel
+    # rollout 15, event delivery 3, pipeline 6 polls of 4 plus a 45s hold,
+    # proto fetch 1), before kind create, go build and the installs.
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Prep Kind runner
+        uses: ./.github/actions/prep-kind-runner
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # run.sh's has_tools gate also needs jq and curl, which the runner image
+      # already ships.
+      - name: Install Kind, kubectl, Helm and yq
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kind: 'true'
+          kind_version: '${{ steps.versions.outputs.kind }}'
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+
+      # KEEP_CLUSTER so the cluster survives for the diagnostics below; the
+      # always() step after them does the teardown.
+      - name: Run nvsentinel-slinky-drainer e2e
+        env:
+          KEEP_CLUSTER: 'true'
+        run: make nvsentinel-slinky-drainer-e2e
+
+      # run.sh's kubeconfig lives in a mktemp dir it removes on exit, so
+      # re-export before querying. cancelled() because a job timeout cancels
+      # rather than fails.
+      - name: Collect diagnostics on failure
+        if: ${{ failure() || cancelled() }}
+        run: |
+          set +e
+          cluster=aicr-nvsentinel-slinky-drainer-e2e
+          export KUBECONFIG="${RUNNER_TEMP}/slinky-drainer-diag.kubeconfig"
+          kind export kubeconfig --name "$cluster" --kubeconfig "$KUBECONFIG" || exit 0
+          kubectl get pods -A
+          kubectl get node -o yaml
+          kubectl -n nvsentinel get drainrequests.nvsentinel.nvidia.com -o yaml
+          kubectl -n slurm get pods -o yaml
+          for d in fault-quarantine node-drainer slinky-drainer; do
+            kubectl -n nvsentinel logs "deployment/$d" --tail=200
+          done
+          kubectl -n nvsentinel logs daemonset/platform-connectors --tail=200
+
+      - name: Delete Kind cluster
+        if: ${{ always() }}
+        run: kind delete cluster --name aicr-nvsentinel-slinky-drainer-e2e || true

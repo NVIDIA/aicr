@@ -48,12 +48,15 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 
 | Name | Description | Timeout |
 |------|-------------|---------|
-| `nccl-all-reduce-bw` | Verify NCCL All Reduce Bus Bandwidth meets threshold | 30m |
+| `nccl-all-reduce-bw` | Verify NCCL All Reduce Bus Bandwidth meets threshold (TrainJob path) | 30m |
 | `nccl-all-reduce-bw-net` | Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | 30m |
 | `nccl-all-reduce-bw-nvls` | Verify NCCL All Reduce Bus Bandwidth on the NVLS transport (MNNVL across an NVL72 IMEX domain) | 30m |
 | `inference-perf` | Verify inference throughput and TTFT p99 meet thresholds using AIPerf | 65m |
+| `nccl-cre-all-reduce-bw` | NCCL bus bandwidth via a CRE `Certification` (opt-in). Qualified on EKS H100 — live UAT 2026-10-09 on the pinned CRE v0.6.0, 2× p5.48xlarge: 489.51 GB/s vs `>= 300`. | 50m |
+| `cre-training-goodput` | Training goodput via a CRE `Certification` (opt-in). No qualified combination: the `training/nemotron5-8b` entry does not run on the pinned CRE v0.6.0, so the check skips. | 50m |
 
-The NCCL checks derive applicability from the recipe's `criteria` by default;
+The TrainJob-path NCCL checks (`nccl-all-reduce-bw`, `-net`, `-nvls`) derive
+applicability from the recipe's `criteria` by default;
 a recipe outside the embedded service + accelerator matrix (e.g. registered
 via `--data`) opts in with the `nccl-benchmark-profile` performance constraint
 (borrow an embedded template — see
@@ -62,6 +65,9 @@ or, when its fabric matches no embedded template, with the
 `nccl-benchmark-runtime-ref` constraint (ship a Kubeflow `TrainingRuntime` as a
 `--data` file and reference it — see
 [Supplying a benchmark runtime for a private service](../../docs/user/validation.md#supplying-a-benchmark-runtime-for-a-private-service)).
+Neither constraint applies to `nccl-cre-all-reduce-bw` or
+`cre-training-goodput`, which build a CRE `Certification` instead of a
+`TrainJob` and are gated only by `creQualifiedEntries`.
 
 ### Conformance Phase
 

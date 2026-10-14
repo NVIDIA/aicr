@@ -763,6 +763,53 @@ const (
 	// bound instead of the much shorter DiagnosticTimeout used for the rest of
 	// createUnstructured's calls.
 	NCCLResourceRecreateWait = 5 * time.Minute
+
+	// CRECertificationTimeout is AICR's wait budget for a Cluster Readiness
+	// Engine Certification to reach Succeeded or Failed. The same duration is
+	// written on spec.timeoutPerJob, but that is a backstop against a job left
+	// running forever, not a deadline matched to this one: CRE starts the
+	// per-job clock when the workload is first observed running, and starts it
+	// over when a workload is replaced, while AICR's starts at creation. CRE's
+	// bound can therefore fire well after AICR gives up, which is why teardown
+	// confirms the workloads stopped rather than trusting it.
+	CRECertificationTimeout = 30 * time.Minute
+
+	// CRECertificationDeleteTimeout bounds the removal of the Certification
+	// object itself. The shorter DiagnosticTimeout would expire while the CR is
+	// still held by finalizers.
+	CRECertificationDeleteTimeout = 5 * time.Minute
+
+	// CRECertificationTeardownTimeout bounds the whole teardown: removing the
+	// Certification and then confirming the TrainJobs and GPU pods it started
+	// are gone. It must outlast CRE's own drain barrier, which waits up to five
+	// minutes for workload pods to exit and then proceeds regardless
+	// (podDrainGracePeriod in pkg/controller/pod_drain.go), plus the
+	// termination grace of the multi-node GPU pods left behind.
+	CRECertificationTeardownTimeout = 10 * time.Minute
+
+	// CREMeasurementFinalizeTimeout bounds the wait for CRE to finalize a
+	// BandwidthMeasurement or GoodputMeasurement after its Job succeeded.
+	// Certification success does not imply the measurement is final: CRE marks
+	// the Job Succeeded first and only then performs the final log read, which
+	// it retries for as long as the measurement's own measurementTimeout (5m by
+	// default, and never less than two minutes) before completing as
+	// LogsUnavailable. Sized to that retry window, because expiry here fails
+	// the check rather than falling back to the provisional results.
+	CREMeasurementFinalizeTimeout = 5 * time.Minute
+
+	// CREOrphanReclaimAge is how old an AICR-labeled Certification must be
+	// before a later run treats it as abandoned and tears it down. A validator
+	// pod killed mid-run never runs its deferred teardown, and the names carry
+	// a nonce, so the only way the GPUs come back is for a subsequent run to
+	// reclaim what it finds.
+	//
+	// The sum of every phase a live run is allowed, so nothing still in
+	// progress can reach this age. That matters because two validators can
+	// share a namespace, and a sweep that is merely "old enough" would delete
+	// a healthy concurrent run's Certification.
+	CREOrphanReclaimAge = CRECertificationTimeout +
+		CREMeasurementFinalizeTimeout +
+		CRECertificationTeardownTimeout
 )
 
 // Inference performance validation timeouts.
