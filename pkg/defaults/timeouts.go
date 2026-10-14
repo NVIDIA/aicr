@@ -1724,26 +1724,13 @@ const (
 )
 
 // AtRiskListPageSize caps how many objects one List pulls while scanning for
-// resources an upgrade could disturb. MetadataListResponseLimit is sized for a
-// page of this many objects.
+// resources an upgrade could disturb. A page carries only metadata, but an
+// object's annotations can hold 256 KiB, so a full page can reach 50 MiB.
 //
 // Nothing is retained across pages beyond the objects found at risk, which on
 // a healthy cluster is none, so the page bounds the peak as well as the
 // response.
 const AtRiskListPageSize int64 = 200
-
-// MetadataListResponseLimit caps the bytes one PartialObjectMetadataList
-// response may carry. An AtRiskListPageSize page at the 256 KiB annotation cap
-// is 50 MiB, which leaves room for labels and managed fields.
-const MetadataListResponseLimit int64 = 64 * 1024 * 1024 // 64 MiB
-
-// MetadataListRetries is how many times a metadata List is retried after a
-// dropped connection, waiting MetadataListRetryInterval before each retry.
-// Both values match client-go's rest.Request.Do for a GET.
-const (
-	MetadataListRetries       = 10
-	MetadataListRetryInterval = 1 * time.Second
-)
 
 // AtRiskScanTimeout bounds the whole advisory at-risk scan: one discovery
 // mapping and one paged cluster-wide List per affected kind. Shorter than

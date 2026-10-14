@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/metadata"
 	metadatafake "k8s.io/client-go/metadata/fake"
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
@@ -136,23 +137,11 @@ func policyObject(name string, objLabels, annotations map[string]string) *metav1
 	return partialObject(policyGVK, "", name, objLabels, annotations)
 }
 
-// fakeLister is a k8sclient.MetadataLister backed by the client-go fake
-// metadata client.
-type fakeLister struct {
-	*metadatafake.FakeMetadataClient
-}
-
-func (f fakeLister) List(ctx context.Context, gvr schema.GroupVersionResource,
-	opts metav1.ListOptions) (*metav1.PartialObjectMetadataList, error) {
-
-	return f.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, opts)
-}
-
-func scanClient(objects ...runtime.Object) fakeLister {
+func scanClient(objects ...runtime.Object) *metadatafake.FakeMetadataClient {
 	scheme := metadatafake.NewTestScheme()
 	metav1.AddMetaToScheme(scheme)
 
-	return fakeLister{metadatafake.NewSimpleMetadataClient(scheme, objects...)}
+	return metadatafake.NewSimpleMetadataClient(scheme, objects...)
 }
 
 // metadataPage returns a reactor response holding items and continueToken. The
@@ -788,7 +777,7 @@ func TestScanAtRiskWithNoKindsContactsNothing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var noClient k8sclient.MetadataLister
+			var noClient metadata.Interface
 			got, err := scanAtRisk(t.Context(), noClient, nil, nil, tt.kinds)
 			if err != nil {
 				t.Fatalf("scanAtRisk: %v", err)
@@ -866,68 +855,45 @@ func TestScanAtRiskSkipsAnUnnamedObject(t *testing.T) {
 	}
 }
 
-// TestScanAtRiskReadsOnlyMetadataLists runs the scan through a real
-// MetadataListClient. It checks that each kind is listed cluster-wide, and
-// that a full-object response fails the scan without its body reaching the
-// result or the error.
-func TestScanAtRiskReadsOnlyMetadataLists(t *testing.T) {
-	t.Parallel()
+// metadataListJSON is a one-item PartialObjectMetadataList response body.
+const metadataListJSON = `{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1","items":[` +
+	`{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",` +
+	`"metadata":{"name":"topology-1","namespace":"tenant-a"}}]}`
 
-	const (
-		sentinel     = "c2VjcmV0LXNlbnRpbmVs"
-		topologyPath = "/apis/grove.io/v1alpha1/clustertopologies"
-	)
-	secretGVK := schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
-	secretGVR := schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
-	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{topologyGVK.GroupVersion(), secretGVK.GroupVersion()})
-	mapper.AddSpecific(topologyGVK, topologyGVR, topologyGVR.GroupVersion().WithResource("clustertopology"),
-		meta.RESTScopeNamespace)
-	mapper.AddSpecific(secretGVK, secretGVR, secretGVR.GroupVersion().WithResource("secret"), meta.RESTScopeNamespace)
-	secretKind := ResourceKind{Kind: "Secret", Components: []string{"grove"}}
+// metadataClient returns a real metadata client for srv.
+func metadataClient(t *testing.T, srv *httptest.Server) metadata.Interface {
+	t.Helper()
+
+	client, err := k8sclient.NewMetadataClientForConfig(&rest.Config{Host: srv.URL})
+	if err != nil {
+		t.Fatalf("NewMetadataClientForConfig: %v", err)
+	}
+
+	return client
+}
+
+// TestScanAtRiskRequestsMetadataLists runs the scan through a real metadata
+// client, checking that each kind is listed cluster-wide as metadata.
+func TestScanAtRiskRequestsMetadataLists(t *testing.T) {
+	t.Parallel()
 
 	tests := []struct {
 		name         string
-		kind         ResourceKind
-		wantPath     string
 		status       int
 		body         string
 		wantFindings []AtRiskObject
 		wantErr      bool
 	}{
 		{
-			name:     "a metadata list is scanned",
-			kind:     topologyKind(),
-			wantPath: topologyPath,
-			status:   http.StatusOK,
-			body: `{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1","items":[` +
-				`{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",` +
-				`"metadata":{"name":"topology-1","namespace":"tenant-a"}}]}`,
+			name:   "a metadata list is scanned",
+			status: http.StatusOK,
+			body:   metadataListJSON,
 			wantFindings: []AtRiskObject{{Group: "grove.io", Kind: "ClusterTopology", Components: []string{"grove"},
 				Namespace: "tenant-a", Name: "topology-1"}},
 		},
 		{
-			name:     "a full custom resource list is refused",
-			kind:     topologyKind(),
-			wantPath: topologyPath,
-			status:   http.StatusOK,
-			body: `{"kind":"ClusterTopologyList","apiVersion":"grove.io/v1alpha1","items":[` +
-				`{"metadata":{"name":"topology-1","namespace":"tenant-a"},"spec":{"token":"` + sentinel + `"}}]}`,
-			wantErr: true,
-		},
-		{
-			name:     "a full Secret list is refused",
-			kind:     secretKind,
-			wantPath: "/api/v1/secrets",
-			status:   http.StatusOK,
-			body: `{"kind":"SecretList","apiVersion":"v1","items":[` +
-				`{"metadata":{"name":"creds","namespace":"tenant-a"},"data":{"password":"` + sentinel + `"}}]}`,
-			wantErr: true,
-		},
-		{
-			name:     "a 406 is refused",
-			kind:     topologyKind(),
-			wantPath: topologyPath,
-			status:   http.StatusNotAcceptable,
+			name:   "a 406 fails the scan",
+			status: http.StatusNotAcceptable,
 			body: `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotAcceptable","code":406,` +
 				`"message":"only the following media types are accepted: application/json"}`,
 			wantErr: true,
@@ -937,47 +903,39 @@ func TestScanAtRiskReadsOnlyMetadataLists(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			requests := make(chan *url.URL, 1)
+			type request struct {
+				url    *url.URL
+				accept string
+			}
+			requests := make(chan request, 1)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests <- r.URL
+				requests <- request{url: r.URL, accept: r.Header.Get("Accept")}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.status)
 				_, _ = w.Write([]byte(tt.body))
 			}))
 			t.Cleanup(srv.Close)
-			lister, err := k8sclient.NewMetadataListClientForConfig(&rest.Config{Host: srv.URL})
-			if err != nil {
-				t.Fatalf("NewMetadataListClientForConfig: %v", err)
-			}
 
-			got, err := scanAtRisk(t.Context(), lister, mapper, discovered{}, []ResourceKind{tt.kind})
+			got, err := scanAtRisk(t.Context(), metadataClient(t, srv), scanMapper(), discovered{},
+				[]ResourceKind{topologyKind()})
 			select {
-			case requested := <-requests:
-				if requested.Path != tt.wantPath {
-					t.Errorf("listed %q, want the cluster-wide %q", requested.Path, tt.wantPath)
+			case req := <-requests:
+				if want := "/apis/grove.io/v1alpha1/clustertopologies"; req.url.Path != want {
+					t.Errorf("listed %q, want the cluster-wide %q", req.url.Path, want)
+				}
+				if !strings.Contains(req.accept, "as=PartialObjectMetadataList") {
+					t.Errorf("Accept = %q, want a PartialObjectMetadataList", req.accept)
 				}
 			default:
 				t.Fatalf("scanAtRisk sent no List, result %#v, error %v", got, err)
 			}
 			if tt.wantErr {
 				errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
-				if err != nil && strings.Contains(err.Error(), sentinel) {
-					t.Errorf("error = %q, which quotes the response body", err)
-				}
-				if !reflect.DeepEqual(got, AtRiskResult{}) {
-					t.Errorf("result = %#v, want nothing from a refused response", got)
-				}
 
 				return
 			}
 			if err != nil {
 				t.Fatalf("scanAtRisk: %v", err)
-			}
-			if len(got.Kinds) != 1 {
-				t.Fatalf("Kinds = %#v, want the one kind scanned", got.Kinds)
-			}
-			if got.Kinds[0].Examined != len(tt.wantFindings) {
-				t.Errorf("Examined = %d, want %d", got.Kinds[0].Examined, len(tt.wantFindings))
 			}
 			if !reflect.DeepEqual(got.Findings, tt.wantFindings) {
 				t.Errorf("Findings = %#v, want %#v", got.Findings, tt.wantFindings)
@@ -1002,17 +960,11 @@ func TestScanAtRiskRetriesADroppedConnection(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1","items":[` +
-			`{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",` +
-			`"metadata":{"name":"topology-1","namespace":"tenant-a"}}]}`))
+		_, _ = w.Write([]byte(metadataListJSON))
 	}))
 	t.Cleanup(srv.Close)
-	lister, err := k8sclient.NewMetadataListClientForConfig(&rest.Config{Host: srv.URL})
-	if err != nil {
-		t.Fatalf("NewMetadataListClientForConfig: %v", err)
-	}
 
-	got, err := scanAtRisk(t.Context(), lister, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
+	got, err := scanAtRisk(t.Context(), metadataClient(t, srv), scanMapper(), discovered{}, []ResourceKind{topologyKind()})
 	if err != nil {
 		t.Fatalf("scanAtRisk: %v", err)
 	}

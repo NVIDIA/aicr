@@ -202,8 +202,7 @@
 // ScanAtRisk is advisory and asks what an upgrade might destroy rather than
 // what is installed. Given the group/kind pairs the crossed transition records
 // name, it resolves each through a RESTMapper and lists its metadata
-// cluster-wide. The scan requests only metadata, and a response that is not a
-// meta.k8s.io/v1 PartialObjectMetadataList, a 406 included, fails the scan.
+// cluster-wide, never an object's spec.
 //
 // It reports every object carrying none of these ownership markers:
 //   - a nonblank argocd.argoproj.io/tracking-id annotation

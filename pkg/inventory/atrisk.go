@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/metadata"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -126,7 +127,7 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 	if err != nil {
 		return AtRiskResult{}, err
 	}
-	lister, err := k8sclient.NewMetadataListClientForConfig(restConfig)
+	metaClient, err := k8sclient.NewMetadataClientForConfig(restConfig)
 	if err != nil {
 		return AtRiskResult{}, err
 	}
@@ -135,12 +136,12 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 		return AtRiskResult{}, err
 	}
 
-	return scanAtRisk(ctx, lister, mapper, groups, opts.Kinds)
+	return scanAtRisk(ctx, metaClient, mapper, groups, opts.Kinds)
 }
 
 // scanAtRisk is ScanAtRisk with the client, the mapper and the discovery the
 // mapper resolves through supplied.
-func scanAtRisk(ctx context.Context, client k8sclient.MetadataLister, mapper meta.RESTMapper,
+func scanAtRisk(ctx context.Context, client metadata.Interface, mapper meta.RESTMapper,
 	groups k8sclient.GroupResourceLister, kinds []ResourceKind) (AtRiskResult, error) {
 
 	if len(kinds) == 0 {
@@ -248,7 +249,7 @@ func resolveKind(ctx context.Context, mapper meta.RESTMapper, groups k8sclient.G
 }
 
 // scanKind lists kind cluster-wide and returns the objects nothing owns.
-func scanKind(ctx context.Context, client k8sclient.MetadataLister, kind ResourceKind,
+func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 	gvr schema.GroupVersionResource) (ScannedKind, []AtRiskObject, error) {
 
 	scanned := ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components, Present: true}
@@ -260,7 +261,7 @@ func scanKind(ctx context.Context, client k8sclient.MetadataLister, kind Resourc
 		}
 		// Requests only metadata, whose annotations can still hold a whole
 		// object in kubectl's last-applied-configuration.
-		page, err := client.List(ctx, gvr, opts)
+		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, opts)
 		if err != nil {
 			// A CRD deleted between the mapping and this List answers the same
 			// way one that was never installed does. Only the first request
@@ -290,9 +291,7 @@ func scanKind(ctx context.Context, client k8sclient.MetadataLister, kind Resourc
 				continue
 			}
 			if item.GetName() == "" {
-				// A finding an operator cannot look up is worse than none:
-				// this is advisory output, and an unactionable line in it
-				// costs the actionable ones their credibility.
+				// An unnamed object cannot be looked up.
 				continue
 			}
 			findings = append(findings, AtRiskObject{
