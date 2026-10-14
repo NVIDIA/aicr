@@ -418,9 +418,10 @@ and fails closed rather than guessing an ownership mode.
 The OKE recipes that deploy `network-operator` (`gb200-oke-training`,
 `l40s-oke-training`, and their descendants) declare
 `K8s.oke-addons.nvidia-network-operator: absent`. Any other reading,
-including a missing one, fails recipe generation and the `aicr validate`
-pre-flight, because the add-on and AICR's `network-operator` would both
-reconcile the same `NicClusterPolicy`.
+including a missing one, fails snapshot-based recipe generation and the
+`aicr validate` pre-flight, because the add-on and AICR's `network-operator`
+would both reconcile the same `NicClusterPolicy`. Criteria-only generation
+evaluates no reading and only records the constraint in the recipe.
 
 The constraint paths are `K8s.oke-addons.nvidia-gpu-plugin` in profile value
 constraints and `K8s.oke-addons.nvidia-network-operator` in recipe

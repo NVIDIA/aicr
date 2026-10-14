@@ -156,7 +156,9 @@ The recipes that deploy `network-operator` (`gb200-oke-training`,
 `NvidiaNetworkOperator`. They require the
 `K8s.oke-addons.nvidia-network-operator` reading from the same
 `--oke-addons` dump to be `absent`, so a cluster with the add-on fails
-recipe generation and the `aicr validate` pre-flight. Remove the add-on,
+snapshot-based recipe generation and the `aicr validate` pre-flight.
+Criteria-only generation evaluates no reading and only records the
+constraint, so the gate fires at the pre-flight. Remove the add-on,
 wait for the removal to finish, then recapture the snapshot. An add-on that
 is still being removed reads `addon-deleting`, which also fails the gate.
 
