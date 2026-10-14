@@ -480,9 +480,14 @@ func TestGenerate_AsyncOverrideDoesNotDisarmTheGate(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	// The call carries the override...
-	if main := readFile(t, filepath.Join(outputDir, fileMain)); !strings.Contains(main, "wait    = false") {
+	// The call carries the override, and pins atomic with it: Helm forces
+	// wait on whenever atomic is set, so var.atomic would undo the override.
+	main := readFile(t, filepath.Join(outputDir, fileMain))
+	if !strings.Contains(main, "wait    = false") {
 		t.Errorf("main.tf lost the async override:\n%s", main)
+	}
+	if !strings.Contains(main, "atomic  = false") || strings.Contains(stripComments(main), "atomic  = var.atomic") {
+		t.Errorf("the async override leaves atomic on var.atomic, which re-arms the wait:\n%s", main)
 	}
 	// ...and the gate slot ignores it.
 	mod := readFile(t, filepath.Join(outputDir, moduleDir, "main.tf"))

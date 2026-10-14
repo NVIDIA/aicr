@@ -45,7 +45,8 @@ module "kai_scheduler" {
 
   # Asynchronous: helm --wait times out on this component's custom-resource
   # readiness even though its pods start. Ordering still holds; readiness does not.
-  atomic  = var.atomic
+  # atomic stays off too: Helm waits whenever atomic is set.
+  atomic  = false
   wait    = false
   timeout = 1200
 

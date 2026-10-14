@@ -9,7 +9,8 @@
 # only (no file()); pass a computed value with -var or TF_VAR_cluster_keepers.
 # cluster_keepers = { ca = "<the cluster CA certificate, or any value minted per cluster>" }
 {{ end }}
-# Per-release apply behaviour.
+# Per-release apply behaviour. atomic implies wait; the asynchronous
+# components keep both off whatever is set here.
 # wait    = true
 # timeout = 900
 # atomic  = false

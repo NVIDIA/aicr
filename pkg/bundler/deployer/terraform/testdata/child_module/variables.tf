@@ -40,7 +40,7 @@ variable "timeout" {
 }
 
 variable "atomic" {
-  description = "Roll a release back if it fails to install. Off by default: a failed release left in place is easier to diagnose."
+  description = "Roll a release back if it fails to install or upgrade. Implies wait: Helm waits whenever atomic is set, which is why the asynchronous components pin both to false. Off by default: a failed release left in place is easier to diagnose."
   type        = bool
   default     = false
 }

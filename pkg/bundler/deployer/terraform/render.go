@@ -58,6 +58,7 @@ type bundleData struct {
 const (
 	argWait    = "wait"
 	argTimeout = "timeout"
+	argAtomic  = "atomic"
 )
 
 // attr is one `name = expression` line. Value is already a rendered HCL
@@ -151,7 +152,7 @@ func (g *Generator) bundleData(components []component) bundleData {
 			ValuesFiles: valuesFilesFor(primary, g.DynamicValues[c.Name]),
 			Phases:      phaseAttrs(c),
 			Behavior: []attr{
-				{"atomic", "var.atomic"},
+				{argAtomic, "var.atomic"},
 				{argWait, "var.wait"},
 				{argTimeout, "var.timeout"},
 			},
@@ -233,6 +234,15 @@ func overrideBehavior(base []attr, ov deployer.ComponentOverride) []attr {
 		switch a.Name {
 		case argWait:
 			out = append(out, attr{argWait, strconv.FormatBool(ov.Wait)})
+		case argAtomic:
+			// Helm turns wait on whenever atomic is set (action.Install and
+			// action.Upgrade both do Wait = Wait || Atomic), so var.atomic
+			// would re-arm the wait this override exists to turn off.
+			if !ov.Wait {
+				out = append(out, attr{argAtomic, "false"})
+				continue
+			}
+			out = append(out, a)
 		case argTimeout:
 			if ov.TimeoutSeconds > 0 {
 				out = append(out, attr{argTimeout, strconv.Itoa(ov.TimeoutSeconds)})
@@ -250,7 +260,7 @@ func overrideBehavior(base []attr, ov deployer.ComponentOverride) []attr {
 // that silently contradicts the bundle-wide variable reads as a bug.
 func overrideNote(ov deployer.ComponentOverride) string {
 	if !ov.Wait {
-		return "Asynchronous: helm --wait times out on this component's custom-resource\n  # readiness even though its pods start. Ordering still holds; readiness does not."
+		return "Asynchronous: helm --wait times out on this component's custom-resource\n  # readiness even though its pods start. Ordering still holds; readiness does not.\n  # atomic stays off too: Helm waits whenever atomic is set."
 	}
 	return "Per-component override."
 }

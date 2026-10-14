@@ -70,7 +70,7 @@ variable "timeout" {
 }
 
 variable "atomic" {
-  description = "Roll the release back if it fails to install."
+  description = "Roll the release back if it fails to install or upgrade. Implies wait."
   type        = bool
   default     = false
 }
