@@ -143,7 +143,8 @@ transitions:
               Apply the v1.25.0 CRDs using the CRD-apply command under
               "Upgrade, uninstall, and troubleshooting" in
               docs/user/component-catalog.md, with
-              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.25.0 and
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.25.0,
+              MANAGER=terraform-provider-helm and
               EXCLUDE_SUBCHARTS=mongodb-store, so the Percona CRDs
               psmdb-operator owns are left alone.
             reason: >-

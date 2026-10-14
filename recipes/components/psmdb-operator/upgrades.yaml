@@ -71,8 +71,8 @@ transitions:
               the CRD-apply command under "Upgrade, uninstall, and
               troubleshooting" in docs/user/component-catalog.md, with
               CHART=psmdb-operator,
-              REPO=https://percona.github.io/percona-helm-charts/ and
-              VERSION=1.23.2.
+              REPO=https://percona.github.io/percona-helm-charts/,
+              VERSION=1.23.2 and MANAGER=terraform-provider-helm.
             reason: >-
               helm_release upgrades through Helm, which never applies a changed
               crds/ directory, and Percona requires the new CRDs before the new
@@ -181,8 +181,8 @@ transitions:
               the CRD-apply command under "Upgrade, uninstall, and
               troubleshooting" in docs/user/component-catalog.md, with
               CHART=psmdb-operator,
-              REPO=https://percona.github.io/percona-helm-charts/ and
-              VERSION=<new>.
+              REPO=https://percona.github.io/percona-helm-charts/,
+              VERSION=<new> and MANAGER=terraform-provider-helm.
             reason: >-
               helm_release upgrades through Helm, which never applies a changed
               crds/ directory, and Percona requires the new CRDs before the new

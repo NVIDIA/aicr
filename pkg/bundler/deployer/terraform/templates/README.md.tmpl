@@ -228,9 +228,14 @@ this directory, then `terraform plan` and read the diff:
 - Helm installs a chart's `crds/` once and never upgrades them, and this
   bundle has no CRD step of its own. Before upgrading a component whose CRDs
   changed, apply the new CRDs with the CRD-apply command under "Upgrade,
-  uninstall, and troubleshooting" in AICR's component catalog
-  (the helm deployer's `apply-crds.sh` does the same), or the chart's new
-  resources may fail validation.
+  uninstall, and troubleshooting" in AICR's component catalog, with `CHART`
+  and `VERSION` set to the component's new coordinates, `REPO` for a chart
+  from a classic repository, `EXCLUDE_SUBCHARTS` from the registry's
+  `ownsCRDsExcludeSubcharts`, and `MANAGER=terraform-provider-helm`, the
+  field manager the provider installed the CRDs under (the helm deployer's
+  `apply-crds.sh` does the same). `aicr upgrade-check --deployer terraform`
+  lists the components that need it. Skipped, the chart's new resources may
+  fail validation.
 
 A **replacement** is destroy-then-create. `terraform apply -replace` on a
 slot, a changed release name or namespace, or a tainted release uninstalls

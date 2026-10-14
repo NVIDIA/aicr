@@ -1448,6 +1448,12 @@ VERSION="1.5.1"   # replace with the version you are upgrading to
 # oci:// CHART. For psmdb-operator:
 # REPO="https://percona.github.io/percona-helm-charts/"
 REPO=""
+# The field manager that installed the CRDs, so this apply adopts its fieldset:
+# "helm" under the helm and helmfile deployers (both run the helm CLI), and
+# "terraform-provider-helm" under terraform, where the provider installs the
+# release. Check with:
+#   kubectl get crd <name> --show-managed-fields -o jsonpath='{.metadata.managedFields[*].manager}'
+MANAGER="helm"
 # The component's ownsCRDsExcludeSubcharts, space-separated. For nvsentinel:
 # EXCLUDE_SUBCHARTS="mongodb-store", whose Percona CRDs psmdb-operator owns.
 EXCLUDE_SUBCHARTS=""
@@ -1487,7 +1493,7 @@ fi
 # manager so a field or spec.versions entry the new chart removes is pruned.
 for crd in "${crds[@]}"; do
   grep -q '[^[:space:]]' "${crd}" || continue
-  if ! kubectl apply --server-side --force-conflicts --field-manager=helm -f "${crd}"; then
+  if ! kubectl apply --server-side --force-conflicts --field-manager="${MANAGER}" -f "${crd}"; then
     echo "ERROR: failed to apply ${crd}." >&2
     echo "       Stopping: the remaining CRDs are unapplied, so do not upgrade" >&2
     echo "       the controller until this is resolved." >&2
@@ -1498,8 +1504,8 @@ done
 
 Four details are load-bearing, and the obvious shorter forms fail on them:
 
-- **Server-side apply under `--field-manager=helm`, not `kubectl replace` or a
-  bare `kubectl apply --server-side`.** A chart's raw CRD manifest carries no
+- **Server-side apply under the field manager that installed the CRDs, not
+  `kubectl replace` or a bare `kubectl apply --server-side`.** A chart's raw CRD manifest carries no
   `metadata.resourceVersion`, and Kubernetes rejects an update without one, so
   `replace` fails on exactly the upgrade this command exists for — verified on
   a live cluster, the API returns `Conflict`. A bare `apply --server-side`
@@ -1509,7 +1515,11 @@ Four details are load-bearing, and the obvious shorter forms fail on them:
   default `kubectl` manager. Applying as `--field-manager=helm` adopts Helm's
   fieldset instead, so the removal actually takes; verified on a live cluster
   against both Helm 3 (manager `helm`, operation Update) and Helm 4 (manager
-  `helm`, operation Apply). `--force-conflicts` is required because other
+  `helm`, operation Apply). Under `terraform` the provider, not the helm CLI,
+  installs the CRDs, as manager `terraform-provider-helm` (measured on a kind
+  cluster with provider 3.3.0), so `MANAGER` must be that name there: applying
+  as `helm` against those CRDs would leave a removed field in place, still
+  owned by the provider. `--force-conflicts` is required because other
   managers may hold individual fields, including a `caBundle` a webhook
   injects at runtime — which is why `ownsCRDs` requires that no CRD use
   `spec.conversion.strategy: Webhook`.
@@ -1539,7 +1549,7 @@ Which deployers need that step differs, so check yours:
 |---|---|---|
 | `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs` |
 | `helmfile` | Upgrades through Helm, so it skips `crds/` too; no automation exists, because a `presync` hook fires only for releases `helmfile apply` decides to sync, so it would hold on a chart bump and silently not hold on an unchanged rerun | Assume yes — see note below |
-| `terraform` | Upgrades through Helm (`helm_release`), so it skips `crds/` too; the bundle emits no CRD step, because the provider has no CRD-upgrade option and a `local-exec` step would run outside the plan | Assume yes — see note below |
+| `terraform` | Upgrades through Helm (`helm_release`), so it skips `crds/` too; the bundle emits no CRD step, because the provider has no CRD-upgrade option and a `local-exec` step would run outside the plan; run the manual command with `MANAGER=terraform-provider-helm`, the manager the provider installed the CRDs under | Assume yes — see note below |
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
 

@@ -111,8 +111,9 @@ transitions:
               Before upgrading the release, apply the v0.6.0 CRDs directly
               using the CRD-apply command under "Upgrade, uninstall, and
               troubleshooting" in docs/user/component-catalog.md, with
-              CHART=oci://ghcr.io/nvidia/cluster-readiness-engine and
-              VERSION=v0.6.0.
+              CHART=oci://ghcr.io/nvidia/cluster-readiness-engine,
+              VERSION=v0.6.0 and MANAGER=helm under helmfile or
+              MANAGER=terraform-provider-helm under terraform.
             reason: >-
               helmfile and terraform have no automated CRD-update path for
               ownsCRDs components, and the whole of this release's admission

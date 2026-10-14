@@ -83,8 +83,9 @@ transitions:
               the release, apply the v1.5.1 CRDs directly using the
               CRD-apply command under "Upgrade, uninstall, and
               troubleshooting" in docs/user/component-catalog.md, with
-              CHART=oci://ghcr.io/googlecloudplatform/charts/k8s-aibom and
-              VERSION=1.5.1.
+              CHART=oci://ghcr.io/googlecloudplatform/charts/k8s-aibom,
+              VERSION=1.5.1 and MANAGER=helm under helmfile or
+              MANAGER=terraform-provider-helm under terraform.
             reason: >-
               helmfile and terraform have no automated equivalent for
               ownsCRDs components; they are the deployers that never update
