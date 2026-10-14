@@ -148,15 +148,12 @@ func compareInstallOrder(nameA, namespaceA, nameB, namespaceB string) int {
 	return strings.Compare(namespaceA, namespaceB)
 }
 
-// advance moves the cursor to the next page, refusing a continue token the
-// server has already handed back.
-//
-// Without that refusal the loop is unbounded: a proxy or aggregation layer
-// that echoes a stale token turns one cluster-wide read into an open request
-// flood against the apiserver. Each caller's deadline is the backstop for a
-// server that cycles through several tokens rather than repeating one; this
-// catches the repeat immediately, before thousands of requests have been
-// issued.
+// advance moves opts to the page next names. It returns ErrCodeInternal if
+// next repeats the token opts already holds, which would otherwise page
+// forever, as a proxy echoing back the token it was sent does. An expired
+// token is the apiserver's to reject, with a 410. A server cycling through
+// several tokens is bounded only by the caller's deadline, and the at-risk
+// scan has none.
 func advance(opts *metav1.ListOptions, next, resource string) error {
 	if next == opts.Continue {
 		return errors.NewWithContext(errors.ErrCodeInternal,
