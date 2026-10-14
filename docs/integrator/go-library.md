@@ -477,6 +477,21 @@ are created. The other facade options cover the production-controller knobs:
   `WithValidationImageTagOverride` — resolve validator images against a
   commit SHA, a mirror registry prefix, or a fixed tag. Empty values leave
   the default resolution in place.
+- `WithValidatorServiceAccountName(name)` runs the validator Jobs as an
+  existing ServiceAccount in the validation namespace instead of a per-run
+  ServiceAccount bound to `cluster-admin`, so the caller needs no permission
+  to grant `cluster-admin`. The run creates and deletes no ServiceAccount or
+  ClusterRoleBinding and does not apply the namespace. It verifies the
+  ServiceAccount's `cluster-admin` grant with a `SubjectAccessReview` before
+  deploying anything and fails with `ErrCodeNotFound` when it is missing,
+  `ErrCodeInvalidRequest` when it disables token automount,
+  `ErrCodeUnauthorized` when it is not bound or the caller may not read it or
+  create the review, and `ErrCodeCanceled`, `ErrCodeTimeout`,
+  `ErrCodeUnavailable` or `ErrCodeInternal` when the check cannot complete.
+  Unrelated
+  to `ValidateSettings().ServiceAccountName`, which names the snapshot agent's
+  ServiceAccount. Not in v1.0.0 or earlier. See
+  [Running under a pre-provisioned ServiceAccount](../user/validation.md#running-under-a-pre-provisioned-serviceaccount).
 
 `PreflightSkipChecks(ctx, recipe, opts...)` runs only the skip-list guard
 from `ValidateState`, with no Kubernetes call, so a caller that does its own
@@ -484,6 +499,14 @@ cluster work first can reject an unusable skip list before creating anything.
 The CLI does this before deploying a snapshot agent. Pass the same options you
 will pass to `ValidateState`; it returns nil at once when no skip list is set.
 `PreflightSkipChecks` is not in v0.22.0 or earlier.
+
+`PreflightValidatorServiceAccount(ctx, opts...)` runs only the
+`WithValidatorServiceAccountName` check from `ValidateState`: a Get and a
+`SubjectAccessReview`, creating nothing. The CLI runs it before deploying a
+snapshot agent, so a missing or unbound ServiceAccount is reported before any
+object exists. Pass the same options you will pass to `ValidateState`; it
+returns nil without contacting the cluster when no name is set or
+`WithValidationNoCluster(true)` is. Not in v1.0.0 or earlier.
 
 `MergeReports(results)` merges the per-phase CTRF reports from a
 `ValidateState` run into one `*ctrf.Report` (`pkg/validator/ctrf`) stamped
@@ -1232,13 +1255,15 @@ so `ValidateSettings()` carries settings from both `spec.validate.agent` and
 `spec.validate.execution` as a plain value, not an option slice, so you read
 and override individual fields directly — but not every field it carries
 reaches `Client.ValidateState`.
-Ten do, via a matching `WithValidation*` option: namespace, image pull
-secrets, node selector, tolerations, no-cluster, cleanup, phases, skip checks,
-fail-fast, and timeout. `WithValidationSkipChecks` is not in v0.22.0 or
-earlier, so a module pinned there has only nine. Four do not: image, job name, service account name and
-require-GPU have no `WithValidationImage`, `WithValidationJobName`,
-`WithValidationServiceAccountName` or `WithValidationRequireGPU` for
-`ValidateState` to accept them through. They ride on `ValidateSettings()`
+Eleven do, via a matching option: namespace, image pull secrets, node
+selector, tolerations, no-cluster, cleanup, phases, skip checks, fail-fast,
+timeout, and the validator service account name
+(`ValidatorServiceAccountName`, through `WithValidatorServiceAccountName`).
+`WithValidationSkipChecks` is not in v0.22.0 or earlier and
+`WithValidatorServiceAccountName` is not in v1.0.0 or earlier, so a module
+pinned to v1.0.0 has ten and one pinned to v0.22.0 has nine. Four do not: image, job name, service account name and
+require-GPU configure the snapshot agent, and `ValidateState` has no option to
+accept them through. They ride on `ValidateSettings()`
 anyway so a caller building its own validator agent config (the CLI's
 `parseValidateAgentConfig`, in particular) can read them with its own
 flag-over-config precedence instead of reaching for `Unwrap()` — see the
@@ -1259,6 +1284,11 @@ results, err := client.ValidateState(ctx, rec, snap,
     aicr.WithValidationTolerations(opts.Tolerations),
     aicr.WithValidationNoCluster(opts.NoCluster),
     aicr.WithValidationCleanup(opts.Cleanup),
+    aicr.WithValidatorServiceAccountName(opts.ValidatorServiceAccountName),
+    // Phases, SkipChecks, FailFast and Timeout map the same way, through
+    // WithValidationPhases, WithValidationSkipChecks, WithValidationFailFast
+    // and WithValidationTimeout; FailFast and Timeout are pointers, so pass
+    // them only when non-nil.
 )
 ```
 
@@ -1283,7 +1313,7 @@ The rest of the section has other homes, and knowing which saves a search:
 
 | Field | Home |
 |---|---|
-| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState` — `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. The CLI reads them directly to build the validator's own agent Job. |
+| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState`: they configure the snapshot-capture agent, not the validator Jobs, so a `ValidateState` option here would have nothing to translate into. The CLI reads them directly to build the agent Job. `.validatorServiceAccountName` is not in this row; it reaches `ValidateState` through `WithValidatorServiceAccountName`. |
 | `spec.validate.input.recipe`, `.snapshot`, `spec.validate.execution.failOnError` | `ValidateInputOptions()`, which targets the CALLER rather than `ValidateState` — see below. |
 | `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
 | `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which the caller reads to choose between `RenderCNCFEvidence` and `CollectCNCFEvidence`. See below. |

@@ -590,6 +590,25 @@ func TestDeployJobPodSpec(t *testing.T) {
 	}
 }
 
+// TestDeployJobPodSpecUsesConfiguredServiceAccount pins that an
+// administrator-provisioned ServiceAccount replaces the per-run one verbatim:
+// the Job must not run as a name EnsureRBAC never created.
+func TestDeployJobPodSpecUsesConfiguredServiceAccount(t *testing.T) {
+	ns := createUniqueNamespace(t)
+	job := deployAndGet(t, NewDeployer(Config{
+		Clientset:          testClientset,
+		Factory:            testFactory(t, ns),
+		Namespace:          ns,
+		RunID:              "run1",
+		ServiceAccountName: "aicr-validator",
+		Entry:              testEntry(),
+	}))
+
+	if got := job.Spec.Template.Spec.ServiceAccountName; got != "aicr-validator" {
+		t.Errorf("ServiceAccountName = %q, want %q", got, "aicr-validator")
+	}
+}
+
 func TestCleanupJob(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
