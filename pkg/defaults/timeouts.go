@@ -371,14 +371,6 @@ const (
 	// ceiling is derived from the operation it repeats rather than picked.
 	CLIUpgradeCheckTimeout = 3 * RecipeOperationTimeout
 
-	// CLIUpgradeCheckClusterTimeout bounds an `aicr upgrade-check` run that
-	// reads the cluster: CLIUpgradeCheckTimeout's artifact work, plus the
-	// longer of the two inventory readers (one runs per deployer), plus the
-	// at-risk scan. Summing them lets every inner budget be reached before the
-	// run's own expires, so a slow scan times out on its own budget and leaves
-	// a report rather than taking the run down with it.
-	CLIUpgradeCheckClusterTimeout = CLIUpgradeCheckTimeout + HelmInventoryTimeout + AtRiskScanTimeout
-
 	// OIDCAuthTimeout is the maximum time to wait for a user to complete
 	// any interactive OIDC authentication flow — browser callback or
 	// device-code (RFC 8628). Prevents indefinite blocking if the flow is
@@ -1732,12 +1724,8 @@ const (
 // response.
 const AtRiskListPageSize int64 = 200
 
-// AtRiskScanTimeout bounds the whole advisory at-risk scan: one discovery
-// mapping and one paged cluster-wide List per affected kind. Shorter than
-// ArgoInventoryTimeout per kind is not expressible here, so the budget covers
-// the handful of kinds a single upgrade's records name.
-//
-// The scan is advisory and never changes the exit code, so it is bounded
-// tightly on purpose: an operator waiting on a warning has already been given
-// the verdict.
-const AtRiskScanTimeout = 60 * time.Second
+// AtRiskStepTimeout bounds one step of the advisory at-risk scan, which is
+// resolving one kind or listing one page of it with its retries. The scan has
+// no total budget, so a cluster with many objects of a kind finishes as long
+// as every page arrives in time, and a stalled apiserver fails one step.
+const AtRiskStepTimeout = 60 * time.Second

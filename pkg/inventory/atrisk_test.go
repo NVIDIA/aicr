@@ -977,3 +977,66 @@ func TestScanAtRiskRetriesADroppedConnection(t *testing.T) {
 		t.Errorf("Findings = %#v, want %#v", got.Findings, want)
 	}
 }
+
+// slowPages serves pages of one object each, taking delay to answer each, or
+// until the client gives up.
+func slowPages(t *testing.T, pages int, delay time.Duration) *httptest.Server {
+	t.Helper()
+
+	var served atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := int(served.Add(1))
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-timer.C:
+		}
+		next := ""
+		if n < pages {
+			next = "page-" + strconv.Itoa(n)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"continue":%q},"items":[{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"name":"topology-%d","namespace":"tenant-a"}}]}`, next, n)
+	}))
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
+func TestScanKindBoundsEachPage(t *testing.T) {
+	t.Parallel()
+
+	const pageTimeout = 500 * time.Millisecond
+
+	t.Run("a scan longer than one page's budget finishes", func(t *testing.T) {
+		t.Parallel()
+
+		client := metadataClient(t, slowPages(t, 4, 200*time.Millisecond))
+		scanned, findings, err := scanKind(t.Context(), client, topologyKind(), topologyGVR, pageTimeout)
+		if err != nil {
+			t.Fatalf("scanKind: %v", err)
+		}
+		if scanned.Examined != 4 || len(findings) != 4 {
+			t.Errorf("Examined = %d, findings = %d, want all 4 pages read", scanned.Examined, len(findings))
+		}
+	})
+
+	t.Run("a stalled page times out", func(t *testing.T) {
+		t.Parallel()
+
+		// Bounds the test if the page budget never fires. That deadline also
+		// reports ErrCodeTimeout, so the check below tells the two apart.
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		client := metadataClient(t, slowPages(t, 1, time.Hour))
+		_, _, err := scanKind(ctx, client, topologyKind(), topologyGVR, pageTimeout)
+		if ctx.Err() != nil {
+			t.Fatalf("the test's own deadline ended the scan, so the %v page budget never fired", pageTimeout)
+		}
+		errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
+	})
+}

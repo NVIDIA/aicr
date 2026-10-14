@@ -417,11 +417,11 @@ func reportSourceFrom(info inventory.SourceInfo, kubeconfig string, matched int)
 // a nil error says the comparison stands.
 //
 // The caller's context is what separates the two, rather than the returned
-// error's code or the sentinel under it. pkg/inventory bounds the scan by
-// defaults.AtRiskScanTimeout, which is shorter than the CLI's whole-run
-// budget, and codes that expiry ErrCodeTimeout over a context.DeadlineExceeded
-// exactly as it codes the caller's own: matching on either would fail the run
-// for the slow cluster the scan's budget exists to cut short.
+// error's code or the sentinel under it. pkg/inventory bounds each step of the
+// scan by defaults.AtRiskStepTimeout, and codes that expiry ErrCodeTimeout
+// over a context.DeadlineExceeded exactly as it codes the caller's own.
+// Matching on either would fail the run for the stalled apiserver the step
+// budget exists to cut short.
 func (c *Client) upgradeCheckScan(ctx context.Context, kubeconfig string,
 	kinds []upgrade.ResourceKind) (*upgrade.AtRiskReport, error) {
 

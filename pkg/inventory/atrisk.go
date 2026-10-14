@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -151,9 +152,6 @@ func scanAtRisk(ctx context.Context, client metadata.Interface, mapper meta.REST
 		return AtRiskResult{}, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, defaults.AtRiskScanTimeout)
-	defer cancel()
-
 	out := AtRiskResult{Kinds: make([]ScannedKind, 0, len(kinds))}
 	for _, kind := range kinds {
 		// Per kind rather than per object, for the reason listOptions gives
@@ -163,7 +161,9 @@ func scanAtRisk(ctx context.Context, client metadata.Interface, mapper meta.REST
 			return AtRiskResult{}, err
 		}
 
-		gvr, served, err := resolveKind(ctx, mapper, groups, kind)
+		stepCtx, cancel := context.WithTimeout(ctx, defaults.AtRiskStepTimeout)
+		gvr, served, err := resolveKind(stepCtx, mapper, groups, kind)
+		cancel()
 		if err != nil {
 			return AtRiskResult{}, err
 		}
@@ -175,7 +175,7 @@ func scanAtRisk(ctx context.Context, client metadata.Interface, mapper meta.REST
 			continue
 		}
 
-		scanned, findings, err := scanKind(ctx, client, kind, gvr)
+		scanned, findings, err := scanKind(ctx, client, kind, gvr, defaults.AtRiskStepTimeout)
 		if err != nil {
 			return AtRiskResult{}, err
 		}
@@ -248,9 +248,10 @@ func resolveKind(ctx context.Context, mapper meta.RESTMapper, groups k8sclient.G
 	return schema.GroupVersionResource{}, false, nil
 }
 
-// scanKind lists kind cluster-wide and returns the objects nothing owns.
+// scanKind lists kind cluster-wide and returns the objects nothing owns. Each
+// page, retries included, must arrive within pageTimeout.
 func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
-	gvr schema.GroupVersionResource) (ScannedKind, []AtRiskObject, error) {
+	gvr schema.GroupVersionResource, pageTimeout time.Duration) (ScannedKind, []AtRiskObject, error) {
 
 	scanned := ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components, Present: true}
 	var findings []AtRiskObject
@@ -261,7 +262,9 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 		}
 		// Requests only metadata, whose annotations can still hold a whole
 		// object in kubectl's last-applied-configuration.
-		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, opts)
+		pageCtx, cancel := context.WithTimeout(ctx, pageTimeout)
+		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(pageCtx, opts)
+		cancel()
 		if err != nil {
 			// A CRD deleted between the mapping and this List answers the same
 			// way one that was never installed does. Only the first request

@@ -155,12 +155,14 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	budget := defaults.CLIUpgradeCheckTimeout
-	if cmd.String("from") == aicr.FromCluster || cmd.Bool("scan-cluster") {
-		budget = defaults.CLIUpgradeCheckClusterTimeout
+	// A run that reads the cluster has no whole-run deadline. Every read in
+	// it is bounded, and the at-risk scan bounds each page, so its length
+	// follows the cluster's size.
+	if cmd.String("from") != aicr.FromCluster && !cmd.Bool("scan-cluster") {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaults.CLIUpgradeCheckTimeout)
+		defer cancel()
 	}
-	ctx, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
 
 	outFormat, err := parseOutputFormat(cmd)
 	if err != nil {
