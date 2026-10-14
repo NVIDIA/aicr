@@ -62,8 +62,11 @@ type okeAddon struct {
 }
 
 // okeAddonsDump is the top-level `oci ce cluster list-addons` envelope.
+// The OCI CLI emits opc-next-page only when more pages remain, which is
+// how a dump captured without --all is detected.
 type okeAddonsDump struct {
-	Data []okeAddon `json:"data"`
+	Data     []okeAddon `json:"data"`
+	NextPage string     `json:"opc-next-page"`
 }
 
 // ProjectOKEAddons returns the oke-addons subtype for the
@@ -79,8 +82,9 @@ type okeAddonsDump struct {
 //     (e.g. addon-deleting). No declared constraint matches it, so
 //     resolution fails closed naming the state.
 //
-// A missing, unreadable, or malformed file is an error, never a missing
-// reading, so a bad path cannot steer a profile decision.
+// A missing, unreadable, malformed, or partially paginated file is an
+// error, never a missing reading, so a bad path cannot steer a profile
+// decision.
 func ProjectOKEAddons(ctx context.Context, path string) (measurement.Subtype, error) {
 	addons, err := readOKEAddons(ctx, path)
 	if err != nil {
@@ -136,6 +140,12 @@ func readOKEAddons(ctx context.Context, path string) ([]okeAddon, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("failed to decode OKE add-ons file %q: no data array, expected the "+
 				"JSON object emitted by `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`", path))
+	}
+	// A partial page could omit an installed add-on and project it absent.
+	if dump.NextPage != "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("OKE add-ons file %q is a partial page (opc-next-page is set), re-capture with "+
+				"`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`", path))
 	}
 	return dump.Data, nil
 }

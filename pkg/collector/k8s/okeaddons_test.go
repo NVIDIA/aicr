@@ -133,6 +133,20 @@ func TestProjectOKEAddons(t *testing.T) {
 			wantCount:  0,
 		},
 		{
+			name: "partial page without --all rejected",
+			content: `{"data": [
+				{"name": "NvidiaGpuPlugin", "lifecycle-state": "ACTIVE"}
+			], "opc-next-page": "AAAAAAAAAAAA"}`,
+			wantErr: true,
+		},
+		{
+			name:       "empty opc-next-page is a complete list",
+			content:    `{"data": [{"name": "NvidiaNetworkOperator", "lifecycle-state": "ACTIVE"}], "opc-next-page": ""}`,
+			wantPlugin: "absent",
+			wantNNO:    "installed",
+			wantCount:  1,
+		},
+		{
 			name:    "top-level null rejected",
 			content: `null`,
 			wantErr: true,

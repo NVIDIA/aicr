@@ -43,6 +43,10 @@ aicr recipe --snapshot snapshot.yaml --intent training \
   --profile gpuStack=operator-managed -o recipe.yaml
 ```
 
+Always capture the dump with `--all`, never `--page`. A dump with
+`opc-next-page` set is rejected, but a final page alone looks like a
+complete list, so an add-on on an earlier page would read as `absent`.
+
 ## Default: Oracle-Managed (`oci-managed`)
 
 A default-provisioned OKE cluster with Oracle GPU images needs zero setup:

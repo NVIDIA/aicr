@@ -379,7 +379,9 @@ operator-supplied dump
 passed to `aicr snapshot --oke-addons` (merged
 controller-side in both agent Job mode and local mode). A missing, truncated,
 or malformed dump fails the command — a file error is never degraded into a
-"reading unavailable" measurement.
+"reading unavailable" measurement. A dump capturing a partial page, with
+`opc-next-page` set, fails the same way. Capturing with `--page` is not
+supported, because a final page alone looks like a complete list.
 
 ```yaml
 type: K8s
