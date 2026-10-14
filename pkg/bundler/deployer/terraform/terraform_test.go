@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -352,6 +353,48 @@ func TestModulePath(t *testing.T) {
 		if got := modulePath(in); got != want {
 			t.Errorf("modulePath(%q) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+// TestGenerate_DeploymentStepsFollowTheForm: a child module has no provider
+// and no connection variables, so the printed steps must send the operator to
+// the calling configuration, not into the bundle with kubeconfig advice.
+func TestGenerate_DeploymentStepsFollowTheForm(t *testing.T) {
+	gen := func(child bool) *deployer.Output {
+		t.Helper()
+		cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
+		g := &Generator{RecipeResult: recipeWith(cm), Version: testBundlerVersion, ChildModule: child, ClusterRollover: true}
+		out, err := g.Generate(context.Background(), t.TempDir())
+		if err != nil {
+			t.Fatalf("Generate(child=%v): %v", child, err)
+		}
+		return out
+	}
+	joined := func(ss []string) string { return strings.Join(ss, "\n") }
+
+	root := gen(false)
+	if !strings.HasPrefix(root.DeploymentSteps[0], "cd ") {
+		t.Errorf("root steps do not start in the bundle: %q", root.DeploymentSteps[0])
+	}
+	if !strings.Contains(joined(root.DeploymentNotes), "kubeconfig_path") {
+		t.Errorf("root notes do not say how to point the bundle at a cluster:\n%s", joined(root.DeploymentNotes))
+	}
+	if !strings.Contains(joined(root.DeploymentNotes), "null (the root-module default)") {
+		t.Errorf("root rollover note does not mention the null default:\n%s", joined(root.DeploymentNotes))
+	}
+
+	child := gen(true)
+	if !strings.Contains(child.DeploymentSteps[0], "as a module") {
+		t.Errorf("child steps do not send the operator to the calling configuration: %q", child.DeploymentSteps[0])
+	}
+	all := joined(child.DeploymentSteps) + "\n" + joined(child.DeploymentNotes)
+	for _, absent := range []string{"kubeconfig_path", "cluster_host", "cd ", "root-module default"} {
+		if strings.Contains(all, absent) {
+			t.Errorf("child-module output mentions %q, which a child module does not have:\n%s", absent, all)
+		}
+	}
+	if !strings.Contains(joined(child.DeploymentNotes), "The variable is required") {
+		t.Errorf("child rollover note does not say cluster_keepers is required:\n%s", joined(child.DeploymentNotes))
 	}
 }
 

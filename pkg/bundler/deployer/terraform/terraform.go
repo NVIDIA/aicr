@@ -305,15 +305,32 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	output.Duration = time.Since(start)
-	output.DeploymentSteps = []string{
-		fmt.Sprintf("cd %s", outputDir),
-		"terraform init",
-		"terraform plan",
-		"terraform apply",
+	// The steps follow the form. A child module has no provider block and no
+	// connection variables, so it is applied from the configuration that
+	// calls it; printing the root-module steps for it would apply with an
+	// unconfigured helm provider.
+	var connection string
+	if g.ChildModule {
+		output.DeploymentSteps = []string{
+			fmt.Sprintf("Call %s as a module from the configuration that owns the helm provider (see its README.md)", outputDir),
+			"terraform init",
+			"terraform plan",
+			"terraform apply",
+		}
+		connection = "This bundle is a child module: it declares no provider and no cluster-connection variables, " +
+			"and installs through the calling configuration's helm provider. Run init/plan/apply there, not in the bundle."
+	} else {
+		output.DeploymentSteps = []string{
+			fmt.Sprintf("cd %s", outputDir),
+			"terraform init",
+			"terraform plan",
+			"terraform apply",
+		}
+		connection = "The bundle does not create a cluster. It reads ~/.kube/config by default; " +
+			"set kubeconfig_path/kube_context, or cluster_host and credentials, to point it elsewhere."
 	}
 	notes := []string{
-		"The bundle does not create a cluster. It reads ~/.kube/config by default; " +
-			"set kubeconfig_path/kube_context, or cluster_host and credentials, to point it elsewhere.",
+		connection,
 		"depends_on carries the recipe's dependency graph exactly, so independent components apply concurrently. " +
 			"Each component is one module call; its pre/post/readiness folders chain inside it.",
 	}
@@ -326,11 +343,16 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			"This bundle contains vendored Helm charts. No upstream registry access is required at deploy time. See provenance.yaml.")
 	}
 	if g.ClusterRollover {
+		keepers := "Set cluster_keepers from the cluster resource itself — its CA certificate, id or " +
+			"creation time — so that it changes when the cluster is rebuilt; a value a rebuild " +
+			"keeps leaves the releases uncontained"
+		if g.ChildModule {
+			keepers += ". The variable is required: the module call must pass it."
+		} else {
+			keepers += ", and null (the root-module default) never fires."
+		}
 		notes = append(notes,
-			"Cluster rollover is enabled: replacing the cluster replaces every release. "+
-				"Set cluster_keepers from the cluster resource itself — its CA certificate, id or "+
-				"creation time — so that it changes when the cluster is rebuilt; a value a rebuild "+
-				"keeps leaves the releases uncontained, and null (the root-module default) never fires.")
+			"Cluster rollover is enabled: replacing the cluster replaces every release. "+keepers)
 	}
 	output.DeploymentNotes = notes
 
