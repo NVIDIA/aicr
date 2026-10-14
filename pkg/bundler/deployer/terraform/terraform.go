@@ -207,9 +207,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// configuration, and an apply of that runs on the operator's host.
 		// Recipe validation rejects only surrounding whitespace, so refuse
 		// here, where the values are about to become HCL.
-		for field, value := range map[string]string{
-			"name": ref.Name, "chart name": ref.Chart, "chart version": ref.Version, "source": ref.Source,
+		for _, fv := range [][2]string{
+			{"name", ref.Name}, {"namespace", ref.Namespace}, {"chart name", ref.Chart},
+			{"chart version", ref.Version}, {"source", ref.Source},
 		} {
+			field, value := fv[0], fv[1]
 			if hasControl(value) {
 				return nil, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("component %q: %s %q contains a control character", ref.Name, field, value))

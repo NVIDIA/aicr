@@ -298,10 +298,11 @@ func TestGenerate_RejectsKustomizeComponent(t *testing.T) {
 func TestGenerate_RejectsControlCharacters(t *testing.T) {
 	const payload = "resource \"terraform_data\" \"pwn\" {}"
 	cases := map[string]recipe.ComponentRef{
-		"version": ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2\n"+payload, "https://charts.jetstack.io"),
-		"chart":   ref("cert-manager", "cert-manager", "cert-manager\r\n"+payload, "v1.17.2", "https://charts.jetstack.io"),
-		"source":  ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io\n"+payload),
-		"name":    ref("cert-manager\n"+payload, "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
+		"version":   ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2\n"+payload, "https://charts.jetstack.io"),
+		"chart":     ref("cert-manager", "cert-manager", "cert-manager\r\n"+payload, "v1.17.2", "https://charts.jetstack.io"),
+		"source":    ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io\n"+payload),
+		"name":      ref("cert-manager\n"+payload, "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
+		"namespace": ref("cert-manager", "cert-manager\n"+payload, "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
 	}
 	for field, r := range cases {
 		t.Run(field, func(t *testing.T) {
