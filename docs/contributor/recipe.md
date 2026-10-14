@@ -241,7 +241,7 @@ on a default-track version, is rejected. Profile-version metadata and recipe art
 so an unknown field cannot silently disappear.
 
 The core `ProfileValue` contract is closed to `advertiser`, `constraints`,
-`readinessConstraints`, and `componentRefs{name,overrides}`. It rejects `valuesFile`, component
+`readinessConstraints`, and `componentRefs{name,optional,overrides}`. It rejects `valuesFile`, component
 identity/deployment fields, root `overrides.enabled`, literal dotted keys,
 and nested empty maps. The `advertiser` field accepts exactly one non-empty
 value, `external` (validated against `pkg/allocpolicy`, the canonical

@@ -356,7 +356,9 @@ schema ahead of any user.
 
 **The fragment schema is closed.** The core roll-in permits
 `constraints` and `componentRefs` only, and each `componentRef` permits
-only `name` and `overrides`. Every other `ComponentRef` field is rejected
+only `name`, `optional`, and `overrides` (`optional` per the
+[optional component references](#amendment-optional-component-references-2026-10)
+amendment). Every other `ComponentRef` field is rejected
 at catalog load. The GKE extension admits only the already-reserved
 `advertiser` field in addition to that core shape (full field inventory in
 [#1761](https://github.com/NVIDIA/aicr/issues/1761)).

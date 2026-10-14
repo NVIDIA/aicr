@@ -761,7 +761,7 @@ Profile declarations are intentionally narrow:
   so `Operator-Managed` and `operator-managed` would collapse onto one evidence
   directory.
 - A value permits only `constraints` and
-  `componentRefs{name,overrides}` in the core mechanism. `valuesFile`,
+  `componentRefs{name,optional,overrides}` in the core mechanism. `valuesFile`,
   component identity/deployment fields, literal dotted keys, nested empty
   maps, and root `overrides.enabled` are rejected.
 - Override leaves must be JSON/YAML scalar values. Finite numbers and YAML
