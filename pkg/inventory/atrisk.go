@@ -258,55 +258,17 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 	scanned := ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components, Present: true}
 	var findings []AtRiskObject
 	opts := metav1.ListOptions{Limit: defaults.AtRiskListPageSize}
-	// Consecutive rather than total, since a long list legitimately outlives
-	// several compactions, each costing one 410.
-	expiredInARow := 0
 	for {
 		if err := ctxErr(ctx, atRiskSubject); err != nil {
 			return ScannedKind{}, nil, err
 		}
-		// Metadata only, though kubectl's last-applied-configuration
-		// annotation can still hold a whole object.
-		pageCtx, cancel := context.WithTimeout(ctx, pageTimeout)
-		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(pageCtx, opts)
-		cancel()
+		page, served, err := listPage(ctx, client, kind, gvr, &opts, pageTimeout)
 		if err != nil {
-			// For an advisory scan an inconsistent list beats a failed one.
-			if fresh := expiredContinue(err); opts.Continue != "" && fresh != "" {
-				expiredInARow++
-				if expiredInARow > defaults.AtRiskExpiredContinueRetries {
-					return ScannedKind{}, nil, errors.WrapWithContext(errors.ErrCodeUnavailable,
-						fmt.Sprintf("the apiserver expired the continue token %d times in a row while listing %s, "+
-							"so paging cannot make progress", expiredInARow, kindDescription(kind)),
-						err, map[string]any{ctxKeyResource: gvr.Resource})
-				}
-				if advErr := advance(&opts, fresh, gvr.Resource); advErr != nil {
-					return ScannedKind{}, nil, advErr
-				}
-
-				continue
-			}
-			// A CRD deleted between the mapping and this List answers the same
-			// way one that was never installed does. Only the first request
-			// can say that: a CRD does not disappear between pages, so the
-			// same error later would silently drop everything already read.
-			if opts.Continue == "" && (apierrors.IsNotFound(err) || meta.IsNoMatchError(err)) {
-				return ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components}, nil, nil
-			}
-			// Before the generic wrap below, which would report an operator's
-			// Ctrl-C as an unavailable apiserver. The per-page ctxErr catches
-			// most aborts, but one landing mid-request surfaces here instead.
-			if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
-				return ScannedKind{}, nil, abortError(err, atRiskSubject,
-					map[string]any{ctxKeyResource: gvr.Resource})
-			}
-
-			return ScannedKind{}, nil, errors.WrapWithContext(errors.ErrCodeUnavailable,
-				fmt.Sprintf("failed to list %s while scanning for resources an upgrade could disturb",
-					kindDescription(kind)),
-				err, map[string]any{ctxKeyResource: gvr.Resource})
+			return ScannedKind{}, nil, err
 		}
-		expiredInARow = 0
+		if !served {
+			return ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components}, nil, nil
+		}
 
 		for i := range page.Items {
 			item := &page.Items[i]
@@ -346,6 +308,62 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 	})
 
 	return scanned, findings, nil
+}
+
+// listPage reads the page opts.Continue names, advancing opts past each
+// expired-continue 410 it follows. The page and those retries share one
+// pageTimeout. It reports false with no error when the kind's resource is
+// gone before the first page.
+func listPage(ctx context.Context, client metadata.Interface, kind ResourceKind, gvr schema.GroupVersionResource,
+	opts *metav1.ListOptions, pageTimeout time.Duration) (*metav1.PartialObjectMetadataList, bool, error) {
+
+	pageCtx, cancel := context.WithTimeout(ctx, pageTimeout)
+	defer cancel()
+	errCtx := map[string]any{ctxKeyResource: gvr.Resource}
+	// Per page rather than per list, since a long list legitimately outlives
+	// several compactions, each costing one 410.
+	expired := 0
+	for {
+		// Metadata only, though kubectl's last-applied-configuration
+		// annotation can still hold a whole object.
+		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(pageCtx, *opts)
+		if err == nil {
+			return page, true, nil
+		}
+		// For an advisory scan an inconsistent list beats a failed one.
+		if fresh := expiredContinue(err); opts.Continue != "" && fresh != "" {
+			expired++
+			if expired > defaults.AtRiskExpiredContinueRetries {
+				return nil, false, errors.WrapWithContext(errors.ErrCodeUnavailable,
+					fmt.Sprintf("the apiserver expired the continue token %d times in a row while listing %s, "+
+						"so paging cannot make progress", expired, kindDescription(kind)),
+					err, errCtx)
+			}
+			if advErr := advance(opts, fresh, gvr.Resource); advErr != nil {
+				return nil, false, advErr
+			}
+
+			continue
+		}
+		// A CRD deleted between the mapping and this List answers the same
+		// way one that was never installed does. Only the first request
+		// can say that. A CRD does not disappear between pages, so the
+		// same error later would silently drop everything already read.
+		if opts.Continue == "" && (apierrors.IsNotFound(err) || meta.IsNoMatchError(err)) {
+			return nil, false, nil
+		}
+		// Before the generic wrap below, which would report an operator's
+		// Ctrl-C as an unavailable apiserver. The per-page ctxErr catches
+		// most aborts, but one landing mid-request surfaces here instead.
+		if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
+			return nil, false, abortError(err, atRiskSubject, errCtx)
+		}
+
+		return nil, false, errors.WrapWithContext(errors.ErrCodeUnavailable,
+			fmt.Sprintf("failed to list %s while scanning for resources an upgrade could disturb",
+				kindDescription(kind)),
+			err, errCtx)
+	}
 }
 
 // expiredContinue returns the token that err, a 410 for an expired continue

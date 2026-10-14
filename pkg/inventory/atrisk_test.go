@@ -1188,3 +1188,55 @@ func TestScanKindBoundsConsecutiveExpiredTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestScanKindBoundsExpiredTokenRetriesByThePage(t *testing.T) {
+	t.Parallel()
+
+	const (
+		pageTimeout = 500 * time.Millisecond
+		delay       = 200 * time.Millisecond
+	)
+	// The first page is prompt. Every later request takes delay, first
+	// AtRiskExpiredContinueRetries 410s and then the page. Each fits
+	// pageTimeout alone, but together they do not.
+	var served atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		i := int(served.Add(1)) - 1
+		if i > 0 {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-r.Context().Done():
+				return
+			case <-timer.C:
+			}
+		}
+		next := "token-" + strconv.Itoa(i)
+		w.Header().Set("Content-Type", "application/json")
+		if i > 0 && i <= defaults.AtRiskExpiredContinueRetries {
+			w.WriteHeader(http.StatusGone)
+			_, _ = fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","metadata":{"continue":%q},`+
+				`"status":"Failure","message":"The provided continue parameter is too old",`+
+				`"reason":"Expired","code":410}`, next)
+
+			return
+		}
+		if i > 0 {
+			next = ""
+		}
+		_, _ = fmt.Fprintf(w, `{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"continue":%q},"items":[{"kind":"PartialObjectMetadata",`+
+			`"apiVersion":"meta.k8s.io/v1","metadata":{"name":"object-%d","namespace":"tenant-a"}}]}`, next, i)
+	}))
+	t.Cleanup(srv.Close)
+
+	// Bounds the test if the page budget never fires. That deadline also
+	// reports ErrCodeTimeout, so the check below tells the two apart.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, _, err := scanKind(ctx, metadataClient(t, srv), topologyKind(), topologyGVR, pageTimeout)
+	if ctx.Err() != nil {
+		t.Fatalf("the test's own deadline ended the scan, so the %v page budget never fired", pageTimeout)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
+}
