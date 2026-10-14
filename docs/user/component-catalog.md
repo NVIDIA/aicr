@@ -14,7 +14,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 |-----------|-------------|--------|
 | **gpu-operator** | Manages the GPU driver and runtime lifecycle on Kubernetes nodes. Handles driver installation, container runtime configuration, device plugin, and GPU feature discovery. | [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) |
 | **network-operator** | Manages high-performance networking for GPU workloads. Configures RDMA, SR-IOV, and host networking for multi-node communication. | [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) |
-| **nfd** | Node Feature Discovery. Labels nodes with hardware features (PCI device IDs, kernel modules, CPU capabilities). Both gpu-operator and network-operator consume these labels. Uninstalling nfd leaves its node labels in place because the chart's post-delete prune hook is disabled (`postDeleteCleanup: false`), so the GPU, network and DRA DaemonSets that select on them keep running. On production GPU recipes, the Topology Updater publishes per-node `NodeResourceTopology` CRDs describing NUMA zones and GPU/NIC affinity for downstream NUMA-aware schedulers. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
+| **nfd** | Node Feature Discovery. Labels nodes with hardware features (PCI device IDs, kernel modules, CPU capabilities). Both gpu-operator and network-operator consume these labels. Uninstalling nfd leaves its node labels in place because the chart's post-delete prune hook is disabled (`postDeleteCleanup: false`), so the GPU, network and DRA DaemonSets that select on them keep running. To clear them when retiring nfd for good, see [NFD Permanent Removal](#nfd-permanent-removal). On production GPU recipes, the Topology Updater publishes per-node `NodeResourceTopology` CRDs describing NUMA zones and GPU/NIC affinity for downstream NUMA-aware schedulers. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
 | **node-problem-detector** | Detects node-level faults the GPU stack does not watch — XFS shutdown, fatal UEFI CPER hardware errors, a read-only root filesystem — and publishes them as Node Conditions for NVSentinel's Object Monitor to consume. Opt-in via the `npd` mixin, and only where the platform does not already run its own. | [node-problem-detector](https://github.com/kubernetes/node-problem-detector) |
 | **dranet** | DRA network driver ([kubernetes-sigs/dranet](https://github.com/kubernetes-sigs/dranet)) for the ConnectX-9 RDMA fabric on VR200 (Vera Rubin NVL72) RKE2 clusters. Publishes the mlx5 NICs as `ResourceSlice`s (driver `dra.net`) and injects them into pods via NRI under `DeviceClass` `mlnx-cx9`. Manifest-only (vendored `dranet.yaml`), evaluated as a lean alternative to `network-operator`. Ships only in the VR200 RKE2 overlays, which pair it with host RDMA "exclusive" netns mode (`ib_core` `netns_mode=0`, applied by `nodewright-customizations` with `rdmaNetnsExclusive: true` and a node reboot) so a pod sees only its DRA-allocated HCA. | [DraNet](https://github.com/kubernetes-sigs/dranet) |
 | **gke-nccl-tcpxo** | NCCL TCPXO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
@@ -120,6 +120,19 @@ Production GPU leaf recipes (H100, GB200, RTX Pro 6000 on EKS / AKS / GKE / OKE 
 The Topology Updater requires the kubelet `podResources` gRPC socket. The `KubeletPodResources` feature gate has been on by default since Kubernetes 1.15 (Beta) and reached GA in Kubernetes 1.28; AICR's recipe constraints require K8s ≥ 1.32, so this is satisfied in practice. Recipes targeting Kubernetes `< 1.15` must enable the feature gate explicitly. Kind / KWOK simulated clusters do not run a real kubelet and therefore leave the Topology Updater disabled — kind-based recipes will not see `NodeResourceTopology` CRDs.
 
 See the upstream [Topology Updater docs](https://kubernetes-sigs.github.io/node-feature-discovery/stable/usage/nfd-topology-updater.html) for runtime consumer examples.
+
+### NFD Permanent Removal
+
+Uninstalling nfd does not clean up the nodes. The `feature.node.kubernetes.io/*` labels, the labels NodeFeatureRules created, NFD-managed extended resources and taints, and the `nfd.node.kubernetes.io/*` annotations stay on every node indefinitely, because AICR disables the chart's post-delete prune hook.
+
+To retire nfd permanently, first uninstall every component that selects on those labels (gpu-operator, network-operator, nvidia-dra-driver-gpu). Then re-enable the hook for the final uninstall, so its Job runs `nfd-master -prune` against every node:
+
+```bash
+RECIPE="recipe.yaml"  # replace with the recipe the bundle was generated from
+aicr bundle -r "${RECIPE}" --set nfd:postDeleteCleanup=true -o ./bundles
+```
+
+Redeploy only the nfd component from the regenerated bundle, then uninstall it. With the `helm` deployer, run `./bundles/NNN-nfd/install.sh` followed by `helm uninstall nfd -n node-feature-discovery`. With an Argo CD deployer, sync the regenerated nfd Application and then delete it. This needs Argo CD 3.4.1 or later, because earlier versions never finish deleting an Application whose post-delete hooks include cluster-scoped objects.
 
 ### GPU Operator Driver Auto-Detect
 
