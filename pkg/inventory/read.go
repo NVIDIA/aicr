@@ -69,6 +69,7 @@ const (
 	DeployerFlux       Deployer = "flux"
 	DeployerArgoCD     Deployer = "argocd"
 	DeployerArgoCDHelm Deployer = "argocd-helm"
+	DeployerTerraform  Deployer = "terraform"
 )
 
 // allDeployers is every deployer this package knows a name transform for.
@@ -78,6 +79,7 @@ var allDeployers = []Deployer{
 	DeployerFlux,
 	DeployerArgoCD,
 	DeployerArgoCDHelm,
+	DeployerTerraform,
 }
 
 // Component is what the mapping layer needs to know about a registry entry.
@@ -662,8 +664,9 @@ func attributeRecord(d Deployer, comps []Component, record installedRelease) (in
 // the component-side string that matched.
 //
 // Each deployer's rule is the inverse of what that deployer writes. helm and
-// helmfile install under the component's own name
-// (localformat's install-local-helm.sh). Flux writes a HelmRelease with a name
+// helmfile install under the component's own name (localformat's
+// install-local-helm.sh), and terraform's module sets release_name to the
+// same name with the same -pre/-post/-readiness suffixes. Flux writes a HelmRelease with a name
 // and a targetNamespace and never a releaseName, so helm-controller composes
 // the release name from the two. Argo CD prepends a user-settable namePrefix
 // to every child Application, which cannot be enumerated and need not end in a
@@ -673,7 +676,7 @@ func attributeRecord(d Deployer, comps []Component, record installedRelease) (in
 // being reported as that component.
 func matchComponent(d Deployer, c *Component, record installedRelease) (matchKind, string) {
 	switch d {
-	case DeployerHelm, DeployerHelmfile:
+	case DeployerHelm, DeployerHelmfile, DeployerTerraform:
 		return matchName(record.Name, c.Name, false)
 	case DeployerFlux:
 		return matchFlux(c, record)

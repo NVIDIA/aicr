@@ -124,6 +124,16 @@ func TestAttributeRecord(t *testing.T) {
 			want:   "cert-manager", wantKind: matchPrimary,
 		},
 		{
+			name: "terraform shares the helm transform", deployer: DeployerTerraform, comps: comps,
+			record: helmRec("cert-manager", "cert-manager-system", "deployed", "1.20.2", nil),
+			want:   "cert-manager", wantKind: matchPrimary,
+		},
+		{
+			name: "terraform folds an injected readiness folder into its parent", deployer: DeployerTerraform, comps: comps,
+			record: helmRec("gpu-operator-readiness", "nvidia-gpu-operator", "deployed", "0.1.0", nil),
+			want:   "gpu-operator", wantKind: matchInjected,
+		},
+		{
 			name: "helm folds an injected pre folder into its parent", deployer: DeployerHelm, comps: comps,
 			record: helmRec("gpu-operator-pre", "nvidia-gpu-operator", "deployed", "0.1.0", nil),
 			want:   "gpu-operator", wantKind: matchInjected,
