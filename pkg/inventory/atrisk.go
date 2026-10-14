@@ -260,14 +260,13 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 		if err := ctxErr(ctx, atRiskSubject); err != nil {
 			return ScannedKind{}, nil, err
 		}
-		// Requests only metadata, whose annotations can still hold a whole
-		// object in kubectl's last-applied-configuration.
+		// Metadata only, though kubectl's last-applied-configuration
+		// annotation can still hold a whole object.
 		pageCtx, cancel := context.WithTimeout(ctx, pageTimeout)
 		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(pageCtx, opts)
 		cancel()
 		if err != nil {
-			// Objects changed since the first page may be missed or included,
-			// which an advisory scan tolerates better than failing.
+			// For an advisory scan an inconsistent list beats a failed one.
 			if fresh := expiredContinue(err); opts.Continue != "" && fresh != "" {
 				if advErr := advance(&opts, fresh, gvr.Resource); advErr != nil {
 					return ScannedKind{}, nil, advErr
@@ -336,9 +335,9 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 	return scanned, findings, nil
 }
 
-// expiredContinue returns the continue token an apiserver puts in the 410 for
-// an expired one, which resumes the list at the latest snapshot. It returns ""
-// if err is not that 410 or carries no token.
+// expiredContinue returns the token that err, a 410 for an expired continue
+// token, carries to resume the list at the latest snapshot, or "" if err is
+// not such a 410 or carries none.
 func expiredContinue(err error) string {
 	var status apierrors.APIStatus
 	if !apierrors.IsResourceExpired(err) || !stderrors.As(err, &status) {
@@ -356,15 +355,14 @@ func expiredContinue(err error) string {
 //   - the app.kubernetes.io/managed-by=Helm label with a non-blank
 //     helm.sh/hook annotation
 func owned(item metav1.Object) bool {
-	// An allowlist, so an unrecognized marker over-warns rather than letting a
-	// cascade-deleted object, which has no recovery, go unreported.
+	// An allowlist, since over-warning costs a line of output and
+	// under-warning costs an object a CRD removal deletes for good.
 	annotations := item.GetAnnotations()
 	if strings.TrimSpace(annotations[argoTrackingIDAnnotation]) != "" {
 		return true
 	}
-	// Anything can write the label, but only Helm's install path writes the
-	// release name. Helm gives a hook no release name, so a hook pairs the
-	// label with helm.sh/hook.
+	// Anything can write the label, but only Helm writes the release name,
+	// or helm.sh/hook on a hook, which gets no release name.
 	if item.GetLabels()[labels.ManagedBy] != helmManagedByValue {
 		return false
 	}

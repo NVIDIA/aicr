@@ -727,10 +727,9 @@ func (c *abortingContext) abort(err error) {
 // nil error says the comparison stands.
 //
 // The two rows that must not fail the run are the discriminating ones. A scan
-// that exhausted its own defaults.AtRiskStepTimeout carries exactly the code
-// and the sentinel an expired caller deadline carries, because pkg/inventory
-// codes both through the same abortError, so neither distinguishes them; the
-// caller's context does.
+// step past defaults.AtRiskStepTimeout carries the code and sentinel an
+// expired caller deadline carries, so only the caller's context tells them
+// apart.
 func TestUpgradeCheckScanAbortIsNotAFinding(t *testing.T) {
 	t.Parallel()
 
@@ -759,8 +758,7 @@ func TestUpgradeCheckScanAbortIsNotAFinding(t *testing.T) {
 			wantTransient: true,
 		},
 		{
-			// A step of the scan stalled past its own budget, and nobody
-			// aborted.
+			// The caller's context is still live.
 			name: "a scan step's own budget expires",
 			scanErr: errors.Wrap(errors.ErrCodeTimeout,
 				"timed out reading the cluster for resources an upgrade could disturb",

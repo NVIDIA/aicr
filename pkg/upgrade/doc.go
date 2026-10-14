@@ -37,8 +37,7 @@
 // # The ten rules
 //
 // Rule 1 is Load's. Rules 2 through 10 are Validate's, one function each in
-// wellformed.go. A reader told there are ten rules otherwise finds nine,
-// numbered 2 to 10, because rule 1 is named nowhere in the package.
+// wellformed.go.
 //
 //	1  apiVersion and kind are recognized                        decodeRecord
 //	2  to is bounded, its ceiling at or below the pin            checkPinCeiling

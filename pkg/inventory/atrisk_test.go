@@ -872,8 +872,8 @@ func metadataClient(t *testing.T, srv *httptest.Server) metadata.Interface {
 	return client
 }
 
-// TestScanAtRiskRequestsMetadataLists runs the scan through a real metadata
-// client, checking that each kind is listed cluster-wide as metadata.
+// TestScanAtRiskRequestsMetadataLists checks that a real metadata client lists
+// each kind cluster-wide as metadata.
 func TestScanAtRiskRequestsMetadataLists(t *testing.T) {
 	t.Parallel()
 
@@ -978,8 +978,8 @@ func TestScanAtRiskRetriesADroppedConnection(t *testing.T) {
 	}
 }
 
-// slowPages serves pages of one object each, taking delay to answer each, or
-// until the client gives up.
+// slowPages serves pages of one object each, answering each after delay or
+// when the client gives up.
 func slowPages(t *testing.T, pages int, delay time.Duration) *httptest.Server {
 	t.Helper()
 

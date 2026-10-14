@@ -349,13 +349,12 @@ func TestLoadAllowsNilSourceWhenNothingReferencesAFile(t *testing.T) {
 	}
 }
 
-// No other test asserts that a realistic record satisfies all ten rules at
-// once, so nothing proved they are jointly satisfiable, and `replaces` was
-// never exercised through a YAML decode at all. Every clause here is load
-// bearing: rule 3 needs the two `from` domains to meet and to reach the pin,
-// rule 7 needs each `from` to stop at its own `to` floor, rule 8 needs the two
-// floors to differ, and rule 6 needs the explicit group plus the remainder to
-// cover all five deployers.
+// TestLoadAndValidateAcceptAWellFormedRecord checks that one realistic record,
+// replaces included, decodes and satisfies all ten rules at once. Each clause
+// is load bearing. Rule 3 needs the two from domains to meet and reach the
+// pin, rule 7 needs each from to stop at its own to floor, rule 8 needs the
+// two floors to differ, and rule 6 needs the explicit group plus the remainder
+// to cover all five deployers.
 func TestLoadAndValidateAcceptAWellFormedRecord(t *testing.T) {
 	const body = `apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades

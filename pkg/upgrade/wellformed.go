@@ -619,9 +619,9 @@ func checkHooks(where string, t *Transition) []string {
 	return v
 }
 
-// checkAffectedResources implements rule 10. It returns one violation for each
-// core Secret kind t's affectedResources name, matching the kind
-// case-insensitively and ignoring surrounding space.
+// checkAffectedResources implements rule 10, returning a violation for each
+// core Secret kind in t's affectedResources. A kind matches case-insensitively,
+// ignoring surrounding space.
 func checkAffectedResources(where string, t *Transition) []string {
 	// Listing Secrets needs a permission that reads every Secret's data.
 	var v []string

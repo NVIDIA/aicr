@@ -1715,17 +1715,10 @@ const (
 	MaxOCIRecipeFiles = 4096
 )
 
-// AtRiskListPageSize caps how many objects one List pulls while scanning for
-// resources an upgrade could disturb. A page carries only metadata, but an
-// object's annotations can hold 256 KiB, so a full page can reach 50 MiB.
-//
-// Nothing is retained across pages beyond the objects found at risk, which on
-// a healthy cluster is none, so the page bounds the peak as well as the
-// response.
+// AtRiskListPageSize is the most objects the at-risk scan asks for in one List
+// request.
 const AtRiskListPageSize int64 = 200
 
-// AtRiskStepTimeout bounds one step of the advisory at-risk scan, which is
-// resolving one kind or listing one page of it with its retries. The scan has
-// no total budget, so a cluster with many objects of a kind finishes as long
-// as every page arrives in time, and a stalled apiserver fails one step.
+// AtRiskStepTimeout bounds each step of the at-risk scan, which is resolving
+// one kind or listing one page with its retries. The scan has no total budget.
 const AtRiskStepTimeout = 60 * time.Second
