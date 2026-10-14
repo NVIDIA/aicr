@@ -242,6 +242,77 @@ func TestWaitForCRETerminalKeepsPartialStatusOnTimeout(t *testing.T) {
 	}
 }
 
+// TestCREErrorWithPartialReport covers the consuming half of #2688's criterion
+// that an expired run produces a failure carrying the partial report. The
+// Certification is deleted by teardown moments after the wait returns, so an
+// error that did not absorb the per-category progress loses it for good.
+func TestCREErrorWithPartialReport(t *testing.T) {
+	withCategories := func(statuses ...map[string]any) *unstructured.Unstructured {
+		raw := make([]any, 0, len(statuses))
+		for _, s := range statuses {
+			raw = append(raw, s)
+		}
+		return &unstructured.Unstructured{
+			Object: map[string]any{"status": map[string]any{"categoryStatuses": raw}},
+		}
+	}
+	timeout := errors.New(errors.ErrCodeTimeout, "timed out waiting for Certification")
+
+	tests := []struct {
+		name    string
+		err     error
+		obj     *unstructured.Unstructured
+		wantMsg string
+	}{
+		{
+			name: "partial progress is reported with the timeout",
+			err:  timeout,
+			obj: withCategories(
+				map[string]any{"domain": "communication", "variant": "nccl-all-reduce", "status": "Succeeded"},
+				map[string]any{"domain": "training", "variant": "nemotron5-8b", "status": "InProgress"},
+			),
+			wantMsg: "communication/nccl-all-reduce=Succeeded, training/nemotron5-8b=InProgress",
+		},
+		{
+			// Nothing to add, so the error must pass through untouched rather
+			// than gain an empty "completed so far:" clause.
+			name:    "no categories leaves the error alone",
+			err:     timeout,
+			obj:     withCategories(),
+			wantMsg: "timed out waiting for Certification",
+		},
+		{
+			name:    "a run that never reported leaves the error alone",
+			err:     timeout,
+			obj:     nil,
+			wantMsg: "timed out waiting for Certification",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := creErrorWithPartialReport(tt.err, tt.obj)
+			if got == nil {
+				t.Fatal("error = nil, want the wait's error preserved")
+			}
+			// The code must survive: ExitCodeFromError reads the outermost one.
+			if errorstest.ReportedCode(got) != errors.ErrCodeTimeout {
+				t.Errorf("reported code = %v, want ErrCodeTimeout", errorstest.ReportedCode(got))
+			}
+			if !strings.Contains(got.Error(), tt.wantMsg) {
+				t.Errorf("error = %q, want it to contain %q", got.Error(), tt.wantMsg)
+			}
+		})
+	}
+
+	t.Run("a clean run stays nil", func(t *testing.T) {
+		if got := creErrorWithPartialReport(nil, withCategories(
+			map[string]any{"domain": "training", "variant": "nemotron5-8b", "status": "Succeeded"},
+		)); got != nil {
+			t.Errorf("error = %v, want nil", got)
+		}
+	})
+}
+
 func TestDeleteCREResourceWaitsUntilGone(t *testing.T) {
 	obj := buildTestCertification(t, "ns", "aicr-cre-nccl-gone", twoNodeGPUConfig())
 	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(), obj)

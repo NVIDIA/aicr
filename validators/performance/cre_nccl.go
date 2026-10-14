@@ -103,7 +103,7 @@ func validateCRENcclAllReduceBw(
 
 	run, err := waitForCertificationTerminal(ctx.Ctx, dyn, ctx.Namespace, objName)
 	if err != nil {
-		return "", false, err
+		return "", false, creErrorWithPartialReport(err, run)
 	}
 	if unstructuredConditionTrue(run, "Failed") {
 		// Teardown deletes the Certification, so CRE's reason is only

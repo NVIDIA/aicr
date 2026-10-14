@@ -360,6 +360,49 @@ func creCleanupFailure(label string, primary, deleteErr error) error {
 		map[string]any{"cleanupError": deleteErr.Error()})
 }
 
+// crePartialReport summarizes what CRE had finished when a run ended without
+// reaching a verdict, one "<domain>/<variant>=<status>" per category.
+func crePartialReport(obj *unstructured.Unstructured) string {
+	if obj == nil {
+		return ""
+	}
+	statuses, found, err := unstructured.NestedSlice(obj.Object, "status", "categoryStatuses")
+	if err != nil || !found {
+		return ""
+	}
+	parts := make([]string, 0, len(statuses))
+	for _, raw := range statuses {
+		status, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%v/%v=%v", status["domain"], status["variant"], status["status"]))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ", ")
+}
+
+// creErrorWithPartialReport attaches the partial report to an error that ended
+// the wait before a verdict, which is what #2688 asks an expired run to carry.
+// Teardown deletes the Certification as soon as the wait returns, so the
+// object is the only record of per-category progress and this is the last
+// point at which it can be read.
+//
+// The error keeps its code, because callers and exit codes switch on it, and
+// stays in the Unwrap chain.
+func creErrorWithPartialReport(err error, obj *unstructured.Unstructured) error {
+	report := crePartialReport(obj)
+	if err == nil || report == "" {
+		return err
+	}
+	return aicrErrors.WrapWithContext(creErrorCode(err),
+		"CRE run ended without a verdict; completed so far: "+report, err,
+		map[string]any{"partialReport": report})
+}
+
 // deleteCRECertification removes a Certification under its own delete budget.
 // Teardown does not use it: that path holds one budget across enumerate,
 // delete, and confirm, so the phases cannot each spend the full allowance.

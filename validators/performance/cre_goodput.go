@@ -104,7 +104,7 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 	}
 	run, err := waitForCertificationTerminal(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, objName)
 	if err != nil {
-		return err
+		return creErrorWithPartialReport(err, run)
 	}
 	if unstructuredConditionTrue(run, "Failed") {
 		summary := creTerminalConditionSummary(run)
