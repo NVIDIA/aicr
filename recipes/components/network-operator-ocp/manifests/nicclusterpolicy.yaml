@@ -18,9 +18,14 @@ kind: NicClusterPolicy
 metadata:
   name: {{ $v.name }}
   annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "10"
-    helm.sh/hook-delete-policy: before-hook-creation
+    # Deliberately NOT a Helm hook: this CR is long-lived cluster networking
+    # (it also installs ofedDriver) and must be updated in place —
+    # hook-delete-policy would delete the live policy on every upgrade,
+    # tearing down OFED/RDMA pods before the replacement reconciles.
+    # CRD-before-CR ordering comes from component sequencing: this
+    # manifest-only component is ordered after network-operator-ocp-olm,
+    # whose Subscription installs the operator and its CRDs.
+    aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:

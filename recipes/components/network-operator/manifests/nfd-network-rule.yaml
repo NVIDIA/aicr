@@ -40,9 +40,12 @@ kind: NodeFeatureRule
 metadata:
   name: nfd-network-rule
   annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "1"
-    helm.sh/hook-delete-policy: before-hook-creation
+    # Deliberately NOT a Helm hook: this rule labels the nodes the
+    # NicClusterPolicy schedules onto and must be updated in place —
+    # hook-delete-policy would drop the labels on every upgrade and let the
+    # fabric DaemonSets lose their nodes. CRD-before-CR ordering is provided
+    # by the bundler's post-bundle sequencing (network-operator-post bundle).
+    aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}

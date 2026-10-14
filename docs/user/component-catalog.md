@@ -1925,6 +1925,116 @@ kubectl get configmap dcgm-exporter -n gpu-operator \
 # Expected: gpu-operator
 ```
 
+### `network-operator`, `network-operator-ocp` and `nfd-ocp`: fabric CRs are no longer Helm hooks (Flux only)
+
+Earlier bundles declared the AKS and OKE `NicClusterPolicy` manifests, the AKS
+`NodeFeatureRule`, and the OpenShift `NicClusterPolicy` and
+`NodeFeatureDiscovery` as `helm.sh/hook: post-install,post-upgrade` resources
+with `helm.sh/hook-delete-policy: before-hook-creation`. Newer bundles ship them
+as ordinary release members that Helm updates in place, because deleting a
+`NicClusterPolicy` is how the network-operator tears down its OFED and RDMA
+pods, and a hook with that delete policy did exactly that on every upgrade.
+
+Only the `flux` deployer crosses a boundary here. `helm`, `helmfile`, `argocd`
+and `argocd-helm` strip hook annotations from every local chart they write
+(see [Bundling](bundling.md)), so on those deployers the live objects were
+release members all along and nothing changes. The `flux` deployer copies recipe
+manifests into its generated charts unchanged, so a Flux cluster deployed from an
+earlier bundle runs these CRs as hooks today. The hook-created object is not in
+the release manifest, and the first upgrade across this change has to adopt it:
+
+| `HelmRelease` | Live objects to adopt | Recipes |
+|---|---|---|
+| `network-operator-post` | `NicClusterPolicy/nic-cluster-policy`; on AKS also `NodeFeatureRule/nfd-network-rule` | AKS, OKE GB200, OKE L40S |
+| `network-operator-ocp` | `NicClusterPolicy/nic-cluster-policy` | OpenShift |
+| `nfd-ocp` | `NodeFeatureDiscovery/nfd-instance` in `openshift-nfd` | OpenShift |
+
+The `HelmRelease` objects live in the namespace given by `--flux-namespace`
+(`flux-system` by default); substitute it in the commands below. Fresh installs
+are not affected, and this is not a component version boundary, so
+`aicr upgrade-check` does not report it.
+
+Whether the adoption applies the new spec depends on how helm-controller
+applies the release. `spec.upgrade.serverSideApply` defaults to `auto`, which
+reuses the apply method of the previous release:
+
+- A release first installed by helm-controller v1.5.0 or later is server-side
+  when its install used server-side apply, which is the default unless
+  `spec.install.serverSideApply: false` or `UseHelm3Defaults` is set. Its
+  upgrade adopts the object (take-ownership is on unless
+  `spec.upgrade.disableTakeOwnership: true`), forces field conflicts, and
+  rewrites the live spec from the chart. Nothing to do.
+- A release first installed client-side stays client-side under `auto`. For
+  custom resources, Helm's client-side upgrade computes a two-way merge patch
+  between the recorded release manifest and the new one. The adopted object has
+  no recorded manifest to differ from, so the patch is empty: the `HelmRelease`
+  reports success while the live `NicClusterPolicy` keeps its old spec,
+  including any DOCA/OFED driver version pin, and later upgrades never correct
+  it because the object is now in the release manifest and looks current.
+
+For the second case, set `spec.upgrade.serverSideApply: enabled` on each
+affected `HelmRelease` before reconciling the first bundle without the hooks.
+This needs helm-controller v1.5.0 or later, with take-ownership left at its
+default. AICR does not emit the field, and the bundle's own files are generated
+and checksummed, so do not edit them: `aicr verify` fails closed on a modified
+bundle, OCI-pushed bundles have no file to edit, and the next bundle regenerates
+them anyway. Add the patch to the Flux `Kustomization` you own that applies the
+bundle (`aicr-stack` in the bundle's README), which rewrites the `HelmRelease`
+as Flux applies it:
+
+```yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: aicr-stack
+  namespace: flux-system   # your --flux-namespace
+spec:
+  # ...
+  patches:
+    - target:
+        kind: HelmRelease
+        name: network-operator-post   # or network-operator-ocp, nfd-ocp
+      patch: |
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: network-operator-post
+        spec:
+          upgrade:
+            serverSideApply: enabled
+```
+
+Changing the `HelmRelease` spec alone does not re-run Helm: helm-controller
+treats a deployed release as in sync unless its chart, values or
+post-renderers change. If the crossing upgrade already ran client-side, force
+a one-off upgrade after the patch is in place:
+
+```bash
+flux reconcile helmrelease network-operator-post -n flux-system --force
+```
+
+The setting is needed once. After an upgrade has applied server-side, `auto`
+resolves to server-side apply for that release from then on, so the patch can
+be dropped on a later bundle. Confirm the upgrade applied the spec by comparing
+a field the template pins against the bundle; a stale value means the upgrade
+ran client-side:
+
+| Recipe | Live object | Field | Pinned in |
+|---|---|---|---|
+| AKS | `NicClusterPolicy/nic-cluster-policy` | `.spec.ofedDriver.version` | `network-operator-post` chart, `nic-cluster-policy-aks.yaml` |
+| OKE GB200 | `NicClusterPolicy/nic-cluster-policy` | `.spec.rdmaSharedDevicePlugin.version` | `network-operator-post` chart, `nic-cluster-policy-oke-gb200.yaml` |
+| OKE L40S | `NicClusterPolicy/nic-cluster-policy` | `.spec.sriovDevicePlugin.version` | `network-operator-post` chart, `nic-cluster-policy-oke-l40s.yaml` |
+| AKS | `NodeFeatureRule/nfd-network-rule` | `.spec.rules[0].matchFeatures[0].matchExpressions.device.value` | `network-operator-post` chart, `nfd-network-rule.yaml` (no version pin; compare the device ID list) |
+| OpenShift | `NicClusterPolicy/nic-cluster-policy` | `.spec.ofedDriver.version` | `network-operator-ocp` `HelmRelease`, `spec.values.network-operator-ocp.ofedDriver.version` |
+| OpenShift | `NodeFeatureDiscovery/nfd-instance` (`openshift-nfd`) | `.spec.workerConfig.configData` | `nfd-ocp` `HelmRelease`, `spec.values.nfd-ocp.workerConfig.configData` |
+
+For example, on AKS:
+
+```bash
+kubectl get nicclusterpolicy nic-cluster-policy \
+  -o jsonpath='{.spec.ofedDriver.version}{"\n"}'
+```
+
 ### `grove`: `v0.1.0-alpha.8` (or earlier) to `v0.1.0-alpha.12`
 
 alpha.8's `clustertopologies.grove.io` CRD (kind `ClusterTopology`, shortname
