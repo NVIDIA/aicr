@@ -76,7 +76,7 @@ spec:
   rdmaSharedDevicePlugin:
     image: k8s-rdma-shared-dev-plugin
     repository: nvcr.io/nvidia/mellanox
-    version: network-operator-v26.4.1
+    version: network-operator-v26.7.0
     imagePullSecrets: []
     config: |
       {
