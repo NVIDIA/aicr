@@ -1055,8 +1055,9 @@ choose, such as the container's termination-message path
 `aicr bundle --image-refs` writes. Its path, and that it can be written, are
 checked before validation starts. The kubelet bind-mounts the
 termination-message file, so aicr writes it in place rather than renaming a
-new file over it. A failed run leaves the file as it was, so gate on the exit
-status before reading it.
+new file over it. A run that fails before the write leaves the file as it was,
+but an in-place write that fails partway can leave it empty or partial, so gate
+on the exit status before reading it.
 
 After the command finishes:
 
