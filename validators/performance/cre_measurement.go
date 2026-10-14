@@ -159,12 +159,20 @@ func waitForFinalMeasurements(
 // errWatchRestart asks waitForFinalMeasurements to re-list and watch again.
 var errWatchRestart = stderrors.New("watch closed")
 
-// measurementDeleted reports whether a deletion ends the wait. CRE never
-// deletes a measurement itself — the Workflow owns them through an
-// OwnerReference — so one this run owns disappearing before it was finalized
-// means the Workflow is being garbage-collected under the check, and the
-// remaining measurements describe a partial sweep. A measurement already read
-// as final is kept: the object going away does not unmake the reading.
+// measurementDeleted reports whether a deletion ends the wait.
+//
+// It fails closed on any unfinalized measurement this run owns, because the
+// two reasons one can vanish are indistinguishable from here: the Workflow is
+// being garbage-collected under the check, or CRE is replacing an earlier
+// attempt's measurement for a retried Job that reused its name
+// (ensureBandwidthMeasurement, job_controller.go). Neither leaves a reading
+// behind. Treating the second as benign would mean waiting on a name that may
+// never come back, and the cost of being wrong is asymmetric — a spurious
+// failure costs a rerun, while a partial sweep reported as a sweep ships a
+// verdict drawn from measurements that were never taken.
+//
+// A measurement already read as final is kept: the object going away does not
+// unmake the reading.
 func measurementDeleted(byName map[string]*unstructured.Unstructured, name, kind string) error {
 	obj, tracked := byName[name]
 	if !tracked {

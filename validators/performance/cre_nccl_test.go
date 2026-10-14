@@ -15,10 +15,14 @@
 package main
 
 import (
+	stderrors "errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -39,6 +43,78 @@ func TestCheckCRENCCLSkipsWithoutConstraint(t *testing.T) {
 	err := checkCRENCCLAllReduceBW(ctx)
 	if !validators.IsSkip(err) {
 		t.Fatalf("expected Skip without CRE constraint, got %v", err)
+	}
+}
+
+// TestCRENCCLCleanupResult pins the deferred teardown's effect on the result.
+// The case that matters is both errors together: a teardown failure used to
+// be dropped once the check had already failed, which is exactly when the
+// surviving Certification goes unreported.
+func TestCRENCCLCleanupResult(t *testing.T) {
+	primary := errors.New(errors.ErrCodeInvalidRequest, "bandwidth below threshold")
+	delErr := errors.New(errors.ErrCodeTimeout, "Workflow/wf-1 still running")
+
+	tests := []struct {
+		name          string
+		actual        string
+		passed        bool
+		primary       error
+		delErr        error
+		wantActual    string
+		wantPassed    bool
+		wantCode      errors.ErrorCode
+		wantMentions  string
+		wantUnwrapsTo error
+	}{
+		{
+			name:   "clean teardown leaves a passing reading alone",
+			actual: "412.00", passed: true, primary: nil, delErr: nil,
+			wantActual: "412.00", wantPassed: true,
+		},
+		{
+			name:    "clean teardown leaves the check's own failure alone",
+			primary: primary, delErr: nil,
+			wantCode: errors.ErrCodeInvalidRequest, wantMentions: "bandwidth below threshold",
+			wantUnwrapsTo: primary,
+		},
+		{
+			name:   "teardown failure drops a passing reading",
+			actual: "412.00", passed: true, delErr: delErr,
+			wantCode: errors.ErrCodeInternal, wantMentions: "wf-1 still running",
+			wantUnwrapsTo: delErr,
+		},
+		{
+			name:    "teardown failure reaches the caller even when the check failed",
+			primary: primary, delErr: delErr,
+			// The primary keeps the code callers switch on, but the leak has
+			// to be in the message the operator reads.
+			wantCode: errors.ErrCodeInvalidRequest, wantMentions: "wf-1 still running",
+			wantUnwrapsTo: primary,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual, passed, err := creNCCLCleanupResult(tt.actual, tt.passed, tt.primary, tt.delErr)
+			if actual != tt.wantActual || passed != tt.wantPassed {
+				t.Errorf("actual, passed = %q, %v, want %q, %v", actual, passed, tt.wantActual, tt.wantPassed)
+			}
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("error = %v, want nil", err)
+				}
+				return
+			}
+			if got := errorstest.ReportedCode(err); got != tt.wantCode {
+				t.Errorf("reported code = %v, want %v", got, tt.wantCode)
+			}
+			if !strings.Contains(err.Error(), tt.wantMentions) {
+				t.Errorf("error = %q, want it to mention %q", err.Error(), tt.wantMentions)
+			}
+			if !stderrors.Is(err, tt.wantUnwrapsTo) {
+				t.Errorf("error = %v, want it to unwrap to %v", err, tt.wantUnwrapsTo)
+			}
+		})
 	}
 }
 

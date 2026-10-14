@@ -89,12 +89,8 @@ func validateCRENcclAllReduceBw(
 	}
 
 	defer func() {
-		delErr := teardownCRECertification(context.Background(), dyn, ctx.Clientset, ctx.Namespace, objName)
-		// A leak must not hide behind a passing bandwidth reading, so drop the
-		// measurement along with the pass when cleanup is what failed.
-		if leaked := creCleanupFailure(checkNameCRENCCLAllReduceBW, err, delErr); leaked != nil && err == nil {
-			actual, passed, err = "", false, leaked
-		}
+		actual, passed, err = creNCCLCleanupResult(actual, passed, err,
+			teardownCRECertification(context.Background(), dyn, ctx.Clientset, ctx.Namespace, objName))
 	}()
 
 	if createErr := createUnstructured(ctx.Ctx, dyn, certificationGVR, ctx.Namespace, obj); createErr != nil {
@@ -131,6 +127,23 @@ func validateCRENcclAllReduceBw(
 
 	actual = strconv.FormatFloat(bw, 'f', 2, 64)
 	return actual, bw >= threshold, nil
+}
+
+// creNCCLCleanupResult folds a teardown failure into the check's result.
+//
+// A leak must not hide behind a passing bandwidth reading, nor behind a check
+// that already failed for its own reason: either way the nodes may still be
+// busy and the operator has to be told which objects survived.
+// creCleanupFailure keeps the primary error's code and its Unwrap chain, so
+// only the message grows.
+//
+// Split out of the deferred call so a test can reach the case where both the
+// check and its teardown failed.
+func creNCCLCleanupResult(actual string, passed bool, primary, delErr error) (string, bool, error) {
+	if delErr == nil {
+		return actual, passed, primary
+	}
+	return "", false, creCleanupFailure(checkNameCRENCCLAllReduceBW, primary, delErr)
 }
 
 func creLauncherLogs(ctx *validators.Context, workflowName string, createdAt metav1.Time) (string, error) {

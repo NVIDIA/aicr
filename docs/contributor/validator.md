@@ -930,7 +930,8 @@ silently fall back.
 
 Full list (defaults, semantics) is in the `validators/performance`
 package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
-`nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls`. Opt-in public CRE
+`nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls`. Inference:
+`inference-perf` (Dynamo + AIPerf). Opt-in public CRE
 checks: `nccl-cre-all-reduce-bw` and `cre-training-goodput`. Neither branches on
 service or accelerator — `creQualifiedEntries` in
 `validators/performance/cre_qualification.go` records which combinations are
@@ -961,7 +962,6 @@ every measurement the run owns to finalize, bounded by
 completion reasons are not weaker evidence but no evidence: `LogsUnavailable`
 completes while leaving the provisional results in place and `NoDataCollected`
 has none, and CRE declines to evaluate a threshold against either.
-Inference: `inference-perf` (Dynamo + AIPerf).
 
 > **Constraint-name contract.** Each NCCL variant looks up a
 > constraint with the *exact* same name as the check. A recipe
