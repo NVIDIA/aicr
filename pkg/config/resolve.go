@@ -418,6 +418,13 @@ type ValidateResolved struct {
 	// See pkg/snapshotter.AgentConfig.ServiceAccountName.
 	ServiceAccountName string
 
+	// ValidatorServiceAccountName is
+	// spec.validate.agent.validatorServiceAccountName: an existing,
+	// administrator-provisioned ServiceAccount the validator Jobs run as
+	// instead of a per-run one. Empty keeps per-run RBAC. See
+	// pkg/validator.Validator.ServiceAccountName.
+	ValidatorServiceAccountName string
+
 	// NodeSelector is spec.validate.agent.nodeSelector. Nil if unset;
 	// non-nil empty if `{}` was explicit.
 	NodeSelector map[string]string
@@ -525,6 +532,7 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 		out.Image = v.Agent.Image
 		out.JobName = v.Agent.JobName
 		out.ServiceAccountName = v.Agent.ServiceAccountName
+		out.ValidatorServiceAccountName = v.Agent.ValidatorServiceAccountName
 		out.RequireGPU = v.Agent.RequireGPU
 		out.ImagePullSecrets = slices.Clone(v.Agent.ImagePullSecrets)
 		if err := bundlercfg.ValidateNodeSelector(v.Agent.NodeSelector); err != nil {

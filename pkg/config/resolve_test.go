@@ -764,6 +764,8 @@ func TestValidateResolve_AllFieldsPopulated(t *testing.T) {
 			NodeSelector:       map[string]string{"k": "v"},
 			Tolerations:        []string{"foo=bar:NoSchedule"},
 			RequireGPU:         true,
+
+			ValidatorServiceAccountName: "validator-sa",
 		},
 		Execution: &config.ValidateExecutionSpec{
 			Phases:      []string{"deployment", "conformance"},
@@ -782,7 +784,7 @@ func TestValidateResolve_AllFieldsPopulated(t *testing.T) {
 		t.Errorf("input mismatch: %+v", got)
 	}
 	if got.Namespace != "ns" || got.Image != "img:1" || got.JobName != "j" ||
-		got.ServiceAccountName != "sa" || !got.RequireGPU {
+		got.ServiceAccountName != "sa" || got.ValidatorServiceAccountName != "validator-sa" || !got.RequireGPU {
 
 		t.Errorf("agent mismatch: %+v", got)
 	}

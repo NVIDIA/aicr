@@ -252,6 +252,11 @@ const (
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second
 
+	// K8sServiceAccountVerifyTimeout bounds the read-only ServiceAccount Get
+	// and SubjectAccessReview that vet an administrator-provisioned validator
+	// ServiceAccount before a run uses it.
+	K8sServiceAccountVerifyTimeout = 30 * time.Second
+
 	// DiscoveryRefreshCooldown rate-limits how often the shared cluster
 	// fetcher (pkg/chainsaw) invalidates its cached discovery data after a
 	// no-match. The refresh exists so a CRD installed by the component being

@@ -504,21 +504,19 @@ func (c *Config) BundleInputOptions() (BundleInputOptions, error) {
 // the other derivations use.
 //
 // Not every field reaches Client.ValidateState. Image, JobName,
-// ServiceAccountName and RequireGPU configure the validator's own
-// Kubernetes Job, but pkg/validator exposes no WithValidationImage,
-// WithValidationJobName, WithValidationServiceAccountName or
-// WithValidationRequireGPU option for ValidateState to accept them through —
-// see options.go. They are carried here anyway so a caller (the CLI's
-// parseValidateAgentConfig, in particular) can read spec.validate.agent with
-// its own flag-over-config precedence instead of reaching for Unwrap(). The
-// remaining nine fields (Namespace, ImagePullSecrets, NodeSelector,
-// Tolerations, Phases, NoCluster, Cleanup, FailFast, Timeout) do reach
-// ValidateState via a matching WithValidation* option.
+// ServiceAccountName and RequireGPU configure the live snapshot-capture
+// agent's Kubernetes Job, and ValidateState has no option to accept them
+// through — see options.go. They are carried here anyway so a caller (the
+// CLI's parseValidateAgentConfig, in particular) can read spec.validate.agent
+// with its own flag-over-config precedence instead of reaching for Unwrap().
+// The remaining eleven fields (Namespace, ValidatorServiceAccountName,
+// ImagePullSecrets, NodeSelector, Tolerations, Phases, SkipChecks, NoCluster,
+// Cleanup, FailFast, Timeout) do reach ValidateState via a matching option.
 type ValidateSettings struct {
 	Namespace string
 
 	// Image, JobName, ServiceAccountName and RequireGPU have no
-	// WithValidation* option — see the type godoc above. A caller feeds them
+	// ValidateState option — see the type godoc above. A caller feeds them
 	// into its own agent/Job construction instead of ValidateState.
 	Image              string
 	ImagePullSecrets   []string
@@ -528,6 +526,11 @@ type ValidateSettings struct {
 	Tolerations        []corev1.Toleration
 	RequireGPU         bool
 	Phases             []Phase
+
+	// ValidatorServiceAccountName is
+	// spec.validate.agent.validatorServiceAccountName verbatim. It reaches
+	// ValidateState through WithValidatorServiceAccountName.
+	ValidatorServiceAccountName string
 
 	// SkipChecks is spec.validate.execution.skipChecks verbatim. It reaches
 	// ValidateState through WithValidationSkipChecks.
@@ -553,13 +556,14 @@ type ValidateSettings struct {
 // individual fields with its own flag precedence instead of replaying a
 // built option list.
 //
-// Thirteen settings project: namespace, image, image pull secrets, job name,
-// service account name, node selector, tolerations, require-GPU, phases,
-// no-cluster, cleanup, fail-fast and timeout. Only nine of them reach
-// Client.ValidateState — image, job name, service account name and
-// require-GPU have no WithValidation* counterpart and are carried purely for
-// the caller's own agent/Job construction. See the ValidateSettings type
-// godoc for which is which.
+// Fifteen settings project: namespace, image, image pull secrets, job name,
+// service account name, validator service account name, node selector,
+// tolerations, require-GPU, phases, skip checks, no-cluster, cleanup,
+// fail-fast and timeout. Only eleven of them reach Client.ValidateState —
+// image, job name, service account name and require-GPU have no
+// ValidateState counterpart and are carried purely for the caller's own
+// agent/Job construction. See the ValidateSettings type godoc for which is
+// which.
 //
 // # Where the rest of spec.validate goes
 //
@@ -636,17 +640,18 @@ func (c *Config) ValidateSettings() (ValidateSettings, bool, error) {
 	}
 
 	return ValidateSettings{
-		Namespace:          resolved.Namespace,
-		Image:              resolved.Image,
-		ImagePullSecrets:   resolved.ImagePullSecrets,
-		JobName:            resolved.JobName,
-		ServiceAccountName: resolved.ServiceAccountName,
-		NodeSelector:       resolved.NodeSelector,
-		Tolerations:        resolved.Tolerations,
-		RequireGPU:         resolved.RequireGPU,
-		Phases:             phases,
-		SkipChecks:         resolved.SkipChecks,
-		NoCluster:          resolved.NoCluster,
+		Namespace:                   resolved.Namespace,
+		Image:                       resolved.Image,
+		ImagePullSecrets:            resolved.ImagePullSecrets,
+		JobName:                     resolved.JobName,
+		ServiceAccountName:          resolved.ServiceAccountName,
+		ValidatorServiceAccountName: resolved.ValidatorServiceAccountName,
+		NodeSelector:                resolved.NodeSelector,
+		Tolerations:                 resolved.Tolerations,
+		RequireGPU:                  resolved.RequireGPU,
+		Phases:                      phases,
+		SkipChecks:                  resolved.SkipChecks,
+		NoCluster:                   resolved.NoCluster,
 		// Inverted on purpose. See the field godoc.
 		Cleanup:  !resolved.NoCleanup,
 		FailFast: resolved.FailFast,

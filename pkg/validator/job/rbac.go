@@ -17,10 +17,14 @@ package job
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"log/slog"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
+	authorizationv1 "k8s.io/api/authorization/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
@@ -80,10 +84,27 @@ const (
 	// 5. This matches the pattern used by other cluster validation tools:
 	//    Sonobuoy uses cluster-admin for conformance tests, and the Kubernetes
 	//    e2e test suite itself requires cluster-admin.
+	//
+	// Points 1, 3 and 4 describe per-run RBAC only. With an
+	// administrator-provisioned ServiceAccount (see VerifyServiceAccount) the
+	// administrator grants cluster-admin once, to a long-lived identity in a
+	// namespace they own, and the caller need not hold it.
 	clusterAdminRole = "cluster-admin"
 
 	// fieldManager is the SSA field manager name for all RBAC resources.
 	fieldManager = labels.ValueAICR
+
+	// serviceAccountUserPrefix is the username the apiserver authenticates a
+	// ServiceAccount as, and therefore the SubjectAccessReview subject that
+	// answers for the validator pod rather than for the caller.
+	serviceAccountUserPrefix = "system:serviceaccount:"
+
+	// Virtual groups every ServiceAccount belongs to. Bindings may target
+	// them instead of the individual ServiceAccount, so a review that omits
+	// them under-reports what the validator pod can do.
+	groupServiceAccounts       = "system:serviceaccounts"
+	groupServiceAccountsPrefix = "system:serviceaccounts:"
+	groupAuthenticated         = "system:authenticated"
 )
 
 // EnsureRBAC applies the ServiceAccount and ClusterRoleBinding for validator
@@ -155,6 +176,107 @@ func CleanupRBAC(ctx context.Context, clientset kubernetes.Interface, namespace,
 		"namespace", namespace)
 
 	return nil
+}
+
+// VerifyServiceAccount vets an administrator-provisioned ServiceAccount that
+// validator Jobs will run as in place of the per-run one EnsureRBAC creates.
+// It issues only reads: a Get, and a SubjectAccessReview asking whether the
+// ServiceAccount may perform any verb on any resource cluster-wide, which is
+// what a binding to cluster-admin grants (see clusterAdminRole for why
+// validators need it).
+//
+// The ServiceAccount must also leave token automount enabled.
+//
+// Every outcome other than "exists and allowed" fails closed, including a
+// caller that may not create SubjectAccessReviews. A validator denied access
+// does not always fail: a check asserting that something is refused can read
+// its own Forbidden as the refusal it expected. Running under an unverified
+// identity would trade a clear error here for a result nobody can trust.
+func VerifyServiceAccount(ctx context.Context, clientset kubernetes.Interface, namespace, name string) error {
+	ctx, cancel := context.WithTimeout(ctx, defaults.K8sServiceAccountVerifyTimeout)
+	defer cancel()
+
+	sa, err := clientset.CoreV1().ServiceAccounts(namespace).Get(ctx, name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return errors.Wrap(errors.ErrCodeNotFound,
+			fmt.Sprintf("ServiceAccount %q does not exist in namespace %q. aicr does not create it in this mode, "+
+				"because that would grant cluster-admin on the caller's behalf: create it and bind it to the "+
+				"cluster-admin ClusterRole, or omit the validator ServiceAccount name to use per-run RBAC", name, namespace),
+			err)
+	case apierrors.IsForbidden(err):
+		return errors.Wrap(errors.ErrCodeUnauthorized,
+			fmt.Sprintf("cannot read ServiceAccount %q in namespace %q: grant the caller 'get serviceaccounts' in that namespace",
+				name, namespace),
+			err)
+	case err != nil:
+		return errors.Wrap(apiErrorCode(ctx, err), fmt.Sprintf("failed to read ServiceAccount %q in namespace %q", name, namespace), err)
+	}
+	// The validator pod spec leaves token automount to the ServiceAccount, so
+	// a ServiceAccount that disables it yields pods with no credential to
+	// reach the apiserver at all.
+	if sa.AutomountServiceAccountToken != nil && !*sa.AutomountServiceAccountToken {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("ServiceAccount %q in namespace %q sets automountServiceAccountToken: false, so validator pods "+
+				"would get no token to reach the API server; remove the field or set it to true", name, namespace))
+	}
+
+	review := &authorizationv1.SubjectAccessReview{
+		Spec: authorizationv1.SubjectAccessReviewSpec{
+			User:   serviceAccountUserPrefix + namespace + ":" + name,
+			Groups: []string{groupServiceAccounts, groupServiceAccountsPrefix + namespace, groupAuthenticated},
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Verb:     rbacv1.VerbAll,
+				Group:    rbacv1.APIGroupAll,
+				Resource: rbacv1.ResourceAll,
+			},
+		},
+	}
+	result, err := clientset.AuthorizationV1().SubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
+	switch {
+	case apierrors.IsForbidden(err):
+		return errors.Wrap(errors.ErrCodeUnauthorized,
+			fmt.Sprintf("cannot verify that ServiceAccount %q in namespace %q is bound to cluster-admin: the caller may "+
+				"not create SubjectAccessReviews. Grant the caller 'create subjectaccessreviews' "+
+				"(authorization.k8s.io, a read-only authorization query); aicr will not run validators under an "+
+				"unverified identity", name, namespace),
+			err)
+	case err != nil:
+		return errors.Wrap(apiErrorCode(ctx, err),
+			fmt.Sprintf("failed to review the permissions of ServiceAccount %q in namespace %q", name, namespace), err)
+	}
+	if !result.Status.Allowed {
+		msg := fmt.Sprintf("ServiceAccount %q in namespace %q is not bound to cluster-admin, which validators require. "+
+			"Bind it with: kubectl create clusterrolebinding <name> --clusterrole=%s --serviceaccount=%s:%s",
+			name, namespace, clusterAdminRole, namespace, name)
+		if result.Status.Reason != "" {
+			msg += " (apiserver: " + result.Status.Reason + ")"
+		}
+		return errors.New(errors.ErrCodeUnauthorized, msg)
+	}
+
+	slog.Debug("validator ServiceAccount verified",
+		"serviceAccount", name,
+		"namespace", namespace)
+	return nil
+}
+
+// apiErrorCode classifies an unexpected apiserver error: a dead context is a
+// cancellation or a timeout, rejected credentials are unauthorized, a network
+// failure is retryable, and anything else is internal.
+func apiErrorCode(ctx context.Context, err error) errors.ErrorCode {
+	switch {
+	case stderrors.Is(ctx.Err(), context.Canceled):
+		return errors.ErrCodeCanceled
+	case ctx.Err() != nil:
+		return errors.ErrCodeTimeout
+	case apierrors.IsUnauthorized(err):
+		return errors.ErrCodeUnauthorized
+	case errors.IsNetworkError(err):
+		return errors.ErrCodeUnavailable
+	default:
+		return errors.ErrCodeInternal
+	}
 }
 
 func applyServiceAccount(ctx context.Context, clientset kubernetes.Interface, namespace, saName string) error {
