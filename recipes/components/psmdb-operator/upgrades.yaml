@@ -70,8 +70,8 @@ transitions:
               Before applying the regenerated bundle, apply the new CRDs using
               the CRD-apply command under "Upgrade, uninstall, and
               troubleshooting" in docs/user/component-catalog.md, with
-              CHART=psmdb-operator, the repo
-              https://percona.github.io/percona-helm-charts/ and
+              CHART=psmdb-operator,
+              REPO=https://percona.github.io/percona-helm-charts/ and
               VERSION=1.23.2.
             reason: >-
               helm_release upgrades through Helm, which never applies a changed
@@ -180,8 +180,8 @@ transitions:
               Before applying the regenerated bundle, apply the new CRDs using
               the CRD-apply command under "Upgrade, uninstall, and
               troubleshooting" in docs/user/component-catalog.md, with
-              CHART=psmdb-operator, the repo
-              https://percona.github.io/percona-helm-charts/ and
+              CHART=psmdb-operator,
+              REPO=https://percona.github.io/percona-helm-charts/ and
               VERSION=<new>.
             reason: >-
               helm_release upgrades through Helm, which never applies a changed

@@ -1444,6 +1444,10 @@ set -euo pipefail
 
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
 VERSION="1.5.1"   # replace with the version you are upgrading to
+# The classic Helm repository the chart is served from. Leave it empty for an
+# oci:// CHART. For psmdb-operator:
+# REPO="https://percona.github.io/percona-helm-charts/"
+REPO=""
 # The component's ownsCRDsExcludeSubcharts, space-separated. For nvsentinel:
 # EXCLUDE_SUBCHARTS="mongodb-store", whose Percona CRDs psmdb-operator owns.
 EXCLUDE_SUBCHARTS=""
@@ -1454,7 +1458,7 @@ trap 'rm -rf "${work}"' EXIT
 # Every step below is checked explicitly rather than left to `set -e`. This
 # block gets pasted into a shell, often only in part, and a copy that loses
 # the `set -e` line would otherwise carry on past a failure in silence.
-if ! helm pull "${CHART}" --version "${VERSION}" --destination "${work}"; then
+if ! helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" --destination "${work}"; then
   echo "ERROR: helm pull failed for ${CHART} ${VERSION}" >&2
   exit 1
 fi
