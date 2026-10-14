@@ -152,14 +152,19 @@ The recipes that deploy `network-operator` (`gb200-oke-training`,
 `NvidiaNetworkOperator`. They require the
 `K8s.oke-addons.nvidia-network-operator` reading from the same
 `--oke-addons` dump to be `absent`, so a cluster with the add-on fails
-recipe generation and the `aicr validate` pre-flight. Remove the add-on
-before deploying:
+recipe generation and the `aicr validate` pre-flight. Remove the add-on,
+wait for the removal to finish, then recapture the snapshot. An add-on that
+is still being removed reads `addon-deleting`, which also fails the gate.
 
 ```shell
 CLUSTER_ID="ocid1.cluster.oc1.iad.aaaaaaaaexample"  # replace with your OKE cluster OCID
 
 oci ce cluster disable-addon --cluster-id "${CLUSTER_ID}" \
   --addon-name NvidiaNetworkOperator --is-remove-existing-add-on true
+
+# After the removal finishes, recapture with a fresh add-on dump.
+oci ce cluster list-addons --cluster-id "${CLUSTER_ID}" --all --output json > addons.json
+aicr snapshot --oke-addons addons.json --output snapshot.yaml
 ```
 
 ## References
