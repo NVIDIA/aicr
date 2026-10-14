@@ -624,6 +624,84 @@ func TestResolveRecipeFromSnapshot_ConstraintExcludedIsNotRelaxed(t *testing.T) 
 	})
 }
 
+// constraintFailingAKSSnapshot fingerprints to service=aks on a Kubernetes
+// version below the aks overlay's `K8s.server.version >= 1.34` constraint.
+// The aks overlay is both the only overlay covering service=aks and the one
+// declaring the gpuStack profile, so its exclusion trips the profile-survival
+// guard and the criteria-coverage post-condition in the same resolve.
+func constraintFailingAKSSnapshot() *snapshotter.Snapshot {
+	return &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: "K8s",
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "node",
+						Data: map[string]measurement.Reading{
+							"provider": measurement.Str("aks"),
+						},
+					},
+					{
+						Name: "server",
+						Data: map[string]measurement.Reading{
+							"version": measurement.Str("1.33.0"),
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestResolveRecipeFromSnapshot_ProfileSurvivalCarriesAttribution pins the
+// attribution on the profile-survival error. The survival guard returns before
+// the coverage post-condition, so without its own uncovered list the caller
+// sees exclusions but no constraint-excluded dimension.
+func TestResolveRecipeFromSnapshot_ProfileSurvivalCarriesAttribution(t *testing.T) {
+	client := newEmbeddedTestClient(t)
+	snap := constraintFailingAKSSnapshot()
+
+	criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria(client.CriteriaRegistry())
+	if criteria.Service != recipe.CriteriaServiceAKS {
+		t.Fatalf("fingerprint service = %q, want aks", criteria.Service)
+	}
+
+	_, strictErr := client.ResolveRecipeFromSnapshot(t.Context(), WrapCriteria(criteria), WrapSnapshot(snap))
+	if strictErr == nil {
+		t.Fatal("strict resolve succeeded on an AKS cluster below 1.34; " +
+			"did the aks overlay's version constraint change?")
+	}
+
+	t.Run("strict resolve is the survival error with service attribution", func(t *testing.T) {
+		var se *errors.StructuredError
+		if !stderrors.As(strictErr, &se) {
+			t.Fatalf("error is not structured: %v", strictErr)
+		}
+		const wantMsg = `profile declaration from overlay "aks" was removed by snapshot constraint filtering`
+		if se.Code != errors.ErrCodeInvalidRequest || se.Message != wantMsg {
+			t.Fatalf("error = [%s] %q, want [%s] %q", se.Code, se.Message, errors.ErrCodeInvalidRequest, wantMsg)
+		}
+		want := []uncoveredDimension{{name: DimensionService, constraintExcluded: true}}
+		if got := uncoveredCoverageDimensions(strictErr); !slices.Equal(got, want) {
+			t.Fatalf("uncovered = %v, want %v: %v", got, want, strictErr)
+		}
+	})
+
+	t.Run("relaxation refuses and preserves the original error", func(t *testing.T) {
+		result, err := client.ResolveRecipeFromSnapshotWithOptions(
+			t.Context(), WrapCriteria(criteria), WrapSnapshot(snap),
+			WithSnapshotCriteriaRelaxation())
+		if err == nil {
+			t.Fatalf("relaxation produced a recipe (%q, %d components, relaxed=%v) for a cluster "+
+				"that fails the aks overlay's constraints",
+				result.Name, len(result.Components), result.RelaxedDimensions)
+		}
+		if err.Error() != strictErr.Error() {
+			t.Errorf("relaxed error differs from strict error:\n got: %v\nwant: %v", err, strictErr)
+		}
+	})
+}
+
 func newEmbeddedTestClient(t *testing.T) *Client {
 	t.Helper()
 	client, err := NewClient(

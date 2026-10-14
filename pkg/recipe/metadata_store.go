@@ -1296,8 +1296,11 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluatorAndProfile(
 	if err != nil {
 		return nil, err
 	}
+	_, uncoveredEntries := s.uncoveredDimensionDetails(
+		criteria, s.uncoveredDimensions(criteria, appliedOverlays), excludedOverlays,
+	)
 	if survivalErr := ensureProfileDeclarationSurvived(
-		effectiveProfile, survivingProfile, excludedOverlays, constraintWarnings,
+		effectiveProfile, survivingProfile, excludedOverlays, constraintWarnings, uncoveredEntries,
 	); survivalErr != nil {
 		return nil, survivalErr
 	}

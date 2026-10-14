@@ -109,9 +109,13 @@ make component-cleanup DELETE_CLUSTER=true
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `NVML_MOCK_VERSION` | from `.settings.yaml` | nvml-mock version |
-| `NVML_MOCK_IMAGE` | `ghcr.io/nvidia/nvml-mock` | Image override |
-| `GPU_PROFILE` | `a100` | GPU profile: `a100`, `h100`, `gb200` |
+| `NVML_MOCK_VERSION` | from `.settings.yaml` | nvml-mock image tag only; the chart is pinned separately. Setting it drops the pinned image digest unless `NVML_MOCK_IMAGE_DIGEST` is also set |
+| `NVML_MOCK_IMAGE_DIGEST` | from `.settings.yaml` | Image index digest the image is pulled by; empty pulls by tag |
+| `NVML_MOCK_IMAGE` | `ghcr.io/nvidia/nvml-mock` | Image repository override, such as a mirror; the image digest still applies |
+| `NVML_MOCK_CHART` | from `.settings.yaml` | OCI chart reference, without `oci://` |
+| `NVML_MOCK_CHART_VERSION` | from `.settings.yaml` | Chart version. Setting it drops the pinned chart digest unless `NVML_MOCK_CHART_DIGEST` is also set. The manifest fallback refuses any version other than the one it was rendered from |
+| `NVML_MOCK_CHART_DIGEST` | from `.settings.yaml` | Chart digest the chart is pulled by; empty pulls by `NVML_MOCK_CHART_VERSION` |
+| `GPU_PROFILE` | `a100` | GPU profile: `a100`, `h100`, `gb200`. The manifest fallback, used when Helm is missing or the chart install fails, serves `a100` only |
 | `GPU_COUNT` | `8` | GPUs per node |
 | `DRIVER_VERSION` | auto from profile | Mock driver version (e.g., `550.163.01`) |
 | `MOCK_READY_TIMEOUT` | `300s` | DaemonSet readiness timeout |
@@ -167,6 +171,8 @@ make component-cleanup COMPONENT=cert-manager DELETE_CLUSTER=true
 ## Adding GPU-Aware Testing
 
 For components requiring GPU resources: ensure `.settings.yaml` has `testing.component_test.nvml_mock_version`. GPU references in `values.yaml` or registry entries auto-detect; override via `TIER=gpu-aware` or set `testTier: gpu-aware` in `registry.yaml`. Customize: `GPU_PROFILE=h100 GPU_COUNT=4 make component-test ...`.
+
+This harness deploys one component at a time with its chart's values. To deploy the NFD, gpu-operator, and DRA driver folders of a Kind bundle on mocked GPUs, the cluster needs the Mokka node image and the bundle needs eight bundle-time overrides. Four point the device plugin, GFD, DCGM exporter, and DRA driver at the mock driver root. The other four turn off the validator's CUDA workload and its dev-char symlink creation, turn off the DRA driver's `ComputeDomainCliques` and `IMEXDaemonsWithDNSNames` feature gates, and set its `altProcDevices` to the mock IMEX `proc-devices` file. [`.github/workflows/gpu-operator-mokka-test.yaml`](../../.github/workflows/gpu-operator-mokka-test.yaml) runs that end to end; its header lists the setup steps and its "Generate the Kind recipe and bundle it for Mokka" step carries the overrides and why each is needed.
 
 ## Troubleshooting
 
