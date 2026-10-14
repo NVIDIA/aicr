@@ -411,6 +411,22 @@ GB300 recipe. Other recipes keep a lower limit (2Gi on OKE, the chart default
 elsewhere), so raise `limits.memory` together with the request there: a
 request above its limit is rejected.
 
+The generic GB300 recipe also sizes the NIC configuration daemon, a
+per-node DaemonSet whose pods each cache every `NicDevice` in the cluster, so
+each pod's memory grows with cluster size. Its resources come from the
+`networkoperator` values at `nicConfigurationOperator.configurationDaemon.resources`
+(256Mi request, 2Gi limit by default), which the recipe's `NicClusterPolicy`
+manifest reads. Set this path at bundle time:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.limits.memory=4Gi \
+  --output ./bundles
+```
+
+The manifest renders when the bundle is generated, so the install-time
+overrides below do not reach it.
+
 At bundle time, scope the path with the override key:
 
 ```bash

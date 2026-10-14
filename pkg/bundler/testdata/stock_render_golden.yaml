@@ -1847,12 +1847,12 @@ gb300-generic-ubuntu-training:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: f6ea837a76770ac5a6e25d1bc7341d6453c8ed082f7cc22355c456e951d9983e
+  003-network-operator/values.yaml: 75f0b26ead66cb474898f4bf74fba87e5137c372ee739b672f8c82c261a07b73
   004-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  004-network-operator-post/templates/nic-cluster-policy-generic-gb300.yaml: eda2f33ade8eafe4da4cdf5b9a71ab69c36351984eb7bdf26af476599a666649
-  004-network-operator-post/values.yaml: f6ea837a76770ac5a6e25d1bc7341d6453c8ed082f7cc22355c456e951d9983e
+  004-network-operator-post/templates/nic-cluster-policy-generic-gb300.yaml: d024ab42de905684ee4f9b733f49ac72286ccf61409593582c52d06d8801601b
+  004-network-operator-post/values.yaml: 75f0b26ead66cb474898f4bf74fba87e5137c372ee739b672f8c82c261a07b73
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -1898,7 +1898,7 @@ gb300-generic-ubuntu-training:
   README.md: ef30048e7d7b5b82ab7f8eba7322c8d3e7b1b9febb6efdd0fc54285646d33db6
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: cebdb841bd2c064ba3b0f88144e6d49cab31653ee43c5ac60c89bdedf716d2d9
-  checksums.txt: c3a37deef317e829b9c1e2b78c1bc042cdb91f69d69b5e605202e406b9cb137c
+  checksums.txt: c23262141fb5352805539dcff9c1751363bf6f33f324cdca03c0c6fac61296ec
   deploy.sh: 232d818fb3754a09053ad85f88642654063affd68a660b0c4ab38b9330ce0fdd
   recipe.yaml: fd54688be2606278d00f90e6b48805d65a626baa2de5352fc8d00f132e65bcb7
 gb300-gke-cos-inference-dynamo:
