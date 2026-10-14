@@ -622,6 +622,25 @@ prevents concurrent runs from clobbering each other's RBAC. External
 tooling selects by label `app.kubernetes.io/name=aicr-validator`, not
 literal name.
 
+`validator.WithServiceAccountName` (CLI `--validator-service-account-name`,
+facade `WithValidatorServiceAccountName`) replaces that with an
+administrator-provisioned ServiceAccount. The run then skips
+`ensureNamespace`, `EnsureRBAC`, `rollbackRBAC`, and `CleanupRBAC`, and
+`prepareCluster` calls `job.VerifyServiceAccount` instead: a Get, then a `SubjectAccessReview`
+for verb, group, and resource `*` at cluster scope, which a binding to
+`cluster-admin`, or any rule granting `*` for verb, group, and resource,
+satisfies. RBAC matches a requested `*` only against a literal `*`, so a role
+that lists its verbs fails the review even when it covers everything the
+validators use. It fails closed on a missing
+ServiceAccount, on one that disables token automount (the validator pod spec
+does not override it), on a denied review, and on a caller that may not
+create the review. A validator running with less than it needs can read its
+own `Forbidden` as the refusal a negative check expects, so an unverified
+identity is not run. The Job's `serviceAccountName` comes from
+`job.Config.ServiceAccountName`, defaulting to the per-run name. See
+[Running under a pre-provisioned ServiceAccount](../user/validation.md#running-under-a-pre-provisioned-serviceaccount)
+for the manifests and the caller's permissions.
+
 **Image-pull policy** is computed by `v1.ImagePullPolicy(image,
 imageTagOverride)` in `pkg/validator/v1/job_plan.go`:
 side-loaded (`ko.local/*`, `kind.local/*`) → `Never`;
