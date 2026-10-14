@@ -761,7 +761,7 @@ Profile declarations are intentionally narrow:
   so `Operator-Managed` and `operator-managed` would collapse onto one evidence
   directory.
 - A value permits only `constraints` and
-  `componentRefs{name,overrides}` in the core mechanism. `valuesFile`,
+  `componentRefs{name,optional,overrides}` in the core mechanism. `valuesFile`,
   component identity/deployment fields, literal dotted keys, nested empty
   maps, and root `overrides.enabled` are rejected.
 - Override leaves must be JSON/YAML scalar values. Finite numbers and YAML
@@ -822,6 +822,16 @@ lock on owned paths is enforced per surface:
   `enabled` — so reselecting a profile changes owned **value** paths
   only, never which components are present. Presence changes are
   catalog/composition changes.
+- **Optional references**: a `componentRefs` entry with `optional: true`
+  owns its override paths but not presence. The bundle may omit the
+  component (`--set <component>:enabled=false` or a `bundlers=` list);
+  when it ships, its owned paths are locked as above. Recipe resolution
+  still requires the component to be enabled. Every value must agree on
+  `optional` for a component, an optional reference must assign at least
+  one override, and GPU allocation-policy components (`gpu-operator`,
+  `nvidia-dra-driver-gpu` and their OCP variants) cannot be optional.
+  The GKE-COS and OKE `gpuStack` profiles reference `nvsentinel` this
+  way.
 
 **Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is
 resolved from a snapshot (via `aicr recipe --snapshot` or

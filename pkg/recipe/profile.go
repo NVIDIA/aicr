@@ -94,14 +94,21 @@ type ProfileValue struct {
 // may only assign values on an existing component; component identity,
 // deployment shape, manifests, health checks, and ordering are not profile
 // effects.
+//
+// Optional limits the profile to configuring the component when it is
+// deployed: the profile owns the override paths but not the component's
+// presence, so the component may still be left out of a bundle (#2978).
+// Recipe resolution still requires the component to be enabled.
 type ProfileComponentRef struct {
 	Name      string         `json:"name" yaml:"name"`
+	Optional  bool           `json:"optional,omitempty" yaml:"optional,omitempty"`
 	Overrides map[string]any `json:"overrides,omitempty" yaml:"overrides,omitempty"`
 }
 
 // SelectedProfile is persisted in a hydrated RecipeResult. OwnedPaths is the
 // declaration-wide, deterministic lock surface keyed by canonical component
-// name. The synthetic "enabled" path records component presence.
+// name. The synthetic "enabled" path records component presence; it is
+// absent for a component every value references as optional.
 type SelectedProfile struct {
 	Name       string              `json:"name" yaml:"name"`
 	Value      string              `json:"value" yaml:"value"`
@@ -207,6 +214,9 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 
 	var expected []string
 	ownedSet := make(map[string]map[string]struct{})
+	// Presence ownership is declaration-wide, so every value must agree on
+	// whether a component reference is optional.
+	optionalByComponent := make(map[string]bool)
 	for i, valueName := range valueNames {
 		if !validProfileIdentifier(valueName) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -289,15 +299,15 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 					"invalid profile overrides", err,
 					map[string]any{"profile": decl.Name, "value": valueName, "component": ref.Name})
 			}
-			for _, path := range paths {
-				valuePaths = append(valuePaths, ref.Name+":"+path)
-				if ownedSet[ref.Name] == nil {
-					ownedSet[ref.Name] = make(map[string]struct{})
-				}
-				ownedSet[ref.Name][path] = struct{}{}
+			if err := validateProfileRefOptionality(decl.Name, valueName, ref, paths, optionalByComponent); err != nil {
+				return nil, err
 			}
 			if ownedSet[ref.Name] == nil {
 				ownedSet[ref.Name] = make(map[string]struct{})
+			}
+			for _, path := range paths {
+				valuePaths = append(valuePaths, ref.Name+":"+path)
+				ownedSet[ref.Name][path] = struct{}{}
 			}
 			// The synthetic presence marker is declaration-wide and is
 			// deliberately kept out of valuePaths: ADR-015 evaluates union
@@ -306,7 +316,9 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 			// because fragments may not assign it. Folding it in would compare
 			// component-reference sets instead, rejecting a declaration whose
 			// values legitimately differ in which components they reference.
-			ownedSet[ref.Name][profileComponentEnabledPath] = struct{}{}
+			if !ref.Optional {
+				ownedSet[ref.Name][profileComponentEnabledPath] = struct{}{}
+			}
 		}
 		sort.Strings(valuePaths)
 		if i == 0 {
@@ -322,13 +334,43 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 
 	owned := make(map[string][]string, len(ownedSet))
 	for component, paths := range ownedSet {
-		owned[component] = make([]string, 0, len(paths))
-		for path := range paths {
-			owned[component] = append(owned[component], path)
-		}
-		sort.Strings(owned[component])
+		owned[component] = slices.Sorted(maps.Keys(paths))
 	}
 	return owned, nil
+}
+
+// validateProfileRefOptionality enforces the optional-reference rules: every
+// value agrees on optionality, and an optional reference assigns at least one
+// override and names no #1327 descriptor component. When a profile owns
+// advertisement, EffectiveLockSet re-locks every enabled descriptor
+// component's presence, which would silently void the marker.
+func validateProfileRefOptionality(
+	profile, value string,
+	ref ProfileComponentRef,
+	paths []string,
+	optionalByComponent map[string]bool,
+) error {
+
+	if optional, seen := optionalByComponent[ref.Name]; seen && optional != ref.Optional {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q references component %q as optional in some values but not others",
+				profile, ref.Name))
+	}
+	optionalByComponent[ref.Name] = ref.Optional
+	if !ref.Optional {
+		return nil
+	}
+	if len(paths) == 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q value %q optional component %q must assign at least one override",
+				profile, value, ref.Name))
+	}
+	if allocpolicy.SelectorPaths(ref.Name) != nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q value %q component %q is a GPU allocation-policy component and may not be optional",
+				profile, value, ref.Name))
+	}
+	return nil
 }
 
 func flattenProfileOverrides(overrides map[string]any) ([]string, error) {
@@ -663,10 +705,11 @@ func (r *RecipeResult) ValidateProfileContract() error {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("metadata.selectedProfile.ownedPaths[%q] must be lexicographically sorted", component))
 		}
-		if !slices.Contains(paths, profileComponentEnabledPath) {
+		// An optional reference owns its override paths but not the
+		// synthetic presence path, so only an empty entry is malformed.
+		if len(paths) == 0 {
 			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("metadata.selectedProfile.ownedPaths[%q] must include synthetic path %q",
-					component, profileComponentEnabledPath))
+				fmt.Sprintf("metadata.selectedProfile.ownedPaths[%q] must name at least one path", component))
 		}
 		for i, path := range paths {
 			if path == "" || strings.HasPrefix(path, ".") || strings.HasSuffix(path, ".") ||
@@ -812,6 +855,11 @@ func (r *RecipeResult) validateProfileValuesWithContext(
 		paths := lockSet[component]
 		ref := r.GetComponentRef(component)
 		if ref == nil || !ref.IsEnabled() {
+			// A bundle's emitted recipe omits an optional component the
+			// bundle left out; composition still requires it (#2978).
+			if !slices.Contains(paths, profileComponentEnabledPath) {
+				continue
+			}
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile-owned component %q is missing or disabled", component))
 		}
@@ -1153,7 +1201,9 @@ func ValidateOwnershipDisjoint(first, second OwnershipDomain) error {
 // ValidateProfileLock compares the final candidate values and component set
 // against the hydrated selected recipe before an output is written. Dynamic
 // paths model install-time mutability and are rejected on structural
-// intersection even when the current value is identical.
+// intersection even when the current value is identical. A component whose
+// presence the profile does not own (an optional reference) may be absent
+// or disabled in the output; its owned paths are checked only when it ships.
 func (r *RecipeResult) ValidateProfileLock(
 	ctx context.Context,
 	candidateRefs []ComponentRef,
@@ -1187,7 +1237,11 @@ func (r *RecipeResult) ValidateProfileLock(
 				errors.ErrCodeTimeout, "profile lock validation canceled", ctxErr)
 		}
 		paths := lockSet[component]
+		presenceOwned := slices.Contains(paths, profileComponentEnabledPath)
 		baselineRef := r.GetComponentRef(component)
+		if !presenceOwned && (baselineRef == nil || !baselineRef.IsEnabled() || !candidateEnabled[component]) {
+			continue
+		}
 		if baselineRef == nil {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile-owned component %q is absent from the recipe", component))

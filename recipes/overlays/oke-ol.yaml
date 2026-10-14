@@ -156,6 +156,9 @@ spec:
             overrides:
               nvidiaDriverRoot: /
           - name: nvsentinel
+            # optional: the bundle may omit NVSentinel when it is deployed
+            # outside AICR (#2978); this value applies whenever it ships.
+            optional: true
             overrides:
               labeler: {assumeDriverInstalled: true}
               # OKE's add-on advertises the GPUs, so the GPU Operator runs no
@@ -239,6 +242,7 @@ spec:
           # preinstalled driver here would label GPU nodes before the driver
           # is actually ready.
           - name: nvsentinel
+            optional: true
             overrides:
               labeler: {assumeDriverInstalled: false}
               janitor:
