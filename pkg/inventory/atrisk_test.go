@@ -1040,3 +1040,66 @@ func TestScanKindBoundsEachPage(t *testing.T) {
 		errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
 	})
 }
+
+func TestScanAtRiskContinuesAnExpiredList(t *testing.T) {
+	t.Parallel()
+
+	page := func(continueToken, name string) string {
+		return fmt.Sprintf(`{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"continue":%q},"items":[{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"name":%q,"namespace":"tenant-a"}}]}`, continueToken, name)
+	}
+	expired := func(fresh string) string {
+		return fmt.Sprintf(`{"kind":"Status","apiVersion":"v1","metadata":{"continue":%q},"status":"Failure",`+
+			`"message":"The provided continue parameter is too old","reason":"Expired","code":410}`, fresh)
+	}
+
+	tests := []struct {
+		name      string
+		fresh     string
+		wantNames []string
+	}{
+		{"a 410 carrying a fresh token resumes the list", "fresh", []string{"first-page", "second-page"}},
+		{"a 410 carrying no token fails the scan", "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Query().Get("continue") {
+				case "":
+					_, _ = w.Write([]byte(page("stale", "first-page")))
+				case "stale":
+					w.WriteHeader(http.StatusGone)
+					_, _ = w.Write([]byte(expired(tt.fresh)))
+				case "fresh":
+					_, _ = w.Write([]byte(page("", "second-page")))
+				default:
+					t.Errorf("unexpected continue token %q", r.URL.Query().Get("continue"))
+					w.WriteHeader(http.StatusBadRequest)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			got, err := scanAtRisk(t.Context(), metadataClient(t, srv), scanMapper(), discovered{},
+				[]ResourceKind{topologyKind()})
+			if tt.wantNames == nil {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("scanAtRisk: %v", err)
+			}
+			names := make([]string, 0, len(got.Findings))
+			for _, f := range got.Findings {
+				names = append(names, f.Name)
+			}
+			if !reflect.DeepEqual(names, tt.wantNames) {
+				t.Errorf("findings = %v, want %v", names, tt.wantNames)
+			}
+		})
+	}
+}

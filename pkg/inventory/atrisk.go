@@ -266,6 +266,15 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(pageCtx, opts)
 		cancel()
 		if err != nil {
+			// Objects changed since the first page may be missed or included,
+			// which an advisory scan tolerates better than failing.
+			if fresh := expiredContinue(err); opts.Continue != "" && fresh != "" {
+				if advErr := advance(&opts, fresh, gvr.Resource); advErr != nil {
+					return ScannedKind{}, nil, advErr
+				}
+
+				continue
+			}
 			// A CRD deleted between the mapping and this List answers the same
 			// way one that was never installed does. Only the first request
 			// can say that: a CRD does not disappear between pages, so the
@@ -325,6 +334,18 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 	})
 
 	return scanned, findings, nil
+}
+
+// expiredContinue returns the continue token an apiserver puts in the 410 for
+// an expired one, which resumes the list at the latest snapshot. It returns ""
+// if err is not that 410 or carries no token.
+func expiredContinue(err error) string {
+	var status apierrors.APIStatus
+	if !apierrors.IsResourceExpired(err) || !stderrors.As(err, &status) {
+		return ""
+	}
+
+	return status.Status().Continue
 }
 
 // owned reports whether item carries a deployer ownership marker. The markers
