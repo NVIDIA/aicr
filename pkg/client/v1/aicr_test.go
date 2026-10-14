@@ -2061,32 +2061,62 @@ func TestResolveRecipeFromSnapshot_OKENetworkOperatorAddonGate(t *testing.T) {
 	tests := []struct {
 		name        string
 		accelerator string
+		os          string
+		platform    string
 		nnoState    string // NNO is the NVIDIA Network Operator add-on.
 		wantErr     string // "" => resolution succeeds
 	}{
-		{name: "l40s add-on absent qualifies", accelerator: "l40s", nnoState: "absent"},
-		{name: "gb200 add-on absent qualifies", accelerator: "gb200", nnoState: "absent"},
+		{name: "l40s add-on absent qualifies", accelerator: "l40s", os: "ol", nnoState: "absent"},
+		{name: "l40s kubeflow add-on absent qualifies", accelerator: "l40s", os: "ol", platform: "kubeflow", nnoState: "absent"},
+		{name: "gb200 add-on absent qualifies", accelerator: "gb200", os: "ol", nnoState: "absent"},
 		{
 			name:        "l40s add-on installed fails closed",
 			accelerator: "l40s",
+			os:          "ol",
 			nnoState:    "installed",
 			wantErr:     "l40s-oke-training " + gate + " (expected absent, got installed)",
 		},
 		{
 			name:        "gb200 add-on installed fails closed",
 			accelerator: "gb200",
+			os:          "ol",
 			nnoState:    "installed",
 			wantErr:     "gb200-oke-training " + gate + " (expected absent, got installed)",
 		},
 		{
+			name:        "l40s kubeflow add-on installed fails closed",
+			accelerator: "l40s",
+			os:          "ol",
+			platform:    "kubeflow",
+			nnoState:    "installed",
+			wantErr:     "l40s-oke-training-kubeflow " + gate + " (expected absent, got installed)",
+		},
+		{
+			name:        "gb200 ubuntu add-on installed fails closed",
+			accelerator: "gb200",
+			os:          "ubuntu",
+			nnoState:    "installed",
+			wantErr:     "gb200-oke-ubuntu-training " + gate + " (expected absent, got installed)",
+		},
+		{
+			name:        "gb200 ubuntu kubeflow add-on installed fails closed",
+			accelerator: "gb200",
+			os:          "ubuntu",
+			platform:    "kubeflow",
+			nnoState:    "installed",
+			wantErr:     "gb200-oke-ubuntu-training-kubeflow " + gate + " (expected absent, got installed)",
+		},
+		{
 			name:        "add-on mid-create fails closed",
 			accelerator: "l40s",
+			os:          "ol",
 			nnoState:    "addon-creating",
 			wantErr:     "l40s-oke-training " + gate + " (expected absent, got addon-creating)",
 		},
 		{
 			name:        "missing reading fails closed",
 			accelerator: "gb200",
+			os:          "ol",
 			nnoState:    "",
 			wantErr:     "gb200-oke-training " + gate,
 		},
@@ -2102,12 +2132,16 @@ func TestResolveRecipeFromSnapshot_OKENetworkOperatorAddonGate(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = c.Close() })
 
-			crit, err := recipe.BuildCriteriaWithRegistry(nil,
+			opts := []recipe.RegistryCriteriaOption{
 				recipe.WithServiceRegistry("oke"),
 				recipe.WithAcceleratorRegistry(tt.accelerator),
 				recipe.WithIntentRegistry("training"),
-				recipe.WithOSRegistry("ol"),
-			)
+				recipe.WithOSRegistry(tt.os),
+			}
+			if tt.platform != "" {
+				opts = append(opts, recipe.WithPlatformRegistry(tt.platform))
+			}
+			crit, err := recipe.BuildCriteriaWithRegistry(nil, opts...)
 			if err != nil {
 				t.Fatalf("BuildCriteria: %v", err)
 			}

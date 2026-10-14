@@ -98,6 +98,36 @@ func TestOKENetworkOperatorAddonGate(t *testing.T) {
 	if gated == 0 {
 		t.Fatal("no OKE recipe deploys network-operator, so the gate invariant checked nothing")
 	}
+
+	// Snapshot resolution checks only a leaf's own constraints, so every
+	// overlay that inherits the gate must also declare it.
+	store, err := loadMetadataStore(t.Context())
+	if err != nil {
+		t.Fatalf("loadMetadataStore() failed: %v", err)
+	}
+	for name, overlay := range store.Overlays {
+		chain, err := store.resolveInheritanceChain(name)
+		if err != nil {
+			t.Fatalf("resolveInheritanceChain(%s) failed: %v", name, err)
+		}
+		for _, ancestor := range chain {
+			if ancestor == overlay || !declaresConstraint(ancestor, gatePath) {
+				continue
+			}
+			if !declaresConstraint(overlay, gatePath) {
+				t.Errorf("%s inherits %s from %s but does not declare it", name, gatePath, ancestor.Metadata.Name)
+			}
+		}
+	}
+}
+
+func declaresConstraint(overlay *RecipeMetadata, name string) bool {
+	for _, c := range overlay.Spec.Constraints {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // TestOKEGpuStackProfileResolution pins the OKE family conversion: the

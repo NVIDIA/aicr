@@ -38,6 +38,19 @@ spec:
   constraints:
     - name: K8s.server.version
       value: ">= 1.32"
+    # Snapshot resolution checks only a leaf's own constraints, so this leaf
+    # declares the add-on gate itself.
+    - name: K8s.oke-addons.nvidia-network-operator
+      value: absent
+      remediation: >-
+        Oracle's NvidiaNetworkOperator cluster add-on is present on this
+        cluster, but this recipe deploys AICR's network-operator component,
+        and two controllers would reconcile the same NicClusterPolicy. Remove
+        the add-on with `oci ce cluster disable-addon --cluster-id
+        <cluster-ocid> --addon-name NvidiaNetworkOperator
+        --is-remove-existing-add-on true`, then recapture the snapshot with
+        aicr snapshot --oke-addons <path to `oci ce cluster list-addons
+        --cluster-id <cluster-ocid> --all --output json` dump>.
 
   componentRefs: []
 
