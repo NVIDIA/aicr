@@ -27,6 +27,16 @@ master:
 worker:
   enable: true
 
+# Disable the chart's post-delete prune hook. Its Job runs `nfd-master -prune`,
+# which strips every NFD-owned node label, including the nvidia.com/* and
+# pci-15b3.present labels that the GPU Operator, Network Operator and DRA
+# DaemonSets select on, so deleting this release tears those stacks down.
+# Argo CD before 3.4.1 also never finishes deleting an Application whose
+# post-delete hooks include cluster-scoped objects, and re-runs the prune
+# every time the Job's TTL expires. Labels left behind after an uninstall are
+# reconciled on reinstall.
+postDeleteCleanup: false
+
 # Topology Updater disabled by default (enable via overlay override)
 topologyUpdater:
   enable: false
