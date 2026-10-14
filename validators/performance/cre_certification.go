@@ -43,9 +43,11 @@ const (
 	creNCCLVariant     = "nccl-all-reduce"
 	creTrainingDomain  = "training"
 	creTrainingVariant = "nemotron5-8b"
-	// creGonePollInterval is how often deleteCREResource re-Gets a CR that is
-	// still terminating (finalizers). Bounded by DiagnosticTimeout on the
-	// parent context.
+	// creGonePollInterval is how often waitForCREResourceGone re-Gets a CR
+	// that is still terminating (finalizers). Bounded by the caller's
+	// deadline: CRECertificationDeleteTimeout on its own, or the whole
+	// CRECertificationTeardownTimeout when teardown holds one budget across
+	// every phase.
 	creGonePollInterval = 200 * time.Millisecond
 	// creWorkloadGonePollInterval paces the teardown proof. It is far coarser
 	// than creGonePollInterval because that wait is seconds against one object
@@ -353,11 +355,7 @@ func creCleanupFailure(label string, primary, deleteErr error) error {
 	// about keeps GPU nodes busy, so the teardown failure — which is what
 	// names the objects that survived — goes in the message rather than
 	// living only in the log.
-	code := aicrErrors.ErrCodeInternal
-	if structured, ok := stderrors.AsType[*aicrErrors.StructuredError](primary); ok {
-		code = structured.Code
-	}
-	return aicrErrors.WrapWithContext(code,
+	return aicrErrors.WrapWithContext(creErrorCode(primary),
 		label+" workloads may still be running: "+deleteErr.Error(), primary,
 		map[string]any{"cleanupError": deleteErr.Error()})
 }
@@ -419,13 +417,47 @@ func teardownCRECertification(
 	_, seedErr := tracker.observe(tdCtx, client, namespace, name)
 
 	if err := deleteCREResourceWithin(tdCtx, client, certificationGVR, "Certification", namespace, name); err != nil {
-		return err
+		return creTeardownFailure(err, namespace, name, tracker)
 	}
 	if seedErr != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
-			"deleted Certification but could not enumerate its workloads to confirm they stopped", seedErr)
+		return creTeardownFailure(aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			"could not enumerate the Certification's workloads to confirm they stopped", seedErr),
+			namespace, name, tracker)
 	}
-	return waitForCREWorkloadsGone(tdCtx, client, clientset, namespace, name, tracker)
+	if err := waitForCREWorkloadsGone(tdCtx, client, clientset, namespace, name, tracker); err != nil {
+		return creTeardownFailure(err, namespace, name, tracker)
+	}
+	return nil
+}
+
+// creTeardownFailure names what a failed teardown may have left behind.
+//
+// Only the confirmation loop's deadline arm knows which workloads were still
+// running. Every other failure — a finalizer never released, a pod held
+// Terminating past the budget, a list that times out — would otherwise report
+// its bare cause, leaving the operator nothing to go delete before the nodes
+// are usable again. The tracked names are whatever the seed recorded, so they
+// are available on all of those paths.
+//
+// The cause keeps its code, since callers and exit codes switch on it.
+func creTeardownFailure(cause error, namespace, name string, tracker *creWorkloadTracker) error {
+	tracked := tracker.jobNames()
+	message := "Certification " + namespace + "/" + name + " teardown could not be confirmed"
+	errCtx := map[string]any{keyNamespace: namespace, "certification": name}
+	if len(tracked) > 0 {
+		message += "; GPU work may still be running under " + strings.Join(tracked, ", ")
+		errCtx["trackedJobs"] = strings.Join(tracked, ",")
+	}
+	return aicrErrors.WrapWithContext(creErrorCode(cause), message, cause, errCtx)
+}
+
+// creErrorCode reports the code err carries, for wraps that add context
+// without reclassifying what went wrong.
+func creErrorCode(err error) aicrErrors.ErrorCode {
+	if structured, ok := stderrors.AsType[*aicrErrors.StructuredError](err); ok {
+		return structured.Code
+	}
+	return aicrErrors.ErrCodeInternal
 }
 
 // creWorkloadTracker accumulates the identities of the workloads a

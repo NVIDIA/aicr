@@ -24,6 +24,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -281,6 +282,52 @@ func TestDeleteCREResourceTimesOutWhenFinalizerHolds(t *testing.T) {
 	}
 	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
 		t.Fatalf("error = %v, want ErrCodeTimeout", err)
+	}
+}
+
+// TestTeardownCRECertificationNamesWorkloadsWhenDeleteHangs covers the
+// failure that is not the confirmation loop's: a finalizer that is never
+// released holds the Certification past the budget, so teardown never reaches
+// the point where it learns which workloads survived. The seed already
+// recorded them, and without those names the operator is told only that a
+// deletion timed out — with nothing to go delete before the GPUs are free.
+func TestTeardownCRECertificationNamesWorkloadsWhenDeleteHangs(t *testing.T) {
+	const ns = creTestNamespace
+	creAPI := creAPIGroup + "/" + versionV1alpha1
+
+	cert := creLabeled(creAPI, "Certification", "cert-stuck", creLabelCertification, "cert-stuck")
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(),
+		cert,
+		creLabeled(creAPI, "Workflow", "wf-stuck", creLabelCertification, "cert-stuck"),
+		creLabeled(creAPI, "Job", "job-stuck", creLabelWorkflow, "wf-stuck"),
+	)
+
+	held := func(k8stesting.Action) (bool, runtime.Object, error) {
+		stuck := cert.DeepCopy()
+		now := metav1.Now()
+		stuck.SetDeletionTimestamp(&now)
+		stuck.SetFinalizers([]string{"nvcre.nvidia.com/certification-finalizer"})
+		return true, stuck, nil
+	}
+	client.PrependReactor("delete", certificationGVR.Resource, held)
+	client.PrependReactor("get", certificationGVR.Resource, held)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	err := teardownCRECertification(ctx, client, k8sfake.NewSimpleClientset(), ns, "cert-stuck")
+	if err == nil {
+		t.Fatal("teardownCRECertification() = nil while the Certification was still held")
+	}
+	// The cause's code must survive the wrap: ExitCodeFromError reads the
+	// outermost one.
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
+		t.Errorf("reported code = %v, want ErrCodeTimeout", errorstest.ReportedCode(err))
+	}
+	for _, want := range []string{"cert-stuck", "job-stuck"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to name %q", err.Error(), want)
+		}
 	}
 }
 
