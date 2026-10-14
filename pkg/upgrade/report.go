@@ -149,7 +149,8 @@ type ReportSourceHelm struct {
 	// Unattributed is records carrying no release name.
 	Unattributed int `json:"unattributed" yaml:"unattributed"`
 
-	// Unreadable is releases whose records could not be read.
+	// Unreadable is releases whose records could not be read, plus releases
+	// with records under both storage drivers, whose rows say dual-driver.
 	Unreadable int `json:"unreadable" yaml:"unreadable"`
 
 	// Uninstalled is releases excluded because `helm uninstall

@@ -209,8 +209,10 @@ type HelmInfo struct {
 	// attributed even to a guess.
 	Unattributed int
 
-	// Unreadable is releases matched loosely whose records could not be read,
-	// counted once per release however many revisions were unreadable.
+	// Unreadable is releases whose version was withheld, counted once per
+	// release however many revisions were unreadable. That is a release
+	// matched loosely whose records could not be read, or a dual-driver
+	// release, whose records all decode.
 	Unreadable int
 
 	// Uninstalled is releases excluded because `helm uninstall

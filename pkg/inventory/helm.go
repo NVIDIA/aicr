@@ -133,8 +133,8 @@ func (w *helmWalk) tolerate(id releaseID, c confidence) bool {
 	return true
 }
 
-// poison withholds a release's version, counting the release once and keeping
-// the first reason given.
+// poison withholds a release's version, counting the release once as
+// unreadable whatever the reason, and keeping the first reason given.
 func (w *helmWalk) poison(id releaseID, reason UnprovenReason) {
 	if _, already := w.poisoned[id]; !already {
 		w.poisoned[id] = reason

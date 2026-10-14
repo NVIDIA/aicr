@@ -939,6 +939,9 @@ func TestReadNamesDualDriverRelease(t *testing.T) {
 	if !reflect.DeepEqual(got.Unproven, wantUnproven) {
 		t.Errorf("read() unproven = %+v, want %+v", got.Unproven, wantUnproven)
 	}
+	if got.Source.Helm.Unreadable != 1 {
+		t.Errorf("read() helm unreadable = %d, want 1 for the withheld release", got.Source.Helm.Unreadable)
+	}
 }
 
 // TestDeployersMatchBundlerConfig fails when a deployer is added to the
