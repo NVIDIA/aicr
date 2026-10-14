@@ -1257,6 +1257,9 @@ func runBundleCmdWithDependencies(
 		outputType = "Helmfile release graph"
 	case config.DeployerTerraform:
 		outputType = "Terraform root module"
+		if opts.terraformChildModule {
+			outputType = "Terraform child module"
+		}
 	}
 	slog.Info("generating bundle",
 		slog.String("deployer", opts.deployer.String()),

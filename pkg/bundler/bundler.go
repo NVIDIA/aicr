@@ -1124,7 +1124,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 
 	// Map deployer type to result and deployment names
-	resultType, deploymentType := deployerResultNames(b.Config.Deployer())
+	resultType, deploymentType := deployerResultNames(b.Config.Deployer(), b.Config.TerraformChildModule())
 
 	// Build result
 	resultOutput := &result.Output{
@@ -1217,7 +1217,9 @@ func (b *DefaultBundler) terraformDeployer(
 
 // deployerResultNames returns the result type and deployment type display names
 // for a given deployer type, preserving the human-readable names used in output.
-func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
+// terraformChildModule distinguishes the two forms the terraform deployer emits;
+// it is ignored for every other deployer.
+func deployerResultNames(dt config.DeployerType, terraformChildModule bool) (types.BundleType, string) {
 	switch dt {
 	case config.DeployerHelm:
 		return "helm-bundle", "Helm per-component bundle"
@@ -1230,6 +1232,9 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 	case config.DeployerHelmfile:
 		return "helmfile-bundle", "Helmfile release graph"
 	case config.DeployerTerraform:
+		if terraformChildModule {
+			return "terraform-bundle", "Terraform child module"
+		}
 		return "terraform-bundle", "Terraform root module"
 	default:
 		return types.BundleType(dt), string(dt)
