@@ -121,6 +121,20 @@ transitions:
               both charts, so storedVersions is identical before and after and
               cannot be used as the signal either. The rule text is the only
               thing that differs.
+          - id: check-live-objects-for-rejected-patches
+            description: >-
+              Before upgrading, list any Job or Workflow that automation
+              patches in place, and confirm nothing adds or removes
+              nodeHealthMonitor, goodputMeasurement, bandwidthMeasurement, or
+              workloadMetadata on an existing object. Move that automation to
+              create-and-replace, or set the field at creation time.
+            reason: >-
+              These four fields were already immutable once set; v0.6.0 closes
+              the absent-to-present and present-to-absent gap. A controller or
+              script that has been toggling one of them on a live object keeps
+              working right up to the CRD update and then starts failing at
+              admission, which surfaces as a rejected patch rather than as
+              anything attributable to the upgrade.
       - steps:
           - id: verify-crd-rules-landed
             description: >-
