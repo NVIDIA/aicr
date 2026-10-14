@@ -148,6 +148,127 @@ The policy is **only-false**: the auto-detect never forces `driver.enabled=true`
 
 The signal is a single-node sample: the snapshotter Job runs on one `nvidia.com/gpu.present=true` node, so its `driver-loaded` reading is representative only when every GPU pool is in the same driver state. Mixed-pool clusters (some nodes with a preinstalled driver, some without) are out of scope for the auto-detect and tracked in [#464](https://github.com/NVIDIA/aicr/issues/464); AICR emits a `topology reports non-uniform GPU labels…` warning when the snapshot's node-topology labels indicate divergent GPU nodes so the fail-direction (some non-preinstalled pools may come up driverless) is at least observable.
 
+#### Opt-in NVIDIADriver CR ownership
+
+The `gpu-operator-nvidia-driver-cr` mixin adds a post-manifest that renders a
+separately managed `NVIDIADriver/default` resource. The mixin itself hard-codes
+no driver version or rollout policy: the consuming overlay must enable
+`driver.nvidiaDriverCRD.enabled`, explicitly set `deployDefaultCR: false`, clear
+the legacy ClusterPolicy driver identity and `upgradePolicy`, and provide a
+complete `nvidiaDriver` value tree. The required keys are `repository`, `image`,
+`version`, `manager`, and every `upgradePolicy` member: `autoUpgrade`,
+`maxParallelUpgrades`, `maxUnavailable`, `waitForCompletion` (`timeoutSeconds`
+and `podSelector`), `gpuPodDeletion` (`force`, `timeoutSeconds`, and
+`deleteEmptyDir`), and `drain` (`enable`, `force`, `podSelector`,
+`timeoutSeconds`, and `deleteEmptyDir`). `gpuPodDeletion` is intentionally
+mapped to `spec.upgradePolicy.podDeletion`. `imagePullPolicy`,
+`imagePullSecrets`, `driverType`, `kernelModuleType`, and `usePrecompiled` are
+optional. Omitting `deployDefaultCR` does not opt in. The manifest renders only
+when the GPU Operator still manages the driver and all three guards are
+satisfied.
+
+The post-manifest resolves in one Helm pass for every deployer. Driver identity,
+pull secrets, and rollout policy come from `nvidiaDriver`; the existing `gds`
+and `gdrcopy` trees are projected into the CR so enabling CR ownership does not
+silently drop those driver sidecars. Their image identities are not pinned in
+the shared GPU Operator values; an overlay adopting this mixin must supply each
+complete tree it uses (`enabled`, `repository`, `image`, `version`,
+`imagePullPolicy`, `imagePullSecrets`, `env`, and `args`). The resource is the
+cluster-wide default, so it intentionally omits `nodeSelector`: the upstream
+CRD forbids a default `NVIDIADriver` from selecting nodes. Deployments that need
+pool-specific driver resources must attach separate non-default manifests
+instead of this mixin.
+
+The following replacement for the stock H100/EKS/Ubuntu training leaf is a
+complete example. Put it at
+`<data-dir>/overlays/h100-eks-ubuntu-training.yaml` and resolve with
+`--data <data-dir>` (including that data tree's required `registry.yaml`):
+
+```yaml
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: h100-eks-ubuntu-training
+spec:
+  base: h100-eks-training
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+  mixins:
+    - os-ubuntu
+    - gpu-operator-nvidia-driver-cr
+  componentRefs:
+    - name: gpu-operator
+      overrides:
+        driver:
+          nvidiaDriverCRD:
+            enabled: true
+            deployDefaultCR: false
+          # Remove the legacy ClusterPolicy-owned driver settings inherited
+          # from the base values; the NVIDIADriver tree below owns them.
+          repository: null
+          image: null
+          version: null
+          upgradePolicy: null
+        nvidiaDriver:
+          repository: nvcr.io/nvidia
+          image: driver
+          version: "580.173.02"
+          imagePullPolicy: IfNotPresent
+          imagePullSecrets: []
+          driverType: gpu
+          kernelModuleType: auto
+          usePrecompiled: false
+          manager:
+            repository: nvcr.io/nvidia/cloud-native
+            image: k8s-driver-manager
+            version: v0.12.1
+            imagePullPolicy: IfNotPresent
+            env: []
+          upgradePolicy:
+            autoUpgrade: true
+            maxParallelUpgrades: 5
+            maxUnavailable: 25%
+            waitForCompletion:
+              timeoutSeconds: 0
+              podSelector: ""
+            gpuPodDeletion:
+              force: false
+              timeoutSeconds: 300
+              deleteEmptyDir: false
+            drain:
+              enable: false
+              force: false
+              podSelector: ""
+              timeoutSeconds: 300
+              deleteEmptyDir: false
+        gds:
+          enabled: false
+          repository: nvcr.io/nvidia/cloud-native
+          image: nvidia-fs
+          version: "2.29.4"
+          imagePullPolicy: IfNotPresent
+          imagePullSecrets: []
+          env: []
+          args: []
+        gdrcopy:
+          enabled: true
+          repository: nvcr.io/nvidia/cloud-native
+          image: gdrdrv
+          version: v2.6
+          imagePullPolicy: IfNotPresent
+          imagePullSecrets: []
+          env: []
+          args: []
+```
+
+This is an advanced ownership mode, not a stock recipe default. Do not enable
+it alongside the chart-generated default CR or leave the legacy
+`ClusterPolicy.spec.driver` identity populated; either combination creates two
+sources of truth for the same driver rollout.
+
 To see exactly which components appear in a given recipe, generate one:
 
 ```bash
