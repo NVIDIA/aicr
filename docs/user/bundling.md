@@ -431,7 +431,7 @@ it at install time from the values in `network-operator-post/helmrelease.yaml`.
 Edit `spec.values.network-operator.nicConfigurationOperator.configurationDaemon.resources`
 there to resize the daemon without regenerating the bundle.
 
-At bundle time, scope the path with the override key:
+At bundle time, scope each resources path in the table with its override key:
 
 ```bash
 aicr bundle --recipe recipe.yaml \
