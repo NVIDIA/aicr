@@ -304,7 +304,7 @@ version describes the wrapper instead of what it wraps.
 
 So for the `gpu-operator-post` release generated alongside gpu-operator, a
 `helm list` reports chart `gpu-operator-post-0.22.0` — the AICR version — while
-its app version and `aicr.run/component-version` both read `v26.7.1`, the
+its app version and `aicr.run/component-version` both read `v26.7.2`, the
 gpu-operator pin those manifests accompany.
 
 A component with no upstream pin — a manifest-only component, and the injected
@@ -387,6 +387,63 @@ The `agentgateway` inference-gateway is **private by default**: with no
 RFC1918 ranges so it is not exposed to the public internet. Use the override
 above to admit specific clients (e.g. a corporate VPN). See
 [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
+
+### Size controllers for large clusters
+
+Some controllers' memory grows with node count. The controllers below ship
+default memory **limits** that cover clusters of about 2500 nodes, in the
+recipes each row names; a row with no recipe applies to all of them. Their
+**requests** are sized for small clusters, so a large cluster schedules them
+with far less reserved than they use. On large clusters, raise the requests so
+the scheduler reserves memory on the system nodes:
+
+| Controller | Override key | Resources path |
+|---|---|---|
+| GPU Operator | `gpuoperator` | `operator.resources` |
+| Network Operator (generic GB300) | `networkoperator` | `operator.resources` |
+| Maintenance Operator (Network Operator subchart, generic GB300) | `networkoperator` | `maintenance-operator-chart.operator.resources` |
+| Nodewright manager | `nodewright` | `controllerManager.manager.resources` |
+
+The Network Operator limit is sized for large clusters only in the generic
+GB300 recipe. Other recipes keep a lower limit (2Gi on OKE, the chart default
+elsewhere), so raise `limits.memory` together with the request there: a
+request above its limit is rejected.
+
+At bundle time, scope the path with the override key:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --set gpuoperator:operator.resources.requests.memory=4Gi \
+  --set networkoperator:operator.resources.requests.memory=8Gi \
+  --set networkoperator:maintenance-operator-chart.operator.resources.requests.memory=8Gi \
+  --set nodewright:controllerManager.manager.resources.requests.memory=8Gi \
+  --output ./bundles
+```
+
+An `argocd-helm` bundle also takes these at install time, without
+regenerating. Each child Application merges the root chart's
+`.Values.<override key>` over the bundle's static values. Use a `.` after the
+override key instead of a `:`. Bundles generated before these limits were
+raised still carry the old, lower limits, so set each limit with its request:
+
+```bash
+helm install aicr-bundle . \
+  --set gpuoperator.operator.resources.requests.memory=4Gi \
+  --set gpuoperator.operator.resources.limits.memory=8Gi \
+  --set networkoperator.operator.resources.requests.memory=8Gi \
+  --set networkoperator.operator.resources.limits.memory=12Gi \
+  --set networkoperator.maintenance-operator-chart.operator.resources.requests.memory=8Gi \
+  --set networkoperator.maintenance-operator-chart.operator.resources.limits.memory=12Gi \
+  --set nodewright.controllerManager.manager.resources.requests.memory=8Gi \
+  --set nodewright.controllerManager.manager.resources.limits.memory=12Gi
+```
+
+When the root Application installs the chart, put these keys in its Helm
+values. Do not edit the child Applications: the root Application's self-heal
+reverts them.
+
+These overrides only change requests and limits. Free memory on the system
+nodes still decides whether the controllers fit.
 
 ## Enable or disable components
 
