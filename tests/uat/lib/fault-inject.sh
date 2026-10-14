@@ -305,9 +305,8 @@ MANIFEST
     return 1
   fi
   echo "wrote synthetic XID 79 to ${node}:/dev/kmsg"
-  # The pod has done its job. Left running, it is a user pod node-drainer
-  # waits on before janitor may reboot the node, which would hold Stage 3 for
-  # up to its 300s sleep. The finalize step deletes it again on every exit.
+  # Cleanup only: the pod runs in a node-drainer system namespace, so the drain
+  # never waits on it. The finalize step deletes it again on every exit.
   kubectl delete pod "${_FAULT_INJECT_POD_NAME}" -n "${nvs_ns}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   echo "::endgroup::"
 

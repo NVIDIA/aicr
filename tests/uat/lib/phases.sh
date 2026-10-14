@@ -435,6 +435,9 @@ inject_push_target() {
   echo "evidence push target: $(yq '.spec.validate.evidence.attestation.push' "${config}")"
 }
 
+# Bundle override every composed run carries; see uat_compose_nvsentinel_mixin.
+UAT_NVSENTINEL_BREAKER_OFF="nvsentinel:fault-quarantine.circuitBreaker.enabled=false"
+
 # uat_compose_nvsentinel_mixin re-resolves recipe.yaml with the opt-in
 # NVSentinel mixin named by UAT_NVSENTINEL_MIXIN composed onto its leaf
 # overlay, so the faultinject phase can run Stage 2 (nvsentinel-quarantine) or
@@ -484,6 +487,32 @@ uat_compose_nvsentinel_mixin() {
   got="$(uat_nvsentinel_remediation_mode recipe.yaml)"
   if [[ "${got}" != "${want}" ]]; then
     echo "::error::recipe composed with ${mixin} deploys NVSentinel remediation step '${got}', want '${want}'" >&2
+    return 1
+  fi
+
+  # The UAT cells run two GPU nodes, where the chart-default breaker
+  # (percentage: 50) trips on the first cordon and then halts every event,
+  # so Stage 3 would never see the node uncordoned. The KWOK e2e for these
+  # mixins disables it for the same reason. Appended to the config's set list
+  # because a --set flag would replace that list rather than extend it.
+  yq -i ".spec.bundle.deployment.set += [\"${UAT_NVSENTINEL_BREAKER_OFF}\"]" "${config}"
+}
+
+# uat_assert_nvsentinel_breaker_disabled fails prep when a composed run's
+# bundle does not carry the breaker override, so Stage 3 cannot fail late as
+# "never uncordoned" after a full remediation run. A no-op when
+# UAT_NVSENTINEL_MIXIN is unset.
+uat_assert_nvsentinel_breaker_disabled() {
+  [[ -n "${UAT_NVSENTINEL_MIXIN:-}" ]] || return 0
+  local dir got
+  dir="$(find bundle -maxdepth 1 -type d -name '*-nvsentinel' -print -quit)"
+  if [[ -z "${dir}" || ! -f "${dir}/values.yaml" ]]; then
+    echo "::error::bundle has no nvsentinel values.yaml to check the circuit-breaker override against" >&2
+    return 1
+  fi
+  got="$(yq '.["fault-quarantine"].circuitBreaker.enabled' "${dir}/values.yaml")"
+  if [[ "${got}" != "false" ]]; then
+    echo "::error::bundle's nvsentinel values set fault-quarantine.circuitBreaker.enabled=${got}, want false" >&2
     return 1
   fi
 }
@@ -653,6 +682,7 @@ phase_prep() {
     ls -la bundle >&2 || true
     exit 1
   }
+  uat_assert_nvsentinel_breaker_disabled
   echo "::endgroup::"
 }
 

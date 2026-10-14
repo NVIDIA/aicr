@@ -98,7 +98,7 @@ compose() {
         set -euo pipefail
         # shellcheck source=tests/uat/lib/phases.sh
         source "${SCRIPT_DIR}/phases.sh"
-        config="${dir}/config.yaml"; : > "${config}"
+        config="${dir}/config.yaml"; printf '%s\n' 'spec: {bundle: {deployment: {set: ["other:a=1"]}}}' > "${config}"
         AICR_BIN="${STUB_BIN}/aicr" UAT_NVSENTINEL_MIXIN="$2" STUB_RECIPE="$3" uat_compose_nvsentinel_mixin
     ) > "${dir}/log" 2>&1
 }
@@ -110,6 +110,8 @@ recipe "${WORK}/none.yaml" '{}'
 d="${WORK}/unset"; compose "${d}" "" "${WORK}/q.yaml"; rc=$?
 [[ "${rc}" == 0 && ! -e "${d}/aicr-calls" ]] && pass "an unset knob re-resolves nothing" \
     || fail "unset knob: rc=${rc}, calls=$(cat "${d}/aicr-calls" 2>/dev/null)"
+[[ "$(yq -r '.spec.bundle.deployment.set | length' "${d}/config.yaml")" == 1 ]] \
+    && pass "an unset knob leaves the config's set list alone" || fail "unset knob changed the config's set list"
 
 d="${WORK}/quarantine"; compose "${d}" nvsentinel-quarantine "${WORK}/q.yaml"; rc=$?
 [[ "${rc}" == 0 ]] && pass "quarantine composes and verifies" || { fail "quarantine: rc=${rc}"; sed 's/^/    | /' "${d}/log" >&2; }
@@ -117,6 +119,10 @@ d="${WORK}/quarantine"; compose "${d}" nvsentinel-quarantine "${WORK}/q.yaml"; r
     && pass "the mixin is appended to the leaf overlay" || fail "leaf overlay lacks the mixin"
 grep -q -- '--data uat-data' "${d}/aicr-calls" 2>/dev/null \
     && pass "the recipe is re-resolved with --data" || fail "no --data re-resolve: $(cat "${d}/aicr-calls" 2>/dev/null)"
+
+[[ "$(yq -r '.spec.bundle.deployment.set | join(",")' "${d}/config.yaml")" == "other:a=1,nvsentinel:fault-quarantine.circuitBreaker.enabled=false" ]] \
+    && pass "the breaker override is appended to the config's set list" \
+    || fail "config set list: $(yq -o=json '.spec.bundle.deployment.set' "${d}/config.yaml")"
 
 d="${WORK}/remediation"; compose "${d}" nvsentinel-remediation "${WORK}/r.yaml"; rc=$?
 [[ "${rc}" == 0 ]] && pass "remediation composes and verifies" || { fail "remediation: rc=${rc}"; sed 's/^/    | /' "${d}/log" >&2; }
@@ -132,6 +138,36 @@ d="${WORK}/wrong-step"; compose "${d}" nvsentinel-remediation "${WORK}/q.yaml"; 
 d="${WORK}/unknown"; compose "${d}" nvsentinel-observe "${WORK}/q.yaml"; rc=$?
 [[ "${rc}" != 0 && ! -e "${d}/aicr-calls" ]] && pass "an unknown mixin is refused before any re-resolve" \
     || fail "unknown mixin: rc=${rc}"
+
+# --- uat_assert_nvsentinel_breaker_disabled ------------------------------
+# assert_breaker <dir> <mixin> <values.yaml content, or "" for no nvsentinel dir> -> rc
+assert_breaker() {
+    local dir="$1"; mkdir -p "${dir}/bundle"
+    if [[ -n "$3" ]]; then
+        mkdir -p "${dir}/bundle/005-nvsentinel"
+        printf '%s\n' "$3" > "${dir}/bundle/005-nvsentinel/values.yaml"
+    fi
+    (
+        cd "${dir}" || exit 99
+        set -euo pipefail
+        # shellcheck source=tests/uat/lib/phases.sh
+        source "${SCRIPT_DIR}/phases.sh"
+        UAT_NVSENTINEL_MIXIN="$2" uat_assert_nvsentinel_breaker_disabled
+    ) > "${dir}/log" 2>&1
+}
+
+assert_breaker "${WORK}/brk-off" nvsentinel-remediation '{fault-quarantine: {circuitBreaker: {enabled: false}}}'; rc=$?
+[[ "${rc}" == 0 ]] && pass "a bundle with the breaker disabled passes" || fail "breaker disabled: rejected"
+
+assert_breaker "${WORK}/brk-default" nvsentinel-remediation '{global: {dryRun: false}}'; rc=$?
+[[ "${rc}" != 0 ]] && grep -q 'want false' "${WORK}/brk-default/log" \
+    && pass "a bundle at the chart-default breaker fails closed" || fail "breaker default: accepted"
+
+assert_breaker "${WORK}/brk-missing" nvsentinel-quarantine ""; rc=$?
+[[ "${rc}" != 0 ]] && pass "a bundle without nvsentinel values fails closed" || fail "missing values: accepted"
+
+assert_breaker "${WORK}/brk-unset" "" ""; rc=$?
+[[ "${rc}" == 0 ]] && pass "an unset knob skips the breaker check" || fail "unset knob: breaker check ran"
 
 if (( fails > 0 )); then
     echo "${fails} test(s) failed (${ran} attempted)" >&2
