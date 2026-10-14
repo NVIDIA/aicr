@@ -1,0 +1,37 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The template node-drainer renders into a DrainRequest for each quarantined
+# node: NVSentinel v1.26.0's
+# plugins/slinky-drainer/config/drain-template/drain-template-configmap.yaml,
+# key drain-template.yaml, byte for byte (commit a5b9e90f).
+#
+# Stored as binaryData because the template is itself a Go template, full of
+# template actions: AICR renders manifests at bundle time and most deployers then render
+# the result again through Helm, so no single escaping survives every deployer.
+# The kubelet mounts the decoded bytes. TestSlinkyDrainTemplateMatchesUpstream
+# pins the decoded content, and TestSlinkyDrainTemplateParsesFaultMessages
+# renders and parses it the way node-drainer does.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: slinky-drain-template
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: slinky-drainer
+    app.kubernetes.io/name: slinky-drainer
+    app.kubernetes.io/component: drain-template
+binaryData:
+  drain-template.yaml: YXBpVmVyc2lvbjogbnZzZW50aW5lbC5udmlkaWEuY29tL3YxYWxwaGExCmtpbmQ6IERyYWluUmVxdWVzdApzcGVjOgogIG5vZGVOYW1lOiB7eyAuSGVhbHRoRXZlbnQuTm9kZU5hbWUgfX0KICBjaGVja05hbWU6IHt7IC5IZWFsdGhFdmVudC5DaGVja05hbWUgfX0KICByZWNvbW1lbmRlZEFjdGlvbjoge3sgLkhlYWx0aEV2ZW50LlJlY29tbWVuZGVkQWN0aW9uLlN0cmluZyB9fQogIGVycm9yQ29kZToKICB7ey0gcmFuZ2UgLkhlYWx0aEV2ZW50LkVycm9yQ29kZSB9fQogIC0gInt7IC4gfX0iCiAge3stIGVuZCB9fQogIGhlYWx0aEV2ZW50SUQ6IHt7IC5FdmVudElEIH19CiAgZW50aXRpZXNJbXBhY3RlZDoKICB7ey0gcmFuZ2UgLkhlYWx0aEV2ZW50LkVudGl0aWVzSW1wYWN0ZWQgfX0KICAtIHR5cGU6IHt7IC5FbnRpdHlUeXBlIH19CiAgICB2YWx1ZTogInt7IC5FbnRpdHlWYWx1ZSB9fSIKICB7ey0gZW5kIH19CiAgcmVhc29uOiAie3sgLkhlYWx0aEV2ZW50Lk1lc3NhZ2UgfX0iCiAgcG9kc1RvRHJhaW46CiAge3stIHJhbmdlICRuYW1lc3BhY2UsICRwb2RzIDo9IC5Qb2RzVG9EcmFpbiB9fQogICAge3sgJG5hbWVzcGFjZSB9fToKICAgIHt7LSByYW5nZSAkcG9kcyB9fQogICAgLSB7eyAuIH19CiAgICB7ey0gZW5kIH19CiAge3stIGVuZCB9fQo=
