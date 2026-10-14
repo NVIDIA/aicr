@@ -5,8 +5,9 @@
 # kube_context    = "kind-my-cluster"
 {{ if .ClusterRollover }}
 # What identifies that cluster. A change here replaces every release; leave it
-# unset and the containment shim never fires.
-# cluster_keepers = { ca = file("~/.kube/my-cluster-ca.pem") }
+# unset and the containment shim never fires. A tfvars file holds literals
+# only (no file()); pass a computed value with -var or TF_VAR_cluster_keepers.
+# cluster_keepers = { ca = "<the cluster CA certificate, or any value minted per cluster>" }
 {{ end }}
 # Per-release apply behaviour.
 # wait    = true

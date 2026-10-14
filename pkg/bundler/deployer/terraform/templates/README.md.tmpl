@@ -178,16 +178,19 @@ install what Terraform manages.
 
 ## Addressing a component
 
-The names in this bundle are a contract, so that configuration outside it can
-refer in. A component `foo-bar` is `module.foo_bar` (its name with every
-character outside `[A-Za-z0-9_]` replaced by `_`), and inside it the releases
-are `helm_release.this` (the chart), with `helm_release.pre`, `helm_release.post`
-and `helm_release.readiness` beside it where the bundle emitted those folders
-(each `count`ed, so `[0]` when present). A lifecycle trigger, a policy rule or a
-dependency from elsewhere in the configuration targets those addresses, as in
-`module.stack.module.gpu_operator.helm_release.this` from a root that calls this
-bundle as `module "stack"`. Each module also outputs `name`, `namespace`,
-`version` and `releases`. Regenerating keeps these names.
+The names in this bundle are a contract, so that tooling outside it can refer
+in. A component `foo-bar` is `module.foo_bar` (its name with every character
+outside `[A-Za-z0-9_]` replaced by `_`, and prefixed with `_` if it would start
+with a digit), and inside it the releases are `helm_release.this` (the chart),
+with `helm_release.pre`, `helm_release.post` and `helm_release.readiness` beside
+it where the bundle emitted those folders (each `count`ed, so `[0]` when
+present). Those are the addresses that `terraform apply -replace`, `-target`,
+`terraform state`, `moved` and `import` blocks, and a policy over the plan JSON
+use, as in `module.stack.module.gpu_operator.helm_release.this` from a root that
+calls this bundle as `module "stack"`. Configuration cannot reach inside a
+module call: a `depends_on` or `replace_triggered_by` in the caller names
+`module.stack` as a whole, and what the caller reads are this bundle's outputs
+(`components`, `releases`, `namespaces`). Regenerating keeps these names.
 
 ## Scheduling
 
@@ -214,7 +217,9 @@ this directory, then `terraform plan` and read the diff:
   before-hook-creation`, so Helm deletes the last Job and runs a fresh one.
   A gate whose own inputs did not change plans clean and does not re-run; to
   re-assert a component by hand, `terraform apply
-  -replace='module.<component>.helm_release.readiness[0]'`.
+  -replace='module.<label>.helm_release.readiness[0]'`, with the label from
+  "Addressing a component" above and the caller's `module.stack.` prefix when
+  this bundle is called as a module.
 - `helm_release` tracks a bundled chart's **path, version and values**, not
   its rendered templates. A regenerated `-pre`, `-post` or `-readiness`
   folder whose manifests changed but whose `Chart.yaml` version did not plans
