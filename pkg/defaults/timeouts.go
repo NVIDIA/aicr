@@ -1727,3 +1727,8 @@ const AtRiskListPageSize int64 = 200
 // AtRiskStepTimeout bounds each step of the at-risk scan, which is resolving
 // one kind or listing one page with its retries. The scan has no total budget.
 const AtRiskStepTimeout = 60 * time.Second
+
+// AtRiskExpiredContinueRetries is the most expired-continue-token 410s in a
+// row, with no page served between them, that the at-risk scan resumes from
+// before it fails the list.
+const AtRiskExpiredContinueRetries = 3

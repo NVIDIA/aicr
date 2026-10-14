@@ -249,13 +249,18 @@ func resolveKind(ctx context.Context, mapper meta.RESTMapper, groups k8sclient.G
 }
 
 // scanKind lists kind cluster-wide and returns the objects nothing owns. Each
-// page, retries included, must arrive within pageTimeout.
+// page, retries included, must arrive within pageTimeout. It fails with
+// ErrCodeUnavailable once the apiserver expires the continue token more than
+// defaults.AtRiskExpiredContinueRetries times in a row.
 func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 	gvr schema.GroupVersionResource, pageTimeout time.Duration) (ScannedKind, []AtRiskObject, error) {
 
 	scanned := ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components, Present: true}
 	var findings []AtRiskObject
 	opts := metav1.ListOptions{Limit: defaults.AtRiskListPageSize}
+	// Consecutive rather than total, since a long list legitimately outlives
+	// several compactions, each costing one 410.
+	expiredInARow := 0
 	for {
 		if err := ctxErr(ctx, atRiskSubject); err != nil {
 			return ScannedKind{}, nil, err
@@ -268,6 +273,13 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 		if err != nil {
 			// For an advisory scan an inconsistent list beats a failed one.
 			if fresh := expiredContinue(err); opts.Continue != "" && fresh != "" {
+				expiredInARow++
+				if expiredInARow > defaults.AtRiskExpiredContinueRetries {
+					return ScannedKind{}, nil, errors.WrapWithContext(errors.ErrCodeUnavailable,
+						fmt.Sprintf("the apiserver expired the continue token %d times in a row while listing %s, "+
+							"so paging cannot make progress", expiredInARow, kindDescription(kind)),
+						err, map[string]any{ctxKeyResource: gvr.Resource})
+				}
 				if advErr := advance(&opts, fresh, gvr.Resource); advErr != nil {
 					return ScannedKind{}, nil, advErr
 				}
@@ -294,6 +306,7 @@ func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
 					kindDescription(kind)),
 				err, map[string]any{ctxKeyResource: gvr.Resource})
 		}
+		expiredInARow = 0
 
 		for i := range page.Items {
 			item := &page.Items[i]

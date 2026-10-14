@@ -1103,3 +1103,88 @@ func TestScanAtRiskContinuesAnExpiredList(t *testing.T) {
 		})
 	}
 }
+
+func TestScanKindBoundsConsecutiveExpiredTokens(t *testing.T) {
+	t.Parallel()
+
+	const limit = defaults.AtRiskExpiredContinueRetries
+	// script builds a request sequence, true for a 410 and false for a page.
+	script := func(runs ...int) []bool {
+		var out []bool
+		for _, run := range runs {
+			out = append(out, false)
+			for range run {
+				out = append(out, true)
+			}
+		}
+
+		return out
+	}
+
+	tests := []struct {
+		name      string
+		responses []bool
+		wantPages int
+		wantErr   bool
+	}{
+		{"a page between runs resets the count", append(script(limit, limit), false), 3, false},
+		{"one 410 past the limit fails the list", script(limit + 1), 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var served atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				i := int(served.Add(1)) - 1
+				want := ""
+				if i > 0 {
+					want = "token-" + strconv.Itoa(i-1)
+				}
+				if got := r.URL.Query().Get("continue"); got != want {
+					t.Errorf("request %d continue = %q, want %q", i, got, want)
+				}
+				if i >= len(tt.responses) {
+					t.Errorf("request %d is past the %d scripted responses", i, len(tt.responses))
+					w.WriteHeader(http.StatusBadRequest)
+
+					return
+				}
+				next := "token-" + strconv.Itoa(i)
+				w.Header().Set("Content-Type", "application/json")
+				if tt.responses[i] {
+					w.WriteHeader(http.StatusGone)
+					_, _ = fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","metadata":{"continue":%q},`+
+						`"status":"Failure","message":"The provided continue parameter is too old",`+
+						`"reason":"Expired","code":410}`, next)
+
+					return
+				}
+				if i == len(tt.responses)-1 {
+					next = ""
+				}
+				_, _ = fmt.Fprintf(w, `{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1",`+
+					`"metadata":{"continue":%q},"items":[{"kind":"PartialObjectMetadata",`+
+					`"apiVersion":"meta.k8s.io/v1","metadata":{"name":"object-%d","namespace":"tenant-a"}}]}`, next, i)
+			}))
+			t.Cleanup(srv.Close)
+
+			scanned, _, err := scanKind(t.Context(), metadataClient(t, srv), topologyKind(), topologyGVR,
+				defaults.AtRiskStepTimeout)
+			if n := int(served.Load()); n != len(tt.responses) {
+				t.Errorf("requests = %d, want %d", n, len(tt.responses))
+			}
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("scanKind: %v", err)
+			}
+			if scanned.Examined != tt.wantPages {
+				t.Errorf("Examined = %d, want %d", scanned.Examined, tt.wantPages)
+			}
+		})
+	}
+}

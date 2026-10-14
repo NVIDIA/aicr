@@ -204,7 +204,8 @@
 // name, it resolves each through a RESTMapper and lists its metadata
 // cluster-wide, never an object's spec. A list whose continue token expires
 // resumes from the apiserver's latest state, so objects changed in between
-// may be missed or included.
+// may be missed or included. A token that keeps expiring with no page served
+// fails the scan.
 //
 // It reports every object carrying none of these ownership markers:
 //   - a nonblank argocd.argoproj.io/tracking-id annotation
