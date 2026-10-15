@@ -457,6 +457,56 @@ func TestReplaceRegistry(t *testing.T) {
 	}
 }
 
+func TestApplyRegistryOverride(t *testing.T) {
+	const (
+		repoPath = "team/image"
+		img      = "registry.example.com/org/" + repoPath + ":v1.2.3"
+		mirrored = "localhost:5001/" + repoPath + ":v1.2.3"
+	)
+
+	tests := []struct {
+		name     string
+		registry string
+		tag      string
+		want     string
+	}{
+		{
+			name: "no override leaves the image unchanged",
+			want: img,
+		},
+		{
+			name:     "registry override replaces host and first path segment",
+			registry: "localhost:5001",
+			want:     mirrored,
+		},
+		{
+			name:     "registry override that keeps the source path",
+			registry: "mirror.example.com/org",
+			want:     "mirror.example.com/org/" + repoPath + ":v1.2.3",
+		},
+		{
+			name: "tag override is ignored",
+			tag:  "latest",
+			want: img,
+		},
+		{
+			name:     "tag override is ignored alongside a registry override",
+			registry: "localhost:5001",
+			tag:      "latest",
+			want:     mirrored,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", tt.registry)
+			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.tag)
+			if got := ApplyRegistryOverride(img); got != tt.want {
+				t.Errorf("ApplyRegistryOverride(%q) = %q, want %q", img, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadWithRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "localhost:5001")
 

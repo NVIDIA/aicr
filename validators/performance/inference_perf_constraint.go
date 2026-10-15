@@ -1619,6 +1619,21 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 	return tolerations
 }
 
+// inferenceTemplateData returns the ${KEY} substitutions for the
+// testdata/inference templates.
+func inferenceTemplateData(config *inferenceWorkloadConfig) map[string]string {
+	return map[string]string{
+		"NAMESPACE":                 config.namespace,
+		"MODEL":                     config.model,
+		"ROUTER_MODE":               config.routerMode,
+		"GPU_COUNT":                 strconv.Itoa(config.gpuCount),
+		"DEPLOYMENT_NAME":           inferenceDeploymentName,
+		"CLAIM_TEMPLATE_NAME":       inferenceClaimTemplateName,
+		"DYNAMO_VLLM_RUNTIME_IMAGE": dynamoRuntimeImage(dynamoVLLMRuntimeImageName),
+		"DYNAMO_FRONTEND_IMAGE":     dynamoRuntimeImage(dynamoFrontendImageName),
+	}
+}
+
 // deployInferenceWorkload deploys the DynamoGraphDeployment and any
 // routing-mode-specific Gateway API resources. Worker GPU wiring is
 // MODE-DISPATCHED (config.useDRAWorkerClaims): in DRA mode a
@@ -1653,14 +1668,7 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		return err
 	}
 
-	templateData := map[string]string{
-		"NAMESPACE":           config.namespace,
-		"MODEL":               config.model,
-		"ROUTER_MODE":         config.routerMode,
-		"GPU_COUNT":           strconv.Itoa(config.gpuCount),
-		"DEPLOYMENT_NAME":     inferenceDeploymentName,
-		"CLAIM_TEMPLATE_NAME": inferenceClaimTemplateName,
-	}
+	templateData := inferenceTemplateData(config)
 
 	// DRA wiring mode: apply the ResourceClaimTemplate the worker pods bind
 	// (one claim, ExactCount=1 GPU, per worker). Device-plugin mode skips it —

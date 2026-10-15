@@ -121,7 +121,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell bom-pinning-check check-depproxy-kit check-upgrade-records check-dynamo-runtime-image ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, and vendored action digests)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
@@ -156,6 +156,10 @@ check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 .PHONY: check-docs-filenames
 check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 	@./tools/check-docs-filenames
+
+.PHONY: check-dynamo-runtime-image
+check-dynamo-runtime-image: ## Verifies the inference-perf Dynamo runtime image tag matches the dynamo-platform chart version
+	@GOFLAGS="-mod=readonly" go run ./tools/check-dynamo-runtime-image
 
 .PHONY: check-upgrade-records
 check-upgrade-records: ## Verifies ComponentUpgrades records are well-formed and cover pins moved since the merge base (ADR-021; uses AICR_UPGRADE_BASE_REF, else a fetched upstream/main or origin/main)

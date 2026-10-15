@@ -101,22 +101,6 @@ const (
 	// with the run ID so concurrent runs don't collide).
 	modelCachePopulateJobPrefix = "aicr-model-cache-populate"
 
-	// cacheWorkerImage is the image used by the populate Job to download
-	// weights. It must carry python3 + huggingface_hub; reuse the vLLM runtime
-	// image so it is already node-cached. Keep in sync with the worker image in
-	// testdata/inference/dynamo-deployment.yaml.
-	//
-	// NOTE: this is pinned to nvcr.io and is NOT run through
-	// catalog.ResolveImage, so AICR_VALIDATOR_IMAGE_REGISTRY does not rewrite it
-	// (unlike the AIPerf image) — a registry-override consistency gap. Propagating
-	// imagePullSecrets only helps when the private creds are for nvcr.io itself.
-	// This matches the Dynamo worker image (also pinned in the template,
-	// drift-guarded by TestCacheWorkerImageMatchesTemplate). Routing this through
-	// ResolveImage for registry-override parity is tracked in #1159. Note that
-	// registry parity alone is not air-gap support: the populate Job's
-	// snapshot_download still reaches huggingface.co for the weights.
-	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2"
-
 	// Resource requests for the populate container. snapshot_download is
 	// network/IO-bound, not compute-bound, so requests stay small; they exist so
 	// the pod gets a Burstable QoS class and schedules under ResourceQuota /
@@ -133,11 +117,17 @@ const (
 	// freshly provisioned volume is group-writable by the cacheWorkerImage's
 	// non-root user. It must match that image's non-root UID/GID — if the vLLM
 	// runtime image rebuilds under a different non-root UID, the workers' RO
-	// mount would silently fail to load weights. Co-located with cacheWorkerImage
-	// so the drift surface is in one place; the worker RO mount relies on the
-	// same group ownership.
+	// mount would silently fail to load weights. The worker RO mount relies on
+	// the same group ownership.
 	cacheWorkerFSGroup = int64(1000)
 )
+
+// cacheWorkerImage returns the image the model-cache populate Job runs.
+func cacheWorkerImage() string {
+	// The workers' own vLLM runtime image, so the Job writes HF_HOME in the
+	// layout the offline workers read.
+	return dynamoRuntimeImage(dynamoVLLMRuntimeImageName)
+}
 
 // storageCompatibilityRule declares that on a given CSI provisioner, the
 // listed machine families can only attach a StorageClass whose
@@ -463,7 +453,7 @@ func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pu
 					SecurityContext:  &v1.PodSecurityContext{FSGroup: ptr.To(cacheWorkerFSGroup)},
 					Containers: []v1.Container{{
 						Name:  "populate",
-						Image: cacheWorkerImage,
+						Image: cacheWorkerImage(),
 						Resources: v1.ResourceRequirements{
 							Requests: v1.ResourceList{
 								v1.ResourceCPU:    resource.MustParse(cacheJobCPURequest),

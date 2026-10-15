@@ -143,3 +143,7 @@ runs:
     - name: Verify vendored Go proxy action
       shell: bash
       run: make check-depproxy-kit
+
+    - name: Verify Dynamo runtime image tag matches the operator chart
+      shell: bash
+      run: make check-dynamo-runtime-image

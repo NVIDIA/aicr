@@ -17,7 +17,7 @@ package main
 import (
 	"context"
 	stderrors "errors"
-	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +30,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -170,8 +171,8 @@ func TestBuildModelCachePopulateJob(t *testing.T) {
 		t.Errorf("cache PVC volume missing: %v", spec.Volumes)
 	}
 	c := spec.Containers[0]
-	if c.Image != cacheWorkerImage {
-		t.Errorf("image = %q, want %q", c.Image, cacheWorkerImage)
+	if c.Image != cacheWorkerImage() {
+		t.Errorf("image = %q, want %q", c.Image, cacheWorkerImage())
 	}
 	if !strings.Contains(strings.Join(c.Command, " "), "snapshot_download") {
 		t.Errorf("command missing snapshot_download: %v", c.Command)
@@ -684,26 +685,108 @@ func TestEnsureModelCachePinsImplicitDefaultStorageClass(t *testing.T) {
 	}
 }
 
-// TestCacheWorkerImageMatchesTemplate guards the cacheWorkerImage constant
-// against drifting from the worker image in the Dynamo deploy template. The
-// populate Job must download with the same vLLM runtime the workers use: the
-// workers load the populated HF_HOME offline (HF_HUB_OFFLINE=1), so a layout
-// mismatch fails closed. The constant is kept in sync by comment only, so this
-// test fails loudly if a template bump isn't mirrored on the constant.
+// TestCacheWorkerImageMatchesTemplate verifies cacheWorkerImage equals the
+// VllmDecodeWorker image each Dynamo deploy template renders, with and without
+// a registry override.
 func TestCacheWorkerImageMatchesTemplate(t *testing.T) {
-	for _, path := range []string{
-		"testdata/inference/dynamo-deployment.yaml",
-		"testdata/inference/dynamo-deployment-gateway-epp.yaml",
-	} {
-		t.Run(path, func(t *testing.T) {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read deploy template: %v", err)
-			}
-			if !strings.Contains(string(data), cacheWorkerImage) {
-				t.Errorf("cacheWorkerImage %q not found in %s; "+
-					"the populate-Job image has drifted from the worker image — update cacheWorkerImage to match", cacheWorkerImage, path)
-			}
-		})
+	for _, registry := range []string{"", "localhost:5001"} {
+		for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
+			t.Run(tmpl+"/registry="+registry, func(t *testing.T) {
+				t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", registry)
+				obj := renderInferenceTemplate(t, tmpl)
+				images := componentContainerImages(t, obj, "VllmDecodeWorker")
+				if got := images[mainContainerName]; got != cacheWorkerImage() {
+					t.Errorf("VllmDecodeWorker main image = %q, want cacheWorkerImage() %q", got, cacheWorkerImage())
+				}
+			})
+		}
 	}
+}
+
+// TestDynamoTemplateImagesResolved verifies every container image in both
+// Dynamo deploy templates is fully substituted, tagged
+// defaults.DynamoRuntimeImageTag, redirected by AICR_VALIDATOR_IMAGE_REGISTRY,
+// and not retagged by AICR_VALIDATOR_IMAGE_TAG.
+func TestDynamoTemplateImagesResolved(t *testing.T) {
+	tests := []struct {
+		name       string
+		registry   string
+		tag        string
+		wantPrefix string
+	}{
+		{name: "no override", wantPrefix: defaults.DynamoImageRepository + "/"},
+		{name: "registry override", registry: "localhost:5001", wantPrefix: "localhost:5001/"},
+		{name: "tag override does not retag runtime images", tag: "latest", wantPrefix: defaults.DynamoImageRepository + "/"},
+	}
+	for _, tt := range tests {
+		for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
+			t.Run(tt.name+"/"+tmpl, func(t *testing.T) {
+				t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", tt.registry)
+				t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.tag)
+				obj := renderInferenceTemplate(t, tmpl)
+				components, _, err := unstructured.NestedSlice(obj.Object, "spec", "components")
+				if err != nil || len(components) == 0 {
+					t.Fatalf("read spec.components: %v (len %d)", err, len(components))
+				}
+				for _, raw := range components {
+					component, _ := raw.(map[string]any)
+					name, _ := component[keyName].(string)
+					for container, image := range componentContainerImages(t, obj, name) {
+						// A leftover placeholder ships as a literal image
+						// reference and sits in ImagePullBackOff.
+						if strings.Contains(image, "${") {
+							t.Errorf("%s/%s image %q has an unsubstituted placeholder", name, container, image)
+						}
+						if !strings.HasPrefix(image, tt.wantPrefix) {
+							t.Errorf("%s/%s image %q, want prefix %q", name, container, image, tt.wantPrefix)
+						}
+						if !strings.HasSuffix(image, ":"+defaults.DynamoRuntimeImageTag) {
+							t.Errorf("%s/%s image %q, want tag %q", name, container, image, defaults.DynamoRuntimeImageTag)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+// renderInferenceTemplate renders testdata/inference/tmpl with the
+// substitutions deployInferenceWorkload applies.
+func renderInferenceTemplate(t *testing.T, tmpl string) *unstructured.Unstructured {
+	t.Helper()
+	cfg := &inferenceWorkloadConfig{
+		namespace:  "aicr-test",
+		model:      "Qwen/Qwen3-8B",
+		routerMode: dynRouterModeDefault,
+		gpuCount:   1,
+	}
+	obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", tmpl), inferenceTemplateData(cfg))
+	if err != nil {
+		t.Fatalf("parseYAMLTemplate(%s) error: %v", tmpl, err)
+	}
+	return obj
+}
+
+// componentContainerImages returns the image of each container in component's
+// pod spec, keyed by container name. It fails t if component has no containers.
+func componentContainerImages(t *testing.T, obj *unstructured.Unstructured, component string) map[string]string {
+	t.Helper()
+	containers, _, err := unstructured.NestedSlice(componentPodSpec(t, obj, component), "containers")
+	if err != nil {
+		t.Fatalf("read %s containers: %v", component, err)
+	}
+	images := make(map[string]string, len(containers))
+	for _, raw := range containers {
+		container, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := container[keyName].(string)
+		image, _ := container["image"].(string)
+		images[name] = image
+	}
+	if len(images) == 0 {
+		t.Fatalf("component %s has no containers", component)
+	}
+	return images
 }
