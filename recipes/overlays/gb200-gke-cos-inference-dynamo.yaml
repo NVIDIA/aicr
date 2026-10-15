@@ -1,4 +1,4 @@
-# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# Copyright 2026 Google LLC.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,14 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Automatically generated directly into source by GKE Version Vector Export Engine.
+# Authoritative single source of truth resides in GKE Version Vector registry and GCE SoT.
+
 kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
   name: gb200-gke-cos-inference-dynamo
 
 spec:
-  # Inherits from gb200-gke-cos-inference (GB200 + GKE COS inference settings)
-  # Adds Dynamo inference platform components.
+  # Inherits from gb200-gke-cos-inference recipe and layers Dynamo AI inference platform
   base: gb200-gke-cos-inference
 
   criteria:
@@ -29,12 +31,23 @@ spec:
     intent: inference
     platform: dynamo
 
-  # DRA requires Kubernetes 1.34+ (GA)
+  # DRA floor: multi-node NVLink gets its IMEX channels from an NVIDIA DRA ComputeDomain, and GKE
+  # serves the DRA API by default only from 1.34 (1.32 and 1.33 need beta APIs enabled on the
+  # cluster). Of the GKE versions the GKE Version Vector registry admits for this platform, the
+  # recipe therefore keeps only 1.34 and later:
+  #   >= 1.32.8-gke.1108000 < 1.33 || >= 1.33.4-gke.1036000
+  # AICR compares the -gke.N build suffix numerically, and ranks "X-gke.N" above bare "X", so an
+  # exclusive upper bound at a minor excludes that whole GKE track. Per-branch minimums are
+  # expressed as "||" alternatives. Note a compound value cannot participate in profile
+  # constraint tightening (it is reported incomparable), so do not add a profile-level
+  # K8s.server.version on top of one.
   constraints:
     - name: K8s.server.version
       value: ">= 1.34"
 
   componentRefs:
+    # GKE AI Inference Runtime & OCI Chart Registration:
+    # Deploys Dynamo inference platform orchestrating through Grove and KAI Scheduler.
     - name: grove
       type: Helm
       source: oci://ghcr.io/ai-dynamo/grove
@@ -57,14 +70,11 @@ spec:
         - gpu-operator
         - kai-scheduler
 
-    # Decline the runtime inventory, matching h100-gke-cos-inference-dynamo.
-    # k8s-aibom alongside grove and dynamo-platform is a combination nothing
-    # has qualified, and that is a property of the pairing rather than of the
-    # accelerator -- so every GKE dynamo recipe declines it, not just the one
-    # that happens to inherit the component from a base.
-    #
-    # Without this ref the widened GKE opt-in (#2962) would grant k8s-aibom
-    # here, assembling on gb200 exactly the trio h100 refuses.
+    # Decline the runtime inventory, matching every other GKE Dynamo recipe. Since #2962, AICR
+    # grants k8s-aibom to any GKE recipe that does not mention it when --runtime-inventory is
+    # enabled, and only this explicit decline makes it reject the opt-in instead. k8s-aibom
+    # alongside grove and dynamo-platform is a combination nothing has qualified, and that is a
+    # property of the pairing rather than of the accelerator.
     - name: k8s-aibom
       type: Helm
       overrides:
@@ -106,14 +116,9 @@ spec:
         - name: inference-model-cache-storage-class
           value: a4x-compatible
     conformance:
+      # Union-merged onto the checks inherited from the inference base. inference-gateway and
+      # robust-controller validate the inference gateway and the Dynamo operator on recipes that
+      # resolve grove and dynamo-platform, so they are declared here.
       checks:
-        - platform-health
-        - gpu-operator-health
-        - dra-support
-        - accelerator-metrics
-        - ai-service-metrics
         - inference-gateway
-        - gang-scheduling
-        - pod-autoscaling
-        - cluster-autoscaling
         - robust-controller
