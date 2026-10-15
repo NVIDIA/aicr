@@ -245,9 +245,9 @@ func namespacedRules() []rbacv1.PolicyRule {
 	}
 }
 
-// clusterRules returns the cluster-scoped policy rules the agent needs. The
-// baseline set is read-only; discoverNetwork appends the mutating rules live
-// l8k network discovery requires (see discoverNetworkClusterRules).
+// clusterRules returns the cluster-scoped policy rules the agent needs. Every
+// rule is read-only; discoverNetwork appends the one additional read rule
+// l8k's read-only network discovery requires (see discoverNetworkReadRules).
 //
 // It is the single definition consumed by both the run-scoped ClusterRole
 // ensureClusterRole creates and the ClusterRole
@@ -306,14 +306,13 @@ func clusterRules(discoverNetwork bool) []rbacv1.PolicyRule {
 		},
 	}
 
-	// Live l8k network discovery stands up a nic-configuration-daemon
-	// DaemonSet in its own namespace, exec's into the daemon pods,
-	// writes nvidia.kubernetes-launch-kit.{machine,gpu} labels onto
-	// nodes, and patches mellanox.com NicClusterPolicy via server-side
-	// apply. Grant the extra cluster-scoped rules only when discovery was
-	// opted into so non-network snapshots stay minimal-priv.
+	// Read-only l8k network discovery lists nodes and pods (granted above)
+	// and the NicDevice objects the Network Operator's
+	// nic-configuration-daemon already publishes. Grant that one extra read
+	// only when discovery was opted into so non-network snapshots stay
+	// minimal-priv.
 	if discoverNetwork {
-		rules = append(rules, discoverNetworkClusterRules()...)
+		rules = append(rules, discoverNetworkReadRules()...)
 	}
 	return rules
 }
@@ -483,71 +482,18 @@ func (d *Deployer) deleteClusterRoleBinding(ctx context.Context, name string, ui
 	return ignoreNotFoundOrConflict(err)
 }
 
-// discoverNetworkClusterRules returns the cluster-scoped policy rules
-// required by l8k's live network discovery (--discover-network). Each
-// rule maps to a concrete cluster-side step in the discovery flow:
-//
-//   - customresourcedefinitions: l8k installs the
-//     nic-configuration-operator CRDs (NicDevice, NicClusterPolicy)
-//     if they're absent.
-//   - namespaces / daemonsets / serviceaccounts / configmaps /
-//     roles / rolebindings: l8k creates a bootstrap namespace
-//     (nvidia-k8s-launch-kit) and deploys the nic-configuration-daemon
-//     DaemonSet plus its supporting RBAC, then deletes the namespace
-//     when done.
-//   - pods/exec: l8k exec's into each daemon pod to read VPD / link
-//     metadata via the in-pod CLI.
-//   - nodes/patch: l8k writes nvidia.kubernetes-launch-kit.machine
-//     and .gpu labels onto matched nodes.
-//   - nicdevices: l8k consumes the NicDevice CRs the daemon publishes.
-//   - nicclusterpolicies: l8k patches the user's NicClusterPolicy
-//     (NicConfigurationOperator section) via server-side apply.
-func discoverNetworkClusterRules() []rbacv1.PolicyRule {
+// discoverNetworkReadRules returns the cluster-scoped rules l8k's read-only
+// network discovery (--discover-network) needs beyond the baseline. Discovery
+// lists nodes and pods, both already granted, and the NicDevice objects an
+// existing nic-configuration-daemon publishes. It creates, patches, and
+// deletes nothing, and aicr deliberately grants no pods/exec: a daemon node
+// without a NicDevice fails the collector rather than being probed.
+func discoverNetworkReadRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
-		{
-			APIGroups: []string{"apiextensions.k8s.io"},
-			Resources: []string{"customresourcedefinitions"},
-			Verbs:     []string{verbGet, verbList, verbCreate, verbUpdate, verbPatch},
-		},
-		{
-			APIGroups: []string{""},
-			Resources: []string{"namespaces"},
-			Verbs:     []string{verbGet, verbCreate, verbDelete},
-		},
-		{
-			APIGroups: []string{"apps"},
-			Resources: []string{"daemonsets"},
-			Verbs:     []string{verbGet, verbList, verbWatch, verbCreate, verbDelete},
-		},
-		{
-			APIGroups: []string{""},
-			Resources: []string{resourceServiceAccounts, resourceCM},
-			Verbs:     []string{verbGet, verbCreate, verbDelete},
-		},
-		{
-			APIGroups: []string{rbacAPIGroup},
-			Resources: []string{resourceRoles, resourceRoleBindings},
-			Verbs:     []string{verbGet, verbCreate, verbDelete},
-		},
-		{
-			APIGroups: []string{""},
-			Resources: []string{resourcePods + "/exec"},
-			Verbs:     []string{verbCreate},
-		},
-		{
-			APIGroups: []string{""},
-			Resources: []string{resourceNodes},
-			Verbs:     []string{verbPatch},
-		},
 		{
 			APIGroups: []string{"configuration.net.nvidia.com"},
 			Resources: []string{"nicdevices"},
 			Verbs:     []string{verbGet, verbList},
-		},
-		{
-			APIGroups: []string{"mellanox.com"},
-			Resources: []string{"nicclusterpolicies"},
-			Verbs:     []string{verbGet, verbPatch},
 		},
 	}
 }

@@ -151,8 +151,9 @@ type AgentConfig struct {
 	// Empty falls back to NameBase and is never probed for existence.
 	//
 	// Using an existing ServiceAccount waives per-run permission
-	// isolation: concurrent runs sharing it share its grants, and grants
-	// provisioned for DiscoverNetwork persist beyond any one run.
+	// isolation: concurrent runs sharing it share its grants, and the
+	// (read-only) grants provisioned for DiscoverNetwork persist beyond any
+	// one run.
 	ServiceAccountName string
 
 	NodeSelector     map[string]string
@@ -188,10 +189,11 @@ type AgentConfig struct {
 	// outside the facade; see Client.CollectSnapshot.
 	ClusterConfigPath string
 
-	// DiscoverNetwork enables the in-pod network collector's live l8k
-	// discovery. Discovery is NOT read-only — it writes
-	// nvidia.kubernetes-launch-kit.* node labels and patches NicClusterPolicy
-	// via server-side-apply, so the agent's RBAC must allow those writes.
+	// DiscoverNetwork enables the in-pod network collector's read-only l8k
+	// discovery (DiscoverReadOnly). It reads nodes, Network Operator pods,
+	// and the NicDevice objects an already-running nic-configuration-daemon
+	// publishes; it creates, patches, and deletes nothing. The agent's
+	// ClusterRole gains only configuration.net.nvidia.com nicdevices get/list.
 	DiscoverNetwork bool
 
 	// AKSGPUPoolsPath points at an operator-supplied

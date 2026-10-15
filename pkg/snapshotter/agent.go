@@ -91,8 +91,9 @@ type AgentConfig struct {
 	// capture the run.
 	//
 	// Using an existing ServiceAccount waives per-run permission
-	// isolation: concurrent runs sharing it share its grants, and grants
-	// provisioned for DiscoverNetwork persist beyond any one run.
+	// isolation: concurrent runs sharing it share its grants, and the
+	// (read-only) grants provisioned for DiscoverNetwork persist beyond any
+	// one run.
 	ServiceAccountName string
 
 	// NodeSelector for targeting specific nodes
@@ -171,10 +172,10 @@ type AgentConfig struct {
 	// snapshot as the gke-gpu-pools subtype.
 	GKEGPUPoolsPath string
 
-	// DiscoverNetwork enables the in-pod network collector's live l8k
-	// discovery path. Discovery is NOT read-only — it writes node labels
-	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
-	// server-side-apply. RBAC must allow those writes.
+	// DiscoverNetwork enables the in-pod network collector's read-only l8k
+	// discovery path (DiscoverReadOnly). It creates, patches, and deletes
+	// nothing; the agent's ClusterRole gains only
+	// configuration.net.nvidia.com nicdevices get/list.
 	DiscoverNetwork bool
 
 	// Requests overrides the agent container's per-resource requests.
