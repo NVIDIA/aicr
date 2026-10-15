@@ -152,7 +152,9 @@ readback_source_summary() {
          + "\(.helm.stampedUnmatched // 0) stamped but unmatched"),
         ("  argo: \(.argo.applications // 0) application(s), "
          + "\(.argo.unattributed // 0) unattributed, "
-         + "\(.argo.unreadable // 0) unreadable, no stamp to check")
+         + "\(.argo.unreadable // 0) unreadable, "
+         + "\(.argo.remote // 0) remote, "
+         + "\(.argo.unplaced // 0) unplaced, no stamp to check")
     ' "${cluster_json}" 2>/dev/null || return 0
 }
 
