@@ -304,7 +304,7 @@ version describes the wrapper instead of what it wraps.
 
 So for the `gpu-operator-post` release generated alongside gpu-operator, a
 `helm list` reports chart `gpu-operator-post-0.22.0` — the AICR version — while
-its app version and `aicr.run/component-version` both read `v26.7.1`, the
+its app version and `aicr.run/component-version` both read `v26.7.2`, the
 gpu-operator pin those manifests accompany.
 
 A component with no upstream pin — a manifest-only component, and the injected
@@ -366,7 +366,9 @@ profile's owned paths are locked. The lock is enforced per surface:
   cannot assign `enabled`, so no `--profile` choice adds or removes a
   component. The lock rejects removing (or bundle-subsetting away) an
   owned component; changing which components are present is a
-  catalog/composition change.
+  catalog/composition change. A component the profile references as
+  `optional` has no presence lock: it may be removed, and its owned
+  value paths are enforced only when it ships.
 
 Change owned **value** paths by regenerating with
 `aicr recipe --profile name=value` instead; component presence is not
@@ -387,6 +389,83 @@ The `agentgateway` inference-gateway is **private by default**: with no
 RFC1918 ranges so it is not exposed to the public internet. Use the override
 above to admit specific clients (e.g. a corporate VPN). See
 [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
+
+### Size controllers for large clusters
+
+Some controllers' memory grows with node count. The controllers below ship
+default memory **limits** that cover clusters of about 2500 nodes, in the
+recipes each row names; a row with no recipe applies to all of them. Their
+**requests** are sized for small clusters, so a large cluster schedules them
+with far less reserved than they use. On large clusters, raise the requests so
+the scheduler reserves memory on the system nodes:
+
+| Controller | Override key | Resources path |
+|---|---|---|
+| GPU Operator | `gpuoperator` | `operator.resources` |
+| Network Operator (generic GB300) | `networkoperator` | `operator.resources` |
+| Maintenance Operator (Network Operator subchart, generic GB300) | `networkoperator` | `maintenance-operator-chart.operator.resources` |
+| Nodewright manager | `nodewright` | `controllerManager.manager.resources` |
+
+The Network Operator limit is sized for large clusters only in the generic
+GB300 recipe. Other recipes keep a lower limit (2Gi on OKE, the chart default
+elsewhere), so raise `limits.memory` together with the request there: a
+request above its limit is rejected.
+
+The generic GB300 recipe also sizes the NIC configuration daemon, a
+per-node DaemonSet whose pods each cache every `NicDevice` in the cluster, so
+each pod's memory grows with cluster size. Its resources come from the
+`networkoperator` values at `nicConfigurationOperator.configurationDaemon.resources`
+(256Mi request, 2Gi limit by default), which the recipe's `NicClusterPolicy`
+manifest reads. Set this path at bundle time:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.limits.memory=4Gi \
+  --output ./bundles
+```
+
+The `helm`, `helmfile`, `argocd`, and `argocd-helm` deployers render this
+manifest when the bundle is generated, so the install-time overrides below do
+not reach it. A `flux` bundle ships the manifest as a template, and Flux renders
+it at install time from the values in `network-operator-post/helmrelease.yaml`.
+Edit `spec.values.network-operator.nicConfigurationOperator.configurationDaemon.resources`
+there to resize the daemon without regenerating the bundle.
+
+At bundle time, scope each resources path in the table with its override key:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --set gpuoperator:operator.resources.requests.memory=4Gi \
+  --set networkoperator:operator.resources.requests.memory=8Gi \
+  --set networkoperator:maintenance-operator-chart.operator.resources.requests.memory=8Gi \
+  --set nodewright:controllerManager.manager.resources.requests.memory=8Gi \
+  --output ./bundles
+```
+
+An `argocd-helm` bundle also takes these at install time, without
+regenerating. Each child Application merges the root chart's
+`.Values.<override key>` over the bundle's static values. Use a `.` after the
+override key instead of a `:`. Bundles generated before these limits were
+raised still carry the old, lower limits, so set each limit with its request:
+
+```bash
+helm install aicr-bundle . \
+  --set gpuoperator.operator.resources.requests.memory=4Gi \
+  --set gpuoperator.operator.resources.limits.memory=8Gi \
+  --set networkoperator.operator.resources.requests.memory=8Gi \
+  --set networkoperator.operator.resources.limits.memory=12Gi \
+  --set networkoperator.maintenance-operator-chart.operator.resources.requests.memory=8Gi \
+  --set networkoperator.maintenance-operator-chart.operator.resources.limits.memory=12Gi \
+  --set nodewright.controllerManager.manager.resources.requests.memory=8Gi \
+  --set nodewright.controllerManager.manager.resources.limits.memory=12Gi
+```
+
+When the root Application installs the chart, put these keys in its Helm
+values. Do not edit the child Applications: the root Application's self-heal
+reverts them.
+
+These overrides only change requests and limits. Free memory on the system
+nodes still decides whether the controllers fit.
 
 ## Enable or disable components
 
@@ -445,8 +524,13 @@ toggling the component).
 
 A component whose presence a configuration profile owns cannot be removed
 at all — `enabled=false` on it is rejected regardless of the rule above.
-NVSentinel is in that position on the AKS and GKE-COS families, whose
-`gpuStack` profiles name it; see
+NVSentinel is in that position on the AKS family, whose `gpuStack`
+profile names it. On the GKE-COS and OKE families the `gpuStack` profile
+references NVSentinel as optional, so `--set nv-sentinel:enabled=false`
+removes it, for example when NVSentinel is deployed outside AICR. The
+profile's `labeler.assumeDriverInstalled` value still applies whenever
+the bundle includes NVSentinel. A recipe generated by an earlier release
+still locks presence; regenerate it with `aicr recipe` first. See
 [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms).
 
 The same rule applies to `--set-json`, `--set-file`, `--dynamic`, and
@@ -568,7 +652,8 @@ same `key=value` pair you passed to `--dra-eviction-node-label` — the examples
 below use the documented default:
 
 ```bash
-kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
+NODE="my-gpu-node"  # replace with the GPU node to repair
+kubectl label node "${NODE}" nvidia.com/dra-kubelet-plugin=true
 kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 ```
 
@@ -718,12 +803,16 @@ hook-injected resource (name and kind from the new
 `templates/` if you still have that bundle):
 
 ```bash
-# Include -n <ns> for namespaced kinds (same <ns> as release-namespace below).
-# Omit -n for cluster-scoped kinds (CRD, ClusterRole, NicClusterPolicy, …).
-kubectl label -n <ns> <kind>/<name> app.kubernetes.io/managed-by=Helm --overwrite
-kubectl annotate -n <ns> <kind>/<name> \
-  meta.helm.sh/release-name=<component>-post \
-  meta.helm.sh/release-namespace=<ns> --overwrite
+COMPONENT="my-component"  # replace with the component that owns the -post chart
+NAMESPACE="my-namespace"  # replace with the component's release namespace
+KIND="configmap"          # replace with the resource kind
+NAME="my-resource"        # replace with the resource name
+# Omit -n "${NAMESPACE}" from both commands for cluster-scoped kinds (CRD,
+# ClusterRole, NicClusterPolicy, …); release-namespace keeps it either way.
+kubectl label -n "${NAMESPACE}" "${KIND}/${NAME}" app.kubernetes.io/managed-by=Helm --overwrite
+kubectl annotate -n "${NAMESPACE}" "${KIND}/${NAME}" \
+  meta.helm.sh/release-name="${COMPONENT}-post" \
+  meta.helm.sh/release-namespace="${NAMESPACE}" --overwrite
 ```
 
 Prefer `kubectl delete` only for kinds where cascade is acceptable (for example

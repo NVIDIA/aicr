@@ -246,8 +246,11 @@ reported as no drift.
 // K8s.aks-gpu-pools.gpu-driver reading (a snapshot without it fails
 // closed). On OKE, OKEAddonsPath plays the same role from an
 // `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`
-// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading. On GKE,
-// GKEGPUPoolsPath plays the same role from a
+// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading. The same
+// dump supplies K8s.oke-addons.nvidia-network-operator, which OKE recipes
+// that deploy network-operator require to be absent, so resolving them from
+// a snapshot without it fails closed. On GKE, GKEGPUPoolsPath plays the same
+// role from a
 // `gcloud container node-pools list --cluster <cluster> --format=json`
 // dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
 // It's required only when resolving the GKE `bundle-installer` gpuStack
@@ -474,6 +477,21 @@ are created. The other facade options cover the production-controller knobs:
   `WithValidationImageTagOverride` — resolve validator images against a
   commit SHA, a mirror registry prefix, or a fixed tag. Empty values leave
   the default resolution in place.
+- `WithValidatorServiceAccountName(name)` runs the validator Jobs as an
+  existing ServiceAccount in the validation namespace instead of a per-run
+  ServiceAccount bound to `cluster-admin`, so the caller needs no permission
+  to grant `cluster-admin`. The run creates and deletes no ServiceAccount or
+  ClusterRoleBinding and does not apply the namespace. It verifies the
+  ServiceAccount's `cluster-admin` grant with a `SubjectAccessReview` before
+  deploying anything and fails with `ErrCodeNotFound` when it is missing,
+  `ErrCodeInvalidRequest` when it disables token automount,
+  `ErrCodeUnauthorized` when it is not bound or the caller may not read it or
+  create the review, and `ErrCodeCanceled`, `ErrCodeTimeout`,
+  `ErrCodeUnavailable` or `ErrCodeInternal` when the check cannot complete.
+  Unrelated
+  to `ValidateSettings().ServiceAccountName`, which names the snapshot agent's
+  ServiceAccount. Not in v1.0.0 or earlier. See
+  [Running under a pre-provisioned ServiceAccount](../user/validation.md#running-under-a-pre-provisioned-serviceaccount).
 
 `PreflightSkipChecks(ctx, recipe, opts...)` runs only the skip-list guard
 from `ValidateState`, with no Kubernetes call, so a caller that does its own
@@ -481,6 +499,14 @@ cluster work first can reject an unusable skip list before creating anything.
 The CLI does this before deploying a snapshot agent. Pass the same options you
 will pass to `ValidateState`; it returns nil at once when no skip list is set.
 `PreflightSkipChecks` is not in v0.22.0 or earlier.
+
+`PreflightValidatorServiceAccount(ctx, opts...)` runs only the
+`WithValidatorServiceAccountName` check from `ValidateState`: a Get and a
+`SubjectAccessReview`, creating nothing. The CLI runs it before deploying a
+snapshot agent, so a missing or unbound ServiceAccount is reported before any
+object exists. Pass the same options you will pass to `ValidateState`; it
+returns nil without contacting the cluster when no name is set or
+`WithValidationNoCluster(true)` is. Not in v1.0.0 or earlier.
 
 `MergeReports(results)` merges the per-phase CTRF reports from a
 `ValidateState` run into one `*ctrf.Report` (`pkg/validator/ctrf`) stamped
@@ -1229,13 +1255,15 @@ so `ValidateSettings()` carries settings from both `spec.validate.agent` and
 `spec.validate.execution` as a plain value, not an option slice, so you read
 and override individual fields directly — but not every field it carries
 reaches `Client.ValidateState`.
-Ten do, via a matching `WithValidation*` option: namespace, image pull
-secrets, node selector, tolerations, no-cluster, cleanup, phases, skip checks,
-fail-fast, and timeout. `WithValidationSkipChecks` is not in v0.22.0 or
-earlier, so a module pinned there has only nine. Four do not: image, job name, service account name and
-require-GPU have no `WithValidationImage`, `WithValidationJobName`,
-`WithValidationServiceAccountName` or `WithValidationRequireGPU` for
-`ValidateState` to accept them through. They ride on `ValidateSettings()`
+Eleven do, via a matching option: namespace, image pull secrets, node
+selector, tolerations, no-cluster, cleanup, phases, skip checks, fail-fast,
+timeout, and the validator service account name
+(`ValidatorServiceAccountName`, through `WithValidatorServiceAccountName`).
+`WithValidationSkipChecks` is not in v0.22.0 or earlier and
+`WithValidatorServiceAccountName` is not in v1.0.0 or earlier, so a module
+pinned to v1.0.0 has ten and one pinned to v0.22.0 has nine. Four do not: image, job name, service account name and
+require-GPU configure the snapshot agent, and `ValidateState` has no option to
+accept them through. They ride on `ValidateSettings()`
 anyway so a caller building its own validator agent config (the CLI's
 `parseValidateAgentConfig`, in particular) can read them with its own
 flag-over-config precedence instead of reaching for `Unwrap()` — see the
@@ -1256,6 +1284,11 @@ results, err := client.ValidateState(ctx, rec, snap,
     aicr.WithValidationTolerations(opts.Tolerations),
     aicr.WithValidationNoCluster(opts.NoCluster),
     aicr.WithValidationCleanup(opts.Cleanup),
+    aicr.WithValidatorServiceAccountName(opts.ValidatorServiceAccountName),
+    // Phases, SkipChecks, FailFast and Timeout map the same way, through
+    // WithValidationPhases, WithValidationSkipChecks, WithValidationFailFast
+    // and WithValidationTimeout; FailFast and Timeout are pointers, so pass
+    // them only when non-nil.
 )
 ```
 
@@ -1280,7 +1313,7 @@ The rest of the section has other homes, and knowing which saves a search:
 
 | Field | Home |
 |---|---|
-| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState` — `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. The CLI reads them directly to build the validator's own agent Job. |
+| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState`: they configure the snapshot-capture agent, not the validator Jobs, so a `ValidateState` option here would have nothing to translate into. The CLI reads them directly to build the agent Job. `.validatorServiceAccountName` is not in this row; it reaches `ValidateState` through `WithValidatorServiceAccountName`. |
 | `spec.validate.input.recipe`, `.snapshot`, `spec.validate.execution.failOnError` | `ValidateInputOptions()`, which targets the CALLER rather than `ValidateState` — see below. |
 | `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
 | `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which the caller reads to choose between `RenderCNCFEvidence` and `CollectCNCFEvidence`. See below. |
@@ -1352,7 +1385,7 @@ rest of `EvidenceOptions` stays yours, and the reasons differ:
 | Field | Why it is not derived |
 |---|---|
 | `Commit` | Names the running binary, not the document. It selects the validator catalog the bundle's BOM is built against. Set it after deriving. |
-| `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file; resolve it at sign time. |
+| `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file, and the signing mode it selects (a KMS `SigningKey`, private Sigstore endpoints) is set per invocation; resolve it at sign time. |
 | `NoSign`, `Full`, `AllowMutableValidatorTags` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. All three weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads, `AllowMutableValidatorTags` lets the predicate name validator images that can later resolve to different code — and a checked-in file that can silently disable signing or provenance is a supply-chain downgrade no reviewer would see in a diff. |
 
 **Why `plainHTTP` and `insecureTLS` project anyway.** They weaken a run too, so
@@ -1626,6 +1659,15 @@ An invalid bundle is a verdict, not an error — branch on `Exit`. The
 means "we could not check this", which is different from "we checked it
 and it failed".
 
+Evidence signed with a KMS key (`OIDCResolve.SigningKey` on
+`EvidenceOptions` or `EvidencePublishOptions`) verifies with `Key`, a KMS
+URI or a PEM public-key path; `result.Signer` then reports issuer `key` and
+the key's `sha256:` fingerprint. `Key` is the signer pin, so setting it with
+`ExpectedIssuer` or `ExpectedIdentityRegexp` is an error, as is
+`IgnoreTLog` without `Key`. `TrustRoot` adds a private Sigstore root for
+evidence signed against a private Fulcio/Rekor. A bad key or trust root
+returns an error, not a verdict.
+
 Pair it with `RecipeDigest` to detect evidence that has gone stale
 against the recipe on your branch:
 
@@ -1713,7 +1755,12 @@ aicr.ValidateIdentityPattern(
 
 The producing half of the supply chain is on the facade too.
 `EmitRecipeEvidence` builds a bundle from a completed validation run;
-`PublishEvidence` signs and pushes one that already exists on disk:
+`EmitRecipeEvidenceWithResult` does the same and also returns an
+`EvidenceEmission` carrying the pushed reference and digest (the `bundle.oci`
+and `bundle.digest` values in `pointer.yaml`; both empty without `Push`), so a
+caller can hand on what was published without reading `pointer.yaml` back. It
+is not in v1.0.0 or earlier. `PublishEvidence` signs and pushes a bundle that
+already exists on disk:
 
 ```go
 err := client.PublishEvidence(ctx, aicr.EvidencePublishOptions{

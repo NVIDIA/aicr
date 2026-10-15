@@ -59,7 +59,7 @@ a component the bundler enabled at bundle time is not checked.
 
 - `aicr` CLI installed (see [installation](installation.md)).
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
-- Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run.
+- Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run. To run without that grant, have an administrator provision the ServiceAccount instead; see [Running under a pre-provisioned ServiceAccount](#running-under-a-pre-provisioned-serviceaccount).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
 - **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` additionally re-evaluates `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so the value fails closed. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
 
@@ -500,6 +500,77 @@ it into AICR is a copy: move the file into the repo, add the accelerator/service
 tuple to the compiled `supportedNCCLCombinations` matrix, and drop the
 `nccl-benchmark-runtime-ref` constraint — the benchmark then runs from the
 recipe's plain criteria like any other embedded one.
+
+### Cluster Readiness Engine checks
+
+An opt-in pair of Cluster Readiness Engine (CRE) checks runs against public CRE
+(`nvcre.nvidia.com`, [cluster-readiness-engine](https://github.com/NVIDIA/cluster-readiness-engine)).
+Neither check branches on service or accelerator; which combinations are
+qualified is recorded as data. Shipped overlays keep the TrainJob
+`nccl-all-reduce-bw` path, so nothing below runs unless you ask for it.
+
+Enabling a CRE check takes two steps and needs both. Add the `nvcre` component
+as described in
+[Enabling NVCRE](component-catalog.md#enabling-nvcre) — a bare component
+reference without that section's `valuesFile` and Trainer dependency hits the
+failures documented there — and then declare the check with a same-named
+constraint:
+
+```yaml
+validation:
+  performance:
+    checks:
+      - nccl-cre-all-reduce-bw
+      - cre-training-goodput
+    constraints:
+      - name: nccl-cre-all-reduce-bw
+        value: '>= 300'   # bus bandwidth in GB/s
+      - name: cre-training-goodput
+        value: '>= 0.5'   # ratio between 0 and 1, not a percentage
+```
+
+Both constraints are floors. The checks compare the measured value with `>=`
+and refuse any other operator rather than evaluating it as a floor anyway, so a
+constraint they cannot honor fails before any GPU work starts. Note the goodput
+units: the measurement is a ratio between 0 and 1, so a constraint written as a
+percentage (`>= 50`) can never be satisfied.
+
+| Check | What it measures | Qualified combinations |
+|---|---|---|
+| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100` |
+| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | none at present |
+
+The catalog entry each check drives, and the node footprint it runs on, come
+from the qualification record rather than the check: for
+`nccl-cre-all-reduce-bw` on `eks` x `h100`, `communication/nccl-all-reduce` on
+two nodes. A combination with no entry skips, because it has no calibrated
+threshold to judge against. `cre-training-goodput` skips everywhere today — the
+`training/nemotron5-8b` entry it drives does not run on the CRE version the
+registry pins, so declaring the check reports a skip rather than a verdict.
+
+**Reclaiming an interrupted run.** Both checks delete their `Certification` and
+confirm its `TrainJob`s and workload pods are gone, but a validator pod killed
+mid-run (eviction, OOM kill, its Job deleted under it) never gets to. Its
+workloads keep holding the GPU nodes, and because `Certification` names carry a
+random suffix, nothing in the name identifies them. Every `Certification` AICR
+submits therefore carries
+`app.kubernetes.io/managed-by: aicr-validator`, and the next CRE check in that
+namespace tears down any it finds older than 45 minutes — longer than a live run
+can take, so a concurrent validator's `Certification` is never swept. To clean
+up by hand instead:
+
+```bash
+NAMESPACE="nvcre"               # replace with the namespace you validated
+CERTIFICATION="aicr-cre-nccl-1a2b3c4d"  # replace with a name from the listing
+
+kubectl get certifications.nvcre.nvidia.com -A \
+  -l app.kubernetes.io/managed-by=aicr-validator
+kubectl delete certifications.nvcre.nvidia.com "${CERTIFICATION}" -n "${NAMESPACE}"
+
+# Deleting the Certification is not sufficient on its own: CRE's controller
+# drops its finalizer without waiting for the workloads.
+kubectl get trainjobs,pods -n "${NAMESPACE}" -l nvcre.nvidia.com/job
+```
 
 ## Inference performance validation
 
@@ -960,11 +1031,12 @@ the two flag families produce independent outputs and may run from a
 single `aicr validate` invocation.
 
 ```bash
+OWNER="my-github-org"  # replace with your GHCR owner
 aicr validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/<owner>/aicr-evidence
+  --push "ghcr.io/${OWNER}/aicr-evidence"
 ```
 
 The `--push` tag is just a human-readable label — the `sha256:` digest is
@@ -974,6 +1046,22 @@ per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g.
 `ghcr.io/<owner>/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so
 distinct attestations never collide on a shared tag. Pass an explicit tag to
 override.
+
+When the run's workspace does not outlive it, for example in a Kubernetes Job
+or an ephemeral CI step, add `--image-refs <file>` to write the pushed
+bundle's digest (the `bundle.digest` value in `pointer.yaml`) to a file you
+choose, such as the container's termination-message path
+(`/dev/termination-log` by default). The file gets the same `sha256:…` line
+`aicr bundle --image-refs` writes. Its path, and that it can be written, are
+checked before validation starts. The kubelet bind-mounts the
+termination-message file, so aicr writes it in place rather than renaming a
+new file over it. The digest is written whenever the push succeeds, including a
+run whose checks fail, since failed runs still publish their evidence. A run
+that stops before the push leaves the file untouched, and an in-place write that
+fails partway can leave it empty or partial. So start each run with an absent or
+empty file and treat a complete `sha256:` digest in it as this run's pushed
+bundle; the exit status says whether the checks passed, not whether the file
+was written.
 
 After the command finishes:
 
@@ -1011,7 +1099,10 @@ same verifier runs against the committed pointer in the CI gate, so exit 0
 locally means the gate will pass:
 
 ```bash
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the copyTo recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the copyTo signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the copyTo file name, without .yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 ```
 
 **Flag reference:** the evidence flags (`--emit-attestation`, `--full`,
@@ -1042,7 +1133,10 @@ this precedence chain: `--identity-token` (or `COSIGN_IDENTITY_TOKEN`)
 → ambient GitHub Actions OIDC (`ACTIONS_ID_TOKEN_REQUEST_URL`
 present) → `--oidc-device-flow` (or `AICR_OIDC_DEVICE_FLOW=true`) →
 interactive browser. CI pipelines typically rely on the ambient
-GitHub Actions path; local workstations get the browser flow.
+GitHub Actions path; local workstations get the browser flow. With
+`--signing-key <kms-uri>` no token is resolved: the bundle is signed
+with the KMS key instead, for private use. See
+[Key-signed evidence](artifact-verification.md#key-signed-evidence).
 
 **Local-only mode (no registry access).** Omitting `--push` still
 produces a complete bundle on disk — the verifier records the
@@ -1095,6 +1189,157 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --no-cluster
 
 Useful for CI pipelines that validate a recipe against a captured snapshot
 without needing cluster access.
+
+## Running under a pre-provisioned ServiceAccount
+
+By default every live run creates a ServiceAccount for its validator Jobs, binds
+it to `cluster-admin` through a per-run `aicr-validator-<run-id>`
+ClusterRoleBinding, and deletes both at cleanup. That requires an identity
+allowed to grant `cluster-admin`, which automation such as a CI runner or a
+scheduled in-cluster Job often should not hold. It also leaves a privileged
+binding behind if the process dies before cleanup, and gives admission or audit
+policy keyed on a username no stable name to target.
+
+`--validator-service-account-name` (or
+`spec.validate.agent.validatorServiceAccountName` in
+[`--config`](cli-config.md)) moves that grant to an administrator. The
+validator Jobs run as the named ServiceAccount, and the run creates and deletes
+no ServiceAccount or ClusterRoleBinding and does not apply the namespace.
+Before it creates anything, the run reads the ServiceAccount and asks the API
+server, through a SubjectAccessReview, whether it may perform any verb on any
+resource cluster-wide. It stops with exit `3` when the ServiceAccount does not
+exist, with exit `2` when the ServiceAccount sets
+`automountServiceAccountToken: false` (validator pods need its token), and with
+exit `4` when it is not bound to `cluster-admin` or the caller may not ask. It
+never falls back to per-run RBAC, because that fallback would create the
+`cluster-admin` binding the flag exists to avoid.
+
+An administrator provisions the namespace, the ServiceAccount, and its binding
+once:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aicr-validation
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aicr-validator
+  namespace: aicr-validation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-validator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: aicr-validator
+    namespace: aicr-validation
+```
+
+The identity running `aicr validate` then needs the following, shown here bound
+to a `ci-runner` ServiceAccount in a `ci` namespace. Everything is scoped to the
+validation namespace except `subjectaccessreviews`, a read-only authorization
+query that persists nothing:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aicr-validate-caller
+  namespace: aicr-validation
+rules:
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create, get, update, patch, delete]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, watch, patch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aicr-validate-caller
+  namespace: aicr-validation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aicr-validate-caller
+subjects:
+  - kind: ServiceAccount
+    name: ci-runner
+    namespace: ci
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aicr-validate-caller
+rules:
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-validate-caller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aicr-validate-caller
+subjects:
+  - kind: ServiceAccount
+    name: ci-runner
+    namespace: ci
+```
+
+Then validate against a captured snapshot:
+
+```bash
+aicr validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --validator-service-account-name aicr-validator \
+  --output ctrf.json
+```
+
+- `--namespace` must name the ServiceAccount's namespace. The default is
+  `aicr-validation`.
+- The flag governs only the validator Jobs. Without `--snapshot`,
+  `aicr validate` first deploys the snapshot-capture agent, which creates or
+  labels the namespace and creates its own run-scoped RBAC unless `--service-account-name` names
+  an existing agent ServiceAccount. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity).
+  Either way the agent needs permissions beyond the Role above, so a caller
+  that holds only that Role supplies `--snapshot`. A missing or unbound
+  validator ServiceAccount is reported before the agent is deployed.
+- `--no-cleanup` keeps the validator Jobs and ConfigMaps. The validator Jobs
+  created no binding to leave behind; a live-capture agent's run-scoped RBAC
+  is kept as well.
+- Before deploying a validator that is placed next to another component's
+  pods, the run lists pods in that component's namespace (for example
+  `monitoring`) to warn when the placement selector matches nothing. Without
+  `list pods` there, the run logs a lookup-failure warning and continues.
+- This changes who grants the validators' access, and when. It does not make
+  the caller less powerful: an identity that can create Jobs in the validation
+  namespace can run any image as that ServiceAccount, and one that can write
+  its ConfigMaps can change what the validators read. Keep the namespace
+  dedicated to validation, and let only the intended caller create workloads
+  or write ConfigMaps in it.
 
 ## CI/CD integration
 
@@ -1246,15 +1491,18 @@ Each performance check has a Job-level `activeDeadlineSeconds` set by the catalo
 kubectl -n aicr-validation get jobs | grep -E 'aicr-inference-perf-|aicr-aiperf-'
 
 # tail each by full job name (label selectors require exact match)
-kubectl -n aicr-validation logs -l job-name=aicr-inference-perf-<hash> --tail=200
-kubectl -n aicr-validation logs -l job-name=aicr-aiperf-<run-id-hash>  --tail=200
+ORCHESTRATOR_JOB="aicr-inference-perf-5d1e8a42"  # replace with the aicr-inference-perf- Job listed above
+AIPERF_JOB="aicr-aiperf-3f9a1c2b"                # replace with the aicr-aiperf- Job listed above
+kubectl -n aicr-validation logs -l "job-name=${ORCHESTRATOR_JOB}" --tail=200
+kubectl -n aicr-validation logs -l "job-name=${AIPERF_JOB}" --tail=200
 
 # the Dynamo workload (DynamoGraphDeployment, Frontend, worker pods)
 # lives in a separate per-run namespace:
 kubectl get ns | grep aicr-inference-perf-
+WORKLOAD_NAMESPACE="aicr-inference-perf-3f9a1c2b"  # replace with the namespace listed above
 # (resourceclaimtemplates is populated in DRA wiring mode; empty in
 # device-plugin mode — both are normal)
-kubectl -n aicr-inference-perf-<suffix> get dynamographdeployments,pods,svc,resourceclaimtemplates
+kubectl -n "${WORKLOAD_NAMESPACE}" get dynamographdeployments,pods,svc,resourceclaimtemplates
 ```
 
 Common causes: image pull throttling, vLLM model load slowness, and every

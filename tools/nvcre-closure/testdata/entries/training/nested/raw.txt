@@ -1,0 +1,2 @@
+image: example.invalid/raw-noted:v6
+{{ lib "deps/absent.yaml" . }}

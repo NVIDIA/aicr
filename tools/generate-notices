@@ -263,6 +263,12 @@ MISSING_LIST="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-missing.XXXXXX")"
 LIST_ERR="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-listerr.XXXXXX")"
 MODMAP_RAW="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-modmap.XXXXXX")"
 MODMAP="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-modmap-u.XXXXXX")"
+# go-licenses' CSV columns plus LicensePath, the license file it classified and
+# chose. tools/normalize-go-license-urls needs that path to cite the same file
+# when it derives a URL go-licenses could not discover.
+CSV_TEMPLATE="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-tpl.XXXXXX")"
+printf '%s\n%s' '{{range .}}{{.Name}},{{.LicenseURL}},{{.LicenseName}},{{.LicensePath}}' '{{end}}' \
+    > "${CSV_TEMPLATE}"
 # Staged beside ${OUTPUT} rather than under TMPDIR so publishing is a rename
 # within one filesystem. The composed file is only moved into place once it
 # passes the fence-balance check below; staging under TMPDIR would make that
@@ -271,7 +277,7 @@ MODMAP="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-modmap-u.XXXXXX")"
 OUTPUT_TMP="$(mktemp "$(dirname "${OUTPUT}")/.aicr-notices-out.XXXXXX")"
 trap 'rm -rf "${SAVE_ROOT}"; rm -f "${COMBINED_CSV}" "${INDEX_FILE}" \
     "${LINKED_RAW}" "${INDEX_KEYS}" "${LINKED_LIST}" "${MISSING_LIST}" \
-    "${LIST_ERR}" "${MODMAP_RAW}" "${MODMAP}" "${OUTPUT_TMP}"' EXIT
+    "${LIST_ERR}" "${MODMAP_RAW}" "${MODMAP}" "${CSV_TEMPLATE}" "${OUTPUT_TMP}"' EXIT
 
 mkdir -p "${LICENSES_DIR}"
 
@@ -348,8 +354,9 @@ for platform in "${PLATFORMS[@]}"; do
     # are preserved (union). 'cp -R src/.' copies directory contents in place.
     cp -R "${platform_save}/." "${LICENSES_DIR}/"
 
-    GOOS="${goos}" GOARCH="${goarch}" go-licenses csv "${PACKAGES[@]}" \
+    GOOS="${goos}" GOARCH="${goarch}" go-licenses report "${PACKAGES[@]}" \
         --ignore="${ignore}" \
+        --template="${CSV_TEMPLATE}" \
         >> "${COMBINED_CSV}"
 
     # Union the linked-module set per platform, for the same reason the

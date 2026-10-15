@@ -18,21 +18,25 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/metadata"
+	metadatafake "k8s.io/client-go/metadata/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -106,11 +110,13 @@ func (d discovered) ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.AP
 	return nil, nil, d.err
 }
 
-// topologyObject is one ClusterTopology carrying exactly the labels and
-// annotations given.
-func topologyObject(namespace, name string, objLabels, annotations map[string]string) *unstructured.Unstructured {
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(topologyGVK)
+// partialObject returns the metadata of a gvk object carrying exactly
+// objLabels and annotations.
+func partialObject(gvk schema.GroupVersionKind, namespace, name string,
+	objLabels, annotations map[string]string) *metav1.PartialObjectMetadata {
+
+	obj := &metav1.PartialObjectMetadata{}
+	obj.SetGroupVersionKind(gvk)
 	obj.SetNamespace(namespace)
 	obj.SetName(name)
 	if len(objLabels) > 0 {
@@ -123,38 +129,39 @@ func topologyObject(namespace, name string, objLabels, annotations map[string]st
 	return obj
 }
 
-func policyObject(name string, objLabels, annotations map[string]string) *unstructured.Unstructured {
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(policyGVK)
-	obj.SetName(name)
-	if len(objLabels) > 0 {
-		obj.SetLabels(objLabels)
-	}
-	if len(annotations) > 0 {
-		obj.SetAnnotations(annotations)
-	}
-
-	return obj
+func topologyObject(namespace, name string, objLabels, annotations map[string]string) *metav1.PartialObjectMetadata {
+	return partialObject(topologyGVK, namespace, name, objLabels, annotations)
 }
 
-func scanClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
-	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{
-			topologyGVR: "ClusterTopologyList",
-			policyGVR:   "ClusterPolicyList",
-		}, objects...)
+func policyObject(name string, objLabels, annotations map[string]string) *metav1.PartialObjectMetadata {
+	return partialObject(policyGVK, "", name, objLabels, annotations)
+}
+
+func scanClient(objects ...runtime.Object) *metadatafake.FakeMetadataClient {
+	scheme := metadatafake.NewTestScheme()
+	metav1.AddMetaToScheme(scheme)
+
+	return metadatafake.NewSimpleMetadataClient(scheme, objects...)
+}
+
+// metadataPage returns a reactor response holding items and continueToken. The
+// fake metadata client accepts only a metav1.List from a reactor, not a
+// PartialObjectMetadataList.
+func metadataPage(continueToken string, items ...*metav1.PartialObjectMetadata) *metav1.List {
+	page := &metav1.List{ListMeta: metav1.ListMeta{Continue: continueToken}}
+	for _, item := range items {
+		page.Items = append(page.Items, runtime.RawExtension{Object: item})
+	}
+
+	return page
 }
 
 func topologyKind() ResourceKind {
 	return ResourceKind{Group: "grove.io", Kind: "ClusterTopology", Components: []string{"grove"}}
 }
 
-// TestScanAtRiskOwnership is the ownership rule, one object per case.
-//
-// The Helm pair is the mutation this table exists for: the managed-by label
-// alone is not ownership. Any controller, any hand-written manifest and any
-// chart rendered by something other than Helm can carry it, while
-// meta.helm.sh/release-name is written only by Helm's own install path.
+// TestScanAtRiskOwnership checks each marker owned recognizes, and that neither
+// the managed-by label nor a Helm annotation is ownership on its own.
 func TestScanAtRiskOwnership(t *testing.T) {
 	t.Parallel()
 
@@ -190,6 +197,59 @@ func TestScanAtRiskOwnership(t *testing.T) {
 			name:        "an empty release name is not a release",
 			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
 			annotations: map[string]string{helmReleaseNameAnnotation: ""},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "a helm hook is owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "post-install,post-upgrade"},
+			wantAtRisk:  false,
+		},
+		{
+			name:        "a pre-upgrade hook is owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "pre-upgrade"},
+			wantAtRisk:  false,
+		},
+		{
+			name:        "hook phases are trimmed and case-insensitive",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "pre-install, Post-Upgrade "},
+			wantAtRisk:  false,
+		},
+		{
+			name:        "a post-install hook is not owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "post-install"},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "a pre-delete hook is not owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "pre-delete"},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "a test hook is not owned",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "test"},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "hook annotation alone is not ownership",
+			annotations: map[string]string{helmHookAnnotation: "post-install,post-upgrade"},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "a hook managed by something other than Helm",
+			objLabels:   map[string]string{labels.ManagedBy: "kustomize"},
+			annotations: map[string]string{helmHookAnnotation: "post-upgrade"},
+			wantAtRisk:  true,
+		},
+		{
+			name:        "an empty hook annotation is not a hook",
+			objLabels:   map[string]string{labels.ManagedBy: "Helm"},
+			annotations: map[string]string{helmHookAnnotation: "  "},
 			wantAtRisk:  true,
 		},
 		{
@@ -536,11 +596,10 @@ func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 	t.Run("keeps the findings from every page", func(t *testing.T) {
 		t.Parallel()
 
-		pages := []*unstructured.UnstructuredList{
-			{Items: []unstructured.Unstructured{*topologyObject("tenant-a", "first-page", nil, nil)}},
-			{Items: []unstructured.Unstructured{*topologyObject("tenant-b", "second-page", nil, nil)}},
+		pages := []*metav1.List{
+			metadataPage("page-2", topologyObject("tenant-a", "first-page", nil, nil)),
+			metadataPage("", topologyObject("tenant-b", "second-page", nil, nil)),
 		}
-		pages[0].SetContinue("page-2")
 
 		listed := 0
 		client := scanClient()
@@ -579,10 +638,7 @@ func TestScanAtRiskPagesAndRefusesARepeatedToken(t *testing.T) {
 		client := scanClient()
 		client.PrependReactor("list", "clustertopologies",
 			func(k8stesting.Action) (bool, runtime.Object, error) {
-				page := &unstructured.UnstructuredList{}
-				page.SetContinue("same-token-forever")
-
-				return true, page, nil
+				return true, metadataPage("same-token-forever"), nil
 			})
 
 		_, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
@@ -751,7 +807,7 @@ func TestScanAtRiskWithNoKindsContactsNothing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var noClient dynamic.Interface
+			var noClient metadata.Interface
 			got, err := scanAtRisk(t.Context(), noClient, nil, nil, tt.kinds)
 			if err != nil {
 				t.Fatalf("scanAtRisk: %v", err)
@@ -814,12 +870,7 @@ func TestScanAtRiskSkipsAnUnnamedObject(t *testing.T) {
 	client := scanClient()
 	client.PrependReactor("list", "clustertopologies",
 		func(k8stesting.Action) (bool, runtime.Object, error) {
-			nameless := &unstructured.Unstructured{}
-			nameless.SetGroupVersionKind(topologyGVK)
-			nameless.SetNamespace("tenant-a")
-			page := &unstructured.UnstructuredList{Items: []unstructured.Unstructured{*nameless}}
-
-			return true, page, nil
+			return true, metadataPage("", topologyObject("tenant-a", "", nil, nil)), nil
 		})
 
 	got, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()})
@@ -834,24 +885,388 @@ func TestScanAtRiskSkipsAnUnnamedObject(t *testing.T) {
 	}
 }
 
-// TestScanAtRiskListsEveryNamespace pins the cluster-wide read. A scan scoped
-// to one namespace would miss exactly the tenant objects this warning exists
-// for.
-func TestScanAtRiskListsEveryNamespace(t *testing.T) {
+// metadataListJSON is a one-item PartialObjectMetadataList response body.
+const metadataListJSON = `{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1","items":[` +
+	`{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",` +
+	`"metadata":{"name":"topology-1","namespace":"tenant-a"}}]}`
+
+// metadataClient returns a real metadata client for srv.
+func metadataClient(t *testing.T, srv *httptest.Server) metadata.Interface {
+	t.Helper()
+
+	client, err := k8sclient.NewMetadataClientForConfig(&rest.Config{Host: srv.URL})
+	if err != nil {
+		t.Fatalf("NewMetadataClientForConfig: %v", err)
+	}
+
+	return client
+}
+
+// TestScanAtRiskRequestsMetadataLists checks that a real metadata client lists
+// each kind cluster-wide as metadata.
+func TestScanAtRiskRequestsMetadataLists(t *testing.T) {
 	t.Parallel()
 
-	client := scanClient(topologyObject("tenant-a", "a", nil, nil))
-	var seen []string
-	client.PrependReactor("list", "clustertopologies", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		seen = append(seen, action.GetNamespace())
+	tests := []struct {
+		name         string
+		status       int
+		body         string
+		wantFindings []AtRiskObject
+		wantErr      bool
+	}{
+		{
+			name:   "a metadata list is scanned",
+			status: http.StatusOK,
+			body:   metadataListJSON,
+			wantFindings: []AtRiskObject{{Group: "grove.io", Kind: "ClusterTopology", Components: []string{"grove"},
+				Namespace: "tenant-a", Name: "topology-1"}},
+		},
+		{
+			name:   "a 406 fails the scan",
+			status: http.StatusNotAcceptable,
+			body: `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotAcceptable","code":406,` +
+				`"message":"only the following media types are accepted: application/json"}`,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-		return false, nil, nil
-	})
+			type request struct {
+				url    *url.URL
+				accept string
+			}
+			requests := make(chan request, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests <- request{url: r.URL, accept: r.Header.Get("Accept")}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(srv.Close)
 
-	if _, err := scanAtRisk(t.Context(), client, scanMapper(), discovered{}, []ResourceKind{topologyKind()}); err != nil {
+			got, err := scanAtRisk(t.Context(), metadataClient(t, srv), scanMapper(), discovered{},
+				[]ResourceKind{topologyKind()})
+			select {
+			case req := <-requests:
+				if want := "/apis/grove.io/v1alpha1/clustertopologies"; req.url.Path != want {
+					t.Errorf("listed %q, want the cluster-wide %q", req.url.Path, want)
+				}
+				if !strings.Contains(req.accept, "as=PartialObjectMetadataList") {
+					t.Errorf("Accept = %q, want a PartialObjectMetadataList", req.accept)
+				}
+			default:
+				t.Fatalf("scanAtRisk sent no List, result %#v, error %v", got, err)
+			}
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("scanAtRisk: %v", err)
+			}
+			if !reflect.DeepEqual(got.Findings, tt.wantFindings) {
+				t.Errorf("Findings = %#v, want %#v", got.Findings, tt.wantFindings)
+			}
+		})
+	}
+}
+
+func TestScanAtRiskRetriesADroppedConnection(t *testing.T) {
+	t.Parallel()
+
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			conn, _, err := http.NewResponseController(w).Hijack()
+			if err != nil {
+				t.Errorf("Hijack: %v", err)
+				return
+			}
+			_ = conn.Close()
+
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(metadataListJSON))
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := scanAtRisk(t.Context(), metadataClient(t, srv), scanMapper(), discovered{}, []ResourceKind{topologyKind()})
+	if err != nil {
 		t.Fatalf("scanAtRisk: %v", err)
 	}
-	if !reflect.DeepEqual(seen, []string{metav1.NamespaceAll}) {
-		t.Errorf("listed namespaces = %#v, want one cluster-wide List", seen)
+	if n := requests.Load(); n != 2 {
+		t.Errorf("requests = %d, want the dropped List and its retry", n)
 	}
+	want := []AtRiskObject{{Group: "grove.io", Kind: "ClusterTopology", Components: []string{"grove"},
+		Namespace: "tenant-a", Name: "topology-1"}}
+	if !reflect.DeepEqual(got.Findings, want) {
+		t.Errorf("Findings = %#v, want %#v", got.Findings, want)
+	}
+}
+
+// slowPages serves pages of one object each, answering each after delay or
+// when the client gives up.
+func slowPages(t *testing.T, pages int, delay time.Duration) *httptest.Server {
+	t.Helper()
+
+	var served atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := int(served.Add(1))
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-timer.C:
+		}
+		next := ""
+		if n < pages {
+			next = "page-" + strconv.Itoa(n)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"continue":%q},"items":[{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"name":"topology-%d","namespace":"tenant-a"}}]}`, next, n)
+	}))
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
+func TestScanKindBoundsEachPage(t *testing.T) {
+	t.Parallel()
+
+	const pageTimeout = 500 * time.Millisecond
+
+	t.Run("a scan longer than one page's budget finishes", func(t *testing.T) {
+		t.Parallel()
+
+		client := metadataClient(t, slowPages(t, 4, 200*time.Millisecond))
+		scanned, findings, err := scanKind(t.Context(), client, topologyKind(), topologyGVR, pageTimeout)
+		if err != nil {
+			t.Fatalf("scanKind: %v", err)
+		}
+		if scanned.Examined != 4 || len(findings) != 4 {
+			t.Errorf("Examined = %d, findings = %d, want all 4 pages read", scanned.Examined, len(findings))
+		}
+	})
+
+	t.Run("a stalled page times out", func(t *testing.T) {
+		t.Parallel()
+
+		// Bounds the test if the page budget never fires. That deadline also
+		// reports ErrCodeTimeout, so the check below tells the two apart.
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		client := metadataClient(t, slowPages(t, 1, time.Hour))
+		_, _, err := scanKind(ctx, client, topologyKind(), topologyGVR, pageTimeout)
+		if ctx.Err() != nil {
+			t.Fatalf("the test's own deadline ended the scan, so the %v page budget never fired", pageTimeout)
+		}
+		errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
+	})
+}
+
+func TestScanAtRiskContinuesAnExpiredList(t *testing.T) {
+	t.Parallel()
+
+	page := func(continueToken, name string) string {
+		return fmt.Sprintf(`{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"continue":%q},"items":[{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"name":%q,"namespace":"tenant-a"}}]}`, continueToken, name)
+	}
+	expired := func(fresh string) string {
+		return fmt.Sprintf(`{"kind":"Status","apiVersion":"v1","metadata":{"continue":%q},"status":"Failure",`+
+			`"message":"The provided continue parameter is too old","reason":"Expired","code":410}`, fresh)
+	}
+
+	tests := []struct {
+		name      string
+		fresh     string
+		wantNames []string
+	}{
+		{"a 410 carrying a fresh token resumes the list", "fresh", []string{"first-page", "second-page"}},
+		{"a 410 carrying no token fails the scan", "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Query().Get("continue") {
+				case "":
+					_, _ = w.Write([]byte(page("stale", "first-page")))
+				case "stale":
+					w.WriteHeader(http.StatusGone)
+					_, _ = w.Write([]byte(expired(tt.fresh)))
+				case "fresh":
+					_, _ = w.Write([]byte(page("", "second-page")))
+				default:
+					t.Errorf("unexpected continue token %q", r.URL.Query().Get("continue"))
+					w.WriteHeader(http.StatusBadRequest)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			got, err := scanAtRisk(t.Context(), metadataClient(t, srv), scanMapper(), discovered{},
+				[]ResourceKind{topologyKind()})
+			if tt.wantNames == nil {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("scanAtRisk: %v", err)
+			}
+			names := make([]string, 0, len(got.Findings))
+			for _, f := range got.Findings {
+				names = append(names, f.Name)
+			}
+			if !reflect.DeepEqual(names, tt.wantNames) {
+				t.Errorf("findings = %v, want %v", names, tt.wantNames)
+			}
+		})
+	}
+}
+
+func TestScanKindBoundsConsecutiveExpiredTokens(t *testing.T) {
+	t.Parallel()
+
+	const limit = defaults.AtRiskExpiredContinueRetries
+	// script builds a request sequence, true for a 410 and false for a page.
+	script := func(runs ...int) []bool {
+		var out []bool
+		for _, run := range runs {
+			out = append(out, false)
+			for range run {
+				out = append(out, true)
+			}
+		}
+
+		return out
+	}
+
+	tests := []struct {
+		name      string
+		responses []bool
+		wantPages int
+		wantErr   bool
+	}{
+		{"a page between runs resets the count", append(script(limit, limit), false), 3, false},
+		{"one 410 past the limit fails the list", script(limit + 1), 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var served atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				i := int(served.Add(1)) - 1
+				want := ""
+				if i > 0 {
+					want = "token-" + strconv.Itoa(i-1)
+				}
+				if got := r.URL.Query().Get("continue"); got != want {
+					t.Errorf("request %d continue = %q, want %q", i, got, want)
+				}
+				if i >= len(tt.responses) {
+					t.Errorf("request %d is past the %d scripted responses", i, len(tt.responses))
+					w.WriteHeader(http.StatusBadRequest)
+
+					return
+				}
+				next := "token-" + strconv.Itoa(i)
+				w.Header().Set("Content-Type", "application/json")
+				if tt.responses[i] {
+					w.WriteHeader(http.StatusGone)
+					_, _ = fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","metadata":{"continue":%q},`+
+						`"status":"Failure","message":"The provided continue parameter is too old",`+
+						`"reason":"Expired","code":410}`, next)
+
+					return
+				}
+				if i == len(tt.responses)-1 {
+					next = ""
+				}
+				_, _ = fmt.Fprintf(w, `{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1",`+
+					`"metadata":{"continue":%q},"items":[{"kind":"PartialObjectMetadata",`+
+					`"apiVersion":"meta.k8s.io/v1","metadata":{"name":"object-%d","namespace":"tenant-a"}}]}`, next, i)
+			}))
+			t.Cleanup(srv.Close)
+
+			scanned, _, err := scanKind(t.Context(), metadataClient(t, srv), topologyKind(), topologyGVR,
+				defaults.AtRiskStepTimeout)
+			if n := int(served.Load()); n != len(tt.responses) {
+				t.Errorf("requests = %d, want %d", n, len(tt.responses))
+			}
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("scanKind: %v", err)
+			}
+			if scanned.Examined != tt.wantPages {
+				t.Errorf("Examined = %d, want %d", scanned.Examined, tt.wantPages)
+			}
+		})
+	}
+}
+
+func TestScanKindBoundsExpiredTokenRetriesByThePage(t *testing.T) {
+	t.Parallel()
+
+	const (
+		pageTimeout = 500 * time.Millisecond
+		delay       = 200 * time.Millisecond
+	)
+	// The first page is prompt. Every later request takes delay, first
+	// AtRiskExpiredContinueRetries 410s and then the page. Each fits
+	// pageTimeout alone, but together they do not.
+	var served atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		i := int(served.Add(1)) - 1
+		if i > 0 {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-r.Context().Done():
+				return
+			case <-timer.C:
+			}
+		}
+		next := "token-" + strconv.Itoa(i)
+		w.Header().Set("Content-Type", "application/json")
+		if i > 0 && i <= defaults.AtRiskExpiredContinueRetries {
+			w.WriteHeader(http.StatusGone)
+			_, _ = fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","metadata":{"continue":%q},`+
+				`"status":"Failure","message":"The provided continue parameter is too old",`+
+				`"reason":"Expired","code":410}`, next)
+
+			return
+		}
+		if i > 0 {
+			next = ""
+		}
+		_, _ = fmt.Fprintf(w, `{"kind":"PartialObjectMetadataList","apiVersion":"meta.k8s.io/v1",`+
+			`"metadata":{"continue":%q},"items":[{"kind":"PartialObjectMetadata",`+
+			`"apiVersion":"meta.k8s.io/v1","metadata":{"name":"object-%d","namespace":"tenant-a"}}]}`, next, i)
+	}))
+	t.Cleanup(srv.Close)
+
+	// Bounds the test if the page budget never fires. That deadline also
+	// reports ErrCodeTimeout, so the check below tells the two apart.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, _, err := scanKind(ctx, metadataClient(t, srv), topologyKind(), topologyGVR, pageTimeout)
+	if ctx.Err() != nil {
+		t.Fatalf("the test's own deadline ended the scan, so the %v page budget never fired", pageTimeout)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
 }

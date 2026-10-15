@@ -122,11 +122,15 @@ and register with Slurm before continuing. Worker shutdown can leave the
 replacement Slurm node `DOWN`; do not return it to service yet.
 
 ```shell
-kubectl delete pod -n slurm <worker-pod>
-kubectl wait --for=condition=Ready -n slurm \
-  pod/<replacement-worker-pod> --timeout=10m
+POD="my-worker-pod"  # replace with the worker pod to replace
+kubectl delete pod -n slurm "${POD}"
 
-scontrol show node <slurm-node>
+REPLACEMENT_POD="my-replacement-worker-pod"  # replace with the pod created in its place
+kubectl wait --for=condition=Ready -n slurm \
+  "pod/${REPLACEMENT_POD}" --timeout=10m
+
+SLURM_NODE="my-slurm-node"  # replace with the replacement's Slurm node name
+scontrol show node "${SLURM_NODE}"
 ```
 
 After every worker is healthy, notify connected users and replace the login

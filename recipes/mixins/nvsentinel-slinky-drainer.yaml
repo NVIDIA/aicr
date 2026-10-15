@@ -1,0 +1,82 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Drains a quarantined Slurm node through Slurm rather than by pod eviction.
+# Opt-in, and only for a platform: slurm recipe that already composes
+# nvsentinel-quarantine or nvsentinel-remediation: no shipped recipe composes
+# it. See docs/user/component-catalog.md#slurm-drain-through-slinky.
+#
+# Without it, node-drainer on a Slurm node waits for the slurmd pod to finish
+# (AllowCompletion), which it never does, so the node stays in draining and
+# remediation never runs; a mode that evicts instead kills running jobs. With
+# it, node-drainer creates a DrainRequest per quarantined node and the
+# slinky-drainer plugin waits for Slurm to drain the node (Slinky drains a
+# cordoned node, and fault-quarantine cordons), then for its jobs to finish,
+# then deletes the slurmd pods and marks the request DrainComplete.
+#
+# Values verified against NVSentinel chart v1.26.0
+# (charts/node-drainer/values.yaml customDrain, pkg/config/config.go):
+#   - with an empty customDrain.nodeSelector every node goes through the
+#     plugin, and node-drainer refuses to start unless userNamespaces and
+#     podDrainPolicies are both empty; the chart defaults userNamespaces to
+#     [{name: "*", mode: AllowCompletion}].
+#   - timeout must be whole seconds: the chart default "30m" fails node-drainer's
+#     config load. Neither side enforces it.
+#   - the DrainRequest CRD comes from slinky-drainer-crds and the template
+#     ConfigMap from slinky-drainer; node-drainer exits at startup without
+#     them, hence the dependencyRefs. The CRD is its own release so the
+#     deployers wait for it before the plugin and node-drainer start.
+#
+# Not with nvsentinel-observe: node-drainer creates DrainRequests even in dry
+# run, so the plugin would act on nodes. CheckNVSentinelSlurmCustomDrainCoherent
+# rejects that, a Slurm recipe running fault-remediation without this mixin, values
+# that break the contract above (a customDrain.nodeSelector scope included),
+# and Slurm control pods (slurmctld, restapi, login, accounting, MariaDB) whose
+# node selectors do not give one label key a different value from slurmd's:
+# the plugin waits for every Ready pod in the Slurm namespace on a drained node
+# to report DRAIN.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-slinky-drainer
+spec:
+  componentRefs:
+    - name: nvsentinel
+      dependencyRefs:
+        - slinky-drainer-crds
+        - slinky-drainer
+      overrides:
+        node-drainer:
+          userNamespaces: []
+          customDrain:
+            enabled: true
+            templateConfigMapName: slinky-drain-template
+            templateMountPath: /etc/drain-template
+            templateFileName: drain-template.yaml
+            namespace: nvsentinel
+            apiGroup: nvsentinel.nvidia.com
+            version: v1alpha1
+            kind: DrainRequest
+            resource: drainrequests
+            statusConditionType: DrainComplete
+            statusConditionStatus: "True"
+            timeout: "1800"
+    - name: slinky-drainer-crds
+      type: Helm
+    - name: slinky-drainer
+      type: Helm
+      valuesFile: components/slinky-drainer/values.yaml
+      dependencyRefs:
+        - slinky-drainer-crds

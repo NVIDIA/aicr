@@ -62,9 +62,9 @@ Each stage transforms input data into a different format:
   (Job mode)
 - **oke-addons**: Orchestration-layer projection, not a collector —
   produced from the explicit operator-supplied add-on dump passed to
-  `aicr snapshot --oke-addons <file>` (the `NvidiaGpuPlugin` add-on's
-  control-plane state). Same up-front validation and attach/merge flow
-  as `aks-gpu-pools`
+  `aicr snapshot --oke-addons <file>` (the control-plane state of the
+  `NvidiaGpuPlugin` and `NvidiaNetworkOperator` add-ons). Same up-front
+  validation and attach/merge flow as `aks-gpu-pools`
 - **gke-gpu-pools**: Orchestration-layer projection, not a collector.
   Produced from the explicit operator-supplied pool dump passed to
   `aicr snapshot --gke-gpu-pools <file>` (per-pool
@@ -664,7 +664,7 @@ spec:
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
-      targetRevision: v26.7.1
+      targetRevision: v26.7.2
       chart: gpu-operator
       helm:
         valueFiles:

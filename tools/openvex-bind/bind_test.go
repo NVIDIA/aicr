@@ -563,20 +563,24 @@ func TestNormalizeProductNameKeepsReleaseImagesDistinct(t *testing.T) {
 
 // TestBindCommittedDocument runs the real .openvex.json through the generator.
 // It is the check that the committed file and the tool have not drifted apart:
-// a product-identifier convention change lands here as a zero-statement
-// projection for aiperf-bench.
+// every committed statement targets aiperf-bench, so a product-identifier
+// convention change lands here as a statement its projection drops, which a
+// release would otherwise drop silently. A document with no statements has
+// nothing to drop.
 func TestBindCommittedDocument(t *testing.T) {
 	t.Parallel()
 	source, err := os.ReadFile("../../.openvex.json")
 	if err != nil {
 		t.Fatalf("read committed OpenVEX document: %v", err)
 	}
+	committed := len(statementsOf(t, decode(t, source)))
 	result, err := Bind(source, Options{Image: benchImage, Digest: amd64Digest})
 	if err != nil {
 		t.Fatalf("Bind() error = %v", err)
 	}
-	if result.Kept == 0 {
-		t.Fatal("no committed statement bound to aiperf-bench; product identifiers have drifted from the tool")
+	if result.Kept != committed {
+		t.Fatalf("aiperf-bench projection kept %d of %d committed statements; product identifiers have drifted from the tool",
+			result.Kept, committed)
 	}
 	// openvex-guard.sh rejects any document-level string over 256 bytes, and it
 	// runs on the projection just before `cosign attest`. Catching an

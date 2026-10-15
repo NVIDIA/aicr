@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
@@ -40,9 +41,25 @@ import (
 // verify.WithKey() instead of a certificate identity. It is the key-based
 // VerificationIdentity, dual of kmsIdentity on the signing side.
 type keyVerificationIdentity struct {
-	pub      crypto.PublicKey
-	identity string // KMS URI, or "pem:<sha256-fingerprint>" for a local key
-	src      TrustedRootSource
+	pub         crypto.PublicKey
+	identity    string // KMS URI, or "pem:<sha256-fingerprint>" for a local key
+	fingerprint string // PublicKeyFingerprint(pub)
+	src         TrustedRootSource
+}
+
+// PublicKeyFingerprint returns "sha256:" and the hex SHA-256 of pub's PKIX DER
+// encoding. A signer and a verifier holding the same public key, whether
+// resolved from a KMS URI or read from a PEM file, compute the same value.
+func PublicKeyFingerprint(pub crypto.PublicKey) (string, error) {
+	if pub == nil {
+		return "", errors.New(errors.ErrCodeInvalidRequest, "public key is required")
+	}
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInvalidRequest, "failed to encode public key", err)
+	}
+	sum := sha256.Sum256(der)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 // NewKeyVerificationIdentity resolves keyRef to a public key and returns the
@@ -66,18 +83,27 @@ func NewKeyVerificationIdentity(ctx context.Context, keyRef string, src TrustedR
 		if err != nil {
 			return nil, err
 		}
+		fingerprint, err := PublicKeyFingerprint(pub)
+		if err != nil {
+			return nil, err
+		}
 		// Store the scheme-normalized URI so the identity (BundleCreator,
 		// --require-creator matching) is canonical regardless of caller casing,
 		// matching how resolveKMSPublicKey resolves the key.
-		return &keyVerificationIdentity{pub: pub, identity: normalizeURIScheme(keyRef), src: src}, nil
+		return &keyVerificationIdentity{pub: pub, identity: normalizeURIScheme(keyRef),
+			fingerprint: fingerprint, src: src}, nil
 	}
 
 	pub, fp, err := loadPEMPublicKey(keyRef)
 	if err != nil {
 		return nil, err
 	}
-	return &keyVerificationIdentity{pub: pub, identity: "pem:" + fp, src: src}, nil
+	return &keyVerificationIdentity{pub: pub, identity: "pem:" + fp, fingerprint: "sha256:" + fp, src: src}, nil
 }
+
+// KeyFingerprint returns the PublicKeyFingerprint of the verifying key, so a
+// caller can compare it with a recorded signer without resolving the key again.
+func (k *keyVerificationIdentity) KeyFingerprint() string { return k.fingerprint }
 
 // Identity returns the key identity (KMS URI or pem:<fp>). The verifier
 // substitutes this as BundleCreator since a key-signed bundle has no cert SAN.
@@ -139,10 +165,9 @@ func loadPEMPublicKey(path string) (crypto.PublicKey, string, error) {
 		return nil, "", errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse PEM public key", err)
 	}
 
-	der, err := x509.MarshalPKIXPublicKey(pub)
+	fingerprint, err := PublicKeyFingerprint(pub)
 	if err != nil {
-		return nil, "", errors.Wrap(errors.ErrCodeInvalidRequest, "failed to encode public key", err)
+		return nil, "", err
 	}
-	sum := sha256.Sum256(der)
-	return pub, hex.EncodeToString(sum[:]), nil
+	return pub, strings.TrimPrefix(fingerprint, "sha256:"), nil
 }

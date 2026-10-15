@@ -173,3 +173,30 @@ func TestKeyVerificationIdentity_NilSourceDefaultsToPublicGood(t *testing.T) {
 		t.Fatal("expected non-nil TrustedMaterial from public-good default base")
 	}
 }
+
+// TestNewUnionTrustedRoot pins the eager load (a bad path fails at
+// construction with the loader's ErrCodeInvalidRequest, so a bad --trust-root
+// never reads as a verification verdict) and the union itself: the source
+// yields the public-good root followed by the private one.
+func TestNewUnionTrustedRoot(t *testing.T) {
+	src, err := NewUnionTrustedRoot("/no/such/trusted_root.json")
+	if src != nil {
+		t.Error("expected nil source on loader failure")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+
+	src, err = NewUnionTrustedRoot("../../trust/testdata/trusted_root.json")
+	if err != nil {
+		t.Fatalf("NewUnionTrustedRoot: %v", err)
+	}
+	tm, err := src(context.Background())
+	if err != nil {
+		t.Fatalf("union source: %v", err)
+	}
+	union, ok := tm.(root.TrustedMaterialCollection)
+	if !ok || len(union) != 2 {
+		t.Fatalf("union = %T of %d, want a two-member TrustedMaterialCollection", tm, len(union))
+	}
+}

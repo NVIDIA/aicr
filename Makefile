@@ -121,7 +121,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
@@ -158,7 +158,7 @@ check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 	@./tools/check-docs-filenames
 
 .PHONY: check-upgrade-records
-check-upgrade-records: ## Verifies committed ComponentUpgrades records are well-formed (ADR-021)
+check-upgrade-records: ## Verifies ComponentUpgrades records are well-formed and cover pins moved since the merge base (ADR-021; uses AICR_UPGRADE_BASE_REF, else a fetched upstream/main or origin/main)
 	@./tools/check-upgrade-records
 
 # Deliberately NOT in `lint` or `qualify`: it re-downloads each pinned tool's
@@ -191,6 +191,10 @@ check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node
 .PHONY: check-docs-yaml
 check-docs-yaml: ## Validates YAML-labelled code blocks throughout docs/ (requires Node; CI-blocking)
 	@./tools/check-docs-yaml
+
+.PHONY: check-docs-shell
+check-docs-shell: ## Rejects unquoted <placeholder>s that bash reads as redirection in docs/ shell blocks (requires Node; CI-blocking)
+	@./tools/check-docs-shell
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -421,6 +425,12 @@ nvsentinel-remediation-e2e: ## Live Kind test: nvsentinel-observe dry-run carrie
 	@set -e; \
 	echo "Running nvsentinel-observe mixin dry-run e2e test..."; \
 	tests/e2e/nvsentinel-remediation/run.sh
+
+.PHONY: nvsentinel-slinky-drainer-e2e
+nvsentinel-slinky-drainer-e2e: ## Live Kind test: nvsentinel-slinky-drainer mixin drains a quarantined Slurm node through Slurm, not eviction (#2615)
+	@set -e; \
+	echo "Running nvsentinel-slinky-drainer mixin e2e test..."; \
+	tests/e2e/nvsentinel-slinky-drainer/run.sh
 
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
@@ -836,13 +846,24 @@ validator-binaries: ## Builds Linux validator binaries (VALIDATOR_PHASES, VALIDA
 		./tools/build-validator-binaries
 
 .PHONY: image-validators
-image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG)
+image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG, VALIDATOR_ARCHES)
 	@set -e; \
-	arch="$$(go env GOARCH)"; \
+	arch="$(VALIDATOR_ARCHES)"; \
+	if [ -z "$${arch}" ]; then arch="$$(go env GOARCH)"; fi; \
+	arch="$$(echo "$${arch}" | tr ',' ' ')"; \
+	if [ "$$(echo $${arch} | wc -w)" -gt 1 ]; then \
+		echo "VALIDATOR_ARCHES=\"$${arch}\" names more than one architecture;" >&2; \
+		echo "each image is tagged per phase without an architecture suffix, so" >&2; \
+		echo "a second arch would overwrite the first. Build one at a time, or" >&2; \
+		echo "use validator-binaries, which does accept a list." >&2; \
+		exit 1; \
+	fi; \
+	echo "Building validator images for linux/$${arch}"; \
 	VALIDATOR_ARCHES="$${arch}" ./tools/build-validator-binaries; \
 	for phase in deployment performance conformance; do \
 		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
 		docker build -f validators/$${phase}/Dockerfile \
+			--platform linux/$${arch} \
 			--build-arg TARGETARCH=$${arch} \
 			-t $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) .; \
 		if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
@@ -852,6 +873,7 @@ image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IM
 	done; \
 	echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
 	docker build -f validators/performance/aiperf-bench.Dockerfile \
+		--platform linux/$${arch} \
 		-t $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG) .; \
 	if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
 		echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
@@ -941,6 +963,43 @@ validate-local: image-validators ## Builds validator images and runs validation 
 	AICR_VALIDATOR_IMAGE_REGISTRY=$(IMAGE_REGISTRY) $$AICR_BIN validate \
 		--recipe "$(RECIPE)" \
 		--phase deployment
+
+.PHONY: validate-performance
+validate-performance: ## Recipe performance phase on the current kubecontext (RECIPE= [SNAPSHOT=] [NODE_SELECTOR=])
+	@set -e; \
+	if [ -z "$(RECIPE)" ]; then \
+		echo "Usage: make validate-performance RECIPE=<path-to-recipe.yaml> [SNAPSHOT=<path>] [NODE_SELECTOR=nvidia.com/gpu.present=true]"; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$(RECIPE)" ]; then \
+		echo "Error: recipe file $(RECIPE) not found"; \
+		exit 1; \
+	fi; \
+	AICR_BIN=$$(command -v aicr 2>/dev/null || true); \
+	if [ -z "$$AICR_BIN" ]; then \
+		HOST_GOOS=$$(go env GOOS); HOST_GOARCH=$$(go env GOARCH); \
+		DIST_DIR=$$(find dist -maxdepth 1 -type d -name "aicr_$${HOST_GOOS}_$${HOST_GOARCH}*" 2>/dev/null | head -1); \
+		if [ -n "$$DIST_DIR" ] && [ -x "$$DIST_DIR/aicr" ]; then \
+			AICR_BIN="$$DIST_DIR/aicr"; \
+		fi; \
+	fi; \
+	if [ -z "$$AICR_BIN" ]; then \
+		echo "Error: aicr binary not found. Run 'make build' or put aicr on PATH."; \
+		exit 1; \
+	fi; \
+	set -- validate --recipe "$(RECIPE)" --phase performance --fail-on-error; \
+	if [ -n "$(SNAPSHOT)" ]; then \
+		if [ ! -f "$(SNAPSHOT)" ]; then \
+			echo "Error: snapshot file $(SNAPSHOT) not found"; \
+			exit 1; \
+		fi; \
+		set -- "$$@" --snapshot "$(SNAPSHOT)"; \
+	fi; \
+	if [ -n "$(NODE_SELECTOR)" ]; then \
+		set -- "$$@" --node-selector "$(NODE_SELECTOR)"; \
+	fi; \
+	echo "Running performance phase with $$AICR_BIN"; \
+	"$$AICR_BIN" "$$@"
 
 .PHONY: python-licenses
 python-licenses: ## Refreshes the committed Python license section for the aiperf-bench image (needs network)

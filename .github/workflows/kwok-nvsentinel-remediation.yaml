@@ -15,7 +15,9 @@
 # KWOK lane for the opt-in NVSentinel remediation steps. No shipped recipe
 # composes them, so the tiered matrix in kwok-recipes.yaml never bundles or
 # deploys them; this lane composes each step onto one EKS leaf on helm, and
-# the widest step on one Argo CD and one Flux deployer as well.
+# the widest step on one Argo CD and one Flux deployer as well. It also
+# composes quarantine with nvsentinel-slinky-drainer onto the EKS Slurm leaf,
+# which adds the plugin and switches node-drainer to customDrain.
 
 name: KWOK NVSentinel Remediation
 
@@ -78,7 +80,7 @@ jobs:
         run: bash .github/actions/aicr-build/build-cli.sh
 
       - name: Upload aicr binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: kwok-aicr-bin
           path: dist/
@@ -87,7 +89,7 @@ jobs:
           retention-days: 7
 
   test:
-    name: 'h100-eks-ubuntu-training + ${{ matrix.mixin }} (${{ matrix.deployer }})'
+    name: "${{ matrix.recipe || 'h100-eks-ubuntu-training' }} + ${{ matrix.mixin }} (${{ matrix.deployer }})"
     needs: [build-aicr]
     runs-on: ubuntu-latest
     # Matches kwok-test-run.yaml: the flux-oci readiness check alone takes ~7min.
@@ -105,6 +107,9 @@ jobs:
             deployer: argocd-oci
           - mixin: nvsentinel-remediation
             deployer: flux-oci
+          - mixin: nvsentinel-quarantine,nvsentinel-slinky-drainer
+            deployer: helm
+            recipe: h100-eks-ubuntu-training-slurm
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -118,7 +123,7 @@ jobs:
       - name: Run KWOK test
         uses: ./.github/actions/kwok-test
         with:
-          recipe: h100-eks-ubuntu-training
+          recipe: ${{ matrix.recipe || 'h100-eks-ubuntu-training' }}
           deployer: ${{ matrix.deployer }}
           mixins: ${{ matrix.mixin }}
           kind_version: ${{ steps.versions.outputs.kind }}

@@ -19,7 +19,9 @@ readonly CONNECT_TIMEOUT_SECONDS=10
 readonly TOTAL_TIMEOUT_SECONDS=30
 readonly RETRIES=2
 readonly PARALLEL_REQUESTS=8
+readonly RECHECK_PARALLEL_REQUESTS=2
 
+# Input rows are package,url,license[,license_path]; output rows drop the path.
 if [[ $# -ne 1 || ! -s "$1" ]]; then
     echo "Usage: $0 <go-licenses.csv>" >&2
     exit 2
@@ -27,11 +29,15 @@ fi
 
 readonly INPUT=$1
 readonly CURL_BIN=${CURL_BIN:-curl}
+readonly GO_BIN=${GO_BIN:-go}
+# go-licenses' license URL when its lookup fails (report.go UNKNOWN).
+readonly UNKNOWN_URL=Unknown
 # Anonymous probes of github.com from shared CI runner IPs get rate-limited
 # (HTTP 429/503) even when every URL is valid, which fails the notices build for
 # reasons unrelated to the licenses. With a token, each github.com blob URL is
 # probed through its raw.githubusercontent.com equivalent, authenticated; the
-# emitted URL is still the github.com one.
+# emitted URL is still the github.com one. A raw probe that stays inconclusive
+# is repeated anonymously on github.com (recheck_raw_on_github).
 readonly PROBE_TOKEN=${GITHUB_TOKEN:-}
 
 if ! command -v "${CURL_BIN}" >/dev/null 2>&1; then
@@ -106,11 +112,90 @@ remapped_candidate() {
     printf '%s\n' "${url}"
 }
 
+# Vanity import paths whose host does not reliably serve the go-import /
+# go-source meta tags go-licenses reads to find a module's repository; when the
+# host answers without them the URL comes back "Unknown" and fails the build. A
+# module path is immutable, so its repository is pinned here, to the one the
+# tags name when they are served, so the notices are identical either way. The
+# URL is derived like a gopkg.in module's (see module_blob_url).
+#
+# Format: <module-path>|<repo-path>
+#
+# dario.cat/mergo: served pages without the tags to CI runners on 2026-10-15;
+# its tags name github.com/imdario/mergo, which GitHub redirects to
+# github.com/darccio/mergo.
+VANITY_REPOSITORIES=(
+    "dario.cat/mergo|github.com/imdario/mergo"
+)
+
+# The blob URL of the license file go-licenses chose for module, whose
+# repository is repo (<host>/<owner>/<name>), at the module's version, as a
+# path relative to the module's local copy. A replaced module, or a license file
+# outside that copy, derives nothing, so its row still fails.
+module_blob_url() {
+    local module=$1
+    local repo=$2
+    local license_path=$3
+    local info ref dir
+    info=$("${GO_BIN}" list -m -f '{{if not .Replace}}{{.Version}} {{.Dir}}{{end}}' "${module}" 2>/dev/null) || return 0
+    ref=${info%% *}
+    dir=${info#* }
+    [[ -n "${ref}" && -n "${dir}" && "${dir}" != "${info}" ]] || return 0
+    [[ "${license_path}" == "${dir}/"* ]] || return 0
+    # A pseudo-version names a commit rather than a tag.
+    if [[ "${ref}" =~ [-.][0-9]{14}-([0-9a-f]{12})$ ]]; then
+        ref=${BASH_REMATCH[1]}
+    fi
+    printf 'https://%s/blob/%s/%s\n' "${repo}" "${ref}" "${license_path#"${dir}/"}"
+}
+
+# go-licenses finds a gopkg.in module's repository through the go-source tag
+# gopkg.in serves, so a gopkg.in outage turns the URL into "Unknown" and fails
+# the build. gopkg.in's naming rule is fixed (gopkg.in/pkg.vN is
+# github.com/go-pkg/pkg, gopkg.in/user/pkg.vN is github.com/user/pkg), so the
+# repository is derived from it.
+gopkgin_candidate() {
+    local package=$1
+    local license_path=$2
+    [[ "${package}" =~ ^gopkg\.in/(([^/]+)/)?([^/]+)\.v([0-9]+)(/|$) ]] || return 0
+    local repo=${BASH_REMATCH[3]}
+    local owner=${BASH_REMATCH[2]:-go-${repo}}
+    local module="gopkg.in/${BASH_REMATCH[1]}${repo}.v${BASH_REMATCH[4]}"
+    module_blob_url "${module}" "github.com/${owner}/${repo}" "${license_path}"
+}
+
+# The URL for a package of a VANITY_REPOSITORIES module.
+vanity_candidate() {
+    local package=$1
+    local license_path=$2
+    local entry module
+    for entry in "${VANITY_REPOSITORIES[@]}"; do
+        module=${entry%%|*}
+        if [[ "${package}" == "${module}" || "${package}" == "${module}/"* ]]; then
+            module_blob_url "${module}" "${entry##*|}" "${license_path}"
+            return 0
+        fi
+    done
+}
+
 # Every URL worth probing for one CSV row, best-provenance first and deduplicated
 # while preserving that order. Normalization is applied to the remapped URL too,
 # so a moved repo that also needs the nested-module fixup is still resolvable.
 url_candidates() {
     local url=$1
+    local package=$2
+    local license_path=$3
+    if [[ "${url}" == "${UNKNOWN_URL}" ]]; then
+        local derived
+        derived=$(gopkgin_candidate "${package}" "${license_path}")
+        if [[ -z "${derived}" ]]; then
+            derived=$(vanity_candidate "${package}" "${license_path}")
+        fi
+        if [[ -n "${derived}" ]]; then
+            printf '%s\n' "${derived}"
+            return
+        fi
+    fi
     local remapped
     remapped=$(remapped_candidate "${url}")
     printf '%s\n' \
@@ -156,13 +241,14 @@ readonly CANDIDATE_URLS="${TMP}/candidate-urls"
 readonly CANDIDATE_STATUS="${TMP}/candidate-status"
 
 : > "${CANDIDATE_URLS}"
-while IFS=, read -r package url license; do
+while IFS=, read -r package url license license_path; do
     [[ -z "${package}" ]] && continue
-    url_candidates "${url}" >> "${CANDIDATE_URLS}"
+    url_candidates "${url}" "${package}" "${license_path}" >> "${CANDIDATE_URLS}"
 done < "${INPUT}"
 
-# Probes every URL in $1 and appends "<url>\t<status>\t<curl error>" lines to $2.
-# Extra arguments are passed to curl ahead of the URLs.
+# Probes every URL in $1, at most $3 at a time, and appends
+# "<url>\t<status>\t<curl error>" lines to $2. Extra arguments are passed to
+# curl ahead of the URLs.
 #
 # curl exits non-zero when any one transfer fails, yet still reports that
 # transfer as status 000 with its error. The resolution below decides whether a
@@ -171,7 +257,8 @@ done < "${INPUT}"
 probe() {
     local input=$1
     local output=$2
-    shift 2
+    local parallel=$3
+    shift 3
     local -a requests=()
     local url
     while IFS= read -r url; do
@@ -187,7 +274,7 @@ probe() {
     "${CURL_BIN}" \
         "$@" \
         --parallel \
-        --parallel-max "${PARALLEL_REQUESTS}" \
+        --parallel-max "${parallel}" \
         --head \
         --location \
         --silent \
@@ -227,10 +314,50 @@ check_urls() {
     if [[ -s "${raw}" ]]; then
         local auth="${TMP}/curl-auth.conf"
         (umask 077 && printf 'header = "Authorization: Bearer %s"\n' "${PROBE_TOKEN}" > "${auth}")
-        probe "${raw}" "${output}" --config "${auth}"
+        probe "${raw}" "${output}" "${PARALLEL_REQUESTS}" --config "${auth}"
         rm -f "${auth}"
     fi
-    probe "${other}" "${output}"
+    probe "${other}" "${output}" "${PARALLEL_REQUESTS}"
+    recheck_raw_on_github "${output}"
+}
+
+# raw.githubusercontent.com can rate-limit a whole repository, with or without
+# a token, while github.com still serves the same files. An inconclusive raw
+# probe is therefore repeated at the github.com URL for the same ref and path,
+# without the token and at lower parallelism, and that answer replaces it. The
+# candidate is unchanged, so this is not a fallback to a lower-ranked one.
+recheck_raw_on_github() {
+    local status_file=$1
+    local pairs="${TMP}/recheck-pairs" urls="${TMP}/recheck-urls" results="${TMP}/recheck-status"
+    local url status
+    : > "${pairs}"
+    : > "${results}"
+    while IFS=$'\t' read -r url status _; do
+        if inconclusive_status "${status}" &&
+            [[ "${url}" =~ ^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)$ ]]; then
+            printf '%s\thttps://github.com/%s/%s/blob/%s\n' \
+                "${url}" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" >> "${pairs}"
+        fi
+    done < "${status_file}"
+    [[ -s "${pairs}" ]] || return 0
+
+    cut -f 2 "${pairs}" > "${urls}"
+    probe "${urls}" "${results}" "${RECHECK_PARALLEL_REQUESTS}"
+    awk -F '\t' -v OFS='\t' '
+        FILENAME == ARGV[1] { raw_of[$2] = $1; next }
+        FILENAME == ARGV[2] { status[raw_of[$1]] = $2; error[raw_of[$1]] = $3; next }
+        $1 in status {
+            if ($2 == "000") {
+                note = "after raw.githubusercontent.com failed" ($3 == "" ? "" : ": " $3)
+            } else {
+                note = "after raw.githubusercontent.com answered " $2
+            }
+            print $1, status[$1], (error[$1] == "" ? note : error[$1] ", " note)
+            next
+        }
+        { print }
+    ' "${pairs}" "${results}" "${status_file}" > "${TMP}/status-rechecked"
+    mv "${TMP}/status-rechecked" "${status_file}"
 }
 
 check_urls "${CANDIDATE_URLS}" "${CANDIDATE_STATUS}"
@@ -239,7 +366,7 @@ check_urls "${CANDIDATE_URLS}" "${CANDIDATE_STATUS}"
 # already probed every candidate by this point, so reporting only the first
 # failure hides the rest behind another full release cycle.
 unreachable=0
-while IFS=, read -r package url license; do
+while IFS=, read -r package url license license_path; do
     [[ -z "${package}" ]] && continue
 
     # Stop at an inconclusive candidate rather than falling through: it may be
@@ -255,7 +382,7 @@ while IFS=, read -r package url license; do
         if inconclusive_status "${status}"; then
             break
         fi
-    done < <(url_candidates "${url}")
+    done < <(url_candidates "${url}" "${package}" "${license_path}")
 
     if [[ -n "${resolved}" ]]; then
         printf '%s,%s,%s\n' "${package}" "${resolved}" "${license}"
@@ -269,7 +396,7 @@ while IFS=, read -r package url license; do
             code=$(url_status "${candidate}")
             err=$(url_error "${candidate}")
             echo "  tried (${code:-no response}${err:+: ${err}}): ${candidate}"
-        done < <(url_candidates "${url}")
+        done < <(url_candidates "${url}" "${package}" "${license_path}")
     } >&2
 done < "${INPUT}"
 
@@ -287,5 +414,6 @@ if (( unreachable > 0 )); then
         fi
     fi
     echo "If a repository moved, add it to MOVED_REPOSITORIES in $0." >&2
+    echo "If a vanity import host does not serve its go-import meta tags, add the module to VANITY_REPOSITORIES." >&2
     exit 1
 fi

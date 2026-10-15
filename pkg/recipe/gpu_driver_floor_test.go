@@ -65,7 +65,8 @@ const gpuDriverFloorConstraint = "Deployment.gpu-driver.version"
 const rtxProDriverFloor = ">= 575.57.08"
 
 // gb300GKEDriverFloor is the GB300 (A4X Max) host driver minimum on GKE COS,
-// where GKE installs the driver and the GPU Operator's driver is disabled.
+// where the driver is installed outside the GPU Operator, by GKE or by the
+// bundle's gcp-driver-installer depending on gpuStack.
 // Source: Google Cloud, "Create an AI-optimized GKE cluster that uses A4X
 // Max", Requirements: "R580.95.05, the minimum GPU driver version for A4X
 // Max". The gb300-gke-cos-* overlays are exported from the GKE Version Vector

@@ -70,6 +70,19 @@ func isKMSURI(ref string) bool {
 	return false
 }
 
+// ValidateSigningKeyRef rejects a signing-key reference that names no
+// supported KMS scheme, so a caller can fail before the work that precedes the
+// sign. Only the scheme is checked: provider initialization (credentials,
+// network, key permissions) still surfaces at sign time.
+func ValidateSigningKeyRef(ref string) error {
+	if !isKMSURI(ref) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"signing key must be a KMS key URI ("+strings.Join(kmsURISchemes, " | ")+
+				"); local key files are not supported for signing")
+	}
+	return nil
+}
+
 // kmsIdentity signs with a KMS-held key. It carries no Fulcio certificate, so
 // SignStatementWith records public-key verification material and uses the key
 // URI as the signer identity. See issue #407.

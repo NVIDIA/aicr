@@ -118,11 +118,15 @@ extract_step "${KIND_WORKFLOW}" '.jobs["uat-kind"]' 'Validate inputs' \
 
 # run_resolve <reservation> <platform> -> rc, publishing into ${WORK}/row.txt.
 # cwd is the repo root because the step resolves ./tools and ./bin relative to
-# it, exactly as it does on a runner.
+# it, exactly as it does on a runner. The nvsentinel_remediation axis (gate C
+# below) is held at its dispatch defaults unless the caller exports overrides.
 run_resolve() {
     : > "${WORK}/row.txt"
     ( cd "${REPO_ROOT}" \
       && RESERVATION="$1" SLOT=0 PLATFORM="$2" GITHUB_OUTPUT="${WORK}/row.txt" \
+         NVSENTINEL_REMEDIATION="${NVSENTINEL_REMEDIATION:-none}" \
+         INTENT="${INTENT:-training}" LIFECYCLE="${LIFECYCLE:-nightly}" \
+         DEPLOYER="${DEPLOYER:-helmfile}" AICR_VERSION="${AICR_VERSION:-}" \
          bash "${RESOLVE_STEP}" ) > "${WORK}/step.log" 2>&1
 }
 lane_verdict() {
@@ -182,6 +186,43 @@ check "the rejection names the platform" "1" \
     "$(grep -c "platform='slurm'" "${WORK}/step.log")"
 check "the rejection names the resolved lane" "1" \
     "$(grep -c "'aws' lane" "${WORK}/step.log")"
+
+# ---------------------------------------------------------------------------
+# Gate C: uat-run.yaml, can this cell compose an NVSentinel remediation mixin
+# ---------------------------------------------------------------------------
+
+# remediation_verdict <reservation> <step> [VAR=value...] -> accept | reject.
+# The subshell keeps each case's overrides from leaking into the next.
+remediation_verdict() {
+    local res="$1" step="$2"; shift 2
+    if ( export NVSENTINEL_REMEDIATION="${step}"; local kv; for kv in "$@"; do export "${kv?}"; done
+         run_resolve "${res}" '' ); then
+        echo accept
+    else
+        echo reject
+    fi
+}
+
+check "none is accepted everywhere it was before"     "accept" "$(remediation_verdict aws-h100 none)"
+check "aws accepts quarantine"                        "accept" "$(remediation_verdict aws-h100 quarantine)"
+check "aws accepts remediation"                       "accept" "$(remediation_verdict aws-h100 remediation)"
+check "azure accepts remediation"                     "accept" "$(remediation_verdict azure-h100 remediation)"
+check "gcp accepts quarantine"                        "accept" "$(remediation_verdict gcp-h100 quarantine)"
+# The GKE managed driver cannot host janitor's GPU reset, so the bundle would
+# refuse nvsentinel-remediation; refusing here costs no lease.
+check "gcp rejects remediation"                       "reject" "$(remediation_verdict gcp-h100 remediation)"
+check "kind rejects quarantine"                       "reject" "$(remediation_verdict kind-h100 quarantine)"
+check "an unknown step is rejected"                   "reject" "$(remediation_verdict aws-h100 observe)"
+check "inference is rejected"                         "reject" "$(remediation_verdict aws-h100 remediation INTENT=inference)"
+check "a daytime lifecycle is rejected"               "reject" "$(remediation_verdict aws-h100 quarantine LIFECYCLE=daytime-up)"
+check "the argocd deployer is rejected"               "reject" "$(remediation_verdict aws-h100 remediation DEPLOYER=argocd)"
+check "a released aicr_version is rejected"           "reject" "$(remediation_verdict aws-h100 remediation AICR_VERSION=v1.0.0)"
+
+remediation_verdict aws-h100 remediation INTENT=inference >/dev/null
+check "a rejected remediation dispatch publishes no cloud output" "0" \
+    "$(grep -c '^cloud=' "${WORK}/row.txt")"
+check "the rejection names the failed bound" "1" \
+    "$(grep -c "intent must be training" "${WORK}/step.log")"
 
 # ---------------------------------------------------------------------------
 # Gate B: uat-kind.yaml, is this a value the kind lane has a config for

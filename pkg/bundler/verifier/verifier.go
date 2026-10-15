@@ -32,7 +32,6 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
@@ -40,7 +39,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/trust"
 )
 
 // readBoundedFile applies a bounded compatibility context to verifier inputs.
@@ -225,26 +223,10 @@ func resolveBundleTrustRoot(opts *VerifyOptions) (attestation.TrustedRootSource,
 	return newUnionTrustedRoot(opts.TrustRoot)
 }
 
-// newUnionTrustedRoot loads the private trusted_root.json at path and returns a
-// TrustedRootSource that unions it with AICR's public-good root. The public-good
-// half keeps NVIDIA-signed bundles verifiable; the private half admits bundles
-// signed against a private Fulcio/Rekor. The file is loaded eagerly so a bad
-// --trust-root (missing, oversized, malformed) fails fast with the loader's
-// ErrCodeInvalidRequest, rather than being deferred into the lazy source where
-// Verify would fold it into a generic verification-failure result. The
-// public-good half stays lazy inside the closure so it resolves under ctx.
+// newUnionTrustedRoot unions the private trusted_root.json at path with AICR's
+// public-good root; see attestation.NewUnionTrustedRoot.
 func newUnionTrustedRoot(path string) (attestation.TrustedRootSource, error) {
-	priv, err := trust.LoadTrustedMaterialFromFile(path)
-	if err != nil {
-		return nil, err // already ErrCodeInvalidRequest
-	}
-	return func(ctx context.Context) (root.TrustedMaterial, error) {
-		pg, err := attestation.PublicGoodTrustedRoot(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return root.TrustedMaterialCollection{pg, priv}, nil
-	}, nil
+	return attestation.NewUnionTrustedRoot(path)
 }
 
 // ValidateIdentityPattern checks that a certificate identity pattern is

@@ -33,6 +33,8 @@ var untrackedComponents = map[string]string{
 	"dra-node-labeler":          "manifest-only: in-tree manifests, no upstream chart",
 	"gcp-driver-installer":      "manifest-only: in-tree manifests, no upstream chart",
 	"nodewright-customizations": "manifest-only: in-tree customization manifests",
+	"slinky-drainer":            "manifest-only: vendored from NVSentinel; image moves with nvsentinel's pin",
+	"slinky-drainer-crds":       "manifest-only: vendored from NVSentinel; moves with nvsentinel's pin",
 	"gpu-operator-ocp-olm":      "OpenShift OLM variant: subscription manifests, no chart",
 	"gpu-operator-ocp":          "OpenShift manifest variant, no chart",
 	"network-operator-ocp-olm":  "OpenShift OLM variant: subscription manifests, no chart",

@@ -85,6 +85,7 @@ jobs:
       renovate: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.renovate }}
       settings: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.settings }}
       bom: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.bom }}
+      nvcre: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.nvcre }}
       tuning: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.tuning }}
       notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
       coverage: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.coverage }}
@@ -175,6 +176,18 @@ jobs:
               - 'recipes/components/*/values.yaml'
               - 'tools/bom/**'
               - 'pkg/bom/**'
+            nvcre:
+              # The NVCRE wiring guard reads the "Enabling NVCRE" fragment out
+              # of the component catalog and resolves it against the real
+              # overlay, mixins and registry. The `tests` job already runs it
+              # on any code change, but the fragment itself lives in docs/, and
+              # a docs-only PR yields code=false and skips `tests` — so an edit
+              # that breaks the documented wiring would merge green. The guard
+              # test is listed too so renaming it re-runs the check rather than
+              # silently disarming this gate.
+              - 'docs/user/component-catalog.md'
+              - 'pkg/recipe/nvcre_wiring_guard_test.go'
+              - 'recipes/components/nvcre/**'
             tuning:
               # Inputs that can change the committed tuning-status table
               # WITHOUT tripping pkg/tuning's TestCompute_Structure — which runs
@@ -270,8 +283,8 @@ jobs:
               - '.github/workflows/merge-gate.yaml'
             docs:
               # Inputs to the documentation parser gates. MDX parsing follows
-              # the Fern-published page list, while YAML fence parsing covers
-              # every Markdown file under docs/.
+              # the Fern-published page list, while YAML fence parsing and the
+              # shell placeholder check cover Markdown files under docs/.
               #
               # docs/index.yml is Fern's navigation manifest and supplies the
               # MDX checker's file list, so it is both an input and a trigger:
@@ -288,6 +301,7 @@ jobs:
               - 'tools/check-docs-mdx'
               - 'tools/check-docs-mdx-parse'
               - 'tools/check-docs-yaml*'
+              - 'tools/check-docs-shell*'
               - 'tools/docs-published-files'
               - 'tools/mdx/**'
               - 'Makefile'
@@ -371,11 +385,11 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d  # v4.38.3
         with:
           languages: go
       - run: go build ./...
-      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d  # v4.38.3
 
   analyze-skip:
     needs: [check-paths]
@@ -590,8 +604,9 @@ jobs:
       - run: echo "No .settings.yaml or refresh-script changes — checksum freshness not required"
 
   # ---------------------------------------------------------------------------
-  # Docs parser gates — parse every Fern-published doc as MDX and every YAML
-  # fence under docs/ as YAML.
+  # Docs parser gates — parse every Fern-published doc as MDX, every YAML
+  # fence under docs/ as YAML, and every shell fence for placeholders that bash
+  # would read as redirection.
   #
   # `fern check` (Fern Docs CI) does not parse MDX, and the job that does
   # (`fern generate --docs --preview`) runs in a workflow_run companion whose
@@ -610,7 +625,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: '20'
       # The bash approximation runs first: it is instant and its messages name
@@ -624,6 +639,8 @@ jobs:
         run: make check-docs-mdx-parse
       - name: Validate YAML examples in documentation
         run: make check-docs-yaml
+      - name: Check shell examples for unquoted placeholders
+        run: make check-docs-shell
 
   docs-mdx-skip:
     needs: [check-paths]
@@ -680,6 +697,51 @@ jobs:
     timeout-minutes: 1
     steps:
       - run: echo "No BOM/registry changes — BOM freshness check not required"
+
+  # ---------------------------------------------------------------------------
+  # NVCRE documented-wiring guard — ensures the "Enabling NVCRE" fragment in
+  # docs/user/component-catalog.md still resolves to a working wiring, on
+  # docs-only PRs that skip the `tests` job (mirrors bom-freshness).
+  # ---------------------------------------------------------------------------
+
+  nvcre-wiring:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.nvcre == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+      - name: Verify the documented NVCRE wiring still resolves
+        # `go test -run <name>` exits 0 with "no tests to run" if a test is
+        # renamed or removed, which would let this gate silently no-op. Assert
+        # the named test actually executed by requiring its PASS line.
+        run: |
+          set -uo pipefail
+          out=$(go test ./pkg/recipe/... -run '^TestNVCREDocumentedWiringResolves$' -v -count=1 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          if ! grep -q "^--- PASS: TestNVCREDocumentedWiringResolves" <<<"$out"; then
+            echo "::error::TestNVCREDocumentedWiringResolves did not execute (renamed or removed?); the NVCRE wiring gate would silently pass. Update this job to run the guard."
+            exit 1
+          fi
+
+  nvcre-wiring-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.nvcre != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No NVCRE wiring inputs changed — wiring guard not required"
 
   # ---------------------------------------------------------------------------
   # Tuning-status doc freshness — ensures the committed tuning table in
@@ -834,6 +896,8 @@ jobs:
       - docs-mdx-skip
       - bom-freshness
       - bom-freshness-skip
+      - nvcre-wiring
+      - nvcre-wiring-skip
       - tuning-freshness
       - tuning-freshness-skip
       - notices-generator

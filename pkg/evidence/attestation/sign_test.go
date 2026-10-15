@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,6 +207,82 @@ func TestPointerSignerFromSignature(t *testing.T) {
 	if zeroRekor.RekorLogIndex != nil {
 		t.Errorf("zero rekor index should map to nil; got *%d", *zeroRekor.RekorLogIndex)
 	}
+
+	// A key signature records the key fingerprint, never the KMS key URI
+	// SignStatementWith reports as its identity.
+	const fingerprint = "sha256:d93f4a5e57c66728cb33edea59e9fc0fdf246a5361a0b8c50905e497ef0e5c2b"
+	keySigned := PointerSignerFromSignature(&bundleattest.SignedAttestation{
+		Identity: "awskms:///alias/aicr-evidence", KeyFingerprint: fingerprint, RekorLogIndex: 7,
+	})
+	if keySigned.Issuer != KeySignerIssuer || keySigned.Identity != fingerprint {
+		t.Errorf("key signer = %+v, want issuer %q identity %q", keySigned, KeySignerIssuer, fingerprint)
+	}
+	if keySigned.RekorLogIndex == nil || *keySigned.RekorLogIndex != 7 {
+		t.Errorf("key signer rekor index = %v, want 7", keySigned.RekorLogIndex)
+	}
+	if offline := PointerSignerFromSignature(&bundleattest.SignedAttestation{KeyFingerprint: fingerprint}); offline.RekorLogIndex != nil {
+		t.Errorf("tlog-less key signer rekor index = %d, want nil", *offline.RekorLogIndex)
+	}
+}
+
+// TestUnsatisfiableSigningFailsBeforeAnyNetworkLeg pins that a signing request
+// no signature could satisfy (a keyless request to skip the transparency log,
+// a signing key with no KMS scheme) is rejected before anything is pushed,
+// pulled or resolved.
+func TestUnsatisfiableSigningFailsBeforeAnyNetworkLeg(t *testing.T) {
+	keylessNoTLog := bundleattest.ResolveOptions{DisableTLogUpload: true}
+
+	t.Run("emit and publish", func(t *testing.T) {
+		// An unreachable registry: reaching the push would fail Unavailable.
+		_, err := signAndPush(context.Background(), &Bundle{SummaryDir: t.TempDir()}, signPushOptions{
+			Push:        "127.0.0.1:1/aicr-evidence:tag",
+			OIDCResolve: keylessNoTLog,
+		})
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+
+	t.Run("sign existing", func(t *testing.T) {
+		err := SignExisting(context.Background(), SignExistingOptions{
+			Pointer:     signableSignPointer(),
+			PointerPath: filepath.Join(t.TempDir(), "pointer.yaml"),
+			BundleDir:   filepath.Join(t.TempDir(), "absent"),
+			Artifact:    MainArtifactDescriptor{Digest: "sha256:abc", MediaType: "application/json", Size: 1},
+			OIDCResolve: keylessNoTLog,
+		})
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		if err == nil || !strings.Contains(err.Error(), "transparency log") {
+			t.Errorf("error %v does not name the transparency-log conflict", err)
+		}
+	})
+
+	t.Run("sign statement", func(t *testing.T) {
+		_, err := signEvidenceStatement(context.Background(), []byte(`{}`), keylessNoTLog)
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+
+	t.Run("signing key without a KMS scheme", func(t *testing.T) {
+		_, err := signAndPush(context.Background(), &Bundle{SummaryDir: t.TempDir()}, signPushOptions{
+			Push:        "127.0.0.1:1/aicr-evidence:tag",
+			OIDCResolve: bundleattest.ResolveOptions{SigningKey: "cosign.key"},
+		})
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+
+	t.Run("signing key with keyless-only options", func(t *testing.T) {
+		for _, opts := range []bundleattest.ResolveOptions{
+			{SigningKey: "awskms:///alias/k", IdentityToken: "tok"},
+			{SigningKey: "awskms:///alias/k", DeviceFlow: true},
+			{SigningKey: "awskms:///alias/k", FulcioURL: "https://fulcio.example.com"},
+		} {
+			errorstest.WantReportedCode(t, validateEvidenceSigningMode(opts), errors.ErrCodeInvalidRequest)
+		}
+	})
+
+	t.Run("key signing may skip the transparency log", func(t *testing.T) {
+		if err := validateEvidenceSigningMode(bundleattest.ResolveOptions{SigningKey: "awskms:///alias/k", DisableTLogUpload: true}); err != nil {
+			t.Errorf("key signing without a tlog entry rejected: %v", err)
+		}
+	})
 }
 
 func TestWritePointerFile_WritesExactPath(t *testing.T) {
@@ -228,5 +305,26 @@ func TestWritePointerFile_WritesExactPath(t *testing.T) {
 	}
 	if _, err := os.Stat(target); err != nil {
 		t.Errorf("pointer file not written at exact path: %v", err)
+	}
+}
+
+// TestSignEvidenceStatement_SigningKeySelectsKMS pins the dispatch: a signing
+// key reaches the KMS provider and never the keyless OIDC path. With
+// VAULT_ADDR unset the hashivault provider fails to initialize without any
+// network call; a keyless fallback would instead fail on the unreachable
+// ambient-token endpoint.
+func TestSignEvidenceStatement_SigningKeySelectsKMS(t *testing.T) {
+	t.Setenv("VAULT_ADDR", "")
+	t.Setenv("BAO_ADDR", "")
+
+	_, err := signEvidenceStatement(context.Background(), []byte(`{}`), bundleattest.ResolveOptions{
+		SigningKey:        "hashivault://transit/keys/aicr-evidence",
+		DisableTLogUpload: true,
+		AmbientURL:        "http://127.0.0.1:1/token",
+		AmbientToken:      "unused",
+	})
+	errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+	if err == nil || !strings.Contains(err.Error(), "KMS") {
+		t.Errorf("error %v does not come from the KMS provider", err)
 	}
 }

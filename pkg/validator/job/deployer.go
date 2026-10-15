@@ -60,6 +60,10 @@ type Config struct {
 	// CLICommit is the git commit SHA, forwarded via AICR_CLI_COMMIT for
 	// SHA-based image tag resolution in dev builds.
 	CLICommit string
+	// ServiceAccountName is the ServiceAccount the validator Job runs as.
+	// Empty selects the per-run ServiceAccountName(RunID) that EnsureRBAC
+	// creates.
+	ServiceAccountName string
 	// ImagePullSecrets are added to the validator pod spec.
 	ImagePullSecrets []string
 	// Tolerations are added to the validator pod spec.
@@ -96,6 +100,14 @@ func (d *Deployer) JobName() string {
 	return d.jobName
 }
 
+// serviceAccountName returns the ServiceAccount the validator Job runs as.
+func (d *Deployer) serviceAccountName() string {
+	if d.config.ServiceAccountName != "" {
+		return d.config.ServiceAccountName
+	}
+	return ServiceAccountName(d.config.RunID)
+}
+
 // DeployJob creates the validator Job using server-side apply.
 // A unique name is generated and the Job is applied with the aicr-validator field manager.
 func (d *Deployer) DeployJob(ctx context.Context) error {
@@ -106,7 +118,7 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 		d.config.Namespace,
 		d.config.CLIVersion,
 		d.config.CLICommit,
-		ServiceAccountName(d.config.RunID),
+		d.serviceAccountName(),
 		d.config.ImagePullSecrets,
 		d.config.Tolerations,
 		d.config.NodeSelector,

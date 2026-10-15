@@ -153,7 +153,7 @@ aicr snapshot \
 - `--os`: Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`). Selects the per-OS pod configuration and service collector backend.
 - `--requests` / `--limits`: Override agent container resource requests/limits (comma-separated `name=quantity` pairs).
 - `--cluster-config`: Path to a pre-existing k8s-launch-kit cluster-config.yaml to ingest network topology (local agent mode only).
-- `--oke-addons`: Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump, projected into the `K8s.oke-addons.nvidia-gpu-plugin` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
+- `--oke-addons`: Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump, projected into the `K8s.oke-addons.nvidia-gpu-plugin` and `K8s.oke-addons.nvidia-network-operator` readings. It runs controller-side, so it works in agent Job mode too. The file never enters the pod, and the CLI merges the projection into the returned snapshot.
 - `--aks-gpu-pools`: Path to an `az aks nodepool list -o json` dump, projected into the `K8s.aks-gpu-pools.gpu-driver` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
 - `--gke-gpu-pools`: Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump, projected into the `K8s.gke-gpu-pools.gpu-driver-installation` reading (required only to resolve the GKE `bundle-installer` gpuStack value from a snapshot). Controller-side: works in agent Job mode too. The file never enters the pod. The CLI merges the projection into the returned snapshot.
 - `--discover-network`: Enable live l8k discovery to populate the NetworkTopology measurement. **Not read-only** — writes `nvidia.kubernetes-launch-kit.*` node labels and may patch `NicClusterPolicy`.
@@ -292,12 +292,13 @@ kubectl annotate serviceaccount irsa-snapshotter -n gpu-operator \
 # 2. Write the RBAC manifests. Applies NOTHING, contacts no cluster, takes no
 #    snapshot. Prints the directory it wrote and the commands below.
 aicr snapshot --namespace gpu-operator --add-roles-to-service-account irsa-snapshotter
+RUN_ID="20260821-142233-9f3a1c0b7e2d4a55"  # replace with the run ID in the directory name printed above
 
 # 3. Read what you are about to grant. Each file explains its rules.
-less snapshot-rbac-<run-id>/*.yaml
+less "snapshot-rbac-${RUN_ID}"/*.yaml
 
 # 4. Grant it, once you are satisfied.
-kubectl apply -f snapshot-rbac-<run-id>/
+kubectl apply -f "snapshot-rbac-${RUN_ID}/"
 
 # 5. Capture snapshots as that ServiceAccount, as often as you like.
 aicr snapshot \
@@ -306,7 +307,7 @@ aicr snapshot \
   --output cm://gpu-operator/aicr-snapshot
 
 # 6. Revoke the grant when the ServiceAccount no longer needs it.
-kubectl delete -f snapshot-rbac-<run-id>/
+kubectl delete -f "snapshot-rbac-${RUN_ID}/"
 ```
 
 Step 2 does **not** check that the ServiceAccount exists — it contacts no
@@ -345,7 +346,8 @@ list, and no `aicr snapshot` or `aicr validate` invocation deletes them.
 Teardown is one command, which is why keeping the directory is worth it:
 
 ```shell
-kubectl delete -f snapshot-rbac-<run-id>/
+RUN_ID="20260821-142233-9f3a1c0b7e2d4a55"  # replace with the run ID in your snapshot-rbac directory name
+kubectl delete -f "snapshot-rbac-${RUN_ID}/"
 ```
 
 If you no longer have the directory, delete the objects by name instead:
@@ -530,28 +532,29 @@ pod and carries only `app.kubernetes.io/name`, `app.kubernetes.io/component` and
 [Job Completes but No Output](#job-completes-but-no-output).)
 
 ```shell
-# From the failing Job (or use the runID the CLI logged at start).
-RUN_ID=$(kubectl get job -n gpu-operator <job-name> -o jsonpath='{.metadata.labels.aicr\.run/run-id}')
+# From the failing Job (or set RUN_ID to the runID the CLI logged at start).
+JOB_NAME="aicr-20260821-142233-9f3a1c0b7e2d4a55"  # replace with the failing Job's name
+RUN_ID="$(kubectl get job -n gpu-operator "${JOB_NAME}" -o jsonpath='{.metadata.labels.aicr\.run/run-id}')"
 
-SA=$(kubectl get sa -n gpu-operator -l app.kubernetes.io/name=aicr,aicr.run/run-id=$RUN_ID -o jsonpath='{.items[0].metadata.name}')
-kubectl auth can-i get nodes --as=system:serviceaccount:gpu-operator:$SA
-kubectl auth can-i get pods --as=system:serviceaccount:gpu-operator:$SA
+SA="$(kubectl get sa -n gpu-operator -l "app.kubernetes.io/name=aicr,aicr.run/run-id=${RUN_ID}" -o jsonpath='{.items[0].metadata.name}')"
+kubectl auth can-i get nodes --as="system:serviceaccount:gpu-operator:${SA}"
+kubectl auth can-i get pods --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list controllers.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list nodesets.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list loginsets.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list restapis.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list accountings.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list mariadbs.k8s.mariadb.com --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list storageclasses.storage.k8s.io \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list perconaservermongodbs.psmdb.percona.com --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 ```
 
 ### Job Pending
@@ -576,8 +579,9 @@ Check ConfigMap and container logs:
 ```shell
 # Every name below is run-scoped, so start from the run ID. The CLI logs it
 # when it starts ("snapshot agent run: runID=..."); this reads it back off the
-# Job instead. Substitute your own Job name (or use the logged run ID).
-RUN_ID=$(kubectl get job -n gpu-operator <job-name> -o jsonpath='{.metadata.labels.aicr\.run/run-id}')
+# Job instead. Set JOB_NAME to your own Job (or set RUN_ID to the logged run ID).
+JOB_NAME="aicr-20260821-142233-9f3a1c0b7e2d4a55"  # replace with your snapshot Job's name
+RUN_ID="$(kubectl get job -n gpu-operator "${JOB_NAME}" -o jsonpath='{.metadata.labels.aicr\.run/run-id}')"
 
 # Check if the staging ConfigMap was created. Without an explicit
 # "-o cm://<namespace>/<name>", the agent stages its result in a run-scoped
@@ -588,10 +592,10 @@ RUN_ID=$(kubectl get job -n gpu-operator <job-name> -o jsonpath='{.metadata.labe
 # carry the aicr.run/run-id label the Job and RBAC resources do. Address it by
 # name: with concurrent runs, the label selector below matches every run's
 # staging ConfigMap plus any delivered cm:// artifact in the namespace.
-kubectl get configmap -n gpu-operator aicr-agent-snapshot-$RUN_ID
+kubectl get configmap -n gpu-operator "aicr-agent-snapshot-${RUN_ID}"
 
 # View ConfigMap contents
-kubectl get configmap -n gpu-operator aicr-agent-snapshot-$RUN_ID -o yaml
+kubectl get configmap -n gpu-operator "aicr-agent-snapshot-${RUN_ID}" -o yaml
 
 # Or list every aicr-written ConfigMap in the namespace (all runs)
 kubectl get configmap -n gpu-operator -l app.kubernetes.io/name=aicr
@@ -653,7 +657,8 @@ select on it: its value changes every invocation.
 Inspect the named object and delete it yourself if it is a stale leftover:
 
 ```shell
-kubectl get role -n gpu-operator aicr-<run-id> -o yaml
+RUN_ID="20260821-142233-9f3a1c0b7e2d4a55"  # replace with the run ID from the warning
+kubectl get role -n gpu-operator "aicr-${RUN_ID}" -o yaml
 ```
 
 The staging ConfigMap is warned about the same way, but proved differently. It
@@ -677,7 +682,8 @@ liveJobUID=<other-uid>
 Delete it by hand once you have confirmed it is not a live run's:
 
 ```shell
-kubectl get cm -n gpu-operator aicr-agent-snapshot-<run-id> -o yaml
+RUN_ID="20260821-142233-9f3a1c0b7e2d4a55"  # replace with the run ID from the warning
+kubectl get cm -n gpu-operator "aicr-agent-snapshot-${RUN_ID}" -o yaml
 ```
 
 ## Security Considerations
