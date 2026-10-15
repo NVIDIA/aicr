@@ -48,6 +48,8 @@ resource "helm_release" "pre" {
   timeout = var.timeout
   atomic  = var.atomic
 
+  disable_openapi_validation = var.disable_openapi_validation
+
   lifecycle {
     replace_triggered_by = [terraform_data.cluster]
   }
@@ -145,6 +147,8 @@ resource "helm_release" "readiness" {
   # preempt it. Same derivation as deploy.sh's --timeout for this release.
   wait    = true
   timeout = 5700
+
+  disable_openapi_validation = var.disable_openapi_validation
 
   depends_on = [helm_release.this, helm_release.post]
 
