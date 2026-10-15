@@ -284,6 +284,11 @@ type Generator struct {
 	// vendoring shape.
 	VendorCharts bool
 
+	// Puller fetches upstream chart bytes when VendorCharts is set. nil
+	// resolves to a default *CLIChartPuller; tests inject a stub here
+	// without touching package state. Ignored when VendorCharts is false.
+	Puller localformat.ChartPuller
+
 	// Serial assigns each folder a strictly increasing sync-wave equal to its
 	// linear position instead of the dependency-depth band (waveForFolder),
 	// so components deploy one at a time in deployment order. Off by default
@@ -543,7 +548,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// charts, the values.yaml/cluster-values.yaml split via DynamicPaths, and
 	// install-related content. This deployer adds the Argo Application file
 	// inside each folder plus the top-level app-of-apps.yaml afterwards.
-	lfComponents := g.toLocalformatComponents(components)
+	var chartDigests map[string]string
+	if g.VendorCharts {
+		var digestErr error
+		chartDigests, digestErr = deployer.ResolveChartDigests(ctx, g.RecipeResult.DataProvider(), components)
+		if digestErr != nil {
+			return nil, digestErr
+		}
+	}
+	lfComponents := g.toLocalformatComponents(components, chartDigests)
 	writeResult, lfErr := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
@@ -552,6 +565,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		ComponentPostManifests: g.ComponentPostManifests,
 		ComponentReadiness:     g.ComponentReadiness,
 		VendorCharts:           g.VendorCharts,
+		Puller:                 g.Puller,
 	})
 	if lfErr != nil {
 		// localformat.Write returns StructuredErrors; propagate as-is.
@@ -766,7 +780,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // inputs consumed by localformat.Write. Mirrors helm.toLocalformatComponents;
 // not lifted into a shared helper because the two callers carry slightly
 // different fields (helm uses ComponentData, argocd uses ComponentRef).
-func (g *Generator) toLocalformatComponents(refs []recipe.ComponentRef) []localformat.Component {
+func (g *Generator) toLocalformatComponents(refs []recipe.ComponentRef, chartDigests map[string]string) []localformat.Component {
 	out := make([]localformat.Component, 0, len(refs))
 	for _, ref := range refs {
 		chart := ref.EffectiveChart()
@@ -781,6 +795,7 @@ func (g *Generator) toLocalformatComponents(refs []recipe.ComponentRef) []localf
 			ChartName:    chart,
 			Version:      ref.Version,
 			IsOCI:        strings.HasPrefix(ref.Source, "oci://"),
+			ChartDigest:  chartDigests[ref.Name],
 			Tag:          ref.Tag,
 			Path:         ref.Path,
 			Values:       values,

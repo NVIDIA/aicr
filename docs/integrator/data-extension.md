@@ -74,7 +74,10 @@ External components in this file are merged with the embedded registry; on
 name collision, the external definition wins. An entry replaces its embedded
 counterpart **wholesale** — to override just `helm.defaultVersion`, copy the
 full embedded entry and change that one field, or the other coordinates
-(repository, chart, scheduling paths) are silently dropped.
+(repository, chart, scheduling paths) are silently dropped. If the entry sets
+`helm.defaultDigest`, update or remove it with the version: the digest names
+one chart archive, so a stale one fails every `--vendor-charts` bundle of
+that component.
 
 Overriding a component's `defaultVersion` this way takes effect for every
 embedded overlay that references the component: embedded overlays do not pin

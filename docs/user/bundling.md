@@ -171,6 +171,14 @@ timestamp — the record feeds `checksums.txt`, which is the subject of the
 bundle attestation, so a wall-clock field would make every bundle
 irreproducible.
 
+`warnings` is reserved for the non-blocking warnings `aicr bundle` prints in
+its `Note:` block. Each entry has a stable UPPER_SNAKE `code`, an optional
+`component`, and a `message` that may change. This release reads the field
+but does not write it yet: `bundle-info.yaml` is decoded strictly, and a
+release that predates the field rejects a record that carries it, so a release
+that reads it ships before one that writes it. Until then, warnings appear
+only in the `Note:` block.
+
 Below is a fully populated example, generated from the shipped serializer and
 extended with fields (`repoURL`, `provenance`, an injected `-post`/`-readiness`
 pair) that a single bundle rarely exercises all at once. Key order is

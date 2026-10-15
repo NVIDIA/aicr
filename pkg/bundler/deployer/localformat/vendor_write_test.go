@@ -16,6 +16,8 @@ package localformat_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +25,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // vendorFetchTimeout bounds the vendor path's kustomize subprocess when the
@@ -469,5 +473,102 @@ func TestWrite_VendorCharts_KustomizeFallthrough(t *testing.T) {
 	// decision is what we're pinning here.)
 	if len(recs) != 0 {
 		t.Errorf("kustomize component should not produce vendor records, got %d (err=%v)", len(recs), err)
+	}
+}
+
+// TestVerifyChartDigest pins the comparison a vendored chart passes before it
+// is written: the SHA-256 of the pulled bytes against the registry pin. The
+// puller's own VendorRecord is not consulted, so a puller that misreports
+// its digest cannot vouch for bytes that do not match.
+func TestVerifyChartDigest(t *testing.T) {
+	tgz := []byte("chart archive bytes")
+	sum := sha256.Sum256(tgz)
+	match := "sha256:" + hex.EncodeToString(sum[:])
+	other := "sha256:" + strings.Repeat("0", 64)
+
+	tests := []struct {
+		name    string
+		pinned  string
+		wantErr bool
+	}{
+		{name: "no pin verifies nothing", pinned: ""},
+		{name: "matching pin", pinned: match},
+		{name: "mismatching pin", pinned: other, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := localformat.VerifyChartDigest(localformat.Component{
+				Name: "nfd", ChartName: "node-feature-discovery", Version: "0.16.1", ChartDigest: tt.pinned,
+			}, tgz)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("VerifyChartDigest() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeConflict)
+			for _, want := range []string{`"nfd"`, match, other} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %v, want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestWrite_VendorCharts_DigestPin covers the pin on the Write path: a match
+// vendors as usual, and a mismatch fails the bundle before the tarball is
+// written, so a substituted chart never lands in the bundle.
+func TestWrite_VendorCharts_DigestPin(t *testing.T) {
+	tgz := []byte("FAKE TGZ for nfd")
+	sum := sha256.Sum256(tgz)
+	match := "sha256:" + hex.EncodeToString(sum[:])
+
+	for _, tt := range []struct {
+		name    string
+		pinned  string
+		wantErr bool
+	}{
+		{name: "matching pin vendors", pinned: match},
+		{name: "mismatching pin fails before writing", pinned: "sha256:" + strings.Repeat("0", 64), wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			outDir := t.TempDir()
+			res, err := localformat.Write(context.Background(), localformat.Options{
+				OutputDir: outDir,
+				Components: []localformat.Component{{
+					Name:        "nfd",
+					Namespace:   "node-feature-discovery",
+					Repository:  "https://kubernetes-sigs.github.io/node-feature-discovery/charts",
+					ChartName:   "node-feature-discovery",
+					Version:     "0.16.1",
+					ChartDigest: tt.pinned,
+				}},
+				VendorCharts: true,
+				Puller:       &fakePuller{bytesByName: map[string][]byte{"nfd": tgz}},
+			})
+			tgzPath := filepath.Join(outDir, "001-nfd", "charts", "node-feature-discovery-0.16.1.tgz")
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("Write: %v", err)
+				}
+				if _, statErr := os.Stat(tgzPath); statErr != nil {
+					t.Errorf("vendored tarball missing: %v", statErr)
+				}
+				// fakePuller reports "deadbeef"; provenance must name the
+				// bytes actually written instead.
+				if got := res.VendoredCharts[0].SHA256; "sha256:"+got != match {
+					t.Errorf("VendorRecord.SHA256 = %q, want the written archive's %q", got, match)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Write() error = nil, want the digest mismatch")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeConflict)
+			if _, statErr := os.Stat(tgzPath); !os.IsNotExist(statErr) {
+				t.Errorf("tarball stat error = %v, want it never written", statErr)
+			}
+		})
 	}
 }

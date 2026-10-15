@@ -106,7 +106,7 @@ components:
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper under both vendored and non-vendored layouts (manifests create CRs of CRDs the chart installs) |
 
 `HelmConfig`: `defaultRepository`, `defaultChart`, `defaultVersion`,
-`defaultNamespace`. `KustomizeConfig`: `defaultSource`, `defaultPath`,
+`defaultDigest`, `defaultNamespace`. `KustomizeConfig`: `defaultSource`, `defaultPath`,
 `defaultTag`. A component must have *either* `helm` or `kustomize`,
 not both.
 
