@@ -17,8 +17,13 @@
 package recipes_test
 
 import (
+	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -132,4 +137,122 @@ func TestGenericGB300MaintenanceOperatorSizing(t *testing.T) {
 		return
 	}
 	t.Fatal("network-operator component not found in the resolved generic GB300 recipe")
+}
+
+// TestGenericGB300NicConfigurationDaemonResources renders the generic GB300
+// NicClusterPolicy with the recipe's effective network-operator values and
+// checks that the nic-configuration-daemon resources come from those values,
+// so a networkoperator override reaches the policy.
+func TestGenericGB300NicConfigurationDaemonResources(t *testing.T) {
+	t.Parallel()
+
+	const policyManifest = "nic-cluster-policy-generic-gb300.yaml"
+
+	tests := []struct {
+		name           string
+		overrides      map[string]string
+		wantLimitMem   string
+		wantRequestMem string
+	}{
+		{
+			name:           "recipe defaults",
+			wantLimitMem:   "2Gi",
+			wantRequestMem: "256Mi",
+		},
+		{
+			name: "override reaches the policy",
+			overrides: map[string]string{
+				"nicConfigurationOperator.configurationDaemon.resources.limits.memory":   "4Gi",
+				"nicConfigurationOperator.configurationDaemon.resources.requests.memory": "1Gi",
+			},
+			wantLimitMem:   "4Gi",
+			wantRequestMem: "1Gi",
+		},
+	}
+
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceGeneric,
+		Accelerator: recipe.CriteriaAcceleratorGB300,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+	}
+	result, err := recipe.NewBuilder().BuildFromCriteriaWithProfile(t.Context(), criteria, "")
+	if err != nil {
+		t.Fatalf("BuildFromCriteriaWithProfile: %v", err)
+	}
+	var ref *recipe.ComponentRef
+	for i := range result.ComponentRefs {
+		if result.ComponentRefs[i].Name == "network-operator" {
+			ref = &result.ComponentRefs[i]
+			break
+		}
+	}
+	if ref == nil {
+		t.Fatal("network-operator component not found in the resolved generic GB300 recipe")
+	}
+	var manifestPath string
+	for _, p := range ref.ManifestFiles {
+		if strings.HasSuffix(p, policyManifest) {
+			manifestPath = p
+		}
+	}
+	if manifestPath == "" {
+		t.Fatalf("network-operator manifestFiles %v do not include %s", ref.ManifestFiles, policyManifest)
+	}
+	content, err := recipe.GetManifestContentWithContext(t.Context(), nil, manifestPath)
+	if err != nil {
+		t.Fatalf("load %s: %v", manifestPath, err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			values, err := recipe.GetComponentValuesWithContext(t.Context(), nil, ref)
+			if err != nil {
+				t.Fatalf("resolve effective network-operator values: %v", err)
+			}
+			if err = component.ApplyMapOverrides(values, tt.overrides); err != nil {
+				t.Fatalf("apply overrides: %v", err)
+			}
+			rendered, err := manifest.Render(content, manifest.RenderInput{
+				ComponentName: ref.Name,
+				Values:        values,
+			})
+			if err != nil {
+				t.Fatalf("render %s: %v", manifestPath, err)
+			}
+
+			var policy struct {
+				Spec struct {
+					NicConfigurationOperator struct {
+						ConfigurationDaemon struct {
+							ContainerResources []struct {
+								Name     string            `yaml:"name"`
+								Requests map[string]string `yaml:"requests"`
+								Limits   map[string]string `yaml:"limits"`
+							} `yaml:"containerResources"`
+						} `yaml:"configurationDaemon"`
+					} `yaml:"nicConfigurationOperator"`
+				} `yaml:"spec"`
+			}
+			if err = yaml.Unmarshal(rendered, &policy); err != nil {
+				t.Fatalf("rendered policy does not parse: %v\n%s", err, rendered)
+			}
+			res := policy.Spec.NicConfigurationOperator.ConfigurationDaemon.ContainerResources
+			if len(res) != 1 || res[0].Name != "nic-configuration-daemon" {
+				t.Fatalf("configurationDaemon.containerResources = %+v, want one nic-configuration-daemon entry", res)
+			}
+			if got := res[0].Limits["memory"]; got != tt.wantLimitMem {
+				t.Errorf("limits.memory = %q, want %q (every daemon caches the cluster-wide "+
+					"NicDevice set, so its memory grows with cluster size)", got, tt.wantLimitMem)
+			}
+			if got := res[0].Requests["memory"]; got != tt.wantRequestMem {
+				t.Errorf("requests.memory = %q, want %q", got, tt.wantRequestMem)
+			}
+			if got := res[0].Requests["cpu"]; got != "100m" {
+				t.Errorf("requests.cpu = %q, want 100m", got)
+			}
+		})
+	}
 }

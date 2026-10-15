@@ -56,3 +56,14 @@ operator:
     requests:
       cpu: 500m
       memory: 2Gi
+# Read by the NicClusterPolicy manifest, not the chart. Every per-node daemon
+# caches every NicDevice in the cluster, so its working set grows with cluster
+# size.
+nicConfigurationOperator:
+  configurationDaemon:
+    resources:
+      limits:
+        memory: 2Gi
+      requests:
+        cpu: 100m
+        memory: 256Mi
