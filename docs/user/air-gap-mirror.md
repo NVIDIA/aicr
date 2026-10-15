@@ -335,7 +335,9 @@ them by the same rule, so `nvcr.io/nvidia/ai-dynamo/vllm-runtime:<version>`
 resolves to `${REGISTRY}/ai-dynamo/vllm-runtime:<version>`. Mirror both images
 to that path. The check copies the Secrets named by `--image-pull-secret` into
 its per-run namespace, so the Dynamo pods and the model-cache Job pull with the
-same credentials. `AICR_VALIDATOR_IMAGE_TAG` does not retag the Dynamo images,
-because the runtime must match the deployed Dynamo operator. Registry
-redirection does not make the check fully offline, since its model-cache Job
-still downloads weights from Hugging Face.
+same credentials. If one of those pods reports `ImagePullBackOff` or
+`InvalidImageName`, the check fails right away and names the image it could not
+pull. `AICR_VALIDATOR_IMAGE_TAG` does not retag the Dynamo images, because the
+runtime must match the deployed Dynamo operator. Registry redirection does not
+make the check fully offline, since its model-cache Job still downloads weights
+from Hugging Face.
