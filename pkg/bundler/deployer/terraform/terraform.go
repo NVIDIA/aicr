@@ -358,8 +358,9 @@ func (g *Generator) deploymentGuidance(outputDir string) (steps, notes []string)
 		}
 		connection = "The bundle does not create a cluster. It reads ~/.kube/config by default; " +
 			"set kubeconfig_path/kube_context, or cluster_host and credentials, to point it elsewhere. " +
-			"An upgrade is a regenerated bundle in a new directory: carry .terraform.lock.hcl, terraform.tfvars and the state across " +
-			"(see README.md). Regenerating into this directory fails the bundle's closed-world check once Terraform has run in it."
+			"An upgrade is a fresh bundle copied over the generated files in this directory, which keeps .terraform.lock.hcl, " +
+			"terraform.tfvars and the state (see README.md). aicr bundle never regenerates into a directory Terraform has run in: " +
+			"the closed-world check fails on those files."
 	}
 	notes = []string{
 		connection,

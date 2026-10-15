@@ -175,9 +175,10 @@ the recipe should narrow the toleration to the system nodes it means.
 
 ## Upgrades and replacements
 
-An upgrade is a regenerated bundle, generated into a **new** directory. A
-bundle is a closed set of files that `checksums.txt` attests, and `aicr bundle`
-fails its closed-world check when the output directory holds anything else.
+An upgrade is a regenerated bundle. A bundle is a closed set of files that
+`checksums.txt` attests, and `aicr bundle` fails its closed-world check when
+the output directory holds anything else, so a bundle is always generated into
+a fresh directory.
 
 Generate the new bundle beside this one, with the flags this
 one was generated with, and point the calling configuration's `source` at it.
@@ -241,8 +242,9 @@ shim exists for; see "Cluster rollover" above.
 
 `main.tf`, `versions.tf`, `variables.tf`, `outputs.tf`, `modules/component/`
 and every `NNN-<component>/` folder are generated, `cluster-values.yaml`
-included, and a regenerated bundle is a new directory (see "Upgrades and
-replacements"). Per-cluster settings belong in the calling
-configuration; for a `--dynamic` path, fill in the component's
+included, and a regenerated bundle is a new directory
+(see "Upgrades and replacements"). Per-cluster settings belong in
+the calling configuration;
+for a `--dynamic` path, fill in the component's
 `cluster-values.yaml` after each regeneration, or keep that file under your
 own version control and restore it.

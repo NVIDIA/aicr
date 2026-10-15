@@ -326,15 +326,16 @@ spec:
             check:
               ($error == null): true
 
-    - name: upgrade-is-a-new-directory
+    - name: upgrade-is-a-fresh-bundle-copied-over
       description: >
-        The README documents an upgrade as a bundle regenerated into a new
-        directory, because a bundle is a closed set of files and the one
-        Terraform has run in holds .terraform/, the lock file and the
-        operator's tfvars. Both halves are pinned here: regenerating over
+        The README documents an upgrade as a bundle generated into a fresh
+        directory and copied over the generated files in the working
+        directory, because a bundle is a closed set of files and the
+        directory Terraform has run in holds .terraform/, the lock file and
+        the operator's tfvars. Both halves are pinned here: regenerating over
         such a directory fails the closed-world check, and the documented
-        flow (fresh directory, carry the lock file and tfvars across) yields
-        byte-identical .tf files.
+        copy yields byte-identical .tf files, keeps the operator's files and
+        drops a stale component folder.
       try:
         - script:
             content: |
@@ -356,15 +357,29 @@ spec:
               fi
               grep -q 'unexpected directory' "${WORK}/.regen-out" \
                 || { echo "regeneration failed for another reason:" >&2; cat "${WORK}/.regen-out" >&2; exit 1; }
-              # The documented flow.
+              # The documented flow: a fresh bundle, verified, copied over
+              # the generated files. A folder a previous bundle numbered
+              # differently stands in for the renumbering --delete handles.
+              mkdir -p "${USED}/999-stale"
+              printf 'stale\n' > "${USED}/999-stale/values.yaml"
               ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/next" \
                 --deployer terraform
-              cp "${USED}/.terraform.lock.hcl" "${USED}/terraform.tfvars" "${USED}/terraform.tfstate" "${WORK}/next/"
+              ${AICR_BIN} verify "${WORK}/next"
+              rsync -a --delete --exclude='/.terraform/' --exclude='/.terraform.lock.hcl' \
+                --exclude='/terraform.tfvars' --exclude='/terraform.tfstate*' \
+                --exclude='/*_override.tf' --exclude='/.git/' "${WORK}/next/" "${USED}/"
               for f in main.tf variables.tf versions.tf outputs.tf \
                        modules/component/main.tf modules/component/variables.tf; do
-                diff -u "${WORK}/basic/${f}" "${WORK}/next/${f}" \
-                  || { echo "${f} differs between the first bundle and its regeneration" >&2; exit 1; }
+                diff -u "${WORK}/basic/${f}" "${USED}/${f}" \
+                  || { echo "${f} differs between the first bundle and the copied-in regeneration" >&2; exit 1; }
               done
+              for f in .terraform/providers .terraform.lock.hcl terraform.tfvars terraform.tfstate; do
+                [ -e "${USED}/${f}" ] || { echo "the copy removed ${f}, which the README says it leaves alone" >&2; exit 1; }
+              done
+              grep -q '^wait = true$' "${USED}/terraform.tfvars" \
+                || { echo "terraform.tfvars was overwritten by the copy" >&2; exit 1; }
+              [ ! -e "${USED}/999-stale" ] \
+                || { echo "the copy left a stale component folder behind" >&2; exit 1; }
               rm -f "${WORK}/.regen-out"
             check:
               ($error == null): true

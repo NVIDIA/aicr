@@ -14,8 +14,10 @@ terraform plan
 terraform apply
 ```
 
-Keep this directory as generated. Terraform's own files land here, so an
-upgrade is generated into a new directory; see "Upgrades and replacements".
+This directory is now your Terraform working directory. Keep it under version
+control as you would any other, with `.terraform/` and the state ignored. An
+upgrade is a fresh bundle copied over the generated files here; see "Upgrades
+and replacements".
 
 ## Pointing it at a cluster
 
@@ -121,29 +123,37 @@ the recipe should narrow the toleration to the system nodes it means.
 
 ## Upgrades and replacements
 
-An upgrade is a regenerated bundle, generated into a **new** directory. A
-bundle is a closed set of files that `checksums.txt` attests, and `aicr bundle`
-fails its closed-world check when the output directory holds anything else.
-Once Terraform has run here it holds `.terraform/`,
-`.terraform.lock.hcl`, `terraform.tfvars` and, with the default local backend,
-the state.
+An upgrade is a regenerated bundle. A bundle is a closed set of files that
+`checksums.txt` attests, and `aicr bundle` fails its closed-world check when
+the output directory holds anything else, so a bundle is always generated into
+a fresh directory: once Terraform has run here, this
+directory holds `.terraform/`, `.terraform.lock.hcl`, `terraform.tfvars` and,
+with the default local backend, the state.
 
-Generate the new bundle beside this one, with the flags this one was
-generated with, carry your own files across, and plan there:
+Treat the generated bundle as a build artifact and this directory as
+the working directory it is copied into. Generate the new bundle beside this
+directory, with the flags this one was generated with, verify it, and copy it
+over the generated files here:
 
 ```sh
 aicr bundle --recipe <new recipe> --output ../bundle-next --deployer terraform
-cp .terraform.lock.hcl terraform.tfvars terraform.tfstate ../bundle-next/
-cd ../bundle-next && terraform init && terraform plan
+aicr verify ../bundle-next
+rsync -a --delete --exclude='/.terraform/' --exclude='/.terraform.lock.hcl' \
+  --exclude='/terraform.tfvars' --exclude='/terraform.tfstate*' \
+  --exclude='/*_override.tf' --exclude='/.git/' ../bundle-next/ ./
+terraform init && terraform plan
 ```
 
-The lock file keeps the provider pinned, `terraform.tfvars` carries your
-settings, and `terraform.tfstate` is the local backend's state. A backend of
-your own belongs in a `backend_override.tf` beside the generated files, which
-Terraform merges into the configuration; carry it across the same way, and
-only the lock file and tfvars move with it. The child-module form
-(`--terraform-child-module`) keeps all of these in the calling configuration
-instead.
+`--delete` matters: the `NNN-<component>/` folders are renumbered on every
+bundle, and a plain copy leaves stale ones behind. Everything the excludes name
+is yours and stays: the lock file keeps the provider pinned, `terraform.tfvars`
+carries your settings, `terraform.tfstate` is the local backend's state, and a
+backend of your own lives in a `backend_override.tf` that Terraform merges into
+the configuration. Verify the fresh bundle, never this directory: verification
+is closed-world and fails on your files. With the generated files committed,
+`git diff` is the upgrade to review and the plan confirms it. The child-module
+form (`--terraform-child-module`) avoids the copy: the calling configuration
+points `source` at each generated bundle.
 
 Read the diff:
 
@@ -194,8 +204,9 @@ reverse dependency order and, like `helm uninstall`, leaves CRDs in place.
 
 `main.tf`, `versions.tf`, `variables.tf`, `outputs.tf`, `modules/component/`
 and every `NNN-<component>/` folder are generated, `cluster-values.yaml`
-included, and a regenerated bundle is a new directory (see "Upgrades and
-replacements"). Per-cluster settings belong in `terraform.tfvars`, which you carry from one generated
-bundle to the next; for a `--dynamic` path, fill in the component's
+included, and a regenerated bundle is copied over them
+(see "Upgrades and replacements"). Per-cluster settings belong in
+`terraform.tfvars`, which the copy leaves alone;
+for a `--dynamic` path, fill in the component's
 `cluster-values.yaml` after each regeneration, or keep that file under your
 own version control and restore it.
