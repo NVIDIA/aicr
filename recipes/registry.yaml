@@ -25,6 +25,11 @@
 #     defaultRepository: Helm repository URL
 #     defaultChart:      Chart name (e.g., "nvidia/gpu-operator")
 #     defaultVersion:    Default chart version if not specified in recipe
+#     defaultDigest:     Optional sha256:<hex> of the pinned chart archive (the
+#                        .tgz, for OCI charts too); --vendor-charts refuses a
+#                        pulled chart that does not match. Place it after
+#                        defaultVersion, where the Renovate annotation regex
+#                        expects the version line.
 #   kustomize:         Default Kustomize settings (for Kustomize components)
 #     defaultSource:     Git repository or OCI reference
 #     defaultPath:       Path within the repository to the kustomization

@@ -1826,3 +1826,65 @@ func TestComponentRegistryValidate_OwnsCRDsExcludeSubcharts(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadComponentRegistry_HelmDefaultDigest pins the load-time contract for
+// helm.defaultDigest: the SHA-256 of the pinned chart archive, written
+// sha256:<64 lowercase hex>, and only on an entry that pins both a chart and
+// a version. A malformed digest on any loaded registry, external --data
+// registries included, fails the load rather than reaching bundle time.
+func TestLoadComponentRegistry_HelmDefaultDigest(t *testing.T) {
+	const validDigest = "sha256:0d3b0d3f8f5c2b7a9e1c4d6f8a0b2c4e6f8a0b2c4d6e8f0a1b3c5d7e9f1a3b5c"
+	tests := []struct {
+		name         string
+		helm         string
+		noRepository bool
+		wantErr      string
+	}{
+		{name: "absent", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0"},
+		{name: "valid", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: " + validDigest},
+		{name: "missing algorithm", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: " + validDigest[len("sha256:"):],
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "wrong algorithm", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: sha512:" + validDigest[len("sha256:"):],
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "uppercase hex", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: sha256:" + strings.ToUpper(validDigest[len("sha256:"):]),
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "short", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: sha256:abc",
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "no pinned version", helm: "defaultChart: example/chart\n    defaultDigest: " + validDigest,
+			wantErr: "pins no chart version"},
+		{name: "no chart", helm: "defaultVersion: 1.0.0\n    defaultDigest: " + validDigest,
+			wantErr: "pins no chart"},
+		{name: "no repository", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: " + validDigest,
+			noRepository: true, wantErr: "pins no chart repository"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := "defaultRepository: https://charts.example.com\n    "
+			if tt.noRepository {
+				repository = ""
+			}
+			registry := fmt.Sprintf("apiVersion: aicr.run/v1beta1\nkind: %s\ncomponents:\n- name: example\n  helm:\n    %s%s\n",
+				ComponentRegistryKind, repository, tt.helm)
+			dp := newInMemoryProvider("registry-digest-"+tt.name, map[string][]byte{"registry.yaml": []byte(registry)})
+			t.Cleanup(func() { EvictCachedRegistry(dp) })
+
+			reg, err := GetComponentRegistryFor(dp)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("GetComponentRegistryFor() error = nil, want rejection containing %q", tt.wantErr)
+				}
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if !strings.Contains(err.Error(), tt.wantErr) || !strings.Contains(err.Error(), `"example"`) {
+					t.Errorf("error = %v, want it to name the component and contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetComponentRegistryFor() error = %v", err)
+			}
+			if tt.name == "valid" && reg.Get("example").Helm.DefaultDigest != validDigest {
+				t.Errorf("DefaultDigest = %q, want %q", reg.Get("example").Helm.DefaultDigest, validDigest)
+			}
+		})
+	}
+}
