@@ -525,15 +525,22 @@ percentage (`>= 50`) can never be satisfied.
 | Check | What it measures | Qualified combinations |
 |---|---|---|
 | `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100` |
-| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | none at present |
+| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | `eks` x `h100` |
 
 The catalog entry each check drives, and the node footprint it runs on, come
 from the qualification record rather than the check: for
 `nccl-cre-all-reduce-bw` on `eks` x `h100`, `communication/nccl-all-reduce` on
-two nodes. A combination with no entry skips, because it has no calibrated
-threshold to judge against. `cre-training-goodput` skips everywhere today — the
-`training/nemotron5-8b` entry it drives does not run on the CRE version the
-registry pins, so declaring the check reports a skip rather than a verdict.
+two nodes, and for `cre-training-goodput` on `eks` x `h100`,
+`training/nemotron5-8b` on two nodes. A combination with no entry skips,
+because it has no calibrated threshold to judge against.
+
+The goodput figure depends on the step count, because startup time counts
+against it: 0.5835 on two nodes and 0.5973 on one over 50 steps, measured on a
+NodeWright-tuned cluster. Both are single measurements, so set the constraint
+as a floor below the value your cluster reaches, not at it. Run it on nodes
+that completed NodeWright tuning: on a cluster that had not, with the distro
+EFA driver, no hugepages, and an 8 MB memlock limit, a two-node run hung in NCCL
+initialization. Which of those differences causes it was not isolated.
 
 **Reclaiming an interrupted run.** Both checks delete their `Certification` and
 confirm its `TrainJob`s and workload pods are gone, but a validator pod killed
