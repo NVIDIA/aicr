@@ -357,10 +357,11 @@ it applies to nothing, silently — so the audit runs on **every** change
 to the file, not just before releases. (The audit that introduced this
 rule found 12 dead statements out of 70.)
 
-Scan every image the document has product entries for (currently
-`aiperf-bench` alone; the `aicr-gate` and `aicr` statements were retired
-at revisions 12 and earlier) using the `scan-<sha>` shortcut above, then
-diff declared statements against applied rules:
+Scan every image the document has product entries for (only
+`aiperf-bench` since the `aicr-gate` and `aicr` statements were retired
+at revisions 12 and earlier; a document with no statements has nothing
+to audit) using the `scan-<sha>` shortcut above, then diff declared
+statements against applied rules:
 
 ```bash
 # Applied: unique vuln IDs suppressed via the vex namespace

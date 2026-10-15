@@ -22,6 +22,8 @@ import (
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // runEvidenceCmd builds a minimal cli.Command that exposes the
@@ -34,7 +36,7 @@ func runEvidenceCmd(t *testing.T, args []string, att aicr.EvidenceOptions) (*rec
 	var got *recipeEvidenceConfig
 	cmd := &cli.Command{
 		Name: "test",
-		Flags: []cli.Flag{
+		Flags: append([]cli.Flag{
 			&cli.StringFlag{Name: "emit-attestation"},
 			&cli.StringFlag{Name: "bom"},
 			&cli.StringFlag{Name: "push"},
@@ -42,12 +44,14 @@ func runEvidenceCmd(t *testing.T, args []string, att aicr.EvidenceOptions) (*rec
 			&cli.BoolFlag{Name: "insecure-tls"},
 			&cli.StringFlag{Name: "identity-token"},
 			&cli.BoolFlag{Name: "oidc-device-flow"},
+			&cli.BoolFlag{Name: flagNoSign},
 			&cli.BoolFlag{Name: "full"},
 			&cli.BoolFlag{Name: flagAllowMutableValidatorTags},
-		},
+		}, evidenceSigningFlags()...),
 		Action: func(_ context.Context, c *cli.Command) error {
-			got = buildRecipeEvidenceConfig(c, att)
-			return nil
+			var err error
+			got, err = buildRecipeEvidenceConfig(c, att)
+			return err
 		},
 	}
 	if err := cmd.Run(context.Background(), append([]string{"test"}, args...)); err != nil {
@@ -62,6 +66,7 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 		args    []string
 		att     aicr.EvidenceOptions
 		wantNil bool
+		wantErr bool
 		want    *recipeEvidenceConfig
 	}{
 		{
@@ -150,6 +155,38 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "signing key selects KMS signing",
+			args: []string{"--emit-attestation", "/tmp/out", "--push", "ttl.sh/x:1h",
+				"--" + flagSigningKey, "awskms:///alias/aicr-evidence", "--" + flagTLogUpload + "=false"},
+			att: aicr.EvidenceOptions{},
+			want: &recipeEvidenceConfig{
+				OutDir: "/tmp/out",
+				Push:   "ttl.sh/x:1h",
+				OIDCResolve: bundleattest.ResolveOptions{
+					SigningKey:        "awskms:///alias/aicr-evidence",
+					DisableTLogUpload: true,
+				},
+			},
+		},
+		{
+			name:    "no-sign rejects a signing key",
+			args:    []string{"--emit-attestation", "/tmp/out", "--push", "ttl.sh/x:1h", "--" + flagNoSign, "--" + flagSigningKey, "awskms:///alias/k"},
+			att:     aicr.EvidenceOptions{},
+			wantErr: true,
+		},
+		{
+			name:    "invalid signing flags fail even with config-only emission",
+			args:    []string{"--" + flagTLogUpload + "=false"},
+			att:     aicr.EvidenceOptions{OutDir: "/cfg/out"},
+			wantErr: true,
+		},
+		{
+			name:    "signing flags are inert without emission",
+			args:    []string{"--" + flagTLogUpload + "=false"},
+			att:     aicr.EvidenceOptions{},
+			wantNil: true,
+		},
+		{
 			name: "flag overrides config when both set",
 			args: []string{"--emit-attestation", "/flag/out", "--push", "ttl.sh/flag:1h"},
 			att: aicr.EvidenceOptions{
@@ -167,6 +204,10 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := runEvidenceCmd(t, tt.args, tt.att)
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				return
+			}
 			if err != nil {
 				t.Fatalf("cmd.Run: %v", err)
 			}
@@ -201,6 +242,14 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 			if got.OIDCResolve.DeviceFlow != tt.want.OIDCResolve.DeviceFlow {
 				t.Errorf("DeviceFlow = %v, want %v",
 					got.OIDCResolve.DeviceFlow, tt.want.OIDCResolve.DeviceFlow)
+			}
+			if got.OIDCResolve.SigningKey != tt.want.OIDCResolve.SigningKey {
+				t.Errorf("SigningKey = %q, want %q",
+					got.OIDCResolve.SigningKey, tt.want.OIDCResolve.SigningKey)
+			}
+			if got.OIDCResolve.DisableTLogUpload != tt.want.OIDCResolve.DisableTLogUpload {
+				t.Errorf("DisableTLogUpload = %v, want %v",
+					got.OIDCResolve.DisableTLogUpload, tt.want.OIDCResolve.DisableTLogUpload)
 			}
 			if got.Full != tt.want.Full {
 				t.Errorf("Full = %v, want %v", got.Full, tt.want.Full)

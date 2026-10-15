@@ -553,6 +553,9 @@ func TestStability_Verification(t *testing.T) {
 	_ = ev.BundleRef
 	_ = ev.ExpectedIssuer
 	_ = ev.ExpectedIdentityRegexp
+	_ = ev.Key
+	_ = ev.TrustRoot
+	_ = ev.IgnoreTLog
 	_ = ev.PlainHTTP
 	_ = ev.InsecureTLS
 	_ = ev.AllowUnpinnedTag

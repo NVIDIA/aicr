@@ -790,6 +790,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 	}
 	flags = append(flags, validateEvidenceFlags()...)
+	flags = append(flags, evidenceSigningFlags()...)
 	return append(flags,
 		configFlag(),
 		dataFlag(),
@@ -868,7 +869,7 @@ func validateEvidenceFlags() []cli.Flag {
 			Usage: `OCI registry reference (e.g. ghcr.io/myorg/aicr-evidence) to push the signed summary bundle to.
 	Sigstore keyless OIDC signing uses the same precedence chain as ` + "`aicr bundle --attest`" + `:
 	--identity-token > COSIGN_IDENTITY_TOKEN env > GitHub Actions ambient OIDC >
-	--oidc-device-flow > interactive browser flow.`,
+	--oidc-device-flow > interactive browser flow. --signing-key signs with a KMS key instead.`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
@@ -1019,7 +1020,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", flagValidatorSA, "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", "gke-gpu-pools", flagPush, flagImageRefs, flagIdentityToken); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", flagValidatorSA, "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", "gke-gpu-pools", flagPush, flagImageRefs, flagIdentityToken, flagSigningKey, flagFulcioURL, flagRekorURL, flagSigningConfig); err != nil {
 				return err
 			}
 

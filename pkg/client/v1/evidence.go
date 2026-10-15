@@ -35,8 +35,9 @@ import (
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
-// OIDCResolveOptions configures keyless-signing OIDC token resolution for a
-// pushed evidence bundle. Deliberate transparent alias of
+// OIDCResolveOptions selects how a pushed evidence bundle is signed: with the
+// KMS key SigningKey names (DisableTLogUpload skips the Rekor entry), or
+// keylessly with deferred OIDC token resolution. Deliberate transparent alias of
 // pkg/bundler/attestation.ResolveOptions, mirroring how BundleOptions exposes
 // BundleAttester: the caller (CLI/server) builds the resolution inputs and the
 // facade threads them through to attestation.Emit, which resolves the token
@@ -85,8 +86,8 @@ type EvidenceOptions struct {
 	// Client has no commit of its own, so it is supplied per call.
 	Commit string
 
-	// OIDCResolve carries keyless-signing token-resolution inputs, consumed
-	// only when Push is set and NoSign is false.
+	// OIDCResolve selects KMS signing (SigningKey) or keyless signing and
+	// carries its inputs, consumed only when Push is set and NoSign is false.
 	OIDCResolve OIDCResolveOptions
 }
 

@@ -252,6 +252,12 @@ func checkPointerFile(path, recipe, source string, al *allowlist.Allowlist) stri
 	if signer == nil {
 		return "committed pointer must be signed (attestation has no signer)"
 	}
+	// The allowlist pins keyless OIDC identities, not public keys, so nothing
+	// here can say which key a key-signed contribution must carry.
+	if signer.Issuer == attestation.KeySignerIssuer {
+		return "key-signed evidence cannot be committed upstream: the allowlist admits keyless " +
+			"signers only; sign the evidence keylessly (without --signing-key) to contribute it"
+	}
 	wantSource, err := attestation.SourceSlug(signer.Issuer, signer.Identity)
 	if err != nil {
 		return "cannot derive source slug from signer: " + err.Error()

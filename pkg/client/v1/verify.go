@@ -269,12 +269,35 @@ type EvidenceVerifyOptions struct {
 	BundleRef string
 
 	// ExpectedIssuer pins the OIDC issuer URL on the signing certificate.
-	// Empty allows any issuer.
+	// Empty allows any issuer. Keyless only: VerifyEvidence rejects it
+	// alongside Key.
 	ExpectedIssuer string
 
 	// ExpectedIdentityRegexp pins the signer's SubjectAlternativeName via
-	// regex. Empty allows any identity.
+	// regex. Empty allows any identity. Keyless only: VerifyEvidence rejects
+	// it alongside Key.
 	ExpectedIdentityRegexp string
+
+	// Key verifies evidence signed with a KMS key (`--signing-key`) instead
+	// of a keyless certificate: a KMS key URI (awskms:// | gcpkms:// |
+	// azurekms:// | hashivault://) or a path to a local PEM public key. The
+	// key is the signer pin; the verified signer is reported as issuer
+	// "key" with the key's sha256 public-key fingerprint as its identity.
+	// A KMS URI makes a live GetPublicKey call.
+	Key string
+
+	// TrustRoot is a path to a private Sigstore trusted_root.json (from a
+	// self-hosted Fulcio/Rekor). ADDITIVE to AICR's built-in public-good
+	// root, so publicly and privately signed evidence both verify.
+	TrustRoot string
+
+	// IgnoreTLog skips transparency-log verification so evidence signed
+	// with `--signing-key ... --tlog-upload=false` verifies with no
+	// transparency-log network calls. REQUIRES Key, and VerifyEvidence
+	// rejects it otherwise. Insecure relative to the default: with no
+	// transparency log there is no trusted timestamp proving when the
+	// signature was made.
+	IgnoreTLog bool
 
 	// PlainHTTP forces HTTP for registry traffic (local-registry tests).
 	PlainHTTP bool
@@ -365,6 +388,9 @@ func (c *Client) VerifyEvidence(ctx context.Context, opts EvidenceVerifyOptions)
 		BundleRef:              opts.BundleRef,
 		ExpectedIssuer:         opts.ExpectedIssuer,
 		ExpectedIdentityRegexp: opts.ExpectedIdentityRegexp,
+		Key:                    opts.Key,
+		TrustRoot:              opts.TrustRoot,
+		IgnoreTLog:             opts.IgnoreTLog,
 		PlainHTTP:              opts.PlainHTTP,
 		InsecureTLS:            opts.InsecureTLS,
 		AllowUnpinnedTag:       opts.AllowUnpinnedTag,
