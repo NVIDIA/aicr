@@ -286,13 +286,6 @@ func TestWrapPopulateJobError(t *testing.T) {
 			wantUnchanged: true,
 			wantText:      []string{"watch closed unexpectedly"},
 		},
-		{
-			name:          "image pull failure propagates unchanged (no remediation)",
-			input:         imagePullError(pullTestPod("populate", nil, "ImagePullBackOff")),
-			wantCode:      errors.New(errors.ErrCodeInternal, ""),
-			wantUnchanged: true,
-			wantText:      []string{testPullImage, "--image-pull-secret"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

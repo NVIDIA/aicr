@@ -372,11 +372,11 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 	if terr != nil {
 		return terr
 	}
-	werr := waitFailFastOnImagePull(ctx.Ctx, ctx.Clientset, config.namespace,
-		batchv1.JobNameLabel+"="+jobName, func(waitCtx context.Context) error {
-			return pod.WaitForJobCompletion(waitCtx, ctx.Clientset, config.namespace, jobName, populateTimeout)
-		})
-	if werr != nil {
+	if werr := pod.WaitForJobCompletion(ctx.Ctx, ctx.Clientset, config.namespace, jobName, populateTimeout); werr != nil {
+		if pullErr := imagePullTimeoutError(ctx.Ctx, ctx.Clientset, config.namespace,
+			batchv1.JobNameLabel+"="+jobName, werr); pullErr != nil {
+			return pullErr
+		}
 		return wrapPopulateJobError(werr, populateTimeout)
 	}
 	slog.Info("Model cache populated", "pvc", modelCachePVCName)

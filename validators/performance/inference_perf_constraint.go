@@ -50,7 +50,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/utils/ptr"
@@ -1707,12 +1706,11 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		"routingMode", config.routingMode, "routerMode", config.routerMode)
 
 	// Wait for the deployment to become ready.
-	readyErr := waitFailFastOnImagePull(ctx.Ctx, ctx.Clientset, config.namespace, "",
-		func(waitCtx context.Context) error {
-			return waitForDynamoDeploymentReady(waitCtx, ctx.DynamicClient, config)
-		})
-	if readyErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "DynamoGraphDeployment not ready", readyErr)
+	if err := waitForDynamoDeploymentReady(ctx, config); err != nil {
+		if pullErr := imagePullTimeoutError(ctx.Ctx, ctx.Clientset, config.namespace, "", err); pullErr != nil {
+			err = pullErr
+		}
+		return errors.Wrap(errors.ErrCodeInternal, "DynamoGraphDeployment not ready", err)
 	}
 
 	if config.routingMode == inferenceRoutingModeGatewayEPP {
@@ -2298,17 +2296,17 @@ func createOrUpdateFromTemplate(ctx *validators.Context, gvr schema.GroupVersion
 // waitForDynamoDeploymentReady watches the DynamoGraphDeployment until it
 // reports state=successful. Fast-paths an immediate check before starting
 // the watch so already-ready deployments return without allocating a watcher.
-func waitForDynamoDeploymentReady(ctx context.Context, client dynamic.Interface, config *inferenceWorkloadConfig) error {
+func waitForDynamoDeploymentReady(ctx *validators.Context, config *inferenceWorkloadConfig) error {
 	slog.Info("Waiting for DynamoGraphDeployment to become ready...")
 
 	readyTimeout, err := durationFromEnv(envWorkloadReadyTimeout, defaults.InferenceWorkloadReadyTimeout)
 	if err != nil {
 		return err
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, readyTimeout)
+	waitCtx, cancel := context.WithTimeout(ctx.Ctx, readyTimeout)
 	defer cancel()
 
-	existing, err := client.Resource(dynamoDeploymentGVR).
+	existing, err := ctx.DynamicClient.Resource(dynamoDeploymentGVR).
 		Namespace(config.namespace).Get(waitCtx, inferenceDeploymentName, metav1.GetOptions{})
 	switch {
 	case err == nil:
@@ -2328,7 +2326,7 @@ func waitForDynamoDeploymentReady(ctx context.Context, client dynamic.Interface,
 			"failed to read DynamoGraphDeployment before watch", err)
 	}
 
-	watcher, err := client.Resource(dynamoDeploymentGVR).
+	watcher, err := ctx.DynamicClient.Resource(dynamoDeploymentGVR).
 		Namespace(config.namespace).Watch(waitCtx, metav1.ListOptions{
 		FieldSelector:   "metadata.name=" + inferenceDeploymentName,
 		ResourceVersion: existingResourceVersion(existing),
@@ -2351,7 +2349,7 @@ func waitForDynamoDeploymentReady(ctx context.Context, client dynamic.Interface,
 				}
 				// Watch closed without cancellation — re-Get before declaring
 				// failure so an apiserver hiccup doesn't fail a ready deployment.
-				recheck, getErr := client.Resource(dynamoDeploymentGVR).
+				recheck, getErr := ctx.DynamicClient.Resource(dynamoDeploymentGVR).
 					Namespace(config.namespace).Get(waitCtx, inferenceDeploymentName, metav1.GetOptions{})
 				switch {
 				case getErr == nil:
