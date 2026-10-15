@@ -16,6 +16,7 @@ package validations
 
 import (
 	"context"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -31,6 +32,8 @@ const (
 	healthEventsAnalyzerImage = "ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.26.0"
 	healthEventsAnalyzerName  = "health-events-analyzer"
 )
+
+var analyzerRuleNameRe = regexp.MustCompile(`(?m)^\s*name\s*=\s*"([^"]+)"\s*$`)
 
 // analyzerRuleConfig returns the rendered analyzer rule config.
 func analyzerRuleConfig(t *testing.T, rendered string) string {
@@ -124,7 +127,26 @@ func TestNVSentinelHealthEventsAnalyzerChartRender(t *testing.T) {
 	if got := strings.Count(config, "evaluate_rule = true"); got != rules {
 		t.Errorf("%d of %d rules are evaluated, want all", got, rules)
 	}
-	if !strings.Contains(config, `name = "MultipleRemediations"`) {
+	// The rendered rules are exactly the ones the mixin names: one toggle,
+	// enable<Rule>Rule, per rule.
+	hea, _ := values["health-events-analyzer"].(map[string]any)
+	named := make([]string, 0, len(hea))
+	for key := range hea {
+		if rule, ok := strings.CutPrefix(key, "enable"); ok && strings.HasSuffix(rule, "Rule") {
+			named = append(named, strings.TrimSuffix(rule, "Rule"))
+		}
+	}
+	matches := analyzerRuleNameRe.FindAllStringSubmatch(config, -1)
+	rendered := make([]string, 0, len(matches))
+	for _, m := range matches {
+		rendered = append(rendered, m[1])
+	}
+	slices.Sort(named)
+	slices.Sort(rendered)
+	if !slices.Equal(rendered, named) {
+		t.Errorf("rendered rules %v, want the rules %s names %v", rendered, healthEventsAnalyzerMixinName, named)
+	}
+	if !slices.Contains(rendered, "MultipleRemediations") {
 		t.Error("rendered config has no MultipleRemediations rule")
 	}
 
@@ -136,7 +158,6 @@ func TestNVSentinelHealthEventsAnalyzerChartRender(t *testing.T) {
 	}
 
 	// Every rule toggle the mixin names, switched off.
-	hea, _ := values["health-events-analyzer"].(map[string]any)
 	off := map[string]any{}
 	mergeValuesForRender(off, values)
 	offHEA, _ := off["health-events-analyzer"].(map[string]any)
