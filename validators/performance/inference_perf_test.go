@@ -2001,6 +2001,101 @@ func TestEnsureWorkloadPullSecrets(t *testing.T) {
 	}
 }
 
+// TestInferencePodsReferenceWorkloadPullSecrets verifies that, given a
+// validator pod with image pull Secrets, the populate Job and every component
+// of both Dynamo templates reference only pull Secrets that exist in the
+// workload namespace.
+func TestInferencePodsReferenceWorkloadPullSecrets(t *testing.T) {
+	podSecrets := []string{"regcred", "mirror"}
+	ctx, client := pullSecretTestContext(t, podSecrets,
+		dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"a":{}}}`),
+		dockerConfigSecret(testValidatorNamespace, "mirror", `{"auths":{"b":{}}}`),
+	)
+	refs, err := ensureWorkloadPullSecrets(ctx, testWorkloadNamespace)
+	if err != nil {
+		t.Fatalf("ensureWorkloadPullSecrets() error: %v", err)
+	}
+	cfg := &inferenceWorkloadConfig{
+		runID:          "run-1",
+		namespace:      testWorkloadNamespace,
+		model:          "Qwen/Qwen3-8B",
+		routerMode:     dynRouterModeDefault,
+		gpuCount:       1,
+		modelCacheSize: defaultModelCacheSize,
+		pullSecrets:    refs,
+	}
+
+	assertResolvable := func(t *testing.T, owner string, names []string) {
+		t.Helper()
+		if !reflect.DeepEqual(names, podSecrets) {
+			t.Errorf("%s imagePullSecrets = %v, want %v", owner, names, podSecrets)
+		}
+		for _, name := range names {
+			if _, err := client.CoreV1().Secrets(testWorkloadNamespace).Get(t.Context(), name, metav1.GetOptions{}); err != nil {
+				t.Errorf("%s references pull secret %q, which is not in namespace %s: %v", owner, name, testWorkloadNamespace, err)
+			}
+		}
+	}
+
+	t.Run("populate Job", func(t *testing.T) {
+		job := buildModelCachePopulateJob("aicr-model-cache-populate-run-1", cfg)
+		names := make([]string, 0, len(job.Spec.Template.Spec.ImagePullSecrets))
+		for _, ref := range job.Spec.Template.Spec.ImagePullSecrets {
+			names = append(names, ref.Name)
+		}
+		assertResolvable(t, "populate Job", names)
+	})
+
+	for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
+		t.Run(tmpl, func(t *testing.T) {
+			obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", tmpl), inferenceTemplateData(cfg))
+			if err != nil {
+				t.Fatalf("parseYAMLTemplate() error: %v", err)
+			}
+			if err = applyInferenceWorkerScheduling(obj, cfg); err != nil {
+				t.Fatalf("applyInferenceWorkerScheduling() error: %v", err)
+			}
+			components, _, err := unstructured.NestedSlice(obj.Object, "spec", "components")
+			if err != nil || len(components) == 0 {
+				t.Fatalf("read spec.components: %v (len %d)", err, len(components))
+			}
+			for _, raw := range components {
+				component, _ := raw.(map[string]any)
+				name, _ := component[keyName].(string)
+				secrets, _, err := unstructured.NestedSlice(componentPodSpec(t, obj, name), "imagePullSecrets")
+				if err != nil {
+					t.Fatalf("read %s imagePullSecrets: %v", name, err)
+				}
+				names := make([]string, 0, len(secrets))
+				for _, s := range secrets {
+					entry, _ := s.(map[string]any)
+					secretName, _ := entry[keyName].(string)
+					names = append(names, secretName)
+				}
+				assertResolvable(t, name, names)
+			}
+		})
+	}
+}
+
+// TestApplyInferenceWorkerScheduling_NoPullSecrets verifies components carry
+// no imagePullSecrets when the validator pod has none.
+func TestApplyInferenceWorkerScheduling_NoPullSecrets(t *testing.T) {
+	cfg := &inferenceWorkloadConfig{namespace: testWorkloadNamespace, model: "Qwen/Qwen3-8B", routerMode: dynRouterModeDefault, gpuCount: 1}
+	obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", "dynamo-deployment.yaml"), inferenceTemplateData(cfg))
+	if err != nil {
+		t.Fatalf("parseYAMLTemplate() error: %v", err)
+	}
+	if err := applyInferenceWorkerScheduling(obj, cfg); err != nil {
+		t.Fatalf("applyInferenceWorkerScheduling() error: %v", err)
+	}
+	for _, name := range []string{"Frontend", "VllmDecodeWorker"} {
+		if _, found, _ := unstructured.NestedSlice(componentPodSpec(t, obj, name), "imagePullSecrets"); found {
+			t.Errorf("%s carries imagePullSecrets with no validator pull secrets", name)
+		}
+	}
+}
+
 // TestEnsureNamespace covers namespace adoption: a fresh namespace is
 // created and labeled, an existing one is reused only if it carries our
 // ownership labels, and a create-race winner (AlreadyExists) is read back

@@ -1765,10 +1765,11 @@ func applyWorkerClaimTemplate(ctx *validators.Context, config *inferenceWorkload
 }
 
 // applyInferenceWorkerScheduling injects nodeSelector, tolerations, and the
-// mode-dispatched worker GPU wiring into each v1beta1 component's podTemplate:
-// DRA resourceClaims (bound to the applied ResourceClaimTemplate) when
-// config.useDRAWorkerClaims(), device-plugin GPU limits
-// (resources.limits["nvidia.com/gpu"]) otherwise. Operating on the
+// mode-dispatched worker GPU wiring into each v1beta1 component's
+// podTemplate. Workers get DRA resourceClaims (bound to the applied
+// ResourceClaimTemplate) when config.useDRAWorkerClaims(), and device-plugin
+// GPU limits (resources.limits["nvidia.com/gpu"]) otherwise. Every component
+// also gets imagePullSecrets referencing config.pullSecrets. Operating on the
 // unstructured object (rather than text-substituting into the YAML template)
 // keeps taint values safe from YAML special characters.
 func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
@@ -1787,6 +1788,11 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 	containerClaimRefs := []any{map[string]any{
 		keyName: "gpu",
 	}}
+
+	pullSecrets := make([]any, 0, len(config.pullSecrets))
+	for _, ref := range config.pullSecrets {
+		pullSecrets = append(pullSecrets, map[string]any{keyName: ref.Name})
+	}
 
 	for i, compRaw := range components {
 		component, ok := compRaw.(map[string]any)
@@ -1820,6 +1826,9 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 				ns[k] = v
 			}
 			podSpec["nodeSelector"] = ns
+		}
+		if len(pullSecrets) > 0 {
+			podSpec["imagePullSecrets"] = pullSecrets
 		}
 
 		// Worker GPU wiring, mode-dispatched: DRA resourceClaims where
