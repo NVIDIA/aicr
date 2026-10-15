@@ -795,7 +795,7 @@ spec:
     - nvsentinel-observe
 ```
 
-The steps are mutually exclusive: they set the same toggles, so composing two fails at recipe resolution. To move up a step, replace the mixin name.
+The steps are mutually exclusive: they set the same toggles, so composing two fails at recipe resolution. To move up a step, replace the mixin name; moving to `nvsentinel-remediation` also requires adding `nvsentinel-health-events-analyzer`, or the bundle fails.
 
 On a `platform: slurm` recipe, `nvsentinel-remediation` also needs `nvsentinel-slinky-drainer`; without it the bundle fails, because the drain could never finish and the node would never be repaired. `nvsentinel-quarantine` works without it and leaves a faulty Slurm node cordoned in `draining`. See [Slurm Drain Through Slinky](#slurm-drain-through-slinky).
 
