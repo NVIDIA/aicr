@@ -75,7 +75,7 @@ data:
   [Pre-flight permission gate](#pre-flight-permission-gate). Pointing
   `--service-account-name` at a ServiceAccount you provisioned yourself
   requires **no** RBAC permissions at all, and no permission on the
-  Namespace object itself: the run leaves it untouched
+  Namespace object itself: the run leaves it untouched.
 
 ## Quick Start
 
