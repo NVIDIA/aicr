@@ -67,6 +67,7 @@ func validateRecord(name string, u *ComponentUpgrades, pin string) []string {
 		v = append(v, checkPinCeiling(where, &u.Transitions[i], pin)...)
 		v = append(v, checkDirectional(where, &u.Transitions[i])...)
 		v = append(v, checkHooks(where, &u.Transitions[i])...)
+		v = append(v, checkAffectedResources(where, &u.Transitions[i])...)
 	}
 	v = append(v, checkCoverage(u.Component, u.Transitions, pin)...)
 	v = append(v, checkDistinctBoundaries(u.Component, u.Transitions)...)
@@ -613,6 +614,28 @@ func checkHooks(where string, t *Transition) []string {
 			v = append(v, fmt.Sprintf(
 				"%s hook %d file %q must live under %s, the tree tools/bom walks",
 				where, i, h.File, hookDir))
+		}
+	}
+	return v
+}
+
+// checkAffectedResources implements rule 10, returning a violation for each
+// core Secret kind in t's affectedResources. A kind matches case-insensitively,
+// ignoring surrounding space.
+func checkAffectedResources(where string, t *Transition) []string {
+	// Listing Secrets needs a permission that reads every Secret's data.
+	var v []string
+	for i, a := range t.AffectedResources {
+		if strings.TrimSpace(a.Group) != "" {
+			continue
+		}
+		for _, kind := range a.Kinds {
+			// Discovery maps a lowercased kind to the same resource.
+			if strings.EqualFold(strings.TrimSpace(kind), "Secret") {
+				v = append(v, fmt.Sprintf(
+					"%s affectedResources %d names core Secret, which the at-risk scan may not list "+
+						"because the permission to list Secrets reads every Secret's data", where, i))
+			}
 		}
 	}
 	return v

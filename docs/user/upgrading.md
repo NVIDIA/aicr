@@ -71,7 +71,7 @@ aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml \
 
 The scan is its own axis rather than a mode. It needs a cluster wherever the `--from` side came from, so scanning a live cluster while comparing two artifacts, as above, is a normal thing to do. `--from cluster` turns it on for you, and `--scan-cluster=false` turns it back off if you do not want it there.
 
-For the resource kinds the *crossed* transition records name, it lists each kind cluster-wide and reports every object carrying neither Helm's ownership markers (`app.kubernetes.io/managed-by=Helm` together with a `meta.helm.sh/release-name` annotation) nor Argo CD's `argocd.argoproj.io/tracking-id`. What it is trying to stop is your own custom resources going away with a CRD that a component removes: AICR did not create them and cannot put them back.
+For the resource kinds the *crossed* transition records name, it lists each kind cluster-wide and reports every object carrying neither Helm's ownership markers (`app.kubernetes.io/managed-by=Helm` together with a `meta.helm.sh/release-name` annotation, or with a `helm.sh/hook` annotation naming a `pre-upgrade` or `post-upgrade` phase, since Helm never gives a hook a release name and an upgrade re-creates only those hooks) nor Argo CD's `argocd.argoproj.io/tracking-id`. It requests only each object's metadata. What it is trying to stop is your own custom resources going away with a CRD that a component removes. AICR did not create them and cannot put them back.
 
 Because the test is positive, an object carrying no marker AICR recognizes is reported. Something a fourth tool owns will show up here. That is the intended direction of error: a spurious line of output costs you a moment, a missing one costs the object.
 
