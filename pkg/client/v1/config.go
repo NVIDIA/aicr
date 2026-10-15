@@ -722,7 +722,9 @@ func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
 //     binary rather than of the document. Set it after deriving.
 //   - OIDCResolve is excluded by the spec itself: a keyless-signing identity
 //     token is a short-lived secret and must not live in a version-controlled
-//     file. The caller resolves it at sign time.
+//     file, and the signing mode it selects (a KMS SigningKey, private
+//     Sigstore endpoints) is set per invocation. The caller resolves it at
+//     sign time.
 //   - NoSign and Full are command-line-only, for the same reason FailOnError
 //     and IgnoreTLog are. Both weaken the ARTIFACT: NoSign pushes an unsigned
 //     bundle, Full ships unredacted payloads. A checked-in file that can

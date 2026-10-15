@@ -95,7 +95,8 @@ type EmitOptions struct {
 	// that is not a commit SHA (e.g. the unstamped "unknown") is omitted.
 	AICRCommit string
 
-	// OIDCResolve is consulted only when Push is set. Resolution is
+	// OIDCResolve is consulted only when Push is set. A SigningKey selects
+	// KMS signing and no token is resolved; otherwise resolution is
 	// deferred until adjacent to SignStatement so Fulcio's nonce-binding
 	// window is respected — a long Helm-render-and-push phase between
 	// resolve and sign otherwise invalidates the token.
@@ -354,13 +355,19 @@ type signPushOptions struct {
 //  1. Push the bundle directory as an OCI artifact → artifactDigest.
 //  2. Build an artifact-subject Statement (subject.digest = artifactDigest)
 //     carrying the same predicate body.
-//  3. Resolve the OIDC token (deferred until here — see signPushOptions.OIDCResolve).
-//  4. Sign the Statement → Sigstore Bundle JSON.
+//  3. Sign the Statement → Sigstore Bundle JSON, with the KMS key or a
+//     keyless OIDC token resolved only now (see signEvidenceStatement).
+//  4. Write the signed bundle beside the local evidence for inspection.
 //  5. Attach the Sigstore Bundle as an OCI Referrer so cosign's
 //     /v2/<name>/referrers/<digest> discovery finds the signature.
 func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emitOutcome, error) {
 	if opts.Push == "" {
 		return emitOutcome{}, nil
+	}
+	if !opts.NoSign {
+		if err := validateEvidenceSigningMode(opts.OIDCResolve); err != nil {
+			return emitOutcome{}, err
+		}
 	}
 
 	// Resolve the push target. When the operator omits a tag, derive a
@@ -406,28 +413,7 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 		return emitOutcome{}, err
 	}
 
-	logOIDCResolveMode(opts.OIDCResolve)
-	// OIDCAuthTimeout caps interactive browser / device-code flows so a
-	// stalled user does not hold the parent (sign) context open
-	// indefinitely; pre-fetched and ambient paths complete well below this
-	// bound, so the cap only kicks in on the genuinely interactive paths
-	// that match defaults.OIDCAuthTimeout's intent.
-	resolveCtx, resolveCancel := context.WithTimeout(ctx, defaults.OIDCAuthTimeout)
-	token, tokenErr := bundleattest.ResolveOIDCToken(resolveCtx, opts.OIDCResolve)
-	resolveCancel()
-	if tokenErr != nil {
-		return emitOutcome{}, tokenErr
-	}
-
-	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
-	defer signCancel()
-	// Map the full resolved signing target (Fulcio/Rekor endpoints plus the
-	// Rekor v2 signing-config selection) through the shared helper so evidence
-	// signing stays in lockstep with bundle/catalog signing — evidence defaults
-	// to Rekor v2 via ResolveOptions.UseTUFSigningConfig. Empty endpoint values
-	// fall back to the public-good defaults inside SignStatement.
-	signRes, err := bundleattest.SignStatement(signCtx, artifactStmt,
-		bundleattest.SignOptionsFromResolve(token, opts.OIDCResolve))
+	signRes, err := signEvidenceStatement(ctx, artifactStmt, opts.OIDCResolve)
 	if err != nil {
 		return emitOutcome{}, err
 	}
@@ -490,7 +476,7 @@ func buildPointerInputsFromOutcome(bundle *Bundle, out emitOutcome) PointerInput
 	}
 	// PointerSignerFromSignature applies the zero-Rekor rule: a
 	// SignedAttestation.RekorLogIndex of 0 is the "no Rekor entry" sentinel
-	// (e.g. --no-rekor) and maps to a nil index. nil when out.Sign is nil.
+	// (e.g. --tlog-upload=false) and maps to a nil index. nil when out.Sign is nil.
 	in.Signer = PointerSignerFromSignature(out.Sign)
 	return in
 }

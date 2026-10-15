@@ -121,6 +121,17 @@ func TestPointerCopyToHint(t *testing.T) {
 	if got := PointerCopyToHint(unsigned); strings.HasPrefix(got, "recipes/evidence/") {
 		t.Errorf("unsigned hint should not be a path, got %q", got)
 	}
+
+	// The evidence gate rejects key-signed pointers, so none gets a path.
+	keySigned := *signed
+	keySigned.Attestations = []PointerAttestation{signed.Attestations[0]}
+	keySigned.Attestations[0].Signer = &PointerSigner{
+		Identity: "sha256:d93f4a5e57c66728cb33edea59e9fc0fdf246a5361a0b8c50905e497ef0e5c2b",
+		Issuer:   KeySignerIssuer,
+	}
+	if got := PointerCopyToHint(&keySigned); strings.HasPrefix(got, "recipes/evidence/") {
+		t.Errorf("key-signed hint should not be a path, got %q", got)
+	}
 }
 
 func TestRelocatePointerToCanonical(t *testing.T) {

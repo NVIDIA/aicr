@@ -100,15 +100,15 @@ Output as JSON:
 	must not use top-level alternation. Default pins to the release workflow on tag refs.`,
 			},
 			&cli.StringFlag{
-				Name:  "key",
+				Name:  flagVerifyKey,
 				Usage: "Verify a key-signed bundle attestation against a KMS key URI (awskms:// | gcpkms:// | azurekms:// | hashivault://) or a local PEM public-key file. The counterpart to `bundle --signing-key`. Coexists with --certificate-identity-regexp (which pins the separate binary attestation).",
 			},
 			&cli.StringFlag{
-				Name:  "trust-root",
+				Name:  flagTrustRoot,
 				Usage: "Verify the bundle attestation against a private Sigstore trusted root (a trusted_root.json from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with --key and --certificate-identity-regexp. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`.",
 			},
 			&cli.BoolFlag{
-				Name:  "insecure-ignore-tlog",
+				Name:  flagInsecureIgnoreTLog,
 				Usage: "Skip transparency-log verification for an offline/air-gapped bundle signed with `bundle --signing-key ... --tlog-upload=false`. Verifies the signature against --key with no transparency-log network calls. Requires --key (the air-gapped path is key-based); a local PEM key is fully offline, while a KMS URI still makes a live GetPublicKey call to resolve the key. \"insecure\" because, with no transparency log, there is no trusted timestamp proving when the signature was made.",
 			},
 			withCompletions(&cli.StringFlag{
@@ -177,12 +177,12 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 	// struct fields.
 	opts := aicr.BundleVerifyOptions{
 		CertificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertificateIdentityRegexp),
-		Key:                       stringFlagOrConfig(cmd, "key", resolved.Key),
-		TrustRoot:                 stringFlagOrConfig(cmd, "trust-root", resolved.TrustRoot),
+		Key:                       stringFlagOrConfig(cmd, flagVerifyKey, resolved.Key),
+		TrustRoot:                 stringFlagOrConfig(cmd, flagTrustRoot, resolved.TrustRoot),
 		MinTrustLevel:             stringFlagOrConfig(cmd, "min-trust-level", resolved.MinTrustLevel),
 		RequireCreator:            stringFlagOrConfig(cmd, "require-creator", resolved.RequireCreator),
 		CLIVersionConstraint:      stringFlagOrConfig(cmd, "cli-version-constraint", resolved.CLIVersionConstraint),
-		IgnoreTLog:                cmd.Bool("insecure-ignore-tlog"),
+		IgnoreTLog:                cmd.Bool(flagInsecureIgnoreTLog),
 	}
 	if opts.IgnoreTLog && opts.Key == "" {
 		// Reworded for the CLI so the message names flags, not fields.

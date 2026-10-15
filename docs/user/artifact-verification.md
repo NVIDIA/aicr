@@ -347,6 +347,44 @@ aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" \
   --expected-identity-regexp '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.+$'
 ```
 
+### Key-Signed Evidence
+
+Where no OIDC identity is available, sign evidence with a KMS key: pass
+`--signing-key <kms-uri>` to `aicr validate --push`, `aicr evidence publish`, or
+`aicr evidence sign`. The same schemes as bundle signing are supported
+(`awskms://`, `gcpkms://`, `azurekms://`, `hashivault://`), and the signature
+goes to Rekor v2 by default. The pointer records `signer.issuer: key` and, as
+`signer.identity`, the key's public-key fingerprint: `sha256:` and the SHA-256
+of the PKIX DER public key. The KMS URI is never recorded, since it names a
+cloud account and cannot be recovered from the signature.
+
+Verify with `--key`, supplying the KMS URI or an exported PEM public key. The
+key is the signer pin, so `--expected-issuer` and `--expected-identity-regexp`
+are rejected alongside it, and a pointer whose `signer` block names another key
+fails the cross-check:
+
+```shell
+# Sign and push with a KMS key.
+aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out \
+  --push ghcr.io/myorg/aicr-evidence --signing-key awskms:///alias/aicr-evidence
+
+# Verify the pointer against the same key, or its exported public key.
+aicr evidence verify ./out/pointer.yaml --key awskms:///alias/aicr-evidence
+cosign public-key --key awskms:///alias/aicr-evidence > evidence-signer.pub
+aicr evidence verify ./out/pointer.yaml --key ./evidence-signer.pub
+```
+
+For air-gapped signing, add `--tlog-upload=false`: no Rekor entry is written
+and the pointer carries no `rekorLogIndex`. Verify such evidence with
+`--key <public-key.pem> --insecure-ignore-tlog`; without a transparency log
+there is no trusted proof of when the signature was made. Evidence signed
+against a private Fulcio/Rekor (`--fulcio-url`, `--rekor-url`,
+`--signing-config`) verifies with `--trust-root <trusted_root.json>`.
+
+Key-signed evidence is for private use. The `Evidence Pointer Contract` gate
+rejects a committed key-signed pointer, because the signer allowlist pins
+keyless OIDC identities, not public keys.
+
 ## Per-Source Pointer Layout and the Signer Allowlist
 
 Committed evidence pointers are **per-source** so two parties can attest to the
