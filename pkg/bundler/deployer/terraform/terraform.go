@@ -144,8 +144,9 @@ type Generator struct {
 	//
 	// Off by default: the keepers are whatever the operator says identifies
 	// the cluster — a CA certificate, a provider id, an endpoint that is
-	// unique per cluster — and nothing in the bundle can choose them. A root
-	// module defaults them to null, where the shim never fires.
+	// unique per cluster — and nothing in the bundle can choose them. Both
+	// forms require the variable: a default would contain nothing, and the
+	// first real value would then replace every release.
 	ClusterRollover bool
 
 	// ChildModule emits the bundle as a CHILD module rather than a root
@@ -352,7 +353,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		if g.ChildModule {
 			keepers += ". The variable is required: the module call must pass it."
 		} else {
-			keepers += ", and null (the root-module default) never fires."
+			keepers += ". The variable is required: set it in terraform.tfvars or with -var before the first apply."
 		}
 		notes = append(notes,
 			"Cluster rollover is enabled: replacing the cluster replaces every release. "+keepers)

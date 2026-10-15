@@ -981,8 +981,8 @@ Package with explicit tag (overrides CLI version):
 	objects in a cluster that no longer exists (--deployer terraform only).
 	The shim keys on var.cluster_keepers: attributes of the cluster that change
 	when it is rebuilt (its CA certificate, a provider id, an endpoint minted
-	per cluster), which the caller sets. Off by default; a root module defaults
-	the keepers to null, where the shim never fires.`,
+	per cluster), which the caller sets; the variable is required in both
+	forms. Off by default.`,
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{

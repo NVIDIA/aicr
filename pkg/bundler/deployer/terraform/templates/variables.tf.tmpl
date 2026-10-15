@@ -76,11 +76,11 @@ variable "cluster_keepers" {
 
     Set it to attributes of the cluster that change when it is rebuilt: its
     CA certificate, a provider-assigned id or creation time, or its endpoint
-    where that is unique per cluster. A map combines several. Null, the
-    default, never changes, so the containment shim is inert. See README.md.
+    where that is unique per cluster. A map combines several. Required, with
+    no default: the value a release is first applied with is what contains
+    it, and any later change replaces every release. See README.md.
   EOT
   type        = any
-  default     = null
 }
 {{ end }}
 {{- end }}

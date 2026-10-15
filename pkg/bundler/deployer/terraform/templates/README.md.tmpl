@@ -137,7 +137,8 @@ context is a local alias. What reliably changes:
 | `azurerm_kubernetes_cluster` | `id`, or `kube_config[0].cluster_ca_certificate` |
 | any | `{ ca = …, id = … }` — a map combines several |
 
-{{ if .ChildModule }}The variable is required: a child module has no caller-independent default.{{ else }}Left at its default, `null`, the keepers never change and the shim never fires.{{ end }}
+The variable is required and has no default, so every release is contained
+from its first apply; any later change to the value replaces every release.
 The value may be unknown at plan time; the rule is "the shim is being
 replaced", which the plan knows structurally.
 

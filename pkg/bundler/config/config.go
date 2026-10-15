@@ -434,8 +434,7 @@ type Config struct {
 	// replacing the cluster replaces every release rather than leaving state
 	// that describes objects in a cluster that no longer exists. Off by
 	// default: the keepers are the caller's statement of what identifies the
-	// cluster, and a root module defaults them to null, where the shim never
-	// fires.
+	// cluster, and both forms require the variable.
 	terraformClusterRollover bool
 
 	// terraformChildModule emits a --deployer terraform bundle as a CHILD

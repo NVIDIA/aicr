@@ -384,8 +384,8 @@ func TestGenerate_DeploymentStepsFollowTheForm(t *testing.T) {
 	if !strings.Contains(joined(root.DeploymentNotes), "kubeconfig_path") {
 		t.Errorf("root notes do not say how to point the bundle at a cluster:\n%s", joined(root.DeploymentNotes))
 	}
-	if !strings.Contains(joined(root.DeploymentNotes), "null (the root-module default)") {
-		t.Errorf("root rollover note does not mention the null default:\n%s", joined(root.DeploymentNotes))
+	if !strings.Contains(joined(root.DeploymentNotes), "The variable is required: set it in terraform.tfvars") {
+		t.Errorf("root rollover note does not say cluster_keepers is required:\n%s", joined(root.DeploymentNotes))
 	}
 
 	child := gen(true)

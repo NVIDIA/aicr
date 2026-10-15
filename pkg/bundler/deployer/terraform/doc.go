@@ -133,8 +133,9 @@ choose them: an API endpoint survives a rebuild behind a DNS name or a VIP, a
 cluster name is reused by design, and a kubeconfig context is a local alias.
 What reliably changes is the CA certificate, a provider-assigned id or
 creation timestamp, or an endpoint on a platform that mints one per cluster;
-a map combines several. A child module requires the variable; a root module
-defaults it to null, where the shim never fires. Hence off by default.
+a map combines several. Both forms require the variable: a default of null
+would contain nothing, and the first real value would then replace every
+release. Hence off by default.
 
 Its effect depends on whether the plan can still see the releases. On a cluster
 the plan can reach, a changed keeper replaces every release through
