@@ -64,9 +64,9 @@ type PublishOptions struct {
 	// baked-in attestedAt timestamp) are signed as-is.
 	AICRVersion string
 
-	// OIDCResolve configures keyless-signing token resolution. Resolution
-	// is deferred until adjacent to SignStatement so Fulcio's
-	// nonce-binding window is respected.
+	// OIDCResolve selects the signing mode: the KMS key SigningKey names,
+	// or otherwise keyless, with token resolution deferred until adjacent
+	// to SignStatement so Fulcio's nonce-binding window is respected.
 	OIDCResolve bundleattest.ResolveOptions
 }
 

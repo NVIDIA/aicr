@@ -1133,7 +1133,10 @@ this precedence chain: `--identity-token` (or `COSIGN_IDENTITY_TOKEN`)
 → ambient GitHub Actions OIDC (`ACTIONS_ID_TOKEN_REQUEST_URL`
 present) → `--oidc-device-flow` (or `AICR_OIDC_DEVICE_FLOW=true`) →
 interactive browser. CI pipelines typically rely on the ambient
-GitHub Actions path; local workstations get the browser flow.
+GitHub Actions path; local workstations get the browser flow. With
+`--signing-key <kms-uri>` no token is resolved: the bundle is signed
+with the KMS key instead, for private use. See
+[Key-signed evidence](artifact-verification.md#key-signed-evidence).
 
 **Local-only mode (no registry access).** Omitting `--push` still
 produces a complete bundle on disk — the verifier records the

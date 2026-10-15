@@ -113,6 +113,10 @@ type SignedAttestation struct {
 	// RekorLogIndex is the Rekor transparency-log inclusion-proof log
 	// index. 0 if no Rekor entry exists.
 	RekorLogIndex int64
+
+	// KeyFingerprint is the PublicKeyFingerprint of the signing key when the
+	// signature is key-based (KMS), and empty for a keyless signature.
+	KeyFingerprint string
 }
 
 // SignStatement DSSE-wraps an in-toto Statement and signs it via
@@ -242,6 +246,13 @@ func SignStatementWith(ctx context.Context, statementJSON []byte, id SigningIden
 	if identity == "" {
 		identity = id.FallbackIdentity() // KMS: the key URI
 	}
+	var keyFingerprint string
+	if bundle.GetVerificationMaterial().GetPublicKey() != nil {
+		keyFingerprint, err = PublicKeyFingerprint(keypair.GetPublicKey())
+		if err != nil {
+			return nil, err
+		}
+	}
 	rekorIndex := extractRekorLogIndex(bundle)
 
 	// Identity (Fulcio SAN) is user PII for interactive OIDC — keep it off the
@@ -252,11 +263,39 @@ func SignStatementWith(ctx context.Context, statementJSON []byte, id SigningIden
 	slog.Debug("sigstore signer claims", "identity", identity, "issuer", issuer)
 
 	return &SignedAttestation{
-		BundleJSON:    bundleJSON,
-		Identity:      identity,
-		Issuer:        issuer,
-		RekorLogIndex: rekorIndex,
+		BundleJSON:     bundleJSON,
+		Identity:       identity,
+		Issuer:         issuer,
+		RekorLogIndex:  rekorIndex,
+		KeyFingerprint: keyFingerprint,
 	}, nil
+}
+
+// SignStatementWithKey DSSE-wraps an in-toto Statement and signs it with the
+// KMS key opts.SigningKey names: the key-based counterpart of SignStatement,
+// for callers that sign their own predicate rather than going through an
+// Attester. The transparency entry follows opts the same way KMSAttester does:
+// none when DisableTLogUpload is set, otherwise the Rekor target the signing
+// config, TUF config or Rekor URL selects. OIDC token sources in opts are
+// ignored, except DeviceFlow, which conflicts with a key and is rejected.
+func SignStatementWithKey(ctx context.Context, statementJSON []byte, opts ResolveOptions) (*SignedAttestation, error) {
+	if opts.SigningKey == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "a signing key is required for key-based signing")
+	}
+	if err := checkSigningMode(opts); err != nil {
+		return nil, err
+	}
+	var tlog TransparencyPolicy
+	if opts.DisableTLogUpload {
+		tlog = NewNoTLogPolicy()
+	} else {
+		var err error
+		tlog, err = transparencyForOptions(ctx, SignOptionsFromResolve("", opts))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return SignStatementWith(ctx, statementJSON, NewKMSIdentity(opts.SigningKey), tlog)
 }
 
 // extractSignerClaims parses the Fulcio cert and returns the SAN

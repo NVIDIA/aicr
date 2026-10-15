@@ -184,8 +184,14 @@ func MarshalPointer(p *Pointer) ([]byte, error) {
 //
 // A pointer with no signer or no pushed digest has no committable
 // destination — only signed, pushed bundles earn a place in the tree — so
-// the hint returns guidance instead of a path.
+// the hint returns guidance instead of a path. Neither does a key-signed
+// pointer: the evidence gate admits keyless signers only.
 func PointerCopyToHint(p *Pointer) string {
+	if p != nil && len(p.Attestations) > 0 && p.Attestations[0].Signer != nil &&
+		p.Attestations[0].Signer.Issuer == KeySignerIssuer {
+
+		return "(key-signed evidence is for private use; the upstream evidence gate admits keyless signers only)"
+	}
 	suffix, err := canonicalPointerSuffix(p)
 	if err != nil {
 		return "(sign and push the bundle, then commit under recipes/evidence/<recipe>/<source>/)"
