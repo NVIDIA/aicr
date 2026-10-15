@@ -7,6 +7,7 @@
 # module means the component is done.
 
 # 001-cert-manager — cert-manager v1.17.2
+# plus 002-cert-manager-readiness
 module "cert_manager" {
   source = "./modules/component"
 
@@ -21,6 +22,9 @@ module "cert_manager" {
   values_files = [
     "${path.module}/001-cert-manager/values.yaml",
   ]
+
+  readiness_chart        = "${path.module}/002-cert-manager-readiness"
+  readiness_chart_digest = "sha256:f5afa792b82ec6b7c784745411a3b9b79f74acf0bd96dcc2561e91a64063d5aa"
 
   atomic          = var.atomic
   wait            = var.wait

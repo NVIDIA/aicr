@@ -30,6 +30,7 @@ module "gpu_operator" {
 }
 
 # 002-kai-scheduler — kai-scheduler v0.16.9
+# plus 003-kai-scheduler-readiness
 module "kai_scheduler" {
   source = "./modules/component"
 
@@ -44,6 +45,9 @@ module "kai_scheduler" {
   values_files = [
     "${path.module}/002-kai-scheduler/values.yaml",
   ]
+
+  readiness_chart        = "${path.module}/003-kai-scheduler-readiness"
+  readiness_chart_digest = "sha256:7d0cc35c6ee0f829e4dce887e5fb7daa56d16d7b62a56dada5b940f274d847fe"
 
   # Asynchronous: helm --wait times out on this component's custom-resource
   # readiness even though its pods start. Ordering still holds; readiness does not.

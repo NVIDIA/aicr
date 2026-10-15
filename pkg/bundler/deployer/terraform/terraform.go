@@ -137,6 +137,12 @@ type Generator struct {
 	// Off by default.
 	VendorCharts bool
 
+	// Puller fetches upstream chart bytes when VendorCharts is set. nil
+	// resolves to localformat's default *CLIChartPuller; tests inject a
+	// stub here so the vendored layout can be rendered without a helm
+	// binary.
+	Puller localformat.ChartPuller
+
 	// ClusterRollover emits a terraform_data keyed on var.cluster_keepers
 	// in each component module, with a replace_triggered_by pointing at
 	// it, so replacing the cluster replaces every release instead of
@@ -248,6 +254,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		ComponentPostManifests: g.ComponentPostManifests,
 		ComponentReadiness:     g.ComponentReadiness,
 		VendorCharts:           g.VendorCharts,
+		Puller:                 g.Puller,
 	})
 	if err != nil {
 		return nil, err

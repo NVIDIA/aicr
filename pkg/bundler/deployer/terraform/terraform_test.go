@@ -17,7 +17,6 @@ package terraform
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,7 +25,7 @@ import (
 	"unicode"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -35,23 +34,43 @@ const testBundlerVersion = "v1.0.0"
 // update regenerates goldens under testdata/ when set via `go test -update`.
 var update = flag.Bool("update", false, "update golden files")
 
-// TestGenerate_Scenarios is the golden-file suite for Generator.Generate.
-// Each row supplies a configured Generator, the testdata/<name>/ dir holding
-// the expected output, and the files to byte-compare. Error paths and the
-// structural invariants that no single golden can express live in their own
-// tests below.
+// deploymentGolden is the file a scenario's deployment steps and notes are
+// compared as, since they are printed, not written into the bundle.
+const deploymentGolden = "deployment.txt"
+
+// scenario is one row of the golden suite: a configured Generator, the
+// testdata/<name>/ directory holding what it must render, and the files to
+// byte-compare. absent lists files the bundle must not contain. steps adds
+// the printed deployment steps and notes as deployment.txt, with the output
+// directory spelled <bundle>.
+type scenario struct {
+	name    string
+	gen     *Generator
+	goldens []string
+	absent  []string
+	steps   bool
+}
+
+// TestGenerate_Scenarios is the golden suite for Generator.Generate: every
+// file the deployer renders is compared byte for byte, so a reviewer reads the
+// file an operator gets rather than a fragment of it. The comment on each
+// scenario names the invariant its goldens hold. Error paths, which render no
+// file, live in their own tests below.
 func TestGenerate_Scenarios(t *testing.T) {
-	scenarios := []struct {
-		name    string
-		gen     *Generator
-		goldens []string
-	}{
+	moduleFiles := []string{
+		filepath.Join(moduleDir, "main.tf"),
+		filepath.Join(moduleDir, "variables.tf"),
+		filepath.Join(moduleDir, "outputs.tf"),
+	}
+	rootFiles := append([]string{fileMain, fileVersions, fileVars, fileOutputs, fileReadme, fileTfvars}, moduleFiles...)
+
+	scenarios := []scenario{
 		{
 			// The base case, and the one that locks the graph: three
 			// components where gpu-operator declares both of the others.
 			// Both the concurrency claim (nfd and cert-manager carry no
 			// depends_on) and the module-call placement of the edge are
-			// visible in this golden.
+			// visible in main.tf. Every root-form file is compared here.
 			name: "upstream_helm",
 			gen: func() *Generator {
 				cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
@@ -67,17 +86,15 @@ func TestGenerate_Scenarios(t *testing.T) {
 					Version: testBundlerVersion,
 				}
 			}(),
-			goldens: []string{
-				fileMain, fileVersions, fileVars, fileOutputs,
-				filepath.Join(moduleDir, "main.tf"),
-				filepath.Join(moduleDir, "variables.tf"),
-			},
+			goldens: rootFiles,
+			steps:   true,
 		},
 		{
 			// A component with post-manifests expands into two releases,
 			// both inside one module. The dependent names the component and
 			// gets the tail for free — with the flat shape it had to name
 			// "module.agentgateway_crds_post" to avoid racing the manifests.
+			// The post slot carries its folder's content digest.
 			name: "post_manifest_tail",
 			gen: func() *Generator {
 				crds := ref("agentgateway-crds", "agentgateway-system", "agentgateway-crds", "v1.5.0", "oci://cr.agentgateway.dev/charts")
@@ -94,7 +111,8 @@ func TestGenerate_Scenarios(t *testing.T) {
 			goldens: []string{fileMain},
 		},
 		{
-			// --serial discards the declared graph for one linear chain.
+			// --serial discards the declared graph for one linear chain, and
+			// the README says so in place of the concurrency paragraph.
 			name: "serial",
 			gen: func() *Generator {
 				cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
@@ -107,49 +125,67 @@ func TestGenerate_Scenarios(t *testing.T) {
 					Serial:       true,
 				}
 			}(),
-			goldens: []string{fileMain},
+			goldens: []string{fileMain, fileReadme},
 		},
 		{
-			// The containment shim adds a resource and a lifecycle block to
-			// the shared module, and one more argument to every call.
+			// The containment shim, with a gate so all four slots are in
+			// view. The module golden holds both halves of the contract: a
+			// terraform_data keyed on var.cluster_keepers (built in, so
+			// hashicorp/helm stays the only provider in versions.tf), and a
+			// replace_triggered_by on every slot with NO create_before_destroy
+			// — replace_triggered_by decides whether a release is replaced,
+			// create_before_destroy decides the order, and two helm_releases
+			// cannot swap create-then-destroy because the name is the
+			// identity. The root variables.tf requires the keepers rather
+			// than defaulting them, and main.tf passes var.cluster_keepers,
+			// never a connection attribute. README, tfvars and the printed
+			// notes carry the same facts in prose.
 			name: "cluster_rollover",
 			gen: func() *Generator {
 				cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
 				return &Generator{
-					RecipeResult:    recipeWith(cm),
-					Version:         testBundlerVersion,
-					ClusterRollover: true,
+					RecipeResult:       recipeWith(cm),
+					Version:            testBundlerVersion,
+					ClusterRollover:    true,
+					ComponentReadiness: map[string]map[string][]byte{"cert-manager": {"readiness.yaml": gateJob}},
 				}
 			}(),
-			goldens: []string{
-				fileMain, fileVersions,
-				filepath.Join(moduleDir, "main.tf"),
-				filepath.Join(moduleDir, "variables.tf"),
-			},
+			goldens: rootFiles,
+			steps:   true,
 		},
 		{
 			// A component the shared override table marks asynchronous
 			// carries literal wait/timeout arguments instead of the
-			// bundle-wide variables, with the reason inline. Rendering it
-			// as var.wait would let an operator silently re-enable a wait
-			// that is known to time out.
+			// bundle-wide variables, with the reason inline, and atomic
+			// pinned false beside them: Helm forces wait on whenever atomic
+			// is set, so var.atomic would re-arm the wait. Rendering var.wait
+			// would let an operator silently re-enable a wait known to time
+			// out. The gate slot in the module golden reads none of those:
+			// wait is a constant, the timeout is derived from the gate's
+			// deadline rather than var.timeout, and there is no
+			// wait_for_jobs on any slot (the gate blocks as a helm hook, and
+			// deploy.sh passes none either), so an async component cannot
+			// disarm its own gate.
 			name: "async_component",
 			gen: func() *Generator {
 				gpu := ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia")
 				kai := ref("kai-scheduler", "kai-scheduler", "kai-scheduler", "v0.16.9", "oci://ghcr.io/kai-scheduler/kai-scheduler")
 				kai.DependencyRefs = []string{"gpu-operator"}
 				return &Generator{
-					RecipeResult: recipeWith(gpu, kai),
-					Version:      testBundlerVersion,
+					RecipeResult:       recipeWith(gpu, kai),
+					Version:            testBundlerVersion,
+					ComponentReadiness: map[string]map[string][]byte{"kai-scheduler": {"readiness.yaml": gateJob}},
 				}
 			}(),
-			goldens: []string{fileMain},
+			goldens: []string{fileMain, filepath.Join(moduleDir, "main.tf")},
 		},
 		{
 			// Child-module form: no provider block, no connection
-			// variables, no tfvars example. The rollover shim's
-			// cluster_keepers becomes a required variable, since there is
-			// no caller-independent default a child module could carry.
+			// variables, no tfvars example, and printed steps that send the
+			// operator to the calling configuration rather than into the
+			// bundle with kubeconfig advice. The rollover shim's
+			// cluster_keepers is a required variable here as in the root
+			// form.
 			name: "child_module",
 			gen: func() *Generator {
 				cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
@@ -160,7 +196,9 @@ func TestGenerate_Scenarios(t *testing.T) {
 					ClusterRollover: true,
 				}
 			}(),
-			goldens: []string{fileMain, fileVersions, fileVars},
+			goldens: []string{fileMain, fileVersions, fileVars, fileOutputs, fileReadme},
+			absent:  []string{fileTfvars},
+			steps:   true,
 		},
 		{
 			// A component with dynamic value paths gets cluster-values.yaml
@@ -183,7 +221,12 @@ func TestGenerate_Scenarios(t *testing.T) {
 			// A readiness gate becomes the last slot in its component's
 			// module, so a dependent's depends_on covers it without naming
 			// it. The module golden is what proves the slot ignores
-			// var.wait.
+			// var.wait. The rendered gate chart is compared too: gatemanifest
+			// annotates the Job as a post-install/post-upgrade helm hook with
+			// hook-delete-policy before-hook-creation, and localformat strips
+			// helm.sh/hook* from every folder EXCEPT the readiness phase.
+			// Narrow that exemption and the gate silently stops re-asserting
+			// on upgrade, because a Job's spec.template is immutable.
 			name: "readiness",
 			gen: func() *Generator {
 				nfd := ref("nfd", "node-feature-discovery", "node-feature-discovery", "0.18.1", "https://kubernetes-sigs.github.io/node-feature-discovery/charts")
@@ -192,14 +235,14 @@ func TestGenerate_Scenarios(t *testing.T) {
 				return &Generator{
 					RecipeResult:       recipeWith(nfd, gpu),
 					Version:            testBundlerVersion,
-					ComponentReadiness: map[string]map[string][]byte{"gpu-operator": {"readiness.yaml": gateJob}},
+					ComponentReadiness: map[string]map[string][]byte{"gpu-operator": {"readiness.yaml": annotatedGateJob}},
 				}
 			}(),
-			goldens: []string{
+			goldens: append([]string{
 				fileMain, fileOutputs,
-				filepath.Join(moduleDir, "main.tf"),
-				filepath.Join(moduleDir, "variables.tf"),
-			},
+				filepath.Join("003-gpu-operator-readiness", "Chart.yaml"),
+				filepath.Join("003-gpu-operator-readiness", "templates", "readiness.yaml"),
+			}, moduleFiles...),
 		},
 		{
 			// All four phases on one component: the shape the flat renderer
@@ -219,6 +262,60 @@ func TestGenerate_Scenarios(t *testing.T) {
 			}(),
 			goldens: []string{fileMain, fileOutputs},
 		},
+		{
+			// --vendor-charts: the primary is installed from the wrapper
+			// chart localformat wrote into the bundle, so its module call
+			// carries a path and a content digest instead of upstream
+			// coordinates, and the printed notes say no registry is needed.
+			name: "vendored",
+			gen: func() *Generator {
+				cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
+				nfd := ref("nfd", "node-feature-discovery", "node-feature-discovery", "0.18.1", "https://kubernetes-sigs.github.io/node-feature-discovery/charts")
+				nfd.DependencyRefs = []string{"cert-manager"}
+				return &Generator{
+					RecipeResult: recipeWith(cm, nfd),
+					Version:      testBundlerVersion,
+					VendorCharts: true,
+					Puller:       &fakePuller{},
+				}
+			}(),
+			goldens: []string{fileMain, fileReadme},
+			steps:   true,
+		},
+		{
+			// An edge to a component the bundle filtered out disappears
+			// rather than rendering `depends_on = [module.absent]`, which is
+			// not a plan-time failure the operator can debug but a parse
+			// error in output AICR reported as generated. The golden has no
+			// cert_manager call and no depends_on at all.
+			name: "dropped_edge",
+			gen: func() *Generator {
+				cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
+				cm.Overrides = map[string]any{"enabled": false}
+				gpu := ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia")
+				gpu.DependencyRefs = []string{"cert-manager"}
+				return &Generator{RecipeResult: recipeWith(cm, gpu), Version: testBundlerVersion}
+			}(),
+			goldens: []string{fileMain},
+		},
+		{
+			// checksums.txt is the bundle's closed world: it lists every
+			// file that ships, so it is also where helm's install.sh and
+			// upstream.env would show up if the strip ever stopped covering
+			// a folder. It must attest to the .tf layer, the module, each
+			// folder's values files and the gate chart, and nothing else.
+			name: "checksums",
+			gen: func() *Generator {
+				cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
+				return &Generator{
+					RecipeResult:       recipeWith(cm),
+					Version:            testBundlerVersion,
+					IncludeChecksums:   true,
+					ComponentReadiness: map[string]map[string][]byte{"cert-manager": {"readiness.yaml": annotatedGateJob}},
+				}
+			}(),
+			goldens: []string{"checksums.txt"},
+		},
 	}
 
 	for _, sc := range scenarios {
@@ -231,50 +328,38 @@ func TestGenerate_Scenarios(t *testing.T) {
 			if out == nil || len(out.Files) == 0 {
 				t.Fatalf("Generate() returned no files")
 			}
+			goldenDir := filepath.Join("testdata", sc.name)
 			// Every scenario's main.tf must be fmt-stable, not only the
 			// ones whose goldens happen to be checked in.
 			assertFmtStable(t, filepath.Join(outputDir, fileMain))
 			for _, rel := range sc.goldens {
-				assertGolden(t, outputDir, filepath.Join("testdata", sc.name), rel)
+				assertGolden(t, outputDir, goldenDir, rel)
 			}
-			// A child module is configured by its caller's module block, so
-			// a tfvars example would be a file nothing can read.
-			_, statErr := os.Stat(filepath.Join(outputDir, fileTfvars))
-			if sc.gen.ChildModule && statErr == nil {
-				t.Errorf("child-module bundle emitted %s", fileTfvars)
+			for _, rel := range sc.absent {
+				if _, statErr := os.Stat(filepath.Join(outputDir, rel)); statErr == nil {
+					t.Errorf("bundle contains %s, which this form must not emit", rel)
+				}
 			}
-			if !sc.gen.ChildModule && statErr != nil {
-				t.Errorf("root-module bundle is missing %s: %v", fileTfvars, statErr)
+			if sc.steps {
+				assertGoldenBytes(t, goldenDir, deploymentGolden, deploymentText(out, outputDir))
 			}
 		})
 	}
 }
 
-// TestGenerate_EdgeToDisabledComponentIsDropped locks the rule that keeps a
-// generated bundle parseable: an edge to a component that was filtered out
-// must disappear, because `depends_on = [module.absent]` is not a plan-time
-// failure the operator can debug, it is a parse error in output AICR reported
-// as successfully generated.
-func TestGenerate_EdgeToDisabledComponentIsDropped(t *testing.T) {
-	cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
-	cm.Overrides = map[string]any{"enabled": false}
-	gpu := ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia")
-	gpu.DependencyRefs = []string{"cert-manager"}
-
-	g := &Generator{RecipeResult: recipeWith(cm, gpu), Version: testBundlerVersion}
-	outputDir := t.TempDir()
-	if _, err := g.Generate(context.Background(), outputDir); err != nil {
-		t.Fatalf("Generate() error = %v", err)
+// deploymentText renders the printed steps and notes for a golden, with the
+// output directory spelled <bundle> since it is a temp dir here.
+func deploymentText(out *deployer.Output, outputDir string) []byte {
+	var b strings.Builder
+	b.WriteString("steps:\n")
+	for _, s := range out.DeploymentSteps {
+		b.WriteString("  " + strings.ReplaceAll(s, outputDir, "<bundle>") + "\n")
 	}
-	main := readFile(t, filepath.Join(outputDir, fileMain))
-	if strings.Contains(main, "cert_manager") {
-		t.Errorf("main.tf references the disabled component:\n%s", main)
+	b.WriteString("notes:\n")
+	for _, n := range out.DeploymentNotes {
+		b.WriteString("  " + strings.ReplaceAll(n, outputDir, "<bundle>") + "\n")
 	}
-	// "depends_on" also appears in the generated header comment, so match
-	// the argument itself.
-	if strings.Contains(main, "depends_on = [") {
-		t.Errorf("main.tf kept a depends_on with no surviving target:\n%s", main)
-	}
+	return []byte(b.String())
 }
 
 func TestGenerate_RejectsKustomizeComponent(t *testing.T) {
@@ -361,48 +446,6 @@ func TestModulePath(t *testing.T) {
 	}
 }
 
-// TestGenerate_DeploymentStepsFollowTheForm: a child module has no provider
-// and no connection variables, so the printed steps must send the operator to
-// the calling configuration, not into the bundle with kubeconfig advice.
-func TestGenerate_DeploymentStepsFollowTheForm(t *testing.T) {
-	gen := func(child bool) *deployer.Output {
-		t.Helper()
-		cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
-		g := &Generator{RecipeResult: recipeWith(cm), Version: testBundlerVersion, ChildModule: child, ClusterRollover: true}
-		out, err := g.Generate(context.Background(), t.TempDir())
-		if err != nil {
-			t.Fatalf("Generate(child=%v): %v", child, err)
-		}
-		return out
-	}
-	joined := func(ss []string) string { return strings.Join(ss, "\n") }
-
-	root := gen(false)
-	if !strings.HasPrefix(root.DeploymentSteps[0], "cd ") {
-		t.Errorf("root steps do not start in the bundle: %q", root.DeploymentSteps[0])
-	}
-	if !strings.Contains(joined(root.DeploymentNotes), "kubeconfig_path") {
-		t.Errorf("root notes do not say how to point the bundle at a cluster:\n%s", joined(root.DeploymentNotes))
-	}
-	if !strings.Contains(joined(root.DeploymentNotes), "The variable is required: set it in terraform.tfvars") {
-		t.Errorf("root rollover note does not say cluster_keepers is required:\n%s", joined(root.DeploymentNotes))
-	}
-
-	child := gen(true)
-	if !strings.Contains(child.DeploymentSteps[0], "as a module") {
-		t.Errorf("child steps do not send the operator to the calling configuration: %q", child.DeploymentSteps[0])
-	}
-	all := joined(child.DeploymentSteps) + "\n" + joined(child.DeploymentNotes)
-	for _, absent := range []string{"kubeconfig_path", "cluster_host", "cd ", "root-module default"} {
-		if strings.Contains(all, absent) {
-			t.Errorf("child-module output mentions %q, which a child module does not have:\n%s", absent, all)
-		}
-	}
-	if !strings.Contains(joined(child.DeploymentNotes), "The variable is required") {
-		t.Errorf("child rollover note does not say cluster_keepers is required:\n%s", joined(child.DeploymentNotes))
-	}
-}
-
 func TestGenerate_RejectsCyclicGraph(t *testing.T) {
 	a := ref("a", "default", "a", "1.0.0", "https://example.com/charts")
 	b := ref("b", "default", "b", "1.0.0", "https://example.com/charts")
@@ -467,174 +510,6 @@ func TestBuildComponents_LabelCollision(t *testing.T) {
 	}
 }
 
-// TestGenerate_AsyncOverrideDoesNotDisarmTheGate locks Finding 6 of the
-// review: the shared override table marks kai-scheduler asynchronous, and with
-// one module call per FOLDER that wait=false literal landed on the component's
-// readiness call too — a gate that submits its Job and returns. The slot reads
-// a constant instead of var.wait, so the module cannot express that mistake.
-func TestGenerate_AsyncOverrideDoesNotDisarmTheGate(t *testing.T) {
-	kai := ref("kai-scheduler", "kai-scheduler", "kai-scheduler", "v0.16.9", "oci://ghcr.io/kai-scheduler/kai-scheduler")
-	g := &Generator{
-		RecipeResult:       recipeWith(kai),
-		Version:            testBundlerVersion,
-		ComponentReadiness: map[string]map[string][]byte{"kai-scheduler": {"readiness.yaml": gateJob}},
-	}
-	outputDir := t.TempDir()
-	if _, err := g.Generate(context.Background(), outputDir); err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-
-	// The call carries the override, and pins atomic with it: Helm forces
-	// wait on whenever atomic is set, so var.atomic would undo the override.
-	main := readFile(t, filepath.Join(outputDir, fileMain))
-	if !strings.Contains(main, "wait    = false") {
-		t.Errorf("main.tf lost the async override:\n%s", main)
-	}
-	if !strings.Contains(main, "atomic  = false") || strings.Contains(stripComments(main), "atomic  = var.atomic") {
-		t.Errorf("the async override leaves atomic on var.atomic, which re-arms the wait:\n%s", main)
-	}
-	// ...and the gate slot ignores it.
-	mod := readFile(t, filepath.Join(outputDir, moduleDir, "main.tf"))
-	const gateBlock = `resource "helm_release" "readiness"`
-	at := strings.Index(mod, gateBlock)
-	if at < 0 {
-		t.Fatalf("module has no readiness slot:\n%s", mod)
-	}
-	gate := stripComments(mod[at:])
-	if strings.Contains(gate, "var.wait") {
-		t.Errorf("the readiness slot reads var.wait, so an async component disarms its own gate:\n%s", gate)
-	}
-	if !strings.Contains(gate, "wait    = true") {
-		t.Errorf("the readiness slot does not wait, so it does not gate:\n%s", gate)
-	}
-	// The gate blocks as a helm hook, not as a tracked Job. wait_for_jobs
-	// covers the release's own resource set, which a hook is not, so its
-	// presence here would be inert decoration -- and deploy.sh omits the
-	// same flag on the same release for the same reason.
-	if strings.Contains(gate, "wait_for_jobs") {
-		t.Errorf("the readiness slot carries an inert wait_for_jobs:\n%s", gate)
-	}
-	// The gate owns the deadline. helm's timeout on this release is derived
-	// from the gate's max-wait plus deploy.sh's buffer, never var.timeout,
-	// whose default (15m) would have helm give up on a gate that is allowed
-	// to wait 90m.
-	if strings.Contains(gate, "var.timeout") {
-		t.Errorf("the readiness slot reads var.timeout, so helm can preempt the gate:\n%s", gate)
-	}
-	wantTimeout := fmt.Sprintf("timeout = %d", int((defaults.ReadinessGateMaxWait + defaults.ReadinessGateHelmTimeoutBuffer).Seconds()))
-	if !strings.Contains(gate, wantTimeout) {
-		t.Errorf("the readiness slot's timeout is not derived from the gate's deadline (want %q):\n%s", wantTimeout, gate)
-	}
-	// And the ordinary slots carry no wait_for_jobs either: deploy.sh passes
-	// none for them, so "ready" means the same thing under both deployers.
-	if ordinary := stripComments(mod[:at]); strings.Contains(ordinary, "wait_for_jobs") {
-		t.Errorf("an ordinary slot waits for bare Jobs, which deploy.sh does not:\n%s", ordinary)
-	}
-}
-
-// TestGenerate_GateKeepsItsHookAnnotations pins the half of the gate contract
-// that lives outside this package. gatemanifest annotates the gate Job as a
-// helm hook; localformat strips helm.sh/hook* from every folder it writes
-// EXCEPT the readiness phase. Narrow that exemption to one deployer and this
-// gate silently stops re-asserting on upgrade, because a Job's spec.template
-// is immutable and nothing else deletes and recreates it.
-func TestGenerate_GateKeepsItsHookAnnotations(t *testing.T) {
-	gpu := ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.0", "https://helm.ngc.nvidia.com/nvidia")
-	g := &Generator{
-		RecipeResult:       recipeWith(gpu),
-		Version:            testBundlerVersion,
-		ComponentReadiness: map[string]map[string][]byte{"gpu-operator": {"readiness.yaml": annotatedGateJob}},
-	}
-	outputDir := t.TempDir()
-	if _, err := g.Generate(context.Background(), outputDir); err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-	matches, globErr := filepath.Glob(filepath.Join(outputDir, "*-readiness", "templates", "*.yaml"))
-	if globErr != nil {
-		t.Fatalf("glob gate manifest: %v", globErr)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("expected exactly one rendered gate manifest, got %v", matches)
-	}
-	job := readFile(t, matches[0])
-	for _, want := range []string{
-		"helm.sh/hook: post-install,post-upgrade",
-		"helm.sh/hook-delete-policy: before-hook-creation",
-	} {
-		if !strings.Contains(job, want) {
-			t.Errorf("the shipped gate lost %q:\n%s", want, job)
-		}
-	}
-}
-
-// TestGenerate_RolloverContainsAndNothingElse pins the two halves of the
-// containment shim that a golden diff states but does not argue for.
-//
-// The negative half is the point. replace_triggered_by and
-// create_before_destroy are independent: the first decides WHETHER a release
-// is replaced, the second decides the ORDER. Adding create_before_destroy is a
-// one-line edit that no golden reads as a warning, and it changes the bundle's
-// behavior from destroy-then-create -- Terraform's default -- to a
-// create-then-destroy that two helm_releases cannot actually perform, because
-// a release name is its identity and the new one collides with the old.
-func TestGenerate_RolloverContainsAndNothingElse(t *testing.T) {
-	cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
-	g := &Generator{
-		RecipeResult:       recipeWith(cm),
-		Version:            testBundlerVersion,
-		ClusterRollover:    true,
-		ComponentReadiness: map[string]map[string][]byte{"cert-manager": {"readiness.yaml": gateJob}},
-	}
-	outputDir := t.TempDir()
-	if _, err := g.Generate(context.Background(), outputDir); err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-
-	mod := stripComments(readFile(t, filepath.Join(outputDir, moduleDir, "main.tf")))
-
-	if !strings.Contains(mod, `resource "terraform_data" "cluster"`) {
-		t.Errorf("no containment shim in the module:\n%s", mod)
-	}
-	if !strings.Contains(mod, "triggers_replace = var.cluster_keepers") {
-		t.Errorf("the shim is not keyed on the cluster keepers:\n%s", mod)
-	}
-	// Never derived from the connection: an endpoint can outlive the cluster
-	// behind it, so the root form declares its own keepers variable too.
-	if main := stripComments(readFile(t, filepath.Join(outputDir, fileMain))); strings.Contains(main, "var.cluster_host") {
-		t.Errorf("the shim is keyed on the connection, not on the operator's keepers:\n%s", main)
-	}
-	if vars := readFile(t, filepath.Join(outputDir, fileVars)); !strings.Contains(vars, `variable "cluster_keepers"`) {
-		t.Errorf("root module declares no cluster_keepers variable:\n%s", vars)
-	}
-	if got := strings.Count(mod, "replace_triggered_by = [terraform_data.cluster]"); got != 4 {
-		t.Errorf("slots tied to the shim = %d, want 4 (pre, primary, post, readiness):\n%s", got, mod)
-	}
-	if strings.Contains(mod, "create_before_destroy") {
-		t.Errorf("rollover replaces create-before-destroy; it must replace destroy-then-create:\n%s", mod)
-	}
-
-	// terraform_data is built in, so opting into rollover must not add a
-	// provider the operator then has to mirror into an air-gapped registry.
-	for _, f := range []string{fileVersions, filepath.Join(moduleDir, "main.tf")} {
-		if body := readFile(t, filepath.Join(outputDir, f)); strings.Contains(body, "hashicorp/null") {
-			t.Errorf("%s still requires hashicorp/null:\n%s", f, body)
-		}
-	}
-}
-
-// stripComments drops whole-line comments so an assertion about generated
-// ARGUMENTS is not satisfied, or defeated, by prose that mentions them.
-func stripComments(hcl string) string {
-	var kept []string
-	for _, line := range strings.Split(hcl, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
-			continue
-		}
-		kept = append(kept, line)
-	}
-	return strings.Join(kept, "\n")
-}
-
 func TestHCLString(t *testing.T) {
 	cases := map[string]string{
 		`plain`:             `"plain"`,
@@ -648,6 +523,53 @@ func TestHCLString(t *testing.T) {
 		if got := hclString(in); got != want {
 			t.Errorf("hclString(%q) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+// TestGenerate_StripsHelmOnlyFiles locks the folder contract on the file
+// system and in the output record: localformat writes helm's install.sh and
+// upstream.env into every folder, and a terraform bundle must ship neither.
+// Not clutter — install.sh installs the release names Terraform manages, so a
+// second entry point beside the state is a way to drift it. The checksums
+// scenario above shows the surviving file list.
+func TestGenerate_StripsHelmOnlyFiles(t *testing.T) {
+	cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
+	g := &Generator{
+		RecipeResult:       recipeWith(cm),
+		Version:            testBundlerVersion,
+		ComponentReadiness: map[string]map[string][]byte{"cert-manager": {"readiness.yaml": annotatedGateJob}},
+	}
+	outputDir := t.TempDir()
+	out, err := g.Generate(context.Background(), outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	for _, rel := range out.Files {
+		if helmOnlyFile(filepath.Base(rel)) {
+			t.Errorf("output record lists a helm-only file: %s", rel)
+		}
+	}
+	var folders int
+	walkErr := filepath.WalkDir(outputDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if helmOnlyFile(d.Name()) {
+			t.Errorf("bundle contains a helm-only file: %s", path)
+		}
+		if d.Name() == fileValues {
+			folders++
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk: %v", walkErr)
+	}
+	if folders != 2 {
+		t.Errorf("values.yaml folders = %d, want 2 (chart and readiness)", folders)
 	}
 }
 
@@ -721,6 +643,22 @@ var (
 	annotatedGateJob = []byte("apiVersion: batch/v1\nkind: Job\nmetadata:\n  name: gate\n  namespace: '{{ .Release.Namespace }}'\n  annotations:\n    helm.sh/hook: post-install,post-upgrade\n    helm.sh/hook-delete-policy: before-hook-creation\nspec:\n  template:\n    spec:\n      restartPolicy: Never\n      containers:\n        - name: gate\n          image: ghcr.io/nvidia/aicr-gate:latest\n")
 )
 
+// fakePuller is a ChartPuller that returns canned bytes, so the vendored
+// layout renders without a helm binary.
+type fakePuller struct{}
+
+func (*fakePuller) Pull(_ context.Context, c localformat.Component) ([]byte, localformat.VendorRecord, string, error) {
+	tarball := c.ChartName + "-" + c.Version + ".tgz"
+	return []byte("FAKE TGZ for " + c.Name), localformat.VendorRecord{
+		Name:        c.Name,
+		Chart:       c.ChartName,
+		Version:     c.Version,
+		Repository:  c.Repository,
+		SHA256:      "deadbeef",
+		TarballName: tarball,
+	}, tarball, nil
+}
+
 func ref(name, ns, chart, version, source string) recipe.ComponentRef {
 	return recipe.ComponentRef{
 		Name:      name,
@@ -753,18 +691,26 @@ func readFile(t *testing.T, path string) string {
 	return string(b)
 }
 
+// assertGolden compares the file at outDir/relPath with goldenDir/relPath.
 func assertGolden(t *testing.T, outDir, goldenDir, relPath string) {
 	t.Helper()
 	got, err := os.ReadFile(filepath.Join(outDir, relPath))
 	if err != nil {
 		t.Fatalf("read actual %s: %v", relPath, err)
 	}
+	assertGoldenBytes(t, goldenDir, relPath, got)
+}
+
+// assertGoldenBytes compares got with goldenDir/relPath, rewriting the golden
+// under -update.
+func assertGoldenBytes(t *testing.T, goldenDir, relPath string, got []byte) {
+	t.Helper()
 	goldenPath := filepath.Join(goldenDir, relPath)
 	if *update {
-		if err = os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
 			t.Fatalf("mkdir golden: %v", err)
 		}
-		if err = os.WriteFile(goldenPath, got, 0o644); err != nil {
+		if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
 			t.Fatalf("write golden: %v", err)
 		}
 		return
@@ -775,57 +721,5 @@ func assertGolden(t *testing.T, outDir, goldenDir, relPath string) {
 	}
 	if string(got) != string(want) {
 		t.Errorf("%s differs from golden:\n--- got ---\n%s\n--- want ---\n%s", relPath, got, want)
-	}
-}
-
-// TestGenerate_StripsHelmOnlyFiles locks the folder contract: localformat
-// writes helm's install.sh and upstream.env into every folder, and a terraform
-// bundle must ship neither. Not clutter — install.sh installs the release
-// names Terraform manages, so a second entry point beside the state is a way
-// to drift it. The files must also leave the output record, or checksums.txt
-// would attest to paths that do not exist.
-func TestGenerate_StripsHelmOnlyFiles(t *testing.T) {
-	cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
-	g := &Generator{
-		RecipeResult:       recipeWith(cm),
-		Version:            testBundlerVersion,
-		IncludeChecksums:   true,
-		ComponentReadiness: map[string]map[string][]byte{"cert-manager": {"readiness.yaml": annotatedGateJob}},
-	}
-	outputDir := t.TempDir()
-	out, err := g.Generate(context.Background(), outputDir)
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-	for _, rel := range out.Files {
-		if helmOnlyFile(filepath.Base(rel)) {
-			t.Errorf("output record lists a helm-only file: %s", rel)
-		}
-	}
-	var folders int
-	walkErr := filepath.WalkDir(outputDir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if helmOnlyFile(d.Name()) {
-			t.Errorf("bundle contains a helm-only file: %s", path)
-		}
-		if d.Name() == fileValues {
-			folders++
-		}
-		return nil
-	})
-	if walkErr != nil {
-		t.Fatalf("walk: %v", walkErr)
-	}
-	if folders != 2 {
-		t.Errorf("values.yaml folders = %d, want 2 (chart and readiness)", folders)
-	}
-	checksums := readFile(t, filepath.Join(outputDir, "checksums.txt"))
-	if strings.Contains(checksums, "install.sh") || strings.Contains(checksums, "upstream.env") {
-		t.Errorf("checksums.txt attests to a stripped file:\n%s", checksums)
 	}
 }
