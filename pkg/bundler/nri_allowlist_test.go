@@ -23,15 +23,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-const nvsentinelComponentName = "nvsentinel"
-
 func TestWarnNRIManagementAllowlist(t *testing.T) {
 	result, err := recipe.NewBuilder().BuildFromCriteriaWithProfile(t.Context(),
 		&recipe.Criteria{Service: recipe.CriteriaServiceRKE2, Intent: recipe.CriteriaIntentTraining}, "")
 	if err != nil {
 		t.Fatalf("BuildFromCriteriaWithProfile: %v", err)
 	}
-	sentinelRef := result.GetComponentRef(nvsentinelComponentName)
+	sentinelRef := result.GetComponentRef(nvsentinelComponent)
 	if sentinelRef == nil || sentinelRef.Namespace == "" {
 		t.Fatal("rke2 training recipe has no namespaced nvsentinel ref — the cases below would be vacuous")
 	}
@@ -68,10 +66,10 @@ func TestWarnNRIManagementAllowlist(t *testing.T) {
 		wantWarning bool
 	}{
 		{name: "full rke2 bundle deploys nvsentinel", values: bundled(gpuValues)},
-		{name: "nvsentinel dropped leaves the allowlist orphaned", values: bundled(gpuValues, nvsentinelComponentName), wantWarning: true},
-		{name: "subset bundle may deploy nvsentinel elsewhere", bundlers: []string{gpuOperatorComponentName}, values: bundled(gpuValues, nvsentinelComponentName)},
-		{name: "nvsentinel dropped with the allowlist cleared", values: bundled(cleared, nvsentinelComponentName)},
-		{name: "no gpu-operator in the bundle", values: bundled(gpuValues, gpuOperatorComponentName, nvsentinelComponentName)},
+		{name: "nvsentinel dropped leaves the allowlist orphaned", values: bundled(gpuValues, nvsentinelComponent), wantWarning: true},
+		{name: "subset bundle may deploy nvsentinel elsewhere", bundlers: []string{gpuOperatorComponentName}, values: bundled(gpuValues, nvsentinelComponent)},
+		{name: "nvsentinel dropped with the allowlist cleared", values: bundled(cleared, nvsentinelComponent)},
+		{name: "no gpu-operator in the bundle", values: bundled(gpuValues, gpuOperatorComponentName, nvsentinelComponent)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
