@@ -327,7 +327,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			"terraform apply",
 		}
 		connection = "This bundle is a child module: it declares no provider and no cluster-connection variables, " +
-			"and installs through the calling configuration's helm provider. Run init/plan/apply there, not in the bundle."
+			"and installs through the calling configuration's helm provider. Run init/plan/apply there, not in the bundle. " +
+			"An upgrade is a regenerated bundle in a new directory; point the module source at it (see README.md)."
 	} else {
 		output.DeploymentSteps = []string{
 			fmt.Sprintf("cd %s", outputDir),
@@ -336,7 +337,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			"terraform apply",
 		}
 		connection = "The bundle does not create a cluster. It reads ~/.kube/config by default; " +
-			"set kubeconfig_path/kube_context, or cluster_host and credentials, to point it elsewhere."
+			"set kubeconfig_path/kube_context, or cluster_host and credentials, to point it elsewhere. " +
+			"An upgrade is a regenerated bundle in a new directory: carry .terraform.lock.hcl, terraform.tfvars and the state across " +
+			"(see README.md). Regenerating into this directory fails the bundle's closed-world check once Terraform has run in it."
 	}
 	notes := []string{
 		connection,

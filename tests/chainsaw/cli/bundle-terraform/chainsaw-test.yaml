@@ -23,8 +23,9 @@ spec:
     Covers output structure (root .tf files + modules/component/ + NNN-<name>/
     component dirs), one module call per component, depends_on carrying the
     recipe's dependencyRefs, the kai-scheduler async override, the
-    --terraform-child-module and --terraform-cluster-rollover variants, and
-    reproducibility.
+    --terraform-child-module and --terraform-cluster-rollover variants,
+    reproducibility, and the upgrade flow (a regenerated bundle is a new
+    directory).
 
     Asserts on the emitted artifacts only. It never runs terraform, so it
     needs no extra binary and no cluster; `terraform validate` coverage is a
@@ -322,6 +323,49 @@ spec:
                 diff -u "${WORK}/basic/${f}" "${WORK}/repro/${f}" \
                   || { echo "${f} is not reproducible" >&2; exit 1; }
               done
+            check:
+              ($error == null): true
+
+    - name: upgrade-is-a-new-directory
+      description: >
+        The README documents an upgrade as a bundle regenerated into a new
+        directory, because a bundle is a closed set of files and the one
+        Terraform has run in holds .terraform/, the lock file and the
+        operator's tfvars. Both halves are pinned here: regenerating over
+        such a directory fails the closed-world check, and the documented
+        flow (fresh directory, carry the lock file and tfvars across) yields
+        byte-identical .tf files.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-terraform"
+              USED="${WORK}/used"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${USED}" \
+                --deployer terraform
+              # What a root module looks like after terraform init and a
+              # first apply with the default local backend.
+              mkdir -p "${USED}/.terraform/providers"
+              printf 'provider "registry.terraform.io/hashicorp/helm" {}\n' > "${USED}/.terraform.lock.hcl"
+              printf 'wait = true\n' > "${USED}/terraform.tfvars"
+              printf '{"version": 4}\n' > "${USED}/terraform.tfstate"
+              if ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${USED}" \
+                   --deployer terraform > "${WORK}/.regen-out" 2>&1; then
+                echo "regenerating over a bundle Terraform has run in succeeded; the README says it fails" >&2
+                exit 1
+              fi
+              grep -q 'unexpected directory' "${WORK}/.regen-out" \
+                || { echo "regeneration failed for another reason:" >&2; cat "${WORK}/.regen-out" >&2; exit 1; }
+              # The documented flow.
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/next" \
+                --deployer terraform
+              cp "${USED}/.terraform.lock.hcl" "${USED}/terraform.tfvars" "${USED}/terraform.tfstate" "${WORK}/next/"
+              for f in main.tf variables.tf versions.tf outputs.tf \
+                       modules/component/main.tf modules/component/variables.tf; do
+                diff -u "${WORK}/basic/${f}" "${WORK}/next/${f}" \
+                  || { echo "${f} differs between the first bundle and its regeneration" >&2; exit 1; }
+              done
+              rm -f "${WORK}/.regen-out"
             check:
               ($error == null): true
 
