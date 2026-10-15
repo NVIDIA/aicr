@@ -70,6 +70,9 @@ spec:
       overrides:
         driver:
           enabled: false
+        # No NRI management allowlist; see vr200-rke2-ubuntu-training.
+        toolkit:
+          env: []
 
     # See vr200-rke2-ubuntu-training for the host-managed-driver /
     # NVSentinel labeler rationale.

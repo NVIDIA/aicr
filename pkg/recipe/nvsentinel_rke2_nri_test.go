@@ -99,8 +99,9 @@ func TestRKE2NVSentinelNRIPluginMode(t *testing.T) {
 // rke2 training and inference recipes, which resolve but are not catalog
 // leaves because the VR200 overlays extend them: metadata-collector
 // NRI plugin mode needs the GPU Operator's NRI plugin and the toolkit's
-// namespace allowlist, and under NRI the collector needs either that mode or
-// a host-mounted NVML. A leaf that turns NRI off but inherits nriPlugin
+// namespace allowlist, the allowlist appears only with that mode (it grants
+// the namespace every GPU), and under NRI the collector needs either that
+// mode or a host-mounted NVML. A leaf that turns NRI off but inherits nriPlugin
 // crash-loops with NVML ERROR_LIBRARY_NOT_FOUND although the `nvidia`
 // RuntimeClass exists.
 func TestRKE2NRISettingsPaired(t *testing.T) {
@@ -160,14 +161,19 @@ func TestRKE2NRISettingsPaired(t *testing.T) {
 		hostMounts, _ := collector["additionalHostVolumes"].([]any)
 		hostMountedNVML := runtimeSet && runtimeClass == "" && len(hostMounts) > 0
 
+		toolkit, _ := gpuOpValues["toolkit"].(map[string]any)
+		env, _ := toolkit["env"].([]any)
+		allowlisted := envListContains(env, nriManagementNamespacesEnvName, sentinelRef.Namespace)
+
 		switch {
+		case !collectorNRI && allowlisted:
+			t.Errorf("%s: toolkit.env %s lists %q, but metadata-collector does not use NRI plugin mode; the entry grants that namespace every GPU for nothing (#3041)",
+				name, nriManagementNamespacesEnvName, sentinelRef.Namespace)
 		case collectorNRI && !nri:
 			t.Errorf("%s: metadata-collector.nriPlugin.enabled is true but gpu-operator cdi.nriPluginEnabled is not; no NRI plugin injects the management device (#3041)", name)
 		case collectorNRI:
 			nriMode++
-			toolkit, _ := gpuOpValues["toolkit"].(map[string]any)
-			env, _ := toolkit["env"].([]any)
-			if !envListContains(env, nriManagementNamespacesEnvName, sentinelRef.Namespace) {
+			if !allowlisted {
 				t.Errorf("%s: metadata-collector uses NRI plugin mode but toolkit.env %s does not list %q (#3041)",
 					name, nriManagementNamespacesEnvName, sentinelRef.Namespace)
 			}

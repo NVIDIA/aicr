@@ -89,6 +89,11 @@ spec:
       overrides:
         driver:
           enabled: false
+        # Clears the rke2 root's NRI_MANAGEMENT_CDI_DEVICE_NAMESPACES entry:
+        # metadata-collector uses the host mount below, not NRI plugin mode,
+        # so the nvsentinel namespace needs no management CDI device.
+        toolkit:
+          env: []
 
     # The reference image preinstalls the driver on the host
     # (gpu-operator driver.enabled is false above), so there is no driver
