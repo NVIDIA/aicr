@@ -856,12 +856,21 @@ func TestServiceAccountChecksTrackTheGrantedRules(t *testing.T) {
 				}
 			}
 
-			// pods/exec is the rule most easily lost to naive splitting:
-			// the apiserver evaluates it as resource "pods", subresource
-			// "exec", never as a resource literally named "pods/exec".
+			// pods/exec must never be checked because it is never granted:
+			// read-only discovery does not exec into pods.
 			execCheck := accessCheck{resource: resourcePods, subresource: "exec", verb: verbCreate, subject: subject}
-			if _, ok := got[execCheck]; ok != discover {
-				t.Errorf("pods/exec check present = %v, want %v", ok, discover)
+			if _, ok := got[execCheck]; ok {
+				t.Error("pods/exec check present; discovery grants no exec")
+			}
+			// The one discovery-specific read must be gated by the flag.
+			nicDevicesChecked := false
+			for c := range got {
+				if c.resource == "nicdevices" && c.verb == verbList {
+					nicDevicesChecked = true
+				}
+			}
+			if nicDevicesChecked != discover {
+				t.Errorf("nicdevices list check present = %v, want %v", nicDevicesChecked, discover)
 			}
 		})
 	}

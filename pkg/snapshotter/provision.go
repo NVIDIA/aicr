@@ -43,9 +43,9 @@ type AgentRolesConfig struct {
 	// exist — see WriteAgentRoleManifests.
 	ServiceAccountName string
 
-	// DiscoverNetwork also renders the cluster-scoped MUTATING rules that
-	// `aicr snapshot --discover-network` needs, with a header enumerating
-	// each one and the discovery step it exists for.
+	// DiscoverNetwork also renders the one extra read-only rule
+	// (configuration.net.nvidia.com nicdevices get/list) that
+	// `aicr snapshot --discover-network` needs, with a header explaining it.
 	DiscoverNetwork bool
 
 	// RunID names the output directory (`snapshot-rbac-<RunID>`). Empty
@@ -88,10 +88,9 @@ type AgentRolesResult struct {
 	// Objects lists what was written, in the order the files apply.
 	Objects []AgentRoleObject
 
-	// DiscoverNetwork echoes AgentRolesConfig.DiscoverNetwork: it is the
-	// difference between a read-only grant and one carrying cluster-scoped
-	// mutating rules, so anything reporting this result can say which was
-	// written.
+	// DiscoverNetwork echoes AgentRolesConfig.DiscoverNetwork: it says
+	// whether the written ClusterRole carries the extra nicdevices read, so
+	// anything reporting this result can name it.
 	DiscoverNetwork bool
 }
 

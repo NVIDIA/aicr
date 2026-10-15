@@ -253,13 +253,11 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 	})
 
-	// Discover-network mode pulls in l8k's extra cluster-scoped rules
-	// (CRDs, bootstrap workload resources, pods/exec, nodes/patch,
-	// nicdevices, nicclusterpolicies). Verify the rule appears for the
-	// most discovery-specific resource (mellanox.com NicClusterPolicy
-	// SSA patch) — that's the marker rule the snapshot Job needs to
-	// run successfully under non-cluster-admin RBAC.
-	t.Run("ClusterRole gains discovery rules when DiscoverNetwork is set", func(t *testing.T) {
+	// Discover-network mode adds exactly one read-only rule
+	// (configuration.net.nvidia.com nicdevices get/list). The rules the
+	// mutating l8k path used to need — NicClusterPolicy patch, pods/exec,
+	// nodes patch — must stay absent.
+	t.Run("ClusterRole gains only the read-only nicdevices rule when DiscoverNetwork is set", func(t *testing.T) {
 		discoverClientset := fake.NewClientset()
 		discoverConfig := config
 		discoverConfig.DiscoverNetwork = true
@@ -275,45 +273,42 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		hasNCPPatch := false
 		hasPodsExec := false
 		hasNodesPatch := false
+		hasNicDevicesList := false
 		for _, r := range cr.Rules {
 			for _, g := range r.APIGroups {
-				if g == "mellanox.com" {
-					for _, res := range r.Resources {
-						if res == "nicclusterpolicies" {
-							for _, v := range r.Verbs {
-								if v == "patch" {
-									hasNCPPatch = true
-								}
-							}
+				for _, res := range r.Resources {
+					for _, v := range r.Verbs {
+						switch {
+						case g == "mellanox.com" && res == "nicclusterpolicies" && v == "patch":
+							hasNCPPatch = true
+						case g == "configuration.net.nvidia.com" && res == "nicdevices" && v == "list":
+							hasNicDevicesList = true
 						}
 					}
 				}
 			}
 			for _, res := range r.Resources {
-				if res == "pods/exec" {
-					for _, v := range r.Verbs {
-						if v == "create" {
-							hasPodsExec = true
-						}
+				for _, v := range r.Verbs {
+					if res == "pods/exec" && v == "create" {
+						hasPodsExec = true
 					}
-				}
-				if res == "nodes" {
-					for _, v := range r.Verbs {
-						if v == "patch" {
-							hasNodesPatch = true
-						}
+					if res == "nodes" && v == "patch" {
+						hasNodesPatch = true
 					}
 				}
 			}
 		}
-		if !hasNCPPatch {
-			t.Error("expected mellanox.com/nicclusterpolicies patch rule")
+		if !hasNicDevicesList {
+			t.Error("expected configuration.net.nvidia.com/nicdevices list rule")
 		}
-		if !hasPodsExec {
-			t.Error("expected pods/exec create rule")
+		if hasNCPPatch {
+			t.Error("mellanox.com/nicclusterpolicies patch rule must not be granted: discovery is read-only")
 		}
-		if !hasNodesPatch {
-			t.Error("expected nodes/patch rule")
+		if hasPodsExec {
+			t.Error("pods/exec create rule must not be granted: discovery is read-only")
+		}
+		if hasNodesPatch {
+			t.Error("nodes/patch rule must not be granted: discovery is read-only")
 		}
 	})
 

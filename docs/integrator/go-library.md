@@ -394,8 +394,8 @@ the applied objects are permanent and no run cleanup removes them:
 res, err := snapshotter.WriteAgentRoleManifests(&snapshotter.AgentRolesConfig{
 	Namespace:          "gpu-operator",
 	ServiceAccountName: "irsa-snapshotter",
-	// DiscoverNetwork also renders the cluster-scoped MUTATING rules live
-	// network discovery needs — permanent once applied, not for one run's lifetime.
+	// DiscoverNetwork also renders the one read-only rule live network
+	// discovery needs (configuration.net.nvidia.com nicdevices get/list).
 	DiscoverNetwork: false,
 })
 if err != nil {
@@ -411,9 +411,9 @@ for _, obj := range res.Objects {
 ```
 
 Adopting one ServiceAccount across runs waives per-run permission isolation:
-concurrent runs sharing it hold the same grants, and a `DiscoverNetwork`
-provisioning leaves mutating cluster permissions in place until an operator
-removes them. See
+concurrent runs sharing it hold the same grants, and the grants (read-only,
+including the `DiscoverNetwork` nicdevices read) stay in place until an
+operator removes them. See
 [Agent Deployment](../user/agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity)
 for the full migration path and teardown commands.
 
