@@ -249,7 +249,7 @@ produced from the live cluster.
 | `output.template` | string | Optional Go template path |
 | `agent.*` | object | In-cluster capture Job pod: `namespace`, `image`, `imagePullSecrets`, `jobName`, `serviceAccountName`, `nodeSelector`, `tolerations`, `requireGpu`, `runtimeClassName` (mutually exclusive with `requireGpu`), `os`, `requests`, `limits`. Mirrors `spec.validate.agent` so one file pins matching placement for both |
 | `agent.jobName` | string | Optional **prefix**, never an exact name — the run ID is always appended (`<prefix>-<run-id>`). Omit it unless you need a custom prefix (default: `aicr`) |
-| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, so unlike `jobName` it is not always a prefix. When a ServiceAccount of exactly this name already exists in `agent.namespace`, the pod runs as it verbatim, the run creates and deletes **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, and per-run permission isolation is waived — concurrent runs share that identity's persistent grants. When it does not exist, the value is a prefix, the run ID is appended (`<prefix>-<run-id>`), and the run owns a full run-scoped RBAC set it deletes at cleanup. Omitting the field is not the same as writing `aicr` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
+| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, so unlike `jobName` it is not always a prefix. When a ServiceAccount of exactly this name already exists in `agent.namespace`, the pod runs as it verbatim, the run creates and deletes **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, it leaves the namespace untouched (no create, no label change), and per-run permission isolation is waived — concurrent runs share that identity's persistent grants. When it does not exist, the value is a prefix, the run ID is appended (`<prefix>-<run-id>`), and the run owns a full run-scoped RBAC set it deletes at cleanup. Omitting the field is not the same as writing `aicr` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
 | `execution.timeout` | duration string | e.g. `5m` |
 | `execution.noCleanup` | bool | Keep the capture Job after completion |
 | `execution.privileged` | bool (tri-state) | Set `false` for PSS-restricted namespaces |
@@ -282,7 +282,7 @@ Inputs to `aicr bundle`.
 |-------|------|-------|
 | `input.recipe` | string | Recipe to bundle |
 | `output.target` | string | Local directory or `oci://` URI |
-| `output.imageRefs` | string | Optional external image-reference output file for an OCI `output.target` only. Local output is rejected. Its parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. |
+| `output.imageRefs` | string | Optional external image-reference output file for an OCI `output.target` only. Local output is rejected. Its parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. The target, including that it can be written, is checked before the bundle is generated. |
 | `deployment.deployer` | string | Deployer choice (same values as `--deployer`) |
 | `deployment.repo` | string | GitOps repo for repo-shaped deployers |
 | `deployment.set` / `.dynamic` | []string | Value overrides, `key:path=value` |
@@ -296,13 +296,16 @@ Inputs to `aicr bundle`.
 | `attestation.signingKey` | string | KMS key reference for key-based signing (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`); empty = keyless OIDC. Mutually exclusive with the keyless-only inputs (`oidcDeviceFlow`, `fulcioURL`, `--identity-token`) |
 | `registry.insecureTLS` / `.plainHTTP` | bool | OCI transport options for push |
 
-When `output.imageRefs` is set, AICR writes the published OCI digest through a
-mode-`0600` temporary file and an anchored same-directory rename. The target
-may be absent or an existing retained regular file; directories, symlinks,
-other non-regular files, and bundle aliases are rejected. The final validation
-and rename are ordered but are not one atomic identity-conditioned filesystem
-operation, so no other process should mutate the target directory while the
-bundle command runs.
+When `output.imageRefs` is set, AICR writes the published OCI digest to it.
+The target may be absent or an existing retained regular file; directories,
+symlinks, other non-regular files, and bundle aliases are rejected. An
+ordinary target is written through a mode-`0600` temporary file and an
+anchored same-directory rename. The final validation and rename are ordered
+but are not one atomic identity-conditioned filesystem operation, so no other
+process should mutate the target directory while the bundle command runs. A
+target on a different device from its directory, such as a Kubernetes Job's
+default termination-message file, is truncated and written in place instead. See
+[`aicr bundle --image-refs`](cli-reference.md#aicr-bundle).
 
 ### spec.validate
 
@@ -313,7 +316,7 @@ Inputs to `aicr validate`.
 | `input.recipe` / `.snapshot` | string | Recipe + snapshot to validate |
 | `agent.*` | object | The **live snapshot-capture** Job pod `aicr validate` deploys when `input.snapshot` is empty; same fields and nil-vs-empty semantics as `spec.snapshot.agent` (minus `runtimeClassName`/`os`/`requests`/`limits`). Neither `jobName` nor `serviceAccountName` names the validator Jobs. The one addition, `validatorServiceAccountName`, configures the validator Jobs instead and applies with or without `input.snapshot` |
 | `agent.jobName` | string | Optional **prefix**, never an exact name — the run ID is always appended (`<prefix>-<run-id>`). Omit it to take the default (`aicr-validate`) |
-| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, with the same two branches as `spec.snapshot.agent.serviceAccountName`: an existing ServiceAccount of exactly this name in `agent.namespace` is used verbatim, the run creates and deletes **no** RBAC, and per-run permission isolation is waived — concurrent runs share that identity's persistent grants; when it does not exist the value is a prefix with the run ID appended (`<prefix>-<run-id>`) and the run owns a full run-scoped RBAC set. Omitting the field is not the same as writing `aicr-validate` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-validate-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
+| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, with the same two branches as `spec.snapshot.agent.serviceAccountName`: an existing ServiceAccount of exactly this name in `agent.namespace` is used verbatim, the run creates and deletes **no** RBAC, the capture agent leaves the namespace untouched (the validator Jobs still apply it unless `agent.validatorServiceAccountName` is set), and per-run permission isolation is waived — concurrent runs share that identity's persistent grants; when it does not exist the value is a prefix with the run ID appended (`<prefix>-<run-id>`) and the run owns a full run-scoped RBAC set. Omitting the field is not the same as writing `aicr-validate` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-validate-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
 | `agent.validatorServiceAccountName` | string | Existing ServiceAccount in `agent.namespace` that the **validator Jobs** run as, instead of a per-run ServiceAccount bound to `cluster-admin`. For the validator Jobs the run creates and deletes no ServiceAccount or ClusterRoleBinding and does not apply the namespace; with `input.snapshot` empty, the live-capture agent still creates or labels the namespace and creates its own RBAC unless `agent.serviceAccountName` names an existing ServiceAccount. It applies with or without `input.snapshot`, and it is exact, never a prefix: a missing, unbound, or unverifiable ServiceAccount fails the run before anything is created rather than falling back to per-run RBAC. Omit it to keep per-run RBAC. Mirrors `--validator-service-account-name`. See [Running under a pre-provisioned ServiceAccount](validation.md#running-under-a-pre-provisioned-serviceaccount) |
 | `execution.phases` | []string | e.g. `[deployment, conformance, performance]` |
 | `execution.skipChecks` | []string | Checks to withhold from every phase that runs, one level below `phases`. For a caller that cannot satisfy a check the recipe declares, e.g. a lane deploying a subset of the recipe. Each named check is **reported as skipped**, not dropped, so the CTRF report and the recipe-evidence bundle still account for it. Rejected before any validation resource is created when a name matches no check, when the list would leave a requested phase with nothing to run, or when it is set alongside `evidence.cncf.dir` (that renderer omits skipped checks, so a submission would silently lose the requirement). A `cm://` recipe is read from the cluster first, so that form contacts the API server before the list is judged. Mirrors `--skip-check` |

@@ -629,16 +629,16 @@ const openVEXMaxDocFieldBytes = 256
 // image promotion, so it validates in jq rather than fetching a schema; these
 // cases are what stands in for the schema. A document that reaches
 // `cosign attest` malformed produces an attestation no scanner can apply, and
-// the shapes that pass a naive presence check (an empty `statements` array, a
-// `{}` statement, a `not_affected` statement with no reason) are exactly the
-// ones that look healthy until a downstream consumer tries to use them.
+// the shapes that pass a naive presence check (a `{}` statement, a
+// `not_affected` statement with no reason) are exactly the ones that look
+// healthy until a downstream consumer tries to use them.
 //
 // Two documents pass through the guard and every case below runs against both:
 // the committed source, and the per-platform projection, which is what actually
 // gets signed. Checking only the source would leave the signed bytes unchecked,
-// because binding rewrites `products` on every statement it keeps. Exactly one
-// rule differs between the modes; every other case asserts the same verdict on
-// both sides.
+// because binding rewrites `products` on every statement it keeps. Every case
+// asserts the same verdict on both sides; the one projection-only rule, digest
+// binding, is exercised separately below.
 func TestReleaseOpenVEXValidation(t *testing.T) {
 	t.Parallel()
 	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
@@ -697,10 +697,6 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 		name     string
 		document string
 		wantErr  string
-		// projectionOK marks the single rule that is scoped to the source
-		// only: the case is expected to be rejected as a source and accepted
-		// as a projection.
-		projectionOK bool
 	}{
 		{name: "a complete document is accepted", document: document(validStatement)},
 		{
@@ -720,14 +716,11 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 			wantErr:  "version must be a number",
 		},
 		{
-			// The one rule that differs by intent. An empty committed source
-			// means someone truncated or mis-generated it. An empty projection
-			// means the image has no triaged CVE, which is the honest answer
-			// for six of the seven released images.
-			name:         "empty statements",
-			document:     document(""),
-			wantErr:      "statements must not be empty",
-			projectionOK: true,
+			// With nothing triaged, `[]` asserts no exceptions. A source in
+			// that state projects to an empty document on every image, which
+			// is the honest answer rather than a release failure.
+			name:     "empty statements are accepted",
+			document: document(""),
 		},
 		{
 			name:     "statement with no fields",
@@ -839,16 +832,12 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 		// call rather than merely available to be called.
 		t.Run("projection/"+tc.name, func(t *testing.T) {
 			t.Parallel()
-			wantErr := tc.wantErr
-			if tc.projectionOK {
-				wantErr = ""
-			}
 			output, result := runOpenVEXProjectionGuard(t, bindScript, tc.document, false)
-			if (result != nil) != (wantErr != "") {
-				t.Fatalf("binding guard error = %v, wantErr %q\n%s", result, wantErr, output)
+			if (result != nil) != (tc.wantErr != "") {
+				t.Fatalf("binding guard error = %v, wantErr %q\n%s", result, tc.wantErr, output)
 			}
-			if wantErr != "" && !strings.Contains(output, wantErr) {
-				t.Errorf("binding guard output = %q, want it to report %q", output, wantErr)
+			if tc.wantErr != "" && !strings.Contains(output, tc.wantErr) {
+				t.Errorf("binding guard output = %q, want it to report %q", output, tc.wantErr)
 			}
 		})
 	}

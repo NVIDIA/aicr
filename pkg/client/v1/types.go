@@ -134,7 +134,9 @@ type AgentConfig struct {
 	//   - A ServiceAccount of exactly this name already exists in
 	//     Namespace: it is used verbatim, and the run creates NO
 	//     ServiceAccount, Role, RoleBinding, ClusterRole or
-	//     ClusterRoleBinding — and deletes none at cleanup. This is how a
+	//     ClusterRoleBinding — and deletes none at cleanup. The Namespace
+	//     is not created, read or relabeled either, so the caller needs no
+	//     permission on it. This is how a
 	//     ServiceAccount carrying IRSA (eks.amazonaws.com/role-arn) or
 	//     GKE Workload Identity (iam.gke.io/gcp-service-account)
 	//     annotations stays usable: both providers pin trust to the

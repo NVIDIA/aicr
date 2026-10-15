@@ -37,7 +37,7 @@ constrained:
       SupportedBundleQueryParameters: behavioral
   pkg/bundler/attestation:
     reason: >-
-      Two legitimate uses. First, pkg/client/v1.BundleAttester and
+      Three legitimate uses. First, pkg/client/v1.BundleAttester and
       BundleOptions.OIDCResolve are transparent aliases of this package's
       Attester and OIDC-resolve types, so any caller populating those facade
       fields calls the concrete constructors (ResolveAttesterLazy,
@@ -46,17 +46,25 @@ constrained:
       pkg/bundler/result below. Second, the CLI's pre-signing keyless-OIDC
       disclosure banner needs the same OIDC-source classification before
       MakeBundle runs, which is inherently interactive CLI UX the facade has
-      no reason to expose.
+      no reason to expose. Third, the evidence-signing commands check their
+      signing flags before any validation run or push, the same input
+      parsing as pkg/bundler/config.ValidateHTTPSURL: ValidateSigningKeyRef
+      rejects a --signing-key that names no KMS scheme, and
+      LoadSigningConfigForValidation parses --signing-config once so a bad
+      file fails up front and the config checked is the one signed with.
+      pkg/evidence/attestation repeats the scheme check for SDK callers.
     permanent: true
     symbols:
       Attester: type
       BundleMetadataPaths: behavioral
       FindBinaryAttestation: behavioral
+      LoadSigningConfigForValidation: behavioral
       OIDCSourceKind.Interactive: behavioral
       ResolveAttester: behavioral
       ResolveAttesterLazy: behavioral
       ResolveOptions: type
       SelectOIDCSource: behavioral
+      ValidateSigningKeyRef: behavioral
   pkg/bundler/checksum:
     reason: >-
       Local-disk staging and verification of an already-generated, on-disk

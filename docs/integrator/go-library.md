@@ -372,7 +372,9 @@ meanings depending on the cluster:
 - A ServiceAccount of exactly that name already exists in `Namespace`: the
   agent pod runs as it verbatim, and `CollectSnapshot` creates **no**
   ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, and
-  deletes none at cleanup.
+  deletes none at cleanup. It also leaves the namespace alone: it does not
+  create, read, or relabel it, so the caller needs no permission on the
+  Namespace object.
 - Otherwise it is a name prefix and the run creates and owns the full
   run-scoped RBAC set, named `<prefix>-<run-id>`.
 
@@ -1385,7 +1387,7 @@ rest of `EvidenceOptions` stays yours, and the reasons differ:
 | Field | Why it is not derived |
 |---|---|
 | `Commit` | Names the running binary, not the document. It selects the validator catalog the bundle's BOM is built against. Set it after deriving. |
-| `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file; resolve it at sign time. |
+| `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file, and the signing mode it selects (a KMS `SigningKey`, private Sigstore endpoints) is set per invocation; resolve it at sign time. |
 | `NoSign`, `Full`, `AllowMutableValidatorTags` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. All three weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads, `AllowMutableValidatorTags` lets the predicate name validator images that can later resolve to different code — and a checked-in file that can silently disable signing or provenance is a supply-chain downgrade no reviewer would see in a diff. |
 
 **Why `plainHTTP` and `insecureTLS` project anyway.** They weaken a run too, so
@@ -1658,6 +1660,15 @@ An invalid bundle is a verdict, not an error — branch on `Exit`. The
 `EvidenceExitIncomplete` case is the one worth handling separately: it
 means "we could not check this", which is different from "we checked it
 and it failed".
+
+Evidence signed with a KMS key (`OIDCResolve.SigningKey` on
+`EvidenceOptions` or `EvidencePublishOptions`) verifies with `Key`, a KMS
+URI or a PEM public-key path; `result.Signer` then reports issuer `key` and
+the key's `sha256:` fingerprint. `Key` is the signer pin, so setting it with
+`ExpectedIssuer` or `ExpectedIdentityRegexp` is an error, as is
+`IgnoreTLog` without `Key`. `TrustRoot` adds a private Sigstore root for
+evidence signed against a private Fulcio/Rekor. A bad key or trust root
+returns an error, not a verdict.
 
 Pair it with `RecipeDigest` to detect evidence that has gone stale
 against the recipe on your branch:

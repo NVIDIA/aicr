@@ -511,12 +511,18 @@ func validateTLogUpload(opts *bundleCmdOptions) error {
 				"requires --attest with --"+flagSigningKey+"; keyless OIDC signing needs "+
 				"Fulcio/Rekor network access")
 	}
-	if opts.rekorURL != "" {
+	return validateTLogOptOutTarget(opts.rekorURL, opts.signingConfigPath)
+}
+
+// validateTLogOptOutTarget rejects a transparency-log target alongside
+// --tlog-upload=false; see validateTLogUpload. Shared with evidence signing.
+func validateTLogOptOutTarget(rekorURL, signingConfigPath string) error {
+	if rekorURL != "" {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"--"+flagTLogUpload+"=false is mutually exclusive with --"+flagRekorURL+
 				": one skips the transparency log, the other selects a Rekor endpoint")
 	}
-	if opts.signingConfigPath != "" {
+	if signingConfigPath != "" {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"--"+flagTLogUpload+"=false is mutually exclusive with --"+flagSigningConfig+
 				": one skips the transparency log, the other selects a signing config")
@@ -567,13 +573,20 @@ func validateSigningKeyExclusivity(cmd *cli.Command, opts *bundleCmdOptions) err
 	// a YAML block-scalar config value) does not reach the KMS URI parser and
 	// fail late at sign time.
 	opts.signingKey = trimmed
+	return validateKeylessOnlyUnset(opts.identityToken, opts.oidcDeviceFlow, opts.fulcioURL)
+}
+
+// validateKeylessOnlyUnset rejects the keyless-only options that are
+// meaningless under KMS signing; see validateSigningKeyExclusivity. Shared with
+// evidence signing.
+func validateKeylessOnlyUnset(identityToken string, deviceFlow bool, fulcioURL string) error {
 	conflicts := []struct {
 		name   string
 		active bool
 	}{
-		{flagIdentityToken, opts.identityToken != ""},
-		{flagOIDCDeviceFlow, opts.oidcDeviceFlow},
-		{flagFulcioURL, opts.fulcioURL != ""},
+		{flagIdentityToken, identityToken != ""},
+		{flagOIDCDeviceFlow, deviceFlow},
+		{flagFulcioURL, fulcioURL != ""},
 	}
 	for _, c := range conflicts {
 		if c.active {
@@ -1088,7 +1101,7 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     flagImageRefs,
-				Usage:    "Path to file where the published image reference will be written (only used with OCI output)",
+				Usage:    "File to receive the published bundle digest (sha256:...); valid only with OCI output. A target on a different device from its directory, such as a Kubernetes termination-message file, is written in place. The target is checked, including that it can be written, before the bundle is generated.",
 				Category: catOCIRegistry,
 			},
 		},
@@ -1181,6 +1194,9 @@ func prepareBundlePublicationTargets(
 	var imageRefs *imageRefsTarget
 	if err == nil && opts.imageRefsPath != "" {
 		imageRefs, err = deps.prepareImageRefsTarget(preflightCtx, bundleTarget, opts.imageRefsPath)
+		if err == nil {
+			err = imageRefs.preflightWrite(preflightCtx)
+		}
 		err = authoritativeFilesystemContextError(preflightCtx,
 			"image-reference target preflight canceled", err)
 	}
@@ -1573,7 +1589,7 @@ func defaultBundlePublishDependencies() bundlePublishDependencies {
 		packageAndPush:      oci.PackageAndPush,
 		packageAndPushHelm:  oci.PackageAndPushHelmChart,
 		writeImageRefs: func(ctx context.Context, target *imageRefsTarget, data []byte) error {
-			return target.writeAtomic(ctx, data)
+			return target.write(ctx, data)
 		},
 	}
 }

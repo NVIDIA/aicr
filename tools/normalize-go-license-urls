@@ -105,27 +105,39 @@ remapped_candidate() {
         old="${entry%%|*}/"
         new="${entry##*|}/"
         if [[ "${url}" == *"${old}"* ]]; then
-            printf '%s\n' "${url/"${old}"/"${new}"}"
+            # Split around the first match rather than ${url/"${old}"/"${new}"}:
+            # bash 3.2 keeps the quotes of a quoted replacement in the result.
+            printf '%s%s%s\n' "${url%%"${old}"*}" "${new}" "${url#*"${old}"}"
             return
         fi
     done
     printf '%s\n' "${url}"
 }
 
-# go-licenses finds a gopkg.in module's repository through the go-source tag
-# gopkg.in serves, so a gopkg.in outage turns the URL into "Unknown" and fails
-# the build. gopkg.in's naming rule is fixed (gopkg.in/pkg.vN is
-# github.com/go-pkg/pkg, gopkg.in/user/pkg.vN is github.com/user/pkg), so the
-# URL is derived from it, the module version, and the license file go-licenses
-# chose, as a path relative to the module's local copy. A replaced module, or a
-# license file outside that copy, derives nothing, so its row still fails.
-gopkgin_candidate() {
-    local package=$1
-    local license_path=$2
-    [[ "${package}" =~ ^gopkg\.in/(([^/]+)/)?([^/]+)\.v([0-9]+)(/|$) ]] || return 0
-    local repo=${BASH_REMATCH[3]}
-    local owner=${BASH_REMATCH[2]:-go-${repo}}
-    local module="gopkg.in/${BASH_REMATCH[1]}${repo}.v${BASH_REMATCH[4]}"
+# Vanity import paths whose host does not reliably serve the go-import /
+# go-source meta tags go-licenses reads to find a module's repository; when the
+# host answers without them the URL comes back "Unknown" and fails the build. A
+# module path is immutable, so its repository is pinned here, to the one the
+# tags name when they are served, so the notices are identical either way. The
+# URL is derived like a gopkg.in module's (see module_blob_url).
+#
+# Format: <module-path>|<repo-path>
+#
+# dario.cat/mergo: served pages without the tags to CI runners on 2026-10-15;
+# its tags name github.com/imdario/mergo, which GitHub redirects to
+# github.com/darccio/mergo.
+VANITY_REPOSITORIES=(
+    "dario.cat/mergo|github.com/imdario/mergo"
+)
+
+# The blob URL of the license file go-licenses chose for module, whose
+# repository is repo (<host>/<owner>/<name>), at the module's version, as a
+# path relative to the module's local copy. A replaced module, or a license file
+# outside that copy, derives nothing, so its row still fails.
+module_blob_url() {
+    local module=$1
+    local repo=$2
+    local license_path=$3
     local info ref dir
     info=$("${GO_BIN}" list -m -f '{{if not .Replace}}{{.Version}} {{.Dir}}{{end}}' "${module}" 2>/dev/null) || return 0
     ref=${info%% *}
@@ -136,8 +148,36 @@ gopkgin_candidate() {
     if [[ "${ref}" =~ [-.][0-9]{14}-([0-9a-f]{12})$ ]]; then
         ref=${BASH_REMATCH[1]}
     fi
-    printf 'https://github.com/%s/%s/blob/%s/%s\n' \
-        "${owner}" "${repo}" "${ref}" "${license_path#"${dir}/"}"
+    printf 'https://%s/blob/%s/%s\n' "${repo}" "${ref}" "${license_path#"${dir}/"}"
+}
+
+# go-licenses finds a gopkg.in module's repository through the go-source tag
+# gopkg.in serves, so a gopkg.in outage turns the URL into "Unknown" and fails
+# the build. gopkg.in's naming rule is fixed (gopkg.in/pkg.vN is
+# github.com/go-pkg/pkg, gopkg.in/user/pkg.vN is github.com/user/pkg), so the
+# repository is derived from it.
+gopkgin_candidate() {
+    local package=$1
+    local license_path=$2
+    [[ "${package}" =~ ^gopkg\.in/(([^/]+)/)?([^/]+)\.v([0-9]+)(/|$) ]] || return 0
+    local repo=${BASH_REMATCH[3]}
+    local owner=${BASH_REMATCH[2]:-go-${repo}}
+    local module="gopkg.in/${BASH_REMATCH[1]}${repo}.v${BASH_REMATCH[4]}"
+    module_blob_url "${module}" "github.com/${owner}/${repo}" "${license_path}"
+}
+
+# The URL for a package of a VANITY_REPOSITORIES module.
+vanity_candidate() {
+    local package=$1
+    local license_path=$2
+    local entry module
+    for entry in "${VANITY_REPOSITORIES[@]}"; do
+        module=${entry%%|*}
+        if [[ "${package}" == "${module}" || "${package}" == "${module}/"* ]]; then
+            module_blob_url "${module}" "${entry##*|}" "${license_path}"
+            return 0
+        fi
+    done
 }
 
 # Every URL worth probing for one CSV row, best-provenance first and deduplicated
@@ -150,6 +190,9 @@ url_candidates() {
     if [[ "${url}" == "${UNKNOWN_URL}" ]]; then
         local derived
         derived=$(gopkgin_candidate "${package}" "${license_path}")
+        if [[ -z "${derived}" ]]; then
+            derived=$(vanity_candidate "${package}" "${license_path}")
+        fi
         if [[ -n "${derived}" ]]; then
             printf '%s\n' "${derived}"
             return
@@ -373,5 +416,6 @@ if (( unreachable > 0 )); then
         fi
     fi
     echo "If a repository moved, add it to MOVED_REPOSITORIES in $0." >&2
+    echo "If a vanity import host does not serve its go-import meta tags, add the module to VANITY_REPOSITORIES." >&2
     exit 1
 fi

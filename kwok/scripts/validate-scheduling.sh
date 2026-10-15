@@ -420,6 +420,7 @@ capture_failure_diagnostics() {
 # Cleanup function
 cleanup() {
     local exit_code=$?
+    local cleanup_failed=0
     log_info "Cleaning up..."
 
     if [[ "$exit_code" -ne 0 ]]; then
@@ -524,20 +525,9 @@ cleanup() {
             fi
         fi
 
-        # Uninstall all Helm releases from component namespaces (excludes
-        # argocd because we want the install-infra.sh-managed release to
-        # survive recipe-to-recipe).
-        local releases
-        releases=$(helm list -A -o json 2>/dev/null \
-            | jq -r '.[] | select(.namespace != "kube-system") | select(.namespace != "argocd") | "\(.name) \(.namespace)"' \
-            || true)
-        if [[ -n "$releases" ]]; then
-            while IFS=' ' read -r name ns; do
-                if [[ -n "$name" ]]; then
-                    log_info "Uninstalling release $name from $ns..."
-                    timeout 60s helm uninstall "$name" -n "$ns" --wait 2>/dev/null || true
-                fi
-            done <<< "$releases"
+        if ! cleanup_recipe_helm_releases; then
+            log_error "Helm release cleanup failed; this recipe cannot be treated as clean"
+            cleanup_failed=1
         fi
         # Clean up stale APIServices before namespace deletion to prevent hangs
         cleanup_stale_apiservices
@@ -589,7 +579,10 @@ cleanup() {
         done
     fi
 
-    exit $exit_code
+    if (( exit_code == 0 && cleanup_failed != 0 )); then
+        exit_code=1
+    fi
+    exit "$exit_code"
 }
 
 # Find aicr binary (goreleaser puts it in platform-specific dirs)
@@ -731,21 +724,9 @@ cleanup_old_tests() {
         fi
     fi
 
-    # Find and uninstall old Helm releases from component namespaces.
-    # Skip the argocd namespace so the install-infra.sh-managed Argo CD
-    # release survives recipe-to-recipe.
-    local releases
-    releases=$(helm list -A -o json 2>/dev/null \
-        | jq -r '.[] | select(.namespace != "kube-system") | select(.namespace != "argocd") | "\(.namespace) \(.name)"' \
-        || true)
-    if [[ -n "$releases" ]]; then
-        log_info "Uninstalling old releases..."
-        echo "$releases" | while read -r ns release; do
-            if [[ -n "$release" ]]; then
-                log_info "  Uninstalling $release from $ns..."
-                helm uninstall "$release" -n "$ns" --wait 2>/dev/null || true
-            fi
-        done
+    if ! cleanup_recipe_helm_releases; then
+        log_error "Failed to clean old Helm releases; refusing to start this recipe"
+        return 1
     fi
 
     # Clean up stale APIServices left by prometheus-adapter

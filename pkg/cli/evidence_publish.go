@@ -54,7 +54,8 @@ directory itself.
 
 Keyless OIDC signing uses the same precedence chain as ` + "`aicr validate --push`" + `:
 --identity-token > COSIGN_IDENTITY_TOKEN env > GitHub Actions ambient OIDC >
---oidc-device-flow > interactive browser flow.
+--oidc-device-flow > interactive browser flow. --signing-key signs with a KMS
+key instead, with no OIDC flow.
 
 Example:
 
@@ -63,7 +64,7 @@ Example:
 
   # Off VPN: sign, push, and write the pointer.
   aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence`,
-		Flags: []cli.Flag{
+		Flags: append([]cli.Flag{
 			&cli.StringFlag{
 				Name:     flagPush,
 				Usage:    "OCI registry reference (e.g. ghcr.io/myorg/aicr-evidence) to push the signed summary bundle to. Required.",
@@ -97,13 +98,20 @@ Example:
 				Category: catEvidence,
 			},
 			assumeYesFlag(catEvidence),
-		},
+		}, evidenceSigningFlags()...),
 		Action: runEvidencePublishCmd,
 	}
 }
 
 func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
-	if err := validateSingleValueFlags(cmd, flagPush, flagIdentityToken); err != nil {
+	if err := validateSingleValueFlags(cmd, flagPush, flagIdentityToken, flagSigningKey, flagFulcioURL, flagRekorURL, flagSigningConfig); err != nil {
+		return err
+	}
+	if err := validateNoSignWithoutSigningFlags(cmd); err != nil {
+		return err
+	}
+	oidcResolve, err := evidenceSigningOptionsFromFlags(cmd)
+	if err != nil {
 		return err
 	}
 
@@ -123,10 +131,9 @@ func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
 	// sources and non-TTY runs pass through inside the gate. With --no-sign no
 	// OIDC flow runs, so the prompt is skipped entirely.
 	noSign := cmd.Bool(flagNoSign)
-	oidcResolve := oidcResolveOptionsFromFlags(cmd)
 	if !noSign {
-		if err := confirmKeylessSigningDisclosure(oidcResolve, cmd.Bool(flagAssumeYes), os.Stdin, os.Stderr); err != nil {
-			return err
+		if discErr := confirmKeylessSigningDisclosure(oidcResolve, cmd.Bool(flagAssumeYes), os.Stdin, os.Stderr); discErr != nil {
+			return discErr
 		}
 	}
 

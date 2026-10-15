@@ -87,6 +87,7 @@ for arg in "$@"; do
         https://github.com/go-nested/nested/blob/v2.0.0/sub/LICENSE | \
         https://github.com/go-copying/copying/blob/v1.0.0/COPYING | \
         https://github.com/go-copying/copying/blob/v1.0.0/LICENSE | \
+        https://github.com/imdario/mergo/blob/v1.0.2/LICENSE | \
         https://github.com/rawthrottled/repo/blob/v1.0.0/sub/LICENSE | \
         https://github.com/rawthrottled/repo/blob/v1.0.0/LICENSE | \
         https://github.com/rawthrottled/repo/blob/v2.0.0/LICENSE)
@@ -119,7 +120,7 @@ exit "${rc}"
 EOF
 chmod +x "${TMP}/curl"
 
-# The stub answers `go list -m` for the gopkg.in modules the cases below use,
+# The stub answers `go list -m` for the gopkg.in and vanity modules the cases below use,
 # with a module directory under ${GO_STUB_MODCACHE}, and fails like go for any
 # other module.
 cat > "${TMP}/go" <<'EOF'
@@ -138,6 +139,7 @@ case "${module}" in
     gopkg.in/mdlicense.v2) version=v2.1.0 ;;
     gopkg.in/nested.v2) version=v2.0.0 ;;
     gopkg.in/copying.v1) version=v1.0.0 ;;
+    dario.cat/mergo) version=v1.0.2 ;;
     # The format prints nothing for a replaced module.
     gopkg.in/replaced.v1) exit 0 ;;
     *) echo "go: module ${module}: not a known dependency" >&2; exit 1 ;;
@@ -173,6 +175,21 @@ golang.org/x/term,https://cs.opensource.google/go/x/term/+/v0.34.0:LICENSE,BSD-3
 github.com/google/cel-go,https://github.com/cel-expr/cel-go/blob/v0.31.0/LICENSE,Apache-2.0
 EOF
 diff -u "${TMP}/expected.csv" "${TMP}/actual.csv"
+
+# The tool runs under whichever bash is first on PATH, and on macOS that can be
+# the stock /bin/bash 3.2, which keeps the quotes of a quoted ${var/pat/rep}
+# replacement in its result. Repeat the main case under it where it exists;
+# Linux runners have no bash 3 to try.
+if [[ -x /bin/bash ]] && (( $(/bin/bash -c 'echo "${BASH_VERSINFO[0]}"') < 4 )); then
+    PATH="/bin:${PATH}" CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/input.csv" > "${TMP}/actual-bash3.csv"
+    diff -u "${TMP}/expected.csv" "${TMP}/actual-bash3.csv"
+fi
+# Linux runners cannot run that case, so the construct itself is also rejected
+# everywhere: a ${var/pattern/replacement} whose replacement is quoted.
+if grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*//?("[^"]*"|[^/}"])*/"' "${TOOL}" | grep -vE '^[0-9]+:[[:space:]]*#'; then
+    echo "normalizer quotes a \${var/pattern/replacement} replacement, which bash 3.2 keeps in its output" >&2
+    exit 1
+fi
 
 cat > "${TMP}/broken.csv" <<'EOF'
 github.com/example/repo/missing,https://github.com/example/repo/blob/missing/v1.2.3/missing/LICENSE,Apache-2.0
@@ -394,11 +411,26 @@ gopkg.in/copying.v1,https://github.com/go-copying/copying/blob/v1.0.0/LICENSE,MI
 EOF
 diff -u "${TMP}/gopkgin.expected" "${TMP}/gopkgin.out"
 
-# An "Unknown" URL is still fatal outside gopkg.in, for a gopkg.in module whose
-# version go cannot resolve, for a replaced one, and when go-licenses chose no
-# license file or one outside the module's copy.
+# A VANITY_REPOSITORIES module whose host served no go-import meta tags is
+# derived the same way, from its pinned repository.
+v="${modcache}/dario.cat"
+cat > "${TMP}/vanity.csv" <<EOF
+dario.cat/mergo,Unknown,BSD-3-Clause,${v}/mergo@v1.0.2/LICENSE
+EOF
+GO_STUB_MODCACHE="${modcache}" GO_BIN="${TMP}/go" CURL_BIN="${TMP}/curl" \
+    "${TOOL}" "${TMP}/vanity.csv" > "${TMP}/vanity.out"
+cat > "${TMP}/vanity.expected" <<'EOF'
+dario.cat/mergo,https://github.com/imdario/mergo/blob/v1.0.2/LICENSE,BSD-3-Clause
+EOF
+diff -u "${TMP}/vanity.expected" "${TMP}/vanity.out"
+
+# An "Unknown" URL is still fatal outside gopkg.in and VANITY_REPOSITORIES, for
+# a module whose version go cannot resolve, for a replaced one, and when
+# go-licenses chose no license file or one outside the module's copy.
 for row in \
     "example.com/vanity,Unknown,MIT" \
+    "dario.cat/mergo,Unknown,BSD-3-Clause,${v}/mergo@v1.0.1/LICENSE" \
+    "dario.cat/mergoextra,Unknown,MIT,${v}/mergo@v1.0.2/LICENSE" \
     "gopkg.in/unresolvable.v1,Unknown,MIT,${m}/unresolvable.v1@v1.0.0/LICENSE" \
     "gopkg.in/replaced.v1,Unknown,MIT,${m}/replaced.v1@v1.0.0/LICENSE" \
     "gopkg.in/yaml.v3,Unknown,MIT,Unknown" \

@@ -1664,7 +1664,7 @@ const (
 	// tasks within a single oras.Copy invocation.
 	OCIPushConcurrency = 3
 
-	// OCIImageRefsWriteTimeout bounds final atomic image-reference output.
+	// OCIImageRefsWriteTimeout bounds the final write of an image-reference file.
 	OCIImageRefsWriteTimeout = 30 * time.Second
 
 	// OCIBundlePublishTimeout bounds the complete verify, stage, package,
