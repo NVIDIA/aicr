@@ -1823,7 +1823,7 @@ aicr bundle [flags]
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
-| `--image-refs` | | string | External file to receive the published OCI digest. Valid only with OCI `--output`; local output is rejected. The parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. `aicr validate --image-refs` writes the pushed evidence bundle's digest with the same format and rules. |
+| `--image-refs` | | string | External file to receive the published OCI digest. Valid only with OCI `--output`; local output is rejected. The parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. An ordinary target is replaced through a temporary file and a rename; a target on a different device from its directory, such as a Kubernetes Job's default termination-message file `/dev/termination-log` (which the kubelet bind-mounts, so it cannot be renamed over), is written in place. The target, including that it can be written, is checked before the bundle is generated, so a target that is unsafe, or whose directory or mount point cannot be written, fails before anything is pushed. The digest is written only after the push succeeds, and an in-place write that fails partway can leave the file empty or partial, so start each run with an absent or empty file. `aicr validate --image-refs` writes the pushed evidence bundle's digest with the same format and rules. |
 | `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication, or a KMS key via `--signing-key` for environments without OIDC. See [Bundle Attestation](#bundle-attestation). |
 | `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must *begin with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed) and must not use top-level alternation. For testing only. |
 | `--identity-token` | | string | Pre-fetched OIDC identity token for `--attest` keyless signing. Skips ambient/browser/device-code flows. Prefer `COSIGN_IDENTITY_TOKEN` on shared hosts — flag values are visible in `ps` and `/proc/<pid>/cmdline`. |
@@ -1858,13 +1858,22 @@ express them. `tolerationSeconds` requires `NoExecute`, as the API server
 requires. AICR also rejects the `Lt` and `Gt` operators, which the API server
 accepts only behind a feature gate AICR cannot verify.
 
-`--image-refs` writes the published digest through a mode-`0600` temporary
-file and an anchored same-directory rename. Its target may be absent or an
-existing retained regular file; directories, symlinks, other non-regular
-files, and aliases of the bundle tree are rejected. The final validation and
-rename are ordered but are not one atomic identity-conditioned filesystem
-operation, so no other process should mutate the target directory while the
-command runs.
+The `--image-refs` target may be absent or an existing retained regular file;
+directories, symlinks, other non-regular files, and aliases of the bundle tree
+are rejected. An ordinary target is written through a mode-`0600` temporary
+file and an anchored same-directory rename. The final validation and rename are
+ordered but are not one atomic identity-conditioned filesystem operation, so no
+other process should mutate the target directory while the command runs. An
+existing target on a different device from its directory is treated as a
+mount point, which a rename cannot replace, so it is truncated and written in
+place through the retained file instead, and keeps its own mode. That covers a
+Kubernetes Job's default termination-message file, so a Job can report the
+pushed digest as its termination message with
+`--image-refs /dev/termination-log`. Such a Job also needs a writable working
+directory and temporary directory (`TMPDIR`), because OCI output writes
+`./bundle` and stages the push there. Detection compares device numbers, so a
+file bind-mounted from the same filesystem as its directory is not detected,
+and renaming over it fails.
 
 For every CLI OCI publication, AICR revalidates a private bundle snapshot and
 publishes only its closed-world inventory; it never packages the mutable
