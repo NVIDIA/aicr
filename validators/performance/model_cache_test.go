@@ -148,13 +148,11 @@ func TestBuildModelCachePopulateJob(t *testing.T) {
 		namespace:       "ns",
 		model:           "Qwen/Qwen3-32B",
 		gpuNodeSelector: map[string]string{"kubernetes.io/hostname": "node-a"},
+		pullSecrets:     []v1.LocalObjectReference{{Name: "regcred"}},
 	}
-	pullSecrets := []v1.LocalObjectReference{{Name: "regcred"}}
-	job := buildModelCachePopulateJob("aicr-model-cache-populate-run-1", cfg, pullSecrets)
+	job := buildModelCachePopulateJob("aicr-model-cache-populate-run-1", cfg)
 
 	spec := job.Spec.Template.Spec
-	// imagePullSecrets propagate from the validator pod so a private-mirror /
-	// air-gapped cluster can pull cacheWorkerImage (parity with the AIPerf Job).
 	if len(spec.ImagePullSecrets) != 1 || spec.ImagePullSecrets[0].Name != "regcred" {
 		t.Errorf("ImagePullSecrets = %v, want [{regcred}]", spec.ImagePullSecrets)
 	}

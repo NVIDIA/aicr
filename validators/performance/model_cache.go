@@ -359,10 +359,7 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 	}
 
 	jobName := fmt.Sprintf("%s-%s", modelCachePopulateJobPrefix, config.runID)
-	// Propagate the validator pod's imagePullSecrets to the populate Job, same
-	// as the AIPerf Job — so a private-mirror / air-gapped cluster can pull the
-	// cacheWorkerImage. nil on a public-registry cluster (a no-op there).
-	job := buildModelCachePopulateJob(jobName, config, getOwnPullSecrets(ctx))
+	job := buildModelCachePopulateJob(jobName, config)
 	jobCtx, jobCancel := context.WithTimeout(ctx.Ctx, defaults.K8sJobCreationTimeout)
 	_, err = ctx.Clientset.BatchV1().Jobs(config.namespace).Create(jobCtx, job, metav1.CreateOptions{})
 	jobCancel()
@@ -427,7 +424,7 @@ func buildModelCachePVC(namespace string, qty resource.Quantity, storageClass st
 // RWO PVC binds there, mounts the PVC read-write at HF_HOME, and uses the
 // optional HF token. fsGroup makes the freshly provisioned volume group-writable
 // for the image's non-root user.
-func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pullSecrets []v1.LocalObjectReference) *batchv1.Job {
+func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig) *batchv1.Job {
 	// BackoffLimit 0 (single attempt): snapshot_download does not resume across
 	// pods, so each Job retry restarts the multi-GB download from scratch and
 	// burns the parent context deadline (a 100Gi-class download retried 2× could
@@ -449,7 +446,7 @@ func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pu
 					RestartPolicy:    v1.RestartPolicyNever,
 					NodeSelector:     config.gpuNodeSelector,
 					Tolerations:      config.gpuTolerations,
-					ImagePullSecrets: pullSecrets,
+					ImagePullSecrets: config.pullSecrets,
 					SecurityContext:  &v1.PodSecurityContext{FSGroup: ptr.To(cacheWorkerFSGroup)},
 					Containers: []v1.Container{{
 						Name:  "populate",

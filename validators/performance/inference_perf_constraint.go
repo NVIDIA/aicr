@@ -430,6 +430,10 @@ type inferenceWorkloadConfig struct {
 	// DRA node set (not from the cluster-global DRAUsable flag): DRA
 	// ResourceClaimTemplate when true, device-plugin limits otherwise.
 	draWorkerWiring bool
+
+	// pullSecrets references the image pull Secrets ensureWorkloadPullSecrets
+	// copied into namespace, for the pods created there.
+	pullSecrets []v1.LocalObjectReference
 }
 
 // useDRAWorkerClaims reports whether worker GPUs are wired via the DRA
@@ -1661,6 +1665,12 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		return err
 	}
 
+	pullSecrets, err := ensureWorkloadPullSecrets(ctx, config.namespace)
+	if err != nil {
+		return err
+	}
+	config.pullSecrets = pullSecrets
+
 	// Provision the optional model-weights cache (PVC + one-time populate Job)
 	// before deploying, so workers mount a pre-populated cache and skip the
 	// Hugging Face download. No-op when the cache is disabled.
@@ -2008,6 +2018,79 @@ func ensureHFTokenSecret(ctx *validators.Context, namespace string) error {
 	}
 	slog.Info("Provisioned Hugging Face token secret for model downloads", "namespace", namespace)
 	return nil
+}
+
+// ensureWorkloadPullSecrets copies the validator pod's image pull Secrets
+// into namespace and returns references to the copies. A pod resolves
+// imagePullSecrets only in its own namespace, so pods in the per-run
+// namespace cannot use the validator namespace's Secrets to pull from an
+// authenticated mirror. A referenced Secret absent from the validator
+// namespace is skipped, as the kubelet would skip it.
+func ensureWorkloadPullSecrets(ctx *validators.Context, namespace string) ([]v1.LocalObjectReference, error) {
+	refs := getOwnPullSecrets(ctx)
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	src := ctx.Clientset.CoreV1().Secrets(ctx.Namespace)
+	dst := ctx.Clientset.CoreV1().Secrets(namespace)
+	copied := make([]v1.LocalObjectReference, 0, len(refs))
+	for _, ref := range refs {
+		ok, err := copyPullSecret(ctx.Ctx, src, dst, ref.Name, namespace)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			slog.Warn("Image pull secret referenced by the validator pod does not exist; not copying it",
+				"secret", ref.Name, "namespace", ctx.Namespace)
+			continue
+		}
+		copied = append(copied, v1.LocalObjectReference{Name: ref.Name})
+	}
+	if len(copied) > 0 {
+		slog.Info("Copied image pull secrets into the inference workload namespace",
+			"namespace", namespace, "count", len(copied))
+	}
+	return copied, nil
+}
+
+// copyPullSecret creates or updates Secret name in dst from its counterpart
+// in src, so a reused namespace does not keep stale registry credentials. It
+// reports false when the source Secret does not exist.
+func copyPullSecret(ctx context.Context, src, dst typedcorev1.SecretInterface, name, namespace string) (bool, error) {
+	opCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	source, err := src.Get(opCtx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read image pull secret %q", name), err)
+	}
+	secret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Type:       source.Type,
+		Data:       source.Data,
+	}
+
+	existing, getErr := dst.Get(opCtx, name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(getErr):
+		if _, err := dst.Create(opCtx, secret, metav1.CreateOptions{}); err != nil {
+			return false, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to copy image pull secret %q into namespace %q", name, namespace), err)
+		}
+	case getErr != nil:
+		return false, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to read image pull secret %q in namespace %q", name, namespace), getErr)
+	default:
+		secret.ResourceVersion = existing.ResourceVersion
+		if _, err := dst.Update(opCtx, secret, metav1.UpdateOptions{}); err != nil {
+			return false, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to update image pull secret %q in namespace %q", name, namespace), err)
+		}
+	}
+	return true, nil
 }
 
 // ensureNamespace creates a namespace if it doesn't exist, waiting for any
