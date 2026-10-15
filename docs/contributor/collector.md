@@ -374,7 +374,8 @@ split:
   ([`aksgpupools.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/aksgpupools.go),
   AgentPool `gpuProfile.driver`), `oke-addons`
   ([`okeaddons.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/okeaddons.go),
-  the `NvidiaGpuPlugin` add-on's lifecycle state), and `gke-gpu-pools`
+  the lifecycle state of the `NvidiaGpuPlugin` and `NvidiaNetworkOperator`
+  add-ons), and `gke-gpu-pools`
   ([`gkegpupools.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/gkegpupools.go),
   node-pool `gpuDriverInstallationConfig`). Do not widen an existing
   provider's subtype or invent a cross-provider pools schema.
