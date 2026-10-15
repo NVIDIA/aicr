@@ -5,8 +5,10 @@
 # kube_context    = "kind-my-cluster"
 {{ if .ClusterRollover }}
 # Required: what identifies that cluster. A change here replaces every
-# release. A tfvars file holds literals only (no file()); pass a computed
-# value with -var or TF_VAR_cluster_keepers.
+# release; a value that never changes keeps the shim inert, and for a cluster
+# this configuration does not create its CA certificate is the natural one.
+# A tfvars file holds literals only (no file()); pass a computed value with
+# -var or TF_VAR_cluster_keepers.
 # cluster_keepers = { ca = "<the cluster CA certificate, or any value minted per cluster>" }
 {{ end }}
 # Per-release apply behaviour. atomic implies wait; the asynchronous
