@@ -78,7 +78,10 @@ cleanup_recipe_helm_releases() {
         if [[ "$namespace" == "kube-system" ]]; then
             wait_option=--wait
         fi
-        if ! timeout 60s helm uninstall "$release" -n "$namespace" "$wait_option"; then
+        # --ignore-not-found: under the Flux deployers the Kustomization's
+        # prune cascade can uninstall a release between the list above and
+        # this call, which is the clean state, not a failure.
+        if ! timeout 60s helm uninstall "$release" -n "$namespace" "$wait_option" --ignore-not-found; then
             echo "[ERROR] Failed to uninstall Helm release $release from $namespace" >&2
             failed=1
         fi

@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,6 +48,10 @@ if [[ "$1" == "uninstall" ]]; then
         echo "mock uninstall failure for $2" >&2
         exit 1
     fi
+    if [[ "${GONE_RELEASE:-}" == "$2" && " $* " != *" --ignore-not-found "* ]]; then
+        echo "Error: uninstall: Release not loaded: $2: release: not found" >&2
+        exit 1
+    fi
     exit 0
 fi
 echo "unexpected helm command: $*" >&2
@@ -73,6 +84,17 @@ if grep -Eq '^(kwok-controller|kwok-stage-fast|cluster-owned|argocd)\|' "${HELM_
     echo "FAIL: cleanup selected a protected release"
     exit 1
 fi
+
+# A release another controller already uninstalled (Flux's prune cascade)
+# counts as cleaned, not as a failure.
+: >"${HELM_CALLS}"
+export GONE_RELEASE=recipe-release
+if ! cleanup_recipe_helm_releases >/dev/null 2>"${TMP_DIR}/stderr"; then
+    echo "FAIL: cleanup failed on a release that was already gone"
+    cat "${TMP_DIR}/stderr"
+    exit 1
+fi
+unset GONE_RELEASE
 
 : >"${HELM_CALLS}"
 export FAIL_RELEASE=recipe-release
