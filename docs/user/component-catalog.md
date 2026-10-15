@@ -1000,7 +1000,12 @@ The AKS `gpuStack` profile now owns these names — `gpu-operator.operator.runti
 | `azure-managed` (default) | `nvidia-container-runtime` | `nvidia-container-runtime` | `nvidia-container-runtime` |
 | `operator-managed` | `nvidia` | `nvidia` | `nvidia` |
 
-Every other platform leaves `operator.runtimeClass` at the shared chart default `nvidia`, so no side needs a value. The exception is RKE2 (VR200): its GPU Operator runs CDI with the NRI plugin, which registers no RuntimeClass, so the VR200 overlays clear `metadata-collector.runtimeClassName` and host-mount the driver libraries instead ([NVIDIA/NVSentinel#1717](https://github.com/NVIDIA/NVSentinel/issues/1717)). `CheckNVSentinelRuntimeClassCoherence` still compares `operator.runtimeClass` with metadata-collector's name as defense in depth, treating either side unset as `nvidia`.
+Every other platform leaves `operator.runtimeClass` at the shared chart default `nvidia`, so no side needs a value. The exception is RKE2: its GPU Operator runs CDI with the NRI plugin, which registers no RuntimeClass.
+
+- **Generic RKE2 recipes** set `metadata-collector.nriPlugin.enabled: true`, so the collector requests the GPU Operator's management CDI device instead ([NVIDIA/NVSentinel#1949](https://github.com/NVIDIA/NVSentinel/pull/1949)). This works with a host-installed driver or the operator's driver container. It needs the nvsentinel namespace in the toolkit's `NRI_MANAGEMENT_CDI_DEVICE_NAMESPACES`, which the `rke2` root sets. The two settings are paired: a leaf that sets `cdi.nriPluginEnabled: false` must also set `metadata-collector.nriPlugin.enabled: false`.
+- **The VR200 overlays** keep their earlier wiring: `nriPlugin` off, `metadata-collector.runtimeClassName` cleared, and the host's NVML library mounted directly ([NVIDIA/NVSentinel#1717](https://github.com/NVIDIA/NVSentinel/issues/1717)).
+
+`CheckNVSentinelRuntimeClassCoherence` still compares `operator.runtimeClass` with metadata-collector's name as defense in depth, treating either side unset as `nvidia`.
 
 An AKS bundle therefore needs no NVSentinel overrides at all — only the keyed toleration AKS requires independently of NVSentinel (bundling an AKS recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration`):
 
