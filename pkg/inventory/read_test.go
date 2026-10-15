@@ -394,14 +394,17 @@ func TestVersionFor(t *testing.T) {
 func TestInstalledVersions(t *testing.T) {
 	comps := []Component{fixtureGPUOperator, fixtureCertManager, fixtureDRALabeler}
 
+	unreadableApp := installedRelease{Source: sourceArgo, Name: "tenant-a-gpu-operator", Unproven: true}
+
 	tests := []struct {
-		name     string
-		deployer Deployer
-		comps    []Component
-		records  []installedRelease
-		want     map[string]string
-		counts   mappingCounts
-		wantErr  bool
+		name         string
+		deployer     Deployer
+		comps        []Component
+		records      []installedRelease
+		want         map[string]string
+		wantUnproven map[string][]UnprovenRecord
+		counts       mappingCounts
+		wantErr      bool
 	}{
 		{
 			name: "an uninstalled release is excluded and counted", deployer: DeployerHelm, comps: comps,
@@ -537,11 +540,122 @@ func TestInstalledVersions(t *testing.T) {
 			},
 			want: map[string]string{"gpu-operator": "v25.3.3"},
 		},
+		{
+			name: "an unplaced application is counted and named", deployer: DeployerArgoCD, comps: comps,
+			records: []installedRelease{
+				argoRec("teamfoo-gpu-operator", "team-foo", "v25.3.3", nil),
+			},
+			want: map[string]string{"gpu-operator": ""},
+			wantUnproven: map[string][]UnprovenRecord{"gpu-operator": {
+				{Source: "argocd", Name: "teamfoo-gpu-operator", Namespace: "team-foo", Reason: UnprovenUnplaced},
+			}},
+			counts: mappingCounts{unplaced: 1},
+		},
+		{
+			// The reader already counted it as unreadable.
+			name: "an unreadable application outside the namespaces stays unreadable", deployer: DeployerArgoCD,
+			comps:   comps,
+			records: []installedRelease{unreadableApp},
+			want:    map[string]string{"gpu-operator": ""},
+			wantUnproven: map[string][]UnprovenRecord{"gpu-operator": {
+				{Source: "argocd", Name: "tenant-a-gpu-operator", Reason: UnprovenUnreadable},
+			}},
+		},
+		{
+			name: "every record behind an unversioned component is named, in reader order", deployer: DeployerArgoCD,
+			comps: comps,
+			records: []installedRelease{
+				argoRec("blue-gpu-operator", "team-blue", "v25.3.3", nil),
+				{Source: sourceArgo, Name: "green-gpu-operator", Namespace: "nvidia-gpu-operator", Unproven: true},
+			},
+			want: map[string]string{"gpu-operator": ""},
+			wantUnproven: map[string][]UnprovenRecord{"gpu-operator": {
+				{Source: "argocd", Name: "blue-gpu-operator", Namespace: "team-blue", Reason: UnprovenUnplaced},
+				{
+					Source: "argocd", Name: "green-gpu-operator", Namespace: "nvidia-gpu-operator",
+					Reason: UnprovenUnreadable,
+				},
+			}},
+			counts: mappingCounts{unplaced: 1},
+		},
+		{
+			// The placed Application versions the component, so nothing is
+			// named.
+			name: "an unplaced application beside a placed one is counted, not named", deployer: DeployerArgoCD,
+			comps: comps,
+			records: []installedRelease{
+				argoRec("teamfoo-gpu-operator", "team-foo", "v24.9.0", nil),
+				argoRec("aicr-gpu-operator", "nvidia-gpu-operator", "v25.3.3", nil),
+			},
+			want:   map[string]string{"gpu-operator": "v25.3.3"},
+			counts: mappingCounts{unplaced: 1},
+		},
+		{
+			name: "an unplaced application beside an unversioned placed one is named alone", deployer: DeployerArgoCD,
+			comps: comps,
+			records: []installedRelease{
+				argoRec("teamfoo-gpu-operator", "team-foo", "v24.9.0", nil),
+				argoRec("aicr-gpu-operator", "nvidia-gpu-operator", "", nil),
+			},
+			want: map[string]string{"gpu-operator": ""},
+			wantUnproven: map[string][]UnprovenRecord{"gpu-operator": {
+				{Source: "argocd", Name: "teamfoo-gpu-operator", Namespace: "team-foo", Reason: UnprovenUnplaced},
+			}},
+			counts: mappingCounts{unplaced: 1},
+		},
+		{
+			name: "an unreadable helm record is named", deployer: DeployerHelm, comps: comps,
+			records: []installedRelease{
+				{Source: sourceHelm, Name: "gpu-operator", Namespace: "nvidia-gpu-operator", Unproven: true},
+			},
+			want: map[string]string{"gpu-operator": ""},
+			wantUnproven: map[string][]UnprovenRecord{"gpu-operator": {
+				{Source: "helm", Name: "gpu-operator", Namespace: "nvidia-gpu-operator", Reason: UnprovenUnreadable},
+			}},
+		},
+		{
+			name: "an unproven install chosen over a healthy tenant is named", deployer: DeployerHelm, comps: comps,
+			records: []installedRelease{
+				{
+					Source: sourceHelm, Name: "gpu-operator", Namespace: "nvidia-gpu-operator",
+					Unproven: true, UnprovenReason: UnprovenDualDriver,
+				},
+				helmRec("gpu-operator", "tenant-a", "deployed", "v24.9.0", nil),
+			},
+			want: map[string]string{"gpu-operator": ""},
+			wantUnproven: map[string][]UnprovenRecord{"gpu-operator": {
+				{Source: "helm", Name: "gpu-operator", Namespace: "nvidia-gpu-operator", Reason: UnprovenDualDriver},
+			}},
+		},
+		{
+			name: "an unproven tenant passed over for a failed install is not named", deployer: DeployerHelm,
+			comps: comps,
+			records: []installedRelease{
+				{
+					Source: sourceHelm, Name: "gpu-operator", Namespace: "tenant-a",
+					Unproven: true, UnprovenReason: UnprovenDualDriver,
+				},
+				helmRec("gpu-operator", "nvidia-gpu-operator", "failed", "v25.3.3", nil),
+			},
+			want: map[string]string{"gpu-operator": ""},
+		},
+		{
+			// The reader already counted it as unreadable.
+			name: "an unreadable flux record matched loosely is not counted unplaced", deployer: DeployerFlux,
+			comps: comps,
+			records: []installedRelease{
+				{Source: sourceHelm, Name: "legacy-gpu-operator", Namespace: "tenant-a", Unproven: true},
+			},
+			want: map[string]string{"gpu-operator": ""},
+			wantUnproven: map[string][]UnprovenRecord{"gpu-operator": {
+				{Source: "helm", Name: "legacy-gpu-operator", Namespace: "tenant-a", Reason: UnprovenUnreadable},
+			}},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, counts, err := installedVersions(tt.deployer, tt.comps, tt.records)
+			got, err := installedVersions(tt.deployer, tt.comps, tt.records)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("installedVersions() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -551,11 +665,14 @@ func TestInstalledVersions(t *testing.T) {
 				}
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("installedVersions() = %v, want %v", got, tt.want)
+			if !reflect.DeepEqual(got.versions, tt.want) {
+				t.Errorf("installedVersions() = %v, want %v", got.versions, tt.want)
 			}
-			if counts != tt.counts {
-				t.Errorf("installedVersions() counts = %+v, want %+v", counts, tt.counts)
+			if !reflect.DeepEqual(got.unproven, tt.wantUnproven) {
+				t.Errorf("installedVersions() unproven = %+v, want %+v", got.unproven, tt.wantUnproven)
+			}
+			if got.counts != tt.counts {
+				t.Errorf("installedVersions() counts = %+v, want %+v", got.counts, tt.counts)
 			}
 		})
 	}
@@ -596,6 +713,42 @@ func TestCombineMergesHelmFirst(t *testing.T) {
 		Source: SourceInfo{
 			Helm: HelmInfo{Records: 7, Unattributed: 2, Unreadable: 1},
 			Argo: ArgoInfo{Read: true, Applications: 4, Unattributed: 3, Unreadable: 2},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("combine() = %+v, want %+v", got, want)
+	}
+}
+
+// TestCombineAccountsForUnplacedApplications pins the unplaced count and the
+// unversioned component's record names. A component Helm answered keeps
+// Helm's answer.
+func TestCombineAccountsForUnplacedApplications(t *testing.T) {
+	comps := []Component{fixtureGPUOperator, fixtureCertManager}
+
+	helmRead := inventoryRead{Releases: []installedRelease{
+		helmRec("cert-manager", "cert-manager-system", "deployed", "1.20.2", nil),
+	}}
+	argoRead := inventoryRead{
+		Records: 2,
+		Releases: []installedRelease{
+			argoRec("teamfoo-cert-manager", "team-foo", "1.19.0", nil),
+			argoRec("teamfoo-gpu-operator", "team-foo", "v25.3.3", nil),
+		},
+	}
+
+	got, err := combine(DeployerArgoCDHelm, comps, helmRead, argoRead)
+	if err != nil {
+		t.Fatalf("combine() error = %v", err)
+	}
+
+	want := Result{
+		Versions: map[string]string{"gpu-operator": "", "cert-manager": "1.20.2"},
+		Unproven: map[string][]UnprovenRecord{"gpu-operator": {
+			{Source: "argocd", Name: "teamfoo-gpu-operator", Namespace: "team-foo", Reason: UnprovenUnplaced},
+		}},
+		Source: SourceInfo{
+			Argo: ArgoInfo{Read: true, Applications: 2, Unplaced: 2},
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -723,6 +876,71 @@ func TestReadWiresBothReaders(t *testing.T) {
 	}
 	if got.Source.Argo != (ArgoInfo{}) {
 		t.Errorf("read() argo info = %+v, want zero", got.Source.Argo)
+	}
+}
+
+// TestReadNamesUnplacedApplication drives a prefixed Application deploying
+// outside its component's namespaces through the whole read.
+func TestReadNamesUnplacedApplication(t *testing.T) {
+	comps := []Component{fixtureGPUOperator, fixtureCertManager}
+	dyn := argoClient(
+		argoAppWith(t, gpuOperatorApp, func(app *unstructured.Unstructured) {
+			app.SetName("teamfoo-gpu-operator")
+			if err := unstructured.SetNestedField(app.Object, "team-foo", "spec", "destination", "namespace"); err != nil {
+				t.Fatalf("set destination namespace: %v", err)
+			}
+		}),
+		argoApp(t, certManagerApp),
+	)
+
+	got, err := read(context.Background(), fake.NewSimpleClientset(), dyn,
+		Options{Deployer: DeployerArgoCD, Components: comps})
+	if err != nil {
+		t.Fatalf("read() error = %v", err)
+	}
+
+	wantVersions := map[string]string{"gpu-operator": "", "cert-manager": "1.20.2"}
+	if !reflect.DeepEqual(got.Versions, wantVersions) {
+		t.Errorf("read() versions = %v, want %v", got.Versions, wantVersions)
+	}
+	wantUnproven := map[string][]UnprovenRecord{"gpu-operator": {
+		{Source: "argocd", Name: "teamfoo-gpu-operator", Namespace: "team-foo", Reason: UnprovenUnplaced},
+	}}
+	if !reflect.DeepEqual(got.Unproven, wantUnproven) {
+		t.Errorf("read() unproven = %+v, want %+v", got.Unproven, wantUnproven)
+	}
+	if want := (ArgoInfo{Read: true, Applications: 2, Unplaced: 1}); got.Source.Argo != want {
+		t.Errorf("read() argo info = %+v, want %+v", got.Source.Argo, want)
+	}
+}
+
+// TestReadNamesDualDriverRelease drives a release whose records both decode,
+// one under each storage driver, through the whole read.
+func TestReadNamesDualDriverRelease(t *testing.T) {
+	comps := []Component{fixtureGPUOperator, fixtureCertManager}
+	client := fake.NewSimpleClientset(
+		helmSecret("nvidia-gpu-operator", "gpu-operator", 1, "deployed",
+			releasePayload(t, "gpu-operator", "nvidia-gpu-operator", "deployed", "gpu-operator", "v25.3.3", 1)),
+		helmConfigMap("nvidia-gpu-operator", "gpu-operator", 7, "deployed",
+			releasePayload(t, "gpu-operator", "nvidia-gpu-operator", "deployed", "gpu-operator", "v24.9.0", 7)),
+	)
+
+	got, err := read(context.Background(), client, argoClient(), Options{Deployer: DeployerHelm, Components: comps})
+	if err != nil {
+		t.Fatalf("read() error = %v", err)
+	}
+
+	if want := map[string]string{"gpu-operator": ""}; !reflect.DeepEqual(got.Versions, want) {
+		t.Errorf("read() versions = %v, want %v", got.Versions, want)
+	}
+	wantUnproven := map[string][]UnprovenRecord{"gpu-operator": {
+		{Source: "helm", Name: "gpu-operator", Namespace: "nvidia-gpu-operator", Reason: UnprovenDualDriver},
+	}}
+	if !reflect.DeepEqual(got.Unproven, wantUnproven) {
+		t.Errorf("read() unproven = %+v, want %+v", got.Unproven, wantUnproven)
+	}
+	if got.Source.Helm.Unreadable != 1 {
+		t.Errorf("read() helm unreadable = %d, want 1 for the withheld release", got.Source.Helm.Unreadable)
 	}
 }
 

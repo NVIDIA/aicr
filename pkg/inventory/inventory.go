@@ -80,6 +80,10 @@ type installedRelease struct {
 	// unversioned, which fails the run, rather than as absent, which reads as
 	// newly installed and does not.
 	Unproven bool
+
+	// UnprovenReason is why Unproven is set, and empty for a record that
+	// could not be read.
+	UnprovenReason UnprovenReason
 }
 
 // The storage resources the readers list, as they appear in a GVR, an RBAC
@@ -107,8 +111,10 @@ func (r installedRelease) installNamespace() string {
 // can be made about it. Unreadable is a release, not a record: one that some
 // component's name matched only loosely and that could not then be read. It
 // may be a foreign workload drawn in by a shared token, or a real component
-// whose storage is damaged, and this package cannot tell which. Summing them
-// would merge "we know nothing about this" with "we could not read this".
+// whose storage is damaged, and this package cannot tell which. The Helm
+// reader also counts there a release withheld for having records under both
+// storage drivers, whose records all decode. Summing the two would merge "we
+// know nothing about this" with "we could not read this".
 //
 // Neither counts the ordinary case of a record that names something perfectly
 // well and matches no component. Those are the overwhelming majority of a real
