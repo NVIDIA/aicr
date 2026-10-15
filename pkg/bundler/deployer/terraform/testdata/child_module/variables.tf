@@ -12,9 +12,10 @@ variable "cluster_keepers" {
     its CA certificate, its provider-assigned id or creation time, or its
     endpoint where that is unique per cluster. A map combines several. A
     value a rebuild keeps — a name, a DNS alias — leaves the releases
-    uncontained. For a cluster this configuration does not manage, pass a
-    stable literal such as its CA certificate: a value that never changes
-    keeps the shim inert. See README.md.
+    uncontained. For a cluster this configuration does not manage, its CA
+    certificate still identifies it: update the value when the cluster is
+    rebuilt and the releases are replaced with it. A constant keeps the
+    shim inert instead. See README.md.
   EOT
   type        = any
 }

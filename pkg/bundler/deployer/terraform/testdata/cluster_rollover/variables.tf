@@ -60,9 +60,10 @@ variable "cluster_keepers" {
     where that is unique per cluster. A map combines several. Required, with
     no default: the value a release is first applied with is what contains
     it, and any later change replaces every release. For a cluster this
-    configuration does not manage, pass a stable literal such as the CA
-    certificate from your kubeconfig: a value that never changes keeps the
-    shim inert. See README.md.
+    configuration does not manage, the CA certificate from your kubeconfig
+    still identifies it: update the value when the cluster is rebuilt and
+    the releases are replaced with it. A constant keeps the shim inert
+    instead. See README.md.
   EOT
   type        = any
 }

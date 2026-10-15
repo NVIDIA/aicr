@@ -104,8 +104,10 @@ context is a local alias. What reliably changes:
 
 The variable is required and has no default, so every release is contained
 from its first apply; any later change to the value replaces every release.
-For a cluster this configuration does not manage, pass a stable literal such
-as its CA certificate: a value that never changes keeps the shim inert.
+For a cluster this configuration does not manage, its CA certificate still
+identifies it: update the value when the cluster is rebuilt and the releases
+are replaced with it. A constant keeps the shim inert instead, and then the
+flag buys nothing; regenerate without it.
 The value may be unknown at plan time; the rule is "the shim is being
 replaced", which the plan knows structurally.
 
