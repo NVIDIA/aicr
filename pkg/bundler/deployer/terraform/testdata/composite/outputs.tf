@@ -5,12 +5,21 @@ output "criteria" {
   value       = ""
 }
 
+# The three maps below are literals, known at plan time. depends_on on each
+# output is what orders a caller that reads one after the install: without it
+# a resource built from module.stack.components["x"] can be created while x
+# is still installing, and fail on a namespace that does not exist yet.
 output "components" {
   description = "Component -> namespace, for every component in the recipe."
   value = {
     "agentgateway" = "agentgateway-system"
     "nvsentinel"   = "nvsentinel"
   }
+
+  depends_on = [
+    module.agentgateway,
+    module.nvsentinel,
+  ]
 }
 
 output "releases" {
@@ -22,9 +31,19 @@ output "releases" {
     "agentgateway-readiness" = "agentgateway-system"
     "nvsentinel"             = "nvsentinel"
   }
+
+  depends_on = [
+    module.agentgateway,
+    module.nvsentinel,
+  ]
 }
 
 output "namespaces" {
   description = "Distinct namespaces the bundle installs into."
   value       = distinct(["agentgateway-system", "nvsentinel"])
+
+  depends_on = [
+    module.agentgateway,
+    module.nvsentinel,
+  ]
 }
