@@ -23,15 +23,8 @@
 # statement it keeps.
 #
 # The rules live in one jq program shared by both modes so they cannot drift.
-# Two rules are mode-specific, and each differs by intent:
+# One rule is mode-specific:
 #
-#   source     -> `statements` must be non-empty. An empty committed document
-#                 means someone truncated or mis-generated it, and failing the
-#                 release loudly is the right answer.
-#   projection -> `statements` may be empty. An image with no triaged CVE
-#                 projects to `[]`, which is the truthful answer: it asserts no
-#                 exceptions for that image. It is NOT a claim that the image
-#                 has no vulnerabilities.
 #   projection -> every product identifier must end in `@<platform-digest>`.
 #                 This is the one failure the whole change exists to prevent:
 #                 a bare `pkg:oci/<image>` product no consumer can tie to a
@@ -41,15 +34,17 @@
 #
 # Everything else applies to both. These are the OpenVEX v0.2.0 contract:
 #
-#   document   -> @context, @id, author, timestamp, version, statements, and
-#                 no document-level string field longer than
+#   document   -> @context, @id, author, timestamp, version, a `statements`
+#                 array, and no document-level string field longer than
 #                 OPENVEX_MAX_DOC_FIELD_BYTES. Every string the spec defines at
 #                 this level (@context, @id, author, role, tooling, timestamp)
 #                 is an identifier, not prose, and `tooling` grew to an 8,010
 #                 byte revision changelog that shipped on all seven release
 #                 images before anyone noticed (NVIDIA/aicr#2706). Statement
 #                 fields are deliberately NOT bounded: impact_statement is
-#                 evidence and is expected to run to paragraphs.
+#                 evidence and is expected to run to paragraphs. `statements`
+#                 may be empty: with nothing triaged, `[]` asserts no
+#                 exceptions, which is NOT a claim of no vulnerabilities.
 #   statement  -> vulnerability.name, status from the four-label enum, and
 #                 at least one identifiable product. The spec marks
 #                 `products` optional only because it can cascade from an
@@ -140,10 +135,7 @@ def statement($index; $s):
   (if filled(field(.; "author")) then empty else "author must be a non-empty string" end),
   (if filled(field(.; "timestamp")) then empty else "timestamp must be a non-empty string" end),
   (if (field(.; "version") | type) == "number" then empty else "version must be a number" end),
-  (if (field(.; "statements") | type) != "array" then "statements must be an array"
-   elif $require_statements and (listing(field(.; "statements")) | length) == 0
-   then "statements must not be empty"
-   else empty end),
+  (if (field(.; "statements") | type) == "array" then empty else "statements must be an array" end),
   (to_entries[]
    | select((.value | type) == "string" and (.value | utf8bytelength) > $max_doc_field)
    | "document field \(.key) is \(.value | utf8bytelength) bytes, over the \($max_doc_field) byte bound for a document-level identifier")
@@ -156,21 +148,19 @@ JQ
 # validate_openvex <source|projection> <file> [platform-digest] fails closed on
 # a malformed document rather than letting the release publish a VEX attestation
 # no scanner can apply. An unknown mode is itself a failure: defaulting it would
-# silently pick one of the two mode-specific rules. Projection mode requires the
+# silently switch the binding rule on or off. Projection mode requires the
 # digest, because a projection that cannot be checked against one is exactly the
 # case this guard exists to reject.
 validate_openvex() {
-  local mode="$1" file="$2" digest="${3:-}" require_statements problems
+  local mode="$1" file="$2" digest="${3:-}" problems
 
   case "${mode}" in
     source)
-      require_statements=true
       # A committed source carries bare `pkg:oci/<image>` products by design,
       # so the binding rule is switched off rather than merely unsatisfied.
       digest=""
       ;;
     projection)
-      require_statements=false
       if [[ ! "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
         echo "::error::validate_openvex: projection mode needs the platform digest as sha256:<64 hex>, got '${digest}'"
         return 1
@@ -190,7 +180,6 @@ validate_openvex() {
   if ! problems="$(jq -r \
     --arg context "${OPENVEX_CONTEXT}" \
     --arg digest "${digest}" \
-    --argjson require_statements "${require_statements}" \
     --argjson max_doc_field "${OPENVEX_MAX_DOC_FIELD_BYTES}" \
     "${OPENVEX_RULES}" "${file}")"; then
     echo "::error::OpenVEX ${mode} document is not valid JSON: ${file}"

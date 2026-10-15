@@ -296,6 +296,13 @@ See the header of `recipes/evidence/allowlist.yaml` and
 [artifact verification](../user/artifact-verification.md) for the anti-sybil
 rules; maintainer review of this entry is the trust gate.
 
+Only keyless signers count. Evidence signed with a KMS key
+(`--signing-key`) records `signer.issuer: key`, and the contract gate rejects
+it however the allowlist reads, because the allowlist pins OIDC identities and
+has no way to say which public key a contribution must carry. Key-signed
+evidence is for private verification with
+[`aicr evidence verify --key`](../user/artifact-verification.md#key-signed-evidence).
+
 ## Fallback: split the legs locally
 
 If you have a host with Sigstore egress (a jump box, CI runner, or
