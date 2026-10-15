@@ -170,10 +170,10 @@ func (g *Generator) bundleData(components []component, digests map[string]string
 			cd.Note = overrideNote(ov)
 		}
 		if g.ClusterRollover {
-			// The same variable in both forms: a root module declares it
-			// with a null default beside its connection variables, a child
-			// module requires it from the caller. It is never derived from
-			// the connection — an endpoint can outlive the cluster behind it.
+			// The same variable in both forms, required in both with no
+			// default: a root module takes it from terraform.tfvars, a child
+			// module from the caller. It is never derived from the
+			// connection — an endpoint can outlive the cluster behind it.
 			cd.Behavior = append(cd.Behavior, attr{"cluster_keepers", "var.cluster_keepers"})
 		}
 		data.Components = append(data.Components, cd)
