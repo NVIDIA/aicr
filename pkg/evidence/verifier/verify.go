@@ -53,6 +53,10 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	if opts.Input == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "Input is required")
 	}
+	policy, err := resolveSignerPolicy(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
 	form, err := DetectInputFormContext(ctx, opts.Input)
 	if err != nil {
 		return nil, err
@@ -89,7 +93,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	// present, sigstore-go anchors the DSSE-wrapped Statement to a
 	// Fulcio cert + optional Rekor entry. The predicate inside that
 	// verified Statement is the cryptographically authoritative value.
-	verifiedPredicate, verifiedType, pendingSignature := stepSignatureCheck(ctx, r, mat, opts)
+	verifiedPredicate, verifiedType, pendingSignature := stepSignatureCheck(ctx, r, mat, opts, policy)
 
 	// Step 3 — predicate parse. Prefer the predicate the signature
 	// step produced (cryptographically anchored); fall back to the
@@ -182,10 +186,10 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 // only valid once the final exit is known.
 //
 // When the input is a pointer file with a signer claim, this step also
-// cross-checks the pointer's claim against the actual cert. A malicious
+// cross-checks the pointer's claim against the verified signer. A malicious
 // pointer that names a different signer than the bundle fails here.
-func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedBundle, opts VerifyOptions) (pred *attestation.Predicate, predType string, pending bool) {
-	sig, sigErr := VerifySignature(ctx, mat, opts)
+func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedBundle, opts VerifyOptions, policy *signerPolicy) (pred *attestation.Predicate, predType string, pending bool) {
+	sig, sigErr := verifySignature(ctx, mat, opts, policy)
 
 	var claimedSigner *attestation.PointerSigner
 	if r.Pointer != nil && len(r.Pointer.Attestations) > 0 {
@@ -214,7 +218,7 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 		return nil, "", false
 	default:
 		r.Signer = sig.Signer
-		if ccErr := CrossCheckPointerSigner(claimedSigner, sig.Signer); ccErr != nil {
+		if ccErr := CrossCheckPointerSigner(comparableSignerClaim(claimedSigner, opts.IgnoreTLog), sig.Signer); ccErr != nil {
 			record(r, stepSignature, StepFailed, ccErr.Error(), nil)
 			recordFailure(r, stepSignature, ccErr)
 			return nil, "", false

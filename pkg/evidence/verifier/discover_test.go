@@ -189,6 +189,35 @@ func TestCheckEvidenceTree_RejectsUnlisted(t *testing.T) {
 	}
 }
 
+// TestCheckEvidenceTree_RejectsKeySigned rejects a key-signed pointer committed
+// at its own source path even when an allowlist entry names that source: the
+// allowlist pins keyless identities, so no entry may admit a key signer.
+func TestCheckEvidenceTree_RejectsKeySigned(t *testing.T) {
+	root := t.TempDir()
+	const fingerprint = "sha256:d93f4a5e57c66728cb33edea59e9fc0fdf246a5361a0b8c50905e497ef0e5c2b"
+	src, err := attestation.SourceSlug(attestation.KeySignerIssuer, fingerprint)
+	if err != nil {
+		t.Fatalf("SourceSlug: %v", err)
+	}
+	body := strings.Replace(pointerYAML("ghcr.io/x/e:v1", "sha256:abc", fingerprint),
+		"issuer: "+testIssuer, "issuer: "+attestation.KeySignerIssuer, 1)
+	writePointer(t, root, testRecipe, src, "sha256-abc.yaml", body)
+
+	allowlistPath := filepath.Join(t.TempDir(), "allowlist.yaml")
+	allow := "schemaVersion: 1.0.0\ncommunity:\n  - issuer: " + attestation.KeySignerIssuer + "\n    source: " + src + "\n"
+	if err = os.WriteFile(allowlistPath, []byte(allow), 0o600); err != nil {
+		t.Fatalf("write allowlist: %v", err)
+	}
+
+	problems, err := CheckEvidenceTree(root, allowlistPath, false)
+	if err != nil {
+		t.Fatalf("CheckEvidenceTree: %v", err)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0].Message, "key-signed evidence") {
+		t.Fatalf("problems = %+v, want one key-signed rejection", problems)
+	}
+}
+
 // TestCheckEvidenceTree_RejectsLooseFiles rejects a pointer placed directly
 // in a recipe directory (not under a <source>/ subdir) and an unexpected
 // non-allowlist file at the evidence root.

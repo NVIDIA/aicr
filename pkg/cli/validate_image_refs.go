@@ -284,7 +284,11 @@ func prepareRecipeEvidence(
 	if err != nil {
 		return nil, nil, err
 	}
-	evidence := evidenceConfigForRunMode(noCluster, buildRecipeEvidenceConfig(cmd, attOpts))
+	built, err := buildRecipeEvidenceConfig(cmd, attOpts)
+	if err != nil {
+		return nil, nil, err
+	}
+	evidence := evidenceConfigForRunMode(noCluster, built)
 	imageRefsPath := cmd.String(flagImageRefs)
 	if err = validateImageRefsUse(imageRefsPath, cncfSubmission, noCluster, evidence); err != nil {
 		return nil, nil, err

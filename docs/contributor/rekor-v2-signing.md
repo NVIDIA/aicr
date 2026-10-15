@@ -190,7 +190,7 @@ cutover remain in Rekor v1 and verify with any recent Cosign.
   is unaffected.
 - **`AICR_SIGNING_CONFIG` binds as `--signing-config` process-wide.** Because
   `generate-slsa-predicate` exports it into the job environment, any later
-  `aicr … --rekor-url …` in the same job auto-picks it up as `--signing-config`
+  `aicr bundle … --rekor-url …` in the same job auto-picks it up as `--signing-config`
   and fails closed with the mutual-exclusivity error (the two select different
   logs). A caller combining a private `--rekor-url` with an inherited config env
   must `unset AICR_SIGNING_CONFIG` first — as the private-Sigstore chainsaw test
