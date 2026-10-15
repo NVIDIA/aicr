@@ -26,4 +26,6 @@ module "cert_manager" {
   wait            = var.wait
   timeout         = var.timeout
   cluster_keepers = var.cluster_keepers
+
+  disable_openapi_validation = var.disable_openapi_validation
 }

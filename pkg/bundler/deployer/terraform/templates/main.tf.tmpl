@@ -34,6 +34,8 @@ module "{{ .Label }}" {
 
 {{ if .Note }}  # {{ .Note }}
 {{ end }}{{ align "  " .Behavior }}
+
+  disable_openapi_validation = var.disable_openapi_validation
 {{- if .DependsOn }}
 
   depends_on = [

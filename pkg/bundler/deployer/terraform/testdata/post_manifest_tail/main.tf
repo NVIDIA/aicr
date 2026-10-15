@@ -28,6 +28,8 @@ module "agentgateway_crds" {
   atomic  = var.atomic
   wait    = var.wait
   timeout = var.timeout
+
+  disable_openapi_validation = var.disable_openapi_validation
 }
 
 # 003-agentgateway — agentgateway v1.5.0
@@ -49,6 +51,8 @@ module "agentgateway" {
   atomic  = var.atomic
   wait    = var.wait
   timeout = var.timeout
+
+  disable_openapi_validation = var.disable_openapi_validation
 
   depends_on = [
     module.agentgateway_crds,

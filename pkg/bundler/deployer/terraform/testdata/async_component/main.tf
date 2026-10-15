@@ -25,6 +25,8 @@ module "gpu_operator" {
   atomic  = var.atomic
   wait    = var.wait
   timeout = var.timeout
+
+  disable_openapi_validation = var.disable_openapi_validation
 }
 
 # 002-kai-scheduler — kai-scheduler v0.16.9
@@ -49,6 +51,8 @@ module "kai_scheduler" {
   atomic  = false
   wait    = false
   timeout = 1200
+
+  disable_openapi_validation = var.disable_openapi_validation
 
   depends_on = [
     module.gpu_operator,

@@ -25,6 +25,8 @@ module "nfd" {
   atomic  = var.atomic
   wait    = var.wait
   timeout = var.timeout
+
+  disable_openapi_validation = var.disable_openapi_validation
 }
 
 # 002-gpu-operator — gpu-operator v25.3.3
@@ -49,6 +51,8 @@ module "gpu_operator" {
   atomic  = var.atomic
   wait    = var.wait
   timeout = var.timeout
+
+  disable_openapi_validation = var.disable_openapi_validation
 
   depends_on = [
     module.nfd,

@@ -26,4 +26,6 @@ module "cert_manager" {
   atomic  = var.atomic
   wait    = var.wait
   timeout = var.timeout
+
+  disable_openapi_validation = var.disable_openapi_validation
 }

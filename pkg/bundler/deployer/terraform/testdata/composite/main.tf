@@ -30,6 +30,8 @@ module "agentgateway" {
   atomic  = var.atomic
   wait    = var.wait
   timeout = var.timeout
+
+  disable_openapi_validation = var.disable_openapi_validation
 }
 
 # 005-nvsentinel — nvsentinel v0.3.0
@@ -51,6 +53,8 @@ module "nvsentinel" {
   atomic  = var.atomic
   wait    = var.wait
   timeout = var.timeout
+
+  disable_openapi_validation = var.disable_openapi_validation
 
   depends_on = [
     module.agentgateway,

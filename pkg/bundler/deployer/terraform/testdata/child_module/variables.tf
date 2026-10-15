@@ -44,3 +44,15 @@ variable "atomic" {
   type        = bool
   default     = false
 }
+
+variable "disable_openapi_validation" {
+  description = <<-EOT
+    Skip the provider's OpenAPI validation of rendered manifests against the
+    live cluster, for every release. Off by default, like the provider's own.
+    A chart whose manifests reference CRDs that a prior release installs can
+    fail that validation; this is the blunt fix, and an ordering edge or a
+    readiness gate on the CRD's release is the better one.
+  EOT
+  type        = bool
+  default     = false
+}

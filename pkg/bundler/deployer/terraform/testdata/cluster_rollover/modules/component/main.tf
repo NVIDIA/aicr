@@ -76,9 +76,8 @@ resource "helm_release" "this" {
   timeout = var.timeout
   atomic  = var.atomic
 
-  # Escape hatch, off by default like the provider's own. A chart referencing
-  # CRDs that a PRIOR release installs can fail dry-run validation; this is the
-  # blunt fix, narrowing wait and ordering is the better one.
+  # Off by default, like the provider's own. Every call passes the bundle-wide
+  # variable of the same name; see ../../variables.tf for when to set it.
   disable_openapi_validation = var.disable_openapi_validation
 
   depends_on = [helm_release.pre]
