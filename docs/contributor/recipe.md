@@ -347,7 +347,7 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
 `nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
 `nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
-`npd`.
+`nvsentinel-health-events-analyzer`, `npd`.
 
 **Mixin rules:**
 

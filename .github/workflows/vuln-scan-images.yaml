@@ -332,9 +332,10 @@ jobs:
           # AICR does not build the images below. They ship only with the
           # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
-          # (#2611), remediation and nvsentinel-slinky-drainer (#2615) mixins,
-          # and no other job scans a mixin-gated image, so nothing else would
-          # surface a CVE in them.
+          # (#2611), remediation, nvsentinel-slinky-drainer (#2615) and
+          # nvsentinel-health-events-analyzer (#2618) mixins, and no other job
+          # scans a mixin-gated image, so nothing else would surface a CVE in
+          # them.
           # Because they are not built by this workflow they carry their
           # upstream tag rather than SCAN_TAG -- see the overrides below.
           - ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
@@ -351,6 +352,7 @@ jobs:
           - ghcr.io/nvidia/nvsentinel/janitor-provider
           - ghcr.io/nvidia/nvsentinel/gpu-reset
           - ghcr.io/nvidia/nvsentinel/slinky-drainer
+          - ghcr.io/nvidia/nvsentinel/health-events-analyzer
           # Percona, from the remediation mixins' separately bundled datastore
           # (psmdb-operator, nvsentinel-mongodb). Pinned by AICR, by digest.
           - docker.io/percona/percona-server-mongodb-operator
@@ -375,8 +377,10 @@ jobs:
           # TestPreflightImagesPinnedEverywhere,
           # TestNICHealthMonitorImagePinnedEverywhere,
           # TestSlurmDrainMonitorImagePinnedEverywhere,
-          # TestRemediationImagesPinnedEverywhere and
-          # TestSlinkyDrainerImagePinnedEverywhere fail if these drift apart.
+          # TestRemediationImagesPinnedEverywhere,
+          # TestSlinkyDrainerImagePinnedEverywhere and
+          # TestHealthEventsAnalyzerImagePinnedEverywhere fail if these drift
+          # apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
             tag: v1.26.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
@@ -406,6 +410,8 @@ jobs:
           # Pinned by digest in recipes/components/slinky-drainer/manifests.
           - image: ghcr.io/nvidia/nvsentinel/slinky-drainer
             tag: v1.26.0@sha256:29f8bbe52449ca0dccc34c1dba39c60c7c8a00cda00a5c5076dde9604dd27690
+          - image: ghcr.io/nvidia/nvsentinel/health-events-analyzer
+            tag: v1.26.0
           # AICR's own pins in recipes/components/{psmdb-operator,nvsentinel-mongodb};
           # TestRemediationImagesPinnedEverywhere fails if these drift apart.
           - image: docker.io/percona/percona-server-mongodb-operator

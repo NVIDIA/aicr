@@ -28,7 +28,8 @@
 # 3. Generates a recipe via query parameters, with the
 #    nvsentinel-object-monitor, nvsentinel-preflight,
 #    nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor,
-#    nvsentinel-remediation and nvsentinel-slinky-drainer mixins composed, so their mixin-gated images are
+#    nvsentinel-remediation, nvsentinel-slinky-drainer and
+#    nvsentinel-health-events-analyzer mixins composed, so their mixin-gated images are
 #    asserted in every manifest format and the three small controller images
 #    (object monitor, preflight, slurm drain monitor) are carried through the
 #    transfer
@@ -130,6 +131,9 @@ REMEDIATION_IMAGES=(
 # manifest-only slinky-drainer component it adds.
 SLINKY_DRAINER_IMAGE="ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.26.0@sha256:29f8bbe52449ca0dccc34c1dba39c60c7c8a00cda00a5c5076dde9604dd27690"
 
+# The image the nvsentinel-health-events-analyzer mixin pulls in (#2618).
+HEALTH_EVENTS_ANALYZER_IMAGE="ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.26.0"
+
 # Every mixin-gated image, asserted in all three `mirror list` formats.
 MIXIN_IMAGES=(
     "${OBJECT_MONITOR_IMAGE}"
@@ -138,6 +142,7 @@ MIXIN_IMAGES=(
     "${SLURM_DRAIN_MONITOR_IMAGE}"
     "${REMEDIATION_IMAGES[@]}"
     "${SLINKY_DRAINER_IMAGE}"
+    "${HEALTH_EVENTS_ANALYZER_IMAGE}"
 )
 
 # The subset carried through the Hauler sync, Zarf package and registry
@@ -232,16 +237,17 @@ ensure_cluster() {
 }
 
 generate_recipe() {
-    msg "Generating recipe (with the nvsentinel-object-monitor, nvsentinel-preflight, nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor, nvsentinel-remediation and nvsentinel-slinky-drainer mixins composed)..."
+    msg "Generating recipe (with the nvsentinel-object-monitor, nvsentinel-preflight, nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor, nvsentinel-remediation, nvsentinel-slinky-drainer and nvsentinel-health-events-analyzer mixins composed)..."
     # No --os: the Kind overlay tree is OS-agnostic, and a stated OS that no
     # Kind overlay distinguishes fails criteria coverage (issue #1542).
     #
     # The recipe is generated through an external --data overlay that composes
     # the nvsentinel-object-monitor, nvsentinel-preflight,
     # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor,
-    # nvsentinel-remediation and nvsentinel-slinky-drainer mixins, so every
-    # mixin-gated image is discovered by `mirror list` and asserted in the
-    # generated Hauler and Zarf manifests.
+    # nvsentinel-remediation, nvsentinel-slinky-drainer and
+    # nvsentinel-health-events-analyzer mixins, so every mixin-gated image is
+    # discovered by `mirror list` and asserted in the generated Hauler and Zarf
+    # manifests.
     # Only the three small controller images are carried through the sync,
     # package and registry verification -- the three preflight check images
     # are 1.7-9.9 GiB each and would exhaust the runner. None of these images
@@ -272,7 +278,7 @@ REGISTRY_EOF
     # CheckNVSentinelSlurmDrainMonitorRequiresSlinky and
     # CheckNVSentinelSlurmCustomDrainCoherent would reject them at `aicr bundle`,
     # but `mirror list` runs no bundle gates.
-    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor", "nvsentinel-remediation", "nvsentinel-slinky-drainer"]' \
+    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor", "nvsentinel-remediation", "nvsentinel-slinky-drainer", "nvsentinel-health-events-analyzer"]' \
         "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
         > "${data_dir}/overlays/h100-kind-training.yaml"
 
@@ -314,6 +320,9 @@ REGISTRY_EOF
     fi
     if ! grep -q "customDrain" "${WORK}/recipe.yaml"; then
         err "nvsentinel-slinky-drainer mixin did not apply -- the recipe carries no customDrain override"
+    fi
+    if ! grep -q "healthEventsAnalyzer" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-health-events-analyzer mixin did not apply -- the recipe carries no healthEventsAnalyzer override"
     fi
     msg "Recipe generated at ${WORK}/recipe.yaml"
 }
