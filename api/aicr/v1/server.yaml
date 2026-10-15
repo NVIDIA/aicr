@@ -1138,10 +1138,11 @@ components:
       required: false
       description: >
         Taint for nodewright-operator workload gating (format:
-        key=value:effect or key:effect).
+        key=value:effect or key:effect). The key must have no DNS prefix
+        (no `/`) and be at most 53 characters.
       schema:
         type: string
-      example: "skyhook.nvidia.com/runtime=required:NoSchedule"
+      example: "nodewright.nvidia.com=runtime-required:NoSchedule"
     WorkloadSelector:
       name: workload-selector
       in: query
@@ -1413,7 +1414,10 @@ components:
                   type: object
                   description: >
                     Canonical component names mapped to sorted owned dotted
-                    paths. Every listed component includes synthetic "enabled".
+                    paths. A listed component includes synthetic "enabled"
+                    when the profile owns its presence; a component the
+                    profile references as optional lists only its override
+                    paths and may be omitted from a bundle.
                   additionalProperties:
                     type: array
                     items:

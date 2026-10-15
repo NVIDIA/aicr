@@ -334,6 +334,35 @@ func TestVerifyEvidence_EmptyDirectoryIsAnError(t *testing.T) {
 	}
 }
 
+// TestVerifyEvidence_ForwardsSignerOptions pins that the key-signing options
+// reach the verifier: each is an operator error the verifier rejects before
+// reading the input, so a dropped option would surface as a verdict instead.
+func TestVerifyEvidence_ForwardsSignerOptions(t *testing.T) {
+	t.Parallel()
+
+	client := newVerifyClient(t)
+	missing := filepath.Join(t.TempDir(), "absent")
+	tests := []struct {
+		name string
+		opts aicr.EvidenceVerifyOptions
+	}{
+		{name: "key", opts: aicr.EvidenceVerifyOptions{Key: missing}},
+		{name: "trust root", opts: aicr.EvidenceVerifyOptions{TrustRoot: missing}},
+		{name: "ignore tlog without a key", opts: aicr.EvidenceVerifyOptions{IgnoreTLog: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tt.opts.Input = t.TempDir()
+			got, err := client.VerifyEvidence(context.Background(), tt.opts)
+			if got != nil {
+				t.Errorf("result = %+v, want nil for an operator error", got)
+			}
+			wantInvalidRequest(t, err)
+		})
+	}
+}
+
 // TestRecipeDigest_IsDeterministicHex verifies the digest is produced against
 // the Client's own catalog and is stable across calls — the property a CI
 // drift gate depends on.

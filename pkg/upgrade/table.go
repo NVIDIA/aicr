@@ -238,6 +238,7 @@ func writeSource(ew *errWriter, s *ReportSource) {
 			fmt.Sprintf("%d unattributed", s.Argo.Unattributed),
 			fmt.Sprintf("%d unreadable", s.Argo.Unreadable),
 			fmt.Sprintf("%d remote", s.Argo.Remote),
+			fmt.Sprintf("%d unplaced", s.Argo.Unplaced),
 			"no stamp to check",
 		}, ", ")
 	}

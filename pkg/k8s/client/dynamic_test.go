@@ -145,3 +145,34 @@ func TestNewRESTMapperForConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestNewMetadataClientForConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := NewMetadataClientForConfig(nil)
+		if err == nil {
+			t.Fatal("expected an error for a nil rest config")
+		}
+		if got != nil {
+			t.Errorf("client = %v, want nil on error", got)
+		}
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+			t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+
+	t.Run("valid config yields a client", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := NewMetadataClientForConfig(&rest.Config{Host: "https://127.0.0.1:6443"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Error("client = nil, want a constructed client")
+		}
+	})
+}

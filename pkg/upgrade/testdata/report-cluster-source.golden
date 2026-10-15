@@ -6,14 +6,15 @@ UPGRADE CHECK
 READ FROM CLUSTER
   kubeconfig  /home/op/.kube/config
   context     prod-east
-  matched     2 components
+  matched     3 components
   helm        37 storage records, 2 unattributed, 1 unreadable, 3 uninstalled, 0 stamped but unmatched
-  argo        5 applications, 6 unattributed, 7 unreadable, 8 remote, no stamp to check
+  argo        5 applications, 6 unattributed, 7 unreadable, 8 remote, 9 unplaced, no stamp to check
 
-COMPONENT        FROM   TO     VERDICT  NOTES
----------        ----   --     -------  -----
-alpha-operator   1.2.0  1.2.3  safe     3 patches, verified, safe across 1 minor
-lambda-operator  1.1.0  1.2.0  unknown  1 minor, record exists, no boundary here
+COMPONENT        FROM   TO     VERDICT      NOTES
+---------        ----   --     -------      -----
+alpha-operator   1.2.0  1.2.3  safe         3 patches, verified, safe across 1 minor
+lambda-operator  1.1.0  1.2.0  unknown      1 minor, record exists, no boundary here
+theta-operator   -      2.0.0  unversioned  versions are not comparable, unplaced application teamfoo-theta-operator deploying to team-foo
 
 AT RISK (advisory)
   Objects of the kinds the crossed transition records name that carry neither
@@ -26,4 +27,4 @@ AT RISK (advisory)
   Nothing at risk: every object examined carries a Helm or Argo CD ownership
   marker.
 
-2 component changes, 1 needs attention
+3 component changes, 2 need attention

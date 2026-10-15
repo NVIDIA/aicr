@@ -45,9 +45,11 @@ Consumes the unsigned pointer left by ` + "`aicr evidence publish --no-sign`" + 
 ` + "`validate --emit-attestation --push --no-sign`" + `): the pointer already carries
 ` + "`bundle.oci`" + ` + ` + "`bundle.digest`" + `, so no recipe-name or bundle-ref input is
 needed. The bundle is pulled (not re-emitted), its predicate signed with
-keyless OIDC (Fulcio + Rekor), and the resulting Sigstore Bundle attached
-as an OCI referrer of the existing artifact. The pointer's
-` + "`signer.{identity,issuer,rekorLogIndex}`" + ` are then written back to the same file.
+keyless OIDC (Fulcio + Rekor), or with a KMS key when --signing-key is set,
+and the resulting Sigstore Bundle attached as an OCI referrer of the
+existing artifact. The pointer's ` + "`signer.{identity,issuer,rekorLogIndex}`" + ` are
+then written back to the same file; a key signature records issuer ` + "`key`" + `
+and the key's ` + "`sha256:`" + ` public-key fingerprint as its identity.
 
 This is the only leg that needs Fulcio egress, so it is designed to run in
 CI (GitHub Actions ambient OIDC) where Sigstore is reachable, while the
@@ -69,7 +71,7 @@ Example:
 
   # In CI (ambient OIDC), after a contributor committed an unsigned pointer:
   aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml --relocate`,
-		Flags: []cli.Flag{
+		Flags: append([]cli.Flag{
 			&cli.StringFlag{
 				Name:     flagIdentityToken,
 				Usage:    "Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Prefer COSIGN_IDENTITY_TOKEN on shared hosts; flag values are visible in process listings (ps, /proc/<pid>/cmdline).",
@@ -98,13 +100,17 @@ Example:
 				Category: catEvidence,
 			},
 			assumeYesFlag(catEvidence),
-		},
+		}, evidenceSigningFlags()...),
 		Action: runEvidenceSignCmd,
 	}
 }
 
 func runEvidenceSignCmd(ctx context.Context, cmd *cli.Command) error {
-	if err := validateSingleValueFlags(cmd, flagIdentityToken); err != nil {
+	if err := validateSingleValueFlags(cmd, flagIdentityToken, flagSigningKey, flagFulcioURL, flagRekorURL, flagSigningConfig); err != nil {
+		return err
+	}
+	oidcResolve, err := evidenceSigningOptionsFromFlags(cmd)
+	if err != nil {
 		return err
 	}
 
@@ -166,7 +172,6 @@ func runEvidenceSignCmd(ctx context.Context, cmd *cli.Command) error {
 	// Signing publishes the signer's identity on the interactive keyless
 	// paths, so gate it behind the disclosure prompt; ambient/token sources
 	// and non-TTY runs (the CI case this command targets) pass through.
-	oidcResolve := oidcResolveOptionsFromFlags(cmd)
 	if discErr := confirmKeylessSigningDisclosure(oidcResolve, cmd.Bool(flagAssumeYes), os.Stdin, os.Stderr); discErr != nil {
 		return discErr
 	}

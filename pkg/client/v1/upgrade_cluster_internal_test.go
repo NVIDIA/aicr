@@ -114,7 +114,7 @@ func distinctSourceInfo() inventory.SourceInfo {
 		Helm: inventory.HelmInfo{
 			Read: true, Records: 11, Unattributed: 2, Unreadable: 3, Uninstalled: 4, StampedUnmatched: 5,
 		},
-		Argo: inventory.ArgoInfo{Applications: 7, Unattributed: 8, Unreadable: 9, Remote: 10},
+		Argo: inventory.ArgoInfo{Applications: 7, Unattributed: 8, Unreadable: 9, Remote: 10, Unplaced: 12},
 	}
 }
 
@@ -221,7 +221,7 @@ func TestUpgradeCheckFromClusterReadsTheInstalledInventory(t *testing.T) {
 		Helm: upgrade.ReportSourceHelm{
 			Read: true, Records: 11, Unattributed: 2, Unreadable: 3, Uninstalled: 4, StampedUnmatched: 5,
 		},
-		Argo: upgrade.ReportSourceArgo{Applications: 7, Unattributed: 8, Unreadable: 9, Remote: 10},
+		Argo: upgrade.ReportSourceArgo{Applications: 7, Unattributed: 8, Unreadable: 9, Remote: 10, Unplaced: 12},
 	}
 	if !reflect.DeepEqual(*report.Source, wantSource) {
 		t.Errorf("report.Source = %#v, want %#v", *report.Source, wantSource)
@@ -249,10 +249,92 @@ func TestReportSourceFromKeepsTheReadersSeparate(t *testing.T) {
 		Helm: upgrade.ReportSourceHelm{
 			Read: true, Records: 11, Unattributed: 2, Unreadable: 3, Uninstalled: 4, StampedUnmatched: 5,
 		},
-		Argo: upgrade.ReportSourceArgo{Applications: 7, Unattributed: 8, Unreadable: 9, Remote: 10},
+		Argo: upgrade.ReportSourceArgo{Applications: 7, Unattributed: 8, Unreadable: 9, Remote: 10, Unplaced: 12},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("reportSourceFrom = %#v, want %#v", got, want)
+	}
+}
+
+// TestUpgradeCheckFromClusterNamesUnplacedApplications pins that an unversioned
+// row names the Application that placed it.
+func TestUpgradeCheckFromClusterNamesUnplacedApplications(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	to := clusterRecipe(t, filepath.Join(dir, "to.yaml"), map[string]string{
+		"synthetic-beta":  "0.19.0",
+		"synthetic-gamma": "1.1.0",
+	})
+
+	f := &fakeCluster{result: inventory.Result{
+		Versions: map[string]string{"synthetic-beta": "", "synthetic-gamma": "1.0.0"},
+		Unproven: map[string][]inventory.UnprovenRecord{"synthetic-beta": {
+			{Source: "argocd", Name: "teamfoo-synthetic-beta", Namespace: "team-foo", Reason: inventory.UnprovenUnplaced},
+		}},
+		Source: inventory.SourceInfo{Argo: inventory.ArgoInfo{Read: true, Applications: 2, Unplaced: 1}},
+	}}
+	client := f.client(t)
+
+	report, err := client.UpgradeCheck(t.Context(), UpgradeCheckRequest{
+		From: FromCluster, To: to, Deployer: "argocd",
+	})
+	if err != nil {
+		t.Fatalf("UpgradeCheck: %v", err)
+	}
+
+	if report.Source == nil || report.Source.Argo.Unplaced != 1 {
+		t.Fatalf("report.Source = %+v, want the Argo block to count 1 unplaced", report.Source)
+	}
+	rows := map[string]upgrade.ReportComponent{}
+	for _, c := range report.Components {
+		rows[c.Component] = c
+	}
+	beta := rows["synthetic-beta"]
+	if beta.Verdict != upgrade.VerdictUnversioned {
+		t.Errorf("synthetic-beta verdict = %q, want %q", beta.Verdict, upgrade.VerdictUnversioned)
+	}
+	wantUnproven := []upgrade.ReportUnproven{
+		{Source: "argocd", Name: "teamfoo-synthetic-beta", Namespace: "team-foo", Reason: "unplaced"},
+	}
+	if !reflect.DeepEqual(beta.Unproven, wantUnproven) {
+		t.Errorf("synthetic-beta unproven = %+v, want %+v", beta.Unproven, wantUnproven)
+	}
+	if gamma := rows["synthetic-gamma"]; len(gamma.Unproven) != 0 {
+		t.Errorf("synthetic-gamma unproven = %+v, want none on a row the read versioned", gamma.Unproven)
+	}
+
+	var buf strings.Builder
+	if err := WriteUpgradeReportTable(&buf, report); err != nil {
+		t.Fatalf("WriteUpgradeReportTable: %v", err)
+	}
+	for _, want := range []string{
+		"unplaced application teamfoo-synthetic-beta deploying to team-foo",
+		"0 remote, 1 unplaced",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("rendered table does not contain %q:\n%s", want, buf.String())
+		}
+	}
+}
+
+// TestReportUnprovenFromRestatesEveryField guards the field-for-field copy.
+func TestReportUnprovenFromRestatesEveryField(t *testing.T) {
+	t.Parallel()
+
+	got := reportUnprovenFrom(map[string][]inventory.UnprovenRecord{"gpu-operator": {
+		{Source: "helm", Name: "gpu-operator", Namespace: "gpu-operator", Reason: inventory.UnprovenUnreadable},
+		{Source: "argocd", Name: "teamfoo-gpu-operator", Namespace: "team-foo", Reason: inventory.UnprovenUnplaced},
+	}})
+	want := map[string][]upgrade.ReportUnproven{"gpu-operator": {
+		{Source: "helm", Name: "gpu-operator", Namespace: "gpu-operator", Reason: "unreadable"},
+		{Source: "argocd", Name: "teamfoo-gpu-operator", Namespace: "team-foo", Reason: "unplaced"},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("reportUnprovenFrom = %#v, want %#v", got, want)
+	}
+	if got := reportUnprovenFrom(nil); got != nil {
+		t.Errorf("reportUnprovenFrom(nil) = %#v, want nil", got)
 	}
 }
 
@@ -727,10 +809,9 @@ func (c *abortingContext) abort(err error) {
 // nil error says the comparison stands.
 //
 // The two rows that must not fail the run are the discriminating ones. A scan
-// that exhausted its own defaults.AtRiskScanTimeout carries exactly the code
-// and the sentinel an expired caller deadline carries, because pkg/inventory
-// codes both through the same abortError, so neither distinguishes them; the
-// caller's context does.
+// step past defaults.AtRiskStepTimeout carries the code and sentinel an
+// expired caller deadline carries, so only the caller's context tells them
+// apart.
 func TestUpgradeCheckScanAbortIsNotAFinding(t *testing.T) {
 	t.Parallel()
 
@@ -759,9 +840,8 @@ func TestUpgradeCheckScanAbortIsNotAFinding(t *testing.T) {
 			wantTransient: true,
 		},
 		{
-			// The scan's budget is the shorter of the two, so this is the
-			// slow cluster it exists to cut short, and nobody aborted.
-			name: "the scan's own budget expires",
+			// The caller's context is still live.
+			name: "a scan step's own budget expires",
 			scanErr: errors.Wrap(errors.ErrCodeTimeout,
 				"timed out reading the cluster for resources an upgrade could disturb",
 				context.DeadlineExceeded),

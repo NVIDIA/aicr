@@ -12,24 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Written while the pin was still v0.17.1, under the rule-2 allowance that lets
-# manual and blocked describe a boundary above it. The pin is now v0.19.0, and
-# v0.18.0 below is the rename release rather than the current pin.
+# The rename record was written while the pin was still v0.17.1, under the
+# rule-2 allowance that lets manual and blocked describe a boundary above it.
+# It is the only boundary that asks anything of an operator, so its to range
+# reaches through the current pin: a jump from below v0.18.0 lands on the
+# rename steps rather than being told to stop partway at a safe boundary that
+# adds no work. Upstream serves the legacy group through v0.20.x, so the steps
+# hold that far; v0.21.0 removes it and needs a record of its own.
 #
-# Two boundaries. The rename is the only one that asks anything of an operator,
-# so its to range reaches through v0.19.0: a jump from below v0.18.0 straight to
-# v0.19.0 lands on the rename steps rather than being told to stop partway,
-# because the v0.19.0 boundary it also crosses is safe and adds no work.
-#
-# Transcribed from NVIDIA/nodewright docs/getting-started/migration.md, which
-# remains the authoritative account. AICR's own reasons for holding are
-# "Upgrade Notes" > nodewright-operator in docs/user/component-catalog.md.
+# The rename is transcribed from NVIDIA/nodewright
+# docs/getting-started/migration.md, which remains the authoritative account.
+# AICR's own reasons for holding are "Upgrade Notes" > nodewright-operator in
+# docs/user/component-catalog.md.
 apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: nodewright-operator
 transitions:
   - from: "<0.18.0"
-    to: ">=0.18.0 <=0.19.1"
+    to: ">=0.18.0 <=0.20.0"
     verdict: manual
     summary: >-
       v0.18.0 renames skyhook.nvidia.com/v1alpha1 Skyhook to
@@ -239,3 +239,26 @@ transitions:
       - https://github.com/NVIDIA/nodewright/pull/771
       - https://github.com/NVIDIA/nodewright/blob/main/docs/operations/resource-management.md
       - https://github.com/NVIDIA/aicr/issues/3101
+
+  - from: ">=0.19.1 <0.20.0"
+    to: "=0.20.0"
+    verdict: safe
+    verifiedBy: >-
+      Chart diff v0.19.1 to v0.20.0: both CRDs change field descriptions
+      only, values move the operator image to v0.20.0 and the default agent
+      to v7.0.0, and the Deployment gains a preferred pod anti-affinity. The
+      KWOK Tier 1 and Tier 2 lanes on NVIDIA/aicr#3210 installed v0.20.0 and
+      passed scheduling validation. Upstream release note operator/v0.20.0
+      for the behavior changes.
+    summary: >-
+      The operator now exits at startup on a runtime-required taint key with
+      a DNS prefix or over 53 characters, and no longer uncordons a node it
+      did not cordon. Such a key already stalled every NodeWright on older
+      versions once autoTaintNewNodes, on by default in AICR's tuning,
+      tainted a node, and aicr bundle now rejects it, so a bundle that
+      builds carries a valid key. Nothing to change on upgrade.
+    references:
+      - https://github.com/NVIDIA/nodewright/releases/tag/operator%2Fv0.20.0
+      - https://github.com/NVIDIA/nodewright/releases/tag/agent%2Fv7.0.0
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/architecture/interrupt-flow.md#cordons-nodewright-did-not-create
+      - https://github.com/NVIDIA/aicr/issues/3207

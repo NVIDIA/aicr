@@ -1,0 +1,174 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVSentinel's slinky-drainer plugin: reconciles the DrainRequests node-drainer
+# creates in customDrain mode against Slinky, so a quarantined Slurm node is
+# drained through Slurm instead of by pod eviction. Vendored from NVSentinel
+# v1.26.0 (plugins/slinky-drainer/config/{rbac,manager}, commit a5b9e90f),
+# which ships the plugin only as Kustomize. Differences from upstream:
+#
+#   - namespace is the release namespace, which must be NVSentinel's: the
+#     drain template ConfigMap is mounted by node-drainer from its own namespace.
+#   - --slinky-namespace comes from values (upstream default "slinky"). It must
+#     be the namespace slinky-slurm deploys worker pods to; with any other value
+#     the plugin finds no pods and marks every drain complete at once.
+#   - the image is a pinned release, and the pod is placed on system nodes.
+#
+# The plugin acts on every pod in --slinky-namespace on the drained node: once
+# each Ready one reports Slurm DRAIN and idle, it deletes them all, then marks
+# the DrainRequest DrainComplete. Neither it nor node-drainer enforces a timeout
+# (--drain-timeout is parsed but unused upstream).
+{{- $vals := index .Values "slinky-drainer" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: slinky-drainer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: slinky-drainer
+    app.kubernetes.io/name: slinky-drainer
+    app.kubernetes.io/component: controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: slinky-drainer-role
+  labels:
+    app: slinky-drainer
+    app.kubernetes.io/name: slinky-drainer
+    app.kubernetes.io/component: controller
+rules:
+  - apiGroups: ["nvsentinel.nvidia.com"]
+    resources: ["drainrequests"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["nvsentinel.nvidia.com"]
+    resources: ["drainrequests/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["nvsentinel.nvidia.com"]
+    resources: ["drainrequests/finalizers"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: slinky-drainer-rolebinding
+  labels:
+    app: slinky-drainer
+    app.kubernetes.io/name: slinky-drainer
+    app.kubernetes.io/component: controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: slinky-drainer-role
+subjects:
+  - kind: ServiceAccount
+    name: slinky-drainer
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slinky-drainer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: slinky-drainer
+    app.kubernetes.io/name: slinky-drainer
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: slinky-drainer
+  template:
+    metadata:
+      labels:
+        app: slinky-drainer
+        app.kubernetes.io/name: slinky-drainer
+        app.kubernetes.io/component: controller
+      annotations:
+        kubectl.kubernetes.io/default-container: controller
+    spec:
+      serviceAccountName: slinky-drainer
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- if $vals.systemNodeSelector }}
+      nodeSelector:
+        {{- toYaml $vals.systemNodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if $vals.systemTolerations }}
+      tolerations:
+        {{- toYaml $vals.systemTolerations | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: controller
+          # Literal, not templated from values: tools/bom and aicr mirror read
+          # embedded manifests without rendering them. Moves with nvsentinel's
+          # defaultVersion (TestSlinkyDrainerImagePinnedEverywhere).
+          image: ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.26.0@sha256:29f8bbe52449ca0dccc34c1dba39c60c7c8a00cda00a5c5076dde9604dd27690
+          imagePullPolicy: IfNotPresent
+          args:
+            - --pod-check-interval=5s
+            - --drain-timeout=30m
+            - --slinky-namespace={{ $vals.slinkyNamespace }}
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      terminationGracePeriodSeconds: 10

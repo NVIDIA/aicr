@@ -28,14 +28,16 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	evattest "github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
+	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
-// OIDCResolveOptions configures keyless-signing OIDC token resolution for a
-// pushed evidence bundle. Deliberate transparent alias of
+// OIDCResolveOptions selects how a pushed evidence bundle is signed: with the
+// KMS key SigningKey names (DisableTLogUpload skips the Rekor entry), or
+// keylessly with deferred OIDC token resolution. Deliberate transparent alias of
 // pkg/bundler/attestation.ResolveOptions, mirroring how BundleOptions exposes
 // BundleAttester: the caller (CLI/server) builds the resolution inputs and the
 // facade threads them through to attestation.Emit, which resolves the token
@@ -84,8 +86,8 @@ type EvidenceOptions struct {
 	// Client has no commit of its own, so it is supplied per call.
 	Commit string
 
-	// OIDCResolve carries keyless-signing token-resolution inputs, consumed
-	// only when Push is set and NoSign is false.
+	// OIDCResolve selects KMS signing (SigningKey) or keyless signing and
+	// carries its inputs, consumed only when Push is set and NoSign is false.
 	OIDCResolve OIDCResolveOptions
 }
 
@@ -110,6 +112,18 @@ func (c *Client) MergeReports(results []*PhaseResult) *ctrf.Report {
 	return ctrf.MergeReports("aicr", version, reports)
 }
 
+// EvidenceEmission reports what Client.EmitRecipeEvidenceWithResult pushed.
+// Both fields are empty when EvidenceOptions.Push was unset.
+type EvidenceEmission struct {
+	// PushedReference is the registry/repository:tag the summary bundle was
+	// pushed to: pointer.yaml's bundle.oci.
+	PushedReference string
+
+	// PushedDigest is the pushed manifest's digest (sha256:...):
+	// pointer.yaml's bundle.digest.
+	PushedDigest string
+}
+
 // EmitRecipeEvidence builds (and optionally pushes) a recipe-evidence
 // attestation bundle from a completed validation run — predicateType v1 for
 // unprofiled recipes, v2 when the recipe carries a configuration profile
@@ -130,30 +144,46 @@ func (c *Client) EmitRecipeEvidence(
 	opts EvidenceOptions,
 ) error {
 
+	_, err := c.EmitRecipeEvidenceWithResult(ctx, rec, snap, results, opts)
+	return err
+}
+
+// EmitRecipeEvidenceWithResult is EmitRecipeEvidence, also reporting the
+// reference and digest of the bundle it pushed, so a caller can hand them on
+// without reading pointer.yaml back from OutDir. The result is non-nil
+// whenever the error is nil.
+func (c *Client) EmitRecipeEvidenceWithResult(
+	ctx context.Context,
+	rec *RecipeResult,
+	snap *Snapshot,
+	results []*PhaseResult,
+	opts EvidenceOptions,
+) (*EvidenceEmission, error) {
+
 	if c == nil {
-		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
 	}
 	if ctx == nil {
-		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
 	}
 	if rec == nil || rec.internal == nil {
-		return errors.New(errors.ErrCodeInvalidRequest,
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"nil or unresolved RecipeResult — call Client.ResolveRecipe to obtain an evidence-emittable RecipeResult")
 	}
 	if err := c.assertOwns(rec); err != nil {
-		return err
+		return nil, err
 	}
 	if snap == nil {
-		return errors.New(errors.ErrCodeInvalidRequest, "nil Snapshot")
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "nil Snapshot")
 	}
 	if opts.OutDir == "" {
-		return errors.New(errors.ErrCodeInvalidRequest, "evidence OutDir is required")
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "evidence OutDir is required")
 	}
 
 	c.mu.RLock()
 	if c.builder == nil {
 		c.mu.RUnlock()
-		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
 	}
 	// Snapshot the per-Client provider + version so the validator catalog
 	// resolves against THIS Client's recipe source, matching the run.
@@ -165,10 +195,10 @@ func (c *Client) EmitRecipeEvidence(
 
 	cat, err := catalog.LoadWithDataProvider(ctx, dp, clientVersion, opts.Commit)
 	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog for evidence")
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog for evidence")
 	}
 
-	_, err = evattest.Emit(ctx, evattest.EmitOptions{
+	res, err := evattest.Emit(ctx, evattest.EmitOptions{
 		OutDir:      opts.OutDir,
 		BOMPath:     opts.BOMPath,
 		Push:        opts.Push,
@@ -187,7 +217,15 @@ func (c *Client) EmitRecipeEvidence(
 		AICRCommit:   opts.Commit,
 		OIDCResolve:  opts.OIDCResolve,
 	})
-	return err
+	if err != nil {
+		return nil, err
+	}
+	emission := &EvidenceEmission{}
+	if res != nil && res.PushSummary != nil {
+		emission.PushedReference = oci.TrimScheme(res.PushSummary.Reference)
+		emission.PushedDigest = res.PushSummary.Digest
+	}
+	return emission, nil
 }
 
 // CNCFCollectOptions configures Client.CollectCNCFEvidence.

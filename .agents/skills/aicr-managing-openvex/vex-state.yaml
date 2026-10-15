@@ -59,40 +59,49 @@
 # A post-merge check belongs here rather than only in a PR description, because
 # the skill reads this file and does not read PR descriptions. A check recorded
 # only in a PR is a check nobody runs.
-deferred_verifications: []
+deferred_verifications:
+  - id: empty-source-openvex-releases
+    opened: 2026-10-15
+    document_version: 20
+    why_deferred: >-
+      Version 20 is the first source document with no statements, and the
+      sbom-and-attest guard accepts that only since this revision. Only a
+      release runs the guard, the binder and `cosign attest` end to end, and
+      only the release scan in on-tag.yaml measures the arm64 aiperf-bench leg.
+    check: >-
+      The first release cut from a main head containing document version 20
+      passes the sbom-and-attest "Verify OpenVEX document" step in source
+      mode, publishes an OpenVEX attestation with `"statements": []` on the
+      aiperf-bench linux/arm64 manifest, and its on-tag.yaml grype scan of the
+      aiperf-bench arm64 leg reports no python HIGH+.
+    how: |
+      cosign verify-attestation --type openvex \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.*' \
+        ghcr.io/nvidia/aicr-validators/aiperf-bench@<linux/arm64 digest> \
+        | jq -rs '.[0].payload | @base64d | fromjson | .predicate.statements'
+    resolves_when: >-
+      the release workflow for THE FIRST release after document version 20
+      has been inspected AND its guard step passed, the command above returned
+      `[]`, and the arm64 aiperf-bench release scan reported no python HIGH+.
+      A failure on that release is the finding to triage, not something a
+      later release discharges.
 
-known_negatives:
-  - id: no-fixed-cpython-3.13-for-cve-2026-82049
-    checked: 2026-10-05
-    finding: >-
-      CVE-2026-82049 (tarfile extraction filters) cannot be remediated by any
-      bump available to this image. 3.13.15 is the newest CPython 3.13 release
-      (2026-08-05); the advisory published 2026-09-14 and the 3.13 backport
-      landed after that release, so grype records the sole fixed version as
-      `3.14.0b1` -- which is why `--only-fixed` does not withhold it.
-      nvcr.io/nvidia/distroless/python publishes a 3.14-v4.1.5 tag, but aiperf
-      0.13.0 still declares `Requires-Python: <3.14,>=3.11`, so building the
-      venv on 3.14 fails pip resolution instead of producing a fixed image.
-    also: >-
-      The finding is on the base image's interpreter (pkg:generic/python@3.13.15
-      at /usr/local/bin/python), not a pip package, so no requirements.txt change
-      can touch it either. Do not re-derive this by bumping the distroless pin:
-      3.13-v4.1.5 is the newest 3.13 tag and still ships CPython 3.13.15.
-    invalidated_by: >-
-      a CPython 3.13.16+ release carrying the backport (then bump the distroless
-      3.13 pin and delete the statement), or an aiperf release whose
-      Requires-Python admits 3.14 (then the 3.14 base becomes reachable, #1910)
+known_negatives: []
 
 deliberate_exclusions:
   - id: libexpat1-wont-fix-highs
     decided: 2026-08-27
-    rechecked: 2026-09-17
+    rechecked: 2026-10-15
     decision: >-
       The High findings on libexpat1 2.8.3-1~deb13u1 -- CVE-2026-66046, and
       CVE-2026-76956 / CVE-2026-76957 seen on the same package at the 2026-09-17
       recheck -- are deliberately NOT suppressed. Debian marks each wont-fix, so
       `--only-fixed` already withholds them from the reported counts, and
       pre-suppressing a wont-fix finding would hide it the moment a fix ships.
+      The same holds for CVE-2026-77214 and CVE-2026-93990 on that package,
+      which Debian lists as not yet fixed: both are present on
+      distroless/python:3.13-v4.1.7 for amd64 and arm64.
     invalidated_by: >-
       Debian shipping a fixed libexpat1; at that point the finding must surface
       and be remediated by the weekly image rebuild, not suppressed
@@ -131,23 +140,43 @@ deliberate_exclusions:
       not build them -- the scan matrix pins each to nvsentinel's registry
       defaultVersion -- so the fix is a pin bump, and a statement would be a
       reachability claim about third-party binaries this repo has no source
-      to support. Current instance: preflight-dcgm-diag v1.25.0 carries
-      CVE-2026-84782 (High) on libssl3t64 and openssl 3.0.13-0ubuntu3.15,
-      fixed in 3.0.13-0ubuntu3.16. It comes from the runtime base
-      nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04, which upstream
-      leaves tag-pinned and never `apt-get upgrade`s, so only an nvsentinel
-      rebuild picks up the fix.
-    evidence_2026_10_08: >-
-      grype 0.120.1, `--only-fixed -c .grype.yaml --vex .openvex.json`,
-      linux/amd64. preflight-dcgm-diag v1.25.0: 2 high / 12 medium / 11 low,
-      matching weekly run 37736381710 exactly; v1.26.0: 0 high / 12 medium /
-      1 low, no openssl match. Only preflight-dcgm-diag was rescanned at
-      v1.26.0; the other nvsentinel images were not, so a bump must scan them.
+      to support. That holds with no clean successor to bump to as well: the
+      fix then belongs upstream, as a rebuild, not here as a statement.
+      Current instance: every Go image at v1.26.0 is built on go1.27.0 with
+      golang.org/x/net v0.59.0 and carries GO-2026-6603/6605/6607/6608/6610/
+      6611/6612/6613 (2 critical and up to 10 high rows per image), fixed in
+      go1.27.2 and x/net v0.60.0; gpu-reset carries CVE-2026-84782 (High) on
+      libssl3t64 and openssl 3.0.13-0ubuntu3.15, fixed in 3.0.13-0ubuntu3.16.
+    evidence_2026_10_15: >-
+      grype 0.118.0 (the scan-action pin), `--only-fixed -c .grype.yaml`,
+      linux/amd64. v1.27.0, the newest tag, is not a clean successor:
+      fault-quarantine still reports 2 critical / 10 high on stdlib go1.27.0
+      and x/net v0.59.0, and gpu-reset 2 high on openssl
+      3.0.13-0ubuntu3.15. Only those two were scanned at v1.27.0, so a bump
+      must scan all fourteen.
     invalidated_by: >-
-      the nvsentinel defaultVersion in recipes/registry.yaml advancing past
-      v1.25.0, which removes the finding; or an nvsentinel release carrying
-      HIGH+ findings with no clean successor version, which would make the
-      suppression question real for the first time
+      an nvsentinel release built on go1.27.2+ and golang.org/x/net v0.60.0+
+      whose gpu-reset image carries openssl 3.0.13-0ubuntu3.16+ (then advance
+      defaultVersion in recipes/registry.yaml and the scan-matrix tags
+      together, after scanning every image), or AICR starting to build these
+      images, which would make their reachability provable from source
+
+  - id: percona-image-cves-are-a-digest-bump
+    decided: 2026-10-15
+    decision: >-
+      HIGH+ findings on the six Percona images in the scan matrix
+      (percona-server-mongodb-operator, percona-server-mongodb,
+      mongodb_exporter, percona-backup-mongodb, fluentbit, pmm-client) get no
+      VEX statement, for the reason that applies to nvsentinel: AICR pins them
+      by digest for the remediation mixins' datastore (psmdb-operator,
+      nvsentinel-mongodb) but does not build them, so the fix is a digest bump
+      to a cleaner upstream build. Scale at weekly run 38690982469:
+      percona-server-mongodb 26 critical / 235 high, pmm-client 26 / 130,
+      percona-backup-mongodb 6 / 108, percona-server-mongodb-operator 4 / 25,
+      mongodb_exporter 2 / 21, fluentbit 1 / 17.
+    invalidated_by: >-
+      AICR starting to build any of these images, which would make their
+      reachability provable from source
 
   - id: busybox-init-image-unfixed-highs
     decided: 2026-09-27

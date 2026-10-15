@@ -109,3 +109,29 @@ func TestKMSSignerVerifierAdapter(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateSigningKeyRef(t *testing.T) {
+	tests := []struct {
+		ref     string
+		wantErr bool
+	}{
+		{"awskms:///alias/aicr-evidence", false},
+		{"GCPKMS://projects/p/locations/l/keyRings/r/cryptoKeys/k", false},
+		{"hashivault://aicr-evidence", false},
+		{"cosign.key", true},
+		{"k8s://ns/secret", true},
+		{"", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			err := ValidateSigningKeyRef(tt.ref)
+			if !tt.wantErr {
+				if err != nil {
+					t.Errorf("ValidateSigningKeyRef(%q) = %v, want nil", tt.ref, err)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		})
+	}
+}
