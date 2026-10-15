@@ -248,10 +248,10 @@ profiles on the next run.
 `.github/workflows/kwok-recipes.yaml` calls the same `run-all-recipes.sh` used by `make kwok-test-all`. CI uses a single shared Kind cluster with cleanup between recipes.
 
 Per-recipe cleanup sweeps Helm releases outside the `argocd` namespace,
-including AICR's `aws-ebs-csi-driver` and `aws-efa` releases in `kube-system`.
-It preserves the shared `kwok-controller` and `kwok-stage-fast` releases, the
-install-infra-managed Argo CD release, and unknown Helm releases in
-`kube-system`.
+including all AICR components registered with `kube-system` as their default
+namespace. It preserves the shared `kwok-controller` and `kwok-stage-fast`
+releases, the install-infra-managed Argo CD release, and unknown Helm releases
+in `kube-system`.
 
 Manual trigger:
 ```bash

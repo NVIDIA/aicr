@@ -37,8 +37,18 @@
 readonly SYSTEM_NS_PATTERN="default|kube-node-lease|kube-public|kube-system|kwok-system|local-path-storage|argocd|aicr-registry|flux-system"
 
 cleanup_recipe_helm_releases() {
-    local release_json releases failed=0
+    local release_json releases kube_system_names failed=0
 
+    if ! kube_system_names=$(yq -r \
+        '.components[] | select(.helm.defaultNamespace == "kube-system") | .name' \
+        "${REPO_ROOT}/recipes/registry.yaml"); then
+        echo "[ERROR] Failed to read kube-system Helm components from the registry" >&2
+        return 1
+    fi
+    if [[ -z "${kube_system_names}" ]]; then
+        echo "[ERROR] Registry contains no kube-system Helm components" >&2
+        return 1
+    fi
     if ! release_json=$(helm list -A -o json); then
         echo "[ERROR] Failed to list Helm releases during KWOK cleanup" >&2
         return 1
@@ -60,16 +70,15 @@ cleanup_recipe_helm_releases() {
         [[ -n "$release" ]] || continue
 
         if [[ "$namespace" == "kube-system" ]]; then
-            # Keep this list aligned with Helm components in registry.yaml
-            # that target kube-system; leave other releases cluster-owned.
-            case "$release" in
-                aws-ebs-csi-driver|aws-efa) ;;
-                *) continue ;;
-            esac
+            grep -Fxq "$release" <<<"${kube_system_names}" || continue
         fi
 
         echo "[INFO] Uninstalling Helm release $release from $namespace..."
-        if ! timeout 60s helm uninstall "$release" -n "$namespace" --wait 2>/dev/null; then
+        local wait_option=--wait=hookOnly
+        if [[ "$namespace" == "kube-system" ]]; then
+            wait_option=--wait
+        fi
+        if ! timeout 60s helm uninstall "$release" -n "$namespace" "$wait_option"; then
             echo "[ERROR] Failed to uninstall Helm release $release from $namespace" >&2
             failed=1
         fi
