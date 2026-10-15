@@ -323,10 +323,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 
-	// Resolve the chart puller for vendored bundles.
-	puller := g.Puller
-	if g.VendorCharts && puller == nil {
-		puller = &localformat.CLIChartPuller{}
+	puller, chartDigests, err := g.resolveVendoring(ctx, sortedRefs)
+	if err != nil {
+		return nil, err
 	}
 
 	// Collect and deduplicate sources. When vendoring, skip HelmRepository
@@ -395,7 +394,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled during component generation", err)
 		}
 		compResources, compErr := g.generateComponentResources(
-			ctx, ref, depsByComponent, outputDir, helmSources, gitSources, puller, output)
+			ctx, ref, depsByComponent, outputDir, helmSources, gitSources, puller, chartDigests[ref.Name], output)
 		if compErr != nil {
 			return nil, compErr
 		}
@@ -461,12 +460,34 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	return output, nil
 }
 
+// resolveVendoring returns the chart puller and the registry-pinned chart
+// digests for a vendored bundle. When VendorCharts is off it returns g.Puller
+// unchanged and no digests.
+func (g *Generator) resolveVendoring(
+	ctx context.Context,
+	refs []recipe.ComponentRef,
+) (localformat.ChartPuller, map[string]string, error) {
+
+	if !g.VendorCharts {
+		return g.Puller, nil, nil
+	}
+	puller := g.Puller
+	if puller == nil {
+		puller = &localformat.CLIChartPuller{}
+	}
+	digests, err := deployer.ResolveChartDigests(ctx, g.RecipeResult.DataProvider(), refs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return puller, digests, nil
+}
+
 // generateComponentResources generates all Flux resources for a single component
 // and returns the resource paths to include in the root kustomization.yaml.
 func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.ComponentRef,
 	deps map[string][]string, outputDir string,
 	helmSources map[string]*HelmRepoSourceData, gitSources map[string]*GitRepoSourceData,
-	puller localformat.ChartPuller,
+	puller localformat.ChartPuller, chartDigest string,
 	output *deployer.Output) ([]string, error) {
 
 	compDir, err := deployer.SafeJoin(outputDir, ref.Name)
@@ -536,7 +557,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 		// manifests (the existing flow handles them correctly).
 		if g.VendorCharts && isVendorable(ref) {
 			wroteCM, rec, extra, vendErr := g.generateVendoredHelmComponent(
-				ctx, ref, compDir, primaryDependsOn, gitSources, puller, output)
+				ctx, ref, compDir, primaryDependsOn, gitSources, puller, chartDigest, output)
 			if vendErr != nil {
 				return nil, vendErr
 			}
