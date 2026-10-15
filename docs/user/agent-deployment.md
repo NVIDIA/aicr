@@ -74,7 +74,8 @@ data:
   the cluster if anything is missing — see
   [Pre-flight permission gate](#pre-flight-permission-gate). Pointing
   `--service-account-name` at a ServiceAccount you provisioned yourself
-  requires **no** RBAC permissions at all
+  requires **no** RBAC permissions at all, and no permission on the
+  Namespace object itself: the run leaves it untouched
 
 ## Quick Start
 
@@ -262,8 +263,8 @@ run-scoped ServiceAccount does not help.
 
 | Does a ServiceAccount of exactly that name exist in `--namespace`? | Behavior |
 |---|---|
-| Yes | Used verbatim. aicr creates **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding for the run, binds nothing to it, and deletes nothing at cleanup. |
-| No | The value is a name prefix. The run creates `<prefix>-<run-id>` plus the full run-scoped RBAC set, and deletes them at cleanup — the pre-existing behavior. |
+| Yes | Used verbatim. aicr creates **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding for the run, binds nothing to it, and deletes nothing at cleanup. The namespace is left untouched: it is not created, and its labels are not changed. |
+| No | The value is a name prefix. The run creates `<prefix>-<run-id>` plus the full run-scoped RBAC set, and deletes them at cleanup — the pre-existing behavior. It also creates the namespace if absent and labels it `app.kubernetes.io/managed-by=aicr`, replacing any other value of that label. |
 
 An unset `--service-account-name` is never probed for existence, so a stray
 ServiceAccount named `aicr` cannot silently capture a run.
@@ -780,6 +781,15 @@ every single run.
 creates and deletes no RBAC at all, so none of the five kinds above is
 demanded of you. What it requires instead is that the ServiceAccount was
 actually provisioned — see below.
+
+**Namespace permissions are not part of the gate.** In exact-ServiceAccount
+mode the run does not touch the Namespace object, so it needs no permission
+on it. In prefix mode the run reads the namespace before creating it. An
+existing namespace needs `namespaces: get`, plus `patch` when it lacks the
+`app.kubernetes.io/managed-by=aicr` label. A missing namespace needs
+`namespaces: create`. When one of those requests is refused, the run fails
+with a permission error naming the verb to grant, before it creates any
+RBAC.
 
 #### What the agent ServiceAccount must be able to do
 
