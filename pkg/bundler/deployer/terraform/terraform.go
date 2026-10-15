@@ -321,13 +321,26 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	output.Duration = time.Since(start)
-	// The steps follow the form. A child module has no provider block and no
-	// connection variables, so it is applied from the configuration that
-	// calls it; printing the root-module steps for it would apply with an
-	// unconfigured helm provider.
+	output.DeploymentSteps, output.DeploymentNotes = g.deploymentGuidance(outputDir)
+
+	slog.Debug("terraform bundle generated",
+		"components", len(components),
+		"releases", len(writeResult.Folders),
+		"files", len(output.Files),
+		"size_bytes", output.TotalSize,
+		"duration", output.Duration,
+	)
+	return output, nil
+}
+
+// deploymentGuidance returns the printed steps and notes for the form. A child
+// module has no provider block and no connection variables, so it is applied
+// from the configuration that calls it; printing the root-module steps for it
+// would apply with an unconfigured helm provider.
+func (g *Generator) deploymentGuidance(outputDir string) (steps, notes []string) {
 	var connection string
 	if g.ChildModule {
-		output.DeploymentSteps = []string{
+		steps = []string{
 			fmt.Sprintf("Call %s as a module from the configuration that owns the helm provider (see its README.md)", outputDir),
 			"terraform init",
 			"terraform plan",
@@ -337,7 +350,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			"and installs through the calling configuration's helm provider. Run init/plan/apply there, not in the bundle. " +
 			"An upgrade is a regenerated bundle in a new directory; point the module source at it (see README.md)."
 	} else {
-		output.DeploymentSteps = []string{
+		steps = []string{
 			fmt.Sprintf("cd %s", outputDir),
 			"terraform init",
 			"terraform plan",
@@ -348,7 +361,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			"An upgrade is a regenerated bundle in a new directory: carry .terraform.lock.hcl, terraform.tfvars and the state across " +
 			"(see README.md). Regenerating into this directory fails the bundle's closed-world check once Terraform has run in it."
 	}
-	notes := []string{
+	notes = []string{
 		connection,
 		"depends_on carries the recipe's dependency graph exactly, so independent components apply concurrently. " +
 			"Each component is one module call; its pre/post/readiness folders chain inside it.",
@@ -373,16 +386,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		notes = append(notes,
 			"Cluster rollover is enabled: replacing the cluster replaces every release. "+keepers)
 	}
-	output.DeploymentNotes = notes
-
-	slog.Debug("terraform bundle generated",
-		"components", len(components),
-		"releases", len(writeResult.Folders),
-		"files", len(output.Files),
-		"size_bytes", output.TotalSize,
-		"duration", output.Duration,
-	)
-	return output, nil
+	return steps, notes
 }
 
 // helmOnlyFile reports whether a localformat folder file exists only for the
