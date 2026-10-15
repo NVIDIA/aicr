@@ -117,8 +117,7 @@ const (
 	// freshly provisioned volume is group-writable by the cacheWorkerImage's
 	// non-root user. It must match that image's non-root UID/GID — if the vLLM
 	// runtime image rebuilds under a different non-root UID, the workers' RO
-	// mount would silently fail to load weights. The worker RO mount relies on
-	// the same group ownership.
+	// mount would silently fail to load weights.
 	cacheWorkerFSGroup = int64(1000)
 )
 
