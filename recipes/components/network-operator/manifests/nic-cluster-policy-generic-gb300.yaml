@@ -20,6 +20,8 @@
 # (shared HCA, resource rdma/ib), and nicConfigurationOperator manages NIC
 # firmware/config. vendor 15b3 = Mellanox; deviceID 1021 = ConnectX-7,
 # 1023 = ConnectX-8.
+{{- $netop := index .Values "network-operator" }}
+{{- $daemon := $netop.nicConfigurationOperator.configurationDaemon }}
 apiVersion: mellanox.com/v1alpha1
 kind: NicClusterPolicy
 metadata:
@@ -106,11 +108,7 @@ spec:
       imagePullSecrets: []
       containerResources:
         - name: nic-configuration-daemon
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            memory: 512Mi
+          {{- toYaml $daemon.resources | nindent 10 }}
   # Fabric DaemonSets must land on tainted GPU nodes.
   tolerations:
     - key: nvidia.com/gpu
