@@ -94,6 +94,92 @@ func TestRKE2NVSentinelNRIPluginMode(t *testing.T) {
 	}
 }
 
+// TestRKE2NRISettingsPaired enforces the pairing documented at the rke2 root
+// on every rke2 catalog leaf, including ones added later, and on the generic
+// rke2 training and inference recipes, which resolve but are not catalog
+// leaves because the VR200 overlays extend them: metadata-collector
+// NRI plugin mode needs the GPU Operator's NRI plugin and the toolkit's
+// namespace allowlist, and under NRI the collector needs either that mode or
+// a host-mounted NVML. A leaf that turns NRI off but inherits nriPlugin
+// crash-loops with NVML ERROR_LIBRARY_NOT_FOUND although the `nvidia`
+// RuntimeClass exists.
+func TestRKE2NRISettingsPaired(t *testing.T) {
+	t.Parallel()
+
+	leaves, err := ResolveLeaves(t.Context(), ResolveLeavesOptions{
+		Filter: &Criteria{Service: CriteriaServiceRKE2},
+	})
+	if err != nil {
+		t.Fatalf("ResolveLeaves: %v", err)
+	}
+
+	type candidate struct {
+		name   string
+		result *RecipeResult
+	}
+	var candidates []candidate
+	for _, leaf := range leaves {
+		if leaf.Err != nil {
+			t.Errorf("%s: resolve: %v", leaf.Entry.Name, leaf.Err)
+			continue
+		}
+		candidates = append(candidates, candidate{leaf.Entry.Name, leaf.Result})
+	}
+	for _, intent := range []CriteriaIntentType{CriteriaIntentTraining, CriteriaIntentInference} {
+		result, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), &Criteria{Service: CriteriaServiceRKE2, Intent: intent}, "")
+		if err != nil {
+			t.Fatalf("rke2 %s: BuildFromCriteriaWithProfile: %v", intent, err)
+		}
+		candidates = append(candidates, candidate{"rke2-" + string(intent), result})
+	}
+
+	checked, nriMode := 0, 0
+	for _, c := range candidates {
+		name, result := c.name, c.result
+		sentinelRef := result.GetComponentRef(nvsentinelComponent)
+		if sentinelRef == nil || !sentinelRef.IsEnabled() || result.GetComponentRef(gpuOperatorComponentName) == nil {
+			continue
+		}
+		sentinelValues, err := result.GetValuesForComponentWithContext(t.Context(), nvsentinelComponent)
+		if err != nil {
+			t.Fatalf("%s: nvsentinel values: %v", name, err)
+		}
+		if enabled, set := nestedMetadataCollectorEnabled(sentinelValues); set && !enabled {
+			continue
+		}
+		gpuOpValues, err := result.GetValuesForComponentWithContext(t.Context(), gpuOperatorComponentName)
+		if err != nil {
+			t.Fatalf("%s: gpu-operator values: %v", name, err)
+		}
+		checked++
+
+		nri, _ := nestedBool(gpuOpValues, "cdi", "nriPluginEnabled")
+		collector, _ := sentinelValues["metadata-collector"].(map[string]any)
+		collectorNRI, _ := nestedBool(collector, "nriPlugin", "enabled")
+		runtimeClass, runtimeSet := collector["runtimeClassName"].(string)
+		hostMounts, _ := collector["additionalHostVolumes"].([]any)
+		hostMountedNVML := runtimeSet && runtimeClass == "" && len(hostMounts) > 0
+
+		switch {
+		case collectorNRI && !nri:
+			t.Errorf("%s: metadata-collector.nriPlugin.enabled is true but gpu-operator cdi.nriPluginEnabled is not; no NRI plugin injects the management device (#3041)", name)
+		case collectorNRI:
+			nriMode++
+			toolkit, _ := gpuOpValues["toolkit"].(map[string]any)
+			env, _ := toolkit["env"].([]any)
+			if !envListContains(env, nriManagementNamespacesEnvName, sentinelRef.Namespace) {
+				t.Errorf("%s: metadata-collector uses NRI plugin mode but toolkit.env %s does not list %q (#3041)",
+					name, nriManagementNamespacesEnvName, sentinelRef.Namespace)
+			}
+		case nri && !hostMountedNVML:
+			t.Errorf("%s: gpu-operator runs the NRI plugin but metadata-collector has neither nriPlugin.enabled nor a cleared runtimeClassName with host-mounted NVML (#3041)", name)
+		}
+	}
+	if checked == 0 || nriMode == 0 {
+		t.Fatalf("checked %d rke2 leaves, %d in NRI plugin mode; want both > 0 or the pairing check is vacuous", checked, nriMode)
+	}
+}
+
 // envListContains reports whether env carries name with a comma-separated
 // value that includes item, the format NRI_MANAGEMENT_CDI_DEVICE_NAMESPACES
 // takes.
