@@ -32,12 +32,7 @@ type ComponentOverride struct {
 // pkg/bundler/deployer/helm/templates/deploy.sh.tmpl (ASYNC_COMPONENTS and the
 // COMPONENT_HELM_TIMEOUT case block). deploy.sh and this map must be updated
 // together; promoting these into the recipe schema is tracked as a follow-up
-// to issue #632.
-//
-// Shared rather than per-deployer: this was the helmfile deployer's private
-// table until the terraform deployer needed the same facts, and a third copy
-// of a list that already has to be kept in sync with a shell template is how
-// one of the copies silently stops matching.
+// to issue #632. The helmfile and terraform deployers read this one table.
 var componentOverrides = map[string]ComponentOverride{
 	// helm --wait times out on kai-scheduler's custom-resource readiness
 	// even though every pod started.

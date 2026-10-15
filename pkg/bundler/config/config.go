@@ -418,11 +418,10 @@ type Config struct {
 	readinessHooks bool
 
 	// serial forces every deployer to sequence components strictly one at a
-	// time in deployment order, disabling the concurrency the argocd,
-	// argocd-helm, flux, helmfile, and terraform deployers emit by default
-	// (per-tier sync-wave bands, declared-dependency dependsOn / depends_on,
-	// and intra-component
-	// needs: respectively). Off by default; opt-in via --serial. An operator
+	// time in deployment order, disabling the concurrency the other deployers
+	// emit by default: per-tier sync-wave bands for argocd and argocd-helm,
+	// dependsOn for flux, intra-component needs: for helmfile, and depends_on
+	// for terraform. Off by default; opt-in via --serial. An operator
 	// escape hatch for bisecting rollout problems or reproducing the
 	// pre-parallelism ordering. The helm deploy.sh is already serial, so the
 	// flag is a no-op for it.

@@ -1171,10 +1171,8 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	return resultOutput, nil
 }
 
-// terraformDeployer builds the terraform Generator. Extracted from
-// buildDeployer's switch rather than inlined like the other cases: it is the
-// only case that collects all three manifest kinds (pre, post, readiness), and
-// inlining it pushed buildDeployer past the statement ceiling.
+// terraformDeployer builds the terraform Generator, the one deployer that
+// collects all three manifest kinds (pre, post, readiness).
 func (b *DefaultBundler) terraformDeployer(
 	ctx context.Context,
 	recipeResult *recipe.RecipeResult,
