@@ -373,7 +373,9 @@ func (g *Generator) deploymentGuidance(outputDir string) (steps, notes []string)
 	}
 	if len(g.vendorRecords) > 0 {
 		notes = append(notes,
-			"This bundle contains vendored Helm charts. No upstream registry access is required at deploy time. See provenance.yaml.")
+			"This bundle contains vendored Helm charts: no chart registry access is needed at deploy time. "+
+				"terraform init still installs the hashicorp/helm provider that versions.tf requires, from the provider registry "+
+				"or from a provider mirror configured in the CLI configuration (provider_installation). See provenance.yaml.")
 	}
 	if g.ClusterRollover {
 		keepers := "Set cluster_keepers from the cluster resource itself — its CA certificate, id or " +

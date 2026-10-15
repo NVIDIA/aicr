@@ -6,4 +6,4 @@ steps:
 notes:
   The bundle does not create a cluster. It reads ~/.kube/config by default; set kubeconfig_path/kube_context, or cluster_host and credentials, to point it elsewhere. An upgrade is a fresh bundle copied over the generated files in this directory, which keeps .terraform.lock.hcl, terraform.tfvars and the state (see README.md). aicr bundle never regenerates into a directory Terraform has run in: the closed-world check fails on those files.
   depends_on carries the recipe's dependency graph exactly, so independent components apply concurrently. Each component is one module call; its pre/post/readiness folders chain inside it.
-  This bundle contains vendored Helm charts. No upstream registry access is required at deploy time. See provenance.yaml.
+  This bundle contains vendored Helm charts: no chart registry access is needed at deploy time. terraform init still installs the hashicorp/helm provider that versions.tf requires, from the provider registry or from a provider mirror configured in the CLI configuration (provider_installation). See provenance.yaml.
