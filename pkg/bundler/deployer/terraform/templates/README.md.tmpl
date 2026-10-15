@@ -236,28 +236,31 @@ Then `terraform init && terraform plan` in the calling configuration (`init`
 picks up the new module source).
 {{ else }}Treat the generated bundle as a build artifact and this directory as
 the working directory it is copied into. Generate the new bundle beside this
-directory, with the flags this one was generated with, verify it, and copy it
-over the generated files here:
+directory, with the flags this one was generated with, verify it, remove what
+the previous bundle shipped, and copy the new one in:
 
 ```sh
 aicr bundle --recipe <new recipe> --output ../bundle-next --deployer terraform
 aicr verify ../bundle-next
-rsync -a --delete --exclude='/.terraform/' --exclude='/.terraform.lock.hcl' \
-  --exclude='/terraform.tfvars' --exclude='/terraform.tfstate*' \
-  --exclude='/*_override.tf' --exclude='/.git/' ../bundle-next/ ./
+# Remove exactly what the previous bundle shipped: checksums.txt is its inventory.
+awk '{print $2}' checksums.txt | xargs rm -f
+awk '{print $2}' checksums.txt | xargs -n1 dirname | sort -ur | xargs rmdir 2>/dev/null
+rm -f checksums.txt
+cp -R ../bundle-next/. .
 terraform init && terraform plan
 ```
 
-`--delete` matters: the `NNN-<component>/` folders are renumbered on every
-bundle, and a plain copy leaves stale ones behind. Everything the excludes name
-is yours and stays: the lock file keeps the provider pinned, `terraform.tfvars`
-carries your settings, `terraform.tfstate` is the local backend's state, and a
-backend of your own lives in a `backend_override.tf` that Terraform merges into
-the configuration. Verify the fresh bundle, never this directory: verification
-is closed-world and fails on your files. With the generated files committed,
-`git diff` is the upgrade to review and the plan confirms it. The child-module
-form (`--terraform-child-module`) avoids the copy: the calling configuration
-points `source` at each generated bundle.
+The inventory is the delete list, so only generated files are ever removed:
+the `NNN-<component>/` folders, which are renumbered on every bundle, go with
+it, and the lock file, `terraform.tfvars` and the other tfvars forms, the
+state, `.gitignore`, a `backend_override.tf` of your own and anything else you
+keep here are never candidates. A generated folder that still holds a file of
+yours stays, since only emptied folders are removed. Verify the fresh bundle,
+never this directory: verification is closed-world and fails on your files.
+With the generated files committed, `git diff` is the upgrade to review and
+the plan confirms it. The child-module form (`--terraform-child-module`)
+avoids the copy: the calling configuration points `source` at each generated
+bundle.
 {{ end }}
 Read the diff:
 

@@ -329,13 +329,14 @@ spec:
     - name: upgrade-is-a-fresh-bundle-copied-over
       description: >
         The README documents an upgrade as a bundle generated into a fresh
-        directory and copied over the generated files in the working
-        directory, because a bundle is a closed set of files and the
-        directory Terraform has run in holds .terraform/, the lock file and
-        the operator's tfvars. Both halves are pinned here: regenerating over
-        such a directory fails the closed-world check, and the documented
-        copy yields byte-identical .tf files, keeps the operator's files and
-        drops a stale component folder.
+        directory and copied into the working directory after the previous
+        bundle's files, listed by its checksums.txt, are removed; a bundle is
+        a closed set of files and the directory Terraform has run in holds
+        .terraform/, the lock file and the operator's tfvars. Both halves are
+        pinned here: regenerating over such a directory fails the
+        closed-world check, and the documented sequence yields byte-identical
+        .tf files, keeps every operator file, keeps a generated folder that
+        holds one, and drops a stale inventoried folder.
       try:
         - script:
             content: |
@@ -357,29 +358,46 @@ spec:
               fi
               grep -q 'unexpected directory' "${WORK}/.regen-out" \
                 || { echo "regeneration failed for another reason:" >&2; cat "${WORK}/.regen-out" >&2; exit 1; }
-              # The documented flow: a fresh bundle, verified, copied over
-              # the generated files. A folder a previous bundle numbered
-              # differently stands in for the renumbering --delete handles.
+              # The documented flow: a fresh bundle, verified, copied in
+              # after the previous bundle's inventory is removed. More
+              # operator files, which no inventory lists; a folder a
+              # previous bundle numbered differently, which its inventory
+              # does list; and an operator file inside a generated folder.
+              printf '.terraform/\n*.tfstate*\n' > "${USED}/.gitignore"
+              printf 'timeout = 600\n' > "${USED}/extra.auto.tfvars"
+              printf 'notes\n' > "${USED}/notes.md"
               mkdir -p "${USED}/999-stale"
               printf 'stale\n' > "${USED}/999-stale/values.yaml"
+              printf '%064d  999-stale/values.yaml\n' 0 >> "${USED}/checksums.txt"
+              first=$(ls -d "${USED}"/001-* | head -n1)
+              printf 'mine\n' > "${first}/mine.txt"
               ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/next" \
                 --deployer terraform
               ${AICR_BIN} verify "${WORK}/next"
-              rsync -a --delete --exclude='/.terraform/' --exclude='/.terraform.lock.hcl' \
-                --exclude='/terraform.tfvars' --exclude='/terraform.tfstate*' \
-                --exclude='/*_override.tf' --exclude='/.git/' "${WORK}/next/" "${USED}/"
+              (
+                cd "${USED}"
+                awk '{print $2}' checksums.txt | xargs rm -f
+                awk '{print $2}' checksums.txt | xargs -n1 dirname | sort -ur | xargs rmdir 2>/dev/null
+                rm -f checksums.txt
+                cp -R "${WORK}/next/." .
+              )
               for f in main.tf variables.tf versions.tf outputs.tf \
                        modules/component/main.tf modules/component/variables.tf; do
                 diff -u "${WORK}/basic/${f}" "${USED}/${f}" \
                   || { echo "${f} differs between the first bundle and the copied-in regeneration" >&2; exit 1; }
               done
-              for f in .terraform/providers .terraform.lock.hcl terraform.tfvars terraform.tfstate; do
-                [ -e "${USED}/${f}" ] || { echo "the copy removed ${f}, which the README says it leaves alone" >&2; exit 1; }
+              for f in .terraform/providers .terraform.lock.hcl terraform.tfvars terraform.tfstate \
+                       .gitignore extra.auto.tfvars notes.md; do
+                [ -e "${USED}/${f}" ] || { echo "the upgrade removed ${f}, which the README says it never touches" >&2; exit 1; }
               done
               grep -q '^wait = true$' "${USED}/terraform.tfvars" \
                 || { echo "terraform.tfvars was overwritten by the copy" >&2; exit 1; }
               [ ! -e "${USED}/999-stale" ] \
-                || { echo "the copy left a stale component folder behind" >&2; exit 1; }
+                || { echo "the upgrade left a stale inventoried folder behind" >&2; exit 1; }
+              [ -f "${first}/mine.txt" ] && [ -f "${first}/values.yaml" ] \
+                || { echo "a generated folder holding an operator file was removed or not refilled" >&2; exit 1; }
+              diff -q "${USED}/checksums.txt" "${WORK}/next/checksums.txt" >/dev/null \
+                || { echo "checksums.txt was not replaced by the new bundle's" >&2; exit 1; }
               rm -f "${WORK}/.regen-out"
             check:
               ($error == null): true
