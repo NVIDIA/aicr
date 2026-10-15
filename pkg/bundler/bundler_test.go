@@ -488,7 +488,7 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 }
 
 // TestMake_EveryDeployerEmitsRecipe covers #2753: the recipe write used to be
-// gated on the helm deployer, so four of the five bundle formats carried no
+// gated on the helm deployer, so every other bundle format carried no
 // recipe and could not be fed back to anything that re-resolves one.
 //
 // The byte-identity assertion is the part that would not survive a plausible

@@ -365,7 +365,7 @@ func TestBundleLayoutManifestsAreComplete(t *testing.T) {
 // and would arrive silently with the first overlapping pair.
 //
 // Comparison is per path segment, after stripping the NNN- ordering prefix that
-// four of the five deployers use and any file extension, so it matches
+// five of the six deployers use and any file extension, so it matches
 // "002-nfd/values.yaml", "nfd/helmrelease.yaml" and "templates/nfd.yaml"
 // without matching "nfd-extras/values.yaml".
 func pathMentionsComponent(path, component string) bool {

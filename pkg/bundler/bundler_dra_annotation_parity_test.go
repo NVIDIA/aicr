@@ -162,11 +162,12 @@ func TestMake_DRAIntegration_GeneratedArtifactParity(t *testing.T) {
 }
 
 // TestMake_DRAIntegration_AllDeployersCarryDerivedValues extends parity
-// coverage to all five supported deployers — Helm,
-// helmfile, Flux, Argo CD, and argocd-helm. Each deployer renders the
+// coverage to all six supported deployers: Helm, helmfile, Flux,
+// Argo CD, argocd-helm and Terraform. Each deployer renders the
 // shared componentValues map differently (values.yaml under a numbered
-// subdir for Helm/helmfile; configmap-values.yaml for Flux; embedded
-// in Application source for the Argo CD variants), so a per-path
+// subdir for Helm, helmfile and Terraform; configmap-values.yaml for
+// Flux; embedded in Application source for the Argo CD variants), so a
+// per-path
 // YAML-structure assertion isn't feasible without coupling the test
 // to each deployer's bundle layout.
 //
