@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 )
@@ -58,6 +59,22 @@ func NewDynamicClientForConfig(restConfig *rest.Config) (dynamic.Interface, erro
 	}
 
 	return dynClient, nil
+}
+
+// NewMetadataClientForConfig returns a client for restConfig that reads only
+// object metadata, with the request timeout BoundedConfig applies. A nil
+// restConfig is an ErrCodeInvalidRequest error.
+func NewMetadataClientForConfig(restConfig *rest.Config) (metadata.Interface, error) {
+	if restConfig == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "no kubernetes client configuration available")
+	}
+
+	metaClient, err := metadata.NewForConfig(BoundedConfig(restConfig))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create metadata client", err)
+	}
+
+	return metaClient, nil
 }
 
 // NewRESTMapperForConfig builds the discovery-backed RESTMapper that resolves a

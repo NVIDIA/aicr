@@ -450,13 +450,6 @@ func reportSourceFrom(info inventory.SourceInfo, kubeconfig string, matched int)
 // not own is a claim it has not earned. A caller who pressed Ctrl-C, or whose
 // deadline expired, asked for no answer at all, and handing them a report with
 // a nil error says the comparison stands.
-//
-// The caller's context is what separates the two, rather than the returned
-// error's code or the sentinel under it. pkg/inventory bounds the scan by
-// defaults.AtRiskScanTimeout, which is shorter than the CLI's whole-run
-// budget, and codes that expiry ErrCodeTimeout over a context.DeadlineExceeded
-// exactly as it codes the caller's own: matching on either would fail the run
-// for the slow cluster the scan's budget exists to cut short.
 func (c *Client) upgradeCheckScan(ctx context.Context, kubeconfig string,
 	kinds []upgrade.ResourceKind) (*upgrade.AtRiskReport, error) {
 
@@ -465,6 +458,9 @@ func (c *Client) upgradeCheckScan(ctx context.Context, kubeconfig string,
 		Kinds:      atRiskKinds(kinds),
 	})
 	if err != nil {
+		// The caller's context, not err, tells an abort from a failure.
+		// pkg/inventory codes its own step timeout exactly as it codes the
+		// caller's deadline.
 		if aborted := ctx.Err(); aborted != nil {
 			return nil, errors.WrapCtxErrWithContext(aborted, errors.ErrCodeTimeout,
 				"the upgrade check was aborted while scanning for resources an upgrade could disturb",

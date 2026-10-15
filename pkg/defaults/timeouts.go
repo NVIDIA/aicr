@@ -370,19 +370,11 @@ const (
 	// CLISnapshotTimeout is the default timeout for snapshot operations.
 	CLISnapshotTimeout = 5 * time.Minute
 
-	// CLIUpgradeCheckTimeout bounds one `aicr upgrade-check` run. The command
-	// performs two recipe operations, each already bounded by
-	// RecipeOperationTimeout, plus the registry's upgrade-record reads, so the
-	// ceiling is derived from the operation it repeats rather than picked.
+	// CLIUpgradeCheckTimeout bounds one `aicr upgrade-check` run that reads no
+	// cluster. Such a run performs two recipe operations, each already bounded
+	// by RecipeOperationTimeout, plus the registry's upgrade-record reads, so
+	// the ceiling is derived from the operation it repeats rather than picked.
 	CLIUpgradeCheckTimeout = 3 * RecipeOperationTimeout
-
-	// CLIUpgradeCheckClusterTimeout bounds an `aicr upgrade-check` run that
-	// reads the cluster: CLIUpgradeCheckTimeout's artifact work, plus the
-	// longer of the two inventory readers (one runs per deployer), plus the
-	// at-risk scan. Summing them lets every inner budget be reached before the
-	// run's own expires, so a slow scan times out on its own budget and leaves
-	// a report rather than taking the run down with it.
-	CLIUpgradeCheckClusterTimeout = CLIUpgradeCheckTimeout + HelmInventoryTimeout + AtRiskScanTimeout
 
 	// OIDCAuthTimeout is the maximum time to wait for a user to complete
 	// any interactive OIDC authentication flow — browser callback or
@@ -1728,23 +1720,15 @@ const (
 	MaxOCIRecipeFiles = 4096
 )
 
-// AtRiskListPageSize caps how many objects one List pulls while scanning for
-// resources an upgrade could disturb. Sized between the two inventory page
-// sizes: the objects are ordinary custom resources rather than Helm storage
-// records carrying rendered manifests, but a tenant's CR can hold an arbitrary
-// spec, so the page stays well under the Argo ceiling.
-//
-// Nothing is retained across pages beyond the objects found at risk, which on
-// a healthy cluster is none, so the page bounds the peak as well as the
-// response.
+// AtRiskListPageSize is the most objects the at-risk scan asks for in one List
+// request.
 const AtRiskListPageSize int64 = 200
 
-// AtRiskScanTimeout bounds the whole advisory at-risk scan: one discovery
-// mapping and one paged cluster-wide List per affected kind. Shorter than
-// ArgoInventoryTimeout per kind is not expressible here, so the budget covers
-// the handful of kinds a single upgrade's records name.
-//
-// The scan is advisory and never changes the exit code, so it is bounded
-// tightly on purpose: an operator waiting on a warning has already been given
-// the verdict.
-const AtRiskScanTimeout = 60 * time.Second
+// AtRiskStepTimeout bounds each step of the at-risk scan, which is resolving
+// one kind or listing one page with its retries. The scan has no total budget.
+const AtRiskStepTimeout = 60 * time.Second
+
+// AtRiskExpiredContinueRetries is the most expired-continue-token 410s in a
+// row, with no page served between them, that the at-risk scan resumes from
+// before it fails the list.
+const AtRiskExpiredContinueRetries = 3
