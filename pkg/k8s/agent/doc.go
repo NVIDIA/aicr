@@ -68,9 +68,12 @@ place permanently rather than for one run's lifetime.
 
 Two objects are deliberately NOT run-scoped:
 
-  - The Namespace is ensured, never deleted: it is created if absent and
-    labeled "app.kubernetes.io/managed-by=aicr", patching the label onto a
-    pre-existing namespace rather than silently dropping intent.
+  - The Namespace is never deleted. In prefix mode it is ensured: read
+    first, created if absent, and labeled
+    "app.kubernetes.io/managed-by=aicr", patching the label onto a
+    pre-existing namespace rather than silently dropping intent. In
+    exact-ServiceAccount mode it belongs to whoever provisioned the
+    ServiceAccount and is not read, created or labeled.
   - A caller-supplied "cm://namespace/name" Output is the caller's delivered
     artifact. It is written on purpose and never deleted
     (Config.OwnsOutputConfigMap is false for it).

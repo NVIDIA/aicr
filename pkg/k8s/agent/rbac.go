@@ -27,56 +27,106 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// ensureNamespace creates or labels the namespace.
-// We deliberately do not use IgnoreAlreadyExists alone here because the
-// managed-by label is intent we want applied even when the user pre-created
-// the namespace. The flow is:
-//  1. Try Create — common path for fresh installs.
-//  2. On AlreadyExists, Get the namespace and check if our managed-by label
-//     is already set; if so, return early. This avoids requiring patch
-//     permission for the (typical) case where the namespace was already
-//     properly labeled by a prior run.
-//  3. Otherwise, Patch the label on. This is the only path that requires
-//     namespaces/patch.
+// ensureNamespace creates or labels the namespace. Deploy calls it only in
+// prefix mode; in exact-ServiceAccount mode the namespace belongs to whoever
+// provisioned that ServiceAccount and is not touched.
+//
+// It reads before it writes. The apiserver authorizes a request before it
+// looks the object up, so a Create from a caller without cluster-scoped
+// `namespaces: create` is Forbidden, not AlreadyExists, even when the
+// namespace exists. The flow is:
+//  1. Get. If the namespace exists, label it (labelNamespace) and return.
+//  2. On NotFound, Create it. A Forbidden Get takes this path too, because
+//     a caller may hold create on namespaces without get.
+//  3. On AlreadyExists, the namespace appeared after step 1 or could not be
+//     read there: Get it again and label it.
+//
+// Every refused request is reported as ErrCodeUnauthorized naming the verb
+// to grant. Whether the namespace is missing is known only when the first
+// Get was answered.
 func (d *Deployer) ensureNamespace(ctx context.Context) error {
+	name := d.config.Namespace
+	existing, getErr := d.clientset.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+	switch {
+	case getErr == nil:
+		return d.labelNamespace(ctx, existing)
+	case !apierrors.IsNotFound(getErr) && !apierrors.IsForbidden(getErr):
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read Namespace %q", name), getErr)
+	}
+
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: d.config.Namespace,
+			Name: name,
 			Labels: map[string]string{
 				labelAppManagedBy: appName,
 			},
 		},
 	}
 	_, err := d.clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
-	if err == nil {
+	switch {
+	case err == nil:
+		return nil
+	case apierrors.IsAlreadyExists(err):
+		return d.labelExistingNamespace(ctx, name)
+	case apierrors.IsForbidden(err) && apierrors.IsNotFound(getErr):
+		return namespaceForbidden(name, err, fmt.Sprintf(
+			"namespace %q does not exist and the caller may not create it; "+
+				"create it beforehand, or grant 'create namespaces'", name))
+	case apierrors.IsForbidden(err):
+		return namespaceForbidden(name, err, fmt.Sprintf(
+			"the caller may neither read nor create namespace %q; grant 'get' on it (%s), grant 'create namespaces', "+
+				"or pass --service-account-name naming an existing ServiceAccount, which leaves the namespace untouched",
+			name, namespaceGrantHint))
+	default:
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to create Namespace %q", name), err)
+	}
+}
+
+// labelExistingNamespace reads a namespace whose Create reported
+// AlreadyExists, then labels it.
+func (d *Deployer) labelExistingNamespace(ctx context.Context, name string) error {
+	existing, err := d.clientset.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+	switch {
+	case err == nil:
+		return d.labelNamespace(ctx, existing)
+	case apierrors.IsForbidden(err):
+		return namespaceForbidden(name, err, fmt.Sprintf(
+			"namespace %q exists but the caller may not read it; grant 'get' on it (%s)", name, namespaceGrantHint))
+	default:
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to get existing Namespace %q", name), err)
+	}
+}
+
+// labelNamespace sets the managed-by label on an existing namespace,
+// replacing any other value. A namespace already labeled managed-by aicr is
+// left alone, so the patch permission is needed only when it is not.
+func (d *Deployer) labelNamespace(ctx context.Context, ns *corev1.Namespace) error {
+	if ns.Labels[labelAppManagedBy] == appName {
 		return nil
 	}
-	if !apierrors.IsAlreadyExists(err) {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create Namespace", err)
-	}
 
-	// Pre-existing namespace: read the current labels first so we only Patch
-	// when the label is actually missing or wrong (saves a round trip and
-	// avoids requiring patch permission in the common case).
-	existing, getErr := d.clientset.CoreV1().Namespaces().
-		Get(ctx, d.config.Namespace, metav1.GetOptions{})
-	if getErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to get existing Namespace", getErr)
-	}
-	if existing.Labels[labelAppManagedBy] == appName {
+	patch := fmt.Appendf(nil, `{"metadata":{"labels":{%q:%q}}}`, labelAppManagedBy, appName)
+	_, err := d.clientset.CoreV1().Namespaces().Patch(ctx, ns.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+	switch {
+	case err == nil:
 		return nil
+	case apierrors.IsForbidden(err):
+		return namespaceForbidden(ns.Name, err, fmt.Sprintf(
+			"the caller may not label namespace %q %s=%s; grant 'patch' on it (%s)",
+			ns.Name, labelAppManagedBy, appName, namespaceGrantHint))
+	default:
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to label existing Namespace %q", ns.Name), err)
 	}
+}
 
-	patch := []byte(fmt.Sprintf(
-		`{"metadata":{"labels":{%q:%q}}}`,
-		labelAppManagedBy, appName,
-	))
-	if _, err := d.clientset.CoreV1().Namespaces().Patch(
-		ctx, d.config.Namespace, types.MergePatchType, patch, metav1.PatchOptions{},
-	); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to label existing Namespace", err)
-	}
-	return nil
+// namespaceGrantHint tells an operator how to grant a verb on one namespace
+// rather than on all of them.
+const namespaceGrantHint = "a ClusterRole rule can limit it to this namespace with resourceNames"
+
+// namespaceForbidden reports a namespace request the apiserver refused as a
+// permission the operator can grant.
+func namespaceForbidden(name string, cause error, msg string) error {
+	return errors.WrapWithContext(errors.ErrCodeUnauthorized, msg, cause, map[string]any{attrNamespace: name})
 }
 
 // resolveServiceAccount decides, once per Deploy, whether this run creates

@@ -313,8 +313,9 @@ func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 }
 
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
-// The agent deployer creates the namespace itself (ensureNamespace, with the
-// managed-by label) using the same explicit kubeconfig (#1787), so no
+// The agent deployer ensures the namespace itself (ensureNamespace, with the
+// managed-by label, unless --service-account-name names an existing
+// ServiceAccount) using the same explicit kubeconfig (#1787), so no
 // pre-create happens here — deployAndWaitForResult's up-front pool-file
 // projection must run before ANY cluster mutation so a malformed
 // --aks-gpu-pools file fails without side effects.
@@ -734,7 +735,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "ServiceAccount the live snapshot-capture agent runs as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and the agent creates and deletes no RBAC for the run (generate its RBAC manifests with 'aicr snapshot --add-roles-to-service-account', then apply them yourself). Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, and the agent's run-scoped names are derived from the \"aicr-validate\" base instead.",
+			Usage:    "ServiceAccount the live snapshot-capture agent runs as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim, and the agent leaves the namespace untouched and creates and deletes no RBAC for the run (generate its RBAC manifests with 'aicr snapshot --add-roles-to-service-account', then apply them yourself). The validator Jobs still apply the namespace unless --validator-service-account-name is set. Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, and the agent's run-scoped names are derived from the \"aicr-validate\" base instead.",
 			Value:    name,
 			Category: catAgentDeployment,
 		},

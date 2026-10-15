@@ -372,7 +372,9 @@ meanings depending on the cluster:
 - A ServiceAccount of exactly that name already exists in `Namespace`: the
   agent pod runs as it verbatim, and `CollectSnapshot` creates **no**
   ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, and
-  deletes none at cleanup.
+  deletes none at cleanup. It also leaves the namespace alone: it does not
+  create, read, or relabel it, so the caller needs no permission on the
+  Namespace object.
 - Otherwise it is a name prefix and the run creates and owns the full
   run-scoped RBAC set, named `<prefix>-<run-id>`.
 
