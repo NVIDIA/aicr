@@ -92,7 +92,10 @@ spec:
         # the operator's namespace unless their namespace is listed here.
         # nvsentinel's metadata-collector requests one (below); without
         # this entry the toolkit skips it silently and the collector
-        # crash-loops with NVML ERROR_LIBRARY_NOT_FOUND (#3041).
+        # crash-loops with NVML ERROR_LIBRARY_NOT_FOUND (#3041). The entry
+        # lets any pod in that namespace request every GPU on the node, so a
+        # bundle that drops nvsentinel (--set nv-sentinel:enabled=false)
+        # should drop it too: --set-json 'gpuoperator:toolkit.env=[]'.
         toolkit:
           env:
             - name: NRI_MANAGEMENT_CDI_DEVICE_NAMESPACES
