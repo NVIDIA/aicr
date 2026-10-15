@@ -121,10 +121,11 @@ func TestCheckNVSentinelRemediationPipelineCoherent(t *testing.T) {
 	quarantine := func() map[string]any {
 		return map[string]any{"dryRun": false, "datastore": percona(), "faultQuarantine": on, "nodeDrainer": on}
 	}
+	// remediation is the remediation step with the analyzer it requires.
 	remediation := func() map[string]any {
 		return map[string]any{
 			"dryRun": false, "datastore": percona(), "faultQuarantine": on, "nodeDrainer": on,
-			"faultRemediation": on, "janitor": on, "janitorProvider": on,
+			"faultRemediation": on, "janitor": on, "janitorProvider": on, "healthEventsAnalyzer": on,
 		}
 	}
 	with := func(global map[string]any, key string, value any) map[string]any {
@@ -136,6 +137,19 @@ func TestCheckNVSentinelRemediationPipelineCoherent(t *testing.T) {
 	}
 	sets := func(paths map[string]string) *config.Config {
 		return config.NewConfig(config.WithValueOverrides(map[string]map[string]string{"nv-sentinel": paths}))
+	}
+	// withAnalyzer sets health-events-analyzer.<key>.
+	withAnalyzer := func(r *recipe.RecipeResult, key string, value any) *recipe.RecipeResult {
+		hea, _ := r.ComponentRefs[0].Overrides["health-events-analyzer"].(map[string]any)
+		if hea == nil {
+			hea = map[string]any{}
+			r.ComponentRefs[0].Overrides["health-events-analyzer"] = hea
+		}
+		hea[key] = value
+		return r
+	}
+	withRule := func(r *recipe.RecipeResult, value any) *recipe.RecipeResult {
+		return withAnalyzer(r, "enableMultipleRemediationsRule", value)
 	}
 	dynamic := func(paths ...string) *config.Config {
 		return config.NewConfig(config.WithDynamicValues(map[string][]string{"nv-sentinel": paths}))
@@ -171,6 +185,11 @@ func TestCheckNVSentinelRemediationPipelineCoherent(t *testing.T) {
 		wantSMTimeout    = "want a positive duration"
 		wantSMNamespace  = "waits for operand pods in namespace"
 		wantSMLabels     = "distinct, non-empty enabledValue"
+		wantAnalyzer     = "fault-remediation is live without health-events-analyzer"
+		wantRuleOff      = "enableMultipleRemediationsRule=false"
+		wantRuleType     = "enableMultipleRemediationsRule is not a bool"
+		wantRuleConfig   = "replacing the analyzer's rule config"
+		wantPostgres     = "health-events-analyzer is enabled on a postgresql datastore"
 	)
 
 	tests := []struct {
@@ -307,13 +326,103 @@ func TestCheckNVSentinelRemediationPipelineCoherent(t *testing.T) {
 		{
 			name:         "quarantine plus fault-remediation not in dry-run",
 			recipeResult: sentinel(with(quarantine(), "faultRemediation", on)),
-			want:         []string{wantJanitor},
+			want:         []string{wantJanitor, wantAnalyzer},
 		},
 		{
 			name:          "observe taken out of dry-run by --set",
 			recipeResult:  sentinel(observe()),
 			bundlerConfig: sets(map[string]string{"global.dryRun": "false"}),
-			want:          []string{wantJanitor},
+			want:          []string{wantJanitor, wantAnalyzer},
+		},
+		{
+			name:         "remediation step without the analyzer",
+			recipeResult: sentinel(with(remediation(), "healthEventsAnalyzer", off)),
+			want:         []string{wantAnalyzer},
+		},
+		{
+			name:         "remediation step with MultipleRemediations off",
+			recipeResult: withRule(sentinel(remediation()), false),
+			want:         []string{wantRuleOff},
+		},
+		{
+			name:         "remediation step with MultipleRemediations not a bool",
+			recipeResult: withRule(sentinel(remediation()), "true"),
+			want:         []string{wantRuleType},
+		},
+		{
+			name:         "remediation step with MultipleRemediations stated on",
+			recipeResult: withRule(sentinel(remediation()), true),
+		},
+		{
+			name:         "remediation step with a rule config that drops MultipleRemediations",
+			recipeResult: withAnalyzer(sentinel(remediation()), "config", "[[rules]]\n  name = \"RepeatedXIDErrorOnSameGPU\"\n"),
+			want:         []string{wantRuleConfig},
+		},
+		{
+			name:         "remediation step with a rule config that is not a string",
+			recipeResult: withAnalyzer(sentinel(remediation()), "config", map[string]any{"rules": "x"}),
+			want:         []string{wantRuleConfig},
+		},
+		{
+			// Even text that defines the rule is rejected: Helm and TOML decide
+			// what survives, so a template guard or a multi-line string could
+			// hide it.
+			name:         "remediation step with a rule config that appears to keep MultipleRemediations on",
+			recipeResult: withAnalyzer(sentinel(remediation()), "config", "{{- if false }}\n[[rules]]\n  name = \"MultipleRemediations\"\n  evaluate_rule = true\n{{- end }}\n"),
+			want:         []string{wantRuleConfig},
+		},
+		{
+			name:         "remediation in dry-run with a rule config",
+			recipeResult: withAnalyzer(sentinel(with(remediation(), "dryRun", true)), "config", "[[rules]]\n"),
+		},
+		{
+			name:         "analyzer on an external postgresql datastore",
+			recipeResult: sentinel(with(external("postgresql"), "healthEventsAnalyzer", on)),
+			want:         []string{wantPostgres},
+		},
+		{
+			name:         "analyzer on an external mongodb datastore",
+			recipeResult: sentinel(with(external("mongodb"), "healthEventsAnalyzer", on)),
+		},
+		{
+			name:         "observe step with a rule config that drops MultipleRemediations",
+			recipeResult: withAnalyzer(sentinel(with(observe(), "healthEventsAnalyzer", on)), "config", "[[rules]]\n"),
+		},
+		{
+			name:          "remediation step with the analyzer switched off by --set",
+			recipeResult:  sentinel(remediation()),
+			bundlerConfig: sets(map[string]string{"global.healthEventsAnalyzer.enabled": "false"}),
+			want:          []string{wantAnalyzer},
+		},
+		{
+			// Dry-run creates no repair, so there is nothing to count.
+			name:         "observe step without the analyzer",
+			recipeResult: sentinel(with(observe(), "healthEventsAnalyzer", off)),
+		},
+		{
+			name:         "observe step with MultipleRemediations off",
+			recipeResult: withRule(sentinel(with(observe(), "healthEventsAnalyzer", on)), false),
+		},
+		{
+			name:         "analyzer on the observe step",
+			recipeResult: sentinel(with(observe(), "healthEventsAnalyzer", on)),
+		},
+		{
+			name:         "analyzer with no datastore",
+			recipeResult: sentinel(map[string]any{"healthEventsAnalyzer": on}),
+			want:         []string{wantDatastore},
+		},
+		{
+			name: "analyzer on the Percona datastore without its components",
+			recipeResult: bare(map[string]any{
+				"datastore": percona(), "healthEventsAnalyzer": on,
+			}),
+			want: []string{wantNotDeployed, wantNotDeployed},
+		},
+		{
+			name:         "analyzer beside the embedded MongoDB",
+			recipeResult: sentinel(map[string]any{"healthEventsAnalyzer": on, "mongodbStore": on}),
+			want:         []string{wantEmbedded},
 		},
 		{
 			// A non-bool is reported as such, not as live remediation.
@@ -349,7 +458,7 @@ func TestCheckNVSentinelRemediationPipelineCoherent(t *testing.T) {
 		{
 			name:         "findings are reported together, in rule order",
 			recipeResult: sentinel(map[string]any{"faultRemediation": on, "janitor": on, "metadataCollector": off}),
-			want:         []string{wantDatastore, wantNoDrainer, wantProvider, wantMetadata},
+			want:         []string{wantDatastore, wantNoDrainer, wantAnalyzer, wantProvider, wantMetadata},
 		},
 		{
 			name:          "pipeline toggle dynamic, pipeline statically off",
@@ -362,6 +471,62 @@ func TestCheckNVSentinelRemediationPipelineCoherent(t *testing.T) {
 			recipeResult:  sentinel(map[string]any{}),
 			bundlerConfig: dynamic("global.faultRemediation.enabled", "global.metadataCollector.enabled", "global.dryRun"),
 			want:          []string{wantDynamic, wantDynamic, wantDynamic},
+		},
+		{
+			name:          "analyzer toggle dynamic, pipeline statically off",
+			recipeResult:  sentinel(map[string]any{}),
+			bundlerConfig: dynamic("global.healthEventsAnalyzer.enabled"),
+			want:          []string{wantDynamic},
+		},
+		{
+			name:          "dynamic analyzer toggle guards the datastore",
+			recipeResult:  sentinel(map[string]any{}),
+			bundlerConfig: dynamic("global.healthEventsAnalyzer.enabled", "global.datastore.provider"),
+			want:          []string{wantDynamic, wantDynamic},
+		},
+		{
+			name:          "analyzer toggle dynamic, remediation on",
+			recipeResult:  sentinel(remediation()),
+			bundlerConfig: dynamic("global.healthEventsAnalyzer.enabled"),
+			want:          []string{wantDynamic},
+		},
+		{
+			name:          "MultipleRemediations toggle dynamic, remediation on",
+			recipeResult:  sentinel(remediation()),
+			bundlerConfig: dynamic("health-events-analyzer.enableMultipleRemediationsRule"),
+			want:          []string{wantDynamic},
+		},
+		{
+			// No rule reads it without fault-remediation.
+			name:          "MultipleRemediations toggle dynamic, quarantine on",
+			recipeResult:  sentinel(quarantine()),
+			bundlerConfig: dynamic("health-events-analyzer.enableMultipleRemediationsRule"),
+		},
+		{
+			name:          "rule config dynamic, remediation on",
+			recipeResult:  sentinel(remediation()),
+			bundlerConfig: dynamic("health-events-analyzer.config"),
+			want:          []string{wantDynamic},
+		},
+		{
+			// Statically dry-run, so the rule-off finding cannot fire, but an
+			// install-time dryRun: false would make remediation live with it off.
+			name:          "dryRun dynamic, remediation in dry-run with MultipleRemediations off",
+			recipeResult:  withRule(sentinel(with(remediation(), "dryRun", true)), false),
+			bundlerConfig: dynamic("global.dryRun"),
+			want:          []string{wantDynamic},
+		},
+		{
+			name:          "dryRun dynamic, remediation in dry-run with a rule config that drops MultipleRemediations",
+			recipeResult:  withAnalyzer(sentinel(with(remediation(), "dryRun", true)), "config", "[[rules]]\n"),
+			bundlerConfig: dynamic("global.dryRun"),
+			want:          []string{wantDynamic},
+		},
+		{
+			name:          "dryRun dynamic, remediation step without the analyzer",
+			recipeResult:  sentinel(with(remediation(), "healthEventsAnalyzer", off)),
+			bundlerConfig: dynamic("global.dryRun"),
+			want:          []string{wantDynamic},
 		},
 		{
 			name:          "dynamic janitor toggle guards janitor-provider",
@@ -388,7 +553,8 @@ func TestCheckNVSentinelRemediationPipelineCoherent(t *testing.T) {
 			want:          []string{wantDynamic},
 		},
 		{
-			// dryRun only feeds the janitor rule, which cannot fire here.
+			// dryRun only feeds the janitor and analyzer rules, which cannot
+			// fire here.
 			name:          "dryRun dynamic, remediation step with janitor on",
 			recipeResult:  sentinel(remediation()),
 			bundlerConfig: dynamic("global.dryRun"),

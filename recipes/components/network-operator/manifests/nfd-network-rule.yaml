@@ -26,6 +26,13 @@
 # Ethernet NICs (class 0200/0207). This rule targets the IB VFs specifically,
 # which is why values-aks.yaml sets nfd.deployNodeFeatureRules=false.
 #
+# Kept for one release so the label does not drop during the upgrade, except
+# under Flux on AKS (docs/user/component-catalog.md): nfd-worker now produces
+# the same label (components/nfd/values-nvidia-nics-aks.yaml). Once workers
+# strip pci.*, this rule matches nothing. Remove it in the contract change
+# (#3038); a cluster must take this release first, or finish the nfd-worker
+# rollout before network-operator syncs, or unrestarted nodes lose the label.
+#
 # Reference: https://github.com/Azure/aks-rdma-infiniband/blob/main/tests/setup-infra/network-operator-nfd.yaml
 ---
 apiVersion: nfd.k8s-sigs.io/v1alpha1

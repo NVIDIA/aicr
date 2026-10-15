@@ -45,6 +45,12 @@ type Component struct {
 	ChartName  string
 	Version    string
 	IsOCI      bool
+	// ChartDigest is the registry-pinned sha256:<hex> of the chart archive,
+	// checked against the pulled bytes when the chart is vendored (see
+	// VerifyChartDigest). Callers set it from deployer.ResolveChartDigests,
+	// which leaves it empty for a ref that overrides source, chart or
+	// version, because the pin identifies the registry's chart only.
+	ChartDigest string
 	// Kustomize (empty for helm components)
 	Tag  string
 	Path string

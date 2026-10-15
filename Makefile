@@ -436,6 +436,12 @@ nvsentinel-slinky-drainer-e2e: ## Live Kind test: nvsentinel-slinky-drainer mixi
 	echo "Running nvsentinel-slinky-drainer mixin e2e test..."; \
 	tests/e2e/nvsentinel-slinky-drainer/run.sh
 
+.PHONY: nvsentinel-health-events-analyzer-e2e
+nvsentinel-health-events-analyzer-e2e: ## Live Kind test: nvsentinel-health-events-analyzer derives STORE_ONLY events named after the matching rule (#2618)
+	@set -e; \
+	echo "Running nvsentinel-health-events-analyzer mixin e2e test..."; \
+	tests/e2e/nvsentinel-health-events-analyzer/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \

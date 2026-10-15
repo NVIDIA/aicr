@@ -105,7 +105,9 @@ remapped_candidate() {
         old="${entry%%|*}/"
         new="${entry##*|}/"
         if [[ "${url}" == *"${old}"* ]]; then
-            printf '%s\n' "${url/"${old}"/"${new}"}"
+            # Split around the first match rather than ${url/"${old}"/"${new}"}:
+            # bash 3.2 keeps the quotes of a quoted replacement in the result.
+            printf '%s%s%s\n' "${url%%"${old}"*}" "${new}" "${url#*"${old}"}"
             return
         fi
     done

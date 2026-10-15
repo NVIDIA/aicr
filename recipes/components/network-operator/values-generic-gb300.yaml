@@ -20,10 +20,11 @@ nvIpam:
   enabled: false
 secondaryNetwork:
   deploy: false
-# The GPU Operator's NFD is used. deployNodeFeatureRules must stay at the
-# chart default (true): the chart's NodeFeatureRule supplies the RDMA
-# readiness gate's node cohort label (enforced by
-# TestNetworkOperatorKeepsChartNodeFeatureRule).
+# The standalone nfd component is used. Its worker labels Mellanox nodes
+# pci-15b3.present (the RDMA readiness gate's node cohort) through
+# components/nfd/values-nvidia-nics.yaml, wired in by this recipe's overlay.
+# For one release the chart's NodeFeatureRule (nfd.deployNodeFeatureRules in
+# values.yaml) produces the same label beside it.
 nfd:
   enabled: false
 # Required by nicConfigurationOperator, which prepares a node through the
