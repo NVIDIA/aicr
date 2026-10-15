@@ -282,7 +282,7 @@ Inputs to `aicr bundle`.
 |-------|------|-------|
 | `input.recipe` | string | Recipe to bundle |
 | `output.target` | string | Local directory or `oci://` URI |
-| `output.imageRefs` | string | Optional external image-reference output file for an OCI `output.target` only. Local output is rejected. Its parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. |
+| `output.imageRefs` | string | Optional external image-reference output file for an OCI `output.target` only. Local output is rejected. Its parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. The target, including that it can be written, is checked before the bundle is generated. |
 | `deployment.deployer` | string | Deployer choice (same values as `--deployer`) |
 | `deployment.repo` | string | GitOps repo for repo-shaped deployers |
 | `deployment.set` / `.dynamic` | []string | Value overrides, `key:path=value` |
@@ -296,13 +296,16 @@ Inputs to `aicr bundle`.
 | `attestation.signingKey` | string | KMS key reference for key-based signing (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`); empty = keyless OIDC. Mutually exclusive with the keyless-only inputs (`oidcDeviceFlow`, `fulcioURL`, `--identity-token`) |
 | `registry.insecureTLS` / `.plainHTTP` | bool | OCI transport options for push |
 
-When `output.imageRefs` is set, AICR writes the published OCI digest through a
-mode-`0600` temporary file and an anchored same-directory rename. The target
-may be absent or an existing retained regular file; directories, symlinks,
-other non-regular files, and bundle aliases are rejected. The final validation
-and rename are ordered but are not one atomic identity-conditioned filesystem
-operation, so no other process should mutate the target directory while the
-bundle command runs.
+When `output.imageRefs` is set, AICR writes the published OCI digest to it.
+The target may be absent or an existing retained regular file; directories,
+symlinks, other non-regular files, and bundle aliases are rejected. An
+ordinary target is written through a mode-`0600` temporary file and an
+anchored same-directory rename. The final validation and rename are ordered
+but are not one atomic identity-conditioned filesystem operation, so no other
+process should mutate the target directory while the bundle command runs. A
+target on a different device from its directory, such as a Kubernetes Job's
+default termination-message file, is truncated and written in place instead. See
+[`aicr bundle --image-refs`](cli-reference.md#aicr-bundle).
 
 ### spec.validate
 

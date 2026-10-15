@@ -1035,7 +1035,7 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     flagImageRefs,
-				Usage:    "Path to file where the published image reference will be written (only used with OCI output)",
+				Usage:    "File to receive the published bundle digest (sha256:...); valid only with OCI output. A target on a different device from its directory, such as a Kubernetes termination-message file, is written in place. The target is checked, including that it can be written, before the bundle is generated.",
 				Category: catOCIRegistry,
 			},
 		},
@@ -1128,6 +1128,9 @@ func prepareBundlePublicationTargets(
 	var imageRefs *imageRefsTarget
 	if err == nil && opts.imageRefsPath != "" {
 		imageRefs, err = deps.prepareImageRefsTarget(preflightCtx, bundleTarget, opts.imageRefsPath)
+		if err == nil {
+			err = imageRefs.preflightWrite(preflightCtx)
+		}
 		err = authoritativeFilesystemContextError(preflightCtx,
 			"image-reference target preflight canceled", err)
 	}
@@ -1513,7 +1516,7 @@ func defaultBundlePublishDependencies() bundlePublishDependencies {
 		packageAndPush:      oci.PackageAndPush,
 		packageAndPushHelm:  oci.PackageAndPushHelmChart,
 		writeImageRefs: func(ctx context.Context, target *imageRefsTarget, data []byte) error {
-			return target.writeAtomic(ctx, data)
+			return target.write(ctx, data)
 		},
 	}
 }
