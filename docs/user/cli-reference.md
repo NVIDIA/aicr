@@ -2705,9 +2705,11 @@ cd ./bundles && helmfile diff && helmfile apply
 **Bundle structure with `--dynamic`** (Terraform deployer):
 
 Each `NNN-<component>/` folder carries `values.yaml` and `cluster-values.yaml`,
-and the component's module call lists both in `values_files`, `cluster-values.yaml`
-last so it wins. Edit `cluster-values.yaml` per component before `terraform apply`;
-a change there plans as an in-place update of that component's `helm_release`.
+but only a component with a declared `--dynamic` path lists both in its module
+call's `values_files`, `cluster-values.yaml` last so it wins; an edit to any other
+component's `cluster-values.yaml` is ignored at apply. Edit the listed ones before
+`terraform apply`; a change there plans as an in-place update of that component's
+`helm_release`.
 
 **Argo CD Helm chart structure with `--dynamic`:**
 
