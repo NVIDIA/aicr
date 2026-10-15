@@ -253,12 +253,10 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 	})
 
-	// Discover-network mode pulls in l8k's extra cluster-scoped rules
-	// (CRDs, bootstrap workload resources, pods/exec, nodes/patch,
-	// nicdevices, nicclusterpolicies). Verify the rule appears for the
-	// most discovery-specific resource (mellanox.com NicClusterPolicy
-	// SSA patch) — that's the marker rule the snapshot Job needs to
-	// run successfully under non-cluster-admin RBAC.
+	// Discover-network mode adds exactly one read-only rule
+	// (configuration.net.nvidia.com nicdevices get/list). The rules the
+	// mutating l8k path used to need — NicClusterPolicy patch, pods/exec,
+	// nodes patch — must stay absent.
 	t.Run("ClusterRole gains only the read-only nicdevices rule when DiscoverNetwork is set", func(t *testing.T) {
 		discoverClientset := fake.NewClientset()
 		discoverConfig := config
