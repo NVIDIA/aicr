@@ -23,9 +23,12 @@ module "agentgateway" {
     "${path.module}/002-agentgateway/values.yaml",
   ]
 
-  pre_chart       = "${path.module}/001-agentgateway-pre"
-  post_chart      = "${path.module}/003-agentgateway-post"
-  readiness_chart = "${path.module}/004-agentgateway-readiness"
+  pre_chart              = "${path.module}/001-agentgateway-pre"
+  pre_chart_digest       = "sha256:fdace27c480532d1d2d6dbe8c2508e4b88be3c71c4fd47f510365243d345076b"
+  post_chart             = "${path.module}/003-agentgateway-post"
+  post_chart_digest      = "sha256:7cbeb524d5da6e47e0857accdaef78588c6162b1e3ab2c5bfb068caf2ebac73a"
+  readiness_chart        = "${path.module}/004-agentgateway-readiness"
+  readiness_chart_digest = "sha256:fc91fa5b08c215dea3e4cae21ed4e0ea69ddd3b08b8f043116b52fe6ffd9385f"
 
   atomic  = var.atomic
   wait    = var.wait

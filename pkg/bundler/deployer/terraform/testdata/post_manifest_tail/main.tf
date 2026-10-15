@@ -23,7 +23,8 @@ module "agentgateway_crds" {
     "${path.module}/001-agentgateway-crds/values.yaml",
   ]
 
-  post_chart = "${path.module}/002-agentgateway-crds-post"
+  post_chart        = "${path.module}/002-agentgateway-crds-post"
+  post_chart_digest = "sha256:e07840816a3032eb3ac4284bdccb0f6029e0f13d6c698224b5b70fe9109124ab"
 
   atomic  = var.atomic
   wait    = var.wait

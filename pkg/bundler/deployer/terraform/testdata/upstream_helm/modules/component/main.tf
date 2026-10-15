@@ -27,7 +27,8 @@ resource "helm_release" "pre" {
   namespace        = var.namespace
   create_namespace = var.create_namespace
 
-  chart = var.pre_chart
+  chart       = var.pre_chart
+  description = var.pre_chart_digest
 
   wait    = var.wait
   timeout = var.timeout
@@ -43,9 +44,13 @@ resource "helm_release" "this" {
   # refuses to adopt a namespace another release created out-of-band.
   create_namespace = var.pre_chart == null ? var.create_namespace : false
 
-  chart      = var.chart
-  repository = var.repository
-  version    = var.chart_version
+  # description carries a bundled chart's content digest, null for an upstream
+  # chart. The provider updates it in place and re-reads the chart directory
+  # on that upgrade, which is how a regenerated directory reaches the cluster.
+  chart       = var.chart
+  repository  = var.repository
+  version     = var.chart_version
+  description = var.chart_digest
 
   values = [for f in var.values_files : file(f)]
 
@@ -73,7 +78,8 @@ resource "helm_release" "post" {
   name      = "${var.release_name}-post"
   namespace = var.namespace
 
-  chart = var.post_chart
+  chart       = var.post_chart
+  description = var.post_chart_digest
 
   wait    = var.wait
   timeout = var.timeout
@@ -92,7 +98,10 @@ resource "helm_release" "readiness" {
   name      = "${var.release_name}-readiness"
   namespace = var.namespace
 
-  chart = var.readiness_chart
+  # A regenerated gate whose files changed changes the digest, so the release
+  # is upgraded and the hook runs again.
+  chart       = var.readiness_chart
+  description = var.readiness_chart_digest
 
   # Hardcoded, not var.wait: the waiting IS the gate. An async component may
   # skip waiting on its own workloads, never on the gate that asserts it came

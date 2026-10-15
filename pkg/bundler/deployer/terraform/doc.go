@@ -90,12 +90,13 @@ hook-delete-policy: before-hook-creation is what lets the gate re-assert. A
 Job's spec.template is immutable, so an unchanged manifest is a no-op patch;
 without the delete-and-recreate the gate would assert once, when it is created.
 
-That covers every upgrade Terraform actually performs on this release. It does
-not cover an upgrade elsewhere in the component: helm_release tracks chart,
-version and values, not rendered manifests, so a gate release whose own inputs
-are unchanged plans clean and is never upgraded at all. Re-asserting on a
-dependency's upgrade needs the gate release to carry something that moves with
-it — a content digest — which is a follow-up, not a property of this code.
+That covers every upgrade Terraform performs on this release, and the gate's
+own folder is part of what it tracks: every bundled chart's release carries a
+digest of its directory as the release description (see chartDigests), so a
+regenerated gate whose files changed is upgraded and re-asserts. It does not
+cover an upgrade elsewhere in the component: a gate whose folder and inputs
+are unchanged plans clean and is never upgraded, so a dependency's upgrade
+does not re-assert it.
 
 # Cluster connection
 

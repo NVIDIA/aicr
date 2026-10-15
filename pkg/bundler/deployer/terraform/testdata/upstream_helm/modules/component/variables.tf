@@ -51,6 +51,36 @@ variable "readiness_chart" {
   default     = null
 }
 
+variable "chart_digest" {
+  description = <<-EOT
+    Content digest of the chart directory, when chart is a path in this
+    bundle; null for an upstream chart. Recorded as the release description:
+    helm_release tracks a directory by path, version and values, not by its
+    files, so the digest is what makes a regenerated directory whose files
+    changed plan as an upgrade.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "pre_chart_digest" {
+  description = "Content digest of pre_chart's directory; see chart_digest."
+  type        = string
+  default     = null
+}
+
+variable "post_chart_digest" {
+  description = "Content digest of post_chart's directory; see chart_digest."
+  type        = string
+  default     = null
+}
+
+variable "readiness_chart_digest" {
+  description = "Content digest of readiness_chart's directory; see chart_digest."
+  type        = string
+  default     = null
+}
+
 variable "values_files" {
   description = "Values files to layer, in order."
   type        = list(string)

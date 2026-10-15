@@ -280,7 +280,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 
-	data := g.bundleData(components)
+	digests, err := chartDigests(outputDir, writeResult.Folders)
+	if err != nil {
+		return nil, err
+	}
+
+	data := g.bundleData(components, digests)
 	if err := g.writeTerraform(outputDir, data, output); err != nil {
 		return nil, err
 	}

@@ -46,7 +46,8 @@ module "gpu_operator" {
     "${path.module}/002-gpu-operator/values.yaml",
   ]
 
-  readiness_chart = "${path.module}/003-gpu-operator-readiness"
+  readiness_chart        = "${path.module}/003-gpu-operator-readiness"
+  readiness_chart_digest = "sha256:cde3a1212b6948cf5cd7f9d43b7836f71453cf2705f47a8762f42d8d14a35ec8"
 
   atomic  = var.atomic
   wait    = var.wait

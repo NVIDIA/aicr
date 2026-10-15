@@ -120,7 +120,9 @@ func align(indent string, attrs []attr) string {
 	return strings.Join(lines, "\n")
 }
 
-func (g *Generator) bundleData(components []component) bundleData {
+// bundleData assembles the render input. digests maps a bundled chart folder's
+// dir to its content digest (see chartDigests); upstream charts have none.
+func (g *Generator) bundleData(components []component, digests map[string]string) bundleData {
 	criteria := ""
 	if g.RecipeResult.Criteria != nil {
 		criteria = g.RecipeResult.Criteria.String()
@@ -148,9 +150,9 @@ func (g *Generator) bundleData(components []component) bundleData {
 				{"namespace", hclString(primary.Namespace)},
 				{"create_namespace", strconv.FormatBool(headFolder(c).CreateNamespace)},
 			},
-			Chart:       chartAttrs(primary),
+			Chart:       chartAttrs(primary, digests[primary.Dir]),
 			ValuesFiles: valuesFilesFor(primary, g.DynamicValues[c.Name]),
-			Phases:      phaseAttrs(c),
+			Phases:      phaseAttrs(c, digests),
 			Behavior: []attr{
 				{argAtomic, "var.atomic"},
 				{argWait, "var.wait"},
@@ -195,10 +197,11 @@ func headFolder(c component) localformat.Folder {
 }
 
 // chartAttrs renders the chart coordinates: upstream name/repo/version, or a
-// path to the chart directory localformat wrote into the bundle.
-func chartAttrs(f localformat.Folder) []attr {
-	if f.Kind != localformat.KindUpstreamHelm || f.Upstream == nil {
-		return []attr{{"chart", localChartExpr(f.Dir)}}
+// path to the chart directory localformat wrote into the bundle together with
+// the directory's content digest.
+func chartAttrs(f localformat.Folder, digest string) []attr {
+	if isBundledChart(f) {
+		return []attr{{"chart", localChartExpr(f.Dir)}, {"chart_digest", hclString(digest)}}
 	}
 	out := []attr{{"chart", hclString(f.Upstream.Chart)}}
 	if f.Upstream.Repo != "" {
@@ -210,19 +213,22 @@ func chartAttrs(f localformat.Folder) []attr {
 	return out
 }
 
-// phaseAttrs renders the auxiliary slots the component actually has. An absent
-// slot is left unset so the module's count guard drops the resource.
-func phaseAttrs(c component) []attr {
+// phaseAttrs renders the auxiliary slots the component actually has, each with
+// its folder's content digest. An absent slot is left unset so the module's
+// count guard drops the resource.
+func phaseAttrs(c component, digests map[string]string) []attr {
 	var out []attr
-	if c.Pre != nil {
-		out = append(out, attr{"pre_chart", localChartExpr(c.Pre.Dir)})
+	slot := func(name string, f *localformat.Folder) {
+		if f == nil {
+			return
+		}
+		out = append(out,
+			attr{name, localChartExpr(f.Dir)},
+			attr{name + "_digest", hclString(digests[f.Dir])})
 	}
-	if c.Post != nil {
-		out = append(out, attr{"post_chart", localChartExpr(c.Post.Dir)})
-	}
-	if c.Readiness != nil {
-		out = append(out, attr{"readiness_chart", localChartExpr(c.Readiness.Dir)})
-	}
+	slot("pre_chart", c.Pre)
+	slot("post_chart", c.Post)
+	slot("readiness_chart", c.Readiness)
 	return out
 }
 
