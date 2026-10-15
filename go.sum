@@ -408,12 +408,12 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/natefinch/atomic v1.0.1 h1:ZPYKxkqQOx3KZ+RsbnP/YsgvxWQPGxjC0oBt2AhwV0A=
 github.com/natefinch/atomic v1.0.1/go.mod h1:N/D/ELrljoqDyT3rZrsUmtsuzvHkeB/wWjHV22AZRbM=
-github.com/nvidia/k8s-launch-kit v0.0.0-20261009034437-dc6631424f5f h1:dX7twOSTlavJcpDsgSlgHJX4PqU4/cChyE+75qXL/Tw=
-github.com/nvidia/k8s-launch-kit v0.0.0-20261009034437-dc6631424f5f/go.mod h1:pzRvInxwPsj8SscdG6zvv3gjCSEMDqmu+2oG1F7f5N8=
+github.com/nvidia/k8s-launch-kit v0.0.0-20261014123243-c35bf5096ed0 h1:yNZD27lJz3ieYk4FvLFQBvz1B1RgLGOo93x4cr9sOmk=
+github.com/nvidia/k8s-launch-kit v0.0.0-20261014123243-c35bf5096ed0/go.mod h1:mKOFIoWV71fOyN0VkSZ4IiHCqCseoeu8wrA8nEIUj40=
 github.com/oklog/ulid/v2 v2.1.2 h1:IEclFb9JNvzYA6MW2SCxbLzcHTVsfqm3PrqGQJH5zec=
 github.com/oklog/ulid/v2 v2.1.2/go.mod h1:rcEKHmBBKfef9DhnvX7y1HZBYxjXb0cP5ExxNsTT1QQ=
-github.com/onsi/ginkgo/v2 v2.33.0 h1:C8gBA6Uc2ZEubiV+SXiu5tZnMTwEmXHgkJwGozKtZf8=
-github.com/onsi/ginkgo/v2 v2.33.0/go.mod h1:+aXOY+vzZ5mu2iI2HpTZUPmM//oQfsNFX6gU9kNcA44=
+github.com/onsi/ginkgo/v2 v2.33.1 h1:62XfWJbEIjPSCSDYrsCPP/SHcmH7O0M8ne8zfqQ2iz4=
+github.com/onsi/ginkgo/v2 v2.33.1/go.mod h1:+aXOY+vzZ5mu2iI2HpTZUPmM//oQfsNFX6gU9kNcA44=
 github.com/onsi/gomega v1.44.0 h1:eAiGl3Pw5jz5GQdDff0BcxYpAX1JxW8xD7mFUuwNfZQ=
 github.com/onsi/gomega v1.44.0/go.mod h1:e/C2HwaZ1DhvjzXXuFhcR7hY7Sh9pl7MmoWKEjzwcdA=
 github.com/opencontainers/cgroups v0.0.7 h1:FqhggFhigAMgKKwy39jweWX3h7Ha6VBF/qNR6Sso3oc=

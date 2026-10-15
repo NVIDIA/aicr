@@ -95,8 +95,8 @@ type Config struct {
 	// silently capture the run.
 	//
 	// Exact mode waives per-run permission isolation: concurrent runs
-	// sharing the ServiceAccount share its grants, and grants provisioned
-	// for DiscoverNetwork persist beyond any one run.
+	// sharing the ServiceAccount share its grants, and the (read-only)
+	// grants provisioned for DiscoverNetwork persist beyond any one run.
 	ServiceAccountName string
 
 	JobName string
@@ -145,9 +145,10 @@ type Config struct {
 	ClusterConfigPath string
 
 	// DiscoverNetwork, when true, forwards via AICR_DISCOVER_NETWORK to
-	// enable the in-pod network collector's live l8k discovery path.
-	// Discovery is NOT read-only — it patches NicClusterPolicy and writes
-	// nvidia.kubernetes-launch-kit.* node labels.
+	// enable the in-pod network collector's read-only l8k discovery path
+	// (DiscoverReadOnly). It adds one read rule (configuration.net.nvidia.com
+	// nicdevices get/list) to the agent's ClusterRole and requires the
+	// Network Operator's nic-configuration-daemon to already be running.
 	DiscoverNetwork bool
 
 	// Requests overrides the per-resource container requests on the agent pod.

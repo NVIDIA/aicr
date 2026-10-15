@@ -147,7 +147,7 @@ aicr snapshot \
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
-- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the run-scoped `aicr-node-reader-<run-id>` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, DaemonSets, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, official MariaDB CRs, StorageClasses, and PerconaServerMongoDB CRs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
+- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the run-scoped `aicr-node-reader-<run-id>` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, DaemonSets, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, official MariaDB CRs, StorageClasses, and PerconaServerMongoDB CRs (not cluster-admin); with `--discover-network` the retained ClusterRole additionally reads `configuration.net.nvidia.com` NicDevices (see [Security Considerations](#security-considerations)) and stays read-only.
 - `--privileged`: Run agent in privileged mode (default: enabled; required for GPU/SystemD collectors). Set to `false` for PSS-restricted namespaces.
 - `--require-gpu`: In privileged mode (the default), requests an `nvidia.com/gpu` resource for the agent pod (required in CDI environments). With `--privileged=false` it adds no GPU request, but still disables automatic GPU-node selection; pass `--node-selector` to target GPU nodes.
 - `--runtime-class`: Set `runtimeClassName` on the agent pod for `nvidia-smi` access without consuming a GPU. Use with `--node-selector` to target GPU nodes.
@@ -157,7 +157,7 @@ aicr snapshot \
 - `--oke-addons`: Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump, projected into the `K8s.oke-addons.nvidia-gpu-plugin` and `K8s.oke-addons.nvidia-network-operator` readings. It runs controller-side, so it works in agent Job mode too. The file never enters the pod, and the CLI merges the projection into the returned snapshot.
 - `--aks-gpu-pools`: Path to an `az aks nodepool list -o json` dump, projected into the `K8s.aks-gpu-pools.gpu-driver` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
 - `--gke-gpu-pools`: Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump, projected into the `K8s.gke-gpu-pools.gpu-driver-installation` reading (required only to resolve the GKE `bundle-installer` gpuStack value from a snapshot). Controller-side: works in agent Job mode too. The file never enters the pod. The CLI merges the projection into the returned snapshot.
-- `--discover-network`: Enable live l8k discovery to populate the NetworkTopology measurement. **Not read-only** — writes `nvidia.kubernetes-launch-kit.*` node labels and may patch `NicClusterPolicy`.
+- `--discover-network`: Enable read-only live l8k discovery to populate the NetworkTopology measurement. Reads the NicDevices an already-running Network Operator `nic-configuration-daemon` publishes; no writes, no pod exec. Skipped with a warning when the daemon is not installed.
 
 ### 4. Check Agent Logs (Debugging)
 
@@ -377,21 +377,13 @@ understanding before you choose it:
   the same ServiceAccount hold exactly the same grants. Run isolation's
   guarantee that one run's permissions cannot reach another run's does not
   apply to them.
-- **`--discover-network` grants become permanent.** With a run-owned
-  ServiceAccount, the cluster-scoped **mutating** discovery rules
-  (`nodes: patch`, `pods/exec: create`, CRD / namespace / DaemonSet
-  create-delete — see [Security Considerations](#security-considerations))
-  exist for one run and are revoked at cleanup. Rendered with
-  `aicr snapshot --add-roles-to-service-account <sa> --discover-network` and
-  applied, they sit on that ServiceAccount until you remove them.
-
-Generate without `--discover-network` unless you need live network discovery;
-that grant is read-only. When you do use it, `03-clusterrole.yaml` carries a
-warning header naming every mutating rule and the discovery step it exists for
-— read it before applying, which is precisely what writing manifests instead of
-applying them is for. If you need discovery only occasionally, prefer a
-run-owned ServiceAccount for those runs, or keep a separate ServiceAccount used
-only for discovery.
+- **`--discover-network` adds one read-only rule.** Rendered with
+  `aicr snapshot --add-roles-to-service-account <sa> --discover-network`, the
+  ClusterRole additionally grants `configuration.net.nvidia.com` nicdevices
+  `get`/`list` (see [Security Considerations](#security-considerations)).
+  Like the rest of the grant it is permanent on an adopted ServiceAccount,
+  and like the rest it is read-only; `03-clusterrole.yaml` explains it in
+  its header.
 
 ## Post-Deployment
 
@@ -705,22 +697,14 @@ and PerconaServerMongoDB CR presence and whether a Percona operator pod that
 AICR did not install runs; StorageClass detection records only which
 classes are annotated as the default.
 
-**Additional privileges with `--discover-network`.** When `--discover-network`
-is set, the CLI appends a set of **cluster-scoped mutating** rules to the
-ClusterRole so k8s-launch-kit's live discovery can run. These grant far more
-than read access:
-- `apiextensions.k8s.io` CustomResourceDefinitions: `get`, `list`, `create`, `update`, `patch`
-- `namespaces`: `get`, `create`, `delete` (l8k creates and tears down a bootstrap namespace)
-- `apps/daemonsets`: `get`, `list`, `watch`, `create`, `delete`
-- `serviceaccounts`, `configmaps`: `get`, `create`, `delete`
-- `rbac.authorization.k8s.io` roles, rolebindings: `get`, `create`, `delete`
-- `pods/exec`: `create` (l8k exec's into the discovery DaemonSet pods to read VPD / link state)
-- `nodes`: `patch` (writes `nvidia.kubernetes-launch-kit.*` node labels)
-- `configuration.net.nvidia.com` nicdevices: `get`, `list`
-- `mellanox.com` nicclusterpolicies: `get`, `patch`
-
-Use `--discover-network` only against clusters where this mutation and the
-broader RBAC grant are acceptable.
+**Additional read with `--discover-network`.** When `--discover-network` is
+set, the ClusterRole gains one rule: `configuration.net.nvidia.com`
+nicdevices: `get`, `list`. k8s-launch-kit's read-only discovery lists nodes
+and pods (already granted) and the `NicDevice` objects an existing
+`nic-configuration-daemon` publishes; it never creates, patches, deletes, or
+execs. A daemon node without a `NicDevice` fails the collector rather than
+being probed, and a cluster without the Network Operator's daemon gets the
+`NetworkTopology` measurement skipped with a warning.
 
 ### Pre-flight permission gate
 
@@ -801,7 +785,7 @@ derived from the same rule set the run-scoped `Role` and `ClusterRole` grant
 behind what the agent needs: namespaced `configmaps` and `pods` access, plus
 cluster-scoped `nodes`, `pods`, `apps` DaemonSets, `nvidia.com` ClusterPolicies,
 the Slinky CRs, the MariaDB CRs, StorageClasses, and the PerconaServerMongoDB
-CRs — widened to the full mutating set when
+CRs — plus `configuration.net.nvidia.com` NicDevices when
 `--discover-network` is passed.
 
 This check runs **in exact-ServiceAccount mode only**. In prefix mode the

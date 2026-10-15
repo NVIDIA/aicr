@@ -56,15 +56,13 @@ Render the RBAC that grants such a ServiceAccount the agent's permissions
 with BuildServiceAccountRoleManifests (CLI: aicr snapshot
 --add-roles-to-service-account). That path APPLIES NOTHING and contacts no
 cluster: it writes manifests the operator reviews and applies themselves, so
-the decision to grant cluster-scoped -- and, under DiscoverNetwork, mutating
--- permissions is an informed one. What they then apply sits outside every
-run: no run-ID label, never in a created-set, never deleted by run cleanup,
-and removed with kubectl delete -f.
+the decision to grant cluster-scoped permissions is an informed one. What
+they then apply sits outside every run: no run-ID label, never in a
+created-set, never deleted by run cleanup, and removed with kubectl delete -f.
 
 The trade-off is deliberate and opt-in: an adopted ServiceAccount waives
 per-run permission isolation. Concurrent runs sharing it share its grants, and
-a DiscoverNetwork grant leaves cluster-scoped mutating permissions in
-place permanently rather than for one run's lifetime.
+the grants stay in place permanently rather than for one run's lifetime.
 
 Two objects are deliberately NOT run-scoped:
 

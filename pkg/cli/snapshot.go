@@ -124,9 +124,9 @@ type snapshotCmdOptions struct {
 	// into the gke-gpu-pools subtype at the snapshot orchestration
 	// layer.
 	gkeGPUPoolsPath string
-	// discoverNetwork enables the network collector's live-discovery
-	// path. The collector calls l8k.Discover against the resolved
-	// kubeconfig; discovery is NOT read-only.
+	// discoverNetwork enables the network collector's read-only
+	// live-discovery path (l8k DiscoverReadOnly against the resolved
+	// kubeconfig).
 	discoverNetwork bool
 	requests        corev1.ResourceList
 	limits          corev1.ResourceList
@@ -422,10 +422,9 @@ permission isolation is waived for them.
 		return
 	}
 	fmt.Fprintf(w, `
-WARNING: --discover-network means the ClusterRole in this directory also carries
-cluster-scoped MUTATING rules (nodes: patch, pods/exec: create, CRD/namespace/
-DaemonSet create-delete). Applying it grants them permanently, not for one run.
-Each rule and the discovery step it exists for is explained in %s.
+--discover-network adds one read-only rule (configuration.net.nvidia.com
+nicdevices: get, list) to %s; the grant stays read-only. Live discovery requires
+the Network Operator's nic-configuration-daemon to already be running.
 `, clusterRoleManifestName(res))
 }
 
@@ -535,7 +534,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     flagAddRolesToSA,
-			Usage:    "WRITES MANIFESTS AND APPLIES NOTHING. Renders the Role, RoleBinding, ClusterRole and ClusterRoleBinding that grant the agent's permissions to the named ServiceAccount into ./snapshot-rbac-<run-id>/, then exits without taking a snapshot. No cluster is contacted, so no kubeconfig or privileges are needed. Review the files, then grant with 'kubectl apply -f <dir>/' and revoke with 'kubectl delete -f <dir>/' yourself. Add --discover-network to include the mutating live-discovery rules.",
+			Usage:    "WRITES MANIFESTS AND APPLIES NOTHING. Renders the Role, RoleBinding, ClusterRole and ClusterRoleBinding that grant the agent's permissions to the named ServiceAccount into ./snapshot-rbac-<run-id>/, then exits without taking a snapshot. No cluster is contacted, so no kubeconfig or privileges are needed. Review the files, then grant with 'kubectl apply -f <dir>/' and revoke with 'kubectl delete -f <dir>/' yourself. Add --discover-network to include the one extra read-only rule live discovery needs (configuration.net.nvidia.com nicdevices get/list).",
 			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
@@ -632,7 +631,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.BoolFlag{
 			Name:     "discover-network",
-			Usage:    "Enable live l8k discovery to populate the NetworkTopology Measurement. NOT read-only — discovery writes nvidia.kubernetes-launch-kit.* node labels and may patch NicClusterPolicy via server-side-apply.",
+			Usage:    "Enable read-only live l8k discovery to populate the NetworkTopology Measurement. Reads nodes, Network Operator pods, and the NicDevice objects an already-running nic-configuration-daemon publishes; creates, patches, and deletes nothing, and never execs into pods. Skipped with a warning when the daemon is not installed. If some daemon pods are not Ready (for example on NotReady nodes) discovery waits up to 5 minutes before proceeding with the Ready ones, so raise --timeout to at least 8m in Job mode on such clusters. If you need the node labels or NicClusterPolicy tuning that `l8k discover` applies, run l8k yourself first.",
 			Sources:  cli.EnvVars("AICR_DISCOVER_NETWORK"),
 			Category: catAgentDeployment,
 		},

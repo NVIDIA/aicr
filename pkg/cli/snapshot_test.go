@@ -581,7 +581,7 @@ func TestSnapshotCmd_AddRolesWritesManifestsWithoutACluster(t *testing.T) {
 	// The report goes to the command writer, not stdout, and must name the
 	// directory and both halves of the operator's workflow.
 	out := buf.String()
-	for _, want := range []string{"NOTHING WAS APPLIED", dir, "kubectl apply -f", "kubectl delete -f", "MUTATING"} {
+	for _, want := range []string{"NOTHING WAS APPLIED", dir, "kubectl apply -f", "kubectl delete -f", "nicdevices"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("command output does not contain %q; got:\n%s", want, out)
 		}
@@ -593,8 +593,8 @@ func TestSnapshotCmd_AddRolesWritesManifestsWithoutACluster(t *testing.T) {
 // them from the cluster: nothing was applied, where the manifests are, the
 // command that makes the grant live, the command that removes it again, and
 // that sharing one ServiceAccount waives per-run permission isolation. The
-// --discover-network warning is separate because that grant is the one that
-// is also mutating.
+// --discover-network note is separate because that grant carries one extra
+// (read-only) rule the operator should know about.
 func TestWriteManifestReport(t *testing.T) {
 	dir := "snapshot-rbac-20260821-142233-9f3a1c0b7e2d4a55"
 	res := &snapshotter.AgentRolesResult{
@@ -630,17 +630,18 @@ func TestWriteManifestReport(t *testing.T) {
 				"permission isolation is waived",
 				"aicr snapshot --namespace gpu-operator --service-account-name irsa-snapshotter",
 			},
-			notWant: "MUTATING",
+			notWant: "nicdevices",
 		},
 		{
-			name:            "discovery grant warns about the mutating rules",
+			name:            "discovery grant names the extra read-only rule",
 			discoverNetwork: true,
 			wantSubstrings: []string{
 				"NOTHING WAS APPLIED",
-				"MUTATING",
-				"grants them permanently, not for one run",
+				"nicdevices",
+				"read-only",
 				"03-clusterrole.yaml",
 			},
+			notWant: "MUTATING",
 		},
 	}
 
