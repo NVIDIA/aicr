@@ -176,6 +176,21 @@ github.com/google/cel-go,https://github.com/cel-expr/cel-go/blob/v0.31.0/LICENSE
 EOF
 diff -u "${TMP}/expected.csv" "${TMP}/actual.csv"
 
+# The tool runs under whichever bash is first on PATH, and on macOS that can be
+# the stock /bin/bash 3.2, which keeps the quotes of a quoted ${var/pat/rep}
+# replacement in its result. Repeat the main case under it where it exists;
+# Linux runners have no bash 3 to try.
+if [[ -x /bin/bash ]] && (( $(/bin/bash -c 'echo "${BASH_VERSINFO[0]}"') < 4 )); then
+    PATH="/bin:${PATH}" CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/input.csv" > "${TMP}/actual-bash3.csv"
+    diff -u "${TMP}/expected.csv" "${TMP}/actual-bash3.csv"
+fi
+# Linux runners cannot run that case, so the construct itself is also rejected
+# everywhere: a ${var/pattern/replacement} whose replacement is quoted.
+if grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*//?("[^"]*"|[^/}"])*/"' "${TOOL}" | grep -vE '^[0-9]+:[[:space:]]*#'; then
+    echo "normalizer quotes a \${var/pattern/replacement} replacement, which bash 3.2 keeps in its output" >&2
+    exit 1
+fi
+
 cat > "${TMP}/broken.csv" <<'EOF'
 github.com/example/repo/missing,https://github.com/example/repo/blob/missing/v1.2.3/missing/LICENSE,Apache-2.0
 EOF

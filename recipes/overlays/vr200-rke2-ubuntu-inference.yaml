@@ -70,6 +70,9 @@ spec:
       overrides:
         driver:
           enabled: false
+        # No NRI management allowlist; see vr200-rke2-ubuntu-training.
+        toolkit:
+          env: []
 
     # See vr200-rke2-ubuntu-training for the host-managed-driver /
     # NVSentinel labeler rationale.
@@ -82,8 +85,11 @@ spec:
         # host-mount rationale (NVIDIA/NVSentinel#1742, released in v1.22.0).
         # Path picks Ubuntu 26.04 arm64 driver libs — same reference image
         # as the training leaf. Only libnvidia-ml.so.1 is mounted because of
-        # the host/container glibc mismatch explained in the training leaf.
+        # the host/container glibc mismatch explained in the training leaf,
+        # which also explains why nriPlugin stays off here.
         metadata-collector:
+          nriPlugin:
+            enabled: false
           runtimeClassName: ""
           extraEnv:
             - name: LD_LIBRARY_PATH

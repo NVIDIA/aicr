@@ -125,6 +125,13 @@ func TestVR200NVSentinelNRIHostMountReenable(t *testing.T) {
 				t.Fatal("metadata-collector overrides missing — the assertions below would be vacuous")
 			}
 
+			// The rke2 root turns on NRI plugin mode for the generic
+			// leaves; this leaf keeps its host mount instead, so the
+			// two NVML sources must not combine (#3041).
+			if nriMode, nriSet := nestedBool(collector, "nriPlugin", "enabled"); !nriSet || nriMode {
+				t.Fatalf("metadata-collector.nriPlugin.enabled = %v (set=%v), want explicit false beside the host mount (#3041)", nriMode, nriSet)
+			}
+
 			// runtimeClassName must be present AND explicitly "".
 			// Left unset it falls back to the chart default `nvidia`,
 			// which no NRI-mode cluster registers, so admission

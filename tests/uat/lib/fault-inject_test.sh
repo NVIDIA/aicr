@@ -126,6 +126,9 @@ grep -q -- '--data uat-data' "${d}/aicr-calls" 2>/dev/null \
 
 d="${WORK}/remediation"; compose "${d}" nvsentinel-remediation "${WORK}/r.yaml"; rc=$?
 [[ "${rc}" == 0 ]] && pass "remediation composes and verifies" || { fail "remediation: rc=${rc}"; sed 's/^/    | /' "${d}/log" >&2; }
+[[ "$(yq -r '.spec.mixins[-2:] | join(",")' "${d}/uat-data/overlays/h100-eks-ubuntu-training.yaml" 2>/dev/null)" == nvsentinel-remediation,nvsentinel-health-events-analyzer ]] \
+    && pass "remediation brings the health-events-analyzer the bundle requires beside it" \
+    || fail "remediation overlay mixins: $(yq -o=json '.spec.mixins' "${d}/uat-data/overlays/h100-eks-ubuntu-training.yaml" 2>/dev/null)"
 
 # A run asked to prove Stage 2 or 3 must not go green on Stage 1 alone.
 d="${WORK}/not-landed"; compose "${d}" nvsentinel-quarantine "${WORK}/none.yaml"; rc=$?
