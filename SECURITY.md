@@ -73,9 +73,9 @@ minors are end-of-life and should be upgraded.
 
 | Version | Supported |
 |---------|-----------|
-| `0.22.x` (latest released minor) | ✅ Receives security fixes |
-| `0.21.x` (previous minor) | ✅ Receives security fixes |
-| `< 0.21` | ❌ End-of-life — upgrade to a supported release |
+| `1.0.x` (latest released minor) | ✅ Receives security fixes |
+| `0.22.x` (previous minor) | ✅ Receives security fixes |
+| `< 0.22` | ❌ End-of-life — upgrade to a supported release |
 
 Security fixes ship in a new patch or minor release cut from `main`, and reach
 the previous supported minor as a manually tagged hotfix. They are never
