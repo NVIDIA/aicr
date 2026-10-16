@@ -1671,10 +1671,9 @@ VERSION="1.6.1"   # replace with the version you are upgrading to
 # oci:// CHART. For psmdb-operator:
 # REPO="https://percona.github.io/percona-helm-charts/"
 REPO=""
-# The field manager that installed the CRDs, so this apply adopts its fieldset:
-# "helm" under the helm and helmfile deployers (both run the helm CLI), and
-# "terraform-provider-helm" under terraform, where the provider installs the
-# release. Check with:
+# The field manager that installed the CRDs: "helm" under the helm and
+# helmfile deployers (both run the helm CLI), and "terraform-provider-helm"
+# under terraform, where the provider installs the release. Check with:
 #   kubectl get crd <name> --show-managed-fields -o jsonpath='{.metadata.managedFields[*].manager}'
 MANAGER="helm"
 # The component's ownsCRDsExcludeSubcharts, space-separated. For nvsentinel:
@@ -1712,8 +1711,8 @@ if [ ${#crds[@]} -eq 0 ]; then
   exit 1
 fi
 
-# One kubectl call per CRD file, server-side applied under Helm's own field
-# manager so a field or spec.versions entry the new chart removes is pruned.
+# One kubectl call per CRD file, server-side applied under the installer's
+# field manager. The notes below say which removed fields this prunes.
 for crd in "${crds[@]}"; do
   grep -q '[^[:space:]]' "${crd}" || continue
   if ! kubectl apply --server-side --force-conflicts --field-manager="${MANAGER}" -f "${crd}"; then
@@ -1725,27 +1724,42 @@ for crd in "${crds[@]}"; do
 done
 ```
 
-Four details are load-bearing, and the obvious shorter forms fail on them:
+Four details are load-bearing, and each obvious alternative loses something:
 
 - **Server-side apply under the field manager that installed the CRDs, not
-  `kubectl replace` or a bare `kubectl apply --server-side`.** A chart's raw CRD manifest carries no
-  `metadata.resourceVersion`, and Kubernetes rejects an update without one, so
-  `replace` fails on exactly the upgrade this command exists for — verified on
-  a live cluster, the API returns `Conflict`. A bare `apply --server-side`
-  fails differently: it deletes a field the manifest omits only when the
-  applying manager owns it, and Helm owns these CRDs, so a schema field or
-  `spec.versions` entry the new chart *removes* would survive under the
-  default `kubectl` manager. Applying as `--field-manager=helm` adopts Helm's
-  fieldset instead, so the removal actually takes; verified on a live cluster
-  against both Helm 3 (manager `helm`, operation Update) and Helm 4 (manager
-  `helm`, operation Apply). Under `terraform` the provider, not the helm CLI,
-  installs the CRDs, as manager `terraform-provider-helm` (measured on a kind
-  cluster with provider 3.3.0), so `MANAGER` must be that name there: applying
-  as `helm` against those CRDs would leave a removed field in place, still
-  owned by the provider. `--force-conflicts` is required because other
-  managers may hold individual fields, including a `caBundle` a webhook
-  injects at runtime — which is why `ownsCRDs` requires that no CRD use
-  `spec.conversion.strategy: Webhook`.
+  `kubectl replace` or a bare `kubectl apply --server-side`.** `kubectl
+  replace` does update an existing CRD, because kubectl copies the live
+  `metadata.resourceVersion` into the manifest before sending it, but it
+  overwrites the whole object: anything another manager set on the CRD after
+  install, such as a GitOps label, is discarded. Server-side apply keeps a
+  field another manager set unless the chart's CRD sets that same field, in
+  which case `--force-conflicts` takes it over. What the apply removes depends
+  on where the new chart dropped something:
+  - **Inside `spec.versions`**, which holds every version's schema, a dropped
+    version or schema property disappears under any field manager, a bare
+    `kubectl` apply included: the list is atomic, so `--force-conflicts`
+    replaces it whole. The exception is a version still listed in the CRD's
+    `status.storedVersions`. The API server rejects that apply and the
+    command stops, until a storage migration removes the version from the
+    list.
+  - **Outside `spec.versions`**, such as `spec.names.shortNames` or an
+    annotation, a dropped field disappears only when the applying manager
+    owns it through an Apply operation. Helm 4 installs CRDs that way, as
+    manager `helm`, so `MANAGER="helm"` removes such a field where a bare
+    apply would leave it. Helm 3 and `terraform-provider-helm` (measured on a
+    kind cluster with provider 3.3.0) install with an Update operation, which
+    server-side apply tracks as a separate owner even under the same manager
+    name. After either, a field the original install set stays behind
+    whatever `MANAGER` says; delete it by hand if the chart's release notes
+    depend on its removal. A field that an earlier run of this command added
+    is owned through Apply and is removed normally, as long as every run uses
+    the same `MANAGER`.
+
+  `--force-conflicts` is required because other managers may hold individual
+  fields. On a CRD using `spec.conversion.strategy: Webhook`, a chart that
+  sets `caBundle`, even to a placeholder, would overwrite the one injected at
+  runtime, and a replace discards it whatever the chart sets. That is why
+  `ownsCRDs` requires that no CRD use webhook conversion.
 - **Read the CRDs from the chart archive, not from `helm show crds`.** That
   command's output shape differs by major version: Helm 4 prepends `---` before
   every CRD, Helm 3 prepends one only for `show all` and emits nothing between
@@ -1803,9 +1817,9 @@ each with the schema its own chart pins. Requiring the opt-in is what
 prevents that, so it stays opt-in.
 
 A component qualifies only if it solely owns every CRD it ships and ships none
-using `spec.conversion.strategy: Webhook`, since `--force-conflicts` reclaims
-a `caBundle` injected at runtime. `kubeflow-trainer` is excluded for that
-second reason.
+using `spec.conversion.strategy: Webhook`, since forcing or replacing the CRD
+can overwrite a `caBundle` injected at runtime. `kubeflow-trainer` is
+excluded for that second reason.
 Currently `gatekeeper`, `k8s-aibom`, `nvcre`, `nvsentinel`, and
 `psmdb-operator` qualify; the audited chart version for each is pinned in
 `pkg/recipe/ownscrds_audit_test.go`, so bumping a pin without re-auditing fails
