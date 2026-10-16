@@ -336,11 +336,13 @@ same rule, so `nvcr.io/nvidia/ai-dynamo/vllm-runtime:<version>` resolves to
 `dynamo-platform` chart version your recipe deploys, which `aicr mirror list`
 reports. The check tags both images with that version, so an overlay or
 `--data` override of the chart moves them with it. Mirror both images to that
-path at that tag. The
-check copies the Secrets named by `--image-pull-secret` into its per-run
-namespace, so the Dynamo pods and the model-cache Job pull with the same
-credentials. If the check times out while one of those pods is still failing to
-pull, the error names the pod and the image it could not pull.
+path at that tag. The check copies the Secrets named by `--image-pull-secret`
+that exist in the validator namespace into its per-run namespace, so the Dynamo
+pods and the model-cache Job pull with the same credentials. A named Secret
+missing from the validator namespace is skipped with a warning in the check's
+log, and those pods then pull without it. If the check times out while one of
+those pods is still failing to pull, the error names the pod and the image it
+could not pull.
 `AICR_VALIDATOR_IMAGE_TAG` does not retag the Dynamo images, because the runtime
 must match the deployed Dynamo operator. Registry redirection does not make the
 check fully offline, since its model-cache Job still downloads weights from
