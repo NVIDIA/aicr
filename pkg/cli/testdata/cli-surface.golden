@@ -202,7 +202,7 @@ flag    aicr snapshot  --image-pull-secret  type=string default= required=false 
 flag    aicr snapshot  --job-name  type=string default="aicr" required=false hidden=false env=
 flag    aicr snapshot  --kubeconfig,-k  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --limits  type=string default= required=false hidden=false env=AICR_LIMITS
-flag    aicr snapshot  --max-nodes-per-entry  type=int default=0 required=false hidden=false env=
+flag    aicr snapshot  --max-nodes-per-entry  type=int default=0 required=false hidden=false env=AICR_MAX_NODES_PER_ENTRY
 flag    aicr snapshot  --namespace,-n  type=string default="default" required=false hidden=false env=AICR_NAMESPACE
 flag    aicr snapshot  --no-cleanup  type=bool default=false required=false hidden=false env=
 flag    aicr snapshot  --node-selector  type=string default= required=false hidden=false env=
