@@ -171,6 +171,7 @@ With `argocd` or `argocd-helm`, publish that revision the same way as the origin
 ```bash
 APP="nvidia-stack"  # replace with the parent Application: --app-name, default nvidia-stack (argocd) or aicr-stack (argocd-helm)
 CHILD="nfd"         # prepend the deployer namePrefix, if the bundle set one
+# With argocd-helm, a helm install --set appName=... or --set deployer.namePrefix=... overrides both names.
 argocd app set "${APP}" --sync-policy none
 argocd app delete "${CHILD}" --cascade
 ```
