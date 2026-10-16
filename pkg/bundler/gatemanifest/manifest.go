@@ -231,7 +231,12 @@ func componentClusterRoleRules(componentName string) string {
 
 func jobMetadataAnnotations(deployer config.DeployerType) string {
 	switch deployer {
-	case config.DeployerHelm:
+	case config.DeployerHelm, config.DeployerTerraform:
+		// Both install the gate through Helm itself, so the hook is what
+		// makes it re-assert: a Job's spec.template is immutable, and
+		// before-hook-creation is the only thing that deletes and recreates
+		// it on upgrade. Helm also blocks on hook completion as part of the
+		// release, which is what the terraform module's dependents depend on.
 		return `  annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation`

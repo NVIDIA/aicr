@@ -65,6 +65,8 @@ flag    aicr bundle  --signing-key  type=string default= required=false hidden=f
 flag    aicr bundle  --storage-class  type=string default= required=false hidden=false env=
 flag    aicr bundle  --system-node-selector  type=string default= required=false hidden=false env=
 flag    aicr bundle  --system-node-toleration  type=string default= required=false hidden=false env=
+flag    aicr bundle  --terraform-child-module  type=bool default=false required=false hidden=false env=
+flag    aicr bundle  --terraform-cluster-rollover  type=bool default=false required=false hidden=false env=
 flag    aicr bundle  --tlog-upload  type=bool default=true required=false hidden=false env=
 flag    aicr bundle  --vendor-charts  type=bool default=false required=false hidden=false env=
 flag    aicr bundle  --workload-gate  type=string default= required=false hidden=false env=

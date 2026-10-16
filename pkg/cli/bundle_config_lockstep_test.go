@@ -118,6 +118,12 @@ func TestBundleCmd_NewConfigMatchesBundlerConfigFields(t *testing.T) {
 		"WithValueOverridesTypedPaths": true,
 		"WithReadinessHooks":           true,
 		"WithSerial":                   true,
+		// Deployer-specific rollout toggle, like WithSerial and
+		// WithFluxNamespace above: it shapes one deployer's emitted
+		// artifacts rather than the bundler's own configuration, so it has
+		// no spec.bundle counterpart.
+		"WithTerraformClusterRollover": true,
+		"WithTerraformChildModule":     true,
 		"WithOCISourceName":            true,
 		"WithFluxNamespace":            true,
 		"WithBundleChartName":          true,

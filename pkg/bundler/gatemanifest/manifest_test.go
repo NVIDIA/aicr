@@ -101,19 +101,27 @@ func TestRender_ClusterScopedNamesAreNamespaceQualified(t *testing.T) {
 	}
 }
 
+// TestRender_HelmHooks covers both deployers that install the gate through
+// Helm itself. The hook is what makes the gate re-assert: a Job's
+// spec.template is immutable, so without before-hook-creation an upgrade is a
+// no-op patch and the gate asserts only once, when it is created.
 func TestRender_HelmHooks(t *testing.T) {
-	got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerHelm, Placement{})
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	s := string(got)
-	for _, want := range []string{
-		"helm.sh/hook: post-install,post-upgrade",
-		"helm.sh/hook-delete-policy: before-hook-creation",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("helm manifest missing %q", want)
-		}
+	for _, deployer := range []config.DeployerType{config.DeployerHelm, config.DeployerTerraform} {
+		t.Run(string(deployer), func(t *testing.T) {
+			got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), deployer, Placement{})
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			s := string(got)
+			for _, want := range []string{
+				"helm.sh/hook: post-install,post-upgrade",
+				"helm.sh/hook-delete-policy: before-hook-creation",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s manifest missing %q", deployer, want)
+				}
+			}
+		})
 	}
 }
 

@@ -24,6 +24,7 @@ re-render the same recipe for whatever pipeline you run:
 | `argocd` | Argo CD `Application` manifests (app-of-apps), published from a Git repo (`--repo`). |
 | `argocd-helm` | A Helm chart app-of-apps; `repoURL` defaults to the push-target registry — plain `helm install` works with no `--set repoURL` needed. Override with `--set repoURL=oci://mirror` when mirroring. Bringing your own root Application? Set `deployer.includeRootApp=false` to render children-only — see [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options). |
 | `flux` | Flux `HelmRelease` manifests plus their source objects, and a plain Kustomize `kustomization.yaml` at the bundle root (not a Flux `Kustomization` CR). |
+| `terraform` | A Terraform root module (or child module) calling one module per component, with `depends_on` carrying the recipe's dependency graph. |
 
 ```bash
 # GitOps with Argo CD, sourced from your config repo
@@ -40,7 +41,7 @@ shown here will not disappear or be renamed without a deliberate, reviewed
 change. Automation may read these paths.
 
 Every deployer writes `bundle-info.yaml`, `checksums.txt`, `README.md` and
-`recipe.yaml` at the bundle root. Four of the five group components into
+`recipe.yaml` at the bundle root. Five of the six group components into
 ordered `NNN-<component>` directories; Flux is the exception and uses a plain
 `<component>` directory with shared `sources/`.
 
@@ -77,13 +78,42 @@ helmfile/
   README.md
 ```
 
+`terraform` shares Helm's per-component values and bundled charts — not its
+`install.sh` or `upstream.env`, which only the shell path reads — and adds the
+Terraform layer above them: one module call per component, with that
+component's pre, post and readiness folders chained inside the call, plus the
+single generic component module they all share. The bundle does not create a
+cluster.
+By default it is a root module that configures the `helm` provider from
+variables, so it applies against whatever cluster you point it at; with
+`--terraform-child-module` it is a child module with no provider block, for
+calling from a configuration that creates the cluster itself.
+
+```text
+terraform/
+  001-cert-manager/            values.yaml and cluster-values.yaml; Chart.yaml +
+  002-nfd/                     templates/ for a bundled chart
+  main.tf                      one module call per component; the dependency graph
+  versions.tf                  required_providers + the helm provider config
+  variables.tf                 cluster connection, wait/timeout/atomic
+  outputs.tf
+  terraform.tfvars.example     root-module form only
+  modules/component/           the shared module every call resolves to, holding
+                               the component's pre / chart / post / readiness
+                               releases chained in order
+  bundle-info.yaml
+  recipe.yaml
+  checksums.txt
+  README.md
+```
+
 `argocd-helm` renders a Helm chart at the root — `Chart.yaml`, `values.yaml`,
 `values.schema.json` — with one template per component.
 
 Two kinds of name appear in these trees, and only one is a promise:
 
 - **Fixed names are contract.** `deploy.sh`, `app-of-apps.yaml`,
-  `kustomization.yaml`, `bundle-info.yaml`, `checksums.txt`, `values.yaml`,
+  `kustomization.yaml`, `main.tf` with `modules/component/`, `bundle-info.yaml`, `checksums.txt`, `values.yaml`,
   `helmrelease.yaml`, and the `NNN-<component>` convention itself.
 - **Derived names are not.** Flux writes one `helmrepo-<host>.yaml` per chart
   repository and helmfile one `level-N.yaml` per dependency depth, so both sets
@@ -132,13 +162,13 @@ the upgrade steps instead.
 ### Bundle info
 
 Every bundle carries a `bundle-info.yaml` at its root, written unconditionally
-by all five deployers — no flag turns it off. It answers three questions a
+by all six deployers — no flag turns it off. It answers three questions a
 bundle cannot answer for itself: which deployer built it, which `aicr` binary
 built it, and which Helm release landed in which directory.
 
 `layout.entrypoint` names the file a consumer invokes or applies —
-`deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`, or
-`kustomization.yaml` — so automation reads one key instead of branching on
+`deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`,
+`kustomization.yaml`, or `main.tf` — so automation reads one key instead of branching on
 `build.deployer`.
 
 `layout.releases` lists every Helm release the bundle installs, in deployment
@@ -276,7 +306,7 @@ That test is applied per deployer, so `repoURL`, `targetRevision` and
 `repoURL` and `targetRevision` under `flux`, `appName` alone under
 `argocd-helm` (whose chart is URL-portable and takes the publish location at
 `helm install --set repoURL=...` time, which is also why `--repo` warns that
-it is ignored there), and none of the three under `helm` or `helmfile`. Where
+it is ignored there), and none of the three under `helm`, `helmfile` or `terraform`. Where
 a key does not apply it is omitted entirely rather than written empty.
 
 Each deployer reports what it resolved, so the recorded value is the one the
@@ -432,9 +462,9 @@ aicr bundle --recipe recipe.yaml \
   --output ./bundles
 ```
 
-The `helm`, `helmfile`, `argocd`, and `argocd-helm` deployers render this
-manifest when the bundle is generated, so the install-time overrides below do
-not reach it. A `flux` bundle ships the manifest as a template, and Flux renders
+The `helm`, `helmfile`, `terraform`, `argocd`, and `argocd-helm` deployers
+render this manifest when the bundle is generated, so the install-time overrides
+below do not reach it. A `flux` bundle ships the manifest as a template, and Flux renders
 it at install time from the values in `network-operator-post/helmrelease.yaml`.
 Edit `spec.values.network-operator.nicConfigurationOperator.configurationDaemon.resources`
 there to resize the daemon without regenerating the bundle.
@@ -836,7 +866,7 @@ Namespace removes everything inside it.
 that ships a readiness test, run as a post-component Job so the deployer blocks
 on component-specific signals (e.g. GPU Operator `ClusterPolicy` state) that
 Helm and Argo CD cannot assess natively. Supported with `--deployer helm`,
-`argocd`, and `argocd-helm`; off by default.
+`argocd`, `argocd-helm`, and `terraform`; off by default.
 
 ```bash
 aicr bundle --recipe recipe.yaml --readiness-hooks --output ./bundles
@@ -849,6 +879,16 @@ For the default `helm` deployer, verify the bundle before installing it:
 ```bash
 cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh
 ```
+
+For the `terraform` deployer, verify in the step that generates the bundle,
+then let Terraform install it:
+
+```bash
+aicr verify ./bundles && terraform -chdir=bundles init && terraform -chdir=bundles apply
+```
+
+(A bundle generated with `--terraform-child-module` is applied from the
+configuration that calls it instead.)
 
 For GitOps deployers, commit/publish the manifests per your Argo CD or Flux
 workflow. Verify the bundle directory before it enters the repository or

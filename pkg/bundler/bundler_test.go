@@ -456,6 +456,7 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
 		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
 		{name: "helmfile", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform},
 	}
 
 	for _, tt := range tests {
@@ -487,7 +488,7 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 }
 
 // TestMake_EveryDeployerEmitsRecipe covers #2753: the recipe write used to be
-// gated on the helm deployer, so four of the five bundle formats carried no
+// gated on the helm deployer, so every other bundle format carried no
 // recipe and could not be fed back to anything that re-resolves one.
 //
 // The byte-identity assertion is the part that would not survive a plausible
@@ -506,6 +507,7 @@ func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
 		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
 		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
 		{name: "helmfile", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform},
 	}
 
 	emitted := make(map[string][]byte, len(tests))
@@ -728,6 +730,7 @@ func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
 		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
 		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
 		{name: "helmfile", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform},
 	}
 
 	for _, tt := range tests {
@@ -818,12 +821,17 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 		wantTargetRevision string
 		wantAppName        string
 	}{
-		// helm and helmfile: the generators declare none of the three fields,
-		// configured or not.
+		// helm, helmfile and terraform: the generators declare none of the
+		// three fields, configured or not. Each installs from chart folders
+		// inside the bundle, so no repository coordinate is observable in
+		// anything they emit -- recording one would describe a source the
+		// bundle never names.
 		{name: "helm", deployer: config.DeployerHelm, configure: true},
 		{name: "helm unset", deployer: config.DeployerHelm},
 		{name: "helmfile", deployer: config.DeployerHelmfile, configure: true},
 		{name: "helmfile unset", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform, configure: true},
+		{name: "terraform unset", deployer: config.DeployerTerraform},
 		{
 			name:               "argocd",
 			deployer:           config.DeployerArgoCD,

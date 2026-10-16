@@ -97,7 +97,7 @@ aicr bundle --recipe recipe.yaml --output ./bundles
 
 With the default `helm` deployer, `./bundles` contains per-component folders
 and a `deploy.sh` that runs the Helm installs in dependency order. To target a
-GitOps tool instead (Argo CD, Flux, Helmfile), or to override values and
+GitOps tool or Terraform instead (Argo CD, Flux, Helmfile, Terraform), or to override values and
 scheduling, see [Generating Bundles](bundling.md).
 
 ## Step 5 — Deploy to your cluster

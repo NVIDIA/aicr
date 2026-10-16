@@ -19,7 +19,7 @@ kind: ComponentUpgrades
 component: psmdb-operator
 transitions:
   # A patch boundary that still changes the CRDs. Manual rather than safe
-  # because helmfile never applies a changed crds/ directory.
+  # because helmfile and terraform never apply a changed crds/ directory.
   - from: ">=1.23.0 <1.23.2"
     to: "=1.23.2"
     verdict: manual
@@ -56,6 +56,33 @@ transitions:
             reason: >-
               The bundle orders psmdb-operator before nvsentinel-mongodb, so
               the operator is upgraded before the cluster's images move.
+          - id: verify
+            description: >-
+              kubectl get perconaservermongodb nvsentinel-mongodb -n
+              nvsentinel reports ready.
+            reason: >-
+              The members restart one at a time; ready means all three rejoined
+              on the new images.
+      - deployers: [terraform]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Before applying the regenerated bundle, apply the new CRDs using
+              the CRD-apply command under "Upgrade, uninstall, and
+              troubleshooting" in docs/user/component-catalog.md, with
+              CHART=psmdb-operator,
+              REPO=https://percona.github.io/percona-helm-charts/,
+              VERSION=1.23.2 and MANAGER=terraform-provider-helm.
+            reason: >-
+              helm_release upgrades through Helm, which never applies a changed
+              crds/ directory, and Percona requires the new CRDs before the new
+              operator.
+          - id: apply-bundle
+            description: >-
+              Regenerate the bundle at the new pins and run terraform apply.
+            reason: >-
+              The module graph orders psmdb-operator before nvsentinel-mongodb,
+              so the operator is upgraded before the cluster's images move.
           - id: verify
             description: >-
               kubectl get perconaservermongodb nvsentinel-mongodb -n
@@ -139,6 +166,33 @@ transitions:
             reason: >-
               The bundle orders psmdb-operator before nvsentinel-mongodb, so
               the operator is upgraded before the cluster's crVersion moves.
+          - id: verify
+            description: >-
+              kubectl get perconaservermongodb nvsentinel-mongodb -n
+              nvsentinel reports ready.
+            reason: >-
+              The members restart one at a time; ready means all three rejoined
+              on the new images.
+      - deployers: [terraform]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Before applying the regenerated bundle, apply the new CRDs using
+              the CRD-apply command under "Upgrade, uninstall, and
+              troubleshooting" in docs/user/component-catalog.md, with
+              CHART=psmdb-operator,
+              REPO=https://percona.github.io/percona-helm-charts/,
+              VERSION=<new> and MANAGER=terraform-provider-helm.
+            reason: >-
+              helm_release upgrades through Helm, which never applies a changed
+              crds/ directory, and Percona requires the new CRDs before the new
+              operator.
+          - id: apply-bundle
+            description: >-
+              Regenerate the bundle at the new pins and run terraform apply.
+            reason: >-
+              The module graph orders psmdb-operator before nvsentinel-mongodb,
+              so the operator is upgraded before the cluster's crVersion moves.
           - id: verify
             description: >-
               kubectl get perconaservermongodb nvsentinel-mongodb -n

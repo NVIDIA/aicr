@@ -163,6 +163,33 @@ func TestConfigSerial(t *testing.T) {
 	}
 }
 
+// TestTerraformOptions pins the two terraform-only options: off unless set,
+// and independent of each other.
+func TestTerraformOptions(t *testing.T) {
+	tests := []struct {
+		name         string
+		cfg          *Config
+		wantChild    bool
+		wantRollover bool
+	}{
+		{"default off", NewConfig(), false, false},
+		{"child module", NewConfig(WithTerraformChildModule(true)), true, false},
+		{"cluster rollover", NewConfig(WithTerraformClusterRollover(true)), false, true},
+		{"both", NewConfig(WithTerraformChildModule(true), WithTerraformClusterRollover(true)), true, true},
+		{"explicit off", NewConfig(WithTerraformChildModule(false), WithTerraformClusterRollover(false)), false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.TerraformChildModule(); got != tt.wantChild {
+				t.Errorf("TerraformChildModule() = %v, want %v", got, tt.wantChild)
+			}
+			if got := tt.cfg.TerraformClusterRollover(); got != tt.wantRollover {
+				t.Errorf("TerraformClusterRollover() = %v, want %v", got, tt.wantRollover)
+			}
+		})
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	seconds := int64(30)
 	tests := []struct {
@@ -1165,6 +1192,8 @@ func TestParseDeployerType(t *testing.T) {
 		{"flux uppercase", "FLUX", DeployerFlux, false},
 		{"flux mixed case", "Flux", DeployerFlux, false},
 		{"flux with spaces", "  flux  ", DeployerFlux, false},
+		{"terraform lowercase", "terraform", DeployerTerraform, false},
+		{"terraform uppercase", "TERRAFORM", DeployerTerraform, false},
 		{"helmfile lowercase", "helmfile", DeployerHelmfile, false},
 		{"helmfile uppercase", "HELMFILE", DeployerHelmfile, false},
 		{"helmfile mixed case", "Helmfile", DeployerHelmfile, false},
@@ -1190,9 +1219,10 @@ func TestParseDeployerType(t *testing.T) {
 func TestGetDeployerTypes(t *testing.T) {
 	types := GetDeployerTypes()
 
-	// Verify we get the expected types (argocd, argocd-helm, flux, helm, helmfile)
-	if len(types) != 5 {
-		t.Errorf("GetDeployerTypes() returned %d types, want 5", len(types))
+	// Verify we get the expected types (argocd, argocd-helm, flux, helm,
+	// helmfile, terraform)
+	if len(types) != 6 {
+		t.Errorf("GetDeployerTypes() returned %d types, want 6", len(types))
 	}
 
 	// Verify types are sorted alphabetically
@@ -1223,6 +1253,9 @@ func TestGetDeployerTypes(t *testing.T) {
 	if !found[string(DeployerHelmfile)] {
 		t.Error("GetDeployerTypes() missing 'helmfile'")
 	}
+	if !found[string(DeployerTerraform)] {
+		t.Error("GetDeployerTypes() missing 'terraform'")
+	}
 }
 
 func TestDeployerTypeString(t *testing.T) {
@@ -1235,6 +1268,7 @@ func TestDeployerTypeString(t *testing.T) {
 		{DeployerArgoCDHelm, "argocd-helm"},
 		{DeployerFlux, "flux"},
 		{DeployerHelmfile, "helmfile"},
+		{DeployerTerraform, "terraform"},
 	}
 
 	for _, tt := range tests {

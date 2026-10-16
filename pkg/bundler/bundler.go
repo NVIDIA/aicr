@@ -40,6 +40,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/flux"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helmfile"
+	tfdeployer "github.com/NVIDIA/aicr/pkg/bundler/deployer/terraform"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/types"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
@@ -802,21 +803,29 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	// Readiness gate emission is wired for the deployers whose ordering
 	// primitive can block on the gate Job:
 	//   - helm: deploy.sh runs the folder's install.sh with
-	//     `helm upgrade --install --wait --wait-for-jobs`.
+	//     `helm upgrade --install --wait`; the gate Job is a helm hook, and
+	//     helm blocks on hook completion as part of the release.
 	//   - argocd / argocd-helm: the gate folder inherits the next sync-wave,
 	//     and Argo CD's built-in batch/Job health blocks that wave until the
 	//     Job completes.
+	//   - terraform: the gate is the last helm_release in the component's
+	//     module call, and the provider blocks on the hook as helm does.
 	// Flux and helmfile wrap each folder in HelmRelease / needs semantics that
 	// need dedicated gating wiring (not yet implemented). Fail clearly rather
 	// than silently dropping the opt-in flag and shipping a bundle without the
 	// readiness gate the user asked for. See #904.
 	if b.Config.ReadinessHooks() {
 		switch b.Config.Deployer() {
-		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm:
-			// supported
+		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm, config.DeployerTerraform:
+			// supported. terraform gates on the emitted readiness release
+			// natively: the gate arrives as one more folder in the
+			// component's chain and becomes the last helm_release in its
+			// module; the gate Job is a helm hook, so that release does not
+			// apply until the Job COMPLETES, and a dependent's depends_on
+			// on the module call waits for it.
 		case config.DeployerFlux, config.DeployerHelmfile:
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm",
+				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm, terraform",
 					b.Config.Deployer()))
 		}
 	}
@@ -1006,6 +1015,9 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			Serial:                 b.Config.Serial(),
 		}, nil
 
+	case config.DeployerTerraform:
+		return b.terraformDeployer(ctx, recipeResult, componentValues, dynamicValues, dataFiles, upgradeNotice)
+
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
@@ -1116,7 +1128,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 
 	// Map deployer type to result and deployment names
-	resultType, deploymentType := deployerResultNames(b.Config.Deployer())
+	resultType, deploymentType := deployerResultNames(b.Config.Deployer(), b.Config.TerraformChildModule())
 
 	// Build result
 	resultOutput := &result.Output{
@@ -1161,9 +1173,55 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	return resultOutput, nil
 }
 
+// terraformDeployer builds the terraform Generator, the one deployer that
+// collects all three manifest kinds (pre, post, readiness).
+func (b *DefaultBundler) terraformDeployer(
+	ctx context.Context,
+	recipeResult *recipe.RecipeResult,
+	componentValues map[string]map[string]any,
+	dynamicValues map[string][]string,
+	dataFiles []string,
+	upgradeNotice string,
+) (deployer.Deployer, error) {
+
+	componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to collect component pre-manifests")
+	}
+	componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to collect component post-manifests")
+	}
+	componentReadiness, err := b.collectComponentReadiness(ctx, recipeResult)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to collect component readiness manifests")
+	}
+	return &tfdeployer.Generator{
+		RecipeResult:           recipeResult,
+		ComponentValues:        componentValues,
+		Version:                b.Config.Version(),
+		IncludeChecksums:       false,
+		UpgradeNotice:          upgradeNotice,
+		ComponentPreManifests:  componentPreManifests,
+		ComponentPostManifests: componentPostManifests,
+		ComponentReadiness:     componentReadiness,
+		DataFiles:              dataFiles,
+		DynamicValues:          dynamicValues,
+		VendorCharts:           b.Config.VendorCharts(),
+		ClusterRollover:        b.Config.TerraformClusterRollover(),
+		ChildModule:            b.Config.TerraformChildModule(),
+		Serial:                 b.Config.Serial(),
+	}, nil
+}
+
 // deployerResultNames returns the result type and deployment type display names
 // for a given deployer type, preserving the human-readable names used in output.
-func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
+// terraformChildModule distinguishes the two forms the terraform deployer emits;
+// it is ignored for every other deployer.
+func deployerResultNames(dt config.DeployerType, terraformChildModule bool) (types.BundleType, string) {
 	switch dt {
 	case config.DeployerHelm:
 		return "helm-bundle", "Helm per-component bundle"
@@ -1175,6 +1233,11 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 		return "flux-manifests", "Flux manifests"
 	case config.DeployerHelmfile:
 		return "helmfile-bundle", "Helmfile release graph"
+	case config.DeployerTerraform:
+		if terraformChildModule {
+			return "terraform-bundle", "Terraform child module"
+		}
+		return "terraform-bundle", "Terraform root module"
 	default:
 		return types.BundleType(dt), string(dt)
 	}
@@ -3968,7 +4031,7 @@ func invalidDRAEvictionManagedValue(componentName, path, wantType string, value 
 // Injection point: called from DefaultBundler.Make AFTER
 // extractComponentValues (so the values map is populated and user
 // --set overrides have already been applied) and BEFORE buildDeployer
-// (so every deployer — Helm, helmfile, Flux, Argo CD, argocd-helm —
+// (so every deployer — Helm, helmfile, Flux, Argo CD, argocd-helm, terraform —
 // receives the same final map). Placing the call after --set means a
 // user override of this specific annotation key is intentionally NOT
 // honored; the annotation must always reflect the actual resolved
