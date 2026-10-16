@@ -859,7 +859,9 @@ component values already set `gpu-operator.driver.enabled=false` and carry the
 coordinated preinstalled-driver configuration. This prerequisite is independent
 of whether the recipe declares an ADR-015 profile. It scopes auto-detection to
 statically prepared overlays such as AKS, GKE-COS, and OKE. Bare EKS is skipped
-with a warning instead of leaving the Operator half-configured. The policy is
+with a warning instead of leaving the Operator half-configured. The EKS
+`os=amazonlinux` leaves carry the preinstalled-driver values statically but
+declare no profile, so they are not auto-detected either. The policy is
 only-false and never forces `true`, so recipes resolved without a snapshot use
 their static defaults.
 

@@ -860,7 +860,7 @@ gb200-eks-amazonlinux-inference:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: cc455680b3a4eb1e69879579f296893c7d9860ffdc7a727cd254ed47ff9b6d77
+  008-nfd/values.yaml: 8d4d25bf24d206b8e075c0b296e143c48bb312c68aebcc12afe64e9491a86ede
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -906,7 +906,7 @@ gb200-eks-amazonlinux-inference:
   README.md: 64c2d102a42840b7b1fed24acefbe759051ccc095afc500adc3e10b353e4d264
   UPGRADING.md: 627350cdf2e92e31479be7cdbc4b3d93657d4dc6a722ab4823c2f692f6ba60f9
   bundle-info.yaml: 582049e825218a3a1fde5364f959ea57d65ea70342aba7fa3daed95b25987c22
-  checksums.txt: 43f0218776c26c05f746587acaa9dd392ee030139530281fe7884e8cc9438721
+  checksums.txt: 574e39faed2ed95021865041d258a20de90d72ef3bbf42750a4666bad14e04bb
   deploy.sh: 3a56cf0894dc38c3be14bce55134c3ef8660e4e79a574a768ce90ee3143a1732
   recipe.yaml: c46b0dbadfc6f706fd679fca1b5efda2490449dfbf61ed4ea9ebdb2e9a8c6a3b
 gb200-eks-ubuntu-inference-dynamo:
@@ -1690,7 +1690,7 @@ gb300-eks-amazonlinux-inference:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: cc455680b3a4eb1e69879579f296893c7d9860ffdc7a727cd254ed47ff9b6d77
+  008-nfd/values.yaml: 8d4d25bf24d206b8e075c0b296e143c48bb312c68aebcc12afe64e9491a86ede
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -1736,7 +1736,7 @@ gb300-eks-amazonlinux-inference:
   README.md: b3a14a9e201d87be620f77700b1c6d70a914f9efa02a6217dbce293b00f79f41
   UPGRADING.md: 627350cdf2e92e31479be7cdbc4b3d93657d4dc6a722ab4823c2f692f6ba60f9
   bundle-info.yaml: 0d7dde4d26279bc952b7f2ef9913dc7e6bf1f0ccbc1d305e462f8221e1c01287
-  checksums.txt: 72beb4e1ffaed398eec791c1791d508c189536f7990d62e67879e8e56647ba16
+  checksums.txt: b12f0cdbd1abd18a7ada834ed5741bbd982c45b49476d7ced52fa44ae6a3a152
   deploy.sh: 3a56cf0894dc38c3be14bce55134c3ef8660e4e79a574a768ce90ee3143a1732
   recipe.yaml: 29f283c4c814e2d8b9dcd61266d35fba6a23619e02cf6a0ab038853c12335dcd
 gb300-eks-ubuntu-inference-dynamo:
@@ -2662,7 +2662,7 @@ h100-eks-amazonlinux-inference:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: cc455680b3a4eb1e69879579f296893c7d9860ffdc7a727cd254ed47ff9b6d77
+  008-nfd/values.yaml: 8d4d25bf24d206b8e075c0b296e143c48bb312c68aebcc12afe64e9491a86ede
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -2703,7 +2703,7 @@ h100-eks-amazonlinux-inference:
   README.md: ac8d513d9e53fcbdbacd657d41c2e105f0e6a2ab4ced6788e931dc8687332af4
   UPGRADING.md: 627350cdf2e92e31479be7cdbc4b3d93657d4dc6a722ab4823c2f692f6ba60f9
   bundle-info.yaml: 509cecd684c8267b60261762c9c6e28825374786dc7c1bf771c058f13b84aaff
-  checksums.txt: dc1ae1a9cd16cdb45fb01c609fbe02b889130e7db237344c5cdcc6912859abeb
+  checksums.txt: 3968b8e7e787be698dcac936666068991d34c5891d88fe7b112fd66887b5ad46
   deploy.sh: 3a56cf0894dc38c3be14bce55134c3ef8660e4e79a574a768ce90ee3143a1732
   recipe.yaml: cf095dfbb4d40618f8bce1bd1a83e54690127988b0a8fadbbbe6f5a8e62ad9cc
 h100-eks-ubuntu-inference-dynamo:
@@ -4581,7 +4581,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   008-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
   008-nfd/upstream.env: 79ea8a9050af5d4ed35de7dec570bed452a46bfed94509b847b7afab428c661f
-  008-nfd/values.yaml: cc455680b3a4eb1e69879579f296893c7d9860ffdc7a727cd254ed47ff9b6d77
+  008-nfd/values.yaml: 8d4d25bf24d206b8e075c0b296e143c48bb312c68aebcc12afe64e9491a86ede
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -4622,7 +4622,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   README.md: 75dcc811f9bf69299ac22a06e4bd3d3431c0dbfb9e233c8f75307739643ec503
   UPGRADING.md: 627350cdf2e92e31479be7cdbc4b3d93657d4dc6a722ab4823c2f692f6ba60f9
   bundle-info.yaml: e365db2143e7f6503842c9e353b30bf3a08e2ca8241991f07329ed3797f24ef4
-  checksums.txt: 37bab1879b4b21a42ef26c06fb359e436e2321733df1f38902eca16884a5f104
+  checksums.txt: 062107baffd7e4f70efd407a8f850c717ec1f570e21bf6baa3add6ae7b90d3ba
   deploy.sh: 3a56cf0894dc38c3be14bce55134c3ef8660e4e79a574a768ce90ee3143a1732
   recipe.yaml: 3c41d1efd76cd9527342ed0aa4a33584710b0873944757c63ab13411943a93c2
 rtx-pro-6000-eks-ubuntu-inference-dynamo:

@@ -1043,7 +1043,7 @@ The explicit `false` on the operator-managed variants is deliberate rather than 
 
 The GKE-COS and OKE `gpuStack` profiles reference nvsentinel as `optional` ([#2978](https://github.com/NVIDIA/aicr/issues/2978)). They own `labeler.assumeDriverInstalled` (and, on OKE, the janitor GPU-reset settings) but not presence, so `--set nv-sentinel:enabled=false` removes the component — for example when NVSentinel is deployed outside AICR. When the bundle does include NVSentinel, the owned values are locked as on AKS. An externally deployed NVSentinel must set `labeler.assumeDriverInstalled` to match the cluster's `gpuStack` value itself; AICR does not verify it. A recipe generated before this change still locks presence, so regenerate it with `aicr recipe` before bundling without NVSentinel. NVSentinel is also optional on platforms with no `gpuStack` profile, such as EKS.
 
-AKS, GKE-COS, and OKE get the install-time profile lock; Kind, k0s, and RKE2 set the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
+AKS, GKE-COS, and OKE get the install-time profile lock; Kind, k0s, RKE2, and the EKS `os=amazonlinux` leaves set the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
 
 If you do need to set it yourself on an unlisted platform, it is an ordinary override:
 

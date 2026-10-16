@@ -60,9 +60,10 @@ spec:
             controllers:
               gpuReset:
                 resetJob: {hostDriverRootPath: /}
-    # nvidia-setup is Debian/Ubuntu-only. manifestFiles merge additively, so the
-    # inherited tuning.yaml cannot be cleared; disabling the component keeps
-    # nvidia-setup off AL2023 nodes.
+    # The base wires tuning-generic.yaml (nvidia-tuned only; no nvidia-setup).
+    # manifestFiles merge additively, so it cannot be cleared. nvidia-tuned is
+    # not validated on AL2023, so the component is disabled and host tuning
+    # must come from the AMI.
     - name: nodewright-customizations
       type: Helm
       overrides:
