@@ -464,6 +464,9 @@ WORK_DIR="$2"
 generate_bundle "$3"
 CHECK
     check "scheduling-${recipe_name}-bundle-stops" eq 1 "$rc"
+    rc=0
+    [[ -s "${FIXTURE_ROOT}/args" ]] || rc=1
+    check "scheduling-${recipe_name}-reaches-cli-stub" eq 0 "$rc"
     for path in node-feature-discovery.master.tolerations node-feature-discovery.gc.tolerations nats.podTemplate.merge.spec.tolerations; do
         rc=0
         grep -Fq "$path" "${FIXTURE_ROOT}/args" || rc=1
