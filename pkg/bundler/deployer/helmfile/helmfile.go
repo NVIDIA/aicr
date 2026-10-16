@@ -102,6 +102,11 @@ type Generator struct {
 	// charts/<chart>-<version>.tgz adjacent to a wrapper Chart.yaml).
 	VendorCharts bool
 
+	// Puller fetches upstream chart bytes when VendorCharts is set. nil
+	// resolves to a default *CLIChartPuller; tests inject a stub here
+	// without touching package state. Ignored when VendorCharts is false.
+	Puller localformat.ChartPuller
+
 	// Serial chains every release to its immediate predecessor via needs:,
 	// forming one linear apply chain instead of the default per-component
 	// chaining (which lets independent components in a sub-helmfile apply
@@ -144,7 +149,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Sort components by deployment order and build the localformat input.
 	sortedRefs := deployer.SortComponentRefsByDeploymentOrder(
 		g.RecipeResult.ComponentRefs, g.RecipeResult.DeploymentOrder)
-	lfComponents, namespaceByComponent := toLocalformatComponents(sortedRefs, g.ComponentValues, g.DynamicValues)
+	var chartDigests map[string]string
+	if g.VendorCharts {
+		var digestErr error
+		chartDigests, digestErr = deployer.ResolveChartDigests(ctx, g.RecipeResult.DataProvider(), sortedRefs)
+		if digestErr != nil {
+			return nil, digestErr
+		}
+	}
+	lfComponents, namespaceByComponent := toLocalformatComponents(sortedRefs, g.ComponentValues, g.DynamicValues, chartDigests)
 
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
@@ -153,6 +166,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
 		VendorCharts:           g.VendorCharts,
+		Puller:                 g.Puller,
 	})
 	if err != nil {
 		return nil, err
@@ -346,6 +360,7 @@ func toLocalformatComponents(
 	refs []recipe.ComponentRef,
 	values map[string]map[string]any,
 	dynamic map[string][]string,
+	chartDigests map[string]string,
 ) ([]localformat.Component, map[string]string) {
 
 	out := make([]localformat.Component, 0, len(refs))
@@ -359,6 +374,7 @@ func toLocalformatComponents(
 			ChartName:    chartName,
 			Version:      ref.Version,
 			IsOCI:        strings.HasPrefix(ref.Source, "oci://"),
+			ChartDigest:  chartDigests[ref.Name],
 			Tag:          ref.Tag,
 			Path:         ref.Path,
 			Values:       values[ref.Name],

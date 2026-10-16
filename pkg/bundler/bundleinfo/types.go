@@ -28,6 +28,28 @@ type BundleInfo struct {
 	Metadata   Metadata `json:"metadata" yaml:"metadata"`
 	Build      Build    `json:"build" yaml:"build"`
 	Layout     Layout   `json:"layout" yaml:"layout"`
+
+	// Warnings lists the non-blocking warnings the bundle run reported.
+	// Readers accept it before any producer writes it: a release whose strict
+	// reader predates the field rejects a record that carries it (ADR-022
+	// §3), so `aicr bundle` must not populate it until a release that reads
+	// it has shipped.
+	Warnings []Warning `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+}
+
+// Warning is one non-blocking warning from a bundle run. Code is stable, so
+// automation can surface, count or suppress a warning by it; Message is for
+// people and may change. Component names the recipe component the warning
+// concerns, when it concerns one.
+//
+// The strict reader covers this struct too, so its field set and the code
+// grammar validateWarnings enforces are fixed once a release that reads them
+// ships: adding a field, or widening the grammar, needs its own readers-first
+// release.
+type Warning struct {
+	Code      string `json:"code" yaml:"code"`
+	Component string `json:"component,omitempty" yaml:"component,omitempty"`
+	Message   string `json:"message" yaml:"message"`
 }
 
 // Metadata carries the identity of the build itself. Version is the aicr

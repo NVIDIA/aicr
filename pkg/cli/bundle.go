@@ -957,8 +957,9 @@ Package with explicit tag (overrides CLI version):
 	network access. Each vendored chart is recorded in provenance.yaml with
 	name, version, source URL, and SHA256. Trades the upstream CVE-yank
 	fail-loud signal for offline deployability — vendored bundles silently
-	install a frozen chart version even after upstream yank. Requires the
-	'helm' binary on PATH at bundle time.`,
+	install a frozen chart version even after upstream yank. A chart that keeps
+	its registry pin must match the registry's helm.defaultDigest when one is
+	set, or the bundle fails. Requires the 'helm' binary on PATH at bundle time.`,
 				Category: "Deployment",
 			},
 			&cli.BoolFlag{

@@ -442,20 +442,22 @@ UAT_NVSENTINEL_BREAKER_OFF="nvsentinel:fault-quarantine.circuitBreaker.enabled=f
 # NVSentinel mixin named by UAT_NVSENTINEL_MIXIN composed onto its leaf
 # overlay, so the faultinject phase can run Stage 2 (nvsentinel-quarantine) or
 # Stages 2 and 3 (nvsentinel-remediation) on real hardware (#2625). Unset is a
-# no-op: no shipped recipe composes either mixin.
+# no-op: no shipped recipe composes either mixin. nvsentinel-remediation brings
+# nvsentinel-health-events-analyzer with it, because the bundle fails live
+# remediation without the analyzer.
 #
 # The leaf is replaced through a --data overlay of the same name, the way the
 # KWOK lane composes KWOK_MIXINS; the empty registry merges into the embedded
 # one unchanged. The overlay is read from this checkout, so the aicr binary
 # must be built from the same tree: uat-run.yaml refuses the knob with a
-# released aicr_version. Bundle and validate need no --data, because both
+# released aicr_version. Bundle and validate need no --data, because these
 # mixins reference only embedded components.
 uat_compose_nvsentinel_mixin() {
-  local mixin="${UAT_NVSENTINEL_MIXIN:-}" want
+  local mixin="${UAT_NVSENTINEL_MIXIN:-}" want mixins
   case "${mixin}" in
     "") return 0 ;;
-    nvsentinel-quarantine) want=quarantine ;;
-    nvsentinel-remediation) want=remediation ;;
+    nvsentinel-quarantine) want=quarantine mixins="${mixin}" ;;
+    nvsentinel-remediation) want=remediation mixins="${mixin},nvsentinel-health-events-analyzer" ;;
     *)
       echo "::error::UAT_NVSENTINEL_MIXIN='${mixin}' is not nvsentinel-quarantine or nvsentinel-remediation" >&2
       return 1
@@ -474,10 +476,10 @@ uat_compose_nvsentinel_mixin() {
   mkdir -p "${data_dir}/overlays"
   printf '%s\n' 'kind: ComponentRegistry' 'apiVersion: aicr.run/v1beta1' \
     'metadata:' '  name: uat-nvsentinel-mixin' 'components: []' > "${data_dir}/registry.yaml"
-  MIXIN="${mixin}" yq '.spec.mixins = ((.spec.mixins // []) + [strenv(MIXIN)])' \
+  MIXINS="${mixins}" yq '.spec.mixins = ((.spec.mixins // []) + (strenv(MIXINS) | split(",")))' \
     "${overlay}" > "${data_dir}/overlays/${leaf}.yaml"
 
-  echo "composing ${mixin} onto ${leaf}"
+  echo "composing ${mixins} onto ${leaf}"
   "${AICR_BIN}" recipe --config "${config}" --data "${data_dir}"
   test -f recipe.yaml
 

@@ -727,6 +727,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "409":
+          description: A vendored chart's archive does not match the digest its registry entry pins (helm.defaultDigest)
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "413":
           description: Request body exceeds the maximum allowed size
           headers:

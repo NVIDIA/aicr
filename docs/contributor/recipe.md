@@ -106,7 +106,7 @@ components:
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper under both vendored and non-vendored layouts (manifests create CRs of CRDs the chart installs) |
 
 `HelmConfig`: `defaultRepository`, `defaultChart`, `defaultVersion`,
-`defaultNamespace`. `KustomizeConfig`: `defaultSource`, `defaultPath`,
+`defaultDigest`, `defaultNamespace`. `KustomizeConfig`: `defaultSource`, `defaultPath`,
 `defaultTag`. A component must have *either* `helm` or `kustomize`,
 not both.
 
@@ -347,7 +347,7 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
 `nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
 `nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
-`npd`.
+`nvsentinel-health-events-analyzer`, `npd`.
 
 **Mixin rules:**
 

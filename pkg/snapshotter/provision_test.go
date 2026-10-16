@@ -119,16 +119,15 @@ func TestWriteAgentRoleManifests_WritesReviewableDirectory(t *testing.T) {
 }
 
 // TestWriteAgentRoleManifests_DiscoverNetwork asserts the flag is what decides
-// whether the written ClusterRole carries the mutating discovery rules, and
-// that the plain form carries none of them.
+// whether the written ClusterRole carries the nicdevices read, and that
+// neither form carries a mutating rule.
 func TestWriteAgentRoleManifests_DiscoverNetwork(t *testing.T) {
 	tests := []struct {
 		name            string
 		discoverNetwork bool
-		wantMutating    bool
 	}{
 		{name: "plain grant stays read-only", discoverNetwork: false},
-		{name: "discovery grant adds the mutating rules", discoverNetwork: true, wantMutating: true},
+		{name: "discovery grant adds only the nicdevices read", discoverNetwork: true},
 	}
 
 	for _, tt := range tests {
@@ -152,15 +151,21 @@ func TestWriteAgentRoleManifests_DiscoverNetwork(t *testing.T) {
 
 			mutating := map[string]string{"nodes": "patch", "pods/exec": "create", "customresourcedefinitions": "create"}
 			for resource, verb := range mutating {
-				if got := clusterRoleGrants(cr, resource, verb); got != tt.wantMutating {
-					t.Errorf("%s: %s = %v, want %v", resource, verb, got, tt.wantMutating)
+				if clusterRoleGrants(cr, resource, verb) {
+					t.Errorf("%s: %s granted; discovery is read-only", resource, verb)
 				}
 			}
+			if got := clusterRoleGrants(cr, "nicdevices", "list"); got != tt.discoverNetwork {
+				t.Errorf("nicdevices: list = %v, want %v", got, tt.discoverNetwork)
+			}
 
-			// The header must explain the mutating rules, not merely carry
-			// them: reading the file is how an operator consents to them.
-			if strings.Contains(string(body), "nodes: patch") != tt.wantMutating {
-				t.Errorf("header explains nodes: patch = %v, want %v", !tt.wantMutating, tt.wantMutating)
+			// The header must explain the extra read, not merely carry it:
+			// reading the file is how an operator consents to it.
+			if strings.Contains(string(body), "nodes: patch") {
+				t.Error("header mentions nodes: patch; discovery is read-only")
+			}
+			if strings.Contains(string(body), "nicdevices") != tt.discoverNetwork {
+				t.Errorf("header explains nicdevices = %v, want %v", !tt.discoverNetwork, tt.discoverNetwork)
 			}
 		})
 	}

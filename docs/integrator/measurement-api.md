@@ -685,7 +685,11 @@ subtypes:
 
 - **`identity`** — group identity and high-level facts. Strings (machineType,
   gpuType, linkType, identifier, nodeSelector) live in `context`. Numeric
-  facts (pf-count, rail-count) live in `data`.
+  facts (pf-count, rail-count) live in `data`. When the source carries no
+  `identifier` (l8k's read-only discovery never assigns one), the collector
+  derives the same value l8k's mutating path would have — from machineType
+  and gpuType — so the key is stable across both paths; it is omitted only
+  when either input is also empty.
 - **`capabilities`** — boolean cluster capabilities (sriov, rdma, ib) as
   scalar `Reading` values in `data`.
 - **`pfs`** — per-PF records as `items`. Per-PF descriptive identifiers

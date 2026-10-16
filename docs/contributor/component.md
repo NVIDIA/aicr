@@ -132,6 +132,7 @@ One-liner per field:
 | `helm.defaultRepository` | Helm repo URL injected when an overlay leaves it empty |
 | `helm.defaultChart` | Chart name (e.g. `nvidia/gpu-operator`) |
 | `helm.defaultVersion` | Default chart version |
+| `helm.defaultDigest` | Optional `sha256:<hex>` of the pinned chart archive (the `.tgz`, for OCI charts too). `--vendor-charts` refuses a pulled chart whose bytes differ, for refs that keep the registry's source, chart and version |
 | `helm.defaultNamespace` | Install namespace |
 | `kustomize.defaultSource` | Git or OCI source URL |
 | `kustomize.defaultPath` | Subpath within the source |

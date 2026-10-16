@@ -130,7 +130,7 @@ The `faultinject` step runs after `verify` on every cloud lane. It writes a synt
 
 A stage that does not apply is recorded as `skipped` in `faultinject-result.json`, not failed. The gates are read from `bundle/recipe.yaml`, the recipe the bundle deployed. No shipped recipe composes either mixin, so nightly cells run Stage 1 only.
 
-**Running Stages 2 and 3.** Dispatch with `nvsentinel_remediation=quarantine` or `remediation`. `phase_prep` then composes the matching mixin onto the cell's leaf overlay through a `--data` overlay of the same name, and fails if the re-resolved recipe does not deploy that step:
+**Running Stages 2 and 3.** Dispatch with `nvsentinel_remediation=quarantine` or `remediation`. `phase_prep` then composes the matching mixin onto the cell's leaf overlay through a `--data` overlay of the same name, and fails if the re-resolved recipe does not deploy that step. `remediation` also composes `nvsentinel-health-events-analyzer`, which `aicr bundle` requires beside live remediation:
 
 ```bash
 # Stages 1-3 on AWS H100 training: cordon, janitor reboot, uncordon

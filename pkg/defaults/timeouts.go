@@ -47,16 +47,18 @@ const (
 	TopologyListPageSize = int64(500)
 )
 
-// Network topology collector constants. Network discovery delegates to the
-// k8s-launch-kit library, which boots a NIC-configuration daemon and pod-exec
-// probes each east-west PF — both bounded above by l8k's own internal
-// timeouts. CollectorNetworkTimeout caps the worst case as a defense in depth
-// so a hung pod exec can't outlive the snapshot.
+// Network topology collector constants. Network discovery delegates to
+// k8s-launch-kit's read-only path: a poll for an already-installed
+// nic-configuration-daemon's pods to report Ready, then a handful of List
+// calls. l8k bounds that poll at 5 minutes on its own (the collector hands it
+// a deadline-free context so that bound applies — NVIDIA/k8s-launch-kit#305),
+// so the collector's bound must sit above it with headroom for the Lists.
+// Job mode's --timeout defaults to 5 minutes; on clusters where some daemon
+// pods are not Ready, raise it above this value or the Job deadline fires
+// first.
 const (
 	// CollectorNetworkTimeout is the upper bound for the network collector.
-	// Longer than the topology timeout because l8k discovery includes
-	// DaemonSet rollout + per-node pod-exec probes.
-	CollectorNetworkTimeout = 10 * time.Minute
+	CollectorNetworkTimeout = 7 * time.Minute
 
 	// MaxClusterConfigBytes caps the size of an --cluster-config YAML file
 	// the collector will read into memory. Used as the io.LimitReader bound

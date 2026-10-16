@@ -196,17 +196,19 @@ func TestConcurrentRuns(t *testing.T) {
 			t.Fatalf("run B ClusterRole not found: %v", err)
 		}
 
-		if clusterRoleHasRule(crA.Rules, "pods/exec", "create") {
-			t.Error("non-discovery run A's ClusterRole grants pods/exec create; expected none")
+		for _, cr := range []*rbacv1.ClusterRole{crA, crB} {
+			if clusterRoleHasRule(cr.Rules, "pods/exec", "create") {
+				t.Errorf("%s grants pods/exec create; discovery is read-only", cr.Name)
+			}
+			if clusterRoleHasRule(cr.Rules, "nodes", "patch") {
+				t.Errorf("%s grants nodes patch; discovery is read-only", cr.Name)
+			}
 		}
-		if clusterRoleHasRule(crA.Rules, "nodes", "patch") {
-			t.Error("non-discovery run A's ClusterRole grants nodes patch; expected none")
+		if clusterRoleHasRule(crA.Rules, "nicdevices", "list") {
+			t.Error("non-discovery run A's ClusterRole grants nicdevices list; expected none")
 		}
-		if !clusterRoleHasRule(crB.Rules, "pods/exec", "create") {
-			t.Error("discovery run B's ClusterRole is missing pods/exec create")
-		}
-		if !clusterRoleHasRule(crB.Rules, "nodes", "patch") {
-			t.Error("discovery run B's ClusterRole is missing nodes patch")
+		if !clusterRoleHasRule(crB.Rules, "nicdevices", "list") {
+			t.Error("discovery run B's ClusterRole is missing nicdevices list")
 		}
 	})
 

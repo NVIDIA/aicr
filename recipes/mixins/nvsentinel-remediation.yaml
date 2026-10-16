@@ -25,7 +25,8 @@
 # Mutually exclusive with nvsentinel-observe and nvsentinel-quarantine.
 # Adds the same Percona datastore as nvsentinel-observe, with the same
 # prerequisites, and needs metadata-collector for the GPU UUID a reset is
-# scoped to (CheckNVSentinelRemediationPipelineCoherent).
+# scoped to, and nvsentinel-health-events-analyzer composed beside it for the
+# MultipleRemediations rule (CheckNVSentinelRemediationPipelineCoherent).
 
 kind: RecipeMixin
 apiVersion: aicr.run/v1beta1

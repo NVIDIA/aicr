@@ -2609,6 +2609,9 @@ const (
 	nvsentinelFaultRemediationEnabledPath = "global.faultRemediation.enabled"
 	nvsentinelJanitorEnabledPath          = "global.janitor.enabled"
 	nvsentinelJanitorProviderEnabledPath  = "global.janitorProvider.enabled"
+	nvsentinelAnalyzerEnabledPath         = "global.healthEventsAnalyzer.enabled"
+	nvsentinelMultipleRemediationsPath    = "health-events-analyzer.enableMultipleRemediationsRule"
+	nvsentinelAnalyzerConfigPath          = "health-events-analyzer.config"
 	nvsentinelResetJobRuntimeClassPath    = "janitor.config.controllers.gpuReset.resetJob.runtimeClassName"
 	nvsentinelResetJobHostDriverRootPath  = "janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath"
 	nvsentinelResetJobDriverRootPath      = "janitor.config.controllers.gpuReset.resetJob.driverRoot"
@@ -2645,16 +2648,21 @@ func nvsentinelDryRun(values map[string]any) (dryRun, wellFormed bool) {
 // on. Each subchart renders on its own condition and none checks the
 // others, so every broken combination below deploys cleanly:
 //
-//   - fault-quarantine, node-drainer and fault-remediation read health
-//     events from a datastore: a global.datastore.provider of mongodb or
-//     postgresql, and, when it is nvsentinel-mongodb's, that component and
-//     psmdb-operator deployed alongside (see nvsentinelDatastoreViolations).
+//   - fault-quarantine, node-drainer, fault-remediation and
+//     health-events-analyzer read health events from a datastore: a
+//     global.datastore.provider of mongodb or postgresql, and, when it is
+//     nvsentinel-mongodb's, that component and psmdb-operator deployed
+//     alongside (see nvsentinelDatastoreViolations).
 //   - each stage acts only on events the one before it marked, so
 //     node-drainer needs fault-quarantine and fault-remediation needs
 //     node-drainer.
 //   - without janitor nothing acts on the GPUReset/RebootNode requests
 //     fault-remediation creates, yet it labels the node
 //     remediation-succeeded on creating one.
+//   - live fault-remediation needs health-events-analyzer with its
+//     MultipleRemediations rule on: maxRemediationAttempts resets when a
+//     node leaves quarantine, so that rule is the only signal that a node is
+//     repaired again and again without the fault going away.
 //   - janitor reboots through janitor-provider, and its GPU reset Job must
 //     run where the GPU Operator puts the driver and its RuntimeClass (see
 //     nvsentinelResetJobViolations).
@@ -2691,6 +2699,7 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	remediation := nvsentinelSubchartRenders(values, "faultRemediation")
 	janitor := nvsentinelSubchartRenders(values, "janitor")
 	janitorProvider := nvsentinelSubchartRenders(values, "janitorProvider")
+	analyzer := nvsentinelSubchartRenders(values, "healthEventsAnalyzer")
 
 	// Dynamic guard: a dynamic path matters only when a rule reading it can
 	// still fire, i.e. when that rule's stage renders or its toggle is
@@ -2700,20 +2709,24 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	}
 	guarded := []string{
 		nvsentinelFaultQuarantineEnabledPath, nvsentinelNodeDrainerEnabledPath,
-		nvsentinelFaultRemediationEnabledPath, nvsentinelJanitorEnabledPath,
+		nvsentinelFaultRemediationEnabledPath, nvsentinelJanitorEnabledPath, nvsentinelAnalyzerEnabledPath,
 	}
 	remediationCanRun := remediation || dynamic(nvsentinelFaultRemediationEnabledPath)
 	readerCanRun := remediationCanRun || quarantine || dynamic(nvsentinelFaultQuarantineEnabledPath) ||
-		drainer || dynamic(nvsentinelNodeDrainerEnabledPath)
+		drainer || dynamic(nvsentinelNodeDrainerEnabledPath) || analyzer || dynamic(nvsentinelAnalyzerEnabledPath)
 	if readerCanRun {
 		guarded = append(guarded, nvsentinelMongodbStoreEnabledPath, nvsentinelDatastoreProviderPath,
 			nvsentinelDatastoreSecretPath, nvsentinelDatastoreAuthMechPath, nvsentinelDatastoreClientCertKey)
 	}
 	if remediationCanRun {
-		guarded = append(guarded, nvsentinelMetadataCollectorEnabledPath)
-		// dryRun only feeds the janitor rule, which cannot fire while
-		// janitor is statically on.
-		if !janitor || dynamic(nvsentinelJanitorEnabledPath) {
+		guarded = append(guarded, nvsentinelMetadataCollectorEnabledPath, nvsentinelMultipleRemediationsPath,
+			nvsentinelAnalyzerConfigPath)
+		// dryRun only feeds the janitor and analyzer rules, which cannot
+		// fire while janitor is statically on and the analyzer statically
+		// runs MultipleRemediations from the chart's own rule config.
+		if !janitor || dynamic(nvsentinelJanitorEnabledPath) || !analyzer || dynamic(nvsentinelAnalyzerEnabledPath) ||
+			len(nvsentinelMultipleRemediationsViolations(componentName, values, analyzer)) > 0 {
+
 			guarded = append(guarded, nvsentinelDryRunPath)
 		}
 	}
@@ -2725,7 +2738,8 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys, guarded,
 		"decides whether a remediation stage runs or whether what it depends on is present, "+
 			"so an install-time edit can deploy the pipeline without its datastore, the stage before "+
-			"it, janitor, janitor-provider, GPU inventory, or what the GPU reset Job needs")
+			"it, janitor, janitor-provider, GPU inventory, what the GPU reset Job needs, or the "+
+			"analyzer rule that reports repeated remediation")
 	if resetCanRun {
 		// The reset rules also read the GPU Operator's driver, runtime and
 		// operand settings, so an install-time edit there undoes them too.
@@ -2747,8 +2761,16 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	}
 
 	var errs []error
-	if quarantine || drainer || remediation {
+	if quarantine || drainer || remediation || analyzer {
 		errs = append(errs, nvsentinelDatastoreViolations(recipeResult, bundlerConfig, componentName, values)...)
+	}
+	// NVSentinel v1.26.0's PostgreSQL client has no $lookup or $replaceRoot,
+	// which four of the analyzer's XID 74 rules use.
+	if provider, _, _ := resolvedStringValue(values, nvsentinelDatastoreProviderPath); analyzer && provider == "postgresql" {
+		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: health-events-analyzer is enabled on a postgresql datastore -- NVSentinel's "+
+				"PostgreSQL client cannot run the aggregation stages several of its rules use. Use mongodb, as the "+
+				"remediation step mixins do", componentName)))
 	}
 	if drainer && !quarantine {
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
@@ -2777,6 +2799,9 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 				"nvsentinel-remediation mixin, or nvsentinel-quarantine to cordon and drain without "+
 				"remediating", componentName, nvsentinelDryRunPath)))
 	}
+	if remediation && dryRunWellFormed && !dryRun {
+		errs = append(errs, nvsentinelMultipleRemediationsViolations(componentName, values, analyzer)...)
+	}
 	if janitor && !janitorProvider {
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q: janitor is enabled without janitor-provider, which performs its reboots -- "+
@@ -2798,6 +2823,48 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	}
 
 	return nil, errs
+}
+
+// nvsentinelMultipleRemediationsViolations requires health-events-analyzer
+// with its MultipleRemediations rule on beside live fault-remediation. The
+// chart interpolates the rule toggle into the analyzer's TOML config
+// unchecked, so absent is the chart default, on, and only a bool is usable.
+// The rule itself lives in that config, a Helm template string a values
+// override can replace. A replacement is rejected outright: its effective
+// rules exist only after Helm renders it and TOML parses the result, so no
+// text scan can prove it still evaluates the rule.
+func nvsentinelMultipleRemediationsViolations(componentName string, values map[string]any, analyzer bool) []error {
+	if !analyzer {
+		return []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: fault-remediation is live without health-events-analyzer -- "+
+				"fault-remediation.maxRemediationAttempts resets when a node leaves quarantine, so only the "+
+				"analyzer's MultipleRemediations rule reports a node repaired again and again without the fault "+
+				"going away. Compose the nvsentinel-health-events-analyzer mixin", componentName))}
+	}
+	if _, present := component.GetValueByPath(values, nvsentinelAnalyzerConfigPath); present {
+		return []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: fault-remediation is live with %s replacing the analyzer's rule config, "+
+				"which AICR cannot verify still evaluates MultipleRemediations, the only signal that remediation "+
+				"is not fixing a node. Keep the chart's rule config and choose rules with its "+
+				"health-events-analyzer.enable<Rule>Rule toggles", componentName, nvsentinelAnalyzerConfigPath))}
+	}
+	raw, present := component.GetValueByPath(values, nvsentinelMultipleRemediationsPath)
+	if !present {
+		return nil
+	}
+	on, isBool := raw.(bool)
+	switch {
+	case !isBool:
+		return []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s is not a bool -- the chart writes it into the analyzer's rule config "+
+				"unchecked. Set it to true", componentName, nvsentinelMultipleRemediationsPath))}
+	case !on:
+		return []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: fault-remediation is live with %s=false -- MultipleRemediations is the "+
+				"only signal that remediation is not fixing a node. Set it to true", componentName,
+				nvsentinelMultipleRemediationsPath))}
+	}
+	return nil
 }
 
 // nvsentinelResetJobViolations checks janitor's GPU reset Job: its driver
@@ -3095,7 +3162,7 @@ func nvsentinelDatastoreViolations(recipeResult *recipe.RecipeResult, bundlerCon
 	embedded := nvsentinelSubchartRenders(values, "mongodbStore")
 	if embedded {
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("component %q: %s is on with fault-quarantine, node-drainer or fault-remediation -- "+
+			fmt.Sprintf("component %q: %s is on with a remediation stage or health-events-analyzer -- "+
 				"the embedded MongoDB is not supported here. Use a remediation step mixin, which bundles "+
 				"Percona separately, or set it to false and configure %s", componentName,
 				nvsentinelMongodbStoreEnabledPath, nvsentinelDatastoreProviderPath)))
@@ -3110,7 +3177,7 @@ func nvsentinelDatastoreViolations(recipeResult *recipe.RecipeResult, bundlerCon
 		return errs
 	case !providerSet && providerIsString:
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("component %q: fault-quarantine, node-drainer or fault-remediation is enabled with no "+
+			fmt.Sprintf("component %q: a remediation stage or health-events-analyzer is enabled with no "+
 				"datastore -- they read health events from it and crash-loop without one. Use a remediation "+
 				"step mixin or set %s to mongodb or postgresql", componentName, nvsentinelDatastoreProviderPath)))
 		return errs
@@ -3121,7 +3188,7 @@ func nvsentinelDatastoreViolations(recipeResult *recipe.RecipeResult, bundlerCon
 		}
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q: %s is %s -- NVSentinel supports only \"mongodb\" and \"postgresql\", "+
-				"and fault-quarantine, node-drainer and fault-remediation crash-loop on any other provider",
+				"and the remediation stages and health-events-analyzer crash-loop on any other provider",
 				componentName, nvsentinelDatastoreProviderPath, got)))
 		return errs
 	}

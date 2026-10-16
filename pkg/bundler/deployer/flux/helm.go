@@ -371,17 +371,19 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	compDir string, dependsOn []DependsOnRef,
 	gitSources map[string]*GitRepoSourceData,
 	puller localformat.ChartPuller,
+	chartDigest string,
 	output *deployer.Output) (bool, localformat.VendorRecord, []string, error) {
 
 	chartName := ref.EffectiveChart()
 
 	// Build localformat.Component for the puller.
 	lfc := localformat.Component{
-		Name:       ref.Name,
-		Repository: ref.Source,
-		ChartName:  chartName,
-		Version:    ref.Version,
-		IsOCI:      strings.HasPrefix(ref.Source, "oci://"),
+		Name:        ref.Name,
+		Repository:  ref.Source,
+		ChartName:   chartName,
+		Version:     ref.Version,
+		IsOCI:       strings.HasPrefix(ref.Source, "oci://"),
+		ChartDigest: chartDigest,
 	}
 
 	// Pull upstream chart tarball.
@@ -391,6 +393,12 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 			pullErr, errors.ErrCodeInternal,
 			fmt.Sprintf("pull vendored chart for component %q", ref.Name))
 	}
+	if digestErr := localformat.VerifyChartDigest(lfc, tgz); digestErr != nil {
+		return false, localformat.VendorRecord{}, nil, digestErr
+	}
+	// provenance.yaml must name the bytes written below, not whatever the
+	// puller reported.
+	rec.SHA256 = localformat.ArchiveSHA256(tgz)
 
 	// Write charts/<tarball>.tgz.
 	chartsDir, err := deployer.SafeJoin(compDir, "charts")

@@ -72,11 +72,12 @@ jobs:
   test:
     name: NVSentinel Slinky Drainer E2E
     runs-on: ubuntu-latest
-    # The script's bounded waits sum to ~74 minutes worst case (node Ready 2,
-    # worker 3, cert-manager 10, Percona datastore 15, plugin and nvsentinel
-    # rollout 15, event delivery 3, pipeline 6 polls of 4 plus a 45s hold,
-    # proto fetch 1), before kind create, go build and the installs.
-    timeout-minutes: 90
+    # The script's bounded waits sum to ~84 minutes worst case (node Ready 2,
+    # worker 3, cert-manager 10, Percona datastore 15, the CRD release 10,
+    # plugin and nvsentinel rollout 15, event delivery 3, pipeline 6 polls of 4
+    # plus a 45s hold, proto fetch 1), before kind create, go build and the
+    # installs.
+    timeout-minutes: 100
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
