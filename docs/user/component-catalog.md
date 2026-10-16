@@ -127,13 +127,13 @@ nfd-worker publishes node labels, not raw hardware features. Every recipe that d
 
 nfd-master caches one `NodeFeature` per node. With raw features published, each object was about 334 KB on GB300 nodes, mostly the kernel config, and nfd-master ran out of memory on a 1720-node cluster. On a kind node the published spec drops from 64,709 bytes to 2,979 bytes; `kernel.config` and `kernel.enabledmodule` alone were 82% of it.
 
-The trade-off is that, among the features nfd-worker publishes, cluster-side `NodeFeatureRule` and `NodeFeatureGroup` objects can only match `kernel.loadedmodule`; features that other agents publish in their own `NodeFeature` objects (for example slinky-topograph with `engine.name: nfd`) are unaffected. AICR's own rules run in nfd-worker instead: recipes that ship network-operator add an nfd-worker rule (`components/nfd/values-nvidia-nics.yaml`, or `values-nvidia-nics-aks.yaml` on AKS) that labels NVIDIA networking nodes `feature.node.kubernetes.io/pci-15b3.present=true`. network-operator's own rule (on AKS, AICR's `nfd-network-rule` manifest instead) stays for one release so the label is not dropped during an upgrade (Flux on AKS is the exception; see the last item below). Once a node's worker stops publishing `pci.*`, those rules match nothing on that node, and a later release removes them. Upgrade through this release before taking that later one, or let the nfd-worker rollout finish before network-operator syncs; otherwise nodes whose nfd-worker has not restarted lose the label.
+The trade-off is that, among the features nfd-worker publishes, cluster-side `NodeFeatureRule` and `NodeFeatureGroup` objects can only match `kernel.loadedmodule`; features that other agents publish in their own `NodeFeature` objects (for example slinky-topograph with `engine.name: nfd`) are unaffected. AICR's own rules run in nfd-worker instead: recipes that ship network-operator add an nfd-worker rule (`components/nfd/values-nvidia-nics.yaml`, or `values-nvidia-nics-aks.yaml` on AKS) that labels NVIDIA networking nodes `feature.node.kubernetes.io/pci-15b3.present=true`. network-operator's own rule (on AKS, AICR's `nfd-network-rule` manifest instead) stays for one release so the label is not dropped during an upgrade. Once a node's worker stops publishing `pci.*`, those rules match nothing on that node, and a later release removes them. Upgrade through this release before taking that later one, or let the nfd-worker rollout finish before network-operator syncs; otherwise nodes whose nfd-worker has not restarted lose the label.
 
 - **Your own NodeFeatureRules:** publish the features they read again, for example `--set-json 'nfd:worker.config.core.noPublishFeatures=["kernel.config","kernel.enabledmodule"]'` keeps everything except the two largest keys.
 - **Your own nfd-worker rules:** `worker.config.sources.custom` is a list, and a list override replaces it. Include the NIC rule from the values file above when you set it on a recipe that ships network-operator.
 - **Custom overlays that add network-operator:** select `components/nfd/values-nvidia-nics.yaml` (`values-nvidia-nics-aks.yaml` on AKS) as nfd's `valuesFile` in the same overlay, include its rule in a `worker.config.sources.custom` override, or publish `pci.*` again; with none of these, nothing labels the NIC nodes once nfd-worker restarts. `aicr bundle` warns in both directions: network-operator without the rule, and the rule without network-operator, for example after `--set networkoperator:enabled=false` without `--set-json 'nfd:worker.config.sources.custom=[]'`.
 - **k8s-nim-operator `nfd.nodeFeatureRules.deviceID`:** reads `pci.device`, so it labels nothing unless `pci.*` is published again.
-- **Upgrading a running cluster:** on every non-AKS recipe, and on AKS with the helm, helmfile, argocd and argocd-helm deployers (which ship the AKS rule as a plain resource), the label stays on every node during the upgrade, whatever order the deployer applies components in, because this release keeps the cluster-side rules. Until a node's nfd-worker restarts, the old rule labels the node; the worker's first write after the restart drops `pci.device` and adds the label in the same update. Under Flux on AKS, the `nfd-network-rule` manifest keeps its Helm hook annotations, so each `network-operator-post` upgrade deletes and recreates it, and nodes whose nfd-worker has not restarted yet can lose the label for about a second. Flux recreates the AKS NicClusterPolicy the same way on every upgrade, so this exposure predates this release; this release narrows it to the nodes whose worker has not restarted.
+- **Upgrading a running cluster:** the label stays on every node during the upgrade, whatever order the deployer applies components in, because this release keeps the cluster-side rules. Until a node's nfd-worker restarts, the old rule labels the node; the worker's first write after the restart drops `pci.device` and adds the label in the same update. Earlier bundles shipped the AKS `nfd-network-rule` manifest as a Helm hook that Flux deleted and recreated on every `network-operator-post` upgrade; that is gone (see the `network-operator` upgrade note below), and a Flux cluster coming from such a bundle follows that note.
 
 ### NFD Permanent Removal
 
@@ -1950,9 +1950,23 @@ the release manifest, and the first upgrade across this change has to adopt it:
 | `nfd-ocp` | `NodeFeatureDiscovery/nfd-instance` in `openshift-nfd` | OpenShift |
 
 The `HelmRelease` objects live in the namespace given by `--flux-namespace`
-(`flux-system` by default); substitute it in the commands below. Fresh installs
-are not affected, and this is not a component version boundary, so
-`aicr upgrade-check` does not report it.
+(`flux-system` by default); substitute it in the commands below. This is not
+a component version boundary, so `aicr upgrade-check` does not report it.
+
+Fresh installs apply the new spec directly, and the change does not make the
+release wait on it. helm-controller waits for release members to be Ready
+under `spec.timeout` (5m by default) and remediates a failed install only by
+uninstalling, while network-operator holds `NicClusterPolicy` at `Ready=False`
+until every component, OFED included, is up. The flux deployer therefore sets
+`install.disableWait` and `upgrade.disableWait` on every chart it generates
+from recipe manifests, so `network-operator-post` succeeds once the policy is
+applied and `gpu-operator`, which depends on it, is not held back. Hooks were
+never waited on, so this matches the previous behavior; watch the policy
+itself, not the release, to know when the fabric is ready:
+
+```bash
+kubectl get nicclusterpolicy nic-cluster-policy -o jsonpath='{.status.state}{"\n"}'
+```
 
 Whether the adoption applies the new spec depends on how helm-controller
 applies the release. `spec.upgrade.serverSideApply` defaults to `auto`, which
@@ -1974,8 +1988,10 @@ reuses the apply method of the previous release:
 
 For the second case, set `spec.upgrade.serverSideApply: enabled` on each
 affected `HelmRelease` before reconciling the first bundle without the hooks.
-This needs helm-controller v1.5.0 or later, with take-ownership left at its
-default. AICR does not emit the field, and the bundle's own files are generated
+The field exists from helm-controller v1.5.0, which Flux v2.8.0 ships; Flux
+v2.7 ships v1.4.0 and rejects it. A cluster on Flux v2.7 upgrades Flux first,
+then reconciles the first bundle without the hooks, with take-ownership left
+at its default. AICR does not emit the field, and the bundle's own files are generated
 and checksummed, so do not edit them: `aicr verify` fails closed on a modified
 bundle, OCI-pushed bundles have no file to edit, and the next bundle regenerates
 them anyway. Add the patch to the Flux `Kustomization` you own that applies the

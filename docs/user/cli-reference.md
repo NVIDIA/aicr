@@ -2974,12 +2974,13 @@ Raw manifests (manifest-only components and mixed-component `-post` folders) are
 
 When using `--deployer flux` with OCI output (`--output oci://...`), AICR generates ArtifactGenerator and ExternalArtifact CRs instead of GitRepository sources for local-chart components. This allows Flux to reconcile HelmReleases directly from OCI artifacts without a Git repository.
 
-**Prerequisites (Flux v2.7+):**
+**Prerequisites (Flux v2.8+):**
 
 - **source-watcher controller** must be deployed (`source.extensions.fluxcd.io`). This controller watches ArtifactGenerator CRs and creates ExternalArtifact objects.
 - **ExternalArtifact=true feature gate** must be enabled on helm-controller. This allows HelmRelease CRs to reference ExternalArtifact objects via `spec.chartRef`.
+- **helm-controller v1.5.0 or later**, which Flux v2.8.0 ships. The [`network-operator` upgrade note](component-catalog.md) relies on its `spec.upgrade.serverSideApply` field.
 
-Without both prerequisites, bundles generate successfully but HelmReleases will not reconcile at deploy time.
+Without these prerequisites, bundles generate successfully but HelmReleases will not reconcile at deploy time.
 
 **Configuration flags:**
 

@@ -10,14 +10,29 @@ spec:
   targetNamespace: {{ .TargetNamespace }}
   install:
     createNamespace: true
-{{- if .UpgradeCRDs }}
-  # This component solely owns the CRDs it ships (registry: ownsCRDs), so
-  # replacing them on upgrade cannot race another release. Without this,
-  # helm-controller's spec.upgrade.crds default of Skip leaves the schema
-  # installed on day one in place while a new controller runs against it.
-  # Components that share CRDs deliberately omit this. See NVIDIA/aicr#2264.
+{{- if .DisableWait }}
+    # This chart holds recipe manifests, mostly operator CRs. Their
+    # controllers take minutes to converge (a NicClusterPolicy builds the
+    # DOCA driver), helm-controller's kstatus wait treats Ready=False as in
+    # progress, and a failed install is only retried by uninstalling. Waiting
+    # would fail the release at the default 5m timeout and block every
+    # dependent; hooks were never waited on, so this keeps the prior
+    # contract. See NVIDIA/aicr#2585.
+    disableWait: true
+{{- end }}
+{{- if or .UpgradeCRDs .DisableWait }}
   upgrade:
+{{- if .UpgradeCRDs }}
+    # This component solely owns the CRDs it ships (registry: ownsCRDs), so
+    # replacing them on upgrade cannot race another release. Without this,
+    # helm-controller's spec.upgrade.crds default of Skip leaves the schema
+    # installed on day one in place while a new controller runs against it.
+    # Components that share CRDs deliberately omit this. See NVIDIA/aicr#2264.
     crds: CreateReplace
+{{- end }}
+{{- if .DisableWait }}
+    disableWait: true
+{{- end }}
 {{- end }}
   chart:
     spec:
