@@ -139,12 +139,13 @@ The trade-off is that, among the features nfd-worker publishes, cluster-side `No
 
 Uninstalling nfd does not clean up the nodes. The `feature.node.kubernetes.io/*` labels, the labels NodeFeatureRules created, NFD-managed extended resources and taints, and the `nfd.node.kubernetes.io/*` annotations stay on every node indefinitely, because AICR disables the chart's post-delete prune hook.
 
-To retire nfd permanently, first uninstall every component that selects on those labels (gpu-operator, network-operator, nvidia-dra-driver-gpu). Then re-enable the hook for the final uninstall, so its Job runs `nfd-master -prune` against every node. Regenerate the bundle with every flag the original bundle used, adding only `--set nfd:postDeleteCleanup=true`. A dropped flag falls back to its default, so for example an `argocd` bundle regenerated without its `--repo` points its Applications at a placeholder repository:
+To retire nfd permanently, first uninstall every component that selects on those labels (gpu-operator, network-operator, nvidia-dra-driver-gpu). Then re-enable the hook for the final uninstall, so its Job runs `nfd-master -prune` against every node. Regenerate the bundle with every flag the original bundle used, adding only `--set nfd:postDeleteCleanup=true`. A dropped flag falls back to its default, so for example a bundle regenerated without its `--system-node-selector` no longer pins nfd-master to the system nodes. If the original bundle used `--config`, add `nfd:postDeleteCleanup=true` to the config's `spec.bundle.deployment.set` list instead. A `--set` flag replaces that list rather than adding to it, which drops the config's component overrides, `enabled=false` exclusions and `deployer:` options. Write the bundle to a local directory even if the original went to an `oci://` reference, because an `oci://` output pushes the whole bundle. nfd's values files do not depend on the output target:
 
 ```bash
 RECIPE="recipe.yaml"  # replace with the recipe the bundle was generated from
 DEPLOYER="helm"       # replace with the deployer the bundle was generated with, e.g. argocd
-# Also repeat every other flag the original bundle used, such as --repo, --app-name and --set.
+# Also repeat every other flag the original bundle used, such as --system-node-selector and --set.
+# With --config, add nfd:postDeleteCleanup=true to its set list and drop the --set below.
 aicr bundle -r "${RECIPE}" --deployer "${DEPLOYER}" --set nfd:postDeleteCleanup=true -o ./bundles
 ```
 
