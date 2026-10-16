@@ -15,6 +15,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -61,7 +62,8 @@ func TestPinnedChartVersionMissingComponent(t *testing.T) {
 }
 
 // TestRuntimeImageTagMatchesRegistry runs the make check-dynamo-runtime-image
-// check against the committed registry.
+// check against the committed registry, and checks that each hand-maintained
+// manifest that hard-codes the vllm-runtime image names the pinned tag.
 func TestRuntimeImageTagMatchesRegistry(t *testing.T) {
 	reg, err := recipe.GetComponentRegistry()
 	if err != nil {
@@ -73,5 +75,22 @@ func TestRuntimeImageTagMatchesRegistry(t *testing.T) {
 	}
 	if err := checkTag(pinned, defaults.DynamoRuntimeImageTag); err != nil {
 		t.Fatal(err)
+	}
+
+	ref := defaults.DynamoImageRepository + "/vllm-runtime:" + pinned
+	for _, path := range []string{
+		"../../tests/manifests/dynamo-vllm-smoke-test.yaml",
+		"../../tests/uat/lib/phases.sh",
+		"../../demos/workloads/inference/vllm-agg.yaml",
+		"../../pkg/evidence/cncf/scripts/manifests/dynamo-vllm-agg.yaml",
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("reading %s: %v", path, err)
+			continue
+		}
+		if !strings.Contains(string(data), ref) {
+			t.Errorf("%s does not pin %s; bump it alongside the %s defaultVersion", path, ref, componentName)
+		}
 	}
 }
