@@ -148,7 +148,15 @@ DEPLOYER="helm"       # replace with the deployer the bundle was generated with,
 aicr bundle -r "${RECIPE}" --deployer "${DEPLOYER}" --set nfd:postDeleteCleanup=true -o ./bundles
 ```
 
-Redeploy only the nfd component from the regenerated bundle, then uninstall it so the hook runs. The steps depend on the deployer.
+Redeploy only the nfd component from the regenerated bundle, then uninstall it so the hook runs. The regenerated bundle still contains every component the recipe deploys, including the ones you just uninstalled. The steps depend on the deployer.
+
+With `argocd`, `argocd-helm` and `flux`, do not publish the regenerated bundle whole. The parent Application or the Flux root `kustomization.yaml` would redeploy the uninstalled components, and the prune would then strip the labels they select on. Copy only nfd's values files over the source the cluster syncs from, so the new revision changes nothing else:
+
+- `argocd`: `NNN-nfd/values.yaml`
+- `argocd-helm`: `NNN-nfd/values.yaml` and `static/nfd.yaml`
+- `flux`: `nfd/helmrelease.yaml`
+
+Diff each file against the deployed copy first. The only change should be `postDeleteCleanup: true`. Keep the uninstalled components out of the source from then on, including after auto-sync is turned back on.
 
 With `helm`, run the nfd install script, then uninstall the release:
 
@@ -157,7 +165,7 @@ With `helm`, run the nfd install script, then uninstall the release:
 helm uninstall nfd -n node-feature-discovery
 ```
 
-With `argocd` or `argocd-helm`, publish the regenerated bundle the same way as the original and let the nfd Application sync. The parent Application syncs every child with automated prune and self-heal, so it recreates a deleted nfd child. Generated children also carry no `resources-finalizer.argocd.argoproj.io` finalizer unless the bundle set `deployer:cascadeDelete=true`, so a plain delete leaves nfd running. Turn off the parent's auto-sync, then delete the child with cascade:
+With `argocd` or `argocd-helm`, publish that revision the same way as the original and let the nfd Application sync. The parent Application syncs every child with automated prune and self-heal, so it recreates a deleted nfd child. Generated children also carry no `resources-finalizer.argocd.argoproj.io` finalizer unless the bundle set `deployer:cascadeDelete=true`, so a plain delete leaves nfd running. Turn off the parent's auto-sync, then delete the child with cascade:
 
 ```bash
 APP="nvidia-stack"  # replace with the parent Application: --app-name, default nvidia-stack (argocd) or aicr-stack (argocd-helm)
@@ -168,7 +176,7 @@ argocd app delete "${CHILD}" --cascade
 
 Remove nfd from the bundle source before turning the parent's auto-sync back on. This needs Argo CD 3.4.1 or later, because earlier versions never finish deleting an Application whose post-delete hooks include cluster-scoped objects.
 
-With `flux`, commit the regenerated bundle and let Flux upgrade the nfd release. The Flux Kustomization that applies the bundle recreates a HelmRelease deleted from the cluster, so remove the `nfd/` entries from the bundle's root `kustomization.yaml` and commit instead. With `prune: true`, as the bundle README configures, Flux deletes the `nfd` HelmRelease and helm-controller runs `helm uninstall`, which runs the hook.
+With `flux`, commit that revision and let Flux upgrade the nfd release. The Flux Kustomization that applies the bundle recreates a HelmRelease deleted from the cluster, so remove the `nfd/` entries from the bundle's root `kustomization.yaml` and commit instead. With `prune: true`, as the bundle README configures, Flux deletes the `nfd` HelmRelease and helm-controller runs `helm uninstall`, which runs the hook.
 
 With `helmfile`, run from the regenerated bundle directory:
 
