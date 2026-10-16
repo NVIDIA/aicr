@@ -104,6 +104,11 @@ but AKS recipes disable it by default via `nodewright-customizations`
 [AKS GPU setup](../aks-gpu-setup.md#infiniband-rdma-host-setup-nodewright)
 for the rationale and re-enable path.
 
+The `eks` rows likewise do not apply to the `os=amazonlinux` leaves
+(`*-eks-amazonlinux-inference`). Those leaves disable
+`nodewright-customizations` entirely (`enabled: false`), so no setup or tuning
+package is rendered and host setup and tuning must come from the AMI.
+
 The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
 applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
 omits the `nvidia-tuned` package while `nvidia-setup` keeps running, and on the

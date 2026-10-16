@@ -95,6 +95,11 @@ func TestNodewrightTuningGateAcrossCatalog(t *testing.T) {
 		if leaf.Err != nil || leaf.Result == nil || leaf.Entry.Criteria == nil {
 			continue
 		}
+		// AL2023 leaves intentionally disable nodewright-customizations
+		// (nvidia-setup is Debian/Ubuntu-only); skip them here.
+		if leaf.Entry.Criteria.OS == CriteriaOSAmazonLinux {
+			continue
+		}
 		ref := leaf.Result.GetComponentRef("nodewright-customizations")
 		if ref == nil || !slices.Contains(ref.ManifestFiles, nodewrightTuningManifest) {
 			continue
@@ -215,6 +220,11 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 	seen := map[string]bool{}
 	for _, leaf := range leaves {
 		if leaf.Err != nil || leaf.Result == nil || leaf.Entry.Criteria == nil {
+			continue
+		}
+		// AL2023 leaves intentionally disable nodewright-customizations
+		// (nvidia-setup is Debian/Ubuntu-only); skip them here.
+		if leaf.Entry.Criteria.OS == CriteriaOSAmazonLinux {
 			continue
 		}
 		ref := leaf.Result.GetComponentRef("nodewright-customizations")
@@ -347,4 +357,37 @@ func TestNodewrightTuningRKE2RDMAGate(t *testing.T) {
 			t.Errorf("first package in name order = %q, want nvidia-tuned to issue the merged reboot", first)
 		}
 	})
+}
+
+// TestAmazonLinuxLeavesDoNotRenderTuning pins that no os=amazonlinux leaf
+// schedules the Ubuntu-only nvidia-setup chain: nodewright-customizations
+// must be absent or disabled (manifestFiles merge additively, so the
+// inherited tuning.yaml cannot be cleared).
+func TestAmazonLinuxLeavesDoNotRenderTuning(t *testing.T) {
+	leaves, err := ResolveLeaves(context.Background(), ResolveLeavesOptions{})
+	if err != nil {
+		t.Fatalf("ResolveLeaves: %v", err)
+	}
+	seen := 0
+	for _, leaf := range leaves {
+		if leaf.Err != nil || leaf.Result == nil || leaf.Entry.Criteria == nil ||
+			leaf.Entry.Criteria.OS != CriteriaOSAmazonLinux {
+
+			continue
+		}
+		seen++
+		t.Run(leaf.Entry.Name, func(t *testing.T) {
+			ref := leaf.Result.GetComponentRef("nodewright-customizations")
+			if ref == nil {
+				return
+			}
+			if ref.IsEnabled() {
+				t.Errorf("nodewright-customizations must be disabled on os=amazonlinux (overrides=%v, manifestFiles=%v)",
+					ref.Overrides, ref.ManifestFiles)
+			}
+		})
+	}
+	if seen == 0 {
+		t.Error("no os=amazonlinux leaf resolved")
+	}
 }

@@ -211,7 +211,7 @@ When a recipe is resolved from a snapshot (`aicr recipe --snapshot snap.yaml`, o
 
 Injection is gated on the resolved overlay already declaring `driver.enabled=false` in its merged base+valuesFile. That marker check inspects `driver.enabled` alone; the shipped preinstalled-driver overlays additionally carry coordinated ownership settings (AKS and OKE set `toolkit.enabled=false`; GKE-COS keeps the toolkit enabled with the COS-specific `toolkit.installDir` under the host-managed driver root) plus `hostPaths.driverInstallDir`, and the bundle-time `CheckDriverOwnershipCoherence` validation enforces full ownership coherence for any recipe. That scopes auto-detect to overlays like AKS, GKE-COS, and OKE where every dependent setting is already aligned. Bare EKS overlays lack the marker; the auto-detect **skips them and logs a warning** (`gpu-operator driver auto-detect: pre-installed driver observed …`) telling the operator to use a preinstalled-profile overlay rather than land a half-configured Operator (driver off, toolkit and gdrcopy still enabled with no operator-managed driver root). The case is still tracked as separate work:
 
-- **EKS** — GPU-optimized AMIs that ship an NVIDIA driver preinstalled on the AMI itself. Today this warns; a full preinstalled EKS overlay is tracked separately.
+- **EKS** — GPU-optimized AMIs that ship an NVIDIA driver preinstalled on the AMI itself. Bare EKS overlays still warn. The `*-eks-amazonlinux-inference` leaves (`os=amazonlinux`) are the preinstalled-driver overlays: they require the NVIDIA AL2023 AMI and set `driver.enabled=false` and `toolkit.enabled=false` themselves.
 
 On preinstalled-driver overlays whose profile does not own `driver.enabled` (GKE-COS) or that carry no profile (OKE, legacy AKS artifacts), the injection is **semantically idempotent** — the rendered `driver.enabled` value is unchanged; the resolved recipe records the override explicitly (visible in `aicr recipe -o recipe.yaml`) so the reason for the value is auditable end-to-end. On profiled AKS there is no injection at all: the `gpuStack` fragment writes the value and the injector skips the owned path (see above). The AKS default is the [AKS azure-managed profile](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) (`driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` — the Azure default, where the node image preinstalls driver and toolkit); a `--gpu-driver none` pool selects the operator-managed profile value at recipe time (`--profile gpuStack=operator-managed`, see the [GPU Operator-managed profile](../integrator/aks-gpu-setup.md#alternative-let-gpu-operator-manage-the-driver)).
 
@@ -921,11 +921,12 @@ The reset Job runs `nvidia-smi` by chrooting into the host's driver root, so whe
 
 | Platform | `resetJob.hostDriverRootPath` | `resetJob.runtimeClassName` | Set by |
 |---|---|---|---|
-| GPU Operator installs the driver (EKS, BCM, LKE, OCP, k0s, generic) | `/run/nvidia/driver` (chart default) | `nvidia` (chart default) | — |
+| GPU Operator installs the driver (EKS except os=amazonlinux, BCM, LKE, OCP, k0s, generic) | `/run/nvidia/driver` (chart default) | `nvidia` (chart default) | — |
 | AKS `gpuStack=azure-managed` (default) | `/` | `nvidia-container-runtime` | the `gpuStack` profile |
 | AKS `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` | the `gpuStack` profile |
 | OKE `gpuStack=oci-managed` (default) | `/` | `nvidia` (chart default) | the `gpuStack` profile |
 | OKE `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` (chart default) | the `gpuStack` profile |
+| EKS `os=amazonlinux` leaves (require the NVIDIA AL2023 AMI) | `/` | `nvidia` (chart default) | the leaf overlay |
 | Kind (nvkind), H200 k0s | `/` | `nvidia` (chart default) | the overlay |
 | RKE2 (CDI with NRI) | `/` on VR200, the chart default elsewhere | none (`""`) | the `rke2` and VR200 overlays |
 | GKE COS (`gpuStack=gke-default` or `bundle-installer`) | not supported (see **Not supported**) | — | — |
@@ -1030,7 +1031,8 @@ The recipes now carry that value wherever it is needed ([#2181](https://github.c
 | GKE COS `gpuStack=bundle-installer` | the bundle's `gcp-driver-installer` DaemonSet | `false` | the `gpuStack` profile |
 | OKE `gpuStack=oci-managed` (default) | none — driver is in the node image; OKE's `NvidiaGpuPlugin` add-on advertises | `true` | the `gpuStack` profile |
 | OKE `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
-| EKS | the operator's driver pod | unset (chart default `false`) | — |
+| EKS (except os=amazonlinux) | the operator's driver pod | unset (chart default `false`) | — |
+| EKS `os=amazonlinux` leaves (require the NVIDIA AL2023 AMI) | none — driver is in the AMI | `true` | the leaf overlay (these leaves have no profile) |
 | Kind (nvkind) | none — driver is host-installed | `true` | the overlay (Kind has no profile) |
 | k0s (H200) | none — driver is host-installed | `true` | the leaf overlay (k0s has no profile) |
 | RKE2 (VR200) | none — driver is host-installed | `true` | the leaf overlays (RKE2 has no profile) |
@@ -1041,7 +1043,7 @@ The explicit `false` on the operator-managed variants is deliberate rather than 
 
 The GKE-COS and OKE `gpuStack` profiles reference nvsentinel as `optional` ([#2978](https://github.com/NVIDIA/aicr/issues/2978)). They own `labeler.assumeDriverInstalled` (and, on OKE, the janitor GPU-reset settings) but not presence, so `--set nv-sentinel:enabled=false` removes the component — for example when NVSentinel is deployed outside AICR. When the bundle does include NVSentinel, the owned values are locked as on AKS. An externally deployed NVSentinel must set `labeler.assumeDriverInstalled` to match the cluster's `gpuStack` value itself; AICR does not verify it. A recipe generated before this change still locks presence, so regenerate it with `aicr recipe` before bundling without NVSentinel. NVSentinel is also optional on platforms with no `gpuStack` profile, such as EKS.
 
-AKS, GKE-COS, and OKE get the install-time profile lock; Kind, k0s, and RKE2 set the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
+AKS, GKE-COS, and OKE get the install-time profile lock; Kind, k0s, RKE2, and the EKS `os=amazonlinux` leaves set the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
 
 If you do need to set it yourself on an unlisted platform, it is an ordinary override:
 
