@@ -144,6 +144,10 @@ runs:
       shell: bash
       run: make check-depproxy-kit
 
+    - name: Verify Dynamo runtime image tag matches the operator chart
+      shell: bash
+      run: make check-dynamo-runtime-image
+
     - name: Reject floating runner labels
       shell: bash
       run: make check-runner-labels

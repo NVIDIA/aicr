@@ -87,20 +87,14 @@ spec:
   #     vllm/vllm-openai:v0.26.0 (predates the code); its unreleased main
   #     branch pins v0.28.0 (has the code, not yet CUDA 13.4); neither is
   #     what this leaf needs, and nothing built from main is published.
-  #   - Independent of the runtime image, this repo's own performance
-  #     validator hardcodes nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
-  #     in two places (validators/performance/model_cache.go
-  #     cacheWorkerImage, and the DynamoGraphDeployment testdata under
-  #     validators/performance/testdata/inference/) — those pins need
-  #     updating too before this leaf's inference-perf check would even
-  #     exercise a different image.
-  # Add a `validation.performance` block once a published, CUDA
-  # >= 13.4-built runtime image is verified on real VR200 hardware (past
-  # the JIT-compile crash, not just past a version-number check), the
-  # AICR-side 1.2.1 pins above are updated in lockstep, and a real floor
-  # is measured (same class of gap as GB300/sm_103 — plain CUDA kernels
-  # forward-compat onto Rubin via PTX JIT, but runtime kernel compilers
-  # need explicit sm_107a support).
+  #   - The inference-perf validator runs vllm-runtime at the recipe's
+  #     dynamo-platform chart version. It can exercise a VR200-capable
+  #     image only after a Dynamo release ships one and the chart pin
+  #     moves to it.
+  # Add a `validation.performance` block once that image runs on VR200
+  # hardware and a throughput/TTFT floor is measured on it. A CUDA
+  # version check is not enough, since runtime kernel compilers crash
+  # without sm_107a support even when PTX JIT runs plain CUDA kernels.
   #
   # Deployment phase and baseline conformance checks are inherited from
   # vr200-rke2-ubuntu-inference (checks union across the overlay chain);

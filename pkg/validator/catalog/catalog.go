@@ -113,8 +113,15 @@ func ResolveImage(image, version, commit string) string {
 	if tag := os.Getenv("AICR_VALIDATOR_IMAGE_TAG"); tag != "" {
 		image = replaceTag(image, tag)
 	}
+	return ApplyRegistryOverride(image)
+}
+
+// ApplyRegistryOverride returns image with its registry host and first path
+// segment replaced by AICR_VALIDATOR_IMAGE_REGISTRY, or image unchanged when
+// that variable is unset. It never applies AICR_VALIDATOR_IMAGE_TAG.
+func ApplyRegistryOverride(image string) string {
 	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
-		image = replaceRegistry(image, override)
+		return replaceRegistry(image, override)
 	}
 	return image
 }

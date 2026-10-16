@@ -1879,6 +1879,223 @@ func TestEnsureHFTokenSecret(t *testing.T) {
 	})
 }
 
+const (
+	testValidatorNamespace = "aicr-validation"
+	testValidatorPod       = "aicr-validator-pod"
+	testWorkloadNamespace  = "aicr-inference-perf-test"
+)
+
+// pullSecretTestContext returns a validator context whose own pod, found
+// through HOSTNAME, references podSecrets as imagePullSecrets. objects seed
+// the fake clientset alongside that pod.
+func pullSecretTestContext(t *testing.T, podSecrets []string, objects ...runtime.Object) (*validators.Context, *fake.Clientset) {
+	t.Helper()
+	t.Setenv("HOSTNAME", testValidatorPod)
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: testValidatorPod, Namespace: testValidatorNamespace}}
+	for _, name := range podSecrets {
+		pod.Spec.ImagePullSecrets = append(pod.Spec.ImagePullSecrets, v1.LocalObjectReference{Name: name})
+	}
+	client := fake.NewClientset(append(objects, pod)...)
+	return &validators.Context{Ctx: t.Context(), Clientset: client, Namespace: testValidatorNamespace}, client
+}
+
+func dockerConfigSecret(namespace, name, config string) *v1.Secret {
+	return &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Type:       v1.SecretTypeDockerConfigJson,
+		Data:       map[string][]byte{v1.DockerConfigJsonKey: []byte(config)},
+	}
+}
+
+func TestEnsureWorkloadPullSecrets(t *testing.T) {
+	tests := []struct {
+		name       string
+		podSecrets []string
+		objects    []runtime.Object
+		failRead   bool
+		want       []string
+		wantErr    bool
+	}{
+		{
+			name: "validator pod without pull secrets copies nothing",
+		},
+		{
+			name:       "copies every referenced secret",
+			podSecrets: []string{"regcred", "mirror"},
+			objects: []runtime.Object{
+				dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"a":{}}}`),
+				dockerConfigSecret(testValidatorNamespace, "mirror", `{"auths":{"b":{}}}`),
+			},
+			want: []string{"regcred", "mirror"},
+		},
+		{
+			name:       "skips a referenced secret that does not exist",
+			podSecrets: []string{"missing", "regcred"},
+			objects:    []runtime.Object{dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"a":{}}}`)},
+			want:       []string{"regcred"},
+		},
+		{
+			name:       "replaces a stale copy in a reused namespace",
+			podSecrets: []string{"regcred"},
+			objects: []runtime.Object{
+				dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"fresh":{}}}`),
+				dockerConfigSecret(testWorkloadNamespace, "regcred", `{"auths":{"stale":{}}}`),
+			},
+			want: []string{"regcred"},
+		},
+		{
+			name:       "a failed secret read fails closed",
+			podSecrets: []string{"regcred"},
+			objects:    []runtime.Object{dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"a":{}}}`)},
+			failRead:   true,
+			wantErr:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, client := pullSecretTestContext(t, tt.podSecrets, tt.objects...)
+			if tt.failRead {
+				client.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewInternalError(stderrors.New("boom"))
+				})
+			}
+
+			refs, err := ensureWorkloadPullSecrets(ctx, testWorkloadNamespace)
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			got := make([]string, 0, len(refs))
+			for _, ref := range refs {
+				got = append(got, ref.Name)
+			}
+			if len(got) != len(tt.want) || (len(got) > 0 && !reflect.DeepEqual(got, tt.want)) {
+				t.Fatalf("references = %v, want %v", got, tt.want)
+			}
+
+			secrets, err := client.CoreV1().Secrets(testWorkloadNamespace).List(t.Context(), metav1.ListOptions{})
+			if err != nil {
+				t.Fatalf("list workload secrets: %v", err)
+			}
+			if len(secrets.Items) != len(tt.want) {
+				t.Errorf("workload namespace holds %d secrets, want %d", len(secrets.Items), len(tt.want))
+			}
+			for _, name := range tt.want {
+				src, err := client.CoreV1().Secrets(testValidatorNamespace).Get(t.Context(), name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("get source secret %q: %v", name, err)
+				}
+				dst, err := client.CoreV1().Secrets(testWorkloadNamespace).Get(t.Context(), name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("secret %q not copied into the workload namespace: %v", name, err)
+				}
+				if dst.Type != src.Type || !reflect.DeepEqual(dst.Data, src.Data) {
+					t.Errorf("copy of %q = (%s, %q), want (%s, %q)", name, dst.Type, dst.Data, src.Type, src.Data)
+				}
+			}
+		})
+	}
+}
+
+// TestInferencePodsReferenceWorkloadPullSecrets verifies that, given a
+// validator pod with image pull Secrets, the populate Job and every component
+// of both Dynamo templates reference only pull Secrets that exist in the
+// workload namespace.
+func TestInferencePodsReferenceWorkloadPullSecrets(t *testing.T) {
+	podSecrets := []string{"regcred", "mirror"}
+	ctx, client := pullSecretTestContext(t, podSecrets,
+		dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"a":{}}}`),
+		dockerConfigSecret(testValidatorNamespace, "mirror", `{"auths":{"b":{}}}`),
+	)
+	refs, err := ensureWorkloadPullSecrets(ctx, testWorkloadNamespace)
+	if err != nil {
+		t.Fatalf("ensureWorkloadPullSecrets() error: %v", err)
+	}
+	cfg := &inferenceWorkloadConfig{
+		runID:          "run-1",
+		namespace:      testWorkloadNamespace,
+		model:          "Qwen/Qwen3-8B",
+		routerMode:     dynRouterModeDefault,
+		gpuCount:       1,
+		modelCacheSize: defaultModelCacheSize,
+		pullSecrets:    refs,
+	}
+
+	assertResolvable := func(t *testing.T, owner string, names []string) {
+		t.Helper()
+		if !reflect.DeepEqual(names, podSecrets) {
+			t.Errorf("%s imagePullSecrets = %v, want %v", owner, names, podSecrets)
+		}
+		for _, name := range names {
+			if _, err := client.CoreV1().Secrets(testWorkloadNamespace).Get(t.Context(), name, metav1.GetOptions{}); err != nil {
+				t.Errorf("%s references pull secret %q, which is not in namespace %s: %v", owner, name, testWorkloadNamespace, err)
+			}
+		}
+	}
+
+	t.Run("populate Job", func(t *testing.T) {
+		job := buildModelCachePopulateJob("aicr-model-cache-populate-run-1", cfg)
+		names := make([]string, 0, len(job.Spec.Template.Spec.ImagePullSecrets))
+		for _, ref := range job.Spec.Template.Spec.ImagePullSecrets {
+			names = append(names, ref.Name)
+		}
+		assertResolvable(t, "populate Job", names)
+	})
+
+	for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
+		t.Run(tmpl, func(t *testing.T) {
+			obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", tmpl), inferenceTemplateData(cfg))
+			if err != nil {
+				t.Fatalf("parseYAMLTemplate() error: %v", err)
+			}
+			if err = applyInferenceWorkerScheduling(obj, cfg); err != nil {
+				t.Fatalf("applyInferenceWorkerScheduling() error: %v", err)
+			}
+			components, _, err := unstructured.NestedSlice(obj.Object, "spec", "components")
+			if err != nil || len(components) == 0 {
+				t.Fatalf("read spec.components: %v (len %d)", err, len(components))
+			}
+			for _, raw := range components {
+				component, _ := raw.(map[string]any)
+				name, _ := component[keyName].(string)
+				secrets, _, err := unstructured.NestedSlice(componentPodSpec(t, obj, name), "imagePullSecrets")
+				if err != nil {
+					t.Fatalf("read %s imagePullSecrets: %v", name, err)
+				}
+				names := make([]string, 0, len(secrets))
+				for _, s := range secrets {
+					entry, _ := s.(map[string]any)
+					secretName, _ := entry[keyName].(string)
+					names = append(names, secretName)
+				}
+				assertResolvable(t, name, names)
+			}
+		})
+	}
+}
+
+// TestApplyInferenceWorkerScheduling_NoPullSecrets verifies components carry
+// no imagePullSecrets when the validator pod has none.
+func TestApplyInferenceWorkerScheduling_NoPullSecrets(t *testing.T) {
+	cfg := &inferenceWorkloadConfig{namespace: testWorkloadNamespace, model: "Qwen/Qwen3-8B", routerMode: dynRouterModeDefault, gpuCount: 1}
+	obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", "dynamo-deployment.yaml"), inferenceTemplateData(cfg))
+	if err != nil {
+		t.Fatalf("parseYAMLTemplate() error: %v", err)
+	}
+	if err := applyInferenceWorkerScheduling(obj, cfg); err != nil {
+		t.Fatalf("applyInferenceWorkerScheduling() error: %v", err)
+	}
+	for _, name := range []string{"Frontend", "VllmDecodeWorker"} {
+		if _, found, _ := unstructured.NestedSlice(componentPodSpec(t, obj, name), "imagePullSecrets"); found {
+			t.Errorf("%s carries imagePullSecrets with no validator pull secrets", name)
+		}
+	}
+}
+
 // TestEnsureNamespace covers namespace adoption: a fresh namespace is
 // created and labeled, an existing one is reused only if it carries our
 // ownership labels, and a create-race winner (AlreadyExists) is read back
