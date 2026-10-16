@@ -377,7 +377,8 @@ func withRecipeNamespaces(comps []inventory.Component, to *RecipeResult) []inven
 // omission it could fill. It attributes a release to a component by name, and
 // for flux and Argo CD that name is composed from candidate namespaces: a
 // namespace is an input to the attribution rather than a fact recovered from
-// it, and helm and helmfile match on the bare name and recover none at all.
+// it, and helm, helmfile and terraform match on the bare name and recover none
+// at all.
 // Chart, source, path, type and the manifest file sets are likewise in no
 // record the read decodes.
 //

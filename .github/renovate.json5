@@ -524,6 +524,26 @@
       allowedVersions: "<0.32.0",
     },
 
+    // ---- kustomize is capped below v0.21.3 until k8s 0.38 ----
+    // kustomize v0.21.3 requires a k8s.io/kube-openapi that imports
+    // sigs.k8s.io/structured-merge-diff/v7, while k8s.io/apimachinery v0.37
+    // still builds against v6, so the bump fails `go build ./...` in
+    // apimachinery's managedfields typeconverter. Closing the PR does not stop
+    // the repeat: #3246 was closed and Renovate proposed the same bump the next
+    // day as #3271 under the kubernetes group title. Like the cel-go cap, this
+    // hides a fix published only in 0.21.3+ from Renovate but not from grype,
+    // which scans go.mod directly.
+    //
+    // apimachinery v0.38 moves to structured-merge-diff/v7, which unblocks it.
+    // TestKustomizeRenovateCapLiftsAtK8s038 (tests/architecture) fails the
+    // k8s 0.38 bump until this rule is deleted in that same PR, so the cap
+    // cannot outlive its reason (#3273).
+    {
+      matchManagers: ["gomod"],
+      matchDepNames: ["sigs.k8s.io/kustomize/api", "sigs.k8s.io/kustomize/kyaml"],
+      allowedVersions: "<0.21.3",
+    },
+
     // ---- Registry chart pins are extracted, never PR'd ----
     {
       // Report-only. Each run relies on exactly one config-level guard here:

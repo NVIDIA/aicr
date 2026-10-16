@@ -49,6 +49,27 @@ transitions:
             description: Delete the legacy resource.
 `
 
+// upgradeNotesTerraformGroupRecord carries an explicit terraform group beside
+// the remainder, the shape the ownsCRDs records use for deployers that apply
+// CRDs by hand.
+const upgradeNotesTerraformGroupRecord = `apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: upgrade-notes-fixture
+transitions:
+  - from: "<2.1.0"
+    to: "=2.1.0"
+    verdict: manual
+    summary: Fixture boundary whose CRDs changed.
+    stepsByDeployer:
+      - deployers: [helmfile, terraform]
+        steps:
+          - id: apply-new-crds
+            description: Apply the new CRDs, then apply the bundle.
+      - steps:
+          - id: apply-bundle
+            description: Apply the bundle; the deployer applies the CRDs.
+`
+
 const upgradeNotesSafeRecord = `apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: upgrade-notes-fixture
@@ -205,6 +226,30 @@ func TestMake_UpgradeNotes(t *testing.T) {
 			wantGuide:    true,
 			wantStep:     "delete-legacy",
 			unwantedStep: "rename-in-one-commit",
+		},
+		{
+			name:         "terraform ships the remainder steps",
+			record:       upgradeNotesManualRecord,
+			deployer:     config.DeployerTerraform,
+			wantGuide:    true,
+			wantStep:     "delete-legacy",
+			unwantedStep: "rename-in-one-commit",
+		},
+		{
+			name:         "terraform takes its explicit group over the remainder",
+			record:       upgradeNotesTerraformGroupRecord,
+			deployer:     config.DeployerTerraform,
+			wantGuide:    true,
+			wantStep:     "apply-new-crds",
+			unwantedStep: "apply-bundle",
+		},
+		{
+			name:         "helm takes the remainder when terraform's group is explicit",
+			record:       upgradeNotesTerraformGroupRecord,
+			deployer:     config.DeployerHelm,
+			wantGuide:    true,
+			wantStep:     "apply-bundle",
+			unwantedStep: "apply-new-crds",
 		},
 		{
 			name:     "a safe transition adds nothing",

@@ -747,7 +747,7 @@ func (ref *ComponentRef) HasExternalChart() bool {
 // EffectiveChart returns the chart name a Helm-typed ref deploys: the
 // explicit Chart, falling back to the component name when unset (a
 // source-only ref). Every ComponentRef consumer derives the chart through
-// this method — the flux, argocd, helmfile, and helm deployers, pkg/mirror,
+// this method — the flux, argocd, helmfile, helm, and terraform deployers, pkg/mirror,
 // and the facade/query/BOM projections. (localformat keeps an equivalent
 // fallback on its own Component type, which is constructed from
 // EffectiveChart-derived inputs but also serves direct callers.)

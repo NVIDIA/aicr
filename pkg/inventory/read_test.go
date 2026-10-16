@@ -124,6 +124,26 @@ func TestAttributeRecord(t *testing.T) {
 			want:   "cert-manager", wantKind: matchPrimary,
 		},
 		{
+			name: "terraform shares the helm transform", deployer: DeployerTerraform, comps: comps,
+			record: helmRec("cert-manager", "cert-manager-system", "deployed", "1.20.2", nil),
+			want:   "cert-manager", wantKind: matchPrimary,
+		},
+		{
+			name: "terraform folds an injected readiness folder into its parent", deployer: DeployerTerraform, comps: comps,
+			record: helmRec("gpu-operator-readiness", "nvidia-gpu-operator", "deployed", "0.1.0", nil),
+			want:   "gpu-operator", wantKind: matchInjected,
+		},
+		{
+			name: "terraform does not read an argo prefixed name", deployer: DeployerTerraform, comps: comps,
+			record:   helmRec("tenant-a-gpu-operator", "nvidia-gpu-operator", "deployed", "v25.3.3", nil),
+			wantKind: matchNone,
+		},
+		{
+			name: "terraform does not read a flux composed name", deployer: DeployerTerraform, comps: comps,
+			record:   helmRec("nvidia-gpu-operator-gpu-operator", "nvidia-gpu-operator", "deployed", "v25.3.3", nil),
+			wantKind: matchNone,
+		},
+		{
 			name: "helm folds an injected pre folder into its parent", deployer: DeployerHelm, comps: comps,
 			record: helmRec("gpu-operator-pre", "nvidia-gpu-operator", "deployed", "0.1.0", nil),
 			want:   "gpu-operator", wantKind: matchInjected,
@@ -1318,7 +1338,7 @@ func TestReadRunsOnlyTheDeployersReader(t *testing.T) {
 	}
 	comps := []Component{fixtureGPUOperator}
 
-	for _, d := range []Deployer{DeployerHelm, DeployerHelmfile, DeployerFlux} {
+	for _, d := range []Deployer{DeployerHelm, DeployerHelmfile, DeployerTerraform, DeployerFlux} {
 		t.Run(string(d), func(t *testing.T) {
 			dyn := argoClient()
 			dyn.PrependReactor("list", "applications", deny)

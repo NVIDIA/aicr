@@ -19,11 +19,9 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -892,92 +890,6 @@ func TestGenerate_NamespaceOwningPreManifest(t *testing.T) {
 	}
 }
 
-// TestComponentOverrides_ParityWithHelmDeployScript guards against silent
-// drift between componentOverrides in this package and the hardcoded
-// ASYNC_COMPONENTS / COMPONENT_HELM_TIMEOUT case block in
-// pkg/bundler/deployer/helm/templates/deploy.sh.tmpl. Either side changing
-// without the other must fail this test until the duplication is unified.
-//
-// Specifically, for every component name in componentOverrides:
-//   - Wait==false  ⟺  the name appears in ASYNC_COMPONENTS="…"
-//   - Timeout != 0 ⟺  a "<name>) COMPONENT_HELM_TIMEOUT="<n>m" ;;"
-//     case exists with matching duration
-//
-// The reverse direction is also asserted: any component in either
-// deploy.sh.tmpl construct must be present in componentOverrides.
-func TestComponentOverrides_ParityWithHelmDeployScript(t *testing.T) {
-	scriptPath := filepath.Join("..", "helm", "templates", "deploy.sh.tmpl")
-	body, err := os.ReadFile(scriptPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", scriptPath, err)
-	}
-	script := string(body)
-
-	// Parse ASYNC_COMPONENTS="<space-separated names>".
-	asyncRe := regexp.MustCompile(`(?m)^ASYNC_COMPONENTS="([^"]*)"`)
-	asyncMatch := asyncRe.FindStringSubmatch(script)
-	if asyncMatch == nil {
-		t.Fatalf("could not find ASYNC_COMPONENTS=\"…\" in %s", scriptPath)
-	}
-	asyncNames := map[string]bool{}
-	for n := range strings.FieldsSeq(asyncMatch[1]) {
-		asyncNames[n] = true
-	}
-
-	// Parse the "<name>) COMPONENT_HELM_TIMEOUT=\"<N>m\"" case block.
-	// Pattern is a stable two-line shape in deploy.sh.tmpl.
-	caseRe := regexp.MustCompile(`(?m)^\s*([a-z0-9-]+)\)\s*\n\s*COMPONENT_HELM_TIMEOUT="(\d+)m"`)
-	scriptTimeouts := map[string]time.Duration{}
-	for _, m := range caseRe.FindAllStringSubmatch(script, -1) {
-		mins, parseErr := time.ParseDuration(m[2] + "m")
-		if parseErr != nil {
-			t.Fatalf("parse %sm: %v", m[2], parseErr)
-		}
-		scriptTimeouts[m[1]] = mins
-	}
-
-	// Forward direction: every Go override must match deploy.sh.tmpl.
-	for name, ov := range componentOverrides {
-		if !ov.wait && !asyncNames[name] {
-			t.Errorf("componentOverrides[%q].wait=false but %q not in ASYNC_COMPONENTS=%q "+
-				"(update deploy.sh.tmpl or the Go map together)",
-				name, name, asyncMatch[1])
-		}
-		if ov.timeout != 0 {
-			want := time.Duration(ov.timeout) * time.Second
-			got, ok := scriptTimeouts[name]
-			if !ok {
-				t.Errorf("componentOverrides[%q].timeout=%v but no COMPONENT_HELM_TIMEOUT case "+
-					"for %q in deploy.sh.tmpl (update deploy.sh.tmpl or the Go map together)",
-					name, want, name)
-			} else if got != want {
-				t.Errorf("componentOverrides[%q].timeout=%v but deploy.sh.tmpl case sets %v "+
-					"(update deploy.sh.tmpl or the Go map together)",
-					name, want, got)
-			}
-		}
-	}
-
-	// Reverse direction: every name in either deploy.sh.tmpl construct must
-	// exist in componentOverrides.
-	for name := range asyncNames {
-		if _, ok := componentOverrides[name]; !ok {
-			t.Errorf("deploy.sh.tmpl ASYNC_COMPONENTS lists %q but componentOverrides has no entry "+
-				"(helmfile bundles would --wait on a release the helm deployer treats as async)", name)
-		}
-	}
-	for name := range scriptTimeouts {
-		if _, ok := componentOverrides[name]; !ok {
-			t.Errorf("deploy.sh.tmpl has COMPONENT_HELM_TIMEOUT case for %q but componentOverrides has no entry "+
-				"(helmfile bundles would use the global timeout for a release the helm deployer special-cases)", name)
-		}
-	}
-}
-
-// TestSanitizeRepoAlias_Edges covers the slug edge cases (empty input,
-// >63 char truncation, double-hyphen collapsing) so a future URL with
-// embedded ports or query strings doesn't silently produce a malformed
-// helmfile repository name.
 func TestSanitizeRepoAlias_Edges(t *testing.T) {
 	tests := []struct {
 		name, in, want string

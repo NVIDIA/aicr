@@ -76,8 +76,8 @@ type scope struct {
 }
 
 // newScope builds a scope from component names, confident in each bare name
-// and its injected folders, which is what the helm and helmfile deployers
-// write. An empty name is dropped: it would match on any record whose name
+// and its injected folders, which is what the helm, helmfile and terraform
+// deployers write. An empty name is dropped: it would match on any record whose name
 // contains an empty token, and it can only have arrived by accident.
 func newScope(components ...string) scope {
 	within := scope{
@@ -157,7 +157,8 @@ func (s scope) validate() error {
 // it answers for.
 //
 // A component's name is not always the name the cluster stores it under. Only
-// the helm and helmfile deployers install under the component's own name;
+// the helm, helmfile and terraform deployers install under the component's own
+// name;
 // helm-controller composes a Flux release as "<targetNamespace>-<name>", so
 // gpu-operator is stored as gpu-operator-gpu-operator, and Argo CD prepends a
 // user-settable namePrefix to every child Application. The bundle writer's own

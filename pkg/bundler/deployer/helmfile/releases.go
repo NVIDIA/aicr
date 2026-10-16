@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -105,21 +106,6 @@ type Release struct {
 	// (ManifestsUseChartCRDs). All other wrappers keep the safety
 	// check. Issues #914, #929.
 	DisableValidation bool `yaml:"disableValidation,omitempty"`
-}
-
-// overrides carries per-component helm flag overrides.
-type overrides struct {
-	wait    bool
-	timeout int // seconds; 0 means "use helmDefaults.timeout"
-}
-
-// componentOverrides mirrors the special cases hardcoded in
-// pkg/bundler/deployer/helm/templates/deploy.sh.tmpl
-// (ASYNC_COMPONENTS and the COMPONENT_HELM_TIMEOUT case block).
-// The two files must be updated together; promoting these into the recipe
-// schema is tracked as a follow-up to issue #632.
-var componentOverrides = map[string]overrides{
-	"kai-scheduler": {wait: false, timeout: 20 * 60},
 }
 
 // defaultHelmDefaults returns the cluster-wide defaults applied to every
@@ -212,13 +198,13 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 		// Per-component overrides (async / longer timeout). Keyed by
 		// f.Parent so primary + injected -pre / -post inherit the same
 		// override as their parent component.
-		if ov, ok := componentOverrides[f.Parent]; ok {
-			if !ov.wait {
+		if ov, ok := deployer.ComponentOverrideFor(f.Parent); ok {
+			if !ov.Wait {
 				waitFalse := false
 				rel.Wait = &waitFalse
 			}
-			if ov.timeout > 0 {
-				rel.Timeout = ov.timeout
+			if ov.TimeoutSeconds > 0 {
+				rel.Timeout = ov.TimeoutSeconds
 			}
 		}
 

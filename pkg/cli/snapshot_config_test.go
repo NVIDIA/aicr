@@ -748,6 +748,69 @@ func TestSnapshotCmd_NoConfigCleanupDefaultsTrue(t *testing.T) {
 	}
 }
 
+// TestSnapshotCmd_MaxNodesPerEntryEnv pins the Job-to-pod contract: the agent
+// Job passes the cap to the in-pod CLI only as AICR_MAX_NODES_PER_ENTRY (its
+// args are just `snapshot -o cm://...`), so without the env source the cap was
+// silently 0 inside the pod (#3253).
+func TestSnapshotCmd_MaxNodesPerEntryEnv(t *testing.T) {
+	const envName = "AICR_MAX_NODES_PER_ENTRY"
+	cfg := `kind: AICRConfig
+apiVersion: aicr.run/v1beta1
+spec:
+  snapshot:
+    execution:
+      maxNodesPerEntry: 2
+`
+	env := func(v string) *string { return &v }
+	tests := []struct {
+		name       string
+		env        *string // nil = unset
+		withConfig bool
+		args       []string
+		want       int
+		wantErr    bool
+	}{
+		{name: "env only", env: env("7"), want: 7},
+		{name: "flag beats env", env: env("7"), args: []string{"--max-nodes-per-entry", "3"}, want: 3},
+		{name: "env beats config", env: env("7"), withConfig: true, want: 7},
+		{name: "config when env unset", withConfig: true, want: 2},
+		{name: "empty env falls through to config", env: env(""), withConfig: true, want: 2},
+		{name: "unset defaults to unlimited", want: 0},
+		{name: "non-integer env fails", env: env("five"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envName, "")
+			if tt.env == nil {
+				if err := os.Unsetenv(envName); err != nil {
+					t.Fatalf("unset %s: %v", envName, err)
+				}
+			} else {
+				t.Setenv(envName, *tt.env)
+			}
+			args := append([]string{"-o", "-"}, tt.args...)
+			if tt.withConfig {
+				cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+				if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+				args = append(args, "--config", cfgPath)
+			}
+			if tt.wantErr {
+				err := runSnapshotCmdExpectErr(t, args)
+				if err == nil || !strings.Contains(err.Error(), envName) {
+					t.Fatalf("error = %v, want a parse error naming %s", err, envName)
+				}
+				return
+			}
+			opts := captureSnapshotOpts(t, args)
+			if opts.maxNodesPerEntry != tt.want {
+				t.Errorf("maxNodesPerEntry = %d, want %d", opts.maxNodesPerEntry, tt.want)
+			}
+		})
+	}
+}
+
 // === HTTP source: snapshot section round-trips through config.Load ===
 
 // testSnapshotConfig is a canned config used by the HTTP source test;

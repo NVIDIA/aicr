@@ -120,6 +120,78 @@ transitions:
             reason: >-
               Confirms the mirror adopted live lifecycle position rather than
               handing the new object a fresh rollout.
+      - deployers: [terraform]
+        steps:
+          - id: expect-operator-downtime-during-the-hook
+            description: >-
+              The chart runs a selector-migration pre-upgrade hook that DELETES
+              the operator Deployment before helm recreates it. The hook runs
+              inside the helm_release upgrade terraform apply performs. If
+              that hook's Job fails or exceeds its deadline, the upgrade aborts
+              with the Deployment already gone. With atomic at its default of
+              false the namespace is left with no operator at all and the
+              release sits in `failed`; with atomic = true Helm rolls the
+              release back and the old operator returns. Either way, re-run
+              terraform apply to recover; it completes once the hook Job
+              passes.
+            reason: >-
+              Observed on a kind cluster crossing v0.17.1 to v0.19.0: the hook
+              pod exited 0 having deleted the Deployment, but the Job tripped
+              its activeDeadlineSeconds while its image was still being pulled,
+              and helm treated the Job failure as an aborted upgrade. The
+              deletion is deliberate: the hook deletes when the live selector
+              would have to change (spec.selector is immutable) or when the
+              running operator predates label-based webhook discovery, which is
+              what fired here. Such an operator looks its webhook
+              configurations up by name, the upgrade renames them, so it never
+              goes Ready, never releases the webhook bootstrap lease and is
+              never terminated by the rolling update, wedging the release on
+              "Pending termination". A short operator gap is the cheaper
+              failure. The exposure is that gap widening, not the deletion.
+          - id: upgrade-operator
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply,
+              before touching any CR; the module's helm_release upgrades the
+              operator chart.
+            reason: >-
+              The chart ships both groups' CRDs and RBAC, and the mirror
+              imports each Skyhook into a NodeWright. Per-node state is copied
+              to the nodewright.nvidia.com/* prefix, so packages are not
+              re-run.
+          - id: rename-crs
+            description: >-
+              Rewrite your CR manifests and apply them:
+              sed -e '/^ *apiVersion:/ s|skyhook\.nvidia\.com/|nodewright.nvidia.com/|'
+              -e 's|^\( *kind: *\)Skyhook[[:space:]]*$|\1NodeWright|'
+              my-skyhook.yaml > my-nodewright.yaml
+            reason: >-
+              The mirror already created the object, so this applies as a
+              no-op adoption rather than a fresh create. Rewrite apiVersion
+              and kind only: a blanket substitution also rewrites
+              nodeSelectors and podNonInterruptLabels, which name your labels
+              rather than the operator's, and that turns a no-op adoption into
+              a real spec change against keys nothing carries.
+          - id: delete-legacy-crs
+            description: >-
+              Once the NodeWright exists and reconciles: kubectl delete
+              skyhook.skyhook.nvidia.com <name>, then kubectl delete
+              deploymentpolicy.skyhook.nvidia.com <name>.
+            reason: >-
+              Skyhooks must go before the DeploymentPolicy they reference. The
+              NodeWright survives, because the mirror never deletes it. Legacy
+              per-node state and pre-rename package pods are kept for the
+              LEGACY_CLEANUP_DELAY rollback window and pruned later, not now.
+              Do not remove the skyhook.nvidia.com CRD itself until every
+              legacy object is gone, since that cascade-deletes whatever
+              remains.
+          - id: verify-migration
+            description: >-
+              kubectl get nodewrights.nodewright.nvidia.com lists a NodeWright
+              for each former Skyhook, node annotations are present under the
+              nodewright.nvidia.com/ prefix, and no package re-ran.
+            reason: >-
+              Confirms the mirror adopted live lifecycle position rather than
+              handing the new object a fresh rollout.
       - steps:
           - id: expect-operator-downtime-during-the-hook
             description: >-

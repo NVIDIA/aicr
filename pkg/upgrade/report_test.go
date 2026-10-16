@@ -48,11 +48,11 @@ func TestStepsFor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
-			for _, s := range stepsFor(tt.groups, tt.deployer) {
+			for _, s := range (&Transition{StepsByDeployer: tt.groups}).StepsFor(tt.deployer) {
 				got = append(got, s.ID)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("stepsFor(...) step ids = %v, want %v", got, tt.want)
+				t.Errorf("StepsFor(...) step ids = %v, want %v", got, tt.want)
 			}
 		})
 	}
