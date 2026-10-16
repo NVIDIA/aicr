@@ -143,55 +143,139 @@ transitions:
       - https://github.com/Mellanox/network-operator/releases/tag/v26.7.0
       - https://github.com/Mellanox/network-operator/blob/v26.7.0/deployment/network-operator/values.yaml
       - https://github.com/Mellanox/network-operator/blob/v26.7.0/docs/heterogeneous-cluster-support.md
-  - from: "<25.7.0"
+  - from: ">=25.4.0 <25.7.0"
     to: "=25.7.0"
-    verdict: blocked
+    verdict: manual
     summary: >-
-      In-place migration to Network Operator 25.7.0 has not been qualified for existing
-      NicClusterPolicy resources and RDMA workloads. A recipe pin describes a deployment baseline,
-      not an upgrade path for an existing installation.
+      Only same-major or next-major upgrades are supported; earlier sources
+      must advance through the intervening major releases first. Upgrading the
+      operator does not update operand image versions in an
+      existing NicClusterPolicy. Update that policy explicitly to the target
+      release's supported operands; driver changes require a planned node drain.
     precondition: >-
-      Keep the existing release and its resources intact until a migration
-      plan has been verified against the installed version and configuration.
-    reversible: false
-    reversibleNotes: >-
-      A Helm rollback alone has not been verified to restore custom resources
-      and their controller behavior across this boundary.
+      The existing NicClusterPolicy is ready. These version-based records
+      describe the upstream operator lifecycle, not a migration between chart
+      distributors; confirm distributor-specific instructions separately.
     stepsByDeployer:
       - steps:
-          - id: qualify-migration
+          - id: save-and-plan
             description: >-
-              Do not apply or sync this version change in place. Export the
-              existing release values, CRDs and custom resources; test the
-              target version in an isolated cluster using copies of that
-              configuration. Establish and verify a migration and recovery
-              procedure before scheduling the production transition.
+              Export the existing NicClusterPolicy, CRDs and release values.
+              Compare operand versions with the target release's supported
+              configuration. Plan disruption and drain capacity if DOCA/OFED
+              changes, respecting workload disruption budgets.
             reason: >-
-              Baseline deployment checks do not establish compatibility of
-              existing custom resources, active workloads or rollback behavior.
-  - from: ">=25.7.0 <26.4.1"
+              Driver replacement affects active RDMA workloads on each node.
+          - id: upgrade-operator-and-policy
+            description: >-
+              Apply the target operator and CRDs through the selected deployer,
+              then update operand versions in the desired NicClusterPolicy.
+              Follow the documented driver upgrade procedure if applicable.
+              Verify policy readiness, operand images and RDMA workload access.
+            reason: >-
+              Operator reconciliation alone leaves existing operand pins intact.
+    references:
+      - https://docs.nvidia.com/networking/display/kubernetes2640/life-cycle-management.html
+      - https://docs.nvidia.com/networking/display/kubernetes2570/life-cycle-management.html
+  - from: ">=25.7.0 <25.10.0"
+    to: "=25.10.0"
+    verdict: manual
+    summary: >-
+      Only same-major or next-major upgrades are supported; earlier sources
+      must advance through the intervening major releases first. Upgrading the
+      operator does not update operand image versions in an
+      existing NicClusterPolicy. Update that policy explicitly to the target
+      release's supported operands; driver changes require a planned node drain.
+    precondition: >-
+      The existing NicClusterPolicy is ready. These version-based records
+      describe the upstream operator lifecycle, not a migration between chart
+      distributors; confirm distributor-specific instructions separately.
+    stepsByDeployer:
+      - steps:
+          - id: save-and-plan
+            description: >-
+              Export the existing NicClusterPolicy, CRDs and release values.
+              Compare operand versions with the target release's supported
+              configuration. Plan disruption and drain capacity if DOCA/OFED
+              changes, respecting workload disruption budgets.
+            reason: >-
+              Driver replacement affects active RDMA workloads on each node.
+          - id: upgrade-operator-and-policy
+            description: >-
+              Apply the target operator and CRDs through the selected deployer,
+              then update operand versions in the desired NicClusterPolicy.
+              Follow the documented driver upgrade procedure if applicable.
+              Verify policy readiness, operand images and RDMA workload access.
+            reason: >-
+              Operator reconciliation alone leaves existing operand pins intact.
+    references:
+      - https://docs.nvidia.com/networking/display/kubernetes2640/life-cycle-management.html
+      - https://docs.nvidia.com/networking/display/kubernetes2570/life-cycle-management.html
+  - from: ">=25.10.0 <26.1.0"
+    to: "=26.1.0"
+    verdict: manual
+    summary: >-
+      Only same-major or next-major upgrades are supported; earlier sources
+      must advance through the intervening major releases first. Upgrading the
+      operator does not update operand image versions in an
+      existing NicClusterPolicy. Update that policy explicitly to the target
+      release's supported operands; driver changes require a planned node drain.
+    precondition: >-
+      The existing NicClusterPolicy is ready. These version-based records
+      describe the upstream operator lifecycle, not a migration between chart
+      distributors; confirm distributor-specific instructions separately.
+    stepsByDeployer:
+      - steps:
+          - id: save-and-plan
+            description: >-
+              Export the existing NicClusterPolicy, CRDs and release values.
+              Compare operand versions with the target release's supported
+              configuration. Plan disruption and drain capacity if DOCA/OFED
+              changes, respecting workload disruption budgets.
+            reason: >-
+              Driver replacement affects active RDMA workloads on each node.
+          - id: upgrade-operator-and-policy
+            description: >-
+              Apply the target operator and CRDs through the selected deployer,
+              then update operand versions in the desired NicClusterPolicy.
+              Follow the documented driver upgrade procedure if applicable.
+              Verify policy readiness, operand images and RDMA workload access.
+            reason: >-
+              Operator reconciliation alone leaves existing operand pins intact.
+    references:
+      - https://docs.nvidia.com/networking/display/kubernetes2640/life-cycle-management.html
+      - https://docs.nvidia.com/networking/display/kubernetes2570/life-cycle-management.html
+  - from: ">=26.1.0 <26.4.1"
     to: "=26.4.1"
-    verdict: blocked
+    verdict: manual
     summary: >-
-      In-place migration to Network Operator 26.4.1 has not been qualified for existing
-      NicClusterPolicy resources and RDMA workloads. A recipe pin describes a deployment baseline,
-      not an upgrade path for an existing installation.
+      Only same-major or next-major upgrades are supported; earlier sources
+      must advance through the intervening major releases first. Upgrading the
+      operator does not update operand image versions in an
+      existing NicClusterPolicy. Update that policy explicitly to the target
+      release's supported operands; driver changes require a planned node drain.
     precondition: >-
-      Keep the existing release and its resources intact until a migration
-      plan has been verified against the installed version and configuration.
-    reversible: false
-    reversibleNotes: >-
-      A Helm rollback alone has not been verified to restore custom resources
-      and their controller behavior across this boundary.
+      The existing NicClusterPolicy is ready. These version-based records
+      describe the upstream operator lifecycle, not a migration between chart
+      distributors; confirm distributor-specific instructions separately.
     stepsByDeployer:
       - steps:
-          - id: qualify-migration
+          - id: save-and-plan
             description: >-
-              Do not apply or sync this version change in place. Export the
-              existing release values, CRDs and custom resources; test the
-              target version in an isolated cluster using copies of that
-              configuration. Establish and verify a migration and recovery
-              procedure before scheduling the production transition.
+              Export the existing NicClusterPolicy, CRDs and release values.
+              Compare operand versions with the target release's supported
+              configuration. Plan disruption and drain capacity if DOCA/OFED
+              changes, respecting workload disruption budgets.
             reason: >-
-              Baseline deployment checks do not establish compatibility of
-              existing custom resources, active workloads or rollback behavior.
+              Driver replacement affects active RDMA workloads on each node.
+          - id: upgrade-operator-and-policy
+            description: >-
+              Apply the target operator and CRDs through the selected deployer,
+              then update operand versions in the desired NicClusterPolicy.
+              Follow the documented driver upgrade procedure if applicable.
+              Verify policy readiness, operand images and RDMA workload access.
+            reason: >-
+              Operator reconciliation alone leaves existing operand pins intact.
+    references:
+      - https://docs.nvidia.com/networking/display/kubernetes2640/life-cycle-management.html
+      - https://docs.nvidia.com/networking/display/kubernetes2570/life-cycle-management.html

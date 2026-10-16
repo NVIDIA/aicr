@@ -62,3 +62,28 @@ health, RDMA traffic or performance. Use the live validators and record signed
 recipe evidence before upstream submission, following
 [recipe development](recipe-development.md) and
 [evidence publishing](../contributor/evidence-publishing.md).
+
+## Qualification evidence boundary
+
+The October 16, 2026 reference-stack run used Dynamo operator **1.5.0** with
+vLLM runtime **1.4.2**, not runtime 1.5.0. The observed runtime image was
+`nvcr.io/nvidia/ai-dynamo/vllm-runtime@sha256:b23ce9e87c413725024ddfd2e06c1e7da220eb48f8a93037f0b01d564b54bd13`.
+The Qwen3-8B benchmark used eight one-GPU workers on a single B300 node and
+reported 230,614.70 output tokens/second and 644.87 ms p99 TTFT. This is
+historical evidence for that reconciled reference stack, not a fresh installation
+of the generated bundle after review fixes.
+
+Both GPU nodes advertised NVIDIA driver **595.91.07** in the saved node
+inventory before and after that run. The Nebius overlay explicitly pins
+`driver.version: "595.91.07"` to match that baseline instead of inheriting
+**580.173.02** from the shared GPU Operator base values. The earlier generated
+580.173.02 configuration was not qualified by that benchmark. Matching the pin
+corrects the driver-version mismatch; it does not establish a fresh installation
+of the final generated bundle. Before recording new qualification evidence,
+verify the loaded driver on both workers against the generated NVIDIADriver.
+
+The single-node inference result **does not qualify inter-node GPUDirect RDMA**.
+Exposing all eight HCAs through `rdma/ib`, node readiness and scheduling checks
+also do not establish cross-node traffic. An inter-node claim requires separate
+multi-node communication evidence; this recipe's inference result makes no
+such claim.

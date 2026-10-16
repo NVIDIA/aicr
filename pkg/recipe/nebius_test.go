@@ -52,6 +52,9 @@ func TestNebiusB300Recipe(t *testing.T) {
 	if gpu["devicePlugin"].(map[string]any)["enabled"] != true {
 		t.Error("device plugin must advertise whole GPUs")
 	}
+	if got := gpu["driver"].(map[string]any)["version"]; got != "595.91.07" {
+		t.Errorf("driver version = %v, want qualification baseline 595.91.07", got)
+	}
 	dra, err := result.GetValuesForComponent("nvidia-dra-driver-gpu")
 	if err != nil {
 		t.Fatal(err)

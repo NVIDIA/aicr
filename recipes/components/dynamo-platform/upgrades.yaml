@@ -16,29 +16,53 @@ apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: dynamo-platform
 transitions:
-  - from: "<1.5.0"
+  - from: ">=1.4.2 <1.5.0"
     to: "=1.5.0"
-    verdict: blocked
+    verdict: manual
     summary: >-
-      In-place migration to Dynamo Platform 1.5.0 has not been qualified for existing
-      Dynamo deployments and their custom resources. A recipe pin describes a deployment baseline,
-      not an upgrade path for an existing installation.
+      1.5.0 migrates CRD storage to v1beta1, removes v1alpha1 admission
+      endpoints and DynamoCheckpoint, and moves checkpointing to the standalone
+      Snapshot operator. Bundled NATS is disabled by default; accepting that
+      default removes NATS and rolls managed workloads without NATS_SERVER.
     precondition: >-
-      Keep the existing release and its resources intact until a migration
-      plan has been verified against the installed version and configuration.
-    reversible: false
-    reversibleNotes: >-
-      A Helm rollback alone has not been verified to restore custom resources
-      and their controller behavior across this boundary.
+      This guidance starts at the AICR 1.4.2 baseline. Earlier sources are
+      outside the assessed migration range.
     stepsByDeployer:
       - steps:
-          - id: qualify-migration
+          - id: preserve-event-plane
             description: >-
-              Do not apply or sync this version change in place. Export the
-              existing release values, CRDs and custom resources; test the
-              target version in an isolated cluster using copies of that
-              configuration. Establish and verify a migration and recovery
-              procedure before scheduling the production transition.
+              Export release values and Dynamo custom resources. Check for
+              DYN_EVENT_PLANE=nats, DYN_REQUEST_PLANE=nats and NATS request
+              tracing. If these are in use, explicitly retain global.nats.install
+              or configure an external server through dynamo-operator.natsAddr
+              before applying the new bundle.
             reason: >-
-              Baseline deployment checks do not establish compatibility of
-              existing custom resources, active workloads or rollback behavior.
+              The new NATS default can remove a dependency of existing workloads.
+          - id: migrate-checkpointing
+            description: >-
+              If checkpointing is used, install the standalone Snapshot operator
+              and its CRDs first, enable checkpoint.enabled, and migrate saved
+              DynamoCheckpoint definitions to PodSnapshot before removing old
+              resources. Update checkpointRef references to PodSnapshot.
+            reason: >-
+              The Dynamo operator no longer reconciles DynamoCheckpoint.
+          - id: migrate-epp
+            description: >-
+              If using the Go endpoint picker, migrate its deployment and
+              configuration to the Rust endpoint picker before upgrading.
+            reason: >-
+              1.5.0 removes the Go EPP implementation.
+          - id: reconcile-api-and-runtime
+            description: >-
+              Update externally managed admission webhook paths and apiVersions
+              to v1beta1. Apply the bundle with its CRDs and let the built-in
+              storage migrator convert existing objects. Verify storedVersions,
+              webhook readiness and reconciliation of existing deployments.
+              Supply a main-component image; for non-semver image tags or
+              digests, set runtimeVersionOverride to the actual runtime version.
+            reason: >-
+              Removed admission endpoints break requests, and runtime feature
+              defaults depend on the workload image rather than operator version.
+    references:
+      - https://github.com/ai-dynamo/dynamo/releases/tag/v1.5.0
+      - https://github.com/ai-dynamo/dynamo/blob/v1.5.0/deploy/helm/charts/platform/README.md

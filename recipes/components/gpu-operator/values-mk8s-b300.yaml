@@ -18,6 +18,7 @@ gpuCluster:
   deployCR: false
 driver:
   enabled: true
+  version: "595.91.07"
   nvidiaDriverCRD:
     enabled: true
     deployDefaultCR: true

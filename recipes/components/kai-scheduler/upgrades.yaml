@@ -16,29 +16,38 @@ apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: kai-scheduler
 transitions:
-  - from: "<0.17.1"
+  - from: ">=0.16.9 <0.17.1"
     to: "=0.17.1"
-    verdict: blocked
+    verdict: manual
     summary: >-
-      In-place migration to KAI Scheduler 0.17.1 has not been qualified for existing
-      queues and scheduling workloads. A recipe pin describes a deployment baseline,
-      not an upgrade path for an existing installation.
+      0.17.1 replaces the global.fips boolean with global.fipsMode (on/off).
+      The 0.17.0 chart also removes the admission.certSecretName and
+      queuecontroller.certSecretName values; the operator uses fixed TLS secret
+      names. Existing values must be reconciled with these chart changes.
     precondition: >-
-      Keep the existing release and its resources intact until a migration
-      plan has been verified against the installed version and configuration.
-    reversible: false
-    reversibleNotes: >-
-      A Helm rollback alone has not been verified to restore custom resources
-      and their controller behavior across this boundary.
+      This guidance covers the AICR 0.16.9 baseline and 0.17.0, assessed against
+      the 0.17.0 and 0.17.1 release changes. Earlier sources are not assessed.
     stepsByDeployer:
       - steps:
-          - id: qualify-migration
+          - id: migrate-values
             description: >-
-              Do not apply or sync this version change in place. Export the
-              existing release values, CRDs and custom resources; test the
-              target version in an isolated cluster using copies of that
-              configuration. Establish and verify a migration and recovery
-              procedure before scheduling the production transition.
+              Export the installed values and custom resources. If global.fips
+              is set, replace it with global.fipsMode set to the quoted string
+              "on" or "off". Remove admission.certSecretName and
+              queuecontroller.certSecretName overrides; check that certificate
+              provisioning uses kai-admission-webhook-tls-secret and
+              queue-webhook-tls-secret.
             reason: >-
-              Baseline deployment checks do not establish compatibility of
-              existing custom resources, active workloads or rollback behavior.
+              Keeping removed keys does not configure the new chart and can
+              silently lose the intended FIPS or certificate configuration.
+          - id: reconcile-and-verify
+            description: >-
+              Apply the generated bundle through the selected deployer, then
+              verify webhook readiness and scheduling of representative queued
+              and gang workloads before resuming normal submissions.
+            reason: >-
+              Controller readiness alone does not verify existing queue and
+              workload configuration across the chart migration.
+    references:
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.17.0
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.17.1

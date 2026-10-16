@@ -270,3 +270,42 @@ const componentsDir = "components"
 // upgradesFileName is the ADR-021 record's filename within a component's
 // directory.
 const upgradesFileName = "upgrades.yaml"
+
+// TestNebiusUpgradeBoundaries checks supported sequential upgrades and rejects
+// skipped Network Operator majors and targets beyond the assessed versions.
+func TestNebiusUpgradeBoundaries(t *testing.T) {
+	set, _, err := LoadUpgradeRecords(t.Context(), defaultEmbeddedProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		component, from, to string
+		want                upgrade.Verdict
+	}{
+		{"network-operator", "25.1.0", "25.7.0", upgrade.VerdictBlocked},
+		{"network-operator", "25.4.0", "25.7.0", upgrade.VerdictManual},
+		{"network-operator", "25.7.0", "26.4.1", upgrade.VerdictBlocked},
+		{"network-operator", "25.10.0", "26.4.1", upgrade.VerdictBlocked},
+		{"network-operator", "26.1.0", "26.4.1", upgrade.VerdictManual},
+		{"network-operator", "26.4.0", "26.4.1", upgrade.VerdictManual},
+		{"kai-scheduler", "0.16.8", "0.17.1", upgrade.VerdictBlocked},
+		{"kai-scheduler", "0.16.9", "0.17.1", upgrade.VerdictManual},
+		{"kai-scheduler", "0.16.9", "0.17.2", upgrade.VerdictBlocked},
+		{"kai-scheduler", "0.17.0", "0.17.1", upgrade.VerdictManual},
+		{"kai-scheduler", "0.17.1", "0.17.2", upgrade.VerdictBlocked},
+		{"dynamo-platform", "1.4.1", "1.5.0", upgrade.VerdictBlocked},
+		{"dynamo-platform", "1.4.2", "1.5.1", upgrade.VerdictBlocked},
+		{"dynamo-platform", "1.4.2", "1.5.0", upgrade.VerdictManual},
+		{"dynamo-platform", "1.5.0", "1.5.1", upgrade.VerdictBlocked},
+	} {
+		t.Run(tc.component+"/"+tc.from+"-"+tc.to, func(t *testing.T) {
+			got := upgrade.Match(set, map[string]string{tc.component: tc.from}, map[string]string{tc.component: tc.to})
+			if len(got) != 1 {
+				t.Fatalf("got %d results, want 1", len(got))
+			}
+			if got[0].Verdict != tc.want {
+				t.Fatalf("got %s, want %s: %s", got[0].Verdict, tc.want, got[0].Explanation)
+			}
+		})
+	}
+}
