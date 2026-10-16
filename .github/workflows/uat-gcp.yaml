@@ -86,7 +86,7 @@ jobs:
     # and its VPC network group. always() lets the teardown steps run to
     # completion; the repository guard still confines this to the org repo.
     if: always() && github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Budget = uncapped non-UAT steps (build, validator image push, GKE
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 25
     # + readiness 65 + validate 40 + the selected CUJ (train 25 OR serve 40) +
@@ -114,7 +114,7 @@ jobs:
     # slice PLUS the remaining phases, so a second ~60m attempt (plus the 60s
     # backoff) adds ~61m on top, for a recomputed worst case of ~339m (278 + 61).
     #
-    # GitHub-hosted runners (ubuntu-latest) hard-cap a job at 360m of execution
+    # GitHub-hosted runners (ubuntu-24.04) hard-cap a job at 360m of execution
     # (6h); a larger timeout-minutes is silently clamped to 360, so 360 is the
     # ceiling here and covers the ~339m worst case with ~21m of margin. If the
     # budget above grows the lever is trimming worst-case work (or moving off

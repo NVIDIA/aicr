@@ -88,7 +88,7 @@ concurrency:
 jobs:
   publish:
     name: Publish to TestGrid
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15  # Go build ~2 min + gcloud uploads ~3 min; 15 min is generous
 
     # Stay disabled until the prod WIF pool/SA exists. The workflow is always

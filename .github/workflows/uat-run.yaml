@@ -208,7 +208,7 @@ jobs:
   # (uat-broker exits NOT_FOUND), so the registry is the single source of truth.
   resolve:
     if: github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       cloud: ${{ steps.row.outputs.cloud }}
       # Daytime cluster-name discovery slug (ADR-017); forwarded to the cloud
@@ -542,7 +542,7 @@ jobs:
     if: >-
       inputs.deployer != 'helmfile' &&
       needs.resolve.outputs.cloud != 'aws'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Fail on unsupported (deployer, cloud) combination
         env:
@@ -571,7 +571,7 @@ jobs:
       needs.resolve.outputs.cloud != 'gcp' &&
       needs.resolve.outputs.cloud != 'azure' &&
       needs.resolve.outputs.cloud != 'kind'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Fail on unmapped cloud
         env:

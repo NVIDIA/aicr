@@ -50,7 +50,7 @@ jobs:
       !github.event.issue.pull_request &&
       (startsWith(github.event.comment.body, '/assign') ||
        startsWith(github.event.comment.body, '/unassign'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       issues: write
     timeout-minutes: 5

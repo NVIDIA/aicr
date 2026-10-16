@@ -225,7 +225,7 @@ check "the sim runner derives the census selector from the mock label" "1" \
 # self-hosted GPU runner would consume the kind-h100 reservation's capacity
 # WITHOUT holding its lease, racing the nvkind lane on the same machine.
 check "the lane runs on a GitHub-hosted runner" "1" \
-    "$(operative "${WORKFLOW}" | grep -cE '^ *runs-on: ubuntu-latest$' | tr -d ' ')"
+    "$(operative "${WORKFLOW}" | grep -cE '^ *runs-on: ubuntu-24\.04$' | tr -d ' ')"
 check "the lane names no self-hosted runner label" "0" \
     "$(operative "${WORKFLOW}" | grep -c 'linux-amd64-gpu' | tr -d ' ')"
 check "the lane takes no reservation" "0" \

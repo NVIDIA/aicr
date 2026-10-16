@@ -103,7 +103,7 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'gcp')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -137,7 +137,7 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'aws')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -175,7 +175,7 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'aws')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -206,7 +206,7 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'azure')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read

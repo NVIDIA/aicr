@@ -70,7 +70,7 @@ concurrency:
 jobs:
   test:
     name: NVSentinel Health Events Analyzer E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The script's bounded waits sum to ~112 minutes worst case (node Ready 2,
     # cert-manager 10, Percona datastore 15, nvsentinel rollout 15, event
     # delivery 27, datastore polls 40, condition waits 2, proto fetch 1), before kind create, go

@@ -68,7 +68,7 @@ jobs:
       github.event.issue.pull_request &&
       (github.event.comment.body == '/ok-to-test' ||
        github.event.comment.body == '/ok-to-test confirm-ci')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read

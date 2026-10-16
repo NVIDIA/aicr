@@ -152,7 +152,7 @@ gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
 
 `platform=slurm` needs **four schedulable nodes**, and the reservation-bound kind lane has one. A Slurm topology block groups *slurmd pods*, the Slinky operator attaches a hard per-hostname `podAntiAffinity` to every NodeSet pod, so four replicas need four nodes; on single-node nvkind one pod would run and three would stay `Pending`. That is why the leased lane refuses the dispatch outright rather than accepting one it could only fail.
 
-`.github/workflows/uat-kind-sim.yaml` is that lane. Four real kind workers whose GPU capacity is **simulated** (a mocked NVML driver tree, a device plugin pointed at it, and a real DCGM host engine reading it), on `ubuntu-latest`:
+`.github/workflows/uat-kind-sim.yaml` is that lane. Four real kind workers whose GPU capacity is **simulated** (a mocked NVML driver tree, a device plugin pointed at it, and a real DCGM host engine reading it), on `ubuntu-24.04`:
 
 ```bash
 # Simulated four-worker Slurm lane (issue #2358): no hardware, no lease

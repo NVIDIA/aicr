@@ -143,3 +143,7 @@ runs:
     - name: Verify vendored Go proxy action
       shell: bash
       run: make check-depproxy-kit
+
+    - name: Reject floating runner labels
+      shell: bash
+      run: make check-runner-labels

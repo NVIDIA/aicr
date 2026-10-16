@@ -73,7 +73,7 @@ concurrency:
 jobs:
   sigstore-scaffolding-e2e:
     name: Private Sigstore E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
       contents: read

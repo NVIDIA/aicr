@@ -488,7 +488,7 @@ runs:
       run: |
         set -euo pipefail
         HELM_VERSION="${HELM_INPUT_VERSION#v}"
-        # The runner image may ship a preinstalled helm (ubuntu-latest bundles
+        # The runner image may ship a preinstalled helm (ubuntu-24.04 bundles
         # Helm 3 at /usr/local/bin/helm). Only skip installation when the
         # existing binary already matches the pinned version; a bare presence
         # check silently ignores the .settings.yaml pin and leaves jobs running

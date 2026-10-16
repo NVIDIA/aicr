@@ -156,7 +156,7 @@ runs:
         go mod tidy -diff \
           || { echo "go.mod/go.sum are not tidy; run 'make tidy' and commit the result" >&2; exit 1; }
 
-    # The ubuntu-latest runner image bundles Helm 3; the unit tests that
+    # The ubuntu-24.04 runner image bundles Helm 3; the unit tests that
     # shell out to helm (pkg/bundler/deployer/argocdhelm live-render tests)
     # must run against the Helm major pinned in .settings.yaml. The
     # setup-build-tools step replaces any preinstalled binary that does not

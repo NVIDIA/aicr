@@ -78,7 +78,7 @@ jobs:
   script-tests:
     name: KWOK Script Tests
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -103,7 +103,7 @@ jobs:
   discover:
     name: Discover Recipes
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       tier1_pairs: ${{ steps.classify.outputs.tier1_pairs }}
@@ -504,7 +504,7 @@ jobs:
   prime-images:
     name: 'Prime Image Cache (${{ matrix.image }})'
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # A failed kind_node pull must not skip every tier. Lanes that miss the
     # cache fall back to `kind create cluster` pulling the node image itself.
@@ -550,7 +550,7 @@ jobs:
   build-aicr:
     name: Build aicr
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -664,7 +664,7 @@ jobs:
   summary:
     name: KWOK Test Summary (advisory)
     needs: [script-tests, discover, prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     if: always()
     steps:

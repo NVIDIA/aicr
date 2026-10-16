@@ -121,12 +121,16 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, vendored action digests, and runner labels)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
 check-depproxy-kit: ## Verifies the vendored Go proxy action matches upstream digests
 	@./tools/check-depproxy-kit
+
+.PHONY: check-runner-labels
+check-runner-labels: ## Rejects the floating ubuntu-latest runner label under .github/
+	@./tools/check-runner-labels
 
 # Standalone target — NOT part of `make lint` because it requires Docker
 # (the validator runs in the same image renovatebot/github-action wraps).

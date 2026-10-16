@@ -71,7 +71,7 @@ concurrency:
 jobs:
   test:
     name: NVSentinel Slinky Drainer E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The script's bounded waits sum to ~84 minutes worst case (node Ready 2,
     # worker 3, cert-manager 10, Percona datastore 15, the CRD release 10,
     # plugin and nvsentinel rollout 15, event delivery 3, pipeline 6 polls of 4

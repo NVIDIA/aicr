@@ -61,7 +61,7 @@ jobs:
   # The kwok-test action downloads this artifact by name.
   build-aicr:
     name: Build aicr
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -93,7 +93,7 @@ jobs:
   test:
     name: "${{ matrix.recipe || 'h100-eks-ubuntu-training' }} + ${{ matrix.mixin }} (${{ matrix.deployer }})"
     needs: [build-aicr]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Matches kwok-test-run.yaml: the flux-oci readiness check alone takes ~7min.
     timeout-minutes: 20
     strategy:

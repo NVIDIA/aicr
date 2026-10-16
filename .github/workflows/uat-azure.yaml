@@ -87,7 +87,7 @@ jobs:
     # its resource group. The repository guard is preserved as the second
     # conjunct so forks still skip the job.
     if: always() && github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Budget = uncapped non-UAT steps (build, validator image push, AKS
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 25
     # + readiness 65 + validate 40 + the selected CUJ (train 25 OR serve 40) +
@@ -1096,7 +1096,7 @@ jobs:
       # step, so a failure before Update Config cannot leave the destroy
       # targeting the committed placeholder id (aicr-uat) instead of this
       # run's cluster. Its only tool dependencies — yq, docker, az — are all
-      # preinstalled on the ubuntu-latest runner image, so it does not depend
+      # preinstalled on the ubuntu-24.04 runner image, so it does not depend
       # on the setup-build-tools step having run either.
       - name: Destroy Cluster
         if: >-

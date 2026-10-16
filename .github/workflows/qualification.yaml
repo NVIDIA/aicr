@@ -40,7 +40,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 15 minutes was sized for a warm Go module cache: the same job finished in
     # 9m59s on the v0.21.0 tag with a cache hit, and was killed at the wall on
     # v0.21.1 with a miss, after 13.6 minutes of `go: downloading` stalls. The
@@ -90,7 +90,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
 
@@ -117,7 +117,7 @@ jobs:
   cli-e2e:
     name: CLI E2E
     if: inputs.privileged_ci
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -147,7 +147,7 @@ jobs:
 
   e2e:
     name: E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
 
@@ -173,7 +173,7 @@ jobs:
     # Intentional: unprivileged fork runs skip this job entirely so fork-derived
     # SARIF is never uploaded under the base repository's identity.
     if: inputs.privileged_ci
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       actions: read
