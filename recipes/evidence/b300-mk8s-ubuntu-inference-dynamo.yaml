@@ -1,0 +1,8 @@
+attestations:
+  - attestedAt: 2026-10-16T21:26:55Z
+    bundle:
+      digest: sha256:c3c8443e6b6b049fdf204c1e8ab744cb2df4f8948b4fe48a0fa69a2303c7593f
+      oci: ghcr.io/kky-fury/aicr-evidence:b300-mk8s-ubuntu-inference-dynamo-33a8f88f416e
+      predicateType: https://aicr.run/recipe-evidence/v3
+recipe: b300-mk8s-ubuntu-inference-dynamo
+schemaVersion: 1.0.0
