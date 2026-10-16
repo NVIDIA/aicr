@@ -318,27 +318,17 @@ fi
 
 # Server-side apply under Helm's own field manager.
 #
-# Two things have to be true at once: the chart must be authoritative, so a
-# field or spec.versions entry it removes actually disappears, and the call has
-# to work on a CRD that already exists.
+# Not `kubectl replace`: it updates an existing CRD (kubectl fills in the live
+# resourceVersion), but as a full overwrite that discards whatever other
+# managers set on the CRD after install. Server-side apply keeps those.
 #
-# `kubectl replace` cannot do the second. Kubernetes rejects an update whose
-# object carries no metadata.resourceVersion, and kubectl forwards the manifest
-# as given, so replacing a chart's raw CRD fails on precisely the upgrade this
-# step exists for. Verified against a live cluster: the API returns a Conflict.
-#
-# Plain `kubectl apply --server-side` cannot do the first. Server-side apply
-# removes an omitted field only when the applying manager owns it, and these
-# CRDs are owned by Helm, so a removal would survive under the default
-# `kubectl` manager.
-#
-# Applying as `helm` satisfies both. The apply adopts Helm's fieldset, so
-# anything Helm owned and the chart no longer declares is pruned, and apply
-# creates the object when it is absent. Verified on a live cluster against both
-# a Helm 4 install (field manager `helm`, operation Apply) and a Helm 3 install
-# (same manager, operation Update): a removed schema property disappeared in
-# both cases. --force-conflicts is still required because other managers may
-# hold individual fields.
+# As `helm` rather than the default `kubectl`, so a field `helm` claimed
+# through a server-side apply (a Helm 4 install, or an earlier run of this
+# step) is pruned once the chart drops it, unless another manager claims it
+# too. Which removals take, including
+# after a Helm 3 install, is set out under "Upgrade, uninstall, and
+# troubleshooting" in docs/user/component-catalog.md. --force-conflicts is
+# required because other managers may hold individual fields.
 while IFS= read -r doc; do
   # A whitespace-only file under crds/ is not an error, but handing it to
   # kubectl is: "no objects passed" aborts the deploy, and because the loop is

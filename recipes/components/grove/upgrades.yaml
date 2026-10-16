@@ -91,8 +91,7 @@ transitions:
               chart archive rather than filtering helm show crds output,
               whose document separators differ between Helm 3 and 4, and
               applies them as manager terraform-provider-helm, the manager
-              the provider installed them under, so the apply adopts that
-              fieldset.
+              the provider installed them under.
           - id: apply-bundle
             description: >-
               Regenerate the bundle at the new pin and run terraform apply.
