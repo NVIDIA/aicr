@@ -14,7 +14,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 |-----------|-------------|--------|
 | **gpu-operator** | Manages the GPU driver and runtime lifecycle on Kubernetes nodes. Handles driver installation, container runtime configuration, device plugin, and GPU feature discovery. | [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) |
 | **network-operator** | Manages high-performance networking for GPU workloads. Configures RDMA, SR-IOV, and host networking for multi-node communication. | [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) |
-| **nfd** | Node Feature Discovery — labels nodes with hardware features (PCI device IDs, kernel modules, CPU capabilities). Both gpu-operator and network-operator consume these labels. On production GPU recipes, the Topology Updater publishes per-node `NodeResourceTopology` CRDs describing NUMA zones and GPU/NIC affinity for downstream NUMA-aware schedulers. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
+| **nfd** | Node Feature Discovery. Labels nodes with hardware features (PCI device IDs, kernel modules, CPU capabilities). Both gpu-operator and network-operator consume these labels. Uninstalling nfd leaves its node labels in place because the chart's post-delete prune hook is disabled (`postDeleteCleanup: false`), so the GPU, network and DRA DaemonSets that select on them keep running. To clear them when retiring nfd for good, see [NFD Permanent Removal](#nfd-permanent-removal). On production GPU recipes, the Topology Updater publishes per-node `NodeResourceTopology` CRDs describing NUMA zones and GPU/NIC affinity for downstream NUMA-aware schedulers. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
 | **node-problem-detector** | Detects node-level faults the GPU stack does not watch — XFS shutdown, fatal UEFI CPER hardware errors, a read-only root filesystem — and publishes them as Node Conditions for NVSentinel's Object Monitor to consume. Opt-in via the `npd` mixin, and only where the platform does not already run its own. | [node-problem-detector](https://github.com/kubernetes/node-problem-detector) |
 | **dranet** | DRA network driver ([kubernetes-sigs/dranet](https://github.com/kubernetes-sigs/dranet)) for the ConnectX-9 RDMA fabric on VR200 (Vera Rubin NVL72) RKE2 clusters. Publishes the mlx5 NICs as `ResourceSlice`s (driver `dra.net`) and injects them into pods via NRI under `DeviceClass` `mlnx-cx9`. Manifest-only (vendored `dranet.yaml`), evaluated as a lean alternative to `network-operator`. Ships only in the VR200 RKE2 overlays, which pair it with host RDMA "exclusive" netns mode (`ib_core` `netns_mode=0`, applied by `nodewright-customizations` with `rdmaNetnsExclusive: true` and a node reboot) so a pod sees only its DRA-allocated HCA. | [DraNet](https://github.com/kubernetes-sigs/dranet) |
 | **gke-nccl-tcpxo** | NCCL TCPXO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
@@ -134,6 +134,76 @@ The trade-off is that, among the features nfd-worker publishes, cluster-side `No
 - **Custom overlays that add network-operator:** select `components/nfd/values-nvidia-nics.yaml` (`values-nvidia-nics-aks.yaml` on AKS) as nfd's `valuesFile` in the same overlay, include its rule in a `worker.config.sources.custom` override, or publish `pci.*` again; with none of these, nothing labels the NIC nodes once nfd-worker restarts. `aicr bundle` warns in both directions: network-operator without the rule, and the rule without network-operator, for example after `--set networkoperator:enabled=false` without `--set-json 'nfd:worker.config.sources.custom=[]'`.
 - **k8s-nim-operator `nfd.nodeFeatureRules.deviceID`:** reads `pci.device`, so it labels nothing unless `pci.*` is published again.
 - **Upgrading a running cluster:** on every non-AKS recipe, and on AKS with the helm, helmfile, argocd and argocd-helm deployers (which ship the AKS rule as a plain resource), the label stays on every node during the upgrade, whatever order the deployer applies components in, because this release keeps the cluster-side rules. Until a node's nfd-worker restarts, the old rule labels the node; the worker's first write after the restart drops `pci.device` and adds the label in the same update. Under Flux on AKS, the `nfd-network-rule` manifest keeps its Helm hook annotations, so each `network-operator-post` upgrade deletes and recreates it, and nodes whose nfd-worker has not restarted yet can lose the label for about a second. Flux recreates the AKS NicClusterPolicy the same way on every upgrade, so this exposure predates this release; this release narrows it to the nodes whose worker has not restarted.
+
+### NFD Permanent Removal
+
+Uninstalling nfd does not clean up the nodes. The `feature.node.kubernetes.io/*` labels, the labels NodeFeatureRules created, NFD-managed extended resources and taints, and the `nfd.node.kubernetes.io/*` annotations stay on every node indefinitely, because AICR disables the chart's post-delete prune hook.
+
+To retire nfd permanently, first uninstall every component that selects on those labels (gpu-operator, network-operator, nvidia-dra-driver-gpu). Then re-enable the hook for the final uninstall, so its Job runs `nfd-master -prune` against every node. Regenerate the bundle with every flag the original bundle used, adding only `--set nfd:postDeleteCleanup=true`. A dropped flag falls back to its default, so for example a bundle regenerated without its `--system-node-selector` no longer pins nfd-master to the system nodes. If the original bundle used `--config`, add `nfd:postDeleteCleanup=true` to the config's `spec.bundle.deployment.set` list instead. A `--set` flag replaces that list rather than adding to it, which drops the config's component overrides, `enabled=false` exclusions and `deployer:` options. Write the bundle to a local directory even if the original went to an `oci://` reference, because an `oci://` output pushes the whole bundle. nfd's values files do not depend on the output target:
+
+```bash
+RECIPE="recipe.yaml"  # replace with the recipe the bundle was generated from
+DEPLOYER="helm"       # replace with the deployer the bundle was generated with, e.g. argocd
+# Also repeat every other flag the original bundle used, such as --system-node-selector and --set.
+# With --config, add nfd:postDeleteCleanup=true to its set list and drop the --set below.
+aicr bundle -r "${RECIPE}" --deployer "${DEPLOYER}" --set nfd:postDeleteCleanup=true -o ./bundles
+```
+
+Redeploy only the nfd component from the regenerated bundle, then uninstall it so the hook runs. The regenerated bundle still contains every component the recipe deploys, including the ones you just uninstalled. The steps depend on the deployer.
+
+With `argocd`, `argocd-helm` and `flux`, do not publish the regenerated bundle whole. The parent Application or the Flux root `kustomization.yaml` would redeploy the uninstalled components, and the prune would then strip the labels they select on. Copy only nfd's values files over the source the cluster syncs from, so the new revision changes nothing else:
+
+- `argocd`: `NNN-nfd/values.yaml`
+- `argocd-helm`: `NNN-nfd/values.yaml` and `static/nfd.yaml`
+- `flux`: `nfd/helmrelease.yaml`
+
+Diff each file against the deployed copy first. The only change should be `postDeleteCleanup: true`. Keep the uninstalled components out of the source from then on, including after auto-sync is turned back on.
+
+With `helm`, run the nfd install script, then uninstall the release:
+
+```bash
+./bundles/NNN-nfd/install.sh  # replace NNN with the nfd folder's prefix in the bundle
+helm uninstall nfd -n node-feature-discovery
+```
+
+With `argocd` or `argocd-helm`, the hook needs Argo CD 3.4.1 or later, because earlier versions never finish deleting an Application whose post-delete hooks include cluster-scoped objects. On an earlier version, do not publish that revision. Run the commands below with the hook still disabled, then run the Helm prune that follows them.
+
+On Argo CD 3.4.1 or later, publish that revision the same way as the original and let the nfd Application sync. With `argocd-helm`, publish the chart under a new version and set the parent's `targetRevision` to it. Argo CD caches a chart by version, so republishing the same version leaves the nfd child on its old values. Before deleting the child, confirm `kubectl get application -n argocd "${CHILD}" -o jsonpath='{.spec.source.helm.values}'` shows `postDeleteCleanup: true`. The parent Application syncs every child with automated prune and self-heal, so it recreates a deleted nfd child. Generated children also carry no `resources-finalizer.argocd.argoproj.io` finalizer unless the bundle set `deployer:cascadeDelete=true`, so a plain delete leaves nfd running. Turn off the parent's auto-sync, then delete the child with cascade:
+
+```bash
+APP="nvidia-stack"  # replace with the parent Application: --app-name, default nvidia-stack (argocd) or aicr-stack (argocd-helm)
+CHILD="nfd"         # prepend the deployer namePrefix, if the bundle set one
+# With argocd-helm, a helm install --set appName=... or --set deployer.namePrefix=... overrides both names.
+argocd app set "${APP}" --sync-policy none
+argocd app delete "${CHILD}" --cascade
+```
+
+Remove nfd from the bundle source before turning the parent's auto-sync back on.
+
+A completed deletion does not prove the prune ran. Through at least Argo CD 3.5.5, a [race in delete-hook handling](https://github.com/argoproj/argo-cd/issues/29100) can delete the prune Job before it starts and still finish deleting the Application, and the Job deletes itself when it succeeds. Check the nodes instead. This prints every node that still carries an NFD label or annotation, and prints nothing once the prune has run:
+
+```bash
+kubectl get nodes -o json | jq -r '.items[] | select((.metadata.labels // {}) + (.metadata.annotations // {}) | keys | any(startswith("feature.node.kubernetes.io/") or startswith("nfd.node.kubernetes.io/"))) | .metadata.name'
+```
+
+If it prints any node, run the prune through Helm, which waits for the hook Job to finish. Do this before turning the parent's auto-sync back on:
+
+```bash
+VALUES="./bundles/NNN-nfd/values.yaml"  # replace NNN with the nfd folder's prefix in the regenerated bundle
+VERSION="x.y.z"                         # replace with the nfd chart version the bundle pins
+helm install nfd node-feature-discovery --repo https://kubernetes-sigs.github.io/node-feature-discovery/charts \
+  --version "${VERSION}" -n node-feature-discovery --create-namespace -f "${VALUES}"
+helm uninstall nfd -n node-feature-discovery
+```
+
+With `flux`, commit that revision and let Flux upgrade the nfd release. The Flux Kustomization that applies the bundle recreates a HelmRelease deleted from the cluster, so remove the `nfd/` entries from the bundle's root `kustomization.yaml` and commit instead. With `prune: true`, as the bundle README configures, Flux deletes the `nfd` HelmRelease and helm-controller runs `helm uninstall`, which runs the hook.
+
+With `helmfile`, run from the regenerated bundle directory:
+
+```bash
+helmfile -f helmfile.yaml -l name=nfd apply
+helmfile -f helmfile.yaml -l name=nfd destroy
+```
 
 ### GPU Operator Driver Auto-Detect
 
