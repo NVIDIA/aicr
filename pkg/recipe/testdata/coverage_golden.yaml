@@ -399,6 +399,7 @@ criteria(service=, accelerator=, intent=inference, os=amazonlinux, platform=):
             - service=eks
             - service=kind
             - service=lke
+            - service=mk8s
             - service=ocp
             - service=rke2
         os:
@@ -1627,6 +1628,7 @@ criteria(service=, accelerator=gb200, intent=inference, os=amazonlinux, platform
             - service=eks
             - service=kind
             - service=lke
+            - service=mk8s
             - service=ocp
             - service=rke2
         os:
@@ -2079,6 +2081,7 @@ criteria(service=, accelerator=gb300, intent=inference, os=amazonlinux, platform
             - service=eks
             - service=kind
             - service=lke
+            - service=mk8s
             - service=ocp
             - service=rke2
         os:
@@ -2572,6 +2575,7 @@ criteria(service=, accelerator=h100, intent=inference, os=amazonlinux, platform=
             - service=eks
             - service=kind
             - service=lke
+            - service=mk8s
             - service=ocp
             - service=rke2
         os:
@@ -3303,6 +3307,7 @@ criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=amazonlinux, p
             - service=eks
             - service=kind
             - service=lke
+            - service=mk8s
             - service=ocp
             - service=rke2
         os:
