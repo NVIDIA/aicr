@@ -1035,19 +1035,6 @@ generate_bundle() {
         )
     fi
 
-    if [[ "$recipe" == "b300-mk8s-ubuntu-inference-dynamo" ]]; then
-        # These bundled subcharts have no registry scheduling paths. Only
-        # this simulation needs fake-node tolerations; keep them out of recipes.
-        conditional_sets+=(
-            --set-json 'networkoperator:node-feature-discovery.master.nodeSelector={"aicr.run/node-type":"system"}'
-            --set-json 'networkoperator:node-feature-discovery.master.tolerations=[{"key":"kwok.x-k8s.io/node","operator":"Equal","value":"fake","effect":"NoSchedule"}]'
-            --set-json 'networkoperator:node-feature-discovery.gc.nodeSelector={"aicr.run/node-type":"system"}'
-            --set-json 'networkoperator:node-feature-discovery.gc.tolerations=[{"key":"kwok.x-k8s.io/node","operator":"Equal","value":"fake","effect":"NoSchedule"}]'
-            --set-json 'dynamoplatform:nats.podTemplate.merge.spec.nodeSelector={"aicr.run/node-type":"system"}'
-            --set-json 'dynamoplatform:nats.podTemplate.merge.spec.tolerations=[{"key":"kwok.x-k8s.io/node","operator":"Equal","value":"fake","effect":"NoSchedule"}]'
-        )
-    fi
-
     # No NVSentinel --set remedies here. The recipes assign
     # labeler.assumeDriverInstalled and, on AKS,
     # metadata-collector.runtimeClassName themselves — from the gpuStack

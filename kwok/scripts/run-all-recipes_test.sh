@@ -467,11 +467,7 @@ CHECK
     for path in node-feature-discovery.master.tolerations node-feature-discovery.gc.tolerations nats.podTemplate.merge.spec.tolerations; do
         rc=0
         grep -Fq "$path" "${FIXTURE_ROOT}/args" || rc=1
-        if [[ "$recipe_name" == b300-mk8s-ubuntu-inference-dynamo ]]; then
-            check "scheduling-${recipe_name}-${path}" eq 0 "$rc"
-        else
-            check "scheduling-${recipe_name}-${path}-unchanged" eq 1 "$rc"
-        fi
+        check "scheduling-${recipe_name}-${path}-uses-registry" eq 1 "$rc"
     done
 done
 rm -f "${VALIDATE_SOURCE}"
