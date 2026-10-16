@@ -165,6 +165,8 @@ components:
         severity: error
 
   - name: network-operator
+    # Bundled NFD supplies the CRD used by this chart's NodeFeatureRule template.
+    hasSelfRefCRDs: true
     displayName: network-operator
     valueOverrideKeys:
       - networkoperator
@@ -197,9 +199,13 @@ components:
           # scoped operator.* placement values; the values key is the
           # dependency name (maintenance-operator-chart, unaliased).
           - maintenance-operator-chart.operator.nodeSelector
+          - node-feature-discovery.master.nodeSelector
+          - node-feature-discovery.gc.nodeSelector
         tolerationPaths:
           - operator.tolerations
           - maintenance-operator-chart.operator.tolerations
+          - node-feature-discovery.master.tolerations
+          - node-feature-discovery.gc.tolerations
 
   - name: gke-nccl-tcpxo
     displayName: gke-nccl-tcpxo
@@ -1024,6 +1030,8 @@ components:
           - tolerations
 
   - name: kai-scheduler
+    upgrades:
+      file: components/kai-scheduler/upgrades.yaml
     displayName: kai-scheduler
     valueOverrideKeys:
       - kaischeduler
@@ -1077,6 +1085,8 @@ components:
           - tolerations
 
   - name: dynamo-platform
+    upgrades:
+      file: components/dynamo-platform/upgrades.yaml
     displayName: dynamo-platform
     valueOverrideKeys:
       - dynamoplatform
@@ -1093,8 +1103,10 @@ components:
       system:
         nodeSelectorPaths:
           - dynamo-operator.controllerManager.nodeSelector
+          - nats.podTemplate.merge.spec.nodeSelector
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
+          - nats.podTemplate.merge.spec.tolerations
 
   - name: agentgateway-crds
     displayName: agentgateway-crds

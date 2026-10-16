@@ -17,14 +17,14 @@ a100-aks-ubuntu-training-kubeflow:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  003-network-operator/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   004-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   004-network-operator-post/templates/nfd-network-rule.yaml: b421813faa8a8c3a756e114cfd6758e1c6237b3684078a3481c611cb0d1c72c1
   004-network-operator-post/templates/nic-cluster-policy-aks.yaml: be26f5cb2c0b233794a65ee2caa353f8b473c07ffa2cb12557898c7d9ffd0f1d
   004-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
-  004-network-operator-post/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  004-network-operator-post/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -84,7 +84,7 @@ a100-aks-ubuntu-training-kubeflow:
   README.md: 68c592b5147e46743e2779be54d2483a4a1456f85771bf06f5435c31378c6859
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: efb0cb3d82aca4ec1d89c8e84e78536656da38a532fc0db97abd0a0461db6700
-  checksums.txt: 02f7fc2f42a3084b5463364024a98e97c3efd9be4d797ef7ea2ce5080d91800b
+  checksums.txt: bcbf2c6caad46f9e134aac10a7c347af6428e6224e9680d628a9d30afc0a416f
   deploy.sh: 1d9a37cfa8557472dabe134c1054b471e61ae527733a911e4a4076d52715d7df
   recipe.yaml: 152e500b4b7da658ecb66c1c3e8ca876458a7f0ab220f55e92dd0581a5f60e72
 a100-any:
@@ -361,14 +361,14 @@ aks-ubuntu:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  003-network-operator/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   004-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   004-network-operator-post/templates/nfd-network-rule.yaml: b421813faa8a8c3a756e114cfd6758e1c6237b3684078a3481c611cb0d1c72c1
   004-network-operator-post/templates/nic-cluster-policy-aks.yaml: be26f5cb2c0b233794a65ee2caa353f8b473c07ffa2cb12557898c7d9ffd0f1d
   004-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
-  004-network-operator-post/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  004-network-operator-post/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -414,7 +414,7 @@ aks-ubuntu:
   README.md: be4a99f4c6beb1939f5176e3dfe541c8e16cab81c38b7676a5b3f52e7b7004c2
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: ced731fd1e0824f20b0ed8253ae349606a6c3a83ed3ec0f28ba39c54b0f42545
-  checksums.txt: 393665c76697b06d11aca99e392bd34cba0185a829eb56d8f33700673bc3406d
+  checksums.txt: b5e658460031340014d0271ceadd89408fe93564539cce58a85ddfc4942ad758
   deploy.sh: 43a3f3423a20c9e8cb2cc003ce4e0255e5b3ef0e0d9ebb92a4a145726752a927
   recipe.yaml: 227ecf0fe7479af7fe93423b7cd9d321203de0eb52142635246724f4bac91523
 b200-any:
@@ -542,7 +542,7 @@ b200-gke-cos-inference-dynamo:
   017-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   017-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  017-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  017-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   018-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   018-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -559,7 +559,7 @@ b200-gke-cos-inference-dynamo:
   README.md: f3a0a0060f8989906cbdd160746717c2996445cf809d852b54880c00ac9efe9b
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: 5f4324e5ebcd5014660b61c795a72630df24e8d35852f6a1a12691d90800a398
-  checksums.txt: 66509159906ac36cbf5904469e644d8776c049b488b88bdcffe6ddd321d7d7f4
+  checksums.txt: b58ff878e90461473fde6250026aa5c574f096833aa8bb037102e2a8dac5f480
   deploy.sh: 4b23f731d5379449f25569b9fa117dcf76697a48fbd0d467cdd88758c249fe09
   recipe.yaml: ea2eeffacd0b3a3feb9dfd4c3591e742374717aaf2563c75dbc44151a4c0ab41
 b200-gke-cos-training-kubeflow:
@@ -637,6 +637,46 @@ b200-gke-cos-training-kubeflow:
   checksums.txt: e0cdef2f56165196e5c0d28f74a0a694cc31eddb5e00168e9e253698f90bdec9
   deploy.sh: 66a7611e30dfa773518b1bc2c649237ecb7423d9b8adeac380bcfc4efd573a5f
   recipe.yaml: 575b7ee06b7ec5a00521dbab594e1ae6e2922acc6f1a683184640c75e72d4b23
+b300-mk8s-ubuntu-inference-dynamo:
+  001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
+  001-cert-manager/upstream.env: 8984ad504d9290d252f1fd39602328bce17d424b3a96e1dc794b4887b949c01e
+  001-cert-manager/values.yaml: cfed5371a715b1fea083d7aa4d690c6c2029a6c845d1fe63c5210898cbe5f557
+  002-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  002-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
+  002-grove/upstream.env: cf5effebfecdead639bae89cb7a4d502d4f5a6c27e4e2a4a0748b48ab6458fc9
+  002-grove/values.yaml: 54de5005b04b86e1bc5e4ad256ed31ba0c9bde13223d22937f08e4d437ff9515
+  003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
+  003-network-operator/upstream.env: ea1fbfa2e45023044b54afbabcefe5daee220162602d88eeb2c6caa7b7293821
+  003-network-operator/values.yaml: 23498f38db7f933134f074708e1450e42cfa8fc9a10d91c3d7ac6da216e8392b
+  004-network-operator-post/Chart.yaml: 7dc57b42cbb43b596bae89753adefe36db2514b14a5b9537395ed023f2ed1049
+  004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
+  004-network-operator-post/templates/nic-cluster-policy-nebius-b300.yaml: fc1647c03f81083f35a06917743ffd6b3439e1e203a092469401d6d51531ce67
+  004-network-operator-post/values.yaml: 23498f38db7f933134f074708e1450e42cfa8fc9a10d91c3d7ac6da216e8392b
+  005-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  005-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
+  005-gpu-operator/upstream.env: 7ffe32c2e799396b13d0fefc870cdab28e82e363681d0d5301c09d3d98c3ffdd
+  005-gpu-operator/values.yaml: 89521cb30143ef4e63ccc05d8c0f5edc98b2365ec9860c7b180afa5a9151a48d
+  006-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  006-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
+  006-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
+  006-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
+  007-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  007-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
+  007-kai-scheduler/upstream.env: 0d8122dbd8521847e72dcc553d8128bb9876e62b27a0beccf9c95649394584c9
+  007-kai-scheduler/values.yaml: dd90b42886f93b4a97881c1c8785cf68c473d70160f9c34af4200bfedc10081a
+  008-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  008-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
+  008-dynamo-platform/upstream.env: 0d3df69a85ddbe1277df835fcc0c1dbe3a2f6e78e8ebc830f31f99f2fd94a016
+  008-dynamo-platform/values.yaml: ab8ac46a506de550847a751b278d102bb28bec24dc8caf1645338df385b8ccfa
+  README.md: 2fecf4aa0f23a95590b9bc1d9549476effd79673b6122ea29f61b0889123a733
+  UPGRADING.md: 7f7463f8fea597447ada0530dfc0c4a8019c667a471235572ffaa0dc1fdbe4f4
+  bundle-info.yaml: 46d4b428f695a95193b5ec94290ce5e33c7392587566cfd89aace5ea8a66c9ee
+  checksums.txt: 61ae8a5fbdc51da9e6c1f73084a9e9c82c51759164ffa7e69d94d7fb31621a05
+  deploy.sh: 36bd61e7655fc91a4e39622a4e8fbc6eb0a9fb847e9c3299972e7d74f856a798
+  recipe.yaml: 4681003934595eff71f0fc51268b4551b51c8c7dbb14812b59b00e24cdbc020f
 bcm-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -902,7 +942,7 @@ gb200-eks-ubuntu-inference-dynamo:
   018-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   018-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  018-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  018-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   019-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   019-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -919,7 +959,7 @@ gb200-eks-ubuntu-inference-dynamo:
   README.md: ea17eff3a520d0ddff6f9d8c5f43abb70d6d8aa8e3e1d3ed4a0b57b2a139670a
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: d822965f39a65b64a628226e24cabfbf11c3c0f0afadb309cae3ead198fd2590
-  checksums.txt: 331688cb3b69fc2ed4a1b29aef6bca6b02c036e16a5925f8350b918634d148ae
+  checksums.txt: 1d6cf36c2d09c2865f4c15e8f5cf3c65483f23a3b4e4f7c51f947eb9d6a5e729
   deploy.sh: 12e18eefc9885746cff3a1191bd08e4b7bc3bb76d58a55577733ff70debd9a45
   recipe.yaml: a28388297b792ac58c3a09fc623f0d5f30b11c51a682b342e2e279d28afeec58
 gb200-eks-ubuntu-training-kubeflow:
@@ -1168,12 +1208,12 @@ gb200-gke-cos-inference-dynamo:
   018-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   018-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  018-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  018-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   019-dynamo-platform-post/Chart.yaml: af87ad73eeadae2daafae239a6b4594a631ef6480f46d325d17b138e2f50545f
   019-dynamo-platform-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-dynamo-platform-post/install.sh: 03abe0d797816032ad34c853fb00a665e870bb4be86ea8f6ed50d0d597c6b37f
   019-dynamo-platform-post/templates/a4x-storage-class.yaml: 1932094e35d06e5989ba13965c0885cc2ada54558e5b0ed0241b9e9c5da19c96
-  019-dynamo-platform-post/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  019-dynamo-platform-post/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   020-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   020-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -1190,7 +1230,7 @@ gb200-gke-cos-inference-dynamo:
   README.md: 76123d113b9fa218c4bfd84580d3b1f63ebf3d8b22d13e09c4f067ac5750065e
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: 512448d2aa8a4705c537fcfbeb57ab7987518eb7336efbf3275a0b97a19ac5b6
-  checksums.txt: 3b7e8f60e6ab4dc9764b017ffb63d0d383df0f11a42a0ef563ef593ae273f443
+  checksums.txt: e5718e34685e1e3f3ea694fb0a5a490172c5bb7cf19f3c4853a63c9e8f8df5a8
   deploy.sh: d0b2cd599897236ad9365c48215614e36c3a7c239e8b5c199ed5a3f1a54720c9
   recipe.yaml: d3a3711ac89515af430cb439bf90a2ef59257700778933cbaf5d599052d8e891
 gb200-gke-cos-training-kubeflow:
@@ -1424,7 +1464,7 @@ gb200-oke-ubuntu-inference-dynamo:
   014-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   014-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  014-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  014-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   015-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -1441,7 +1481,7 @@ gb200-oke-ubuntu-inference-dynamo:
   README.md: 9e71e1aa68ea3039a1b22df97b33c14db595469b1927b1cd4a2a0fc6d5f0a8e1
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: 7f6107b2683aa7916537115f1af29a0feb728e7f5d33ef4435f2b0756d8257fc
-  checksums.txt: e739435db9f0aed44eafdd9ba729835ce27849fd7125c0832c5f35cf7d70a495
+  checksums.txt: 425defb859555f9b2508e76099c17d0438bcf1b281f4f40e7bcfa836e22302f1
   deploy.sh: e987ce3501054b809dddd3e8460e70434bb42496eba1e65b6dbaa3f3cf6e0b4f
   recipe.yaml: 4d5fb7c81991f6679050662203228954e50ddb53bfe4be7e5eeb6bc37d7e4d01
 gb200-oke-ubuntu-training-kubeflow:
@@ -1456,12 +1496,12 @@ gb200-oke-ubuntu-training-kubeflow:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 063308db02cf04714f59986b05f18ebd1cc1294801a5809dbbfd7e842dfe9b78
+  003-network-operator/values.yaml: be37a816af4846ba67ddc1ff0cf319384cdbbe776cf632d5b5108a575a911c9d
   004-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   004-network-operator-post/templates/nic-cluster-policy-oke-gb200.yaml: f8e6aab974f01d7276ea45da93657e9122674682daf67ff2e0ab6d6653b72f8f
-  004-network-operator-post/values.yaml: 063308db02cf04714f59986b05f18ebd1cc1294801a5809dbbfd7e842dfe9b78
+  004-network-operator-post/values.yaml: be37a816af4846ba67ddc1ff0cf319384cdbbe776cf632d5b5108a575a911c9d
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -1516,7 +1556,7 @@ gb200-oke-ubuntu-training-kubeflow:
   README.md: ebe15cb64b0c476a2a0075977a8eaa98dcb32606c855dcb84b832c971c28a166
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: 6b2288b7c278b1dca38049aa86667e56f37452f4595fc45c510e9b73502606ee
-  checksums.txt: b68c1129a024e6d76818821fb540ff7e73a10bd6a496edb45723400aab41bd52
+  checksums.txt: df57c891ce078a7dff9301c8a6656bb8ed84e2d1da99286433b2d7866138d1c8
   deploy.sh: e669a545cfa579953a82abdf5a42b7ec3269a7d35c20461af3b6ec5d780cbfc7
   recipe.yaml: 4690f032b59981c970a19b5207cb65ebb41d121ca0feaaf01f79eaf24253447e
 gb300-any:
@@ -1648,7 +1688,7 @@ gb300-eks-ubuntu-inference-dynamo:
   018-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   018-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  018-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  018-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   019-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   019-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -1665,7 +1705,7 @@ gb300-eks-ubuntu-inference-dynamo:
   README.md: 663b5f45b79964a92d20caf28b65ca2164536048f3283f89fe22b2281a26b514
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: 8438b3436065e20b74e65046a4bd88333568c3c3b5182473ddd79922443d9f67
-  checksums.txt: 285b91b323ffc88f3b9e822926c2444d92a9a25f6bd6efbdda64040fad156c35
+  checksums.txt: 88e7626962c5420c2a36c3d1ead74473f69e1548789975e30c1f80ac87940c9e
   deploy.sh: 12e18eefc9885746cff3a1191bd08e4b7bc3bb76d58a55577733ff70debd9a45
   recipe.yaml: 9c0055c2a41aa361d41469738f0bf28e60699eb8bff4c4df2d32d090950db976
 gb300-eks-ubuntu-training-kubeflow:
@@ -1847,12 +1887,12 @@ gb300-generic-ubuntu-training:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 75f0b26ead66cb474898f4bf74fba87e5137c372ee739b672f8c82c261a07b73
+  003-network-operator/values.yaml: 52785dcbe5ac71a6b87320f85c074ffdfd16883cdb33478ba2774671712e1dbd
   004-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   004-network-operator-post/templates/nic-cluster-policy-generic-gb300.yaml: a9ba7bb436042255a21a09a630177f75fd8867ef210d3546d089d39f5ec37943
-  004-network-operator-post/values.yaml: 75f0b26ead66cb474898f4bf74fba87e5137c372ee739b672f8c82c261a07b73
+  004-network-operator-post/values.yaml: 52785dcbe5ac71a6b87320f85c074ffdfd16883cdb33478ba2774671712e1dbd
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -1898,7 +1938,7 @@ gb300-generic-ubuntu-training:
   README.md: ef30048e7d7b5b82ab7f8eba7322c8d3e7b1b9febb6efdd0fc54285646d33db6
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: 1170032bb533c422f2442990ec442dabc4b8914f349b48637a1e4cd1baa02444
-  checksums.txt: 7a182040684cc0c36a15a7a59afb3ded4ac6e93f8c6eb5c706be0f995319441e
+  checksums.txt: 6545d5b7de780049dcbd02b8c0ffacae366d7b6e230fc9638cff1541d7b56bca
   deploy.sh: 232d818fb3754a09053ad85f88642654063affd68a660b0c4ab38b9330ce0fdd
   recipe.yaml: e954c53584e0b938ad29fde713e7fe6413d6402874cdbf45e1810dbef7c4943b
 gb300-gke-cos-inference-dynamo:
@@ -1974,7 +2014,7 @@ gb300-gke-cos-inference-dynamo:
   017-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   017-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  017-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  017-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   018-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   018-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -1991,7 +2031,7 @@ gb300-gke-cos-inference-dynamo:
   README.md: f3bb498ae801699854d1e4408de76d5ed5e1aed17c72affbf330ae39ed4af87f
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: 88991f7451a8b441fa03164df2a15d8c43c47adf1a7ac00d6348c61104aba945
-  checksums.txt: 772eb42cd30b0d1db156d47ed35b394c5e6af1380ee411096e85e637423bcdbe
+  checksums.txt: 18145acffd64861c878d02ad9f6468fc753ca9f44bf13d20b19df4faf7e1978c
   deploy.sh: 4b23f731d5379449f25569b9fa117dcf76697a48fbd0d467cdd88758c249fe09
   recipe.yaml: 2661d49e2860295aa44d1be59147464f27a0f338b987708eb4ef28f2832acdbd
 gb300-gke-cos-training-kubeflow:
@@ -2104,14 +2144,14 @@ h100-aks-ubuntu-inference-dynamo:
   008-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   008-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  008-network-operator/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  008-network-operator/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   009-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   009-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   009-network-operator-post/templates/nfd-network-rule.yaml: b421813faa8a8c3a756e114cfd6758e1c6237b3684078a3481c611cb0d1c72c1
   009-network-operator-post/templates/nic-cluster-policy-aks.yaml: be26f5cb2c0b233794a65ee2caa353f8b473c07ffa2cb12557898c7d9ffd0f1d
   009-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
-  009-network-operator-post/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  009-network-operator-post/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   010-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   010-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -2149,7 +2189,7 @@ h100-aks-ubuntu-inference-dynamo:
   018-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   018-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  018-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  018-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   019-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   019-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -2166,7 +2206,7 @@ h100-aks-ubuntu-inference-dynamo:
   README.md: c6ceb665b4c6d05feff9dbd9e39c1299747bab67656372cf76991d1f6e5283e9
   UPGRADING.md: 14985f23270c47c5f8a9768fd56a2da80d450e8ef4efef207ade3766dc4262e1
   bundle-info.yaml: 39f4392e304c107eb427df4c1fda8e19bfa1328effb6c983a6b13a6ce7bea63c
-  checksums.txt: 511059d7ed573f87bdc53ce32d1998cbbda45aa2c30227b6f2447883326ba225
+  checksums.txt: fa8591f698eeefdf6a6e37c521467a09185f6b23e5f5e73dcfb35c477fbd4c39
   deploy.sh: c4ac141773d250db1ea80114cc91a546e4664fb098ca04de856b8d737888a62c
   recipe.yaml: 0005d6830c1aac38c6fcc1945df7cb603f81e55e8b6fae345b375a37923fafa3
 h100-aks-ubuntu-training-kubeflow:
@@ -2181,14 +2221,14 @@ h100-aks-ubuntu-training-kubeflow:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  003-network-operator/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   004-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   004-network-operator-post/templates/nfd-network-rule.yaml: b421813faa8a8c3a756e114cfd6758e1c6237b3684078a3481c611cb0d1c72c1
   004-network-operator-post/templates/nic-cluster-policy-aks.yaml: be26f5cb2c0b233794a65ee2caa353f8b473c07ffa2cb12557898c7d9ffd0f1d
   004-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
-  004-network-operator-post/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  004-network-operator-post/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -2248,7 +2288,7 @@ h100-aks-ubuntu-training-kubeflow:
   README.md: 5bb5b0a3dbf900b02b8f6f6bd205b69e9ed07294a14720af3fefd0ef0410666c
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: 5fda27a9cec7619fb6c6b59ad07077fcdf7869a22d11c2ea5762a36de234e4b1
-  checksums.txt: 2b155fdcff8e9778f0dd8194effc1b001609b936ab6674bf6ce2738eafaced15
+  checksums.txt: aa234875840f97576dd9efcfbd11a32f5af01703581e4dbd37f60a07060700ae
   deploy.sh: 1d9a37cfa8557472dabe134c1054b471e61ae527733a911e4a4076d52715d7df
   recipe.yaml: 6586b4b3ea49dda73d2cb8938e2048d88648f041434f7cc061e3b3de8bc88f4d
 h100-aks-ubuntu-training-slurm:
@@ -2263,14 +2303,14 @@ h100-aks-ubuntu-training-slurm:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  003-network-operator/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   004-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   004-network-operator-post/templates/nfd-network-rule.yaml: b421813faa8a8c3a756e114cfd6758e1c6237b3684078a3481c611cb0d1c72c1
   004-network-operator-post/templates/nic-cluster-policy-aks.yaml: be26f5cb2c0b233794a65ee2caa353f8b473c07ffa2cb12557898c7d9ffd0f1d
   004-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
-  004-network-operator-post/values.yaml: 2118eaddf77558f68bfa4830cd2e78bd26758fde227aabbb1f1db9e7e2427331
+  004-network-operator-post/values.yaml: 156ad218e785de36503ce024f17b46fe006274fb72cf434dcd251c592848288c
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -2338,7 +2378,7 @@ h100-aks-ubuntu-training-slurm:
   README.md: b245aca349f4683870a21f8ce0fae980ad7280f5a1d2d606a22025e71cafdca6
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: 915bce67f5829ca54884fe03df11c3b571eac1ae585f91a81aae5daee59d5352
-  checksums.txt: 2fef0a9acf98ab42c603426e07c938ed676844515faa73de3196860026070a1d
+  checksums.txt: 568d666b8c53f169b251e355e1f9b9accf3858fb391a312b94c643b59adaef70
   deploy.sh: c337fdddc870ba97626541a9435e98734c5cbbb9808f2b6da4c8736e0ff75983
   recipe.yaml: 2e5bce89835a639cc90941259e289ab8b73110560df9fae1d0320a0d63f3c87f
 h100-any:
@@ -2531,7 +2571,7 @@ h100-eks-ubuntu-inference-dynamo:
   017-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   017-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  017-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  017-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   018-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   018-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -2548,7 +2588,7 @@ h100-eks-ubuntu-inference-dynamo:
   README.md: f33904f5581cd293b17722f2a6e69ea40aa316dab9b9c5b1e1be82e8cb1705a1
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: 0b9950aab658cc7f00edf71e6ef0feb425554af7a50ecd21a39fff0a00432689
-  checksums.txt: a9227d0aa78f1470be6ca0832252cc8a2155de8831cf4b4c6eba2200855380ff
+  checksums.txt: bf3b711c08769d2dee8570613bfc5c7fa2356742f818200e9375a9a781879afa
   deploy.sh: 12e18eefc9885746cff3a1191bd08e4b7bc3bb76d58a55577733ff70debd9a45
   recipe.yaml: c123fac7ca0b3f6a3cc0d3fd90e1b5ee7068dcf310ab5d738748a23cac2b9066
 h100-eks-ubuntu-inference-nim:
@@ -2949,7 +2989,7 @@ h100-gke-cos-inference-dynamo:
   017-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   017-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  017-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  017-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   018-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   018-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -2966,7 +3006,7 @@ h100-gke-cos-inference-dynamo:
   README.md: 4c3cc0a6bca4203674f0bf89a88a56c917eb70a29f8a9e68ea8d5aa6488ecaa2
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: 6937b20910ebc2d7ea389be78a27d8719878d1e792346cafbf7097a1ae13595f
-  checksums.txt: e8d6f89b98fb0e9f9397f6e1f411f14bc651b7642dccdbb950c8918763504834
+  checksums.txt: 2925f37e08b4b922ff12b3af8d9badc6d84119638fb30d2e90484014e720308c
   deploy.sh: 4b23f731d5379449f25569b9fa117dcf76697a48fbd0d467cdd88758c249fe09
   recipe.yaml: 3f048dae05272a27c6bc5e29cb25f39bd05d8672eaaa3c83c4436bc58c9854eb
 h100-gke-cos-training-kubeflow:
@@ -3267,7 +3307,7 @@ h100-kind-inference-dynamo:
   008-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   008-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  008-network-operator/values.yaml: 2a7cf1b257fb3dbeeb3c8f47158dd854423e603d69a4b85401327f27925ebc71
+  008-network-operator/values.yaml: 5f6625238b83c2ef983bf091ad3fad3e18da2f92e82fb9faa5e5454328211e78
   009-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   009-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -3295,7 +3335,7 @@ h100-kind-inference-dynamo:
   015-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   015-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  015-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  015-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   016-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -3312,7 +3352,7 @@ h100-kind-inference-dynamo:
   README.md: ac6e1ea8028a9273210d6fe2a929f47b73d7d5ee08938a974eeab1c489d67838
   UPGRADING.md: 14985f23270c47c5f8a9768fd56a2da80d450e8ef4efef207ade3766dc4262e1
   bundle-info.yaml: 5fefb8115a437bbc0e37513894cafa2bfc5cce3d8b057761525d90c5c93da1b4
-  checksums.txt: 780c96f828ada7a0fd118ed56b675a5a1ad81738328ac91fdf4f9c98682aafd0
+  checksums.txt: 412981aa6fe72256c597889e7ad390e945593d7d2178f2195e95fdb7e22747c3
   deploy.sh: 1130da7bacf874dc1f8fb01412dbe2e3c62336de0c69eb50989999db17956ec6
   recipe.yaml: a85a7ee12f5a7ebe60f6746afc1acad9dac621bacc557519e871652dcdec7f41
 h100-kind-training-kubeflow:
@@ -3327,7 +3367,7 @@ h100-kind-training-kubeflow:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 2a7cf1b257fb3dbeeb3c8f47158dd854423e603d69a4b85401327f27925ebc71
+  003-network-operator/values.yaml: 5f6625238b83c2ef983bf091ad3fad3e18da2f92e82fb9faa5e5454328211e78
   004-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   004-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -3377,7 +3417,7 @@ h100-kind-training-kubeflow:
   README.md: 2668deea4a4b81ca202c3e707697ecae75220ac33911c62f8156e98133f5fcf6
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: 5992a6579268c25d35ea345b91d78c6f808b8032b2e9551e7744a5810d2d7d4b
-  checksums.txt: 674a2fde6ec158137b39054fd8947a39222cba4cdd616c2d6d6444c089ef0a12
+  checksums.txt: c65da3cd2a5ffd9ba716532a1f467255ad1aef53fe1f2d51ed7545a492c633e8
   deploy.sh: e669a545cfa579953a82abdf5a42b7ec3269a7d35c20461af3b6ec5d780cbfc7
   recipe.yaml: 5f724c67aff109f73866dbd3add29483a0ceaab8d06c806879913fcbae4f3691
 h100-kind-training-kueue:
@@ -3392,7 +3432,7 @@ h100-kind-training-kueue:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 2a7cf1b257fb3dbeeb3c8f47158dd854423e603d69a4b85401327f27925ebc71
+  003-network-operator/values.yaml: 5f6625238b83c2ef983bf091ad3fad3e18da2f92e82fb9faa5e5454328211e78
   004-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   004-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -3449,7 +3489,7 @@ h100-kind-training-kueue:
   README.md: 26efd53f0202c3fdfcf9509aa7995608b6a5fe1634d6392a11ab115461504845
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: 9f5401ed423ca2a8b47a8b4932657a48d16324a5f075c7c14b74eafb04f16e5b
-  checksums.txt: 3bb346f360adbdafedaee8eb2e428fe82d38925429aa8582d8ea67570b6050f8
+  checksums.txt: 6a56373d5c6d243e815774f0d327d9161689d8b75f48a413ec0d20806ed50753
   deploy.sh: cbe36b426daa2ff5076f4463ef1342eeaca319f56dcace1d3a2559dbf1a82583
   recipe.yaml: 5816b1933fd49788d11f8084196db97e0a64c480caf912bfeed920f87b1765a0
 h100-kind-training-slurm:
@@ -3464,7 +3504,7 @@ h100-kind-training-slurm:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 2a7cf1b257fb3dbeeb3c8f47158dd854423e603d69a4b85401327f27925ebc71
+  003-network-operator/values.yaml: 5f6625238b83c2ef983bf091ad3fad3e18da2f92e82fb9faa5e5454328211e78
   004-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   004-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -3526,7 +3566,7 @@ h100-kind-training-slurm:
   README.md: b5ef91fc28c6656f6813d50aac953c446534c69ec90eaa5b40f5c124bb21f042
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: bf0f5ec7e568f4198d37ed97e38a9dd9e800ee5648c7e8c7ff10e196d57f516d
-  checksums.txt: a9b62ab434ade3f1474ab56bb433c7ccc85b85af920e7bea9faa32020b3abe54
+  checksums.txt: 33efcec09afb07c8f0def55088d0eff21752f4cd1586eafd2b1ce49d7b4d62ba
   deploy.sh: e67250472d44b12eb1c1a89f69e1aed44a8535d93bb48e55f30b15de7cb9ac8b
   recipe.yaml: 0c530dd672226b694cfd26b82f0e81ada8d2c984ed8d295160efd7271e0cee91
 h200-any:
@@ -3978,12 +4018,12 @@ l40s-oke-training-kubeflow:
   003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   003-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  003-network-operator/values.yaml: 063308db02cf04714f59986b05f18ebd1cc1294801a5809dbbfd7e842dfe9b78
+  003-network-operator/values.yaml: be37a816af4846ba67ddc1ff0cf319384cdbbe776cf632d5b5108a575a911c9d
   004-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   004-network-operator-post/templates/nic-cluster-policy-oke-l40s.yaml: a51c66444c360655e5195240f4d0f1ba4d3fe441d760f8c15968f2c9d3fbe734
-  004-network-operator-post/values.yaml: 063308db02cf04714f59986b05f18ebd1cc1294801a5809dbbfd7e842dfe9b78
+  004-network-operator-post/values.yaml: be37a816af4846ba67ddc1ff0cf319384cdbbe776cf632d5b5108a575a911c9d
   005-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   005-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
@@ -4033,7 +4073,7 @@ l40s-oke-training-kubeflow:
   README.md: 359b98335ccfb1815199044b6322396f8e5f394a9bbcf8b447c8c3a65f27cf17
   UPGRADING.md: fb1f8fa08209aae68e35d24a272edd388748cfebc9ba9d978c65ae9de138f6cb
   bundle-info.yaml: b9cb0b06d11c44efcafdab58984979d8ec13ec87ae05c11d371146d418b6b5e1
-  checksums.txt: 079546f038fab335d28cab5a47161af198fbd35e625f7b239b862240f9cda442
+  checksums.txt: f283af88e5277a71f70456674d18837aec65e0a8a505b545fbf630131fd542de
   deploy.sh: e669a545cfa579953a82abdf5a42b7ec3269a7d35c20461af3b6ec5d780cbfc7
   recipe.yaml: 69a610a76e49301e5e4e74a7ce8c3eeebdb9af948cb537f2a7c2cac1f7196f52
 monitoring-hpa:
@@ -4371,7 +4411,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   017-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   017-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  017-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  017-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   018-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   018-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -4388,7 +4428,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   README.md: a30508968ec3bada5713e67f4eaf3419838fa552dad5080128326db5a7a42683
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: f6852ea0c1f5f08663f77f70dc2eb147644f8a46317b4634a0852cd1d2dd6ee4
-  checksums.txt: 40f37de2f7fe7573dd8580d77482cbcc8775182dcbe2130881fbbfb0902d9f0b
+  checksums.txt: bd6a047f3a855a7b380b21c83574177923b4e10b70ffb9dfee1886fc0e55133a
   deploy.sh: 12e18eefc9885746cff3a1191bd08e4b7bc3bb76d58a55577733ff70debd9a45
   recipe.yaml: 4be30e2ee06c43431861c3eda639985a6974c1511db2b560be5d730021040688
 rtx-pro-6000-eks-ubuntu-inference-nim:
@@ -4755,7 +4795,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   016-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
   016-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
-  016-dynamo-platform/values.yaml: c2c4218fcd3018d9656aede6cb5b7c066189486f3cdb3f8d26bd85d762ccf80c
+  016-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
   017-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   017-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -4772,7 +4812,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   README.md: 00bebd2c13a2c73d07e6cb2bd084a53487656140a5a51332cc23e8ea599b6b9e
   UPGRADING.md: e041428c87fbeb95b81ed706019c37d20f4049a92dd2fbe0aa5452425501f8fb
   bundle-info.yaml: 6561c7212f9d0494fd05b7a244f4b4d666ec7121b8ec5c66e09d2962eeb40a9b
-  checksums.txt: 7f71f3c53679a3ac2e554d1b2feeae9a1d631dcbd02f517ddc1979222fa9f632
+  checksums.txt: 8e61f4b4b5a11e8e0aad64eca60f2d61503de156b899a650372b4f5c2b829704
   deploy.sh: 4b23f731d5379449f25569b9fa117dcf76697a48fbd0d467cdd88758c249fe09
   recipe.yaml: b6d869be553c48acd286c046636c86dda8657f22d66e8ece6786fed3ee4c9b6e
 vr200-rke2-ubuntu-training-kubeflow:

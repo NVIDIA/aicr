@@ -108,6 +108,10 @@ var imageDigestExemptions = map[string]imageDigestExemption{
 	"ghcr.io/mellanox/nic-configuration-operator:v1.3.1":                          {"network-operator/manifests/nic-cluster-policy-generic-gb300", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 	"ghcr.io/mellanox/nic-configuration-operator-daemon:v1.3.1":                   {"network-operator/manifests/nic-cluster-policy-generic-gb300", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 
+	// Nebius NicClusterPolicy uses the same repository/image/version CRD schema.
+	"cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0": {"network-operator/manifests/nic-cluster-policy-nebius-b300", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
+	"ghcr.io/mellanox/k8s-rdma-shared-dev-plugin:v1.5.2":                                                               {"network-operator/manifests/nic-cluster-policy-nebius-b300", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
+
 	// Skyhook Package (nodewright-customizations no-op): shellscript package
 	// is pinned by tag only — `containerSHA` is not surfaced for this
 	// upstream image. nodewright-packages/* refs are digest-pinned via the

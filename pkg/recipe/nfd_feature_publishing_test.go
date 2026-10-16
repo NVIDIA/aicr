@@ -101,7 +101,9 @@ var (
 const nfdPubTemplatePlaceholder = "AICRTEMPLATEACTION"
 
 // TestNFDFeaturePublishingContract resolves every shipped leaf and checks, on
-// merged effective values:
+// merged effective values. The pinned Nebius marketplace Network Operator uses
+// its bundled NFD and chart NIC rule instead of the standalone worker rule;
+// nfdPubBundledProblems guards that separate publishing contract.
 //
 //  1. A recipe with network-operator has exactly one nfd-worker sources.custom
 //     rule producing pci-15b3.present="true" (the NicClusterPolicy
@@ -159,6 +161,25 @@ func TestNFDFeaturePublishingContract(t *testing.T) {
 
 			hasNFD := nfdPubEnabled(result.ComponentRefs, nfdPubNFD)
 			hasNetOp := nfdPubEnabled(result.ComponentRefs, nfdPubNetworkOperator)
+			hasBundledNFD := false
+			if hasNetOp {
+				values, err := result.GetValuesForComponentWithContext(ctx, nfdPubNetworkOperator)
+				if err != nil {
+					t.Fatal(err)
+				}
+				hasBundledNFD, _ = nfdPubLookup(values, "nfd", "enabled").(bool)
+				if hasBundledNFD {
+					gpuValues, err := result.GetValuesForComponentWithContext(ctx, "gpu-operator")
+					if err != nil {
+						t.Fatal(err)
+					}
+					gpuNFD, _ := nfdPubLookup(gpuValues, "nfd", "enabled").(bool)
+					ref, _ := findComponentRefByName(result.ComponentRefs, nfdPubNetworkOperator)
+					for _, problem := range nfdPubBundledProblems(ref, values, hasNFD || gpuNFD) {
+						t.Errorf("%s: %s", name, problem)
+					}
+				}
+			}
 
 			var patterns []string
 			var rules []map[string]any
@@ -195,9 +216,9 @@ func TestNFDFeaturePublishingContract(t *testing.T) {
 			}
 
 			switch {
-			case hasNetOp && !hasNFD:
+			case hasNetOp && !hasNFD && !hasBundledNFD:
 				t.Fatalf("%s ships network-operator without the nfd component, so nothing labels %s", name, nfdPubMellanoxLabel)
-			case hasNetOp:
+			case hasNetOp && !hasBundledNFD:
 				if len(rules) != 1 {
 					t.Errorf("%s ships network-operator: want exactly one nfd-worker sources.custom rule labeling %s (or %s), got %d; "+
 						"set the nfd componentRef valuesFile to components/nfd/values-nvidia-nics.yaml (values-nvidia-nics-aks.yaml on AKS)",
@@ -314,6 +335,64 @@ func TestNFDFeaturePublishingContract(t *testing.T) {
 		if !transitionalUsed[key] {
 			t.Errorf("nfdPubTransitional[%q] matched no rendered rule on any leaf: delete the entry in the contract change of #3038", key)
 		}
+	}
+}
+
+// The marketplace network-operator 25.7.0 chart enables NodeFeatureAPI,
+// master and worker, and publishes raw PCI features by default. Its
+// templates/nodefeaturerules.yaml labels vendor 15b3, classes 0200/0207 from
+// pci.device. Keep this assertion tied to that inspected chart: unlike the
+// standalone v0.19 NFD path, it must not inherit #3038's raw-feature stripping.
+// Reject subchart overrides until their publishing semantics are audited.
+func nfdPubBundledProblems(ref ComponentRef, values map[string]any, duplicateProvider bool) []string {
+	var problems []string
+	if ref.Source != "oci://cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/chart" ||
+		ref.Chart != "network-operator" || ref.Version != "25.7.0" {
+
+		problems = append(problems, "bundled NFD chart defaults and NIC rule have not been audited for this source/chart/version")
+	}
+	if duplicateProvider {
+		problems = append(problems, "bundled NFD must be the only NFD provider")
+	}
+	if nfdPubLookup(values, "nfd", "deployNodeFeatureRules") != true {
+		problems = append(problems, "bundled NFD requires the chart NIC rule consuming pci.device")
+	}
+	if _, overridden := values["node-feature-discovery"]; overridden {
+		problems = append(problems, "bundled NFD overrides require a publishing audit; preserve the pinned chart's raw PCI publishing defaults")
+	}
+	return problems
+}
+
+func TestNFDPubBundledProblems(t *testing.T) {
+	ref := ComponentRef{
+		Source: "oci://cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/chart",
+		Chart:  "network-operator", Version: "25.7.0",
+	}
+	for _, tt := range []struct {
+		name         string
+		overrides    string
+		duplicate    bool
+		version      string
+		wantProblems bool
+	}{
+		{"pinned chart defaults", "", false, "25.7.0", false},
+		{"duplicate provider", "", true, "25.7.0", true},
+		{"unaudited version", "", false, "26.7.0", true},
+		{"chart rule disabled", "nfd: {enabled: true, deployNodeFeatureRules: false}", false, "25.7.0", true},
+		{"raw PCI stripped", "node-feature-discovery: {worker: {config: {core: {noPublishFeatures: [pci.*]}}}}", false, "25.7.0", true},
+		{"worker publishing disabled", "node-feature-discovery: {worker: {config: {core: {noPublish: true}}}}", false, "25.7.0", true},
+		{"master disabled", "node-feature-discovery: {master: {enable: false}}", false, "25.7.0", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			values := nfdPubValues(t, "nfd: {enabled: true, deployNodeFeatureRules: true}")
+			for key, value := range nfdPubValues(t, tt.overrides) {
+				values[key] = value
+			}
+			ref.Version = tt.version
+			if problems := nfdPubBundledProblems(ref, values, tt.duplicate); (len(problems) != 0) != tt.wantProblems {
+				t.Errorf("problems = %v, want problems %v", problems, tt.wantProblems)
+			}
+		})
 	}
 }
 

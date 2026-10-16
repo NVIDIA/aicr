@@ -404,6 +404,77 @@ else
     echo "SKIP: jq not on PATH; interruption and write-failure cases not run"
 fi
 
+# Exercise the real generation function with a failing CLI stub, stopping
+# before rendering or cluster work. The native Nebius leaf must keep Dynamo;
+# other Dynamo lanes and existing Slurm forwarding keep their prior behavior.
+VALIDATE_SOURCE=$(mktemp "${SCRIPT_DIR}/.validate-scheduling.test.XXXXXX.sh")
+grep -v '^main "\$@"$' "${SCRIPT_DIR}/validate-scheduling.sh" > "${VALIDATE_SOURCE}"
+if [[ $(grep -c '^main "\$@"$' "${SCRIPT_DIR}/validate-scheduling.sh") != 1 ]]; then
+    rm -f "${VALIDATE_SOURCE}"
+    echo "FAIL: validate-scheduling main invocation changed"
+    exit 1
+fi
+cat > "${FIXTURE_ROOT}/aicr-args" <<'STUB'
+#!/usr/bin/env bash
+if [[ "${TEST_BUNDLE_CAPTURE:-}" == true && "$1" == recipe ]]; then
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == --output ]]; then
+            printf 'deploymentOrder: [network-operator, dynamo-platform]\n' > "$2"
+            exit 0
+        fi
+        shift
+    done
+fi
+printf '%s\n' "$@" > "$ARGS_FILE"
+exit 73
+STUB
+chmod +x "${FIXTURE_ROOT}/aicr-args"
+for entry in b300-mk8s-ubuntu-inference-dynamo:dynamo gb200-eks-ubuntu-inference-dynamo:none h100-kind-training-slurm:slurm; do
+    recipe_name=${entry%:*}
+    wanted_platform=${entry##*:}
+    rm -f "${FIXTURE_ROOT}/args"
+    rc=0
+    ARGS_FILE="${FIXTURE_ROOT}/args" bash -s -- "${VALIDATE_SOURCE}" "${FIXTURE_ROOT}" "$recipe_name" >"${LOG_FILE}" 2>&1 <<'CHECK' || rc=$?
+source "$1"
+AICR_BIN="$2/aicr-args"
+WORK_DIR="$2"
+generate_bundle "$3"
+CHECK
+    check "platform-${recipe_name}-generation-stops" eq 1 "$rc"
+    rc=0
+    [[ -s "${FIXTURE_ROOT}/args" ]] || rc=1
+    check "platform-${recipe_name}-reaches-cli-stub" eq 0 "$rc"
+    if [[ "$wanted_platform" == none ]]; then
+        rc=0
+        grep -Fxq -- --platform "${FIXTURE_ROOT}/args" && rc=1
+    else
+        rc=0
+        grep -Fxq -- --platform "${FIXTURE_ROOT}/args" || rc=1
+        grep -Fxq -- "$wanted_platform" "${FIXTURE_ROOT}/args" || rc=1
+    fi
+    check "platform-${recipe_name}-forwarding" eq 0 "$rc"
+done
+for recipe_name in b300-mk8s-ubuntu-inference-dynamo gb200-eks-ubuntu-inference-dynamo; do
+    rm -f "${FIXTURE_ROOT}/args"
+    rc=0
+    ARGS_FILE="${FIXTURE_ROOT}/args" TEST_BUNDLE_CAPTURE=true bash -s -- "${VALIDATE_SOURCE}" "${FIXTURE_ROOT}" "$recipe_name" >"${LOG_FILE}" 2>&1 <<'CHECK' || rc=$?
+source "$1"
+AICR_BIN="$2/aicr-args"
+WORK_DIR="$2"
+generate_bundle "$3"
+CHECK
+    check "scheduling-${recipe_name}-bundle-stops" eq 1 "$rc"
+    rc=0
+    [[ -s "${FIXTURE_ROOT}/args" ]] || rc=1
+    check "scheduling-${recipe_name}-reaches-cli-stub" eq 0 "$rc"
+    for path in node-feature-discovery.master.tolerations node-feature-discovery.gc.tolerations nats.podTemplate.merge.spec.tolerations; do
+        rc=0
+        grep -Fq "$path" "${FIXTURE_ROOT}/args" || rc=1
+        check "scheduling-${recipe_name}-${path}-uses-registry" eq 1 "$rc"
+    done
+done
+rm -f "${VALIDATE_SOURCE}"
+
 # ── Summary ────────────────────────────────────────────────────────────
 # ${ran} is incremented inside check / check_log so the summary count is
 # derived, not a hardcoded literal — a future contributor adding or
