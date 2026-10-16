@@ -3166,9 +3166,9 @@ func TestKeyedTolerations(t *testing.T) {
 }
 
 // TestApplyNodeSchedulingOverrides_SharedPathUnion covers the shared-path
-// rules around the #3135 fix: keyless system entries are not carried, the
-// union is deduplicated, and opt-out / append-mode / values-file-default
-// handling matches non-shared paths.
+// rules around the #3135 fix: keyless system entries are dropped only when an
+// accelerated list is merged in, the union is deduplicated, and opt-out /
+// append-mode / values-file-default handling matches non-shared paths.
 func TestApplyNodeSchedulingOverrides_SharedPathUnion(t *testing.T) {
 	const workerPath = "worker.tolerations"
 	const masterPath = "master.tolerations"
@@ -3211,6 +3211,20 @@ func TestApplyNodeSchedulingOverrides_SharedPathUnion(t *testing.T) {
 			sys:        []corev1.Toleration{keyless, sysTol},
 			acc:        []corev1.Toleration{accTol},
 			wantWorker: []any{sysMap, accMap},
+		},
+		{
+			name:       "no accelerated list: keyless system default is written as given",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless},
+			wantWorker: []any{keylessMap},
+			wantMaster: []any{keylessMap},
+		},
+		{
+			name:       "no accelerated list: mixed system list is not narrowed",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless, sysTol},
+			wantWorker: []any{keylessMap, sysMap},
+			wantMaster: []any{keylessMap, sysMap},
 		},
 		{
 			name: "append mode keeps overlay entries and does not repeat the system one",

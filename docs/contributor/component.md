@@ -193,8 +193,9 @@ must run on every node (`nfd` `worker.tolerations` and
 `topologyUpdater.tolerations`, `aws-ebs-csi-driver` `node.tolerations`). The
 bundler writes such a path once, with the keyed `--system-node-toleration`
 entries followed by the `--accelerated-node-toleration` entries, deduplicated;
-keyless system entries (the tolerate-all default) are not carried over. The
-usual opt-out (`[]`) and append-mode (non-empty overlay list) rules still
+keyless system entries (the tolerate-all default) are left out so they never
+widen a restricted accelerated list. With no accelerated entries at all, the
+path receives the system list as given. The usual opt-out (`[]`) and append-mode (non-empty overlay list) rules still
 apply. `nodeSelectorPaths` must not be shared: a selector cannot mean "both
 node classes".
 

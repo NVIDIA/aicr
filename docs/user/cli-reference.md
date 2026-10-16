@@ -1962,13 +1962,13 @@ The `--accelerated-node-selector` and `--accelerated-node-toleration` flags cont
 | `--accelerated-node-selector` | Applied (restricts to GPU nodes) — **except gpu-operator operands**, which self-place via the operator's GPU detection | **Not applied** (NFD runs on all nodes) |
 | `--accelerated-node-toleration` | Applied (including gpu-operator operands, via `daemonsets.tolerations`) | Applied |
 | `--system-node-selector` | Not applied | Not applied |
-| `--system-node-toleration` | Not applied | Applied (keyed entries only, merged with the accelerated tolerations) |
+| `--system-node-toleration` | Not applied | Applied (merged with the accelerated tolerations; see the note below) |
 
 NFD (Node Feature Discovery) workers must run on **all nodes** (GPU, CPU, and system) to detect hardware features. This matches the gpu-operator default behavior where NFD workers also run on control-plane nodes. The `--accelerated-node-selector` is intentionally not applied to NFD workers so they are not restricted to GPU nodes.
 
 > **Note:** When no `--accelerated-node-toleration` is specified, a default toleration (`operator: Exists`) is applied to both GPU DaemonSets and NFD workers, allowing them to run on nodes with any taint.
 
-> **Shared toleration paths:** a value path the registry declares under both the system and accelerated tiers (NFD `worker` and `topologyUpdater`, aws-ebs-csi-driver `node`) receives the deduplicated union of the keyed `--system-node-toleration` entries followed by all `--accelerated-node-toleration` entries. Keyless system tolerations — the tolerate-all default and an explicit `*` — are not carried onto these paths, for the same reason they are not carried onto readiness gates: a toleration with no key also matches the not-ready and unreachable taints. To tolerate everything on these DaemonSets, pass the wildcard on the accelerated flag.
+> **Shared toleration paths:** a value path the registry declares under both the system and accelerated tiers (NFD `worker` and `topologyUpdater`, aws-ebs-csi-driver `node`) receives the deduplicated union of the keyed `--system-node-toleration` entries followed by all `--accelerated-node-toleration` entries. Keyless system tolerations — the tolerate-all default when the flag is unset, and an explicit `*` — are left out of that union so a system tolerate-all never widens an accelerated list you restricted on purpose. With no accelerated tolerations at all (possible through the Go SDK or a config file; the CLI defaults the flag), these paths receive the system list as given. To tolerate everything on these DaemonSets, pass the wildcard on the accelerated flag.
 
 **Example:**
 
