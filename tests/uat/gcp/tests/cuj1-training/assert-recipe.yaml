@@ -54,15 +54,15 @@ componentRefs: ## alphabetically sorted
 deploymentOrder:
   - cert-manager
   - gcp-driver-installer
-  - nfd
   - nodewright-operator
   - nodewright-customizations
   - prometheus-operator-crds
   - kube-prometheus-stack
+  - k8s-ephemeral-storage-metrics
+  - nfd
   - gpu-operator
   - dra-node-labeler
   - gke-nccl-tcpxo
-  - k8s-ephemeral-storage-metrics
   - kai-scheduler
   - kubeflow-trainer
   - nvidia-dra-driver-gpu

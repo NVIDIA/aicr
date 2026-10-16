@@ -29,6 +29,13 @@ spec:
       type: Helm
       source: https://kubernetes-sigs.github.io/node-feature-discovery/charts
       valuesFile: components/nfd/values.yaml
+      manifestFiles:
+        - components/nfd/manifests/master-podmonitor.yaml
+      dependencyRefs:
+        # The PodMonitor manifest needs the CRD before the post-chart
+        # apply; without the edge both land in the same sync band and
+        # race (issue #928).
+        - prometheus-operator-crds
 
     - name: cert-manager
       type: Helm
