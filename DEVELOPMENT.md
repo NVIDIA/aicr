@@ -219,7 +219,7 @@ make test-coverage
 
 ```bash
 # Run all linters (Go, YAML, license headers, agents sync, docs gates, chart-version pins,
-# vendored Go proxy action digests, upgrade records)
+# vendored Go proxy action digests, upgrade records, Dynamo runtime image tag)
 make lint
 
 # Or run individually for a faster loop (all of these already run as part of `make lint`)
@@ -480,7 +480,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make qualify` | Full qualification (test-coverage, lint, tuning-check, coverage-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
-| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, and upgrade records |
+| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, upgrade records, and the Dynamo runtime image tag |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
 | `make e2e` | CLI end-to-end tests |
