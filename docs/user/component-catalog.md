@@ -1165,6 +1165,17 @@ Prerequisites: NVIDIA GPU Operator and cert-manager, both inherited from `base.y
 
 NVCRE v0.8.2 expects Kubeflow Trainer **v2.2.1** — it pins `kubeflowTrainerVersion = "v2.2.1"` and its `setup status` reports the 2.2.0 that the registry defaults to as unsupported. The expectation did not move between v0.2.0 and v0.8.2. No functional break is known between the two versions: the CRD delta is documentation text plus one embedded PodSpec field NVCRE does not set. Aligning the global Trainer default is tracked separately.
 
+### Cluster-scoped objects and release ownership
+
+The chart creates cluster-scoped objects with fixed names: four `LogProfile` resources (`megatron-bridge`, `megatron-training`, `nccl-bandwidth`, `nccl-loopback`), 24 `ClusterRole`s, and two `ClusterRoleBinding`s. `fullnameOverride: nvcre` in the shipped values is what fixes the RBAC names, and `LogProfile` names are fixed by the chart regardless. Every one carries Helm ownership annotations for the release `nvcre` and none carries `helm.sh/resource-policy`. Because of that, a Helm release owns them for its whole lifetime:
+
+- **Upgrade** keeps them in place. A revision 1 to revision 2 upgrade left the same four `LogProfile`s, 26 RBAC objects, and seven CRDs.
+- **A second release** with the shipped values cannot coexist, even in another namespace. Installing it fails before creating anything, with Helm reporting that the first cluster-scoped object it reaches (`ClusterRole nvcre-bandwidthmeasurement-admin-role`) already belongs to release `nvcre`. The `LogProfile` names carry no release prefix, so changing `fullnameOverride` to rename the RBAC objects would leave those names to collide; that case was not tested.
+- **Uninstall** deletes the `LogProfile`s and all RBAC objects, and leaves the seven CRDs behind, as Helm does for anything in a chart's `crds/` directory. The `nccl-bandwidth` `LogProfile` is what the NCCL check's parse rules come from, so a cluster that has uninstalled the release has the CRDs but no profile.
+- **Reinstall** after an uninstall works through the bundle's `apply-crds.sh`, which detects the remaining CRDs ("no release but CRDs remain") and updates them before the install. The `LogProfile`s and RBAC objects come back identical to their pre-uninstall state.
+
+This was observed on EKS (Kubernetes v1.35) with the Helm deployer, chart v0.7.0, and Helm 4.3.0. Not exercised: other deployers, an uninstall while a `Certification` is still running, and whether an edit made to a shipped `LogProfile` survives an upgrade.
+
 ## NIM Workload Credentials
 
 AICR installs the **k8s-nim-operator** only. It does not create a `NIMService` and does not create credentials — deploying a workload is an operator step, and there are two ways to supply the model.
