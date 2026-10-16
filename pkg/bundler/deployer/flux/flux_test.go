@@ -3526,13 +3526,10 @@ func TestUsesRegistryChartRejectsRefsWithoutCoordinates(t *testing.T) {
 
 // TestGenerate_ManifestChartsDisableWait covers #2585.
 //
-// Charts generated from recipe manifests hold operator CRs such as
-// NicClusterPolicy, whose controllers hold Ready=False for minutes while
-// drivers build. helm-controller waits on those with the default 5m timeout
-// and remediates a failed install only by uninstalling, which would delete
-// the CR. Hooks were never waited on, so every generated manifest chart
-// disables the wait on install and upgrade; an upstream chart release is
-// left alone. Both the GitRepository and the chartRef shapes are checked.
+// A generated chart holding a manifest annotated aicr/disable-wait is released
+// with install.disableWait and upgrade.disableWait; a generated chart without
+// one, and an upstream chart release, keep helm-controller's wait. Both the
+// GitRepository and the chartRef shapes are checked.
 func TestGenerate_ManifestChartsDisableWait(t *testing.T) {
 	ctx := context.Background()
 
@@ -3548,11 +3545,19 @@ func TestGenerate_ManifestChartsDisableWait(t *testing.T) {
 				Type:      recipe.ComponentTypeHelm,
 				Source:    "https://helm.ngc.nvidia.com/nvidia",
 			},
+			{
+				Name:      "nodewright-customizations",
+				Namespace: "nodewright-system",
+				Type:      recipe.ComponentTypeHelm,
+			},
 		}
-		recipeResult.DeploymentOrder = []string{"network-operator"}
+		recipeResult.DeploymentOrder = []string{"network-operator", "nodewright-customizations"}
 		return &Generator{
-			RecipeResult:    recipeResult,
-			ComponentValues: map[string]map[string]any{"network-operator": {}},
+			RecipeResult: recipeResult,
+			ComponentValues: map[string]map[string]any{
+				"network-operator":          {},
+				"nodewright-customizations": {},
+			},
 			ComponentPreManifests: map[string]map[string][]byte{
 				"network-operator": {
 					"ns.yaml": []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: nvidia-network-operator\n"),
@@ -3560,7 +3565,10 @@ func TestGenerate_ManifestChartsDisableWait(t *testing.T) {
 			},
 			ComponentManifests: map[string]map[string][]byte{
 				"network-operator": {
-					"ncp.yaml": []byte("apiVersion: mellanox.com/v1alpha1\nkind: NicClusterPolicy\nmetadata:\n  name: nic-cluster-policy\n"),
+					"ncp.yaml": []byte("apiVersion: mellanox.com/v1alpha1\nkind: NicClusterPolicy\nmetadata:\n  name: nic-cluster-policy\n  annotations:\n    aicr/disable-wait: \"true\"\n"),
+				},
+				"nodewright-customizations": {
+					"tuning.yaml": []byte("apiVersion: nodewright.nvidia.com/v1alpha1\nkind: NodeWright\nmetadata:\n  name: tuning\n"),
 				},
 			},
 			Version:       "v0.9.0",
@@ -3592,18 +3600,18 @@ func TestGenerate_ManifestChartsDisableWait(t *testing.T) {
 			if _, err := newGenerator(mode.oci).Generate(ctx, outputDir); err != nil {
 				t.Fatalf("Generate() error = %v", err)
 			}
-			for _, dir := range []string{"network-operator-pre", "network-operator-post"} {
-				raw := readFile(t, filepath.Join(outputDir, dir, "helmrelease.yaml"))
-				for _, section := range []string{"install", "upgrade"} {
-					if got, ok := disableWait(t, raw, section); !ok || !got {
-						t.Errorf("%s: spec.%s.disableWait = %v (present=%v), want true\n%s", dir, section, got, ok, raw)
-					}
+			raw := readFile(t, filepath.Join(outputDir, "network-operator-post", "helmrelease.yaml"))
+			for _, section := range []string{"install", "upgrade"} {
+				if got, ok := disableWait(t, raw, section); !ok || !got {
+					t.Errorf("annotated chart: spec.%s.disableWait = %v (present=%v), want true\n%s", section, got, ok, raw)
 				}
 			}
-			raw := readFile(t, filepath.Join(outputDir, "network-operator", "helmrelease.yaml"))
-			for _, section := range []string{"install", "upgrade"} {
-				if _, ok := disableWait(t, raw, section); ok {
-					t.Errorf("upstream chart: spec.%s.disableWait present, want absent\n%s", section, raw)
+			for _, dir := range []string{"network-operator-pre", "nodewright-customizations", "network-operator"} {
+				raw := readFile(t, filepath.Join(outputDir, dir, "helmrelease.yaml"))
+				for _, section := range []string{"install", "upgrade"} {
+					if _, ok := disableWait(t, raw, section); ok {
+						t.Errorf("%s: spec.%s.disableWait present, want absent\n%s", dir, section, raw)
+					}
 				}
 			}
 		})

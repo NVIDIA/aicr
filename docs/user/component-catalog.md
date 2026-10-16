@@ -1954,15 +1954,20 @@ The `HelmRelease` objects live in the namespace given by `--flux-namespace`
 a component version boundary, so `aicr upgrade-check` does not report it.
 
 Fresh installs apply the new spec directly, and the change does not make the
-release wait on it. helm-controller waits for release members to be Ready
-under `spec.timeout` (5m by default) and remediates a failed install only by
-uninstalling, while network-operator holds `NicClusterPolicy` at `Ready=False`
-until every component, OFED included, is up. The flux deployer therefore sets
-`install.disableWait` and `upgrade.disableWait` on every chart it generates
-from recipe manifests, so `network-operator-post` succeeds once the policy is
-applied and `gpu-operator`, which depends on it, is not held back. Hooks were
-never waited on, so this matches the previous behavior; watch the policy
-itself, not the release, to know when the fabric is ready:
+release wait on a `NicClusterPolicy`. helm-controller waits for release
+members to be Ready under `spec.timeout` (5m by default) and remediates a
+failed install only by uninstalling, while network-operator v26.7.0 and later
+hold `NicClusterPolicy` at `Ready=False` until every component, OFED included,
+is up. The `NicClusterPolicy` manifests therefore carry
+`aicr/disable-wait: "true"`, and the flux deployer sets `install.disableWait` and
+`upgrade.disableWait` on a generated chart that holds such a manifest:
+`network-operator-post` and `network-operator-ocp` succeed once the policy is
+applied, and `gpu-operator`, which depends on the first, is not held back.
+Every other generated chart keeps its wait; `NodeFeatureRule` and the
+OpenShift `NodeFeatureDiscovery` report no `Ready` condition, so the wait on
+`nfd-ocp` returns at once. Hooks were never waited on, so this matches the
+previous behavior; watch the policy itself, not the release, to know when the
+fabric is ready:
 
 ```bash
 kubectl get nicclusterpolicy nic-cluster-policy -o jsonpath='{.status.state}{"\n"}'

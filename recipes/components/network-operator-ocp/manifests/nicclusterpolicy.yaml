@@ -26,6 +26,10 @@ metadata:
     # manifest-only component is ordered after network-operator-ocp-olm,
     # whose Subscription installs the operator and its CRDs.
     aicr/skip-hook-validation: "true"
+    # Flux does not wait for this CR: from network-operator v26.7.0 the
+    # operator holds it at Ready=False until OFED is built, past
+    # helm-controller's timeout (NVIDIA/aicr#2585).
+    aicr/disable-wait: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
