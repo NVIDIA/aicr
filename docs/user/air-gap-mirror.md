@@ -343,7 +343,8 @@ missing from the validator namespace is skipped with a warning in the check's
 log, and those pods then pull without it. If the check times out while one of
 those pods is still failing to pull, the error names the pod and the image it
 could not pull.
-`AICR_VALIDATOR_IMAGE_TAG` does not retag the Dynamo images, because the runtime
-must match the deployed Dynamo operator. Registry redirection does not make the
+`AICR_VALIDATOR_IMAGE_TAG` does not retag the Dynamo images, because their tag
+follows the `dynamo-platform` chart the recipe deploys, so a retag would run a
+runtime that differs from the operator. Registry redirection does not make the
 check fully offline, since its model-cache Job still downloads weights from
 Hugging Face.
