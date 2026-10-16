@@ -424,3 +424,60 @@ func TestMakeBundle_SharedTolerationPathsUnion(t *testing.T) {
 		}
 	}
 }
+
+// TestMakeBundle_NoTolerationPathsWriteTopLevel covers a config outside the
+// registry, which declares no toleration paths: each tier falls back to the
+// top-level "tolerations" key, and both tiers set together share it.
+func TestMakeBundle_NoTolerationPathsWriteTopLevel(t *testing.T) {
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	sysMap := map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"}
+	accMap := map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+
+	tests := []struct {
+		name string
+		opts []config.Option
+		want []any
+	}{
+		{"system only", []config.Option{config.WithSystemNodeTolerations([]corev1.Toleration{sysTol})}, []any{sysMap}},
+		{"accelerated only", []config.Option{config.WithAcceleratedNodeTolerations([]corev1.Toleration{accTol})}, []any{accMap}},
+		{"both tiers", []config.Option{
+			config.WithSystemNodeTolerations([]corev1.Toleration{sysTol}),
+			config.WithAcceleratedNodeTolerations([]corev1.Toleration{accTol}),
+		}, []any{sysMap, accMap}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewBaseBundler(config.NewConfig(tt.opts...), "test")
+			input := &recipe.RecipeResult{
+				Kind:       "RecipeResult",
+				APIVersion: recipe.RecipeResultAPIVersion,
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "custom-chart", Type: "Helm", Source: "https://charts.example.com", Version: "1.0.0"},
+				},
+			}
+			outputDir := t.TempDir()
+			cfg := ComponentConfig{Name: "custom-chart", DefaultHelmRepository: "https://charts.example.com", DefaultHelmChart: "custom-chart"}
+			res, err := MakeBundle(context.Background(), b, input, outputDir, cfg, nil)
+			if err != nil || !res.Success {
+				t.Fatalf("MakeBundle() = %+v, %v", res, err)
+			}
+
+			raw, err := os.ReadFile(filepath.Join(outputDir, "custom-chart", "values.yaml"))
+			if err != nil {
+				t.Fatalf("read values.yaml: %v", err)
+			}
+			var values map[string]any
+			if err := yaml.Unmarshal(raw, &values); err != nil {
+				t.Fatalf("parse values.yaml: %v\n%s", err, raw)
+			}
+			got, ok := GetValueByPath(values, "tolerations")
+			if !ok {
+				t.Fatalf("tolerations absent from values.yaml\n%s", raw)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("tolerations:\n  got  = %#v\n  want = %#v", got, tt.want)
+			}
+		})
+	}
+}

@@ -255,11 +255,15 @@ func MakeBundle(ctx context.Context, b *BaseBundler, input recipe.RecipeInput, o
 	}
 
 	// Tolerations: a path declared under both tiers is written once with the
-	// union; every other path gets its tier's list.
+	// union; every other path gets its tier's list. A tier with no declared
+	// paths writes the top-level "tolerations" key, as ApplyTolerationsOverrides
+	// does, so a config outside the registry keeps its tolerations.
 	systemTols := b.Config.SystemNodeTolerations()
 	acceleratedTols := b.Config.AcceleratedNodeTolerations()
-	shared := SharedTolerationPaths(cfg.SystemTolerationPaths, cfg.AcceleratedTolerationPaths)
-	if paths := pathsExcept(cfg.SystemTolerationPaths, shared); len(systemTols) > 0 && len(paths) > 0 {
+	systemPaths := tolerationPathsOrDefault(cfg.SystemTolerationPaths)
+	acceleratedPaths := tolerationPathsOrDefault(cfg.AcceleratedTolerationPaths)
+	shared := SharedTolerationPaths(systemPaths, acceleratedPaths)
+	if paths := pathsExcept(systemPaths, shared); len(systemTols) > 0 && len(paths) > 0 {
 		ApplyTolerationsOverrides(values, systemTols, paths...)
 	}
 
@@ -268,7 +272,7 @@ func MakeBundle(ctx context.Context, b *BaseBundler, input recipe.RecipeInput, o
 		ApplyNodeSelectorOverrides(values, selectors, cfg.AcceleratedNodeSelectorPaths...)
 	}
 
-	if paths := pathsExcept(cfg.AcceleratedTolerationPaths, shared); len(acceleratedTols) > 0 && len(paths) > 0 {
+	if paths := pathsExcept(acceleratedPaths, shared); len(acceleratedTols) > 0 && len(paths) > 0 {
 		ApplyTolerationsOverrides(values, acceleratedTols, paths...)
 	}
 	if sharedTols := SharedTolerations(systemTols, acceleratedTols); len(sharedTols) > 0 && len(shared) > 0 {

@@ -283,10 +283,7 @@ func ApplyTolerationsOverrides(values map[string]any, tolerations []corev1.Toler
 		return
 	}
 
-	// Default to top-level "tolerations" if no paths specified
-	if len(paths) == 0 {
-		paths = []string{"tolerations"}
-	}
+	paths = tolerationPathsOrDefault(paths)
 
 	// Convert tolerations to YAML-friendly format
 	tolList := TolerationsToPodSpec(tolerations)
@@ -311,19 +308,22 @@ func AppendTolerationsOverrides(values map[string]any, tolerations []corev1.Tole
 	if len(tolerations) == 0 || values == nil {
 		return
 	}
-	if len(paths) == 0 {
-		paths = []string{"tolerations"}
-	}
+	paths = tolerationPathsOrDefault(paths)
 	tolList := TolerationsToPodSpec(tolerations)
 	for _, path := range paths {
 		appendTolerationsAtPath(values, tolList, path)
 	}
 }
 
-// appendTolerationsAtPath appends tolerations to the slice at the given
-// dot-notation path. If the path is missing or not a slice, the path is set
-// to the new tolerations list (i.e. identical to setTolerationsAtPath in
-// that case).
+// tolerationPathsOrDefault returns paths, or the top-level "tolerations" key
+// when none are declared.
+func tolerationPathsOrDefault(paths []string) []string {
+	if len(paths) == 0 {
+		return []string{"tolerations"}
+	}
+	return paths
+}
+
 // SharedTolerationPaths returns the paths declared under both the system and
 // accelerated tolerationPaths, in system order and without repeats. A workload
 // registered this way (nfd worker, aws-ebs-csi-driver node) must run on every
@@ -376,6 +376,10 @@ func keyedTolerations(tolerations []corev1.Toleration) []corev1.Toleration {
 	return keyed
 }
 
+// appendTolerationsAtPath appends tolerations to the slice at the given
+// dot-notation path. If the path is missing or not a slice, the path is set
+// to the new tolerations list (i.e. identical to setTolerationsAtPath in
+// that case).
 func appendTolerationsAtPath(values map[string]any, tolerations []map[string]any, path string) {
 	parent, key, _ := getOrCreateNestedMap(values, path, false)
 
