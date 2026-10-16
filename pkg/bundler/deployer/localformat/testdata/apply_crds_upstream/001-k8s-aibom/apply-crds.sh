@@ -476,11 +476,13 @@ fi
 # resourceVersion), but as a full overwrite that discards whatever other
 # managers set on the CRD after install. Server-side apply keeps those.
 #
-# As `helm` rather than the default `kubectl`, so a field Helm 4 installed,
-# that no other manager also owns, is pruned once the chart drops it. Which removals take, including after a Helm 3
-# install, is set out under "Upgrade, uninstall, and troubleshooting" in
-# docs/user/component-catalog.md. --force-conflicts is required because other
-# managers may hold individual fields.
+# As `helm` rather than the default `kubectl`, so a field `helm` claimed
+# through a server-side apply (a Helm 4 install, or an earlier run of this
+# step) is pruned once the chart drops it, unless another manager claims it
+# too. Which removals take, including
+# after a Helm 3 install, is set out under "Upgrade, uninstall, and
+# troubleshooting" in docs/user/component-catalog.md. --force-conflicts is
+# required because other managers may hold individual fields.
 while IFS= read -r doc; do
   # A whitespace-only file under crds/ is not an error, but handing it to
   # kubectl is: "no objects passed" aborts the deploy, and because the loop is
