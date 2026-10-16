@@ -166,7 +166,7 @@ With `helm`, run the nfd install script, then uninstall the release:
 helm uninstall nfd -n node-feature-discovery
 ```
 
-With `argocd` or `argocd-helm`, publish that revision the same way as the original and let the nfd Application sync. The parent Application syncs every child with automated prune and self-heal, so it recreates a deleted nfd child. Generated children also carry no `resources-finalizer.argocd.argoproj.io` finalizer unless the bundle set `deployer:cascadeDelete=true`, so a plain delete leaves nfd running. Turn off the parent's auto-sync, then delete the child with cascade:
+With `argocd` or `argocd-helm`, publish that revision the same way as the original and let the nfd Application sync. With `argocd-helm`, publish the chart under a new version and set the parent's `targetRevision` to it. Argo CD caches a chart by version, so republishing the same version leaves the nfd child on its old values. Before deleting the child, confirm `kubectl get application -n argocd "${CHILD}" -o jsonpath='{.spec.source.helm.values}'` shows `postDeleteCleanup: true`. The parent Application syncs every child with automated prune and self-heal, so it recreates a deleted nfd child. Generated children also carry no `resources-finalizer.argocd.argoproj.io` finalizer unless the bundle set `deployer:cascadeDelete=true`, so a plain delete leaves nfd running. Turn off the parent's auto-sync, then delete the child with cascade:
 
 ```bash
 APP="nvidia-stack"  # replace with the parent Application: --app-name, default nvidia-stack (argocd) or aicr-stack (argocd-helm)
