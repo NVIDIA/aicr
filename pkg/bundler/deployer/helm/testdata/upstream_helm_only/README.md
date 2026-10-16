@@ -85,8 +85,9 @@ bash install.sh
 > pinned chart once, reads the CRDs out of that archive, and server-side
 > applies each one under `--field-manager=helm`. A version or schema property
 > the new chart removes disappears; a field removed outside `spec.versions`
-> disappears only if Helm 4 installed the CRDs, since a server-side apply
-> prunes only fields it owns and a Helm 3 install keeps its own claim. See
+> disappears only if Helm 4 installed the CRDs and no other manager also
+> owns the field, since a server-side apply prunes only fields it alone owns
+> and a Helm 3 install keeps its own claim. See
 > [Upgrade, uninstall, and troubleshooting](https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#upgrade-uninstall-and-troubleshooting)
 > for the exceptions. Only
 > components audited as the sole owner of every CRD they ship get this, and

@@ -322,8 +322,8 @@ fi
 # resourceVersion), but as a full overwrite that discards whatever other
 # managers set on the CRD after install. Server-side apply keeps those.
 #
-# As `helm` rather than the default `kubectl`, so a field Helm 4 installed and
-# the chart dropped is pruned. Which removals take, including after a Helm 3
+# As `helm` rather than the default `kubectl`, so a field Helm 4 installed,
+# that no other manager also owns, is pruned once the chart drops it. Which removals take, including after a Helm 3
 # install, is set out under "Upgrade, uninstall, and troubleshooting" in
 # docs/user/component-catalog.md. --force-conflicts is required because other
 # managers may hold individual fields.

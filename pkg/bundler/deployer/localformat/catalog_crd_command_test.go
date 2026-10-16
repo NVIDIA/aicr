@@ -80,8 +80,9 @@ const (
 //
 // The fixture upgrade drops a version and a schema property, which every
 // forced apply removes because spec.versions is atomic, and
-// spec.names.shortNames, which only an Apply-operation owner removes. That
-// second removal is what tells the ownership shapes apart.
+// spec.names.shortNames, which only its sole owner, holding it through an
+// Apply operation, removes. That second removal is what tells the ownership
+// shapes apart.
 func TestCatalogCRDUpgradeCommand(t *testing.T) {
 	block := catalogCRDBlock(t)
 	helmBin := requireTool(t, "helm")
@@ -95,7 +96,10 @@ func TestCatalogCRDUpgradeCommand(t *testing.T) {
 		name      string
 		install   crdInstall
 		installer string
-		manager   string
+		// coOwner, when set, applies the same shortNames value under its own
+		// manager after install, so it shares ownership of the field.
+		coOwner string
+		manager string
 		// apply replaces catalogApplyLine; empty runs the block as published.
 		apply string
 		// needsApply marks a case whose expectation holds only when helm
@@ -110,6 +114,15 @@ func TestCatalogCRDUpgradeCommand(t *testing.T) {
 			manager:    "helm",
 			needsApply: true,
 			wantLabel:  true,
+		},
+		{
+			name:           "as published when another manager shares the field",
+			install:        installHelm,
+			coOwner:        "gitops",
+			manager:        "helm",
+			needsApply:     true,
+			wantShortNames: true,
+			wantLabel:      true,
 		},
 		{
 			name:           "as published over Helm 3 ownership",
@@ -173,6 +186,13 @@ func TestCatalogCRDUpgradeCommand(t *testing.T) {
 				t.Skip(msg)
 			}
 			cluster.run(t, cluster.kubectl, "label", "crd", crd, crdForeignLabel+"=other")
+			if tt.coOwner != "" {
+				path := filepath.Join(t.TempDir(), "shortnames.yaml")
+				writeFile(t, path, fmt.Sprintf(
+					"apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: %s\nspec:\n  names:\n    shortNames: [%s]\n",
+					crd, crdShortName))
+				cluster.run(t, cluster.kubectl, "apply", "--server-side", "--field-manager="+tt.coOwner, "-f", path)
+			}
 
 			script := pinCatalogBlock(t, block, map[string]string{
 				"CHART":   chart,

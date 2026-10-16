@@ -1744,16 +1744,19 @@ Four details are load-bearing, and each obvious alternative loses something:
     list.
   - **Outside `spec.versions`**, such as `spec.names.shortNames` or an
     annotation, a dropped field disappears only when the applying manager
-    owns it through an Apply operation. Helm 4 installs CRDs that way, as
-    manager `helm`, so `MANAGER="helm"` removes such a field where a bare
-    apply would leave it. Helm 3 and `terraform-provider-helm` (measured on a
-    kind cluster with provider 3.3.0) install with an Update operation, which
-    server-side apply tracks as a separate owner even under the same manager
-    name. After either, a field the original install set stays behind
-    whatever `MANAGER` says; delete it by hand if the chart's release notes
-    depend on its removal. A field that an earlier run of this command added
-    is owned through Apply and is removed normally, as long as every run uses
-    the same `MANAGER`.
+    owns it through an Apply operation and no other manager owns it too.
+    Another owner, even one that set the same value, keeps the field in
+    place, and `--force-conflicts` does not change that. Helm 4 installs
+    CRDs through Apply, as manager `helm`, so `MANAGER="helm"` removes such a
+    field where a bare apply would leave it. Helm 3 and
+    `terraform-provider-helm` (measured on a kind cluster with provider
+    3.3.0) install with an Update operation, which server-side apply tracks
+    as a separate owner even under the same manager name, so after either a
+    field the original install set stays behind whatever `MANAGER` says. A
+    field that an earlier run of this command added is owned through Apply
+    and is removed normally, as long as every run uses the same `MANAGER`. If
+    the chart's release notes depend on a removal, check the field's owners
+    with `--show-managed-fields` and delete it by hand if it remains.
 
   `--force-conflicts` is required because other managers may hold individual
   fields. On a CRD using `spec.conversion.strategy: Webhook`, a chart that
