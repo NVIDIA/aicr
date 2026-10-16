@@ -666,9 +666,12 @@ them:
    images uniformly, including the inner `aiperf-bench` runner the
    `performance` validator launches (so both must exist at that tag).
    It does not retag the Dynamo runtime images (`vllm-runtime`,
-   `dynamo-frontend`) the inference-perf workload runs. Those stay at
+   `dynamo-frontend`) the inference-perf workload runs. Those take the
+   recipe's `dynamo-platform` chart version, so they match the deployed
+   operator even when an overlay or `--data` overrides the chart pin. When
+   the recipe's ref carries no version they fall back to
    `defaults.DynamoRuntimeImageTag`, which `make check-dynamo-runtime-image`
-   holds equal to the `dynamo-platform` chart version. They resolve through
+   holds equal to the registry's `dynamo-platform` pin. They resolve through
    `catalog.ApplyRegistryOverride`, so `AICR_VALIDATOR_IMAGE_REGISTRY` still
    redirects them.
 

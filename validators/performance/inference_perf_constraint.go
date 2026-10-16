@@ -434,6 +434,10 @@ type inferenceWorkloadConfig struct {
 	// pullSecrets references the image pull Secrets ensureWorkloadPullSecrets
 	// copied into namespace, for the pods created there.
 	pullSecrets []v1.LocalObjectReference
+
+	// dynamoRuntimeTag tags the Dynamo runtime images with the recipe's
+	// dynamo-platform chart version.
+	dynamoRuntimeTag string
 }
 
 // useDRAWorkerClaims reports whether worker GPUs are wired via the DRA
@@ -604,7 +608,7 @@ func hasDynamoPlatform(ctx *validators.Context) bool {
 		return false
 	}
 	for _, ref := range ctx.ValidationInput.ComponentRefs {
-		if ref.Name == "dynamo-platform" {
+		if ref.Name == dynamoPlatformComponent {
 			return true
 		}
 	}
@@ -775,6 +779,11 @@ func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*infer
 		return nil, err
 	}
 
+	dynamoRuntimeTag, err := resolveDynamoRuntimeTag(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	runID := deriveRunID()
 	modelCacheStorageClass, modelCacheStorageClassFromRecipe := resolveModelCacheStorageClass(ctx)
 	config := &inferenceWorkloadConfig{
@@ -793,6 +802,7 @@ func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*infer
 		routerMode:                       routerMode,
 		gpuAllocMode:                     mode,
 		draWorkerWiring:                  draWiring,
+		dynamoRuntimeTag:                 dynamoRuntimeTag,
 	}
 
 	// Pin every worker to the specific chosen node via kubernetes.io/hostname
@@ -1633,8 +1643,8 @@ func inferenceTemplateData(config *inferenceWorkloadConfig) map[string]string {
 		"GPU_COUNT":                 strconv.Itoa(config.gpuCount),
 		"DEPLOYMENT_NAME":           inferenceDeploymentName,
 		"CLAIM_TEMPLATE_NAME":       inferenceClaimTemplateName,
-		"DYNAMO_VLLM_RUNTIME_IMAGE": dynamoRuntimeImage(dynamoVLLMRuntimeImageName),
-		"DYNAMO_FRONTEND_IMAGE":     dynamoRuntimeImage(dynamoFrontendImageName),
+		"DYNAMO_VLLM_RUNTIME_IMAGE": dynamoRuntimeImage(dynamoVLLMRuntimeImageName, config.dynamoRuntimeTag),
+		"DYNAMO_FRONTEND_IMAGE":     dynamoRuntimeImage(dynamoFrontendImageName, config.dynamoRuntimeTag),
 	}
 }
 

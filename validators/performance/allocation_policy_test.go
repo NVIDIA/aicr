@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/allocmode"
@@ -224,6 +225,7 @@ func TestBuildInferenceConfig_DRAPolicyDiscoversDRAOnlyNodes(t *testing.T) {
 		Clientset: fake.NewClientset(&draNode),
 		ValidationInput: &validatorv1.ValidationInput{
 			GPUAllocationPolicy: validatorv1.GPUAllocationPolicyDRAResourceClaim,
+			ComponentRefs:       []recipe.ComponentRef{{Name: dynamoPlatformComponent, Version: testRecipeDynamoVersion}},
 		},
 	}
 	mode := &allocmode.Mode{
@@ -237,6 +239,10 @@ func TestBuildInferenceConfig_DRAPolicyDiscoversDRAOnlyNodes(t *testing.T) {
 	config, err := buildInferenceConfig(ctx, mode)
 	if err != nil {
 		t.Fatalf("buildInferenceConfig() error = %v", err)
+	}
+	if config.dynamoRuntimeTag != testRecipeDynamoVersion {
+		t.Errorf("dynamoRuntimeTag = %q, want the recipe's dynamo-platform version %q",
+			config.dynamoRuntimeTag, testRecipeDynamoVersion)
 	}
 	if !config.useDRAWorkerClaims() {
 		t.Error("useDRAWorkerClaims() = false, want DRA wiring under the configured claim policy")

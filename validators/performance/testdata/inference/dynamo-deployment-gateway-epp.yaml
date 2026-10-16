@@ -26,9 +26,8 @@
 # inference_perf_constraint.go) so taint values with YAML-special characters
 # cannot break the template.
 #
-# Images are substituted by inferenceTemplateData from
-# defaults.DynamoRuntimeImageTag, which must match the dynamo-platform chart
-# version, and honor AICR_VALIDATOR_IMAGE_REGISTRY.
+# Images are substituted by inferenceTemplateData, tagged with the recipe's
+# dynamo-platform chart version, and honor AICR_VALIDATOR_IMAGE_REGISTRY.
 
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment

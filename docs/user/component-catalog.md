@@ -2061,9 +2061,9 @@ runtime image is its own hazard, independent of NATS. An older runtime
 under a newer operator is the same version-skew class that caused the
 frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
 on the old workload is defense in depth, not a substitute for bumping its
-image to match the operator. For AICR's own inference-perf workload,
-`make check-dynamo-runtime-image` fails unless
-`defaults.DynamoRuntimeImageTag` equals the `dynamo-platform` chart version.
+image to match the operator. AICR's own inference-perf workload tags its
+runtime images with the recipe's `dynamo-platform` chart version, so it
+moves with the operator.
 
 ### `dynamo-platform`: reusing an existing StorageClass for the GB200 model-weights cache
 

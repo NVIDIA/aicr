@@ -21,8 +21,10 @@ const (
 )
 
 // DynamoImageRepository and DynamoRuntimeImageTag locate the Dynamo runtime
-// images the inference-perf validator runs. DynamoRuntimeImageTag must equal
-// the dynamo-platform chart version in recipes/registry.yaml, as enforced by
+// images the inference-perf validator runs. The validator tags them with the
+// recipe's dynamo-platform version and falls back to DynamoRuntimeImageTag
+// when the recipe's ref carries none. DynamoRuntimeImageTag must equal the
+// dynamo-platform chart version in recipes/registry.yaml, as enforced by
 // make check-dynamo-runtime-image.
 const (
 	DynamoImageRepository = "nvcr.io/nvidia/ai-dynamo"

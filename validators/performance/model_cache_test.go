@@ -144,11 +144,12 @@ func TestBuildModelCachePopulateJob(t *testing.T) {
 	// the offline workers fail to find their model.
 	t.Setenv(envModel, "Qwen/Qwen3-0.6B")
 	cfg := &inferenceWorkloadConfig{
-		runID:           "run-1",
-		namespace:       "ns",
-		model:           "Qwen/Qwen3-32B",
-		gpuNodeSelector: map[string]string{"kubernetes.io/hostname": "node-a"},
-		pullSecrets:     []v1.LocalObjectReference{{Name: "regcred"}},
+		runID:            "run-1",
+		namespace:        "ns",
+		model:            "Qwen/Qwen3-32B",
+		gpuNodeSelector:  map[string]string{"kubernetes.io/hostname": "node-a"},
+		pullSecrets:      []v1.LocalObjectReference{{Name: "regcred"}},
+		dynamoRuntimeTag: testRecipeDynamoVersion,
 	}
 	job := buildModelCachePopulateJob("aicr-model-cache-populate-run-1", cfg)
 
@@ -169,8 +170,8 @@ func TestBuildModelCachePopulateJob(t *testing.T) {
 		t.Errorf("cache PVC volume missing: %v", spec.Volumes)
 	}
 	c := spec.Containers[0]
-	if c.Image != cacheWorkerImage() {
-		t.Errorf("image = %q, want %q", c.Image, cacheWorkerImage())
+	if want := defaults.DynamoImageRepository + "/vllm-runtime:" + testRecipeDynamoVersion; c.Image != want {
+		t.Errorf("image = %q, want %q", c.Image, want)
 	}
 	if !strings.Contains(strings.Join(c.Command, " "), "snapshot_download") {
 		t.Errorf("command missing snapshot_download: %v", c.Command)
@@ -691,10 +692,11 @@ func TestCacheWorkerImageMatchesTemplate(t *testing.T) {
 		for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
 			t.Run(tmpl+"/registry="+registry, func(t *testing.T) {
 				t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", registry)
-				obj := renderInferenceTemplate(t, tmpl)
+				cfg := inferenceTemplateTestConfig(defaults.DynamoRuntimeImageTag)
+				obj := renderInferenceTemplate(t, tmpl, cfg)
 				images := componentContainerImages(t, obj, "VllmDecodeWorker")
-				if got := images[mainContainerName]; got != cacheWorkerImage() {
-					t.Errorf("VllmDecodeWorker main image = %q, want cacheWorkerImage() %q", got, cacheWorkerImage())
+				if got := images[mainContainerName]; got != cacheWorkerImage(cfg) {
+					t.Errorf("VllmDecodeWorker main image = %q, want cacheWorkerImage() %q", got, cacheWorkerImage(cfg))
 				}
 			})
 		}
@@ -702,26 +704,32 @@ func TestCacheWorkerImageMatchesTemplate(t *testing.T) {
 }
 
 // TestDynamoTemplateImagesResolved verifies every container image in both
-// Dynamo deploy templates is fully substituted, tagged
-// defaults.DynamoRuntimeImageTag, redirected by AICR_VALIDATOR_IMAGE_REGISTRY,
-// and not retagged by AICR_VALIDATOR_IMAGE_TAG.
+// Dynamo deploy templates is fully substituted, tagged with the config's
+// Dynamo runtime tag, redirected by AICR_VALIDATOR_IMAGE_REGISTRY, and not
+// retagged by AICR_VALIDATOR_IMAGE_TAG.
 func TestDynamoTemplateImagesResolved(t *testing.T) {
 	tests := []struct {
 		name       string
 		registry   string
 		tag        string
+		runtimeTag string
 		wantPrefix string
 	}{
 		{name: "no override", wantPrefix: defaults.DynamoImageRepository + "/"},
 		{name: "registry override", registry: "localhost:5001", wantPrefix: "localhost:5001/"},
 		{name: "tag override does not retag runtime images", tag: "latest", wantPrefix: defaults.DynamoImageRepository + "/"},
+		{name: "recipe chart version", runtimeTag: testRecipeDynamoVersion, wantPrefix: defaults.DynamoImageRepository + "/"},
 	}
 	for _, tt := range tests {
 		for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
 			t.Run(tt.name+"/"+tmpl, func(t *testing.T) {
 				t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", tt.registry)
 				t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.tag)
-				obj := renderInferenceTemplate(t, tmpl)
+				wantTag := tt.runtimeTag
+				if wantTag == "" {
+					wantTag = defaults.DynamoRuntimeImageTag
+				}
+				obj := renderInferenceTemplate(t, tmpl, inferenceTemplateTestConfig(wantTag))
 				components, _, err := unstructured.NestedSlice(obj.Object, "spec", "components")
 				if err != nil || len(components) == 0 {
 					t.Fatalf("read spec.components: %v (len %d)", err, len(components))
@@ -738,8 +746,8 @@ func TestDynamoTemplateImagesResolved(t *testing.T) {
 						if !strings.HasPrefix(image, tt.wantPrefix) {
 							t.Errorf("%s/%s image %q, want prefix %q", name, container, image, tt.wantPrefix)
 						}
-						if !strings.HasSuffix(image, ":"+defaults.DynamoRuntimeImageTag) {
-							t.Errorf("%s/%s image %q, want tag %q", name, container, image, defaults.DynamoRuntimeImageTag)
+						if !strings.HasSuffix(image, ":"+wantTag) {
+							t.Errorf("%s/%s image %q, want tag %q", name, container, image, wantTag)
 						}
 					}
 				}
@@ -748,16 +756,22 @@ func TestDynamoTemplateImagesResolved(t *testing.T) {
 	}
 }
 
-// renderInferenceTemplate renders testdata/inference/tmpl with the
-// substitutions deployInferenceWorkload applies.
-func renderInferenceTemplate(t *testing.T, tmpl string) *unstructured.Unstructured {
-	t.Helper()
-	cfg := &inferenceWorkloadConfig{
-		namespace:  "aicr-test",
-		model:      "Qwen/Qwen3-8B",
-		routerMode: dynRouterModeDefault,
-		gpuCount:   1,
+// inferenceTemplateTestConfig returns a minimal config whose Dynamo runtime
+// images are tagged runtimeTag.
+func inferenceTemplateTestConfig(runtimeTag string) *inferenceWorkloadConfig {
+	return &inferenceWorkloadConfig{
+		namespace:        "aicr-test",
+		model:            "Qwen/Qwen3-8B",
+		routerMode:       dynRouterModeDefault,
+		gpuCount:         1,
+		dynamoRuntimeTag: runtimeTag,
 	}
+}
+
+// renderInferenceTemplate renders testdata/inference/tmpl with the
+// substitutions deployInferenceWorkload applies for cfg.
+func renderInferenceTemplate(t *testing.T, tmpl string, cfg *inferenceWorkloadConfig) *unstructured.Unstructured {
+	t.Helper()
 	obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", tmpl), inferenceTemplateData(cfg))
 	if err != nil {
 		t.Fatalf("parseYAMLTemplate(%s) error: %v", tmpl, err)

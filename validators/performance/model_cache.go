@@ -122,10 +122,10 @@ const (
 )
 
 // cacheWorkerImage returns the image the model-cache populate Job runs.
-func cacheWorkerImage() string {
+func cacheWorkerImage(config *inferenceWorkloadConfig) string {
 	// The workers' own vLLM runtime image, so the Job writes HF_HOME in the
 	// layout the offline workers read.
-	return dynamoRuntimeImage(dynamoVLLMRuntimeImageName)
+	return dynamoRuntimeImage(dynamoVLLMRuntimeImageName, config.dynamoRuntimeTag)
 }
 
 // storageCompatibilityRule declares that on a given CSI provisioner, the
@@ -453,7 +453,7 @@ func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig) *b
 					SecurityContext:  &v1.PodSecurityContext{FSGroup: ptr.To(cacheWorkerFSGroup)},
 					Containers: []v1.Container{{
 						Name:  "populate",
-						Image: cacheWorkerImage(),
+						Image: cacheWorkerImage(config),
 						Resources: v1.ResourceRequirements{
 							Requests: v1.ResourceList{
 								v1.ResourceCPU:    resource.MustParse(cacheJobCPURequest),

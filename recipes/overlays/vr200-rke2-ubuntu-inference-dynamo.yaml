@@ -87,8 +87,7 @@ spec:
   #     vllm/vllm-openai:v0.26.0 (predates the code); its unreleased main
   #     branch pins v0.28.0 (has the code, not yet CUDA 13.4); neither is
   #     what this leaf needs, and nothing built from main is published.
-  #   - The inference-perf validator runs vllm-runtime at
-  #     defaults.DynamoRuntimeImageTag, which must equal the
+  #   - The inference-perf validator runs vllm-runtime at the recipe's
   #     dynamo-platform chart version. It can exercise a VR200-capable
   #     image only after a Dynamo release ships one and the chart pin
   #     moves to it.
