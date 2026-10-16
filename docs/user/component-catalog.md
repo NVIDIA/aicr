@@ -178,6 +178,22 @@ argocd app delete "${CHILD}" --cascade
 
 Remove nfd from the bundle source before turning the parent's auto-sync back on. This needs Argo CD 3.4.1 or later, because earlier versions never finish deleting an Application whose post-delete hooks include cluster-scoped objects.
 
+A completed deletion does not prove the prune ran. Through at least Argo CD 3.5.5, a [race in delete-hook handling](https://github.com/argoproj/argo-cd/issues/29100) can delete the prune Job before it starts and still finish deleting the Application, and the Job deletes itself when it succeeds. Check the nodes instead. This prints every node that still carries an NFD label or annotation, and prints nothing once the prune has run:
+
+```bash
+kubectl get nodes -o json | jq -r '.items[] | select((.metadata.labels // {}) + (.metadata.annotations // {}) | keys | any(startswith("feature.node.kubernetes.io/") or startswith("nfd.node.kubernetes.io/"))) | .metadata.name'
+```
+
+If it prints any node, run the prune through Helm, which waits for the hook Job to finish. Do this before turning the parent's auto-sync back on:
+
+```bash
+VALUES="./bundles/NNN-nfd/values.yaml"  # replace NNN with the nfd folder's prefix in the regenerated bundle
+VERSION="x.y.z"                         # replace with the nfd chart version the bundle pins
+helm install nfd node-feature-discovery --repo https://kubernetes-sigs.github.io/node-feature-discovery/charts \
+  --version "${VERSION}" -n node-feature-discovery --create-namespace -f "${VALUES}"
+helm uninstall nfd -n node-feature-discovery
+```
+
 With `flux`, commit that revision and let Flux upgrade the nfd release. The Flux Kustomization that applies the bundle recreates a HelmRelease deleted from the cluster, so remove the `nfd/` entries from the bundle's root `kustomization.yaml` and commit instead. With `prune: true`, as the bundle README configures, Flux deletes the `nfd` HelmRelease and helm-controller runs `helm uninstall`, which runs the hook.
 
 With `helmfile`, run from the regenerated bundle directory:
