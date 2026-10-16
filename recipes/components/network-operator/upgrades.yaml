@@ -143,3 +143,55 @@ transitions:
       - https://github.com/Mellanox/network-operator/releases/tag/v26.7.0
       - https://github.com/Mellanox/network-operator/blob/v26.7.0/deployment/network-operator/values.yaml
       - https://github.com/Mellanox/network-operator/blob/v26.7.0/docs/heterogeneous-cluster-support.md
+  - from: "<25.7.0"
+    to: "=25.7.0"
+    verdict: blocked
+    summary: >-
+      In-place migration to Network Operator 25.7.0 has not been qualified for existing
+      NicClusterPolicy resources and RDMA workloads. A recipe pin describes a deployment baseline,
+      not an upgrade path for an existing installation.
+    precondition: >-
+      Keep the existing release and its resources intact until a migration
+      plan has been verified against the installed version and configuration.
+    reversible: false
+    reversibleNotes: >-
+      A Helm rollback alone has not been verified to restore custom resources
+      and their controller behavior across this boundary.
+    stepsByDeployer:
+      - steps:
+          - id: qualify-migration
+            description: >-
+              Do not apply or sync this version change in place. Export the
+              existing release values, CRDs and custom resources; test the
+              target version in an isolated cluster using copies of that
+              configuration. Establish and verify a migration and recovery
+              procedure before scheduling the production transition.
+            reason: >-
+              Baseline deployment checks do not establish compatibility of
+              existing custom resources, active workloads or rollback behavior.
+  - from: ">=25.7.0 <26.4.1"
+    to: "=26.4.1"
+    verdict: blocked
+    summary: >-
+      In-place migration to Network Operator 26.4.1 has not been qualified for existing
+      NicClusterPolicy resources and RDMA workloads. A recipe pin describes a deployment baseline,
+      not an upgrade path for an existing installation.
+    precondition: >-
+      Keep the existing release and its resources intact until a migration
+      plan has been verified against the installed version and configuration.
+    reversible: false
+    reversibleNotes: >-
+      A Helm rollback alone has not been verified to restore custom resources
+      and their controller behavior across this boundary.
+    stepsByDeployer:
+      - steps:
+          - id: qualify-migration
+            description: >-
+              Do not apply or sync this version change in place. Export the
+              existing release values, CRDs and custom resources; test the
+              target version in an isolated cluster using copies of that
+              configuration. Establish and verify a migration and recovery
+              procedure before scheduling the production transition.
+            reason: >-
+              Baseline deployment checks do not establish compatibility of
+              existing custom resources, active workloads or rollback behavior.

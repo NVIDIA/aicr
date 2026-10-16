@@ -637,6 +637,46 @@ b200-gke-cos-training-kubeflow:
   checksums.txt: e0cdef2f56165196e5c0d28f74a0a694cc31eddb5e00168e9e253698f90bdec9
   deploy.sh: 66a7611e30dfa773518b1bc2c649237ecb7423d9b8adeac380bcfc4efd573a5f
   recipe.yaml: 575b7ee06b7ec5a00521dbab594e1ae6e2922acc6f1a683184640c75e72d4b23
+b300-mk8s-ubuntu-inference-dynamo:
+  001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
+  001-cert-manager/upstream.env: 8984ad504d9290d252f1fd39602328bce17d424b3a96e1dc794b4887b949c01e
+  001-cert-manager/values.yaml: cfed5371a715b1fea083d7aa4d690c6c2029a6c845d1fe63c5210898cbe5f557
+  002-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  002-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
+  002-grove/upstream.env: cf5effebfecdead639bae89cb7a4d502d4f5a6c27e4e2a4a0748b48ab6458fc9
+  002-grove/values.yaml: 54de5005b04b86e1bc5e4ad256ed31ba0c9bde13223d22937f08e4d437ff9515
+  003-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  003-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
+  003-network-operator/upstream.env: ea1fbfa2e45023044b54afbabcefe5daee220162602d88eeb2c6caa7b7293821
+  003-network-operator/values.yaml: a1151a1af9618bba9f9eaea83f7df921692cd2be0407d59cbfb1b3805f26266d
+  004-network-operator-post/Chart.yaml: 7dc57b42cbb43b596bae89753adefe36db2514b14a5b9537395ed023f2ed1049
+  004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
+  004-network-operator-post/templates/nic-cluster-policy-nebius-b300.yaml: fc1647c03f81083f35a06917743ffd6b3439e1e203a092469401d6d51531ce67
+  004-network-operator-post/values.yaml: a1151a1af9618bba9f9eaea83f7df921692cd2be0407d59cbfb1b3805f26266d
+  005-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  005-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
+  005-gpu-operator/upstream.env: 7ffe32c2e799396b13d0fefc870cdab28e82e363681d0d5301c09d3d98c3ffdd
+  005-gpu-operator/values.yaml: 0d90e8e90cccc10d4c1d27c42b2c20ed7d19cb279f86269960cc9c8d9f1c9510
+  006-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  006-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
+  006-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
+  006-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
+  007-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  007-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
+  007-kai-scheduler/upstream.env: 0d8122dbd8521847e72dcc553d8128bb9876e62b27a0beccf9c95649394584c9
+  007-kai-scheduler/values.yaml: dd90b42886f93b4a97881c1c8785cf68c473d70160f9c34af4200bfedc10081a
+  008-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  008-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
+  008-dynamo-platform/upstream.env: 0d3df69a85ddbe1277df835fcc0c1dbe3a2f6e78e8ebc830f31f99f2fd94a016
+  008-dynamo-platform/values.yaml: f470285ee30043e030112888c96428c443ff23aad3c0ef91361bf44c7a5e945a
+  README.md: ced4104318f40a2c445e7395f2e132cb8048602ddee065fb2c79dfb47fcfb79f
+  UPGRADING.md: 35b2570671992e60a9ede0eb11d7d5eb91c94a60683db41206d6ff0ec0bbc03f
+  bundle-info.yaml: 46d4b428f695a95193b5ec94290ce5e33c7392587566cfd89aace5ea8a66c9ee
+  checksums.txt: 8758e574f0fd2d3710e9615a14bbad2e406a9a59f3412aa71179a5d52b7cdd91
+  deploy.sh: 36bd61e7655fc91a4e39622a4e8fbc6eb0a9fb847e9c3299972e7d74f856a798
+  recipe.yaml: 4681003934595eff71f0fc51268b4551b51c8c7dbb14812b59b00e24cdbc020f
 bcm-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

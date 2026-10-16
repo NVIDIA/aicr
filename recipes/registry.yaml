@@ -1024,6 +1024,8 @@ components:
           - tolerations
 
   - name: kai-scheduler
+    upgrades:
+      file: components/kai-scheduler/upgrades.yaml
     displayName: kai-scheduler
     valueOverrideKeys:
       - kaischeduler
@@ -1077,6 +1079,8 @@ components:
           - tolerations
 
   - name: dynamo-platform
+    upgrades:
+      file: components/dynamo-platform/upgrades.yaml
     displayName: dynamo-platform
     valueOverrideKeys:
       - dynamoplatform

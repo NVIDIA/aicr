@@ -25,8 +25,8 @@
 // Criteria: Specifies target deployment parameters
 //
 //	type Criteria struct {
-//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, any
-//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any
+//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, mk8s, any
+//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, any
 //	    Platform    CriteriaPlatformType    // dynamo, kubeflow, kueue, nim, runai, slurm, any
@@ -73,6 +73,7 @@
 //   - CriteriaServiceRKE2: Rancher Kubernetes Engine 2 (bare-metal)
 //   - CriteriaServiceGeneric: generic self-managed Kubernetes (no distinguishing distro or provisioner; opt-in-only, never inferred from a snapshot)
 //   - CriteriaServiceK0s: k0s (self-managed k0s clusters)
+//   - CriteriaServiceMK8s: Nebius Managed Service for Kubernetes
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:
@@ -81,6 +82,7 @@
 //   - CriteriaAcceleratorGB200: NVIDIA GB200
 //   - CriteriaAcceleratorGB300: NVIDIA GB300
 //   - CriteriaAcceleratorB200: NVIDIA B200
+//   - CriteriaAcceleratorB300: NVIDIA B300 SXM (distinct from Grace Blackwell GB300)
 //   - CriteriaAcceleratorA100: NVIDIA A100
 //   - CriteriaAcceleratorL40: NVIDIA L40
 //   - CriteriaAcceleratorL40S: NVIDIA L40S
@@ -189,8 +191,8 @@
 // # Query Parameters (HTTP API - GET)
 //
 // The HTTP handler accepts these query parameters for GET requests:
-//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, any (default: any)
-//   - accelerator: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any (default: any)
+//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, mk8s, any (default: any)
+//   - accelerator: h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
 //   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, any (default: any)
