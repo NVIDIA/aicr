@@ -353,6 +353,9 @@ func TestFromMeasurements_ServiceDetection(t *testing.T) {
 		{"oci", "oke"},
 		{"oci://ocid1.instance.oc1.us-chicago-1.example", "oke"},
 		{"ocid1.instance.oc1.us-chicago-1.anxxeljsaqwjupqcb4pa5kzxy4hef5dtclbkqsnmu6kedbkrne3s2bz5nwzq", "oke"},
+		{"mk8s", "mk8s"},
+		{"nebius", "nebius"},
+		{"nebius://computeinstance-example", "nebius://computeinstance-example"},
 		{"lke", "lke"},
 		{"linode", "lke"},
 		{"linode://58291", "lke"},
@@ -687,4 +690,44 @@ func TestDistinctLabelValuesDedupes(t *testing.T) {
 	if got := distinctLabelValues(st, labelKeyGPUProduct); len(got) != 1 {
 		t.Errorf("distinctLabelValues() = %v, want one distinct value", got)
 	}
+}
+
+func TestFromMeasurements_MK8sB300(t *testing.T) {
+	tests := []struct {
+		name, provider, labelKey, labelValue, wantService string
+	}{
+		{"managed", "nebius", "nebius.com/node-group-id", "mk8snodegroup-example", "mk8s"},
+		{"raw provider", "nebius://computeinstance-example", "nebius.com/node-group-id", "mk8snodegroup-example", "mk8s"},
+		{"generic VM", "nebius", "nebius.com/gpu-name", "B300", "nebius"},
+		{"empty group ID", "nebius", "nebius.com/node-group-id", "mk8snodegroup-", "nebius"},
+		{"prefix collision", "nebius", "nebius.com/node-group-id-extra", "mk8snodegroup-example", "nebius"},
+		{"unrelated group", "nebius", "nebius.com/node-group-id", "other-group", "nebius"},
+		{"wrong provider", "eks", "nebius.com/node-group-id", "mk8snodegroup-example", "eks"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, topo := range []*measurement.Measurement{
+				topologyMeasurement(1, map[string]string{tt.labelKey: tt.labelValue + "|node1", "nvidia.com/gpu.product": "NVIDIA-B300-SXM6-AC|node1"}),
+				topologyItemsMeasurement(1, map[string][]string{tt.labelKey: {tt.labelValue}, "nvidia.com/gpu.product": {"NVIDIA-B300-SXM6-AC"}}, nil),
+			} {
+				for _, ms := range [][]*measurement.Measurement{
+					{k8sMeasurement("", tt.provider), topo}, {topo, k8sMeasurement("", tt.provider)},
+				} {
+					got := FromMeasurements(ms)
+					if got.Service.Value != tt.wantService || got.Accelerator.Value != "b300" {
+						t.Errorf("fingerprint service=%+v accelerator=%+v, want %s/b300", got.Service, got.Accelerator, tt.wantService)
+					}
+					if tt.wantService == "mk8s" && got.ToCriteria(nil).Service != "mk8s" {
+						t.Errorf("criteria service = %s, want mk8s", got.ToCriteria(nil).Service)
+					}
+				}
+			}
+		})
+	}
+	t.Run("PCI fallback", func(t *testing.T) {
+		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("b300")})
+		if got.Accelerator.Value != "b300" || got.Accelerator.Note != "" || got.ToCriteria(nil).Accelerator != "b300" {
+			t.Errorf("B300 PCI fingerprint/criteria not recognized: %+v", got.Accelerator)
+		}
+	})
 }

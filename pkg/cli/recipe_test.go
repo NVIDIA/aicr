@@ -81,6 +81,15 @@ func TestBuildCriteriaFromCmd(t *testing.T) {
 			},
 		},
 		{
+			name: "Nebius B300 criteria",
+			args: []string{"cmd", "--service", "mk8s", "--accelerator", "b300"},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if c.Service != recipe.CriteriaServiceMK8s || c.Accelerator != recipe.CriteriaAcceleratorB300 {
+					t.Errorf("criteria = %+v, want mk8s/b300", c)
+				}
+			},
+		},
+		{
 			name:      "invalid service",
 			args:      []string{"cmd", "--service", "invalid-service"},
 			wantError: true,
@@ -658,6 +667,12 @@ func TestRecipeCmd_CommandStructure(t *testing.T) {
 
 	if cmd.Description == "" {
 		t.Error("Description should not be empty")
+	}
+
+	for _, value := range []string{"mk8s", "b300"} {
+		if !strings.Contains(cmd.Description, ", "+value+",") {
+			t.Errorf("Description missing criterion %q", value)
+		}
 	}
 
 	requiredFlags := []string{

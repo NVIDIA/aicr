@@ -20,7 +20,7 @@ The short form:
 | Step | Command | Notes |
 |------|---------|-------|
 | 1. Pre-flight | `make qualify` on `main` | Must pass. Tests + lint + e2e + scan. |
-| 2. Bump | `make bump-patch` (or `bump-minor`/`bump-rc`) | Tags HEAD and pushes the tag. To promote a pre-release to stable on the same SHA, use `make bump-promote TAG=<rc-tag>` (e.g. `TAG=v1.3.0-rc2`). |
+| 2. Bump | `make bump-patch` (or `bump-minor`/`bump-rc`) | Tags HEAD and pushes the tag. To take an RC to GA, delete the RC release and tags first; see [Promoting an RC to GA](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#promoting-an-rc-to-ga). |
 | 3. Push | `git push origin <tag>` (done by the bump target) | Triggers the `On Tag Release` (`on-tag.yaml`) workflow. |
 | 4. Verify | `gh release view <tag>` + `cosign verify-attestation ...` | See RELEASE.md §Verification. |
 

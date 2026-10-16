@@ -1,0 +1,140 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: RecipeMetadata
+metadata:
+  name: b300-mk8s-ubuntu-inference-dynamo
+spec:
+  base: mk8s-inference
+  criteria:
+    service: mk8s
+    accelerator: b300
+    os: ubuntu
+    intent: inference
+    platform: dynamo
+  mixins:
+  - os-ubuntu
+  componentRefs:
+  - name: network-operator
+    type: Helm
+    namespace: nvidia-network-operator
+    source: oci://cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/chart
+    chart: network-operator
+    version: 25.7.0
+    valuesFile: components/network-operator/values-mk8s-b300.yaml
+    dependencyRefs: []
+    manifestFiles:
+    - components/network-operator/manifests/nic-cluster-policy-nebius-b300.yaml
+  - name: gpu-operator
+    type: Helm
+    namespace: gpu-operator
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    valuesFile: components/gpu-operator/values-mk8s-b300.yaml
+    dependencyRefs:
+    - network-operator
+  - name: nvidia-dra-driver-gpu
+    type: Helm
+    namespace: nvidia-dra-driver
+    source: oci://registry.k8s.io/dra-driver-nvidia/charts
+    chart: dra-driver-nvidia-gpu
+    valuesFile: components/nvidia-dra-driver-gpu/values-mk8s-b300.yaml
+    dependencyRefs:
+    - gpu-operator
+  - name: cert-manager
+    type: Helm
+    namespace: cert-manager
+    source: https://charts.jetstack.io
+    chart: cert-manager
+    valuesFile: components/cert-manager/values-mk8s-b300.yaml
+    dependencyRefs: []
+  - name: kai-scheduler
+    type: Helm
+    namespace: kai-scheduler
+    source: oci://ghcr.io/kai-scheduler/kai-scheduler
+    chart: kai-scheduler
+    version: v0.17.1
+    valuesFile: components/kai-scheduler/values-mk8s-b300.yaml
+    dependencyRefs:
+    - nvidia-dra-driver-gpu
+  - name: grove
+    type: Helm
+    namespace: dynamo-system
+    source: oci://ghcr.io/ai-dynamo/grove
+    chart: grove-charts
+    dependencyRefs:
+    - cert-manager
+  - name: dynamo-platform
+    type: Helm
+    namespace: dynamo-system
+    source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+    chart: dynamo-platform
+    version: 1.5.0
+    valuesFile: components/dynamo-platform/values-mk8s-b300.yaml
+    dependencyRefs:
+    - grove
+    - cert-manager
+    - gpu-operator
+    - kai-scheduler
+  - name: nfd
+    overrides:
+      enabled: false
+  - name: nvsentinel
+    overrides:
+      enabled: false
+  - name: nodewright-operator
+    overrides:
+      enabled: false
+  - name: prometheus-operator-crds
+    overrides:
+      enabled: false
+  - name: kube-prometheus-stack
+    overrides:
+      enabled: false
+  - name: k8s-ephemeral-storage-metrics
+    overrides:
+      enabled: false
+  - name: prometheus-adapter
+    overrides:
+      enabled: false
+  - name: dra-node-labeler
+    overrides:
+      enabled: false
+  validation:
+    deployment:
+      checks:
+      - operator-health
+      - expected-resources
+      - gpu-operator-version
+      - check-nvidia-smi
+      constraints:
+      - name: Deployment.gpu-operator.version
+        value: = v26.7.2
+    performance:
+      checks:
+      - inference-perf
+      constraints:
+      - name: inference-throughput
+        value: '>= 50000'
+      - name: inference-ttft-p99
+        value: <= 2000
+      - name: inference-model
+        value: Qwen/Qwen3-8B
+      - name: inference-concurrency-per-gpu
+        value: '256'
+      - name: inference-routing-mode
+        value: dynamo-router
+      - name: inference-model-cache-storage-class
+        value: compute-csi-default-sc

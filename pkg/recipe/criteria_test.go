@@ -39,6 +39,9 @@ func TestParseCriteriaServiceType(t *testing.T) {
 		{"eks", "eks", CriteriaServiceEKS, false},
 		{"EKS uppercase", "EKS", CriteriaServiceEKS, false},
 		{"gke", "gke", CriteriaServiceGKE, false},
+		{"mk8s", "mk8s", CriteriaServiceMK8s, false},
+		{"MK8S whitespace", " MK8S ", CriteriaServiceMK8s, false},
+		{"unqualified Nebius provider", "nebius", CriteriaServiceAny, true},
 		{"aks", "aks", CriteriaServiceAKS, false},
 		{"oke", "oke", CriteriaServiceOKE, false},
 		{"lke", "lke", CriteriaServiceLKE, false},
@@ -87,6 +90,9 @@ func TestParseCriteriaAcceleratorType(t *testing.T) {
 		{"H200 uppercase", "H200", CriteriaAcceleratorH200, false},
 		{"gb200", "gb200", CriteriaAcceleratorGB200, false},
 		{"b200", "b200", CriteriaAcceleratorB200, false},
+		{"b300", "b300", CriteriaAcceleratorB300, false},
+		{"B300 whitespace", " B300 ", CriteriaAcceleratorB300, false},
+		{"gb300 distinct", "gb300", CriteriaAcceleratorGB300, false},
 		{"a100", "a100", CriteriaAcceleratorA100, false},
 		{"l40", "l40", CriteriaAcceleratorL40, false},
 		{"l40s", "l40s", CriteriaAcceleratorL40S, false},
@@ -719,7 +725,7 @@ func TestGetCriteriaServiceTypes(t *testing.T) {
 	types := GetCriteriaServiceTypes()
 
 	// Should return sorted list
-	expected := []string{"aks", "bcm", "eks", "generic", "gke", "k0s", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
+	expected := []string{"aks", "bcm", "eks", "generic", "gke", "k0s", "kind", "lke", "metal3", "mk8s", "ocp", "oke", "rke2"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaServiceTypes() returned %d types, want %d", len(types), len(expected))
 	}
@@ -743,7 +749,7 @@ func TestGetCriteriaAcceleratorTypes(t *testing.T) {
 	types := GetCriteriaAcceleratorTypes()
 
 	// Should return sorted list
-	expected := []string{"a100", "b200", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000", "vr200"}
+	expected := []string{"a100", "b200", "b300", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000", "vr200"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaAcceleratorTypes() returned %d types, want %d", len(types), len(expected))
 	}

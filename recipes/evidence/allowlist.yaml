@@ -77,6 +77,9 @@ firstParty:
 # Each commits pointers under recipes/evidence/<recipe>/<src>/ where <src> is
 # the slug below.
 community:
+  - issuer: https://token.actions.githubusercontent.com
+    source: 45d8f16e5893804eca45b900bd037446
+    label: kky-fury
   - issuer: https://github.com/login/oauth
     source: 7c4c0edc8c765a95a0f3afdb3bbb8e91
   - issuer: https://github.com/login/oauth

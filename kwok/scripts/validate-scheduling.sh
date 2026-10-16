@@ -887,7 +887,8 @@ generate_bundle() {
 
     # Without --platform, *-slurm overlays resolve to their non-platform
     # parent and the bundle omits the slinky-slurm operator/cluster.
-    # Scoped to slurm: kubeflow/dynamo are not yet validated under KWOK.
+    # The native Nebius Dynamo leaf also needs its platform: it has no
+    # non-platform parent leaf to resolve. Other Dynamo lanes are unchanged.
     local service accelerator intent os platform
     service=$(yq eval '.spec.criteria.service // ""' "$recipe_overlay")
     accelerator=$(yq eval '.spec.criteria.accelerator // ""' "$recipe_overlay")
@@ -902,11 +903,11 @@ generate_bundle() {
     [[ -n "$accelerator" ]] && recipe_args+=(--accelerator "$accelerator")
     [[ -n "$intent" ]] && recipe_args+=(--intent "$intent")
     [[ -n "$os" ]] && recipe_args+=(--os "$os")
-    # Only forward --platform for platforms validated under KWOK. Other
-    # platforms (kubeflow, dynamo, nim) historically resolve to their
+    # Only forward --platform for explicitly covered KWOK lanes. Other
+    # platform leaves (kubeflow, dynamo, nim) historically resolve to their
     # non-platform parent here; preserve that behavior to avoid regressing
     # existing matrix lanes. Extend as additional platforms are validated.
-    if [[ "$platform" == "slurm" ]]; then
+    if [[ "$platform" == "slurm" || "$recipe" == "b300-mk8s-ubuntu-inference-dynamo" ]]; then
         recipe_args+=(--platform "$platform")
     elif [[ -n "$platform" ]]; then
         log_info "platform=$platform not yet validated under KWOK — resolving without --platform"

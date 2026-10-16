@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -186,7 +187,7 @@ func TestCompletion_RecipeFlagValues(t *testing.T) {
 				t.Fatalf("recipe %s completion failed: %v", tt.flag, err)
 			}
 			for _, v := range tt.expect {
-				if !strings.Contains(output, v) {
+				if !slices.Contains(strings.Fields(output), v) {
 					t.Errorf("expected %q in output for %s, got:\n%s", v, tt.flag, output)
 				}
 			}

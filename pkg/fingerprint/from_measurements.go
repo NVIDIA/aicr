@@ -91,11 +91,31 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 	}
 	if topo != nil {
 		reconcileAccelerator(fp, topo)
+		reconcileManagedService(fp, topo)
 	}
 	if gpu != nil {
 		populatePCIDiscovery(fp, gpu)
 	}
 	return fp
+}
+
+// reconcileManagedService requires a managed node-group label as well as the
+// Nebius provider: a Nebius VM alone does not identify Managed Kubernetes.
+func reconcileManagedService(fp *Fingerprint, topo *measurement.Measurement) {
+	if fp.Service.Value != "nebius" && !strings.HasPrefix(fp.Service.Value, "nebius://") {
+		return
+	}
+	const label = "nebius.com/node-group-id"
+	st := topo.GetSubtype(subtypeTopologyLabel)
+	if st == nil {
+		return
+	}
+	for _, value := range distinctLabelValues(st, label) {
+		if strings.HasPrefix(value, "mk8snodegroup-") && len(value) > len("mk8snodegroup-") {
+			fp.Service = Dimension{Value: string(recipe.CriteriaServiceMK8s), Source: "nodeTopology.label." + label}
+			return
+		}
+	}
 }
 
 // populatePCIDiscovery records the PCI device-ID–derived SKU from the GPU
