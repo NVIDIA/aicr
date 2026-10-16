@@ -240,7 +240,7 @@ func listPerconaServerMongoDBs(
 
 // perconaAICRRelease is the suffix of every Helm release name AICR gives
 // psmdb-operator, which its pods carry in app.kubernetes.io/instance: the
-// component name under the helm and helmfile deployers, <namePrefix><name>
+// component name under the helm, helmfile and terraform deployers, <namePrefix><name>
 // under Argo CD's deployer:namePrefix, and Flux's default
 // <targetNamespace>-<name>. A foreign operator installed in AICR's namespace
 // under such a release name is therefore read as AICR's own.

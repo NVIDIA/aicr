@@ -47,7 +47,7 @@ concurrency:
 
 jobs:
   comment:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     # Run regardless of build conclusion: workflow 1 uploads partial
     # reports with `if: always()`. Filter to PR-triggered runs only so

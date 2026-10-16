@@ -1332,11 +1332,11 @@ kubectl get crd aibomcontrollerconfigs.aibom.k8saibom.dev \
 `k8s-aibom` is marked `ownsCRDs` in the registry, so most deployers update its
 CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` through
 the generated `apply-crds.sh`, and Argo CD by applying them as ordinary
-manifests each sync. `helmfile` has no equivalent automation — see
+manifests each sync. `helmfile` and `terraform` have no equivalent automation — see
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
 for the manual step. Whether a given bump needs that step depends on whether
 the upgrade uses anything the new schema adds: a v1.3.0 to v1.5.1 bump on
-default values upgrades cleanly on `helmfile` against the old CRDs, but the
+default values upgrades cleanly on `helmfile` and `terraform` against the old CRDs, but the
 same bump setting `config.verification` aborts the release with
 `.spec.verification: field not declared in schema` after the Deployment has
 already advanced. When in doubt, apply the CRDs first; it is never harmful.
@@ -1351,10 +1351,10 @@ below — therefore upgrades the controller with **no** CRD update on those two
 deployers, silently. Such a recipe needs its own audit of the chart it points
 at and its own CRD step; the fallback command below is the manual form. Argo CD
 is unaffected, since it applies whatever CRDs the rendered chart contains
-regardless of provenance. `helmfile` is also unaffected by this particular
-caveat, in the sense that there is nothing to disable: it never acts on
-`ownsCRDs`, checked or not, so no version override can take its automation
-away. Whether a given bump actually needs the manual step is a separate
+regardless of provenance. `helmfile` and `terraform` are also unaffected by
+this particular caveat, in the sense that there is nothing to disable: neither
+acts on `ownsCRDs`, checked or not, so no version override can take their
+automation away. Whether a given bump actually needs the manual step is a separate
 question, answered per transition by the upgrade record.
 The assertion is still worth making on every deployer, because it proves the
 deployed CRDs match the pinned chart rather than merely that some deployer was
@@ -1478,25 +1478,26 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**CRDs are applied for you on every deployer except `helmfile`.** The chart
+**CRDs are applied for you on every deployer except `helmfile` and `terraform`.** The chart
 ships its CRDs under `crds/`. Helm installs that directory on first install and
 never touches it again on upgrade, so a chart bump whose CRDs changed would
 leave the previous schema in place and the API server would silently prune the
 new controller's writes to added fields.
 
-Every deployer except `helmfile` closes that on its own, by a different route;
-see the deployer table below. `helm` bundles carry an `apply-crds.sh` in the
+Every other deployer closes that on its own, by a different route; see the
+deployer table below. `helm` bundles carry an `apply-crds.sh` in the
 component's folder, run automatically before the upgrade; `flux` and Argo CD
-apply the CRDs through their own controllers. `helmfile` has no automated
-equivalent: the manual command below is always required for its `ownsCRDs`
-components.
+apply the CRDs through their own controllers. `helmfile` and `terraform` have
+no automated equivalent: the manual command below is always required for their
+`ownsCRDs` components.
 
 When you run the command below depends on your deployer, because only some of
 them do it for you:
 
-- **`helmfile`: always, including from a generated bundle.** Nothing runs it
-  for you on this deployer, so it is a required step before every `ownsCRDs`
-  upgrade, not a fallback.
+- **`helmfile` and `terraform`: always, including from a generated bundle.**
+  Nothing runs it for you on these deployers, so it is a required step before
+  every `ownsCRDs` upgrade, not a fallback. Under `terraform`, run it before
+  the `terraform apply` of the regenerated bundle.
 - **`helm`: only** when you are upgrading outside a generated bundle, or when
   the bundle's `apply-crds.sh` failed and you are reproducing it by hand.
 - **`flux`, `argocd`, `argocd-helm`: not needed.** Their controllers apply the
@@ -1507,6 +1508,16 @@ set -euo pipefail
 
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
 VERSION="1.5.1"   # replace with the version you are upgrading to
+# The classic Helm repository the chart is served from. Leave it empty for an
+# oci:// CHART. For psmdb-operator:
+# REPO="https://percona.github.io/percona-helm-charts/"
+REPO=""
+# The field manager that installed the CRDs, so this apply adopts its fieldset:
+# "helm" under the helm and helmfile deployers (both run the helm CLI), and
+# "terraform-provider-helm" under terraform, where the provider installs the
+# release. Check with:
+#   kubectl get crd <name> --show-managed-fields -o jsonpath='{.metadata.managedFields[*].manager}'
+MANAGER="helm"
 # The component's ownsCRDsExcludeSubcharts, space-separated. For nvsentinel:
 # EXCLUDE_SUBCHARTS="mongodb-store", whose Percona CRDs psmdb-operator owns.
 EXCLUDE_SUBCHARTS=""
@@ -1517,7 +1528,7 @@ trap 'rm -rf "${work}"' EXIT
 # Every step below is checked explicitly rather than left to `set -e`. This
 # block gets pasted into a shell, often only in part, and a copy that loses
 # the `set -e` line would otherwise carry on past a failure in silence.
-if ! helm pull "${CHART}" --version "${VERSION}" --destination "${work}"; then
+if ! helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" --destination "${work}"; then
   echo "ERROR: helm pull failed for ${CHART} ${VERSION}" >&2
   exit 1
 fi
@@ -1546,7 +1557,7 @@ fi
 # manager so a field or spec.versions entry the new chart removes is pruned.
 for crd in "${crds[@]}"; do
   grep -q '[^[:space:]]' "${crd}" || continue
-  if ! kubectl apply --server-side --force-conflicts --field-manager=helm -f "${crd}"; then
+  if ! kubectl apply --server-side --force-conflicts --field-manager="${MANAGER}" -f "${crd}"; then
     echo "ERROR: failed to apply ${crd}." >&2
     echo "       Stopping: the remaining CRDs are unapplied, so do not upgrade" >&2
     echo "       the controller until this is resolved." >&2
@@ -1557,8 +1568,8 @@ done
 
 Four details are load-bearing, and the obvious shorter forms fail on them:
 
-- **Server-side apply under `--field-manager=helm`, not `kubectl replace` or a
-  bare `kubectl apply --server-side`.** A chart's raw CRD manifest carries no
+- **Server-side apply under the field manager that installed the CRDs, not
+  `kubectl replace` or a bare `kubectl apply --server-side`.** A chart's raw CRD manifest carries no
   `metadata.resourceVersion`, and Kubernetes rejects an update without one, so
   `replace` fails on exactly the upgrade this command exists for — verified on
   a live cluster, the API returns `Conflict`. A bare `apply --server-side`
@@ -1568,7 +1579,11 @@ Four details are load-bearing, and the obvious shorter forms fail on them:
   default `kubectl` manager. Applying as `--field-manager=helm` adopts Helm's
   fieldset instead, so the removal actually takes; verified on a live cluster
   against both Helm 3 (manager `helm`, operation Update) and Helm 4 (manager
-  `helm`, operation Apply). `--force-conflicts` is required because other
+  `helm`, operation Apply). Under `terraform` the provider, not the helm CLI,
+  installs the CRDs, as manager `terraform-provider-helm` (measured on a kind
+  cluster with provider 3.3.0), so `MANAGER` must be that name there: applying
+  as `helm` against those CRDs would leave a removed field in place, still
+  owned by the provider. `--force-conflicts` is required because other
   managers may hold individual fields, including a `caBundle` a webhook
   injects at runtime — which is why `ownsCRDs` requires that no CRD use
   `spec.conversion.strategy: Webhook`.
@@ -1587,7 +1602,7 @@ Four details are load-bearing, and the obvious shorter forms fail on them:
   chart whose `crds/` is empty or moved runs the loop zero times and exits 0.
   Either way you would proceed to upgrade the controller against a stale or
   partial schema — the exact failure this command exists to prevent, and it
-  matters most on `helmfile`, where nothing else covers it.
+  matters most on `helmfile` and `terraform`, where nothing else covers it.
 
 The generated `apply-crds.sh` does exactly this, with each call bounded; it is
 the reference if you need the details.
@@ -1598,11 +1613,12 @@ Which deployers need that step differs, so check yours:
 |---|---|---|
 | `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs` |
 | `helmfile` | Upgrades through Helm, so it skips `crds/` too; no automation exists, because a `presync` hook fires only for releases `helmfile apply` decides to sync, so it would hold on a chart bump and silently not hold on an unchanged rerun | Assume yes — see note below |
+| `terraform` | Upgrades through Helm (`helm_release`), so it skips `crds/` too; the bundle emits no CRD step, because the provider has no CRD-upgrade option and a `local-exec` step would run outside the plan; run the manual command with `MANAGER=terraform-provider-helm`, the manager the provider installed the CRDs under | Assume yes — see note below |
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
 
-**On `helmfile`'s "assume yes".** helmfile never updates CRDs for you, so the
-deployer itself can never narrow the step — that much is unconditional. Whether
+**On the `helmfile` and `terraform` "assume yes".** Neither deployer ever
+updates CRDs for you, so the deployer itself can never narrow the step — that much is unconditional. Whether
 a *particular* version bump actually needs it is a different question, and the
 only thing that can answer it is the component's ADR-021 upgrade record for
 that transition. Some transitions genuinely do not need it: the k8s-aibom
@@ -1639,7 +1655,8 @@ CI. `nvsentinel` excludes the Percona CRDs its `mongodb-store` subchart embeds
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the
 `helm` and `helmfile` deployers install releases by name, and a release the new
-bundle no longer mentions is simply left alone. Skipping the explicit uninstall
+bundle no longer mentions is simply left alone (`terraform` is the exception:
+the release is in state, so applying the regenerated bundle uninstalls it). Skipping the explicit uninstall
 leaves the controller running while the next step deletes the CRs and CRDs
 underneath it, so it reconciles against resources that are disappearing.
 
@@ -1653,7 +1670,8 @@ underneath it, so it reconciles against resources that are disappearing.
    helm uninstall k8s-aibom -n k8s-aibom-system
    ```
 
-   For Argo CD, delete the owning `Application`; for Flux, the `HelmRelease`.
+   For Argo CD, delete the owning `Application`; for Flux, the `HelmRelease`;
+   under Terraform, `terraform apply` of the regenerated bundle already removed it.
    Confirm the controller Deployment is gone before continuing.
 
    **Do not use `helmfile destroy` for this.** It tears down *every* release in
@@ -1865,7 +1883,8 @@ Fresh installs are unaffected. To migrate an existing cluster:
      | kubectl apply --server-side --force-conflicts -f -
    ```
 4. Resume whichever deployer you use (`helm`/`helmfile`: re-run `install.sh`
-   or `helmfile apply`; `flux`/`argocd`/`argocd-helm`: reconcile/sync as
+   or `helmfile apply`; `terraform`: `terraform apply` on a bundle regenerated
+   at the new pin; `flux`/`argocd`/`argocd-helm`: reconcile/sync as
    usual). AICR's generated `install.sh` already passes `--force-conflicts`
    on Helm 4.
 

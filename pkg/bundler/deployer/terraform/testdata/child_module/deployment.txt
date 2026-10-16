@@ -1,0 +1,9 @@
+steps:
+  Call <bundle> as a module from the configuration that owns the helm provider (see its README.md)
+  terraform init
+  terraform plan
+  terraform apply
+notes:
+  This bundle is a child module: it declares no provider and no cluster-connection variables, and installs through the calling configuration's helm provider. Run init/plan/apply there, not in the bundle. An upgrade is a regenerated bundle in a new directory; point the module source at it (see README.md).
+  depends_on carries the recipe's dependency graph exactly, so independent components apply concurrently. Each component is one module call; its pre/post/readiness folders chain inside it.
+  Cluster rollover is enabled: replacing the cluster replaces every release. Set cluster_keepers from the cluster resource itself — its CA certificate, id or creation time — so that it changes when the cluster is rebuilt; a value a rebuild keeps leaves the releases uncontained. The variable is required: the module call must pass it.

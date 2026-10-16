@@ -49,7 +49,7 @@ jobs:
   build-ko:
     name: Build Ko Images
     if: github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -122,7 +122,7 @@ jobs:
         arch: [amd64, arm64]
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             platform: linux/amd64
           - arch: arm64
             runner: ubuntu-24.04-arm
@@ -208,7 +208,7 @@ jobs:
         arch: [amd64, arm64]
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             platform: linux/amd64
           - arch: arm64
             runner: ubuntu-24.04-arm
@@ -269,7 +269,7 @@ jobs:
 
   docker-manifest:
     name: Docker Manifest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build-docker, build-gate]
     timeout-minutes: 5
     permissions:
@@ -308,7 +308,7 @@ jobs:
 
   scan:
     name: Scan (${{ matrix.image }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build-ko, docker-manifest]
     # 30, not 15: the two NVSentinel NCCL check images are ~9.9 GiB compressed
     # each, so the pull and extraction alone outlast the budget the small
@@ -441,7 +441,7 @@ jobs:
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
-      # Only for images this workflow does not build. An ubuntu-latest runner
+      # Only for images this workflow does not build. An ubuntu-24.04 runner
       # ships with roughly 21 GiB free, and grype extracts the image before
       # scanning it, so a ~9.9 GiB compressed NCCL check image does not fit
       # without this. matrix.tag is the marker for "upstream image".
@@ -529,7 +529,7 @@ jobs:
 
   notify:
     name: Slack Notification
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [scan]
     if: always() && needs.scan.result != 'cancelled'
     timeout-minutes: 5
@@ -609,7 +609,7 @@ jobs:
 
   cleanup:
     name: Cleanup Scan Images
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [notify]
     if: always()
     timeout-minutes: 10

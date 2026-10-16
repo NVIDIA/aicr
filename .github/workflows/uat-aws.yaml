@@ -98,7 +98,7 @@ jobs:
     # reservation, leaking them. The repository guard is preserved as the second
     # conjunct so forks still skip the job.
     if: always() && github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Budget = uncapped non-UAT steps (build, validator image push, EKS
     # provisioning, evidence upload ~30m) + UAT phase steps + ~8 failure-path
     # debug collection + the always()-run Destroy Cluster teardown (up to 3

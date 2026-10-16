@@ -121,12 +121,16 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell bom-pinning-check check-depproxy-kit check-upgrade-records check-dynamo-runtime-image ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records check-dynamo-runtime-image ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, vendored action digests, and runner labels)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
 check-depproxy-kit: ## Verifies the vendored Go proxy action matches upstream digests
 	@./tools/check-depproxy-kit
+
+.PHONY: check-runner-labels
+check-runner-labels: ## Rejects the floating ubuntu-latest runner label under .github/
+	@./tools/check-runner-labels
 
 # Standalone target — NOT part of `make lint` because it requires Docker
 # (the validator runs in the same image renovatebot/github-action wraps).
@@ -463,7 +467,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 	@printf '%s\n' "Regenerating pkg/bundler/testdata/layout/manifests/ from the fixture recipe." \
 		"A removed path is a broken promise to integrator automation -- read the diff."
 # Every manifest is rendered under $$tmp first and copied over the committed
-# files only after all five deployers succeed. Writing them in place meant a
+# files only after every deployer succeeds. Writing them in place meant a
 # failure partway left a mixed old/new baseline set, which is worse than no
 # refresh: the manifests would disagree with each other and with the bundler.
 #
@@ -477,7 +481,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 # set -e can catch.
 	@set -e; tmp=$$(mktemp -d); \
 	  trap 'rm -rf "$$tmp"' EXIT; \
-	  for d in helm argocd argocd-helm flux helmfile; do \
+	  for d in helm argocd argocd-helm flux helmfile terraform; do \
 	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
 	      -r pkg/bundler/testdata/layout/recipe.yaml \
 	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
@@ -485,7 +489,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 	    sed 's|^\./||' "$$tmp/raw-$$d.txt" > "$$tmp/rel-$$d.txt"; \
 	    LC_ALL=C sort "$$tmp/rel-$$d.txt" > "$$tmp/$$d.txt"; \
 	  done; \
-	  for d in helm argocd argocd-helm flux helmfile; do \
+	  for d in helm argocd argocd-helm flux helmfile terraform; do \
 	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
 	  done
 	@echo "Bundle layout manifests updated."

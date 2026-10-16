@@ -162,14 +162,15 @@ jobs:
 #### Translating to other CI systems
 
 The four stages above map one-to-one onto other platforms. Only the job/stage
-syntax and artifact passing differ — the `aicr` commands are identical.
+syntax and artifact passing differ — the `aicr` commands are identical, except
+that the Terraform bundle command names its deployer and form.
 
 | Stage | GitLab CI | CircleCI | Terraform |
 |-------|-----------|----------|-----------|
-| Snapshot | `script:` step running `aicr snapshot`, declare `artifacts: paths: [snapshot.yaml]` (or write to a ConfigMap to skip artifacts) | `run:` step; `persist_to_workspace` to pass output downstream | `null_resource` + `local-exec` provisioner running `aicr snapshot` |
-| Recipe | `script:` step running `aicr recipe`, `dependencies:` on the snapshot job | `run:` step after `attach_workspace` | `null_resource` + `local-exec`, `depends_on` the snapshot resource |
-| Bundle | `script:` step running `aicr bundle`, publish `bundles/` as artifacts | `run:` step, `persist_to_workspace` | `null_resource` + `local-exec` running `aicr bundle` |
-| Deploy | `script:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, with `when: manual` for approval gating | `run:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh` inside a held workflow | `local-exec` running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, gated by `terraform apply` approval |
+| Snapshot | `script:` step running `aicr snapshot`, declare `artifacts: paths: [snapshot.yaml]` (or write to a ConfigMap to skip artifacts) | `run:` step; `persist_to_workspace` to pass output downstream | a pipeline step before `terraform init` running `aicr snapshot` (not a `local-exec` provisioner: that runs at apply, after init has already resolved module sources); this needs an existing cluster, so when the same configuration creates the cluster, skip this stage and build the recipe from criteria |
+| Recipe | `script:` step running `aicr recipe`, `dependencies:` on the snapshot job | `run:` step after `attach_workspace` | the same pre-init step running `aicr recipe` |
+| Bundle | `script:` step running `aicr bundle`, publish `bundles/` as artifacts | `run:` step, `persist_to_workspace` | the same pre-init step running `aicr bundle --recipe recipe.yaml --deployer terraform --terraform-child-module --output bundles`, so `./bundles` exists when `terraform init` resolves it |
+| Deploy | `script:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, with `when: manual` for approval gating | `run:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh` inside a held workflow | run `aicr verify ./bundles` in the pre-init step, then call the bundle as a module (`module "stack" { source = "./bundles" }`) from the configuration that owns the `helm` provider, so the releases are resources in the plan `terraform apply` approves — no `local-exec`. `--terraform-child-module` is what lets the call inherit that provider and take `depends_on` |
 
 Use a container image with the CLI preinstalled (`ghcr.io/nvidia/aicr:latest`)
 for the recipe/bundle stages, and a `kubectl`-capable image for snapshot/deploy.

@@ -48,7 +48,7 @@ on:
 jobs:
   validate-inputs:
     name: Validate Attestation Inputs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     outputs:
@@ -92,7 +92,7 @@ jobs:
 
   attest:
     name: Attest Images
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [validate-inputs]
     timeout-minutes: 10
     permissions:

@@ -136,7 +136,7 @@ type Toleration struct {
 // Layout indexes what the bundle emitted and where, so automation reads one
 // key instead of branching on the deployer. Entrypoint is the file a consumer
 // invokes or applies: deploy.sh, helmfile.yaml, app-of-apps.yaml, Chart.yaml,
-// or kustomization.yaml.
+// kustomization.yaml, or main.tf.
 type Layout struct {
 	Entrypoint string    `json:"entrypoint" yaml:"entrypoint"`
 	Provenance string    `json:"provenance,omitempty" yaml:"provenance,omitempty"`

@@ -71,7 +71,7 @@ WORK=""
 # All are asserted in the three `mirror list` formats, but only the ~13 MiB
 # controller image is carried through the Hauler sync, Zarf package and
 # registry verification: preflight-dcgm-diag is ~1.7 GiB and the two NCCL
-# checks ~9.9 GiB each, which would exhaust an ubuntu-latest runner's disk and
+# checks ~9.9 GiB each, which would exhaust an ubuntu-24.04 runner's disk and
 # blow the lane's timeout on every recipe PR. Carrying a mixin-gated image
 # through the whole transfer path is what discovery alone does not prove.
 PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.26.0"

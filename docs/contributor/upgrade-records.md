@@ -183,12 +183,13 @@ transitions:
       - group: example.io
         kinds: [Widget]
     stepsByDeployer:
-      - deployers: [helm, helmfile]
+      - deployers: [helm, helmfile]   # every deployer these steps are written for
         steps:
           - id: stable-kebab-case-id
             description: What to do.
             reason: Why, and what happens if you skip it.
-      - steps:                 # omit `deployers` for the remainder
+      - steps:                 # omit `deployers` for the remainder: every
+                               # deployer no group names, terraform included
           - id: reconcile
             description: Sync as usual.
 ```
@@ -246,14 +247,21 @@ grove is pinned at one.
 
 **Deployer groups must partition.** No two explicit groups may claim the same
 deployer, at most one group may omit `deployers` (that one is *the* remainder),
-and a `manual` or `blocked` verdict must cover all five of `argocd`,
-`argocd-helm`, `flux`, `helm`, `helmfile`. Otherwise an Argo CD operator gets a
+and a `manual` or `blocked` verdict must cover all six of `argocd`,
+`argocd-helm`, `flux`, `helm`, `helmfile`, `terraform`. Otherwise an Argo CD operator gets a
 verdict promising steps with none for them.
 
 Write the steps a given deployer needs in that deployer's group, even when they
 duplicate another group's. A group is one ordered sequence a reader follows top
 to bottom, not a fragment to be assembled. Step ids may repeat across groups,
 since a consumer addresses a step as (deployer, id).
+
+The remainder is a convenience, not a default: a step written for Flux or Argo
+CD reads wrong under `terraform`, which also lands there unless a group names
+it. For an `ownsCRDs` component, a `manual` or `blocked` record must give
+`helmfile` and `terraform` an explicit group with a step that applies the CRDs,
+since nothing applies them on those two deployers; a test in `pkg/recipe`
+enforces that ([ADR-021](../design/021-component-upgrade-safety.md)).
 
 **`affectedResources` may not name core `Secret`.** The at-risk scan lists every
 kind a crossed record names, cluster-wide, and the permission to list Secrets

@@ -75,7 +75,7 @@ concurrency:
 jobs:
   test:
     name: NVSentinel Preflight E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The script's bounded waits alone sum to ~20 minutes worst case (node
     # ready + cert-manager + kai-scheduler + a cold pull of the whole
     # NVSentinel image set), before kind create and go build.

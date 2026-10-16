@@ -585,6 +585,7 @@ func snapshotCmdFlags() []cli.Flag {
 			Name:     "max-nodes-per-entry",
 			Usage:    "Maximum node names per taint/label entry in topology collection (0 = unlimited)",
 			Value:    0,
+			Sources:  cli.EnvVars("AICR_MAX_NODES_PER_ENTRY"),
 			Category: catOutput,
 		},
 		&cli.StringFlag{

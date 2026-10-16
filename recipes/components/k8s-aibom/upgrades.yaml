@@ -57,14 +57,14 @@ transitions:
     summary: >-
       The CRD change is additive only, and with the verification block unset
       (the value AICR ships) a plain chart bump against stale v1.3.0 CRDs
-      upgrades cleanly on every deployer, helmfile included. Setting
+      upgrades cleanly on every deployer, helmfile and terraform included. Setting
       config.verification is what breaks the upgrade: the field does not
       exist in the v1.3.0 schema, so helm fails while building the
       server-side-apply patch for the AIBOMControllerConfig and aborts the
       release. The value is not silently pruned, but the abort lands after
       the Deployment has already rolled to the v1.5.1 image, leaving a
-      release marked failed partway through. helmfile is the one deployer
-      with no automated CRD-update path, so there the CRDs have to be
+      release marked failed partway through. helmfile and terraform have no
+      automated CRD-update path, so on those two the CRDs have to be
       applied by hand first. The chart's rendered AIBOMControllerConfig CR
       also moves from v1alpha1 to v1beta1, but both stay served, so that is
       a template change rather than an API break.
@@ -74,7 +74,7 @@ transitions:
         kinds:
           - AIBOMControllerConfig
     stepsByDeployer:
-      - deployers: [helmfile]
+      - deployers: [helmfile, terraform]
         steps:
           - id: apply-new-crds
             description: >-
@@ -83,11 +83,13 @@ transitions:
               the release, apply the v1.5.1 CRDs directly using the
               CRD-apply command under "Upgrade, uninstall, and
               troubleshooting" in docs/user/component-catalog.md, with
-              CHART=oci://ghcr.io/googlecloudplatform/charts/k8s-aibom and
-              VERSION=1.5.1.
+              CHART=oci://ghcr.io/googlecloudplatform/charts/k8s-aibom,
+              VERSION=1.5.1 and MANAGER=helm under helmfile or
+              MANAGER=terraform-provider-helm under terraform.
             reason: >-
-              helmfile has no automated equivalent for ownsCRDs components;
-              it is the one deployer that never updates them for you.
+              helmfile and terraform have no automated equivalent for
+              ownsCRDs components; they are the deployers that never update
+              them for you.
               Measured on GKE: against stale v1.3.0 CRDs, setting
               config.verification aborts the release with
               ".spec.verification: field not declared in schema" once the
@@ -95,6 +97,20 @@ transitions:
               operator is left mid-rollout on a failed revision. Applying
               the v1.5.1 CRDs first makes the identical upgrade succeed and
               store the field.
+          - id: verify-crd-update
+            description: >-
+              After the manual apply, confirm the new schema actually landed
+              by looking for the field the v1.5.1 CRDs add: kubectl get crd
+              aibomcontrollerconfigs.aibom.k8saibom.dev -o
+              jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.verification.type}'
+              and expect "object". An empty result means the v1.3.0 schema
+              is still in place.
+            reason: >-
+              Storage version and health are both useless as signals here:
+              v1beta1 was already the storage version at v1.3.0, and a
+              cluster stranded on the v1.3.0 CRDs reports the release
+              deployed and the controller Ready on the v1.5.1 image. Only
+              the schema itself distinguishes the two.
           - id: verify-reconcile
             description: >-
               kubectl get aibomcontrollerconfig default -o yaml and confirm

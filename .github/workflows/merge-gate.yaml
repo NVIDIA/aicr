@@ -70,7 +70,7 @@ jobs:
   # ---------------------------------------------------------------------------
 
   check-paths:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     # Every output is forced true on push so a main run skips path filtering
     # and exercises the whole gate. Path filtering exists to keep PR feedback
@@ -357,7 +357,7 @@ jobs:
   tests-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.code != 'true' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "Qualification not required here (docs-only change, or a push run that on-push.yaml already qualifies)"
@@ -369,7 +369,7 @@ jobs:
   analyze:
     needs: [check-paths]
     if: needs.check-paths.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       actions: read
@@ -394,7 +394,7 @@ jobs:
   analyze-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.code != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "Docs/non-code change — CodeQL analysis not required"
@@ -406,7 +406,7 @@ jobs:
   malware-scan:
     needs: [check-paths]
     if: needs.check-paths.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       actions: read
@@ -424,7 +424,7 @@ jobs:
   malware-scan-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.code != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "Docs/non-code change — malware scan not required"
@@ -436,7 +436,7 @@ jobs:
   actionlint:
     needs: [check-paths]
     if: needs.check-paths.outputs.actions == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -474,11 +474,15 @@ jobs:
           echo "${PWD}" >> "$GITHUB_PATH"
       - name: Run actionlint
         run: actionlint -color -shellcheck=
+      # Also runs from go-lint, but qualification skips Markdown-only changes,
+      # and .github/actions/README.md carries the runs-on examples people copy.
+      - name: Reject floating runner labels
+        run: ./tools/check-runner-labels
 
   actionlint-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.actions != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No workflow/action changes — actionlint not required"
@@ -490,7 +494,7 @@ jobs:
   verify-licenses:
     needs: [check-paths]
     if: needs.check-paths.outputs.deps == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -520,7 +524,7 @@ jobs:
   verify-licenses-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.deps != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No dependency changes — license check not required"
@@ -532,7 +536,7 @@ jobs:
   verify-renovate:
     needs: [check-paths]
     if: needs.check-paths.outputs.renovate == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -544,7 +548,7 @@ jobs:
   verify-renovate-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.renovate != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No Renovate config changes — validation not required"
@@ -571,7 +575,7 @@ jobs:
   settings-checksums:
     needs: [check-paths]
     if: needs.check-paths.outputs.settings == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Sized from the check's own worst case, not from how long it normally
     # takes (~1 min). It runs 7 refreshers sequentially and each makes 2-3 curl
     # calls capped at --retry-max-time 180, so a sustained github.com blip can
@@ -598,7 +602,7 @@ jobs:
   settings-checksums-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.settings != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No .settings.yaml or refresh-script changes — checksum freshness not required"
@@ -619,7 +623,7 @@ jobs:
   docs-mdx:
     needs: [check-paths]
     if: needs.check-paths.outputs.docs == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -645,7 +649,7 @@ jobs:
   docs-mdx-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.docs != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No documentation changes — docs parser gates not required"
@@ -658,7 +662,7 @@ jobs:
   bom-freshness:
     needs: [check-paths]
     if: needs.check-paths.outputs.bom == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -693,7 +697,7 @@ jobs:
   bom-freshness-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.bom != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No BOM/registry changes — BOM freshness check not required"
@@ -707,7 +711,7 @@ jobs:
   nvcre-wiring:
     needs: [check-paths]
     if: needs.check-paths.outputs.nvcre == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -738,7 +742,7 @@ jobs:
   nvcre-wiring-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.nvcre != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No NVCRE wiring inputs changed — wiring guard not required"
@@ -752,7 +756,7 @@ jobs:
   tuning-freshness:
     needs: [check-paths]
     if: needs.check-paths.outputs.tuning == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -773,7 +777,7 @@ jobs:
   tuning-freshness-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.tuning != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No tuning-status inputs changed — freshness check not required"
@@ -793,7 +797,7 @@ jobs:
   notices-generator:
     needs: [check-paths]
     if: needs.check-paths.outputs.notices == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -826,7 +830,7 @@ jobs:
   notices-generator-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.notices != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No dependency/generator changes — notices generator check not required"
@@ -842,7 +846,7 @@ jobs:
   coverage-freshness:
     needs: [check-paths]
     if: needs.check-paths.outputs.coverage == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -865,7 +869,7 @@ jobs:
   coverage-freshness-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.coverage != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No coverage-matrix inputs changed — freshness check not required"
@@ -904,7 +908,7 @@ jobs:
       - notices-generator-skip
       - coverage-freshness
       - coverage-freshness-skip
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - name: Check gate

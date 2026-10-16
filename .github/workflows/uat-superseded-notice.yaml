@@ -51,7 +51,7 @@ jobs:
     # Only a cancelled run can be a pending supersede — skip success/failure
     # cheaply. Gate to the canonical repo so forks don't run it.
     if: ${{ github.event.workflow_run.conclusion == 'cancelled' && github.repository == 'nvidia/aicr' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Classify and surface a superseded run

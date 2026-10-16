@@ -68,7 +68,7 @@ concurrency:
 jobs:
   test:
     name: NVSentinel Remediation E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The script's bounded waits sum to ~62 minutes worst case (node Ready 2,
     # cert-manager 10, Percona datastore 15, nvsentinel rollout 15, event
     # delivery 7, pipeline logs 12, proto fetch 1), before kind create, go

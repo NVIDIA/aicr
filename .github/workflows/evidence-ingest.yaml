@@ -90,7 +90,7 @@ jobs:
     # Never runs on a fork (push to main on a fork would still lack the
     # bundles; the publish job is the real credential gate).
     if: github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -182,7 +182,7 @@ jobs:
     # Only when verify actually produced a tree — an empty push-mode ingest
     # uploads no artifact, and download-artifact would otherwise fail hard.
     if: github.repository == 'nvidia/aicr' && needs.verify.outputs.produced == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -253,7 +253,7 @@ jobs:
     name: Trigger evidence publishes
     needs: publish
     if: github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read

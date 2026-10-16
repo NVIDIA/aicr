@@ -137,7 +137,7 @@ jobs:
     # burning minutes and going red (no checkpoint history, no release identity
     # to monitor) and opening alert/degraded issues in the fork.
     if: github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Backstop the per-pass context timeout in the tool (defaultTimeout, 45m):
     # the job is killed if a network stall somehow outlives it. Sized so the
     # tool's own 45m deadline (which classifies as operational) fires first, and

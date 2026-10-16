@@ -88,6 +88,33 @@ transitions:
             reason: >-
               Ready means the 26.7.0 operator reconciled the 26.4.1 policy.
               NVSentinel selects these pods by the ds-owner label.
+      - deployers: [terraform]
+        steps:
+          - id: save-nicclusterpolicy
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy -o yaml >
+              nic-cluster-policy-backup.yaml
+            reason: >-
+              Helm rollback does not revert the CRD update, so the saved copy
+              is the only record of the pre-upgrade policy.
+          - id: apply-bundle
+            description: >-
+              Generate a bundle at the new pins, copy it into the Terraform
+              working directory as the bundle's README describes (or point the
+              calling configuration's module source at it), then run
+              terraform apply.
+            reason: >-
+              The chart's CRD-upgrade hook updates the CRD before the operator
+              rolls, and keepNCP keeps the existing NicClusterPolicy.
+          - id: verify
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy reports ready,
+              and the DOCA/OFED driver and RDMA shared device plugin pods in
+              nvidia-network-operator are Ready and still carry the
+              ds-owner=NicClusterPolicy label.
+            reason: >-
+              Ready means the 26.7.0 operator reconciled the 26.4.1 policy.
+              NVSentinel selects these pods by the ds-owner label.
       - steps:
           - id: save-nicclusterpolicy
             description: >-

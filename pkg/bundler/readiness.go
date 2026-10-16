@@ -273,7 +273,7 @@ func (b *DefaultBundler) warnPeermemReadinessDisabled(
 			"%s installs a GPU-managed driver with %s=true and %s=true while %s installs "+
 				"OFED/DOCA, but component readiness gating is disabled. dependencyRefs only orders "+
 				"manifest submission; it does not wait for NicClusterPolicy.status.state=ready before "+
-				"deploying %s. Use --readiness-hooks with Helm or Argo CD, or provide an equivalent "+
+				"deploying %s. Use --readiness-hooks with Helm, Argo CD or Terraform, or provide an equivalent "+
 				"external barrier; Flux, Helmfile, and the bundle REST API cannot request this gate "+
 				"yet (#2499).",
 			pair.gpuOperator, gpuDriverEnabledValuePath, gpuDriverRDMAEnabledValuePath,

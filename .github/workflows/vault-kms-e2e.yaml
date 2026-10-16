@@ -81,7 +81,7 @@ env:
 jobs:
   vault-kms-e2e:
     name: Vault KMS E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # id-token: write mints the GitHub OIDC token for Sigstore keyless signing.
     # The "Build aicr binary" step runs goreleaser, whose cosign attest-blob hook
