@@ -584,10 +584,11 @@ clusters is covered by [UAT](uat.md).
 
 - `test-coverage` — `go test -race ./...` plus the 83% coverage floor.
 - `lint` — golangci-lint with `.golangci.yaml`, yamllint, and the docs checks
-  (filenames, MDX patterns, MDX parse, YAML fences, shell placeholders — see
-  [Docs MDX Gate](#docs-mdx-gate),
-  [Docs YAML Fence Gate](#docs-yaml-fence-gate), and
-  [Docs Shell Placeholder Gate](#docs-shell-placeholder-gate)).
+  (filenames, MDX patterns, MDX parse, YAML fences, shell placeholders, and
+  links, described in [Docs MDX Gate](#docs-mdx-gate),
+  [Docs YAML Fence Gate](#docs-yaml-fence-gate),
+  [Docs Shell Placeholder Gate](#docs-shell-placeholder-gate), and
+  [Docs Link Gate](#docs-link-gate)).
 - `tuning-check` — node-tuning profile freshness.
 - `coverage-check` — the committed CUJ/CLI coverage matrix against the tree.
 - `e2e` — the Chainsaw CLI suites via `tools/e2e` (see [E2E Tests](#e2e-tests)).
@@ -732,6 +733,28 @@ whose delimiter is unquoted (`<<EOF`, not `<<'EOF'`), so
 command output are not runnable, so label them `text`; `console` transcripts
 are not checked. The checker needs Node 20+ and has the same local-skip and
 CI-hard-fail behavior as the YAML fence gate.
+
+## Docs Link Gate
+
+`make check-docs-links` runs `tools/check-docs-links`, which parses every page
+that `docs/index.yml` publishes as GitHub-flavored Markdown and checks each
+Markdown link outside code. Two rules apply:
+
+- A relative link must resolve to another published page. Fern renders a link
+  to any other file as a site URL that serves a "Page Not Found" body with HTTP
+  200, so neither the file existing nor an online status check catches it. A
+  link to an ADR under `docs/design/`, a generated BOM page, or a file outside
+  `docs/` fails for that reason.
+- A `https://github.com/NVIDIA/aicr/blob/main/<path>` URL must name a path that
+  exists in the repository.
+
+To link a file Fern does not publish, use its `blob/main` URL. A root-relative
+link such as `/aicr/user-guide/cli-reference` fails because the site's URL
+layout cannot be resolved offline, so link the page's `.md` file by relative
+path instead. Fragments are not checked.
+
+The lychee run in Fern Docs CI separately checks that every relative target
+exists as a file, which catches a renamed or deleted page.
 
 ## Common Gotchas
 

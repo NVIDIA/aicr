@@ -121,7 +121,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records check-dynamo-runtime-image ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, vendored action digests, and runner labels)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell check-docs-links bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records check-dynamo-runtime-image ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, vendored action digests, and runner labels)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
@@ -203,6 +203,10 @@ check-docs-yaml: ## Validates YAML-labelled code blocks throughout docs/ (requir
 .PHONY: check-docs-shell
 check-docs-shell: ## Rejects unquoted <placeholder>s that bash reads as redirection in docs/ shell blocks (requires Node; CI-blocking)
 	@./tools/check-docs-shell
+
+.PHONY: check-docs-links
+check-docs-links: ## Verifies links on Fern-published docs reach a published page or an existing repo path (CI-blocking)
+	@GOFLAGS="-mod=readonly" go run ./tools/check-docs-links
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet

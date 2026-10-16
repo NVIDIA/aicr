@@ -4457,5 +4457,5 @@ aicr snapshot --template examples/templates/snapshot-template.md.tmpl --output r
 - [Installation Guide](installation.md) - Install aicr
 - [Agent Deployment](agent-deployment.md) - Kubernetes agent setup
 - [API Reference](api-reference.md) - Programmatic access
-- [Architecture Docs](../contributor/) - Internal architecture
+- [Architecture Docs](../contributor/index.md) - Internal architecture
 - [Data Architecture](../contributor/recipe.md) - Recipe data system details
