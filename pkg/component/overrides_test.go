@@ -16,6 +16,7 @@ package component
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1292,6 +1293,64 @@ func TestSetValueByPath(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			SetValueByPath(tt.target, tt.path, tt.value)
 			tt.verify(t, tt.target)
+		})
+	}
+}
+
+func TestSharedTolerationPaths(t *testing.T) {
+	tests := []struct {
+		name        string
+		system      []string
+		accelerated []string
+		want        []string
+	}{
+		{name: "both nil", want: nil},
+		{name: "accelerated nil", system: []string{"a"}, want: nil},
+		{name: "no overlap", system: []string{"a", "b"}, accelerated: []string{"c"}, want: nil},
+		{name: "overlap keeps system order", system: []string{"a", "b", "c"}, accelerated: []string{"c", "a"}, want: []string{"a", "c"}},
+		{name: "repeats collapse", system: []string{"a", "a"}, accelerated: []string{"a"}, want: []string{"a"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SharedTolerationPaths(tt.system, tt.accelerated); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SharedTolerationPaths(%v, %v) = %v, want %v", tt.system, tt.accelerated, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKeyedTolerations(t *testing.T) {
+	keyed := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists}
+	keyless := corev1.Toleration{Operator: corev1.TolerationOpExists}
+	got := keyedTolerations([]corev1.Toleration{keyless, keyed, keyless})
+	if want := []corev1.Toleration{keyed}; !reflect.DeepEqual(got, want) {
+		t.Errorf("keyedTolerations() = %v, want %v", got, want)
+	}
+	if got := keyedTolerations(nil); got != nil {
+		t.Errorf("keyedTolerations(nil) = %v, want nil", got)
+	}
+}
+
+func TestSharedTolerations(t *testing.T) {
+	keyed := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists}
+	keyless := corev1.Toleration{Operator: corev1.TolerationOpExists}
+	acc := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists}
+	tests := []struct {
+		name   string
+		system []corev1.Toleration
+		acc    []corev1.Toleration
+		want   []corev1.Toleration
+	}{
+		{name: "no accelerated list returns system as given", system: []corev1.Toleration{keyless, keyed}, want: []corev1.Toleration{keyless, keyed}},
+		{name: "keyless system entries dropped when merging", system: []corev1.Toleration{keyless, keyed}, acc: []corev1.Toleration{acc}, want: []corev1.Toleration{keyed, acc}},
+		{name: "only accelerated", acc: []corev1.Toleration{acc}, want: []corev1.Toleration{acc}},
+		{name: "both nil", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SharedTolerations(tt.system, tt.acc); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SharedTolerations(%v, %v) = %v, want %v", tt.system, tt.acc, got, tt.want)
+			}
 		})
 	}
 }

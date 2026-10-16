@@ -3131,40 +3131,6 @@ func TestApplyNodeSchedulingOverrides_NFDWorkerGetsSystemAndAcceleratedToleratio
 	}
 }
 
-func TestSharedTolerationPaths(t *testing.T) {
-	tests := []struct {
-		name        string
-		system      []string
-		accelerated []string
-		want        []string
-	}{
-		{name: "both nil", want: nil},
-		{name: "accelerated nil", system: []string{"a"}, want: nil},
-		{name: "no overlap", system: []string{"a", "b"}, accelerated: []string{"c"}, want: nil},
-		{name: "overlap keeps system order", system: []string{"a", "b", "c"}, accelerated: []string{"c", "a"}, want: []string{"a", "c"}},
-		{name: "repeats collapse", system: []string{"a", "a"}, accelerated: []string{"a"}, want: []string{"a"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := sharedTolerationPaths(tt.system, tt.accelerated); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("sharedTolerationPaths(%v, %v) = %v, want %v", tt.system, tt.accelerated, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestKeyedTolerations(t *testing.T) {
-	keyed := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists}
-	keyless := corev1.Toleration{Operator: corev1.TolerationOpExists}
-	got := keyedTolerations([]corev1.Toleration{keyless, keyed, keyless})
-	if want := []corev1.Toleration{keyed}; !reflect.DeepEqual(got, want) {
-		t.Errorf("keyedTolerations() = %v, want %v", got, want)
-	}
-	if got := keyedTolerations(nil); got != nil {
-		t.Errorf("keyedTolerations(nil) = %v, want nil", got)
-	}
-}
-
 // TestApplyNodeSchedulingOverrides_SharedPathUnion covers the shared-path
 // rules around the #3135 fix: keyless system entries are dropped only when an
 // accelerated list is merged in, the union is deduplicated, and opt-out /

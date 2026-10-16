@@ -15,10 +15,16 @@
 package component
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestEnrichConfigFromRegistry(t *testing.T) {
@@ -368,5 +374,53 @@ func TestGetValueOverridesForComponent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestMakeBundle_SharedTolerationPathsUnion: MakeBundle writes the nfd
+// worker path, declared under both tiers, with the system and accelerated
+// tolerations, and the system-only master path with the system list (#3135).
+func TestMakeBundle_SharedTolerationPathsUnion(t *testing.T) {
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithSystemNodeTolerations([]corev1.Toleration{sysTol}),
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{accTol}),
+	)
+	b := NewBaseBundler(cfg, "test")
+	input := &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: recipe.RecipeResultAPIVersion,
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "nfd", Type: "Helm", Source: "https://kubernetes-sigs.github.io/node-feature-discovery/charts", Version: "v0.19.0"},
+		},
+	}
+	outputDir := t.TempDir()
+	if _, err := MakeBundle(context.Background(), b, input, outputDir, ComponentConfig{Name: "nfd"}, nil); err != nil {
+		t.Fatalf("MakeBundle() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(outputDir, "nfd", "values.yaml"))
+	if err != nil {
+		t.Fatalf("read values.yaml: %v", err)
+	}
+	var values map[string]any
+	if err := yaml.Unmarshal(raw, &values); err != nil {
+		t.Fatalf("parse values.yaml: %v\n%s", err, raw)
+	}
+	sysMap := map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"}
+	accMap := map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+	for path, want := range map[string][]any{
+		"worker.tolerations":          {sysMap, accMap},
+		"topologyUpdater.tolerations": {sysMap, accMap},
+		"master.tolerations":          {sysMap},
+	} {
+		got, ok := GetValueByPath(values, path)
+		if !ok {
+			t.Fatalf("%s absent from values.yaml\n%s", path, raw)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s:\n  got  = %#v\n  want = %#v", path, got, want)
+		}
 	}
 }

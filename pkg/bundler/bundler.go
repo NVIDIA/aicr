@@ -2055,55 +2055,6 @@ func splitPaths(paths []string, appendMode map[string]struct{}) (appendPaths, re
 	return
 }
 
-// sharedTolerationPaths returns the paths declared under both the system and
-// accelerated tolerationPaths, in system order and without repeats. A workload
-// registered this way (nfd worker, aws-ebs-csi-driver node) must run on every
-// node, so it receives the union of both tiers rather than one tier
-// overwriting the other (#3135).
-func sharedTolerationPaths(system, accelerated []string) []string {
-	if len(system) == 0 || len(accelerated) == 0 {
-		return nil
-	}
-	acc := pathSet(accelerated)
-	seen := make(map[string]struct{}, len(system))
-	var shared []string
-	for _, p := range system {
-		if _, ok := acc[p]; !ok {
-			continue
-		}
-		if _, dup := seen[p]; dup {
-			continue
-		}
-		seen[p] = struct{}{}
-		shared = append(shared, p)
-	}
-	return shared
-}
-
-// sharedTolerations returns what a path declared under both tiers receives.
-// With no accelerated list the system list is written as given, as it was
-// before #3135. Otherwise keyed system entries come first and the accelerated
-// list follows: the CLI and API default an unset system flag to tolerate-all,
-// and carrying that onto a path whose accelerated list the user restricted
-// would widen it to every taint.
-func sharedTolerations(system, accelerated []corev1.Toleration) []corev1.Toleration {
-	if len(accelerated) == 0 {
-		return system
-	}
-	return append(keyedTolerations(system), accelerated...)
-}
-
-// keyedTolerations drops keyless entries.
-func keyedTolerations(tolerations []corev1.Toleration) []corev1.Toleration {
-	var keyed []corev1.Toleration
-	for _, t := range tolerations {
-		if t.Key != "" {
-			keyed = append(keyed, t)
-		}
-	}
-	return keyed
-}
-
 // applyTolerationPaths writes tolerations to paths under the policy: opt-out
 // paths are skipped, append-mode paths are appended to, the rest replaced.
 func applyTolerationPaths(values map[string]any, tolerations []corev1.Toleration, paths []string, policy schedulingPathPolicy) {
@@ -2145,9 +2096,9 @@ func pathSet(paths []string) map[string]struct{} {
 // skipped entirely; append-mode paths receive CLI tolerations appended to
 // whatever the overlay already wrote (so bcm.yaml's BCM-master tolerations
 // coexist with --system-node-toleration); other paths use REPLACE semantics.
-// A toleration path declared under both tiers (sharedTolerationPaths) is
-// written once with sharedTolerations, so NFD's worker DaemonSet tolerates
-// both system and GPU taints (#3135).
+// A toleration path declared under both tiers (component.SharedTolerationPaths)
+// is written once with component.SharedTolerations, so NFD's worker DaemonSet
+// tolerates both system and GPU taints (#3135).
 //
 // Does not enforce requireNodeSelector: a later --set-json/--set-file
 // override can null out an injected selector, so validateRequiredNodeSelectors
@@ -2188,7 +2139,7 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 	acceleratedTols := b.Config.AcceleratedNodeTolerations()
 	systemTolPaths := comp.GetSystemTolerationPaths()
 	acceleratedTolPaths := comp.GetAcceleratedTolerationPaths()
-	shared := sharedTolerationPaths(systemTolPaths, acceleratedTolPaths)
+	shared := component.SharedTolerationPaths(systemTolPaths, acceleratedTolPaths)
 	sharedSet := pathSet(shared)
 	applyTolerationPaths(values, systemTols, filterPaths(systemTolPaths, sharedSet), policy)
 
@@ -2202,7 +2153,7 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 
 	applyTolerationPaths(values, acceleratedTols, filterPaths(acceleratedTolPaths, sharedSet), policy)
 
-	applyTolerationPaths(values, sharedTolerations(systemTols, acceleratedTols), shared, policy)
+	applyTolerationPaths(values, component.SharedTolerations(systemTols, acceleratedTols), shared, policy)
 
 	// Apply workload selector
 	if workloadSelector := b.Config.WorkloadSelector(); len(workloadSelector) > 0 {

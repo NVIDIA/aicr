@@ -324,6 +324,58 @@ func AppendTolerationsOverrides(values map[string]any, tolerations []corev1.Tole
 // dot-notation path. If the path is missing or not a slice, the path is set
 // to the new tolerations list (i.e. identical to setTolerationsAtPath in
 // that case).
+// SharedTolerationPaths returns the paths declared under both the system and
+// accelerated tolerationPaths, in system order and without repeats. A workload
+// registered this way (nfd worker, aws-ebs-csi-driver node) must run on every
+// node, so it receives SharedTolerations rather than one tier overwriting the
+// other (#3135).
+func SharedTolerationPaths(system, accelerated []string) []string {
+	if len(system) == 0 || len(accelerated) == 0 {
+		return nil
+	}
+	acc := make(map[string]struct{}, len(accelerated))
+	for _, p := range accelerated {
+		acc[p] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(system))
+	var shared []string
+	for _, p := range system {
+		if _, ok := acc[p]; !ok {
+			continue
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		shared = append(shared, p)
+	}
+	return shared
+}
+
+// SharedTolerations returns what a path declared under both tiers receives.
+// With no accelerated list the system list is returned as given. Otherwise
+// keyed system entries come first and the accelerated list follows: the CLI
+// and API default an unset system flag to tolerate-all, and carrying that onto
+// a path whose accelerated list the user restricted would widen it to every
+// taint.
+func SharedTolerations(system, accelerated []corev1.Toleration) []corev1.Toleration {
+	if len(accelerated) == 0 {
+		return system
+	}
+	return append(keyedTolerations(system), accelerated...)
+}
+
+// keyedTolerations drops keyless entries.
+func keyedTolerations(tolerations []corev1.Toleration) []corev1.Toleration {
+	var keyed []corev1.Toleration
+	for _, t := range tolerations {
+		if t.Key != "" {
+			keyed = append(keyed, t)
+		}
+	}
+	return keyed
+}
+
 func appendTolerationsAtPath(values map[string]any, tolerations []map[string]any, path string) {
 	parent, key, _ := getOrCreateNestedMap(values, path, false)
 
