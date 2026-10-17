@@ -426,6 +426,15 @@ func TestTolerationEntryKey(t *testing.T) {
 	if got := tolerationEntryKey("scalar"); got != "" {
 		t.Errorf("non-map entry key = %q, want empty", got)
 	}
+	if a, b := tolerationEntryKey(map[string]any{"key": "k", "effect": "NoSchedule"}), tolerationEntryKey(map[string]any{"key": "k", "operator": "Equal", "effect": "NoSchedule"}); a != b {
+		t.Errorf("omitted operator must equal explicit Equal: %q vs %q", a, b)
+	}
+	if a, b := tolerationEntryKey(map[string]any{"key": "k", "operator": "Equal"}), tolerationEntryKey(map[string]any{"key": "k", "operator": "Equal", "value": ""}); a != b {
+		t.Errorf("omitted value must equal explicit empty value: %q vs %q", a, b)
+	}
+	if a, b := tolerationEntryKey(map[string]any{"key": "k"}), tolerationEntryKey(map[string]any{"key": "k", "operator": "Exists"}); a == b {
+		t.Errorf("omitted operator must not equal Exists: %q", a)
+	}
 }
 
 func TestTolerationsToPodSpec(t *testing.T) {

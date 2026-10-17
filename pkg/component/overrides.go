@@ -420,7 +420,8 @@ func dedupTolerationEntries(existing []any, additions []map[string]any) []any {
 // tolerationEntryKey returns a canonical identity for a toleration entry so
 // equal tolerations compare equal whether they came from TolerationsToPodSpec
 // (map[string]any, int64 seconds) or a YAML decode (map[any]any, float64
-// seconds). Non-map entries get "" and are never deduplicated.
+// seconds). An omitted operator is Equal and an omitted value is "", as the
+// scheduler reads them. Non-map entries get "" and are never deduplicated.
 func tolerationEntryKey(entry any) string {
 	var m map[string]any
 	switch x := entry.(type) {
@@ -434,7 +435,15 @@ func tolerationEntryKey(entry any) string {
 	default:
 		return ""
 	}
-	return fmt.Sprintf("%v|%v|%v|%v|%v", m["key"], m["operator"], m["value"], m["effect"], m["tolerationSeconds"])
+	operator, ok := m["operator"]
+	if !ok || operator == nil || operator == "" {
+		operator = string(corev1.TolerationOpEqual)
+	}
+	value, ok := m["value"]
+	if !ok || value == nil {
+		value = ""
+	}
+	return fmt.Sprintf("%v|%v|%v|%v|%v", m["key"], operator, value, m["effect"], m["tolerationSeconds"])
 }
 
 // TolerationsToPodSpec converts a slice of corev1.Toleration to a YAML-friendly format.
