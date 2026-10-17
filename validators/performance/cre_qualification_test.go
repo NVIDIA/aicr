@@ -39,17 +39,9 @@ func buildCRENCCLCertification(t *testing.T, namespace string, gpuConfig *gpuCon
 	return mustBuildCRECertification(t, namespace, creNCCLRunName, gpuConfig, creQualifiedEntries[checkNameCRENCCLAllReduceBW][creEKSH100])
 }
 
-// The entry is spelled out rather than read from creQualifiedEntries, which
-// holds no training combination while the upstream catalog entry is broken.
-// What the driver renders for the training domain is independent of whether a
-// combination is qualified to run it, and stays worth asserting.
 func buildCRETrainingCertification(t *testing.T, namespace, name string, gpuConfig *gpuConfiguration) *unstructured.Unstructured {
 	t.Helper()
-	return mustBuildCRECertification(t, namespace, name, gpuConfig, creCatalogEntry{
-		Domain:   creTrainingDomain,
-		Variant:  creTrainingVariant,
-		MaxNodes: 2,
-	})
+	return mustBuildCRECertification(t, namespace, name, gpuConfig, creQualifiedEntries[checkNameCRETrainingGoodput][creEKSH100])
 }
 
 func mustBuildCRECertification(
@@ -84,6 +76,7 @@ func TestCREQualifiedEntries(t *testing.T) {
 		wantVariant string
 	}{
 		{"nccl on eks h100", checkNameCRENCCLAllReduceBW, creNCCLDomain, creNCCLVariant},
+		{"goodput on eks h100", checkNameCRETrainingGoodput, creTrainingDomain, creTrainingVariant},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -97,7 +90,7 @@ func TestCREQualifiedEntries(t *testing.T) {
 			// An uncapped footprint fans a certification out across the whole
 			// GPU pool, so a qualified entry without a cap is a leak.
 			if entry.MaxNodes < 2 {
-				t.Errorf("MaxNodes = %d, want at least the 2 nodes an all-reduce needs", entry.MaxNodes)
+				t.Errorf("MaxNodes = %d, want at least the 2 nodes a multi-node run needs", entry.MaxNodes)
 			}
 		})
 	}
@@ -112,30 +105,6 @@ func TestCREQualifiedEntriesCoverBothChecks(t *testing.T) {
 		if _, ok := creQualifiedEntries[checkName]; !ok {
 			t.Errorf("%s is absent from the qualification record", checkName)
 		}
-	}
-}
-
-// cre-training-goodput has no qualified combination while the nemotron5-8b
-// catalog entry does not run on the CRE version the registry pins; see
-// creQualifiedEntries for the upstream cause. This asserts the consequence
-// that matters — the check skips rather than failing a healthy cluster. When
-// the entry is fixed and re-measured, this test is what says to delete it.
-func TestCRETrainingGoodputIsUnqualifiedPendingUpstreamFix(t *testing.T) {
-	if _, ok := lookupCREQualification(
-		checkNameCRETrainingGoodput, creEKSH100.Service, creEKSH100.Accelerator,
-	); ok {
-		t.Fatal("cre-training-goodput reports qualified on eks x h100; " +
-			"if it has been re-measured on the pinned CRE version, remove this test")
-	}
-
-	ctx := ctxWithCriteriaAndPerfConstraints(
-		recipe.CriteriaServiceEKS,
-		recipe.CriteriaAcceleratorH100,
-		recipe.Constraint{Name: checkNameCRETrainingGoodput, Value: ">= 0.5"},
-	)
-	err := checkCRETrainingGoodput(ctx)
-	if !validators.IsSkip(err) {
-		t.Fatalf("error = %v, want Skip while the check is unqualified", err)
 	}
 }
 
@@ -184,8 +153,8 @@ func TestCREChecksSkipUnqualifiedCombination(t *testing.T) {
 // TestCREChecksRejectBadConstraintBeforeQualification pins the ordering that
 // makes the documented promise true: a constraint the check cannot honor is
 // refused even on a combination that would otherwise skip. Validating it after
-// the qualification lookup would hide every malformed constraint behind a skip,
-// which is every combination for goodput today.
+// the qualification lookup would hide every malformed constraint behind a skip
+// on any combination the check was not measured on.
 func TestCREChecksRejectBadConstraintBeforeQualification(t *testing.T) {
 	for _, value := range []string{"<= 0.5", ">= NaN"} {
 		t.Run("nccl "+value, func(t *testing.T) {

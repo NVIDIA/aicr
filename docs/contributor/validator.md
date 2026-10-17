@@ -966,9 +966,9 @@ service or accelerator — `creQualifiedEntries` in
 qualified and the catalog entry and node cap each was measured with, so a new
 combination is an entry there plus a measured threshold rather than a new code
 path. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100` with
-`communication/nccl-all-reduce`; `cre-training-goodput` has no qualified
-combination while the `training/nemotron5-8b` entry it drives does not run on
-the pinned CRE version, so it skips wherever it is declared. Both create the
+`communication/nccl-all-reduce`, and `cre-training-goodput` on the same
+combination with `training/nemotron5-8b`, each capped at two nodes. A
+combination with no entry skips. Both create the
 CR on an explicitly named set of nodes, wait with a timeout, and tear it down on
 success or failure — deleting the CR and then confirming the `TrainJob`s and
 workload pods it started are gone, since CRE's controller drops its finalizer

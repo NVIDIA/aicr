@@ -18,7 +18,7 @@
 # Chart:    oci://ghcr.io/nvidia/cluster-readiness-engine
 #
 # Chart and controller image are public on GHCR and both pull anonymously:
-# `helm pull oci://ghcr.io/nvidia/cluster-readiness-engine --version v0.6.0`
+# `helm pull oci://ghcr.io/nvidia/cluster-readiness-engine --version v0.7.0`
 # succeeds with an empty registry config, so no pull secret is required.
 #
 # This file applies only when a componentRef names it explicitly as
@@ -38,17 +38,23 @@ fullnameOverride: nvcre
 
 manager:
   image:
-    # Digest of the v0.6.0 multi-arch index, so the qualified bytes are the
-    # installed bytes even if the tag is repointed. The chart also exposes a
+    # Digest of the multi-arch index, so the qualified bytes are the installed
+    # bytes even if the tag is repointed. The chart also exposes a
     # `manager.image.digest` field, but that branch renders repository@digest
-    # and drops the version; the tag@digest form used here keeps v0.6.0
+    # and drops the version; the tag@digest form used here keeps the version
     # legible in the BOM. The chart's unset-tag default falls back to
     # .Chart.AppVersion, so hard-coding a tag severs the link that kept the
     # controller following the chart: a defaultVersion bump must move this
     # version and digest together, which
     # TestNVCREValuesPinControllerImageByDigest enforces. Re-resolve with:
     #   crane digest ghcr.io/nvidia/cluster-readiness-engine/manager:<version>
-    tag: v0.6.0@sha256:8008c6f9f7e19b317caf0f91afab06b88027c14d7dd03e4173bd49cd1f3cd27a
+    #
+    # PRE-RELEASE: main-bfd3210 is the manager from NVCRE main at bfd321046
+    # (NVCRE#487, the nemotron5 attention-backend fix), under chart v0.7.0, whose
+    # CRDs are byte-identical to it. It ships in no release yet, which is why the
+    # guard test above fails on it; replace the tag and digest with the release
+    # version when one carries that fix.
+    tag: main-bfd3210@sha256:00fa016190de0e9cf5cf022867b6d7cb7f379b66f644c651498327b88f88a6c3
 
 # Chart default is true and requires prometheus-operator CRDs. NVCRE is not
 # on any shipped overlay, so keep the monitor off until a recipe that already
