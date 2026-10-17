@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -29,6 +30,30 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
+
+// disableWaitAnnotation marks a recipe manifest whose controller holds the
+// resource at Ready=False for longer than helm-controller's install timeout
+// (a NicClusterPolicy stays there until OFED is built), and whose release
+// must therefore not wait on it: helm-controller remediates a timed-out
+// install only by uninstalling, which would delete the resource. A generated
+// chart holding such a manifest is released with install.disableWait and
+// upgrade.disableWait; every other generated chart keeps the wait (#2585).
+// Follows the aicr/skip-hook-validation opt-out convention.
+const disableWaitAnnotation = "aicr/disable-wait"
+
+// disableWaitPattern matches the annotation as a YAML line. Manifests are Helm
+// templates, so they are matched as text rather than parsed.
+var disableWaitPattern = regexp.MustCompile(`(?m)^\s*["']?` + regexp.QuoteMeta(disableWaitAnnotation) + `["']?:\s*["']?true["']?\s*$`)
+
+// manifestsDisableWait reports whether any manifest carries disableWaitAnnotation.
+func manifestsDisableWait(manifests map[string][]byte) bool {
+	for _, content := range manifests {
+		if disableWaitPattern.Match(content) {
+			return true
+		}
+	}
+	return false
+}
 
 // HelmReleaseData carries per-component data for the helmrelease.yaml template.
 type HelmReleaseData struct {
@@ -45,6 +70,9 @@ type HelmReleaseData struct {
 	// UpgradeCRDs emits spec.upgrade.crds: CreateReplace. Set only for
 	// components the registry marks ownsCRDs. See NVIDIA/aicr#2264.
 	UpgradeCRDs bool
+	// DisableWait emits spec.install.disableWait and spec.upgrade.disableWait.
+	// Set only for charts generated from recipe manifests. See NVIDIA/aicr#2585.
+	DisableWait bool
 }
 
 // ChartRefHelmReleaseData carries per-component data for the
@@ -62,6 +90,9 @@ type ChartRefHelmReleaseData struct {
 	// UpgradeCRDs emits spec.upgrade.crds: CreateReplace. Set only for
 	// components the registry marks ownsCRDs. See NVIDIA/aicr#2264.
 	UpgradeCRDs bool
+	// DisableWait emits spec.install.disableWait and spec.upgrade.disableWait.
+	// Set only for charts generated from recipe manifests. See NVIDIA/aicr#2585.
+	DisableWait bool
 }
 
 // ArtifactGeneratorData carries per-component data for the
@@ -331,8 +362,9 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 	// ArtifactGenerator extracts this chart's directory from the outer
 	// OCIRepository into an ExternalArtifact that helm-controller can
 	// consume via spec.chartRef.
+	disableWait := manifestsDisableWait(manifests)
 	if g.OCISourceName != "" {
-		extraResources, ociErr := g.writeOCIArtifactPair(dirName, namespace, dependsOn, valuesFrom, valuesYAML, compDir, output)
+		extraResources, ociErr := g.writeOCIArtifactPair(dirName, namespace, disableWait, dependsOn, valuesFrom, valuesYAML, compDir, output)
 		if ociErr != nil {
 			return false, nil, ociErr
 		}
@@ -347,6 +379,7 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 		TargetNamespace: namespace,
 		Chart:           "./" + dirName,
 		UpgradeCRDs:     g.ownsCRDs(dirName),
+		DisableWait:     disableWait,
 		SourceKind:      "GitRepository",
 		SourceName:      sName,
 		DependsOn:       dependsOn,
@@ -481,7 +514,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 
 	// OCI mode: emit ArtifactGenerator + chartRef HelmRelease.
 	if g.OCISourceName != "" {
-		extraResources, ociErr := g.writeOCIArtifactPair(ref.Name, ref.Namespace, dependsOn, valuesFrom, valuesYAML, compDir, output)
+		extraResources, ociErr := g.writeOCIArtifactPair(ref.Name, ref.Namespace, false, dependsOn, valuesFrom, valuesYAML, compDir, output)
 		if ociErr != nil {
 			return false, localformat.VendorRecord{}, nil, ociErr
 		}
@@ -515,7 +548,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 // for OCI mode. It returns the extra resource paths to include in
 // kustomization.yaml. Both generateManifestHelmChart and
 // generateVendoredHelmComponent delegate to this helper to avoid drift.
-func (g *Generator) writeOCIArtifactPair(name, targetNamespace string,
+func (g *Generator) writeOCIArtifactPair(name, targetNamespace string, disableWait bool,
 	dependsOn []DependsOnRef, valuesFrom []ValuesFromRef, valuesYAML string,
 	compDir string, output *deployer.Output) ([]string, error) {
 
@@ -538,6 +571,7 @@ func (g *Generator) writeOCIArtifactPair(name, targetNamespace string,
 		TargetNamespace: targetNamespace,
 		ChartRefName:    agName,
 		UpgradeCRDs:     g.ownsCRDs(name),
+		DisableWait:     disableWait,
 		DependsOn:       dependsOn,
 		ValuesFrom:      valuesFrom,
 		ValuesYAML:      valuesYAML,

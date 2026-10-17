@@ -3523,3 +3523,97 @@ func TestUsesRegistryChartRejectsRefsWithoutCoordinates(t *testing.T) {
 		})
 	}
 }
+
+// TestGenerate_ManifestChartsDisableWait covers #2585.
+//
+// A generated chart holding a manifest annotated aicr/disable-wait is released
+// with install.disableWait and upgrade.disableWait; a generated chart without
+// one, and an upstream chart release, keep helm-controller's wait. Both the
+// GitRepository and the chartRef shapes are checked.
+func TestGenerate_ManifestChartsDisableWait(t *testing.T) {
+	ctx := context.Background()
+
+	newGenerator := func(ociSource string) *Generator {
+		recipeResult := &recipe.RecipeResult{}
+		recipeResult.Metadata.Version = testVersion
+		recipeResult.ComponentRefs = []recipe.ComponentRef{
+			{
+				Name:      "network-operator",
+				Namespace: "nvidia-network-operator",
+				Chart:     "network-operator",
+				Version:   "v25.4.0",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name:      "nodewright-customizations",
+				Namespace: "nodewright-system",
+				Type:      recipe.ComponentTypeHelm,
+			},
+		}
+		recipeResult.DeploymentOrder = []string{"network-operator", "nodewright-customizations"}
+		return &Generator{
+			RecipeResult: recipeResult,
+			ComponentValues: map[string]map[string]any{
+				"network-operator":          {},
+				"nodewright-customizations": {},
+			},
+			ComponentPreManifests: map[string]map[string][]byte{
+				"network-operator": {
+					"ns.yaml": []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: nvidia-network-operator\n"),
+				},
+			},
+			ComponentManifests: map[string]map[string][]byte{
+				"network-operator": {
+					"ncp.yaml": []byte("apiVersion: mellanox.com/v1alpha1\nkind: NicClusterPolicy\nmetadata:\n  name: nic-cluster-policy\n  annotations:\n    aicr/disable-wait: \"true\"\n"),
+				},
+				"nodewright-customizations": {
+					"tuning.yaml": []byte("apiVersion: nodewright.nvidia.com/v1alpha1\nkind: NodeWright\nmetadata:\n  name: tuning\n"),
+				},
+			},
+			Version:       "v0.9.0",
+			RepoURL:       "https://github.com/my-org/gitops.git",
+			OCISourceName: ociSource,
+		}
+	}
+
+	disableWait := func(t *testing.T, raw, section string) (bool, bool) {
+		t.Helper()
+		var hr struct {
+			Spec map[string]any `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal([]byte(raw), &hr); err != nil {
+			t.Fatalf("parse HelmRelease: %v\n%s", err, raw)
+		}
+		sec, _ := hr.Spec[section].(map[string]any)
+		v, ok := sec["disableWait"]
+		if !ok {
+			return false, false
+		}
+		b, isBool := v.(bool)
+		return b, isBool
+	}
+
+	for _, mode := range []struct{ name, oci string }{{"git", ""}, {"oci", "aicr-bundle"}} {
+		t.Run(mode.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			if _, err := newGenerator(mode.oci).Generate(ctx, outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			raw := readFile(t, filepath.Join(outputDir, "network-operator-post", "helmrelease.yaml"))
+			for _, section := range []string{"install", "upgrade"} {
+				if got, ok := disableWait(t, raw, section); !ok || !got {
+					t.Errorf("annotated chart: spec.%s.disableWait = %v (present=%v), want true\n%s", section, got, ok, raw)
+				}
+			}
+			for _, dir := range []string{"network-operator-pre", "nodewright-customizations", "network-operator"} {
+				raw := readFile(t, filepath.Join(outputDir, dir, "helmrelease.yaml"))
+				for _, section := range []string{"install", "upgrade"} {
+					if _, ok := disableWait(t, raw, section); ok {
+						t.Errorf("%s: spec.%s.disableWait present, want absent\n%s", dir, section, raw)
+					}
+				}
+			}
+		})
+	}
+}
