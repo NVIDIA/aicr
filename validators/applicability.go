@@ -125,7 +125,7 @@ func (c Capability) Require(ctx *Context, probeErr error, present bool) error {
 			if declared {
 				return errors.Wrap(errors.ErrCodeNotFound, c.AbsentMsg, probeErr)
 			}
-			return Skip(c.inapplicableReason())
+			return SkipWithReason(SkipReasonComponentNotInRecipe, c.inapplicableReason())
 		}
 		// Any non-NotFound probe error is an infrastructure failure and blocks
 		// the gate regardless of declaration — a Forbidden/timeout/transport/
@@ -139,7 +139,7 @@ func (c Capability) Require(ctx *Context, probeErr error, present bool) error {
 	if declared {
 		return errors.New(errors.ErrCodeNotFound, c.AbsentMsg)
 	}
-	return Skip(c.inapplicableReason())
+	return SkipWithReason(SkipReasonComponentNotInRecipe, c.inapplicableReason())
 }
 
 // RequireList resolves a capability-gated check that probes a LIST/collection

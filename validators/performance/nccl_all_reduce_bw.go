@@ -71,7 +71,7 @@ func ncclVariantDisplayName(variant ncclVariant) string {
 	case variantNVLS:
 		return "NVLS"
 	case variantDefault:
-		return "default"
+		return variantDefaultLabel
 	default:
 		return string(variant)
 	}
@@ -86,7 +86,7 @@ func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) e
 		// also lands here — performanceConstraints returns nil, so found is
 		// false — which is the #1327 boundary: fail-closed only fires once the
 		// recipe actually declares the constraint (see classification below).
-		return validators.Skip(fmt.Sprintf("no %s constraint in recipe", name))
+		return validators.SkipWithReason(validators.SkipReasonNoConstraint, fmt.Sprintf("no %s constraint in recipe", name))
 	}
 
 	actual, passed, err := validateNcclAllReduceBw(ctx, constraint, variant)

@@ -93,7 +93,7 @@ func CheckSlinkySlurmIMEXChannel(ctx *validators.Context) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
 	}
 	if !recipeHasComponent(ctx, slinkySlurmComponent) {
-		return validators.Skip("slinky-slurm component not present in recipe")
+		return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe, "slinky-slurm component not present in recipe")
 	}
 
 	namespace := resolveSlinkySlurmNamespace(ctx)

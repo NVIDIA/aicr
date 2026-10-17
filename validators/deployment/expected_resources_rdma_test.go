@@ -213,8 +213,8 @@ func TestVerifyRDMAFabricReady_Poll(t *testing.T) {
 // guards the narrower gap left once defaults.ValidatorJobDeadlineHeadroom gave
 // the Job's activeDeadlineSeconds margin over this poll's catalog-timeout-bound
 // budget (a probe call blocking past its own cancellation, not a deadline
-// race). parseExtraSentinels keeps the last valid sentinel, so on a clean exit
-// the terminal emit overwrites the floor.
+// race). Sentinels merge key-wise with later values winning, so on a clean
+// exit the terminal emit overwrites the floor's counts.
 func TestVerifyRDMAFabricReady_EagerDisclosureFloor(t *testing.T) {
 	t.Parallel()
 
