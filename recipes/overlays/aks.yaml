@@ -181,8 +181,7 @@ spec:
     #   - NicClusterPolicy: MOFED driver, RDMA shared device plugin, DOCA telemetry
     #   (IB-capable nodes are labeled pci-15b3.present by the nfd ref above)
     #   - NFD NodeFeatureRule (transitional): the same label, kept for one
-    #     release so it does not drop during the upgrade, except under Flux
-    #     (docs/user/component-catalog.md); removed in the contract change
+    #     release so it does not drop during the upgrade; removed in the contract change
     #     (#3038), so a cluster must take this release first, or finish the
     #     nfd-worker rollout before network-operator syncs
     #   - nvidia-peermem reloader: loads nvidia-peermem for GPUDirect RDMA —
