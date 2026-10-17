@@ -16,6 +16,7 @@
 #
 # When `aicr bundle` is run with:
 #   --system-node-selector nodeGroup=system-pool
+#   --system-node-toleration CriticalAddonsOnly:NoSchedule
 #   --accelerated-node-selector nodeGroup=customer-gpu
 #   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
 #

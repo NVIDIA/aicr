@@ -34,6 +34,9 @@ metadata:
     # bundler's post-bundle sequencing (this manifest ships in the
     # network-operator-post bundle, after the operator's CRDs).
     aicr/skip-hook-validation: "true"
+    # Flux does not wait for this CR: the operator holds it at Ready=False
+    # until OFED is built, past helm-controller's timeout (NVIDIA/aicr#2585).
+    aicr/disable-wait: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}

@@ -1099,7 +1099,7 @@ This one is binding: source-controller will not produce an artifact from an
 `OCIRepository` whose signature fails to verify, so no `HelmRelease` downstream
 of it reconciles. As with Argo CD, what the cluster enforces is your pipeline's
 countersignature, not the AICR attestation. Flux OCI mode also has its own
-prerequisites (Flux v2.7+ with source-watcher and the `ExternalArtifact`
+prerequisites (Flux v2.8+ with source-watcher and the `ExternalArtifact`
 feature gate); see
 [Flux OCI Mode](../user/cli-reference.md#flux-oci-mode) and Flux's
 [OCIRepository verification](https://fluxcd.io/flux/components/source/ocirepositories/).
