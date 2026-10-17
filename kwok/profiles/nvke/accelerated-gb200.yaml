@@ -1,0 +1,43 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVKE GB200 NVL tray as observed on ytl-dev2-dh1-vmaas-nke-poc-r3: 4 GB200
+# per tray (PCI 10de:2941), Grace arm64, Ubuntu 24.04, allocatable cpu 143
+# and ~938Gi. Driver matches the gpu-operator component default.
+apiVersion: aicr.run/v1beta1
+kind: KWOKNodeProfile
+metadata:
+  name: accelerated-gb200
+  labels:
+    provider: nvke
+    nodeType: accelerated
+    accelerator: gb200
+
+spec:
+  instanceType: gb200-nvl-tray
+  arch: arm64
+  osImage: Ubuntu 24.04
+
+  resources:
+    cpu: "143"
+    memory: 938Gi
+    storage: 800Gi
+
+  gpu:
+    product: NVIDIA-GB200
+    count: 4
+    memory: 196608  # MiB per GPU (192GB)
+    driver: "580.173.02"
+    driverMajor: "580"
+    driverMinor: "173"

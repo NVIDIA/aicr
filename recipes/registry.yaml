@@ -418,6 +418,27 @@ components:
         # and before it every NodeWright stalled once auto-taint fired.
         severity: error
 
+  # Loads kernel modules the host image leaves out (rdma_ucm, ib_umad on NVKE) through a
+  # non-interrupting NodeWright CR. Manifest-only; requires nodewright-operator
+  # as a componentRef dependency.
+  - name: rdma-modules
+    displayName: rdma-modules
+    class: core
+    valueOverrideKeys:
+      - rdmamodules
+    healthCheck:
+      assertFile: checks/rdma-modules/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: nodewright
+    nodeScheduling:
+      accelerated:
+        nodeSelectorPaths:
+          - acceleratedNodeSelector
+        tolerationPaths:
+          - acceleratedTolerations
+
   - name: nodewright-customizations
     displayName: nodewright-customizations
     class: core

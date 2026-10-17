@@ -1,0 +1,40 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# network-operator Helm values for GB200 NVKE InfiniBand (shared RDMA).
+#
+# NO ofedDriver, and unlike OKE not because of host MOFED: NVKE hosts run the
+# inbox mlx5_core from the -nvidia-64k kernel and OVN-Kubernetes (the primary
+# CNI, on BlueField-3) is bound to it, so a DOCA driver container unloading
+# that module takes the node's primary address with it. No SR-IOV, nv-ipam or
+# multus either: the four ConnectX-7 IB rails are served by
+# rdmaSharedDevicePlugin from the post-install NicClusterPolicy manifest, NOT
+# the chart. deployCR off so that manifest CR is authoritative.
+# nfd.enabled: false: the standalone nfd component labels Mellanox nodes
+# pci-15b3.present through components/nfd/values-nvidia-nics.yaml.
+deployCR: false
+nvIpam:
+  enabled: false
+secondaryNetwork:
+  deploy: false
+nfd:
+  enabled: false
+operator:
+  resources:
+    limits:
+      cpu: "1"
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi

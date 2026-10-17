@@ -1,0 +1,137 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: gb200-nvke-ubuntu-training
+
+spec:
+  # Bare-metal GB200 NVL trays on NVKE: nothing GPU- or fabric-related is
+  # pre-installed. The host keeps the inbox mlx5_core (OVN-Kubernetes runs on
+  # it via BlueField-3), so the Network Operator ships no ofedDriver and
+  # GPUDirect RDMA is DMA-BUF only. Not chained under gb200-oke-training: that
+  # chain assumes an OCI-managed driver and OKE add-ons.
+  base: nvke
+
+  criteria:
+    service: nvke
+    accelerator: gb200
+    os: ubuntu
+    intent: training
+
+  mixins:
+    - os-ubuntu
+
+  constraints:
+    # Restated from nvke: snapshot resolution checks a leaf's own constraints.
+    # Keeps the GA DRA API (resource.k8s.io/v1, Kubernetes 1.34+) for the
+    # ComputeDomain/IMEX path.
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    # No driver.rdma: GPUDirect RDMA attaches over DMA-BUF. nvidia-peermem has
+    # no build for the 64k-page Grace kernel and needs OFED symbols the inbox
+    # driver does not export. The NVreg_GrdmaPciTopoCheckOverride ConfigMap is
+    # what lets dma-buf attach across the PCIe topology to the IB rails.
+    - name: gpu-operator
+      type: Helm
+      preManifestFiles:
+        - components/gpu-operator/manifests/kernel-module-params.yaml
+      # rdma-modules first: its NodeWright taint-gates the GPU nodes until the
+      # RDMA ULP modules are loaded, which only works if the CR precedes the
+      # operators.
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - prometheus-operator-crds
+        - rdma-modules
+      overrides:
+        gdrcopy:
+          enabled: true
+        driver:
+          enabled: true
+          kernelModuleConfig:
+            name: nvidia-kernel-module-params
+        toolkit:
+          enabled: true
+        devicePlugin:
+          enabled: true
+          # Helm replaces lists: the first two entries restate the component
+          # base values.yaml; this override exists to pin MOFED_ENABLED off so
+          # only pods requesting nvidia.com/mlnxnics receive /dev/infiniband.
+          env:
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-cri,cdi-annotations,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
+
+    - name: nfd
+      type: Helm
+      valuesFile: components/nfd/values-nvidia-nics.yaml
+      overrides:
+        topologyUpdater:
+          enable: true
+
+    # InfiniBand east-west fabric: four ConnectX-7 rails per tray, shared via
+    # rdmaSharedDevicePlugin as nvidia.com/mlnxnics. NicClusterPolicy is
+    # manifest-supplied (chart deployCR off).
+    - name: network-operator
+      type: Helm
+      valuesFile: components/network-operator/values-nvke-gb200.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-nvke-gb200.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - rdma-modules
+
+    # rdma_ucm and ib_umad (the /dev/infiniband/rdma_cm and umad providers) are
+    # not loaded by the NVKE image and no operator loads them without OFED; the
+    # shared device plugin exposes nothing until they are. Ordered before
+    # network-operator and gpu-operator through their dependencyRefs.
+    - name: rdma-modules
+      type: Helm
+      manifestFiles:
+        - components/rdma-modules/manifests/rdma-ulp.yaml
+      dependencyRefs:
+        - nodewright-operator
+
+  # Deployment checks come from the gb200-any criteria-wildcard overlay.
+  validation:
+    performance:
+      checks:
+        - nccl-all-reduce-bw-net
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        # The IB shared-HCA runtime for GB200 on OKE requests the same
+        # nvidia.com/mlnxnics resource this leaf's NicClusterPolicy exposes.
+        - name: nccl-benchmark-profile
+          value: gb200/oke
+        # Thresholds copied from gb200-oke-training until a measured NVKE
+        # baseline exists.
+        - name: nccl-all-reduce-bw-net
+          value: ">= 40"
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 500"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics

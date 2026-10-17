@@ -27,6 +27,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **gatekeeper** | `ops` | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
 | **nodewright-operator** | `core` | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. `v0.18.0` renamed the `Skyhook` API to `NodeWright`; crossing that boundary needs operator steps — see [Upgrade Notes](#nodewright-operator-v0180-renames-skyhook-to-nodewright) below. | [Nodewright](https://github.com/NVIDIA/nodewright) |
 | **nodewright-customizations** | `core` | Environment-specific node tuning profiles applied via Nodewright. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
+| **rdma-modules** | `core` | Loads the in-tree RDMA ULP kernel modules `rdma_ucm` and `ib_umad` (the `/dev/infiniband/rdma_cm` and umad providers the shared RDMA device plugin and NCCL need) as a NodeWright package rendered from a vendored manifest, for host images that ship the inbox RDMA core but load no ULPs and have no OFED to do it. The package taint-gates GPU nodes until the modules are loaded, so the overlays order it before network-operator and gpu-operator through `dependencyRefs`. Ships only in the NVKE overlays. CLI alias: `rdmamodules`. | — |
 | **nvsentinel** | `core` | GPU health monitoring. Detects GPU errors and publishes health events; the components that cordon, drain, reboot or terminate a node are off by default — see [NVSentinel Deployment Posture](#nvsentinel-deployment-posture). On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **psmdb-operator** | `core` | Percona Operator for MongoDB, reconciling `nvsentinel-mongodb`. Watches only the `nvsentinel` namespace; sole owner of the `psmdb.percona.com` CRDs. Added only by the NVSentinel [remediation step mixins](#graded-remediation). CLI alias: `psmdboperator`. | [Percona Operator for MongoDB](https://github.com/percona/percona-server-mongodb-operator) |
 | **nvsentinel-mongodb** | `core` | NVSentinel's health-event datastore: a three-member Percona Server for MongoDB replica set with TLS required and x509 client auth. Added only by the NVSentinel [remediation step mixins](#graded-remediation); requires `--system-node-selector`. CLI alias: `nvsentinelmongodb`. | [Percona Helm charts](https://github.com/percona/percona-helm-charts) |
@@ -680,7 +681,7 @@ NVSentinel watches GPUs, drivers, NVLink and syslog. It does not watch the rest 
 | AKS | enabled by default via the AKS Linux Extension | blocked at bundle time |
 | OKE | ships `oke-node-problem-detector`, disabled behind the `oci.oraclecloud.com/oke-node-problem-detector-enabled=true` node label | blocked — the label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
 | OCP | — | blocked — needs a SecurityContextConstraints binding AICR does not ship |
-| LKE, BCM, Metal3, k0s, MK8s, generic | unverified | blocked until someone confirms they run none |
+| LKE, BCM, Metal3, k0s, MK8s, NVKE, generic | unverified | blocked until someone confirms they run none |
 
 The gate is an allowlist, not a denylist: a platform is permitted only once someone has checked it runs no NPD of its own. To qualify a new one, verify that, then add it to `npdQualifiedServices` in `pkg/bundler/validations/checks.go`.
 
@@ -692,7 +693,7 @@ The gate is an allowlist, not a denylist: a platform is permitted only once some
 | `oke` | Oracle ships one disabled behind a node label; that label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
 | `ocp` | the privileged DaemonSet needs a SecurityContextConstraints binding AICR does not ship — it would bundle cleanly, then fail admission |
 | `os: talos` | `os-talos` relocates privileged components into `privileged-*` namespaces for Pod Security Admission, but not NPD, so it would land in a restricted namespace |
-| `lke`, `bcm`, `metal3`, `k0s`, `mk8s`, `generic` | unverified — nobody has checked whether they run their own |
+| `lke`, `bcm`, `metal3`, `k0s`, `mk8s`, `nvke`, `generic` | unverified — nobody has checked whether they run their own |
 | no criteria at all | the platform is unknown, and could be any of the above |
 
 Each rejection names what would resolve it. Disabling the component explicitly (`--set node-problem-detector:enabled=false`) always skips the gate.

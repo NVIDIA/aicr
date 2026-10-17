@@ -112,12 +112,14 @@ var imageDigestExemptions = map[string]imageDigestExemption{
 	"cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0": {"network-operator/manifests/nic-cluster-policy-nebius-b300", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 	"ghcr.io/mellanox/k8s-rdma-shared-dev-plugin:v1.5.2":                                                               {"network-operator/manifests/nic-cluster-policy-nebius-b300", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 
-	// Skyhook Package (nodewright-customizations no-op): shellscript package
-	// is pinned by tag only — `containerSHA` is not surfaced for this
-	// upstream image. nodewright-packages/* refs are digest-pinned via the
-	// Skyhook Package `containerSHA` field (issue #1031), folded into the
-	// extracted image ref as `@sha256:...` by pkg/bom.ExtractImagesFromYAML.
-	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1": {"nodewright-customizations/manifests/", "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224"},
+	// Skyhook Package (nodewright-customizations no-op, rdma-modules):
+	// shellscript package is pinned by tag only — `containerSHA` is not
+	// surfaced for this upstream image. nodewright-packages/* refs are
+	// digest-pinned via the Skyhook Package `containerSHA` field (issue
+	// #1031), folded into the extracted image ref as `@sha256:...` by
+	// pkg/bom.ExtractImagesFromYAML. The match is on the shared path segment
+	// because both NodeWright-carrying components use the same package.
+	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1": {"/manifests/", "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224"},
 
 	// cos-gpu-installer (gcp-driver-installer): node-local image preloaded on
 	// every COS node and referenced with imagePullPolicy: Never — there is no

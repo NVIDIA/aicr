@@ -30,6 +30,7 @@ This section is for integrators who:
 | [RKE2 VR200 Setup](rke2-vr200-setup.md) | Bare-metal RKE2 setup for the VR200 (Vera Rubin) NVL72 Preview coordinates: cluster prerequisites (K8s window, StorageClass, LoadBalancer, host `nvidia-imex` mask), Skyhook reboot behavior, and known gaps |
 | [Nebius B300 Inference](nebius-b300.md) | MK8s reference configuration, operator ownership, shared RDMA and qualification limits |
 | [k0s H200 Setup](k0s-h200-setup.md) | k0s setup for the H200 training Preview coordinate: host-provided driver posture, k0s's bundled containerd wiring, StorageClass note, and known gaps |
+| [NVKE GB200 Setup](nvke-gb200-setup.md) | NVKE (Forge/NICo) GB200 training Preview coordinate: inbox-driver posture (no DOCA-OFED, DMA-BUF GPUDirect), shared-RDMA InfiniBand fabric, RDMA ULP module loading via nodewright, and known gaps |
 | [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
 | [OpenShift Deployment](openshift.md) | OpenShift/OCP-specific Helm and OLM integration and two-phase operator deployment |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
