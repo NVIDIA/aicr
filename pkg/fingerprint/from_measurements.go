@@ -31,6 +31,7 @@ import (
 const (
 	serviceOKE              = "oke"
 	serviceLKE              = "lke"
+	serviceNVKE             = "nvke"
 	subtypeK8sServer        = "server"
 	subtypeK8sNode          = "node"
 	subtypeGPUHardware      = "hardware"
@@ -445,6 +446,9 @@ func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 // Akamai Cloud / Linode LKE nodes carry "linode://<instance-id>"; the collector
 // normalizes this to "lke" via parseProvider, but hand-crafted snapshots may
 // carry the raw "linode://..." URL or the bare "linode" string.
+//
+// NVIDIA Kubernetes Engine (Forge/NICo bare metal) nodes carry "nico://<uuid>",
+// normalized to "nvke" the same way.
 func normalizeProviderID(v string) string {
 	if strings.HasPrefix(v, "ocid1.") {
 		return serviceOKE
@@ -460,6 +464,12 @@ func normalizeProviderID(v string) string {
 	}
 	if v == "linode" {
 		return serviceLKE
+	}
+	if strings.HasPrefix(v, "nico://") {
+		return serviceNVKE
+	}
+	if v == "nico" {
+		return serviceNVKE
 	}
 	return v
 }

@@ -1,0 +1,116 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Loads the in-tree RDMA ULP modules rdma_ucm (pulls in rdma_cm) and ib_umad
+# on Mellanox-NIC nodes and persists them via modules-load.d. Needed where the
+# RDMA stack is the inbox kernel driver with no OFED: nothing else loads them
+# (the GPU Operator only sets nvidia module parameters, the Network Operator
+# only loads modules through ofedDriver), and the RDMA shared device plugin
+# advertises 0 devices until /dev/infiniband has the rdma_cm and umad nodes
+# they create. This is rdma-core's infiniband.conf/rdma.conf set without
+# ib_ipoib (no IPoIB netdevs on the rails) and without the iSER/NFS ULPs.
+# The modules load live, so the package has no interrupt and the CR no
+# interruptionBudget; runtimeRequired still taint-gates GPU nodes until they
+# are present so the RDMA device plugin and workloads do not start against an
+# incomplete /dev/infiniband. Host images that ship rdma-core or this conf make
+# the package a no-op.
+#
+# Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
+{{- $rdma := index .Values "rdma-modules" }}
+{{- if ne (toString (index $rdma "enabled")) "false" }}
+---
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
+metadata:
+  annotations:
+    # No Helm hooks: release-managed so that disabling the component retracts
+    # the CR (see tuning-rke2.yaml). CRD ordering comes from the component
+    # dependency on nodewright-operator.
+    aicr/skip-hook-validation: "true"
+  labels:
+    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/created-by: aicr
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+  name: rdma-modules
+  namespace: {{ .Release.Namespace }}
+spec:
+  runtimeRequired: true
+  # Default: true. Disable with --set rdmamodules:autoTaintNewNodes=false
+  {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
+  autoTaintNewNodes: {{ ne (toString (index $rdma "autoTaintNewNodes")) "false" }}
+  # Dynamic: Supports --accelerated-node-toleration CLI flag
+  additionalTolerations:
+    {{- if $rdma.acceleratedTolerations }}
+    {{- toYaml $rdma.acceleratedTolerations | nindent 4 }}
+    {{- else }}
+    - operator: Exists
+    {{- end }}
+  # Dynamic: Supports --accelerated-node-selector CLI flag. The fallback is the
+  # Mellanox-NIC cohort the NicClusterPolicy DaemonSets use (nfd-worker rule in
+  # components/nfd/values-nvidia-nics.yaml); nfd is ordered before this
+  # component through the network-operator dependency chain.
+  nodeSelectors:
+    matchLabels:
+      {{- if $rdma.acceleratedNodeSelector }}
+      {{- toYaml $rdma.acceleratedNodeSelector | nindent 6 }}
+      {{- else }}
+      feature.node.kubernetes.io/pci-15b3.present: "true"
+      {{- end }}
+    # Control-plane nodes are excluded even when the selector matches them
+    # (NVKE control planes carry a BlueField-3, so pci-15b3.present is true):
+    # the runtime-required auto-taint is applied to every selected node, but
+    # the package pods do not tolerate the control-plane taint, so the node
+    # is skipped as TaintNotTolerable and its auto-taint is never cleared.
+    matchExpressions:
+      - key: node-role.kubernetes.io/control-plane
+        operator: DoesNotExist
+  packages:
+    rdma-ulp:
+      image: ghcr.io/nvidia/skyhook-packages/shellscript
+      version: "1.1.1"
+      containerSHA: sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf
+      # config.sh repeats apply.sh: Skyhook runs apply once per node and only
+      # the config stage on a configMap edit, so a module-list change would
+      # otherwise never reach nodes already marked complete.
+      configMap:
+        apply.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          printf 'rdma_ucm\nib_umad\n' > /etc/modules-load.d/aicr-rdma-ulp.conf
+          modprobe rdma_ucm
+          modprobe ib_umad
+        apply_check.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          grep -qx 'rdma_ucm' /etc/modules-load.d/aicr-rdma-ulp.conf
+          grep -qx 'ib_umad' /etc/modules-load.d/aicr-rdma-ulp.conf
+          grep -q '^rdma_ucm ' /proc/modules
+          grep -q '^ib_umad ' /proc/modules
+          test -c /dev/infiniband/rdma_cm
+        config.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          printf 'rdma_ucm\nib_umad\n' > /etc/modules-load.d/aicr-rdma-ulp.conf
+          modprobe rdma_ucm
+          modprobe ib_umad
+        config_check.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          grep -qx 'rdma_ucm' /etc/modules-load.d/aicr-rdma-ulp.conf
+          grep -qx 'ib_umad' /etc/modules-load.d/aicr-rdma-ulp.conf
+          grep -q '^rdma_ucm ' /proc/modules
+          grep -q '^ib_umad ' /proc/modules
+          test -c /dev/infiniband/rdma_cm
+{{- end }}

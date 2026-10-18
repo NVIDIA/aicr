@@ -2018,7 +2018,7 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			{Operator: v1.TolerationOpExists},
 			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 		}, nil
-	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS, recipe.CriteriaServiceGeneric:
+	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS, recipe.CriteriaServiceGeneric, recipe.CriteriaServiceNVKE:
 		// These services share one shape: tainted GPU pools whose nodes carry
 		// GFD labels. Tolerate the pool taint and pin workers to the
 		// gpu.product label that resolveTargetGPUNodes → narrowByAccelerator

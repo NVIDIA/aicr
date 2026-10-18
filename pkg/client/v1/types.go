@@ -253,7 +253,7 @@ type AgentConfig struct {
 // upstream pkg/recipe.Criteria via WrapCriteria.
 //
 // Field meanings match the pkg/recipe.Criteria documentation:
-//   - Service: Kubernetes service flavor (eks/gke/aks/oke/ocp/kind/lke/bcm/metal3/rke2/generic/k0s/mk8s).
+//   - Service: Kubernetes service flavor (eks/gke/aks/oke/ocp/kind/lke/bcm/metal3/rke2/generic/k0s/mk8s/nvke).
 //   - Accelerator: GPU model identifier (h100/h200/b200/b300/gb200/gb300/a100/l40/l40s/rtx-pro-6000/vr200).
 //   - Intent: workload intent (training/inference).
 //   - OS: worker-node OS (ubuntu/rhel/cos/amazonlinux/talos/ol).
