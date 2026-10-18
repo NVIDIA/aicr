@@ -1523,7 +1523,7 @@ gb200-nvke-ubuntu-training:
   008-rdma-modules/Chart.yaml: 3bc76958add2f2cb30621de5fd77a5a282f1ff50e01a12abb5b9791be266d428
   008-rdma-modules/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-rdma-modules/install.sh: 949b915690561a3ad8240ddd528622c3d01bf2ea3fe2c5d5fb5f0dd10e86e4ea
-  008-rdma-modules/templates/rdma-ulp.yaml: 2b5f2825e6e86761c831991b811f5e2e655f11d409bf8a1fc541993e9da490dc
+  008-rdma-modules/templates/rdma-ulp.yaml: c50bb1b0b8256ef7887ce3bfeb767a8e88fbed6a85bc439bfb49fd38b3cff2a3
   008-rdma-modules/values.yaml: db77cadff69bf611dac908b82f55cde39d93826732afa6ead32924d78f361be3
   009-gpu-operator-pre/Chart.yaml: 99c1631dd612ba140df89fd235197a0b7c858017201d25ec686c48f2a20ae4f4
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -1541,12 +1541,12 @@ gb200-nvke-ubuntu-training:
   012-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   012-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  012-network-operator/values.yaml: be37a816af4846ba67ddc1ff0cf319384cdbbe776cf632d5b5108a575a911c9d
+  012-network-operator/values.yaml: ce3b53dfca383d9443717cde86e0f5d1e882c022bf902f04a0bed9517458d831
   013-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   013-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  013-network-operator-post/templates/nic-cluster-policy-nvke-gb200.yaml: 3cf6aab53d99d529609d180936ebebdc37710bb408c819712b5f7e8cb9471062
-  013-network-operator-post/values.yaml: be37a816af4846ba67ddc1ff0cf319384cdbbe776cf632d5b5108a575a911c9d
+  013-network-operator-post/templates/nic-cluster-policy-nvke-gb200.yaml: f31d3c0daf7817f27d087f2b64bf0a37170b21296bdb9758c9e5fc386d629705
+  013-network-operator-post/values.yaml: ce3b53dfca383d9443717cde86e0f5d1e882c022bf902f04a0bed9517458d831
   014-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -1556,12 +1556,17 @@ gb200-nvke-ubuntu-training:
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
   015-nvsentinel/values.yaml: 2d7d0fb3d9a11c0250b6564e2e6b9d7695fc460efb3bdbe8b1dbb91e80264915
-  README.md: 49043ef6f4606dc5c213ed461894df1d4b0e448ab058f7808db1088475ec5336
+  016-sriov-ib-networks/Chart.yaml: cf11fef32f24b6aefc8716a9431095cfb684127211b920f22faa6070114dd946
+  016-sriov-ib-networks/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  016-sriov-ib-networks/install.sh: 8f4bff183a9169f137fd0c47dc059b67b1fa6121531af7d3000b093de7c277fc
+  016-sriov-ib-networks/templates/nvke-gb200.yaml: a4f1de76967bb0cd9c1fe68bd16c646420750f11e54d7210d410479457400a03
+  016-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  README.md: ed5dcff397d780ef3f37a3d55055f2d89dbf0170fdce55cd83030ecd2236d5e2
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
-  bundle-info.yaml: 881af8d5477f9f04446c7fcfe765ad8d2f97eabac075f04acd25964e1a1071ad
-  checksums.txt: 7f19ca1c2ef71c929cd7a86eea6985aeabb4aafd24f991b7ea033bf390bf7cd6
-  deploy.sh: 3efe775a0c7dc8068b59ee6a0aded809d176a03df65aebe78fe99353f2b76519
-  recipe.yaml: 408622fd27f8f46a1c96010f4cb9129fa445f796695bd4cb84f351e54c8cb62c
+  bundle-info.yaml: 1e9e1f0cac27afb0b2509fad49cff0fb54f894aeed3af351941ff14b0d7349e0
+  checksums.txt: 85802534d733a9c14385f01b6f94672f9406657de6de74af98f4ee8a3fd36c44
+  deploy.sh: 6b1ca68f57b4def8a85283654c51c54dbaf71c4969ecca1720e71893fb47d81a
+  recipe.yaml: 1aad7da619d4194f781359a2cced5c8cba89ed57e6c6818017c0c1d754d0856f
 gb200-oke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

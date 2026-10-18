@@ -12,17 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# network-operator Helm values for GB200 NVKE InfiniBand (shared RDMA).
+# network-operator Helm values for GB200 NVKE InfiniBand (SR-IOV).
 #
 # NO ofedDriver, and unlike OKE not because of host MOFED: NVKE hosts run the
 # inbox mlx5_core from the -nvidia-64k kernel and OVN-Kubernetes (the primary
 # CNI, on BlueField-3) is bound to it, so a DOCA driver container unloading
-# that module takes the node's primary address with it. No SR-IOV, nv-ipam or
-# multus either: the four ConnectX-7 IB rails are served by
-# rdmaSharedDevicePlugin from the post-install NicClusterPolicy manifest, NOT
-# the chart. deployCR off so that manifest CR is authoritative.
-# nfd.enabled: false: the standalone nfd component labels Mellanox nodes
-# pci-15b3.present through components/nfd/values-nvidia-nics.yaml.
+# that module takes the node's primary address with it. The SR-IOV operator
+# creates the IB VFs on that inbox driver through sysfs.
+#
+# Shape follows k8s-launch-kit `generate --deployment-type sriov --fabric
+# infiniband` for this topology, except: the chart's NFD stays off (the
+# standalone nfd component labels Mellanox nodes pci-15b3.present through
+# components/nfd/values-nvidia-nics.yaml), and the Maintenance Operator budget
+# is 1 because the reference cluster has two GPU trays.
+#
+# externalDrainer and useDrainControllerRequestor are a pair: the operator's
+# drain controller ignores SriovNetworkNodeStates that the SR-IOV operator did
+# not mark for an external drainer, and the config daemon never applies VFs
+# without a completed drain. Both need the Maintenance Operator CRDs, so
+# maintenanceOperator is on.
+#
+# nvIpam and secondaryNetwork are off in the chart because the post-install
+# NicClusterPolicy manifest carries nvIpam (deployCR off so that manifest is
+# authoritative). No multus or cniPlugins anywhere: NVKE preinstalls multus
+# and the reference CNI plugins on every node.
 deployCR: false
 nvIpam:
   enabled: false
@@ -31,6 +44,9 @@ secondaryNetwork:
 nfd:
   enabled: false
 operator:
+  maintenanceOperator:
+    useRequestor: true
+    useDrainControllerRequestor: true
   resources:
     limits:
       cpu: "1"
@@ -38,3 +54,19 @@ operator:
     requests:
       cpu: 500m
       memory: 2Gi
+maintenanceOperator:
+  enabled: true
+maintenance-operator-chart:
+  operatorConfig:
+    deploy: true
+    maxParallelOperations: "1"
+    maxUnavailable: "1"
+    maxNodeMaintenanceTimeSeconds: "3600"
+sriovNetworkOperator:
+  enabled: true
+sriov-network-operator:
+  operator:
+    externalDrainer:
+      enabled: true
+  sriovOperatorConfig:
+    deploy: true

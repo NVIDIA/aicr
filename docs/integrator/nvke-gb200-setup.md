@@ -29,17 +29,30 @@ Ubuntu 24.04 with NVIDIA's `-nvidia-64k` kernel. It is a Preview coordinate.
   cluster-scoped charts or expect pods to stay Pending on
   `Insufficient nvidia.com/asap2_vf`.
 - East-west fabric: four ConnectX-7 InfiniBand rails per tray (`mlx5_0`,
-  `mlx5_1`, `mlx5_3`, `mlx5_4`), active NDR, no IPoIB netdevs. `mlx5_2` is the
-  BlueField-3 host representor.
-- `rdma_ucm` and `ib_umad` (which create `/dev/infiniband/rdma_cm` and the
-  `umad`/`issm` nodes the RDMA device plugin requires) are not loaded by the
-  NVKE image and `rdma-core` is not installed; the recipe's `rdma-modules`
-  component loads them (see below). A modules-load.d entry for both in the
-  image makes that component a no-op. Installing `rdma-core` instead also
-  works but is not equivalent: its udev rules tag every `mlx5_core` RDMA
-  device as InfiniBand and load `/etc/rdma/modules/infiniband.conf`
-  (`ib_ipoib`, `ib_umad`) and `rdma.conf` (`ib_iser`, `ib_uverbs`, `rdma_ucm`,
-  `xprtrdma`, `svcrdma`), so IPoIB netdevs appear on all four rails.
+  `mlx5_1`, `mlx5_3`, `mlx5_4`), active NDR, no IPoIB netdevs until the recipe
+  loads `ib_ipoib`. `mlx5_2` is the BlueField-3 host representor. Firmware
+  enables SR-IOV with `NUM_OF_VFS` 16 per PF (`sriov_totalvfs`), which is
+  the count the recipe requests (see below).
+- The fabric Subnet Manager must make the GPU host ports **full members** of
+  their partition. On the reference cluster every rail's P_Key table held
+  only `0x7fff` (limited membership), which leaves links up and LIDs assigned
+  while every RDMA connection between hosts fails with retry-exceeded, even
+  same-tray loopback through the switch. Check
+  `/sys/class/infiniband/mlx5_0/ports/1/pkeys/0`: `0xffff` is required. VFs
+  inherit the PF's membership, so this applies to the SR-IOV VFs too.
+- `rdma_ucm`, `ib_umad` and `ib_ipoib` are not loaded by the NVKE image and
+  `rdma-core` is not installed (the modules ship in
+  `linux-modules-<kernel>`); the recipe's `rdma-modules` component loads them
+  (see below). A modules-load.d entry for all three in the image makes that
+  component a no-op. Installing `rdma-core` instead also works: its udev rules
+  load `/etc/rdma/modules/infiniband.conf` (`ib_ipoib`, `ib_umad`) and
+  `rdma.conf` (`ib_iser`, `ib_uverbs`, `rdma_ucm`, `xprtrdma`, `svcrdma`), a
+  superset of what the recipe loads.
+- Multus and the reference CNI plugins are preinstalled by NVKE
+  (`kube-system/multus-ds`, `/opt/cni/bin`), as is a `sriov-device-plugin`
+  that partitions the BlueField-3 VFs. The recipe installs neither; the
+  SR-IOV operator's NetworkAttachmentDefinitions are served by the platform
+  multus, and its policies select only the ConnectX-7 root devices.
 
 ## Never install DOCA-OFED on these nodes
 
@@ -58,29 +71,73 @@ sets no `driver.rdma` value (no `nvidia-peermem`, which has no build for the
 `kernel-module-params` ConfigMap, which the `nccl-all-reduce-bw-net` preflight
 requires.
 
-## Shared RDMA
+## SR-IOV InfiniBand
 
-The NicClusterPolicy exposes the four IB HCAs as one shared resource,
-`nvidia.com/mlnxnics`, with 63 allocations per node, selecting by PCI vendor
-and device (`15b3`/`1021`) because the IB ports have no netdevs and the
-BlueField-3 shares the vendor. An allocation exposes all four HCAs; it does
-not reserve a NIC. No nv-ipam, IPPool, multus or IPoIB network is deployed.
-NCCL picks the rails directly (`NCCL_IB_HCA`). An SR-IOV variant (8 IB VFs per
-rail, `SriovIBNetwork` + nv-ipam) is the planned follow-up; shared RDMA is
-qualified first because it does not depend on the primary CNI's handling of
-VF netdevs.
+The Network Operator chart enables the SR-IOV Network Operator and the
+Maintenance Operator (external drainer, one node at a time). The
+NicClusterPolicy carries only `nvIpam`. Per rail, the `sriov-ib-networks`
+component (manifest-only, ordered after `network-operator` because the
+nv-ipam CRDs appear only once the NicClusterPolicy is reconciled) supplies
+one nv-ipam `IPPool`
+(`192.168.<4n>.0/22`), one `SriovNetworkNodePolicy` (`linkType: IB`,
+`isRdma: true`, `deviceType: netdevice`, `numVfs: 16`, selected by the rail's
+PCI root device) and one `SriovIBNetwork` whose NetworkAttachmentDefinition
+lands in `default`. Nodes advertise `nvidia.com/sriov_resource_rail_0` to
+`_3`, 16 each. A pod takes one VF per rail and the matching attachments:
+
+```yaml
+metadata:
+  annotations:
+    k8s.v1.cni.cncf.io/networks: default/sriov-network-rail-0,default/sriov-network-rail-1,default/sriov-network-rail-2,default/sriov-network-rail-3
+spec:
+  containers:
+    - resources:
+        limits:
+          nvidia.com/sriov_resource_rail_0: 1
+          nvidia.com/sriov_resource_rail_1: 1
+          nvidia.com/sriov_resource_rail_2: 1
+          nvidia.com/sriov_resource_rail_3: 1
+```
+
+This is the shape k8s-launch-kit generates for
+`--deployment-type sriov --fabric infiniband` on this topology, minus its
+`secondaryNetwork.multus`/`cniPlugins` (preinstalled on NVKE, see above) and
+with the Maintenance Operator budget set to one node, and with `numVfs`
+raised from l8k's 8 to the firmware's 16. That last point matters: the
+config daemon's Mellanox plugin rewrites firmware `NUM_OF_VFS` to exactly
+`numVfs` and then runs `mstfwreset -l 3`, which this tray's firmware rejects
+("not supported in the current state of this device"), so a policy that
+differs from the firmware count drains the node and then loops on the reset
+with the node cordoned. With the counts equal, VF creation is a sysfs write
+and no drain or reboot happens. Check `mstconfig -d <pf> q NUM_OF_VFS` before
+changing `numVfs`. The policies and pools select nodes by
+`feature.node.kubernetes.io/rdma.available=true` rather than
+`pci-15b3.present`: the control plane carries that label (and
+`pci-0302_10de.present`) without any ConnectX-7, and when it was selected
+the operator placed a device-plugin pod there whose init container waited
+forever, which the `expected-resources` check flags. Enabling the
+SR-IOV subchart on a Network Operator release that was installed without it
+needs `charts/sriov-network-operator/crds` applied first: Helm installs a
+subchart's CRDs only on a fresh install, and validates the rendered
+`SriovOperatorConfig` before the chart's own CRD-upgrade hook runs.
+
+A shared-HCA variant (`rdmaSharedDevicePlugin`, one pooled `nvidia.com/mlnxnics`
+resource over the PFs, no IPoIB) was qualified first on the same cluster and
+passed the deployment and conformance phases; it lives in this recipe's
+history before the SR-IOV switch for anyone who needs a VF-free fallback.
 
 ## rdma-modules and node tainting
 
 `rdma-modules` is a manifest-only component carrying one `NodeWright` CR that
-loads `rdma_ucm` and `ib_umad` and writes `/etc/modules-load.d/aicr-rdma-ulp.conf` on
-every `pci-15b3.present` node that is not a control-plane node (the control
-plane also carries a BlueField-3; an auto-tainted node whose taints the
-package cannot tolerate would otherwise stay tainted). The package has no
-interrupt (no cordon, drain
-or reboot). `runtimeRequired: true` with `autoTaintNewNodes` lets nodewright
-taint GPU nodes until the module is loaded, so the RDMA device plugin and GPU
-workloads never start against an empty `/dev/infiniband`. Pass the accelerated
+loads `rdma_ucm`, `ib_umad` and `ib_ipoib` and writes
+`/etc/modules-load.d/aicr-rdma-ulp.conf` on every `pci-15b3.present` node that
+is not a control-plane node (the control plane also carries a BlueField-3; an
+auto-tainted node whose taints the package cannot tolerate would otherwise
+stay tainted). The package has no interrupt (no cordon, drain or reboot).
+`runtimeRequired: true` with `autoTaintNewNodes` lets nodewright taint GPU
+nodes until the modules are loaded, so the SR-IOV config daemon and GPU
+workloads never start against an empty `/dev/infiniband` or VFs without
+IPoIB netdevs. Pass the accelerated
 node selector and toleration at bundle time so the CR, the NicClusterPolicy
 DaemonSets and GPU Operator agree on the cohort:
 
@@ -93,7 +150,7 @@ aicr bundle --recipe recipe.yaml \
 
 Disable the taint with `--set rdmamodules:autoTaintNewNodes=false`, or the
 whole component with `--set rdmamodules:enabled=false` on images that already
-load both modules.
+load all three modules.
 
 ## Generate and validate
 
@@ -106,13 +163,20 @@ aicr validate --recipe bundle/recipe.yaml
 ```
 
 Performance thresholds are copied from the GB200 OKE recipe until an NVKE
-baseline is measured; the benchmark runs the `gb200/oke` IB shared-HCA runtime
-through the `nccl-benchmark-profile` constraint. Record the measured peak in
-qualification evidence before re-flooring.
+baseline is measured. The `nccl-benchmark-profile` constraint still names the
+`gb200/oke` runtime, whose workers request `nvidia.com/mlnxnics`; this leaf
+no longer exposes that resource, so the performance phase cannot schedule
+until a `gb200/nvke` runtime requesting the per-rail VFs and attachments is
+added to the validator. Record the measured peak in qualification evidence
+before re-flooring.
 
 ## Known gaps
 
-- Shared RDMA only; SR-IOV and IPoIB secondary networks are not yet provided.
+- No `gb200/nvke` NCCL runtime yet; the performance phase does not run on this
+  leaf.
+- The reference fabric has not passed RDMA traffic (limited P_Key membership,
+  see prerequisites), so neither the SR-IOV nor the earlier shared-HCA shape
+  has NCCL evidence.
 - `nccl-all-reduce-bw-nvls` is declared but unproven on NVL4 trays without an
   NVSwitch; drop it from the recipe if the cluster has no NVLink fabric.
 - No published evidence yet.

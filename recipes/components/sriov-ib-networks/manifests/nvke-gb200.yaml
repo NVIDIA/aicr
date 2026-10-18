@@ -1,0 +1,336 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# SR-IOV InfiniBand rails for GB200 NVKE: per rail one nv-ipam IPPool, one
+# SriovNetworkNodePolicy and one SriovIBNetwork, as k8s-launch-kit generates
+# for `--deployment-type sriov --fabric infiniband` on this topology.
+#
+# Rail layout is from the reference tray's NetworkTopology snapshot (one
+# ConnectX-7 PF per PCI segment; mlx5_2 is the BlueField-3 and is not a rail):
+#   rail 0  0000:03:00.0  mlx5_0
+#   rail 1  0002:03:00.0  mlx5_1
+#   rail 2  0010:03:00.0  mlx5_3
+#   rail 3  0012:03:00.0  mlx5_4
+# numVfs 16 is the CX-7 firmware's NUM_OF_VFS on these trays (k8s-launch-kit
+# proposes 8). The config daemon's Mellanox plugin rewrites firmware to
+# exactly numVfs and then needs a firmware reset, which this SKU rejects
+# (mstfwreset level 3 "not supported in the current state"), leaving the node
+# cordoned forever; matching the firmware count keeps the plugin out of the
+# firmware and VF creation is a sysfs write with no drain or reboot.
+# The IPPool subnets are IPoIB-only on the isolated IB fabric.
+# The VF netdevs are IPoIB children, so ib_ipoib must be loaded on the host
+# (rdma-modules component).
+#
+# Node selection is rdma.available (NFD: an RDMA device is present), not the
+# pci-15b3.present label the NicClusterPolicy uses: NVKE control planes carry
+# a BlueField-3 and even pci-0302_10de.present without any ConnectX-7, and a
+# selected node without the root devices gets a device-plugin pod whose init
+# container waits forever for a config that never comes.
+#
+# Namespaces: the pools and node policies live in the Network Operator's
+# namespace; the SriovIBNetworks render their NetworkAttachmentDefinitions
+# into `default`, where workloads reference them as
+# default/sriov-network-rail-<n>.
+#
+# Its own component, not a network-operator manifestFile: the nv-ipam CRDs
+# are created by the operator while it reconciles a NicClusterPolicy with
+# nvIpam, and Helm validates every document of a release before applying
+# any, so IPPools in the NicClusterPolicy's release can never apply. The
+# SR-IOV CRDs come from the chart's sriov-network-operator subchart on
+# install; Helm does not add them when the subchart is enabled on an
+# existing release (apply charts/sriov-network-operator/crds first).
+# Spelled out per rail: the manifest renderer has no range/list functions.
+{{- $sriov := index .Values "sriov-ib-networks" }}
+{{- if ne (toString (index $sriov "enabled")) "false" }}
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-0
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 192.168.0.0/22
+  perNodeBlockSize: 10
+  gateway: 192.168.0.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: infiniband-sriov-rail-0
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  mtu: 4000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "0000:03:00.0"
+  linkType: IB
+  isRdma: true
+  numVfs: 16
+  priority: 90
+  resourceName: sriov_resource_rail_0
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovIBNetwork
+metadata:
+  name: sriov-network-rail-0
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-0"
+    }
+  resourceName: sriov_resource_rail_0
+  linkState: enable
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-1
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 192.168.4.0/22
+  perNodeBlockSize: 10
+  gateway: 192.168.4.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: infiniband-sriov-rail-1
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  mtu: 4000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "0002:03:00.0"
+  linkType: IB
+  isRdma: true
+  numVfs: 16
+  priority: 90
+  resourceName: sriov_resource_rail_1
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovIBNetwork
+metadata:
+  name: sriov-network-rail-1
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-1"
+    }
+  resourceName: sriov_resource_rail_1
+  linkState: enable
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-2
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 192.168.8.0/22
+  perNodeBlockSize: 10
+  gateway: 192.168.8.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: infiniband-sriov-rail-2
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  mtu: 4000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "0010:03:00.0"
+  linkType: IB
+  isRdma: true
+  numVfs: 16
+  priority: 90
+  resourceName: sriov_resource_rail_2
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovIBNetwork
+metadata:
+  name: sriov-network-rail-2
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-2"
+    }
+  resourceName: sriov_resource_rail_2
+  linkState: enable
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-3
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 192.168.12.0/22
+  perNodeBlockSize: 10
+  gateway: 192.168.12.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: infiniband-sriov-rail-3
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  mtu: 4000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "0012:03:00.0"
+  linkType: IB
+  isRdma: true
+  numVfs: 16
+  priority: 90
+  resourceName: sriov_resource_rail_3
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovIBNetwork
+metadata:
+  name: sriov-network-rail-3
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-3"
+    }
+  resourceName: sriov_resource_rail_3
+  linkState: enable
+  networkNamespace: default
+{{- end }}

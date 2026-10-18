@@ -15,7 +15,7 @@
 # rdma-modules Health Check
 #
 # Asserts the rdma-modules NodeWright CR reports status.status "complete", i.e.
-# rdma_ucm and ib_umad are loaded on every matching node. Named, unlike the
+# rdma_ucm, ib_umad and ib_ipoib are loaded on every matching node. Named, unlike the
 # nodewright-customizations check: this component renders exactly one CR.
 # Suppressed by the deployment validator when the component's values render
 # no CR (`--set rdmamodules:enabled=false`), same mechanism as

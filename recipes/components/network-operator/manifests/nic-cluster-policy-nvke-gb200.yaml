@@ -12,21 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NicClusterPolicy for GB200 NVKE — rdmaSharedDevicePlugin over InfiniBand.
+# NicClusterPolicy for GB200 NVKE — SR-IOV InfiniBand.
 #
 # No ofedDriver: the host's inbox mlx5_core carries OVN-Kubernetes on the
 # BlueField-3, so it must never be replaced (see values-nvke-gb200.yaml).
 #
-# The four ConnectX-7 rails (PCI device 1021) run IB without IPoIB, so they
-# have RDMA devices but no netdevs; the plugin therefore selects by
-# vendor/deviceID, not ifNames or linkTypes. deviceID 1021 also excludes the
-# BlueField-3 (same vendor, Ethernet, OVN's uplink). One shared resource,
-# nvidia.com/mlnxnics, matches the OKE GB200 IB path so the same NCCL
-# benchmark runtime applies. k8s-launch-kit's ipoib-rdma-shared profile
-# instead emits one rdma_shared_resource_rail_<n> per rail keyed on IPoIB
-# ifNames; that per-rail form is the SR-IOV/IPoIB follow-up.
-# periodicUpdateInterval: the plugin exposes 0 devices until rdma_ucm and ib_umad are loaded
-# (the rdma-modules component loads it after this DaemonSet may have started).
+# Only nvIpam here. The four ConnectX-7 IB rails are exposed as VFs by the
+# sriov-ib-networks component, whose SriovIBNetworks reference the nv-ipam
+# pools for the IPoIB addresses. No secondaryNetwork.multus or
+# cniPlugins: NVKE preinstalls multus and the reference CNI plugins on every
+# node, and a second multus would rewrite the host's multus config.
+# No ibKubernetes: VF partition membership follows the fabric SM's policy for
+# the PF GUIDs, which this recipe has no UFM access to set.
 apiVersion: mellanox.com/v1alpha1
 kind: NicClusterPolicy
 metadata:
@@ -54,25 +51,11 @@ spec:
               operator: In
               values:
                 - "true"
-  rdmaSharedDevicePlugin:
-    image: k8s-rdma-shared-dev-plugin
+  nvIpam:
+    image: nvidia-k8s-ipam
     repository: nvcr.io/nvidia/mellanox
     version: network-operator-v26.7.0
-    config: |
-      {
-        "periodicUpdateInterval": 60,
-        "configList": [
-          {
-            "resourcePrefix": "nvidia.com",
-            "resourceName": "mlnxnics",
-            "rdmaHcaMax": 63,
-            "selectors": {
-              "vendors": ["15b3"],
-              "deviceIDs": ["1021"]
-            }
-          }
-        ]
-      }
+    enableWebhook: false
   deploymentTolerations:
     - key: CriticalAddonsOnly
       operator: Exists

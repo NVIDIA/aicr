@@ -71,7 +71,7 @@ spec:
           enabled: true
           # Helm replaces lists: the first two entries restate the component
           # base values.yaml; this override exists to pin MOFED_ENABLED off so
-          # only pods requesting nvidia.com/mlnxnics receive /dev/infiniband.
+          # only pods requesting an SR-IOV rail VF receive /dev/infiniband.
           env:
             - name: DP_DISABLE_HEALTHCHECKS
               value: "109"
@@ -87,9 +87,11 @@ spec:
         topologyUpdater:
           enable: true
 
-    # InfiniBand east-west fabric: four ConnectX-7 rails per tray, shared via
-    # rdmaSharedDevicePlugin as nvidia.com/mlnxnics. NicClusterPolicy is
-    # manifest-supplied (chart deployCR off).
+    # InfiniBand east-west fabric: four ConnectX-7 rails per tray, each exposed
+    # as 8 IB VFs (nvidia.com/sriov_resource_rail_<n>) with an IPoIB address
+    # from nv-ipam, on the inbox driver. NicClusterPolicy is manifest-supplied
+    # (chart deployCR off); the per-rail SR-IOV objects follow in
+    # sriov-ib-networks.
     - name: network-operator
       type: Helm
       valuesFile: components/network-operator/values-nvke-gb200.yaml
@@ -100,9 +102,16 @@ spec:
         - cert-manager
         - rdma-modules
 
-    # rdma_ucm and ib_umad (the /dev/infiniband/rdma_cm and umad providers) are
-    # not loaded by the NVKE image and no operator loads them without OFED; the
-    # shared device plugin exposes nothing until they are. Ordered before
+    - name: sriov-ib-networks
+      type: Helm
+      manifestFiles:
+        - components/sriov-ib-networks/manifests/nvke-gb200.yaml
+      dependencyRefs:
+        - network-operator
+
+    # rdma_ucm, ib_umad and ib_ipoib are not loaded by the NVKE image and no
+    # operator loads them without OFED; without ib_ipoib the IB VFs have no
+    # netdev for the SR-IOV CNI to hand to pods. Ordered before
     # network-operator and gpu-operator through their dependencyRefs.
     - name: rdma-modules
       type: Helm
@@ -118,8 +127,10 @@ spec:
         - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls
       constraints:
-        # The IB shared-HCA runtime for GB200 on OKE requests the same
-        # nvidia.com/mlnxnics resource this leaf's NicClusterPolicy exposes.
+        # Placeholder: the gb200/oke runtime requests nvidia.com/mlnxnics,
+        # which this leaf no longer exposes, so the performance phase cannot
+        # schedule until a gb200/nvke runtime requesting the per-rail
+        # sriov_resource_rail_<n> VFs and the SriovIBNetwork attachments lands.
         - name: nccl-benchmark-profile
           value: gb200/oke
         # Thresholds copied from gb200-oke-training until a measured NVKE

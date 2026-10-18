@@ -12,19 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Loads the in-tree RDMA ULP modules rdma_ucm (pulls in rdma_cm) and ib_umad
-# on Mellanox-NIC nodes and persists them via modules-load.d. Needed where the
-# RDMA stack is the inbox kernel driver with no OFED: nothing else loads them
-# (the GPU Operator only sets nvidia module parameters, the Network Operator
-# only loads modules through ofedDriver), and the RDMA shared device plugin
-# advertises 0 devices until /dev/infiniband has the rdma_cm and umad nodes
-# they create. This is rdma-core's infiniband.conf/rdma.conf set without
-# ib_ipoib (no IPoIB netdevs on the rails) and without the iSER/NFS ULPs.
+# Loads the in-tree RDMA ULP modules rdma_ucm (pulls in rdma_cm), ib_umad and
+# ib_ipoib on Mellanox-NIC nodes and persists them via modules-load.d. Needed
+# where the RDMA stack is the inbox kernel driver with no OFED: nothing else
+# loads them (the GPU Operator only sets nvidia module parameters, the Network
+# Operator only loads modules through ofedDriver). ib_ipoib creates the IPoIB
+# netdevs that SR-IOV IB VFs (deviceType netdevice) and the ib-sriov CNI
+# operate on; rdma_ucm and ib_umad create the /dev/infiniband/rdma_cm and umad
+# nodes RDMA device plugins pass through to pods. This is rdma-core's
+# infiniband.conf/rdma.conf set without the iSER/NFS ULPs.
 # The modules load live, so the package has no interrupt and the CR no
 # interruptionBudget; runtimeRequired still taint-gates GPU nodes until they
-# are present so the RDMA device plugin and workloads do not start against an
-# incomplete /dev/infiniband. Host images that ship rdma-core or this conf make
-# the package a no-op.
+# are present so the SR-IOV config daemon and workloads do not start against
+# an incomplete /dev/infiniband. Host images that ship rdma-core or this conf
+# make the package a no-op.
 #
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
 {{- $rdma := index .Values "rdma-modules" }}
@@ -88,29 +89,35 @@ spec:
         apply.sh: |-
           #!/bin/bash
           set -euo pipefail
-          printf 'rdma_ucm\nib_umad\n' > /etc/modules-load.d/aicr-rdma-ulp.conf
+          printf 'rdma_ucm\nib_umad\nib_ipoib\n' > /etc/modules-load.d/aicr-rdma-ulp.conf
           modprobe rdma_ucm
           modprobe ib_umad
+          modprobe ib_ipoib
         apply_check.sh: |-
           #!/bin/bash
           set -euo pipefail
           grep -qx 'rdma_ucm' /etc/modules-load.d/aicr-rdma-ulp.conf
           grep -qx 'ib_umad' /etc/modules-load.d/aicr-rdma-ulp.conf
+          grep -qx 'ib_ipoib' /etc/modules-load.d/aicr-rdma-ulp.conf
           grep -q '^rdma_ucm ' /proc/modules
           grep -q '^ib_umad ' /proc/modules
+          grep -q '^ib_ipoib ' /proc/modules
           test -c /dev/infiniband/rdma_cm
         config.sh: |-
           #!/bin/bash
           set -euo pipefail
-          printf 'rdma_ucm\nib_umad\n' > /etc/modules-load.d/aicr-rdma-ulp.conf
+          printf 'rdma_ucm\nib_umad\nib_ipoib\n' > /etc/modules-load.d/aicr-rdma-ulp.conf
           modprobe rdma_ucm
           modprobe ib_umad
+          modprobe ib_ipoib
         config_check.sh: |-
           #!/bin/bash
           set -euo pipefail
           grep -qx 'rdma_ucm' /etc/modules-load.d/aicr-rdma-ulp.conf
           grep -qx 'ib_umad' /etc/modules-load.d/aicr-rdma-ulp.conf
+          grep -qx 'ib_ipoib' /etc/modules-load.d/aicr-rdma-ulp.conf
           grep -q '^rdma_ucm ' /proc/modules
           grep -q '^ib_umad ' /proc/modules
+          grep -q '^ib_ipoib ' /proc/modules
           test -c /dev/infiniband/rdma_cm
 {{- end }}

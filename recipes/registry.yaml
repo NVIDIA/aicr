@@ -418,7 +418,7 @@ components:
         # and before it every NodeWright stalled once auto-taint fired.
         severity: error
 
-  # Loads kernel modules the host image leaves out (rdma_ucm, ib_umad on NVKE) through a
+  # Loads kernel modules the host image leaves out (rdma_ucm, ib_umad, ib_ipoib on NVKE) through a
   # non-interrupting NodeWright CR. Manifest-only; requires nodewright-operator
   # as a componentRef dependency.
   - name: rdma-modules
@@ -438,6 +438,23 @@ components:
           - acceleratedNodeSelector
         tolerationPaths:
           - acceleratedTolerations
+
+  # Per-rail SR-IOV InfiniBand objects (nv-ipam IPPool, SriovNetworkNodePolicy,
+  # SriovIBNetwork) for the Network Operator's sriov-network-operator subchart.
+  # Manifest-only; requires network-operator as a componentRef dependency and
+  # is separate from it because the nv-ipam CRDs exist only after the
+  # NicClusterPolicy is reconciled.
+  - name: sriov-ib-networks
+    displayName: sriov-ib-networks
+    class: core
+    valueOverrideKeys:
+      - sriovibnetworks
+    healthCheck:
+      assertFile: checks/sriov-ib-networks/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: nvidia-network-operator
 
   - name: nodewright-customizations
     displayName: nodewright-customizations
