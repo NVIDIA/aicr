@@ -206,7 +206,7 @@ type Reading interface {
   merely unavailable.
 - Each collector sets its own timeout rather than sharing a universal
   one — e.g. 10s (OS, systemd), 60s (Kubernetes), 90s (node topology),
-  5s (NFD GPU detection), up to 10m (network discovery)
+  5s (NFD GPU detection), up to 7m (network discovery)
 
 ## Stage 2: Recipe (Data Optimization)
 

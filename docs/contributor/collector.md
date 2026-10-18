@@ -160,7 +160,7 @@ host-local collector. Three collectors override:
 |-----------|----------|-------|-----------|
 | Kubernetes | `defaults.CollectorK8sTimeout` | 60s | API server round trips, in-cluster auth setup. |
 | Topology | `defaults.CollectorTopologyTimeout` | 90s | Cluster-wide node pagination on large fleets. |
-| Network | `defaults.CollectorNetworkTimeout` | 10m | Upper bound (defense in depth) on the network collector, which delegates to live discovery with its own per-step timeouts. |
+| Network | `defaults.CollectorNetworkTimeout` | 7m | Upper bound (defense in depth) on the network collector, which delegates to live discovery with its own per-step timeouts. |
 
 Use the parent deadline if it is sooner — the GPU collector shows the
 pattern (`time.Until(deadline) < timeout`). Long-lived watches do not
@@ -410,7 +410,7 @@ marker list in `aksgpupools.go`.
 |------|-----|
 | Constraint evaluation | `validator.WithNoCluster(true)` — see [Test Isolation in CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md#test-isolation) |
 | K8s collector unit tests | `k8s.io/client-go/kubernetes/fake` — inject via collector option |
-| GPU / OS host tooling | Inject a `commandRunner` or `HardwareDetector` (the GPU collector shows the pattern) |
+| GPU host detection | Inject a fake `HardwareDetector` via `gpu.WithHardwareDetector` (see `pkg/collector/gpu`) |
 | Timeout handling | `ctx, cancel := context.WithCancel(...); cancel(); _, err := c.Collect(ctx)` — assert wrapped `ErrCodeTimeout` |
 | Table-driven cases | Required by CLAUDE.md when ≥ 2 input shapes — one case per shape, named |
 

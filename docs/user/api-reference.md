@@ -635,14 +635,19 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
 | `nvidia-dra-driver-gpu-ocp` | DRA GPU driver variant for OpenShift (OCP) |
 | `nvsentinel` | GPU health monitoring; remediation components off by default |
+| `nvsentinel-mongodb` | NVSentinel health-event datastore (Percona Server for MongoDB replica set); added only by the NVSentinel remediation step mixins |
 | `prometheus-adapter` | Custom metrics for HPA scaling |
 | `prometheus-adapter-ocp` | Prometheus Adapter variant for OpenShift (OCP) |
 | `prometheus-operator-crds` | CRDs for the prometheus-operator (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc.) |
+| `psmdb-operator` | Percona Operator for MongoDB, reconciling `nvsentinel-mongodb`; added only by the NVSentinel remediation step mixins |
+| `slinky-drainer` | NVSentinel slinky-drainer plugin; drains quarantined Slurm nodes through Slurm by reconciling `DrainRequest`s (opt-in `nvsentinel-slinky-drainer` mixin) |
+| `slinky-drainer-crds` | `drainrequests.nvsentinel.nvidia.com` CRD required by `node-drainer` and `slinky-drainer` (opt-in `nvsentinel-slinky-drainer` mixin) |
 | `slinky-slurm` | Slinky-managed Slurm cluster instance (Controller, LoginSet, NodeSet, RestApi); reconciled by `slinky-slurm-operator` |
 | `slinky-slurm-operator` | SchedMD Slinky Slurm operator and admission webhook |
 | `slinky-slurm-operator-crds` | CRDs for the SchedMD Slinky Slurm operator (`slinky.slurm.net`) |
 | `slinky-topograph` | Generates Slurm `topology.conf` from cloud topology APIs for topology-aware Slinky placement |
 | `slurm-accounting-mariadb` | Installation-managed MariaDB instance and Secret generation contract for Slurm accounting; installed only for AICR-provided Slurm accounting |
+| `topograph` | Kubernetes-scoped Topograph; writes network-topology node labels for topology-aware Kueue scheduling (`platform=kueue` leaves) |
 
 **Examples:**
 
