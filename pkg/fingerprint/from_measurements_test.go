@@ -390,6 +390,7 @@ func TestFromMeasurements_OSDetection(t *testing.T) {
 		{"oracle linux", "ol", "8.10", "ol", "8.10"},
 		{"sles 16", "sles", "16.0", "sles", "16.0"},
 		{"sles 15", "sles", "15.7", "sles", "15.7"},
+		{"rocky 9", "rocky", "9.6", "rocky", "9.6"},
 		{"unknown ID drops both value and version", "freebsd", "13", "", ""},
 		{"both empty", "", "", "", ""},
 	}
