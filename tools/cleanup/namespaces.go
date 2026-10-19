@@ -19,6 +19,9 @@ import (
 	"maps"
 	"slices"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -28,6 +31,9 @@ import (
 // never delete, each with the reason.
 var notOwnedNamespaces = map[string]string{
 	defaults.KubeSystemNamespace: "shared control-plane namespace, and deleting it breaks the cluster",
+	metav1.NamespaceDefault:      "shared namespace for workloads that name none",
+	metav1.NamespacePublic:       "shared namespace holding cluster bootstrap data",
+	corev1.NamespaceNodeLease:    "shared namespace holding the kubelet heartbeat Leases",
 }
 
 // runtimeNamespaces are namespaces cleanup owns that no recipe names.
