@@ -241,7 +241,7 @@ transitions:
       diff; the rollback itself was not exercised.
     references:
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.26.0
-  - from: ">=1.26.0 <1.28.0"
+  - from: ">=1.25.0 <1.28.0"
     to: "1.28.0"
     verdict: manual
     verifiedBy: >-
@@ -253,7 +253,9 @@ transitions:
       v1.26.0 schema does not declare and does not preserve unknown fields
       under. janitor (pkg/controller/gpureset_controller.go,
       ensureManagedServicesRecord) re-records a missing managedServices and
-      requeues before tearing services down.
+      requeues before tearing services down. From v1.25.0 the jump also
+      crosses v1.26.0, the safe record above, whose CRDs are byte-identical
+      to v1.25.0's, so these steps hold from either starting version.
     summary: >-
       From v1.27.0 janitor records in GPUReset status.managedServices which GPU
       Operator services it stopped before a reset, and restores only those.
@@ -274,11 +276,11 @@ transitions:
       prints True for every GPUReset.
     reversible: true
     reversibleNotes: >-
-      helm rollback to the v1.26.0 revision restores the previous workloads.
+      helm rollback to the previous revision restores the previous workloads.
       The newer GPUReset CRD stays applied; it only adds an optional status
-      field, which v1.26.0's janitor does not read. First remove the dry-run
-      marker from every node (kubectl annotate nodes --all
-      quarantineHealthEventDryRun-): v1.26.0 leaves it in place, so a real
+      field, which earlier janitor versions do not read. First remove the
+      dry-run marker from every node (kubectl annotate nodes --all
+      quarantineHealthEventDryRun-): earlier versions leave it in place, so a real
       quarantine it makes would carry the marker, and the next upgrade would
       discard that quarantine as a dry run and leave the node cordoned with
       no record. This rests on the CRD diff and upstream's notes; the
