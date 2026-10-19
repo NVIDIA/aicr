@@ -19,7 +19,7 @@
 # apiserver will accept CRs of those kinds).
 #
 # CRDs come from the upstream SchedMD Slinky slurm-operator-crds chart
-# pinned to 1.1.0 (oci://ghcr.io/slinkyproject/charts) in
+# pinned to 1.2.2 (oci://ghcr.io/slinkyproject/charts) in
 # recipes/registry.yaml. The 6 kinds under slinky.slurm.net are
 # enumerated in recipes/components/slinky-slurm-operator-crds/values.yaml
 # header: Accounting, Controller, LoginSet, NodeSet, RestApi, Token.
