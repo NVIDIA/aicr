@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Slinky Slurm Operator Helm values (chart v1.2.0)
+# Slinky Slurm Operator Helm values (chart v1.2.2)
 # Deploys the SchedMD Slinky Slurm operator and its admission webhook into
 # the `slinky` namespace. Manages the lifecycle of Slurm clusters declared
 # via the Controller / NodeSet / LoginSet / Accounting / RestApi / Token
