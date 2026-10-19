@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package helm provides shared Helm chart rendering utilities used by
-// both the mirror image discovery pipeline and the BOM generator.
+// Package helm runs the helm CLI with bounded time and output, and renders
+// charts with `helm template`.
 package helm
 
 import (
 	"bytes"
 	"context"
-	"os"
+	"io"
 	"os/exec"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -44,9 +43,9 @@ type ChartInput struct {
 	Namespace string
 	// ValuesPath is a path to a values.yaml file on disk. Empty means skip.
 	ValuesPath string
-	// Values are inline values marshaled to a temp file before rendering.
-	// When both ValuesPath and Values are set, both are passed via separate
-	// --values flags (Helm merges them, with later files winning).
+	// Values are inline values piped to helm on stdin. When both ValuesPath
+	// and Values are set, both are passed via separate --values flags (Helm
+	// merges them, with Values winning).
 	Values map[string]any
 	// KubeVersion is passed to --kube-version. When empty,
 	// defaults.MirrorDefaultKubeVersion is used.
@@ -72,7 +71,7 @@ func Default() Renderer { return &CLIRenderer{} }
 // Render delegates to RenderChart after verifying the helm binary is
 // available on PATH.
 func (r *CLIRenderer) Render(ctx context.Context, input ChartInput) ([]byte, error) {
-	if _, err := exec.LookPath("helm"); err != nil {
+	if _, err := exec.LookPath(Binary); err != nil {
 		return nil, errors.New(errors.ErrCodeNotFound,
 			"helm binary not found on PATH; install helm to discover images from chart templates")
 	}
@@ -82,12 +81,31 @@ func (r *CLIRenderer) Render(ctx context.Context, input ChartInput) ([]byte, err
 // RenderChart shells out to `helm template` and returns rendered YAML.
 // OCI charts (Repository starts with "oci://") use the full URL as the
 // chart argument with no --repo flag; HTTP charts use the bare chart name
-// plus --repo.
+// plus --repo. Inline values reach helm on stdin.
 func RenderChart(ctx context.Context, input ChartInput) ([]byte, error) {
+	return renderChart(ctx, exec.CommandContext, input)
+}
+
+func renderChart(ctx context.Context, command commandFunc, input ChartInput) ([]byte, error) {
 	if input.Chart == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "component "+input.Name+": no helm chart configured")
 	}
 
+	var stdin io.Reader
+	if len(input.Values) > 0 {
+		data, err := yaml.Marshal(input.Values)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "marshal values", err)
+		}
+		stdin = bytes.NewReader(data)
+	}
+	return run(ctx, command, stdin, defaults.HelmTemplateTimeout, defaults.HelmTemplateOutputLimit,
+		templateArgs(input, stdin != nil)...)
+}
+
+// templateArgs returns the `helm template` arguments for input, reading
+// values from stdin when valuesOnStdin is set.
+func templateArgs(input ChartInput, valuesOnStdin bool) []string {
 	var (
 		chart    string
 		repoFlag string
@@ -132,47 +150,13 @@ func RenderChart(ctx context.Context, input ChartInput) ([]byte, error) {
 		args = append(args, "--values", input.ValuesPath)
 	}
 
-	// Inline values: marshal to temp file.
-	if len(input.Values) > 0 {
-		tmpPath, writeErr := writeValuesFile(input.Values)
-		if writeErr != nil {
-			return nil, writeErr
-		}
-		defer os.Remove(tmpPath)
-		args = append(args, "--values", tmpPath)
+	if valuesOnStdin {
+		args = append(args, "--values", "-")
 	}
 
 	// Skip CRD installation in render to avoid surfacing CRD-shipped images
 	// twice (manifests are walked separately).
-	args = append(args, "--include-crds=false")
-
-	// Ensure ctx carries a deadline so the helm subprocess is always bounded.
-	// If a parent already set a tighter deadline, keep it; otherwise cap at
-	// the shared helm-template timeout.
-	deadline, hasDeadline := ctx.Deadline()
-	if !hasDeadline || time.Until(deadline) > defaults.HelmTemplateTimeout {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, defaults.HelmTemplateTimeout)
-		defer cancel()
-	}
-
-	cmd := exec.CommandContext(ctx, "helm", args...)
-	var stdoutBuf, stderr bytes.Buffer
-	stdout := &limitedWriter{w: &stdoutBuf, limit: defaults.HelmTemplateOutputLimit}
-	cmd.Stdout = stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		msg := "helm template failed"
-		if summary := summarizeHelmError(detail); summary != "" {
-			msg += ": " + summary
-		}
-		return stdoutBuf.Bytes(), errors.WrapWithContext(errors.ErrCodeInternal, msg, err,
-			map[string]any{"component": input.Name, "stderr": detail})
-	}
-
-	return stdoutBuf.Bytes(), nil
+	return append(args, "--include-crds=false")
 }
 
 // summarizeHelmError returns the text of the first stderr line that starts
@@ -199,47 +183,21 @@ func summarizeHelmError(stderr string) string {
 	return strings.Join(parts, " ")
 }
 
-// writeValuesFile marshals values to a temporary YAML file and returns
-// the path. The caller is responsible for removing the file.
-func writeValuesFile(values map[string]any) (string, error) {
-	data, err := yaml.Marshal(values)
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "marshal values", err)
-	}
-
-	f, err := os.CreateTemp("", "aicr-helm-values-*.yaml")
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "create temp values file", err)
-	}
-
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(f.Name()) //nolint:gosec // G703: path is from f.Name() created by CreateTemp above
-		return "", errors.Wrap(errors.ErrCodeInternal, "write temp values file", err)
-	}
-
-	closeErr := f.Close()
-	if closeErr != nil {
-		_ = os.Remove(f.Name()) //nolint:gosec // G703: path is from f.Name() created by CreateTemp above
-		return "", errors.Wrap(errors.ErrCodeInternal, "close temp values file", closeErr)
-	}
-
-	return f.Name(), nil
-}
-
 // limitedWriter wraps an io.Writer and enforces a byte cap. Once the cap
 // is reached, Write returns an error instead of silently truncating —
 // silent truncation would produce partial YAML and mask missing images.
 type limitedWriter struct {
-	w       *bytes.Buffer
-	limit   int64
-	written int64
+	w        *bytes.Buffer
+	limit    int64
+	written  int64
+	exceeded bool
 }
 
 func (lw *limitedWriter) Write(p []byte) (int, error) {
 	if lw.written+int64(len(p)) > lw.limit {
+		lw.exceeded = true
 		return 0, errors.New(errors.ErrCodeInternal,
-			"helm template output exceeds size limit")
+			"helm output exceeds size limit")
 	}
 	n, err := lw.w.Write(p)
 	lw.written += int64(n)

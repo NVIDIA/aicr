@@ -254,6 +254,19 @@ const (
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second
 
+	// ClusterCleanupHelmUninstallTimeout bounds one `helm uninstall --wait`
+	// issued by tools/cleanup.
+	ClusterCleanupHelmUninstallTimeout = 2 * time.Minute
+
+	// ClusterCleanupNamespaceDeleteWait is how long tools/cleanup gives deleted
+	// namespaces to finish before stripping finalizers from the objects still
+	// holding them in Terminating.
+	ClusterCleanupNamespaceDeleteWait = 10 * time.Second
+
+	// ClusterCleanupHelmOutputLimit caps the stdout tools/cleanup reads from
+	// one `helm list` or `helm get values` call.
+	ClusterCleanupHelmOutputLimit int64 = 16 << 20
+
 	// K8sServiceAccountVerifyTimeout bounds the read-only ServiceAccount Get
 	// and SubjectAccessReview that vet an administrator-provisioned validator
 	// ServiceAccount before a run uses it.

@@ -594,7 +594,7 @@ running `make cleanup` (`tools/cleanup`) can leave the `nvidia_uvm` kernel
 module wedged mid-unload on GPU nodes. The symptom appears on the *next*
 install: the driver validation init container crashes
 (`Init:CrashLoopBackOff`, logs show `failed to create device node
-nvidia-uvm`). The cleanup script detects driver-managed mode (via the
+nvidia-uvm`). The cleanup tool detects driver-managed mode (via the
 `nvidia-driver-daemonset` or `driver.enabled` in the release values) and
 prints this guidance; the fix is to reboot the GPU nodes before reinstalling:
 
@@ -619,7 +619,7 @@ the Helm uninstall in its namespace, the CRD group match, and the namespace
 deletion. Fence it out of all three phases:
 
 ```bash
-tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com,nodewright.nvidia.com
+go run ./tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com,nodewright.nvidia.com
 ```
 
 Both flags are repeatable and accept comma-separated values. `--exclude-ns`
@@ -630,7 +630,7 @@ protects CRDs whose name contains the given match from deletion. It is applied
 with `--dry-run` first to confirm what will and will not be removed.
 
 Phase 3 only deletes CRDs whose API group exactly matches a group AICR
-components install (`AICR_CRD_GROUPS` in `tools/cleanup`). An unrelated
+components install (`aicrCRDGroups` in `tools/cleanup/cleaner.go`). An unrelated
 `*.nvidia.com` group, such as a third-party harness, is never matched and needs
 no `--exclude-crd`.
 

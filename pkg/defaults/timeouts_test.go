@@ -50,6 +50,8 @@ func TestTimeoutConstants(t *testing.T) {
 		{"K8sPodReadyTimeout", K8sPodReadyTimeout, 1 * time.Minute, 3 * time.Minute},
 		{"K8sJobCompletionTimeout", K8sJobCompletionTimeout, 1 * time.Minute, 10 * time.Minute},
 		{"K8sCleanupTimeout", K8sCleanupTimeout, 10 * time.Second, 60 * time.Second},
+		{"ClusterCleanupHelmUninstallTimeout", ClusterCleanupHelmUninstallTimeout, 1 * time.Minute, 5 * time.Minute},
+		{"ClusterCleanupNamespaceDeleteWait", ClusterCleanupNamespaceDeleteWait, 5 * time.Second, 60 * time.Second},
 		{"K8sServiceAccountVerifyTimeout", K8sServiceAccountVerifyTimeout, 10 * time.Second, 60 * time.Second},
 		{"K8sPodTerminationWaitTimeout", K8sPodTerminationWaitTimeout, 30 * time.Second, 120 * time.Second},
 
