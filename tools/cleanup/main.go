@@ -15,7 +15,7 @@
 // Command cleanup removes AICR-installed resources from the cluster of the
 // current kubeconfig context, in four phases:
 //
-//  1. Helm releases in AICR component namespaces
+//  1. Helm releases of AICR components in AICR component namespaces
 //  2. aicr validate and snapshot-agent artifacts
 //  3. Custom Resource Definitions in AICR-owned API groups
 //  4. AICR component and check-created namespaces, with stuck-finalizer rescue
@@ -168,6 +168,10 @@ func newCleaner(ctx context.Context, opts options, log *slog.Logger) (*cleaner, 
 	if err != nil {
 		return nil, err
 	}
+	releaseNames, err := ownedReleaseNames()
+	if err != nil {
+		return nil, err
+	}
 
 	if opts.dryRun {
 		log = log.With("dryRun", true)
@@ -181,6 +185,7 @@ func newCleaner(ctx context.Context, opts options, log *slog.Logger) (*cleaner, 
 		disc:          bounded.Discovery(),
 		dyn:           dyn,
 		namespaces:    namespaces,
+		releaseNames:  releaseNames,
 		namespaceWait: defaults.ClusterCleanupNamespaceDeleteWait,
 	}
 	if _, err := exec.LookPath(helm.Binary); err == nil {

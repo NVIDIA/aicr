@@ -19,13 +19,31 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 type helmRelease struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
+}
+
+// ownedReleaseNames returns every Helm release name a bundle can install for
+// a registry component.
+func ownedReleaseNames() (map[string]bool, error) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "load component registry", err)
+	}
+	names := map[string]bool{}
+	for _, c := range registry.Components {
+		for _, name := range bundleinfo.ComponentReleaseNames(c.Name) {
+			names[name] = true
+		}
+	}
+	return names, nil
 }
 
 // helmClient is the subset of the helm CLI cleanup uses.

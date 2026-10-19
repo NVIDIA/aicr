@@ -43,8 +43,9 @@ import (
 )
 
 var (
-	configMapGVR   = corev1.SchemeGroupVersion.WithResource("configmaps")
-	testNamespaces = []string{"gang-scheduling-test", "gpu-operator", "nodewright", "skyhook"}
+	configMapGVR     = corev1.SchemeGroupVersion.WithResource("configmaps")
+	testNamespaces   = []string{"gang-scheduling-test", "gpu-operator", "nodewright", "skyhook"}
+	testReleaseNames = map[string]bool{"gpu-operator": true, "nodewright": true, "unrelated": true}
 )
 
 type fakeHelm struct {
@@ -116,6 +117,7 @@ func (f *fixture) cleaner(opts options) *cleaner {
 		dyn:           f.dyn,
 		helm:          f.helm,
 		namespaces:    testNamespaces,
+		releaseNames:  testReleaseNames,
 		namespaceWait: time.Millisecond,
 	}
 }
@@ -207,6 +209,7 @@ func clusterReleases() []helmRelease {
 	return []helmRelease{
 		{Name: "nodewright", Namespace: "skyhook"},
 		{Name: "gpu-operator", Namespace: "gpu-operator"},
+		{Name: "team-app", Namespace: "gpu-operator"},
 		{Name: "unrelated", Namespace: "default"},
 	}
 }
@@ -252,6 +255,7 @@ func TestRunFencesExcludedInstalls(t *testing.T) {
 	}
 	f.wantOutput(t,
 		`msg="skipping helm release in excluded namespace" release=nodewright namespace=skyhook`,
+		`msg="skipping helm release AICR does not own" release=team-app namespace=gpu-operator`,
 		`msg="skipping excluded CRD" name=skyhooks.skyhook.nvidia.com`,
 		`msg="skipping excluded namespace" namespace=skyhook`,
 		`msg="skipping namespace AICR does not own" namespace=kube-system`,

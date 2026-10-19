@@ -117,3 +117,18 @@ func TestHelmCLIFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestOwnedReleaseNames(t *testing.T) {
+	got, err := ownedReleaseNames()
+	if err != nil {
+		t.Fatalf("ownedReleaseNames() error = %v", err)
+	}
+	for _, name := range []string{"gpu-operator", "gpu-operator-pre", "gpu-operator-post", "gpu-operator-readiness"} {
+		if !got[name] {
+			t.Errorf("ownedReleaseNames() is missing %q", name)
+		}
+	}
+	if got["team-app"] {
+		t.Error(`ownedReleaseNames() contains "team-app", which no component installs`)
+	}
+}

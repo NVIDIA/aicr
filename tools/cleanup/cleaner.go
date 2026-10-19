@@ -109,6 +109,7 @@ type cleaner struct {
 	dyn           dynamic.Interface
 	helm          helmClient // nil when helm is not installed
 	namespaces    []string   // sorted
+	releaseNames  map[string]bool
 	namespaceWait time.Duration
 }
 
@@ -249,7 +250,7 @@ func (c *cleaner) driverGuidance() {
 }
 
 func (c *cleaner) uninstallReleases(ctx context.Context, releases []helmRelease) {
-	c.log.Info("phase 1: uninstalling helm releases in AICR namespaces")
+	c.log.Info("phase 1: uninstalling AICR helm releases in AICR namespaces")
 	for _, rel := range releases {
 		if ctx.Err() != nil {
 			return
@@ -258,7 +259,10 @@ func (c *cleaner) uninstallReleases(ctx context.Context, releases []helmRelease)
 		switch {
 		case c.excludedNS(rel.Namespace):
 			log.Info("skipping helm release in excluded namespace")
-		case c.owned(rel.Namespace):
+		case !c.owned(rel.Namespace):
+		case !c.releaseNames[rel.Name]:
+			log.Info("skipping helm release AICR does not own")
+		default:
 			log.Info("uninstalling helm release")
 			if c.opts.dryRun {
 				continue
