@@ -1,0 +1,13 @@
+attestations:
+  - attestedAt: 2026-10-19T19:27:48Z
+    bundle:
+      digest: sha256:8634ffecb3e28c42b9bd61dfbc10ca2d5eb2773506b1534d58e23987ec515c20
+      oci: ghcr.io/nvidia/aicr-evidence:h100-gke-cos-training-kubeflow-gpustack-gke-default-8e2fa8b9dd72
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: 175854+mchmarny@users.noreply.github.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 160146278
+profile: gpuStack=gke-default
+recipe: h100-gke-cos-training-kubeflow-gpustack-gke-default
+schemaVersion: 1.0.0

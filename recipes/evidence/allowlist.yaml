@@ -92,6 +92,9 @@ community:
   - issuer: https://github.com/login/oauth
     source: 2e85f8702c6214cafcc0ed714d928720
     label: mikecook
+  - issuer: https://github.com/login/oauth
+    source: 1d70c50bfd60eaaf472544f2a3cf2b8b
+    label: mchmarny
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []
