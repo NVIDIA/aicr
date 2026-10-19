@@ -51,19 +51,31 @@ func valuesBundle(t *testing.T, releases []bundleinfo.Release) string {
 
 func valuesBundleWith(t *testing.T, releases []bundleinfo.Release, vendored bool) string {
 	t.Helper()
+	return valuesBundleFor(t, "helm", "deploy.sh", releases, vendored)
+}
+
+// helmOpBundle writes bundle-info.yaml for a --fleet-mode helmop bundle, which
+// records deployer fleet and names helmops.yaml as its entrypoint.
+func helmOpBundle(t *testing.T, releases []bundleinfo.Release) string {
+	t.Helper()
+	return valuesBundleFor(t, "fleet", "helmops.yaml", releases, false)
+}
+
+func valuesBundleFor(t *testing.T, deployer, entrypoint string, releases []bundleinfo.Release, vendored bool) string {
+	t.Helper()
 	dir := t.TempDir()
 	info := &bundleinfo.BundleInfo{
 		APIVersion: header.StableGroupVersion,
 		Kind:       string(header.KindBundleInfo),
 		Build: bundleinfo.Build{
-			Deployer: "helm",
+			Deployer: deployer,
 			Recipe: bundleinfo.Recipe{
 				Path:   "recipe.yaml",
 				Digest: "sha256:3b1f8c2ad9e7546102bb8f4c7d0e9a1358cc4f6b2e8d70a94f1c5b3e6d820947",
 			},
 			Settings: bundleinfo.Settings{VendorCharts: vendored},
 		},
-		Layout: bundleinfo.Layout{Entrypoint: "deploy.sh", Releases: releases},
+		Layout: bundleinfo.Layout{Entrypoint: entrypoint, Releases: releases},
 	}
 	if _, err := bundleinfo.Write(context.Background(), dir, info); err != nil {
 		t.Fatalf("Write() failed: %v", err)
@@ -86,6 +98,7 @@ func plant(t *testing.T, dir, rel, content string) {
 func TestReadReleaseValues(t *testing.T) {
 	tests := []struct {
 		name     string
+		helmOp   bool
 		releases []bundleinfo.Release
 		files    map[string]string
 		want     map[string]map[string]any
@@ -175,7 +188,8 @@ func TestReadReleaseValues(t *testing.T) {
 			// Fleet installs the values inlined in each HelmOp and never reads
 			// the folder files, so a user's edit to helmops.yaml must be what
 			// is read back, not the stale values.yaml beside it.
-			name: "a fleet HelmOp is read from the shared manifest, not the folder files",
+			name:   "a fleet HelmOp is read from the shared manifest, not the folder files",
+			helmOp: true,
 			releases: []bundleinfo.Release{
 				{Name: "a", Component: "a", Path: "001-a", Manifest: "helmops.yaml"},
 				{Name: "b", Component: "b", Path: "002-b", Manifest: "helmops.yaml"},
@@ -199,7 +213,8 @@ func TestReadReleaseValues(t *testing.T) {
 			},
 		},
 		{
-			name: "a HelmOp without spec.helm.values states an empty set",
+			name:   "a HelmOp without spec.helm.values states an empty set",
+			helmOp: true,
 			releases: []bundleinfo.Release{
 				{Name: "a", Component: "a", Path: "001-a", Manifest: "helmops.yaml"},
 			},
@@ -267,6 +282,9 @@ func TestReadReleaseValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := valuesBundle(t, tt.releases)
+			if tt.helmOp {
+				dir = helmOpBundle(t, tt.releases)
+			}
 			for rel, content := range tt.files {
 				plant(t, dir, rel, content)
 			}
@@ -516,6 +534,7 @@ func TestReadReleaseValuesKeepsAReleaseThatPinnedNothing(t *testing.T) {
 func TestReadReleaseValuesRejectsIncompleteBundle(t *testing.T) {
 	tests := []struct {
 		name    string
+		helmOp  bool
 		release bundleinfo.Release
 		files   map[string]string
 		wantMsg string
@@ -531,7 +550,8 @@ func TestReadReleaseValuesRejectsIncompleteBundle(t *testing.T) {
 		{
 			// The folder's values.yaml is not what Fleet installed, so falling
 			// back to it would read stale values as the deployed ones.
-			name: "a HelmOp manifest with no HelmOp for the release",
+			name:   "a HelmOp manifest with no HelmOp for the release",
+			helmOp: true,
 			release: bundleinfo.Release{
 				Name: "c", Component: "c", Path: "001-c", Manifest: "helmops.yaml",
 			},
@@ -541,6 +561,47 @@ func TestReadReleaseValuesRejectsIncompleteBundle(t *testing.T) {
 					"spec:\n  helm:\n    releaseName: other\n",
 			},
 			wantMsg: `no HelmOp for release "c"`,
+		},
+		{
+			// The bundle records a HelmOp layout, so the folder values.yaml is
+			// a reference copy and must not stand in for the missing manifest.
+			name:   "a HelmOp bundle whose helmops.yaml is missing",
+			helmOp: true,
+			release: bundleinfo.Release{
+				Name: "c", Component: "c", Path: "001-c", Manifest: "helmops.yaml",
+			},
+			files:   map[string]string{"001-c/values.yaml": "fullnameOverride: stale\n"},
+			wantMsg: "helmops.yaml, which is missing",
+		},
+		{
+			// What `kubectl get helmops -o yaml` writes: a List, so no top-level
+			// document is a HelmOp.
+			name:   "a HelmOp bundle whose helmops.yaml holds no HelmOp",
+			helmOp: true,
+			release: bundleinfo.Release{
+				Name: "c", Component: "c", Path: "001-c", Manifest: "helmops.yaml",
+			},
+			files: map[string]string{
+				"001-c/values.yaml": "fullnameOverride: stale\n",
+				"helmops.yaml": "apiVersion: v1\nkind: List\nitems:\n" +
+					"- apiVersion: fleet.cattle.io/v1alpha1\n  kind: HelmOp\n" +
+					"  spec:\n    helm:\n      releaseName: c\n",
+			},
+			wantMsg: "holds no HelmOp",
+		},
+		{
+			name:   "two HelmOps for the same release",
+			helmOp: true,
+			release: bundleinfo.Release{
+				Name: "c", Component: "c", Path: "001-c", Manifest: "helmops.yaml",
+			},
+			files: map[string]string{
+				"helmops.yaml": "apiVersion: fleet.cattle.io/v1alpha1\nkind: HelmOp\n" +
+					"spec:\n  helm:\n    releaseName: c\n    values:\n      fullnameOverride: one\n" +
+					"---\napiVersion: fleet.cattle.io/v1alpha1\nkind: HelmOp\n" +
+					"spec:\n  helm:\n    releaseName: c\n    values:\n      fullnameOverride: two\n",
+			},
+			wantMsg: "more than one HelmOp",
 		},
 		{
 			// Every local-format folder writes values.yaml unconditionally,
@@ -554,6 +615,9 @@ func TestReadReleaseValuesRejectsIncompleteBundle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := valuesBundle(t, []bundleinfo.Release{tt.release})
+			if tt.helmOp {
+				dir = helmOpBundle(t, []bundleinfo.Release{tt.release})
+			}
 			for rel, content := range tt.files {
 				plant(t, dir, rel, content)
 			}
@@ -600,6 +664,60 @@ func TestReadReleaseValuesWithholdsAReleaseWithValuesFrom(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "valuesFrom") {
 		t.Errorf("error %q does not name valuesFrom", err.Error())
+	}
+}
+
+// argocd-helm records each child Application's template as the release
+// manifest, and that template opens with a Go template action yaml.v3 cannot
+// parse. Its values live in values.yaml, so the manifest must not be read.
+func TestReadReleaseValuesReadsArgoHelmValuesBesideATemplatedManifest(t *testing.T) {
+	dir := valuesBundleFor(t, "argocd-helm", "Chart.yaml", []bundleinfo.Release{
+		{Name: "c", Component: "c", Path: "001-c", Manifest: "templates/c.yaml"},
+	}, false)
+	plant(t, dir, "001-c/values.yaml", "fullnameOverride: from-values-file\n")
+	plant(t, dir, "templates/c.yaml", "{{- $childName := printf \"%s-c\" .Values.appName }}\n"+
+		"apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: {{ $childName }}\n")
+
+	got, err := bundleinfo.ReadReleaseValues(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("ReadReleaseValues() failed: %v", err)
+	}
+	want := map[string]map[string]any{"c": {"fullnameOverride": "from-values-file"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ReadReleaseValues() = %#v, want %#v", got, want)
+	}
+}
+
+// A HelmOp that also takes values from somewhere the manifest does not state
+// installs with values this cannot read, like flux's valuesFrom.
+func TestReadReleaseValuesWithholdsAHelmOpWithUnstatedValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		spec   string
+		source string
+	}{
+		{"valuesFrom", "  helm:\n    releaseName: c\n    valuesFrom:\n    - configMapKeyRef:\n        name: c-values\n", "spec.helm.valuesFrom"},
+		{"templateValues", "  helm:\n    releaseName: c\n    templateValues:\n      fullnameOverride: ${ .ClusterName }\n", "spec.helm.templateValues"},
+		{"per-target helm", "  helm:\n    releaseName: c\n  targets:\n  - clusterName: local\n    helm:\n      values:\n        fullnameOverride: renamed\n", "spec.targets[0].helm"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := helmOpBundle(t, []bundleinfo.Release{
+				{Name: "c", Component: "c", Path: "001-c", Manifest: "helmops.yaml"},
+			})
+			plant(t, dir, "helmops.yaml", "apiVersion: fleet.cattle.io/v1alpha1\nkind: HelmOp\nspec:\n"+tt.spec)
+
+			got, err := bundleinfo.ReadReleaseValues(context.Background(), dir)
+			if err == nil {
+				t.Fatalf("want the release withheld, got values %#v", got)
+			}
+			if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
+				t.Errorf("want ErrCodeUnavailable, got %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.source) {
+				t.Errorf("error %q does not name %s", err.Error(), tt.source)
+			}
+		})
 	}
 }
 

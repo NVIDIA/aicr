@@ -27,6 +27,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -107,7 +108,7 @@ func ReadReleaseValues(ctx context.Context, dir string) (map[string]map[string]a
 		if isInjectedRelease(r) {
 			continue
 		}
-		values, valErr := releaseValues(dir, r, info.Build.Settings.VendorCharts)
+		values, valErr := releaseValues(dir, info, r)
 		if valErr != nil {
 			return nil, valErr
 		}
@@ -139,14 +140,13 @@ func isInjectedRelease(r *Release) bool {
 // Un-nesting runs after whichever layout supplied the values, not inside one of
 // them: flux nests vendored values under the subchart key inside spec.values
 // exactly as the other deployers do inside values.yaml.
-func releaseValues(dir string, r *Release, vendored bool) (map[string]any, error) {
-	if values, isHelmOp, err := readHelmOpValues(dir, r); err != nil {
-		return nil, err
-	} else if isHelmOp {
+func releaseValues(dir string, info *BundleInfo, r *Release) (map[string]any, error) {
+	if isHelmOpRelease(info, r) {
 		// --fleet-mode helmop refuses --vendor-charts, so there is nothing
 		// to un-nest.
-		return values, nil
+		return readHelmOpValues(dir, r)
 	}
+	vendored := info.Build.Settings.VendorCharts
 
 	values, found, err := readValuesFile(dir, r.Path, valuesFileName)
 	if err != nil {
@@ -300,46 +300,69 @@ func readManifestValues(dir, manifest string) (map[string]any, error) {
 	return doc.Spec.Values, nil
 }
 
+// isHelmOpRelease reports whether r is a release of a --fleet-mode helmop
+// bundle. The bundle says so itself: such a bundle records deployer fleet and
+// names helmops.yaml as both its entrypoint and every release's manifest. The
+// manifest's contents are not consulted, because argocd-helm records a Go
+// template there that is not YAML, and a manifest that merely looks like a
+// HelmOp must not override another deployer's values.yaml.
+func isHelmOpRelease(info *BundleInfo, r *Release) bool {
+	return info.Build.Deployer == string(config.DeployerFleet) &&
+		r.Manifest != "" && r.Manifest == info.Layout.Entrypoint
+}
+
 // readHelmOpValues returns spec.helm.values of the HelmOp in r's manifest
-// whose releaseName is r.Name, and reports whether the manifest holds HelmOps
-// at all.
+// whose releaseName is r.Name.
 //
 // A HelmOp bundle still leaves values.yaml and cluster-values.yaml in each
 // release folder, but Fleet never reads them: it installs the values inlined
 // in the HelmOp, and that is the document the bundle README tells a user to
 // edit. Unlike Argo's Application, which only points at values.yaml, the
-// manifest is the live document here, so it is read before the folder files.
-// Reading the folder instead would hand inheritance the pre-edit values.
+// manifest is the live document here, so the folder files are never read.
+// Reading them instead would hand inheritance the pre-edit values.
 //
-// A manifest that holds HelmOps but none for r is an incomplete bundle, not a
-// release that pinned nothing. A missing manifest, or one with no HelmOp, is
-// left to the other layouts.
-func readHelmOpValues(dir string, r *Release) (map[string]any, bool, error) {
-	if r.Manifest == "" {
-		return nil, false, nil
-	}
+// Called only for a release isHelmOpRelease vouches for, so it fails closed: a
+// missing manifest, one with no HelmOp, or one with none or two for r is an
+// incomplete bundle, not a release that pinned nothing. A HelmOp that also
+// takes values from spec.helm.valuesFrom, spec.helm.templateValues or a
+// per-target helm block installs with values the manifest does not state, so
+// it is reported as unreadable rather than read partially, like flux's
+// valuesFrom.
+func readHelmOpValues(dir string, r *Release) (map[string]any, error) {
 	data, found, err := readBounded(dir, r.Manifest)
-	if err != nil || !found {
-		return nil, false, err
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s names %s, which is missing from the bundle; the bundle is incomplete",
+			FileName, r.Manifest))
 	}
 
 	sawHelmOp := false
+	var values map[string]any
+	matched := false
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	for {
 		var doc struct {
 			Kind string `yaml:"kind"`
 			Spec struct {
 				Helm struct {
-					ReleaseName string         `yaml:"releaseName"`
-					Values      map[string]any `yaml:"values"`
+					ReleaseName    string         `yaml:"releaseName"`
+					Values         map[string]any `yaml:"values"`
+					ValuesFrom     []any          `yaml:"valuesFrom"`
+					TemplateValues map[string]any `yaml:"templateValues"`
 				} `yaml:"helm"`
+				Targets []struct {
+					Helm map[string]any `yaml:"helm"`
+				} `yaml:"targets"`
 			} `yaml:"spec"`
 		}
 		if decErr := dec.Decode(&doc); decErr != nil {
 			if stderrors.Is(decErr, io.EOF) {
 				break
 			}
-			return nil, false, errors.Wrap(errors.ErrCodeInvalidRequest,
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("failed to parse %s", r.Manifest), decErr)
 		}
 		if doc.Kind != helmOpKind {
@@ -349,16 +372,49 @@ func readHelmOpValues(dir string, r *Release) (map[string]any, bool, error) {
 		if doc.Spec.Helm.ReleaseName != r.Name {
 			continue
 		}
-		if doc.Spec.Helm.Values == nil {
-			return map[string]any{}, true, nil
+		if matched {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"%s holds more than one HelmOp for release %q; the bundle is malformed", r.Manifest, r.Name))
 		}
-		return doc.Spec.Helm.Values, true, nil
+		matched = true
+		if source := unstatedHelmOpValues(doc.Spec.Helm.ValuesFrom, doc.Spec.Helm.TemplateValues, len(doc.Spec.Targets),
+			func(i int) bool { return doc.Spec.Targets[i].Helm != nil }); source != "" {
+			return nil, errors.New(errors.ErrCodeUnavailable, fmt.Sprintf(
+				"the HelmOp for release %q in %s takes values through %s, so the object names it "+
+					"installed with are not all stated in the bundle", r.Name, r.Manifest, source))
+		}
+		values = doc.Spec.Helm.Values
 	}
 	if !sawHelmOp {
-		return nil, false, nil
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s holds no HelmOp, but %s records a --fleet-mode helmop bundle; the bundle is incomplete",
+			r.Manifest, FileName))
 	}
-	return nil, true, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-		"%s holds no HelmOp for release %q; the bundle is incomplete", r.Manifest, r.Name))
+	if !matched {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s holds no HelmOp for release %q; the bundle is incomplete", r.Manifest, r.Name))
+	}
+	if values == nil {
+		return map[string]any{}, nil
+	}
+	return values, nil
+}
+
+// unstatedHelmOpValues names the first HelmOp field that supplies values the
+// manifest does not state, or returns "" when there is none.
+func unstatedHelmOpValues(valuesFrom []any, templateValues map[string]any, targets int, targetHasHelm func(int) bool) string {
+	switch {
+	case len(valuesFrom) > 0:
+		return "spec.helm.valuesFrom"
+	case len(templateValues) > 0:
+		return "spec.helm.templateValues"
+	}
+	for i := 0; i < targets; i++ {
+		if targetHasHelm(i) {
+			return fmt.Sprintf("spec.targets[%d].helm", i)
+		}
+	}
+	return ""
 }
 
 // readBounded opens dir/rel under the same guards as Read: lexically joined,
