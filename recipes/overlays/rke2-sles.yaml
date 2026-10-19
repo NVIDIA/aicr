@@ -68,3 +68,14 @@ spec:
         # that components/gpu-operator/values.yaml sets.
         gdrcopy:
           enabled: false
+
+    # NRI is off on this path, so metadata-collector must not use the NRI
+    # plugin mode the rke2 root turns on: no NRI plugin injects its management
+    # device here. It takes the `nvidia` RuntimeClass the toolkit registers
+    # instead, the pairing recipes/overlays/rke2.yaml documents.
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        metadata-collector:
+          nriPlugin:
+            enabled: false
