@@ -70,7 +70,8 @@ type bundleCmdOptions struct {
 	// fluxNamespace is the Kubernetes namespace where Flux CRs are deployed.
 	fluxNamespace string
 
-	// fleetNamespace is the Fleet workspace the generated GitRepo targets.
+	// fleetNamespace is the Fleet workspace the generated GitRepo or HelmOps
+	// are applied to.
 	fleetNamespace string
 
 	// fleetMode selects GitRepo or HelmOp output for --deployer fleet.
@@ -1099,7 +1100,7 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name: "fleet-namespace",
-				Usage: "Fleet workspace (namespace) the generated GitRepo is applied to " +
+				Usage: "Fleet workspace (namespace) the generated GitRepo or HelmOps are applied to " +
 					"(--deployer fleet only). fleet-default targets downstream clusters " +
 					"registered with Rancher; fleet-local targets the Rancher local cluster.",
 				Value:    config.DefaultFleetNamespace,

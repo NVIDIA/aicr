@@ -422,8 +422,8 @@ type Config struct {
 	// sources, ArtifactGenerator) are deployed. Defaults to DefaultFluxNamespace.
 	fluxNamespace string
 
-	// fleetNamespace is the Fleet workspace (namespace) the generated GitRepo
-	// is applied to. Defaults to DefaultFleetNamespace.
+	// fleetNamespace is the Fleet workspace (namespace) the generated GitRepo or
+	// HelmOps are applied to. Defaults to DefaultFleetNamespace.
 	fleetNamespace string
 
 	// fleetMode selects the Fleet deployer output shape ("gitrepo" or
@@ -1053,7 +1053,8 @@ func WithFluxNamespace(ns string) Option {
 	}
 }
 
-// FleetNamespace returns the Fleet workspace the generated GitRepo targets.
+// FleetNamespace returns the Fleet workspace the generated GitRepo or HelmOps
+// are applied to.
 // Returns DefaultFleetNamespace when not explicitly set.
 func (c *Config) FleetNamespace() string {
 	if c.fleetNamespace == "" {
@@ -1062,7 +1063,8 @@ func (c *Config) FleetNamespace() string {
 	return c.fleetNamespace
 }
 
-// WithFleetNamespace sets the Fleet workspace for the generated GitRepo.
+// WithFleetNamespace sets the Fleet workspace for the generated GitRepo or
+// HelmOps.
 func WithFleetNamespace(ns string) Option {
 	return func(c *Config) {
 		c.fleetNamespace = ns
