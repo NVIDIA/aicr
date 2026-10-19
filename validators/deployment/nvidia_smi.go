@@ -46,16 +46,10 @@ const (
 	// ComponentRefs, #1327) treats GPU absence as genuine inapplicability.
 	gpuOperatorComponent = "gpu-operator"
 
-	// skipReason* are the low-cardinality enum codes emitted via EmitExtra when
-	// the check skips. Unlike the human-readable RESULT/enumeration stdout lines
-	// (which the default redaction policy strips), these survive minimal
-	// redaction (see pkg/evidence/redact), so a signed bundle records WHY a check
-	// was skipped. Each must accurately describe the observed condition and be
-	// mirrored in redact.ctrfSkipReasons — a code missing from that closed set is
-	// dropped from the published bundle.
-	skipReasonNoGPUNodes            = "no-gpu-nodes"             // cluster has no GPU nodes at all
-	skipReasonNoSchedulableGPUNodes = "no-schedulable-gpu-nodes" // GPU nodes exist but all cordoned/unschedulable
-	skipReasonNodesBusy             = "nodes-busy"               // schedulable GPU nodes exist but are busy with workloads
+	// skipReason* are the codes this check publishes when it skips.
+	skipReasonNoGPUNodes            = validators.SkipReasonNoGPUNodes            // cluster has no GPU nodes at all
+	skipReasonNoSchedulableGPUNodes = validators.SkipReasonNoSchedulableGPUNodes // GPU nodes exist but all cordoned/unschedulable
+	skipReasonNodesBusy             = validators.SkipReasonNodesBusy             // schedulable GPU nodes exist but are busy with workloads
 
 	// gpuDriverVersionConstraint is the deployment-phase constraint name recipes
 	// use to declare a host-driver floor (issue #1995). Platforms with
@@ -338,13 +332,8 @@ func failClosedIfUnmeasurableGPUDriverFloor(ctx *validators.Context, reason stri
 			gpuDriverVersionConstraint, expr, reason))
 }
 
-// emitExtraOrWarn emits structured extra evidence, logging (never failing) on
-// error — a failed stdout write must not flip the check's verdict.
-func emitExtraOrWarn(extra map[string]string) {
-	if err := validators.EmitExtra(extra); err != nil {
-		slog.Warn("failed to emit validator extra", "error", err)
-	}
-}
+// emitExtraOrWarn calls validators.EmitExtraOrWarn.
+func emitExtraOrWarn(extra map[string]string) { validators.EmitExtraOrWarn(extra) }
 
 func verifySingleGPUNode(ctx *validators.Context, nodeName string) error {
 	podSuffix := sanitizeNodeName(nodeName)

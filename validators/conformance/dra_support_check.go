@@ -78,7 +78,7 @@ func CheckDRASupport(ctx *validators.Context) error {
 		}
 		probedPods = pods
 	} else if !recipeHasComponent(ctx, draDriverComponentName) {
-		return validators.Skip(fmt.Sprintf(
+		return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe, fmt.Sprintf(
 			"recipe excludes or disables the %s component — DRA is out of scope for this recipe",
 			draDriverComponentName))
 	}
@@ -224,6 +224,7 @@ func runDRABehavioralSubtests(ctx *validators.Context, dynClient dynamic.Interfa
 		fmt.Sprintf("configured policy: %s", policy))
 	recordRawTextArtifact(ctx, "GPU allocation mode", "",
 		mode.Summary())
+	validators.EmitExtraOrWarn(validators.GPUAllocationPolicyExtra(policy))
 	if verifyErr := verifyGPUAllocationPolicy(policy, mode); verifyErr != nil {
 		return verifyErr
 	}
@@ -439,7 +440,7 @@ func probeStandaloneDriverScope(ctx *validators.Context, driverNamespace string)
 		return nil, probeErr
 	}
 	if !installed {
-		return nil, validators.Skip(fmt.Sprintf(
+		return nil, validators.SkipWithReason(validators.SkipReasonDRADriverNotInstalled, fmt.Sprintf(
 			"NVIDIA DRA driver not installed — no pods, %s Deployment, or %s DaemonSet in namespace %s (no recipe componentRefs available; live detection)",
 			draControllerDeployment, draKubeletPluginDaemonSet, driverNamespace))
 	}

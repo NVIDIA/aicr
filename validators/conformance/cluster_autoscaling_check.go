@@ -539,7 +539,7 @@ func checkPlatformAutoscaling(ctx *validators.Context) error {
 	case "aks":
 		return checkAKSAutoscaling(ctx)
 	default:
-		return validators.Skip("Karpenter not found and cluster platform not recognized (not EKS, GKE, or AKS)")
+		return validators.SkipWithReason(validators.SkipReasonUnrecognizedPlatform, "Karpenter not found and cluster platform not recognized (not EKS, GKE, or AKS)")
 	}
 }
 

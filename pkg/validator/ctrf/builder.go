@@ -38,11 +38,8 @@ type ValidatorResult struct {
 	// Stdout contains the standard output lines from the container.
 	Stdout []string
 
-	// Extra carries structured, low-cardinality outcome data parsed from the
-	// container's EmitExtra sentinel line (see ctrf.ExtraLinePrefix). It maps
-	// into TestResult.Extra and, unlike Stdout/TerminationMsg, survives the
-	// minimal redaction policy for allowlisted keys. Values are counts/enum
-	// codes only — never node names or IPs.
+	// Extra is the merged payload of the container's ExtraLinePrefix lines,
+	// copied into TestResult.Extra.
 	Extra map[string]string
 
 	// RuntimeProvenance is the derived-runtime evidence carrier parsed from the

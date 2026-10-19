@@ -1080,15 +1080,15 @@ After the command finishes:
     └── attestation.intoto.jsonl  # signed (when --push is set)
 ```
 
-The bundle is **minimized by default**: `snapshot.yaml` keeps only an
+The bundle is **minimized by default**. `snapshot.yaml` keeps only an
 allowlisted set of fields (dropping node names, provider instance IDs, the
 node label/taint set, OS tuning, loaded modules, and systemd config) and the
-CTRF reports omit per-test stdout/message — while *preserving* a small
-allowlisted set of structured, low-cardinality outcome fields (the CTRF `extra`
-object: coverage counts and skip-reason codes, never node names or IPs) so a
-signed bundle still distinguishes e.g. a reduced-node pass. The signed predicate
-records the applied policy in a `redaction` block, and the bundle self-verifies
-exactly like a full one. Pass `--full` to publish the raw payloads instead.
+CTRF reports omit per-test stdout/message. Each test's CTRF `extra` keeps only
+allowlisted counts, measurements, thresholds, versions, allocation modes, and
+skip-reason codes, never node names or IPs, and is omitted when none remain.
+The signed predicate records the applied policy in a `redaction` block, and the
+bundle self-verifies exactly like a full one. Pass `--full` to publish the raw
+payloads instead.
 
 Commit `pointer.yaml` to its per-source path
 `recipes/evidence/<recipe>/<src>/<digest>.yaml` — the emit output prints

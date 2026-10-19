@@ -17,40 +17,29 @@
 // story intact.
 //
 // The signed predicate commits to artifacts by hash and carries the derived
-// fingerprint / criteria-match / per-phase counts — that is the conformance
+// fingerprint, criteria match, and per-phase counts. That is the conformance
 // signal. The snapshot and CTRF payloads are the *backing content* those
 // digests point at, not the signal itself, so they can be shrunk without
 // weakening the binding.
 //
 // Two transforms are applied by the minimal policy:
 //
-//   - Snapshot: a fail-closed allowlist that is enforced at every level —
+//   - Snapshot: a fail-closed allowlist enforced at every level, meaning
 //     measurement type, subtype, AND data key. Only enumerated types,
-//     subtypes, and keys survive; a new type, subtype, or key a future
+//     subtypes, and keys survive. A new type, subtype, or key a future
 //     collector adds is dropped until explicitly allowlisted (there is no
 //     keep-all subtype). Node names, provider instance IDs, the raw node
 //     label/taint set, kernel/sysctl tuning, loaded modules, and systemd
 //     service config are dropped.
-//   - CTRF: per-test Stdout and Message (free-form log text that can leak IPs,
-//     DNS names, secret/cert names, internal URLs) are omitted; the pass/fail
-//     signal (name, status, duration, suite, summary counts) is preserved. The
-//     structured per-test Extra map is rebuilt against a fail-closed key AND
-//     value allowlist (ctrfExtraAllowlist): only enumerated low-cardinality
-//     keys survive, and each surviving value must additionally pass its key's
-//     validator (non-negative decimal count, or a closed set of known skip
-//     codes) — so an identifier smuggled under an allowed key (e.g. an IP in
-//     nodesTotal, a hostname or unminted code in skipReason) is dropped, not
-//     published. This is
-//     the publication boundary: emission-side validation alone is bypassable
-//     via raw prefixed stdout. A signed bundle can still distinguish a
-//     1-of-2-node pass from 2-of-2 and preserve a skip reason without shipping
-//     free-form log text. An Extra map that retains nothing is dropped rather
-//     than shipped as an empty object.
+//   - CTRF: per-test Stdout and Message (free-form log text that can leak
+//     IPs, DNS names, secret/cert names, internal URLs) are omitted, and the
+//     pass/fail signal (name, status, duration, suite, summary counts) is
+//     kept. Extra keeps only keys in ctrfExtraAllowlist whose values pass
+//     that key's validator, so an IP under nodesTotal is dropped. This is the
+//     publication boundary, since raw prefixed stdout can bypass emission-side
+//     checks. An Extra map that retains nothing is omitted.
 //
-// Both functions are pure and non-mutating: they build fresh structures and
-// never alter their inputs, so the full (unredacted) artifacts remain
-// available for the --full emit path and for computing the predicate
-// fingerprint from the raw snapshot.
+// Both functions are pure and never alter their inputs.
 package redact
 
 import (
@@ -64,6 +53,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"github.com/NVIDIA/aicr/pkg/version"
 )
 
 const (
@@ -73,20 +63,14 @@ const (
 	// PolicyVersion is the allowlist/scrub-rule version. Bump on any change
 	// to what survives redaction so verifiers can tell which rules ran.
 	//
-	// v2 added the per-test CTRF Extra allowlist (ctrfExtraAllowlist):
-	// allowlisted structured keys whose values match the key's canonical shape
-	// (count / enum code) now survive minimal redaction.
-	// v3 (#2297): the per-test Extra allowlist admits the NCCL runtime-
-	// provenance key runtimeSource (closed set), and the new bounded
-	// TestResult.RuntimeProvenance carrier survives under the rules in
-	// boundRuntimeProvenance. Nothing previously published changed shape;
-	// verifiers on v2 will see fields they do not expect, which is exactly why
-	// the version moves.
-	//
-	// v4 added the `named-in-skip-checks` skipReason code, so a check the
-	// CALLER withheld (--skip-check) reaches the bundle with its reason and not
-	// only its name; the message that used to carry it is blanked here.
-	PolicyVersion = "v4"
+	// Versions:
+	//   - v2 added the per-test Extra allowlist (ctrfExtraAllowlist).
+	//   - v3 added runtimeSource and the TestResult.RuntimeProvenance carrier
+	//     (boundRuntimeProvenance).
+	//   - v4 added the named-in-skip-checks skipReason code.
+	//   - v5 added the bandwidth, readiness, inference, allocation-policy, and
+	//     operator-version keys, and the in-pod skipReason codes.
+	PolicyVersion = "v5"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -196,55 +180,140 @@ const maxCountDigits = 5
 // "10.0.0.5") fails closed. The digit bound (maxCountDigits) caps the value.
 var ctrfCountValue = regexp.MustCompile(`^[0-9]{1,` + strconv.Itoa(maxCountDigits) + `}$`)
 
-func isCountValue(v string) bool { return ctrfCountValue.MatchString(v) }
+// maxDecimalDigits is the most integer digits a published measurement may
+// have, enough for GB/s, milliseconds, and tokens/sec.
+const maxDecimalDigits = 6
 
-// ctrfSkipReasons is the CLOSED set of skipReason codes safe to publish. A
-// regex on kebab-case shape is not enough — it would still pass an arbitrary
-// low-cardinality identifier like "customer-prod-cluster". Only codes minted by
-// a check (see validators/deployment/nvidia_smi.go's skipReason* constants) are
-// listed, plus the one pkg/validator mints for a caller-declared skip
-// (SkipCheckReasonCode); any other value, including a well-formed but unlisted code, is dropped
-// fail-closed. A new skip code must be added here in the same change that emits
-// it — same discipline as the key allowlist.
-var ctrfSkipReasons = map[string]struct{}{
-	"no-gpu-nodes":             {}, // cluster has no GPU nodes at all
-	"no-schedulable-gpu-nodes": {}, // GPU nodes exist but all cordoned/unschedulable
-	"nodes-busy":               {}, // schedulable GPU nodes exist but are busy with workloads
-	"named-in-skip-checks":     {}, // the CALLER withheld the check (--skip-check / spec.validate.execution.skipChecks)
+// ctrfDecimalValue matches a non-negative number with at most one fractional
+// digit ("305.4", "300").
+var ctrfDecimalValue = regexp.MustCompile(`^[0-9]{1,` + strconv.Itoa(maxDecimalDigits) + `}(\.[0-9])?$`)
+
+// ctrfSignedDecimalValue is ctrfDecimalValue with a required sign ("+1.8",
+// "-12.3").
+var ctrfSignedDecimalValue = regexp.MustCompile(`^[+-][0-9]{1,` + strconv.Itoa(maxDecimalDigits) + `}(\.[0-9])?$`)
+
+// maxVersionComponent is the largest number a published version component may
+// be.
+const maxVersionComponent = 9999
+
+// ctrfPreReleaseSuffix matches the only version suffixes a minimal bundle may
+// publish ("-rc.1", "-beta2"). Any other suffix can carry free text.
+var ctrfPreReleaseSuffix = regexp.MustCompile(`^-(alpha|beta|rc)(\.?[0-9]{1,4})?$`)
+
+// isVersionValue reports whether v is a "v"-prefixed canonical version
+// ("v25.3.0"), optionally followed by a ctrfPreReleaseSuffix ("v25.3.0-rc.1").
+// Build metadata is rejected.
+func isVersionValue(v string) bool {
+	base, suffix, hasSuffix := strings.Cut(v, "-")
+	if hasSuffix && !ctrfPreReleaseSuffix.MatchString("-"+suffix) {
+		return false
+	}
+	parsed, err := version.ParseCanonical(base)
+	return err == nil && parsed.Prefixed &&
+		max(parsed.Major, parsed.Minor, parsed.Patch) <= maxVersionComponent
 }
 
-func isSkipReason(v string) bool { _, ok := ctrfSkipReasons[v]; return ok }
-
-// ctrfRuntimeSources is the CLOSED set of NCCL benchmark runtime-provenance
-// codes (validators/performance, #2297). The value names WHERE the measured
-// runtime came from — not whether the bandwidth passed — so a reader can tell a
-// number that describes the artifact the recipe ships from one that describes
-// a validator fixture. As with skip reasons, only codes the check mints are
-// listed; a new code must be added here in the same change that emits it.
-var ctrfRuntimeSources = map[string]struct{}{
-	"delivered-artifact":      {}, // derived from the ClusterTrainingRuntime the recipe ships
-	"recipe-supplied-runtime": {}, // nccl-benchmark-runtime(-ref): the recipe supplied the runtime itself
-	"cluster-capability":      {}, // the validator's embedded fixture: proves the fabric, not the shipped artifact
+// closedSet returns a validator that accepts only values in codes.
+func closedSet(codes ...string) ctrfExtraValidator {
+	set := make(map[string]struct{}, len(codes))
+	for _, c := range codes {
+		set[c] = struct{}{}
+	}
+	return func(v string) bool { _, ok := set[v]; return ok }
 }
 
-func isRuntimeSource(v string) bool { _, ok := ctrfRuntimeSources[v]; return ok }
+// ctrfSkipReasons is the closed set of publishable skipReason codes, the
+// validators.SkipReason* constants plus SkipCheckReasonCode. Any other value
+// is dropped, including a well-formed one, since a kebab-case regex would
+// still pass an identifier like "customer-prod-cluster". A new code must be
+// added here when it is minted.
+var ctrfSkipReasons = []string{
+	"no-gpu-nodes",             // cluster has no GPU nodes at all
+	"no-schedulable-gpu-nodes", // GPU nodes exist but all cordoned/unschedulable
+	"nodes-busy",               // schedulable GPU nodes exist but are busy with workloads
+	"named-in-skip-checks",     // the CALLER withheld the check (--skip-check / spec.validate.execution.skipChecks)
+	"no-constraint",            // the recipe declares no constraint this check evaluates
+	"component-not-in-recipe",  // the component the check verifies is absent from or disabled in the recipe
+	"no-validation-input",      // the check ran with no recipe validation input
+	"unsupported-target",       // the recipe's service and accelerator have no benchmark or qualification
+	"profile-lacks-variant",    // the declared benchmark profile does not implement this transport variant
+	"unsupported-service",      // the recipe's service has nothing for this check to verify
+	"unrecognized-platform",    // the cluster platform has no autoscaling probe
+	"no-gpu-backed-nodeset",    // no Slurm NodeSet pod requests GPUs and the criteria are incomplete
+	"no-verifiable-nodes",      // candidate nodes exist but none carry the data the check reads
+	"dra-driver-not-installed", // standalone run with no NVIDIA DRA driver on the cluster
+	"slurm-managed-gpus",       // GPUs are allocated by Slurm, not the Kubernetes scheduler
+	"simulated-nodes",          // the workload runs on KWOK simulated nodes
+}
 
-// ctrfExtraAllowlist is the fail-closed set of TestResult.Extra keys safe to
-// publish in a minimal (default) evidence bundle, each paired with the
-// validator its value must pass. Every key carries only low-cardinality counts
-// or a closed-set enum code — never node names, IPs, or other operator-
-// identifying text — because unlike Stdout/Message these values are NOT stripped
-// by default. A key a future check adds is dropped until listed here; a value
-// that fails its validator is dropped even under an allowed key. Keep the map
-// keys mirrored in the ctrf godoc and docs/contributor/validator.md.
+// ctrfGPUAllocationPolicies holds the pkg/validator/v1 GPUAllocationPolicy*
+// values that configuredPolicy accepts.
+var ctrfGPUAllocationPolicies = []string{
+	"unspecified",
+	"device-plugin-extended-resource",
+	"dra-resource-claim",
+	"dra-extended-resource",
+}
+
+// ctrfRuntimeSources is the closed set of NCCL benchmark runtime-provenance
+// codes minted by validators/performance. Each names where the measured
+// runtime came from, not whether the bandwidth passed, so a reader can tell a
+// number describing the artifact the recipe ships from one describing a
+// validator fixture. A new code must be added here when it is minted.
+var ctrfRuntimeSources = []string{
+	"delivered-artifact",      // derived from the ClusterTrainingRuntime the recipe ships
+	"recipe-supplied-runtime", // nccl-benchmark-runtime(-ref): the recipe supplied the runtime itself
+	"cluster-capability",      // the validator's embedded fixture: proves the fabric, not the shipped artifact
+}
+
+// ctrfExtraAllowlist maps each TestResult.Extra key a minimal bundle may
+// publish to the validator its value must pass. An unlisted key, or a value
+// failing its validator, is dropped. Keep the keys mirrored in
+// docs/contributor/validator.md.
 var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
-	"nodesValidated": isCountValue, // count of nodes a coverage check actually verified
-	"nodesTotal":     isCountValue, // count of candidate nodes (validated + skipped/cordoned)
-	"skipReason":     isSkipReason, // closed-set code for why a check skipped
-	// NCCL benchmark runtime provenance (#2297): which artifact the bandwidth
-	// number describes. The template digests and path diff that back the claim
-	// are stdout (--full) evidence, not Extra — see validators/performance.
-	"runtimeSource": isRuntimeSource, // closed-set code: delivered-artifact | recipe-supplied-runtime | cluster-capability
+	"nodesValidated": ctrfCountValue.MatchString, // count of nodes a coverage check actually verified
+	"nodesTotal":     ctrfCountValue.MatchString, // count of candidate nodes (validated + skipped/cordoned)
+	"skipReason":     closedSet(ctrfSkipReasons...),
+	// NCCL benchmark runtime provenance, which artifact the bandwidth number
+	// describes. The template digests and path diff backing the claim are
+	// stdout (--full) evidence, not Extra.
+	"runtimeSource": closedSet(ctrfRuntimeSources...),
+
+	// NCCL all-reduce bandwidth.
+	"achievedGbps":  ctrfDecimalValue.MatchString,
+	"thresholdGbps": ctrfDecimalValue.MatchString,
+	"tolerancePct":  ctrfDecimalValue.MatchString,
+	"passMargin":    ctrfSignedDecimalValue.MatchString, // percent above (+) or below (-) thresholdGbps
+	"workerNodes":   ctrfCountValue.MatchString,
+	"gpusInvolved":  ctrfCountValue.MatchString,
+	"transport":     closedSet("default", "net", "nvls"),
+	"fabric":        closedSet("efa", "roce"),
+
+	// Deployment readiness.
+	"draReady":           ctrfCountValue.MatchString,
+	"draDesired":         ctrfCountValue.MatchString,
+	"nodewrightComplete": ctrfCountValue.MatchString,
+	"nodewrightExpected": ctrfCountValue.MatchString,
+	"namespacesActive":   ctrfCountValue.MatchString,
+	"namespacesExpected": ctrfCountValue.MatchString,
+
+	// Inference performance.
+	"throughputTokPerSec": ctrfDecimalValue.MatchString,
+	"ttftP99Ms":           ctrfDecimalValue.MatchString,
+	"throughputThreshold": ctrfDecimalValue.MatchString,
+	"ttftThresholdMs":     ctrfDecimalValue.MatchString,
+	"scaledThreshold":     ctrfDecimalValue.MatchString,
+	"gpusBenchmarked":     ctrfCountValue.MatchString,
+	"gpusPerNode":         ctrfCountValue.MatchString,
+
+	// GPU allocation policy gate.
+	"configuredPolicy": closedSet(ctrfGPUAllocationPolicies...),
+	"resolvedMode":     closedSet("device-plugin-extended-resource", "dra-resource-claim"),
+	"nodeLocal":        closedSet("true", "false"),
+
+	// GPU operator version gate.
+	"detectedVersion":  isVersionValue,
+	"versionSatisfied": closedSet("true", "false"),
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.

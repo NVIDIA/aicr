@@ -201,6 +201,9 @@ func TestParseVersion(t *testing.T) {
 			if result.Extras != tt.expected.Extras {
 				t.Errorf("Extras: got %q, want %q", result.Extras, tt.expected.Extras)
 			}
+			if want := strings.HasPrefix(tt.input, "v"); result.Prefixed != want {
+				t.Errorf("Prefixed: got %v, want %v", result.Prefixed, want)
+			}
 		})
 	}
 }
@@ -773,6 +776,46 @@ func TestParseVersionErrors(t *testing.T) {
 			}
 			if !errors.Is(err, tt.expectedErr) && !strings.Contains(err.Error(), tt.expectedErr.Error()) {
 				t.Errorf("expected error containing %v, got %v", tt.expectedErr, err)
+			}
+		})
+	}
+}
+
+func TestParseCanonical(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    Version
+		wantErr error
+	}{
+		{name: "three components", input: "1.2.3", want: NewVersion(1, 2, 3)},
+		{name: "v prefix", input: "v25.10.1", want: Version{Major: 25, Minor: 10, Patch: 1, Precision: 3, Prefixed: true}},
+		{name: "two components", input: "v1.2", want: Version{Major: 1, Minor: 2, Precision: 2, Prefixed: true}},
+		{name: "one component", input: "7", want: Version{Major: 7, Precision: 1}},
+		{name: "zero components", input: "v0.0.0", want: Version{Precision: 3, Prefixed: true}},
+		{name: "pre-release suffix", input: "1.2.3-rc.1", wantErr: ErrNotCanonical},
+		{name: "build suffix", input: "v1.2.3+build", wantErr: ErrNotCanonical},
+		{name: "GKE suffix", input: "1.28.0-gke.1337000", wantErr: ErrNotCanonical},
+		{name: "leading zero", input: "01.2", wantErr: ErrNotCanonical},
+		{name: "signed component", input: "1.+2", wantErr: ErrNotCanonical},
+		{name: "double v prefix", input: "vv1.2", wantErr: ErrNonNumeric},
+		{name: "too many components", input: "1.2.3.4", wantErr: ErrTooManyComponents},
+		{name: "empty", input: "", wantErr: ErrEmptyVersion},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseCanonical(tt.input)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("ParseCanonical(%q) error = %v, want %v", tt.input, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseCanonical(%q) error = %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Errorf("ParseCanonical(%q) = %+v, want %+v", tt.input, got, tt.want)
 			}
 		})
 	}

@@ -37,17 +37,11 @@ func sentinelOut() io.Writer {
 	return os.Stdout
 }
 
-// EmitExtra marshals a check's structured, low-cardinality outcome data to a
-// single JSON line prefixed with ctrf.ExtraLinePrefix and writes it to stdout.
-// The orchestrator (pkg/validator/job.ExtractResult) parses this line back into
-// ctrf.TestResult.Extra, which — unlike the free-form Stdout/Message evidence —
-// survives the default "minimal" redaction policy for allowlisted keys.
-//
-// CONTRACT: values MUST be counts or enum codes only (e.g. "2", "no-gpu-nodes"),
-// never node names, IPs, or hostnames. Anything operator-identifying belongs in
-// fmt.Printf stdout, which is redacted by default. Emitting an empty map is a
-// no-op. Key order in the JSON is not significant — the line is re-parsed
-// structurally, and only redact-allowlisted keys are published.
+// EmitExtra writes extra to stdout as one ctrf.ExtraLinePrefix line, which the
+// orchestrator parses into ctrf.TestResult.Extra. Keys are the ExtraKey*
+// constants, and values must take the shapes documented on
+// ctrf.TestResult.Extra. Calls merge, a later value winning per key. An empty
+// extra writes nothing.
 func EmitExtra(extra map[string]string) error {
 	return emitSentinel(ctrf.ExtraLinePrefix, extra, len(extra) == 0, "extra")
 }
