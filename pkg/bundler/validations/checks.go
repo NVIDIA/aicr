@@ -1898,8 +1898,8 @@ func CheckNVSentinelDriverLabelDetectable(ctx context.Context, componentName str
 // defaultRuntimeClassName is the shared chart default: the gpu-operator
 // chart ships operator.runtimeClass: nvidia (v26.7.0, verified against
 // the pinned chart values), and nvsentinel's metadata-collector subchart
-// ships runtimeClassName: "nvidia" (v1.26.0, charts/metadata-collector/
-// values.yaml:35). Either side left unset therefore resolves to this
+// ships runtimeClassName: "nvidia" (v1.28.0, charts/metadata-collector/
+// values.yaml:40). Either side left unset therefore resolves to this
 // name.
 const defaultRuntimeClassName = "nvidia"
 
@@ -2340,7 +2340,7 @@ func nicInclusionOverrideUsable(override string) bool {
 // `{{ if }}` -- helmTruthy is the wrong reader here. Helm resolves the
 // path and, on anything that is not a Go bool, logs "returned non-bool
 // value", ignores the condition, and renders the subchart anyway
-// (verified against chart v1.26.0: `--set global.nicHealthMonitor.enabled=0`
+// (verified against chart v1.28.0: `--set global.nicHealthMonitor.enabled=0`
 // still renders nic-health-monitor, while `=false` does not). So only the
 // literal false switches a subchart off, and only a well-formed table can
 // carry it. An absent key reports false: every subchart this reads defaults
@@ -2483,7 +2483,7 @@ func CheckNVSentinelNicHealthMonitorRequiresMetadataCollector(ctx context.Contex
 
 // Paths and names CheckNVSentinelSlurmDrainMonitorRequiresSlinky reads.
 // slurmDrainMonitorChartNamespace is the subchart's default for
-// slurm-drain-monitor.namespace (NVSentinel chart v1.26.0); it also stands in
+// slurm-drain-monitor.namespace (NVSentinel chart v1.28.0); it also stands in
 // for slinky-slurm's namespace on a ref that does not carry one, which recipe
 // resolution otherwise fills from the registry's defaultNamespace, also slurm.
 const (
@@ -2764,7 +2764,7 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	if quarantine || drainer || remediation || analyzer {
 		errs = append(errs, nvsentinelDatastoreViolations(recipeResult, bundlerConfig, componentName, values)...)
 	}
-	// NVSentinel v1.26.0's PostgreSQL client has no $lookup or $replaceRoot,
+	// NVSentinel v1.28.0's PostgreSQL client has no $lookup or $replaceRoot,
 	// which four of the analyzer's XID 74 rules use.
 	if provider, _, _ := resolvedStringValue(values, nvsentinelDatastoreProviderPath); analyzer && provider == "postgresql" {
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,

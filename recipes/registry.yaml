@@ -490,7 +490,7 @@ components:
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: nvsentinel
       # renovate: datasource=docker depName=ghcr.io/nvidia/nvsentinel
-      defaultVersion: v1.26.0
+      defaultVersion: v1.28.0
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
@@ -776,7 +776,7 @@ components:
 
   # NVSentinel's slinky-drainer plugin, added only by the
   # nvsentinel-slinky-drainer mixin. Manifest-only: upstream ships it as
-  # Kustomize, and vendoring the v1.26.0 manifests keeps its image pinned,
+  # Kustomize, and vendoring the v1.28.0 manifests keeps its image pinned,
   # inventoried and mirrored under every deployer. Its DrainRequest CRD is
   # the separate slinky-drainer-crds component, which the plugin and
   # nvsentinel declare as a dependencyRef, so the CRD is installed and
