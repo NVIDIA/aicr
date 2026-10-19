@@ -756,6 +756,12 @@ Flux with OCI output (--output oci://...):
   (default: aicr-bundle). Use --flux-namespace to target a non-default Flux
   installation namespace (default: flux-system).
 
+Flux network-operator migration (git and OCI output):
+  The one-time network-operator migration in the component catalog's upgrade
+  notes needs Flux v2.8+ (helm-controller v1.5.0+) because it sets
+  spec.upgrade.serverSideApply. That is separate from the OCI prerequisites
+  above, and AICR does not emit the field.
+
 Helmfile:
   - helmfile.yaml: Declarative release graph (repositories + releases + needs)
   - NNN-<component>/: Per-component chart dirs (Chart.yaml, values.yaml)

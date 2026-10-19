@@ -66,16 +66,17 @@ type OSDimension struct {
 // criteria matched the cluster on which validate ran.
 type Fingerprint struct {
 	// Service is the Kubernetes service / cloud platform
-	// (eks, gke, aks, oke, kind, lke, bcm). Sourced from
-	// k8s.node.provider (parsed from spec.providerID).
+	// (eks, gke, aks, oke, kind, lke, bcm, mk8s). Sourced from
+	// k8s.node.provider (parsed from spec.providerID); mk8s additionally
+	// requires a Nebius managed node-group label.
 	Service Dimension `json:"service" yaml:"service"`
 
 	// Accelerator is the recipe-supported GPU SKU used for criteria
-	// matching (h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000). It is
-	// intentionally limited to the pkg/recipe accelerator enum: a GPU that
-	// AICR does not have recipe coverage for is left empty here (see
-	// GPUModel for the descriptive identity). Sourced from the GFD
-	// nvidia.com/gpu.product label or the PCI device ID.
+	// matching (h100, h200, gb200, gb300, b200, b300, a100, l40, l40s,
+	// rtx-pro-6000). It is intentionally limited to the pkg/recipe
+	// accelerator enum: a GPU that AICR does not have recipe coverage for
+	// is left empty here (see GPUModel for the descriptive identity).
+	// Sourced from the GFD nvidia.com/gpu.product label or the PCI device ID.
 	Accelerator Dimension `json:"accelerator" yaml:"accelerator"`
 
 	// GPUModel is the descriptive accelerator SKU detected on the node

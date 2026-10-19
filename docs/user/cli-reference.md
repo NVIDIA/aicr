@@ -1622,6 +1622,8 @@ A component need not sit in its registry default namespace to be found. The read
 
 **Permissions.** A cluster read lists at cluster scope, so it needs `list` on `secrets` and `configmaps` under `helm`, `helmfile`, `terraform` and `flux`, and `list` on `applications.argoproj.io` under `argocd` and `argocd-helm`, plus `list` on `secrets` when an `Application` names its destination cluster rather than addressing it. The at-risk scan additionally needs API discovery and `list` on each kind it scans. Nothing is written. `--format json` and `--format yaml` carry the same thing as `source`.
 
+**Under Argo CD, only `https://kubernetes.default.svc` counts as this cluster.** That is Argo CD's in-cluster address, and an `Application` is read as deploying here only when its destination server is that address or its destination name resolves to it: through a cluster Secret registering the name at that address, or, when no Secret registers the name, as Argo CD's built-in `in-cluster`. One that reaches this cluster any other way, such as through the cluster's external API endpoint, is counted as `remote`, and its component reads "added", which carries no verdict and does not fail a strict run. The child `Application`s AICR generates use the in-cluster address unless [`deployer:destinationServer`](#argo-cd-deployer-options) names another.
+
 A read that recognizes nothing is reported, never failed. Every row then reads "added", and the block says so in as many words, because from the rows alone a cluster with none of these components installed looks identical to the two likelier causes: the wrong cluster, or components installed by a deployer other than the one you named.
 
 **A cluster read reports no namespace move.** The identity comparison below is artifact-to-artifact only. The read recovers a version and no namespace, and that is not an omission it could fill: attribution composes the release name *from* the registry's namespace, so a namespace is an input to the read rather than a fact recovered from it, and only `helm`, `helmfile` and `terraform` match on the component's bare name at all. A namespace stated here would come from three deployers of six and be silently absent under the other three, which is a worse report than none.
@@ -1962,11 +1964,13 @@ The `--accelerated-node-selector` and `--accelerated-node-toleration` flags cont
 | `--accelerated-node-selector` | Applied (restricts to GPU nodes) — **except gpu-operator operands**, which self-place via the operator's GPU detection | **Not applied** (NFD runs on all nodes) |
 | `--accelerated-node-toleration` | Applied (including gpu-operator operands, via `daemonsets.tolerations`) | Applied |
 | `--system-node-selector` | Not applied | Not applied |
-| `--system-node-toleration` | Not applied | Not applied |
+| `--system-node-toleration` | Not applied | Applied (merged with the accelerated tolerations; see the note below) |
 
 NFD (Node Feature Discovery) workers must run on **all nodes** (GPU, CPU, and system) to detect hardware features. This matches the gpu-operator default behavior where NFD workers also run on control-plane nodes. The `--accelerated-node-selector` is intentionally not applied to NFD workers so they are not restricted to GPU nodes.
 
 > **Note:** When no `--accelerated-node-toleration` is specified, a default toleration (`operator: Exists`) is applied to both GPU DaemonSets and NFD workers, allowing them to run on nodes with any taint.
+
+> **Shared toleration paths:** a value path the registry declares under both the system and accelerated tiers (NFD `worker` and `topologyUpdater`, aws-ebs-csi-driver `node`) receives the deduplicated union of the keyed `--system-node-toleration` entries followed by all `--accelerated-node-toleration` entries. Keyless system tolerations — the tolerate-all default when the flag is unset, and an explicit `*` — are left out of that union so a system tolerate-all never widens an accelerated list you restricted on purpose. With no accelerated tolerations at all (possible through the Go SDK or a config file; the CLI defaults the flag), these paths receive the system list as given. To tolerate everything on these DaemonSets, pass the wildcard on the accelerated flag.
 
 **Example:**
 
@@ -1985,7 +1989,7 @@ aicr bundle --recipe recipe.yaml \
 
 This results in:
 - **gpu-operator operand DaemonSets** (driver, device-plugin, toolkit, dcgm): **no `nodeSelector` is applied** — the gpu-operator chart and its ClusterPolicy CRD have no `daemonsets.nodeSelector` field, so the selector cannot constrain them; the operator places these operands on GPU nodes itself via its GFD/NFD-driven `nvidia.com/gpu.deploy.*` labels. They **do** receive the tolerations for `dedicated=worker-workload` (both `NoSchedule` and `NoExecute`) through the real `daemonsets.tolerations` value.
-- **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
+- **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for both `dedicated=system-workload` and `dedicated=worker-workload` (`NoSchedule` and `NoExecute` each), so the DaemonSet lands on system and GPU nodes alike
 - **System components** (gpu-operator controller, NFD gc/master, dynamo grove, agentgateway proxy): `nodeSelector=nodeGroup=system-worker` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
 
 **Behavior:**
@@ -2980,6 +2984,8 @@ When using `--deployer flux` with OCI output (`--output oci://...`), AICR genera
 - **ExternalArtifact=true feature gate** must be enabled on helm-controller. This allows HelmRelease CRs to reference ExternalArtifact objects via `spec.chartRef`.
 
 Without both prerequisites, bundles generate successfully but HelmReleases will not reconcile at deploy time.
+
+**Flux version for the `network-operator` migration (git and OCI bundles):** the one-time patch in the [`network-operator` upgrade note](component-catalog.md#network-operator-network-operator-ocp-and-nfd-ocp-fabric-crs-are-no-longer-helm-hooks-flux-only) needs Flux v2.8+, because it sets `spec.upgrade.serverSideApply`, a field that exists from helm-controller v1.5.0 (shipped by Flux v2.8.0) and that the helm-controller v1.4.0 in Flux v2.7 rejects. It applies to Flux bundles of either output type, and only to a cluster upgrading from a bundle generated before that change whose release was first installed client-side. AICR does not emit the field, so generating and reconciling a bundle does not depend on it.
 
 **Configuration flags:**
 
@@ -4457,5 +4463,5 @@ aicr snapshot --template examples/templates/snapshot-template.md.tmpl --output r
 - [Installation Guide](installation.md) - Install aicr
 - [Agent Deployment](agent-deployment.md) - Kubernetes agent setup
 - [API Reference](api-reference.md) - Programmatic access
-- [Architecture Docs](../contributor/) - Internal architecture
+- [Architecture Docs](../contributor/index.md) - Internal architecture
 - [Data Architecture](../contributor/recipe.md) - Recipe data system details

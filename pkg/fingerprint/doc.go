@@ -17,8 +17,8 @@
 // criteria.
 //
 // A Fingerprint records the cluster-identity dimensions used to bind
-// a snapshot to a recipe — service (eks/gke/aks/oke/kind/lke/bcm),
-// accelerator (h100/h200/gb200/b200/a100/l40/l40s/rtx-pro-6000), OS
+// a snapshot to a recipe — service (eks/gke/aks/oke/kind/lke/bcm/mk8s),
+// accelerator (h100/h200/gb200/gb300/b200/b300/a100/l40/l40s/rtx-pro-6000), OS
 // (ubuntu/rhel/cos/amazonlinux/talos/ol plus raw VERSION_ID), Kubernetes
 // server version, region, total node count, and GPU node count. Each
 // dimension records the resolved value plus an optional source string

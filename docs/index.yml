@@ -14,7 +14,8 @@
 
 # Fern's navigation manifest, and therefore the authoritative list of pages
 # Fern publishes (see tools/docs-published-files). A page missing here is not
-# published and not gated by the MDX checkers.
+# published, not gated by the MDX checkers, and not a valid relative link
+# target from a published page (tools/check-docs-links).
 #
 # Deliberately excluded:
 #   - docs/design/ and docs/conformance/ (mirrored in .lychee.toml)

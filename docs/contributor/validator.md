@@ -364,9 +364,8 @@ Skip. The empty-result inapplicability case is handled by the caller
 (`len(items) == 0`), keeping `Require`'s Skip path off the error branch entirely.
 
 **#1327 standalone boundary.** A standalone validator run carries no recipe
-context: `pkg/validator/v1.ToValidationInput` leaves `ComponentRefs` empty, so
-`RecipeDeclares` returns false (it is nil-safe on a nil `Context` or nil
-`ValidationInput`). On that path a clean-absent probe still `Skip`s, which
+context, so `RecipeDeclares` returns false (it is nil-safe on a nil `Context`
+or nil `ValidationInput`). On that path a clean-absent probe still `Skip`s, which
 preserves the capability-driven automatic selection that #1327 introduced.
 Fail-closed fires **only once the recipe actually declares** the dependency —
 declaration is what converts "inapplicable, so Skip" into "promised but missing,

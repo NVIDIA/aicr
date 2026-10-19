@@ -282,13 +282,14 @@ jobs:
               - 'Makefile'
               - '.github/workflows/merge-gate.yaml'
             docs:
-              # Inputs to the documentation parser gates. MDX parsing follows
-              # the Fern-published page list, while YAML fence parsing and the
-              # shell placeholder check cover Markdown files under docs/.
+              # Inputs to the documentation parser gates. MDX parsing and the
+              # link check follow the Fern-published page list, while YAML
+              # fence parsing and the shell placeholder check cover Markdown
+              # files under docs/.
               #
               # docs/index.yml is Fern's navigation manifest and supplies the
-              # MDX checker's file list, so it is both an input and a trigger:
-              # adding a page there must run the gate over it.
+              # MDX and link checkers' file list, so it is both an input and a
+              # trigger. Adding or removing a page there must run the gate.
               # docs/README.md is the published landing page — the earlier
               # per-subdirectory globs missed it entirely.
               #
@@ -302,6 +303,7 @@ jobs:
               - 'tools/check-docs-mdx-parse'
               - 'tools/check-docs-yaml*'
               - 'tools/check-docs-shell*'
+              - 'tools/check-docs-links/**'
               - 'tools/docs-published-files'
               - 'tools/mdx/**'
               - 'Makefile'
@@ -608,9 +610,10 @@ jobs:
       - run: echo "No .settings.yaml or refresh-script changes — checksum freshness not required"
 
   # ---------------------------------------------------------------------------
-  # Docs parser gates — parse every Fern-published doc as MDX, every YAML
-  # fence under docs/ as YAML, and every shell fence for placeholders that bash
-  # would read as redirection.
+  # Docs parser gates. Parse every Fern-published doc as MDX, every YAML fence
+  # under docs/ as YAML, and every shell fence for placeholders that bash would
+  # read as redirection, then check that every link on a published page reaches
+  # a published page or an existing repository path.
   #
   # `fern check` (Fern Docs CI) does not parse MDX, and the job that does
   # (`fern generate --docs --preview`) runs in a workflow_run companion whose
@@ -645,6 +648,14 @@ jobs:
         run: make check-docs-yaml
       - name: Check shell examples for unquoted placeholders
         run: make check-docs-shell
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+      - name: Check links on published pages
+        run: make check-docs-links
 
   docs-mdx-skip:
     needs: [check-paths]

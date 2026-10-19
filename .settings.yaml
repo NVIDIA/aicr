@@ -167,7 +167,7 @@ testing_tools:
   # tools/setup-tools covers local dev on other platforms.
   setup_envtest_sha256_linux_amd64: '94534f83896f3b09934d9570b213fbda04aa5c17457942270928cdca0317bf9b'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
-  helm: 'v4.3.0'
+  helm: 'v4.3.1'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
   helm_diff: 'v3.15.15'
   # helm_diff_checksums are refreshed automatically by tools/update-helm-diff-checksums

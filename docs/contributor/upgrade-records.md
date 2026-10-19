@@ -256,12 +256,12 @@ duplicate another group's. A group is one ordered sequence a reader follows top
 to bottom, not a fragment to be assembled. Step ids may repeat across groups,
 since a consumer addresses a step as (deployer, id).
 
-The remainder is a convenience, not a default: a step written for Flux or Argo
+The remainder is a convenience, not a default. A step written for Flux or Argo
 CD reads wrong under `terraform`, which also lands there unless a group names
 it. For an `ownsCRDs` component, a `manual` or `blocked` record must give
 `helmfile` and `terraform` an explicit group with a step that applies the CRDs,
-since nothing applies them on those two deployers; a test in `pkg/recipe`
-enforces that ([ADR-021](../design/021-component-upgrade-safety.md)).
+since nothing applies them on those two deployers. A test in `pkg/recipe`
+enforces that ([ADR-021](https://github.com/NVIDIA/aicr/blob/main/docs/design/021-component-upgrade-safety.md)).
 
 **`affectedResources` may not name core `Secret`.** The at-risk scan lists every
 kind a crossed record names, cluster-wide, and the permission to list Secrets

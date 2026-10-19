@@ -31,7 +31,7 @@ const (
 	ExitError = 1
 
 	// ExitInvalidInput indicates malformed input, validation failure, or bad arguments.
-	// Maps to: ErrCodeInvalidRequest, ErrCodeMethodNotAllowed
+	// Maps to: ErrCodeInvalidRequest, ErrCodeMethodNotAllowed, ErrCodeConflict
 	ExitInvalidInput = 2
 
 	// ExitNotFound indicates a requested resource was not found.

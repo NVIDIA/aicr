@@ -84,7 +84,7 @@ Qwen3-8B ran on eight one-GPU workers on one B300 node and achieved
 unchanged acceptance gates. The overlay pins NVIDIA driver **595.91.07**;
 NVIDIA-SMI validation passed on both GPU nodes.
 
-The [signed evidence pointer](../../recipes/evidence/b300-mk8s-ubuntu-inference-dynamo/45d8f16e5893804eca45b900bd037446/sha256-c3c8443e6b6b049fdf204c1e8ab744cb2df4f8948b4fe48a0fa69a2303c7593f.yaml)
+The [signed evidence pointer](https://github.com/NVIDIA/aicr/blob/main/recipes/evidence/b300-mk8s-ubuntu-inference-dynamo/45d8f16e5893804eca45b900bd037446/sha256-c3c8443e6b6b049fdf204c1e8ab744cb2df4f8948b4fe48a0fa69a2303c7593f.yaml)
 references the public OCI bundle. The
 [signing workflow](https://github.com/kky-fury/aicr/actions/runs/38969685302)
 completed successfully; anonymous signature and integrity verification passed

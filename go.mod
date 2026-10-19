@@ -32,6 +32,7 @@ require (
 	github.com/transparency-dev/formats v0.1.1
 	github.com/transparency-dev/merkle v0.0.2
 	github.com/urfave/cli/v3 v3.14.0
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/mod v0.42.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0

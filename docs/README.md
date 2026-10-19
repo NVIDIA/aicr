@@ -46,7 +46,7 @@ For pipelines and platforms that call AICR programmatically or host
 | Add or modify recipe metadata | [Recipe Development](integrator/recipe-development.md) |
 | Verify artifacts (SLSA, SBOM, attestations) | [Supply Chain Verification](integrator/supply-chain-verification.md) |
 | Ship custom validators via `--data` | [Validator Extension](integrator/validator-extension.md) |
-| Cloud-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [OKE](integrator/oke-gpu-setup.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE TCPXO networking](integrator/gke-tcpxo-networking.md), [GKE GB200 networking](integrator/gke-gb200-networking.md), [GKE A4X Max networking](integrator/gke-a4x-max-networking.md), [Talos](integrator/talos-integration.md) |
+| Platform-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [OKE](integrator/oke-gpu-setup.md), [Nebius B300](integrator/nebius-b300.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE TCPXO networking](integrator/gke-tcpxo-networking.md), [GKE GB200 networking](integrator/gke-gb200-networking.md), [GKE A4X Max networking](integrator/gke-a4x-max-networking.md), [Talos](integrator/talos-integration.md), [OpenShift](integrator/openshift.md), [RKE2 VR200](integrator/rke2-vr200-setup.md), [k0s H200](integrator/k0s-h200-setup.md) |
 
 ### Contributor Guide
 

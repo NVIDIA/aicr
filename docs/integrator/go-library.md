@@ -73,7 +73,7 @@ go get github.com/NVIDIA/aicr@latest
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v0.22.0
+go get github.com/NVIDIA/aicr@v1.0.0
 ```
 
 ## Quick start
@@ -282,7 +282,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	// full run-scoped RBAC set. Leaving it unset, as here, keeps the
 	// run-scoped default and never probes for an existing ServiceAccount.
 	Namespace:       "aicr-snapshot",
-	Image:           "ghcr.io/nvidia/aicr:v0.22.0",
+	Image:           "ghcr.io/nvidia/aicr:v1.0.0",
 	Timeout:         5 * time.Minute,
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
