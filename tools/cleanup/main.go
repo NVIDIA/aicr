@@ -115,7 +115,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "log what would be removed without changing the cluster")
 	fs.BoolVar(&opts.assumeYes, "yes", false, "skip the confirmation prompt")
 	fs.BoolVar(&opts.keepCRDs, "keep-crds", false, "keep CRDs, e.g. when reinstalling the same version")
-	fs.BoolVar(&opts.keepNamespaces, "keep-namespaces", false, "keep component namespaces")
+	fs.BoolVar(&opts.keepNamespaces, "keep-namespaces", false, "skip namespace deletion")
 	fs.Func("exclude-ns", "protect a namespace from helm uninstall and namespace deletion (repeatable, comma-separated)",
 		csvAppender(&opts.excludeNS, "a namespace"))
 	fs.Func("exclude-crd", "protect CRDs whose name contains this match from deletion (repeatable, comma-separated)",

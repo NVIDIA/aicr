@@ -60,7 +60,14 @@ func (c *cleaner) removeValidatorArtifacts(ctx context.Context) {
 		}
 		c.runSweep(ctx, s)
 	}
-	c.deleteNamespace(ctx, defaults.ValidationNamespace)
+	switch {
+	case c.excludedNS(defaults.ValidationNamespace):
+		c.log.Info("skipping excluded namespace", "namespace", defaults.ValidationNamespace)
+	case c.opts.keepNamespaces:
+		c.log.Info("skipping namespace deletion", "namespace", defaults.ValidationNamespace, "flag", "--keep-namespaces")
+	default:
+		c.deleteNamespace(ctx, defaults.ValidationNamespace)
+	}
 }
 
 func (c *cleaner) runSweep(ctx context.Context, s sweep) {

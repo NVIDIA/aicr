@@ -602,3 +602,29 @@ func TestRemoveValidatorArtifacts(t *testing.T) {
 		t.Errorf("deleted =\n%q\nwant\n%q", deleted, want)
 	}
 }
+
+func TestRemoveValidatorArtifactsProtectsValidationNamespace(t *testing.T) {
+	tests := []struct {
+		name string
+		opts options
+		want string
+	}{
+		{"excluded", options{excludeNS: []string{defaults.ValidationNamespace}},
+			`msg="skipping excluded namespace" namespace=` + defaults.ValidationNamespace},
+		{"keep namespaces", options{keepNamespaces: true},
+			`msg="skipping namespace deletion" namespace=` + defaults.ValidationNamespace + ` flag=--keep-namespaces`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture([]runtime.Object{namespace(defaults.ValidationNamespace)})
+			tt.opts.assumeYes = true
+
+			f.cleaner(tt.opts).removeValidatorArtifacts(context.Background())
+
+			if !f.namespaceExists(t, defaults.ValidationNamespace) {
+				t.Errorf("namespace %s was deleted", defaults.ValidationNamespace)
+			}
+			f.wantOutput(t, tt.want)
+		})
+	}
+}
