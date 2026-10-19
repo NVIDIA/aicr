@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestComponentRefCoherenceProblem(t *testing.T) {
@@ -141,7 +143,7 @@ func TestRecipeResultValidateCoherence(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for incoherent refs, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 	for _, want := range []string{"\"h\"", "\"k\""} {
@@ -299,7 +301,7 @@ func TestPrepareAndValidate_RejectsReservedDeployerName(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
 			}
 			if !strings.Contains(err.Error(), "reserved") {
@@ -393,7 +395,7 @@ func TestPrepareAndValidate_RejectsDuplicateNames(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
 			}
 			if tt.name == "reserved-key precedence over duplicate check" {

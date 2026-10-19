@@ -16,7 +16,6 @@ package cli
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,6 +26,7 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // TestValidateCmd_CNCFSubmissionRecipe covers the recipe source of a
@@ -197,7 +197,7 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 				// well-formed-but-invalid request, so assert the structured
 				// code (not just the message text) — a wrong code would map to
 				// the wrong HTTP status / exit behavior for library callers.
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 				}
 				if tt.errContain != "" && (err == nil || !strings.Contains(err.Error(), tt.errContain)) {
@@ -269,7 +269,7 @@ func TestValidateFlagCombinations_SkipCheckWithEvidenceDir(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 			}
 			for _, want := range tt.wantSubstrs {
@@ -303,7 +303,7 @@ func TestValidateCmd_NoClusterEvidenceFlags(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), "cannot be combined with --no-cluster") {
@@ -461,7 +461,7 @@ func TestValidateCmd_KubeconfigSelectsValidationCluster(t *testing.T) {
 	if !strings.Contains(err.Error(), flagPath) {
 		t.Errorf("error must fail on the explicit --kubeconfig path %q, got:\n%v", flagPath, err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 	}
 }
@@ -496,7 +496,7 @@ func TestDeployAgentForValidation_ExplicitKubeconfigFailsFast(t *testing.T) {
 	if !strings.Contains(err.Error(), flagPath) {
 		t.Errorf("error must fail on the explicit kubeconfig path %q, got:\n%v", flagPath, err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 	}
 }

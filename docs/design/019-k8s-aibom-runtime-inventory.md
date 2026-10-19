@@ -79,7 +79,7 @@ registry entry, minimal AICR values, a pinned chart version, and a read-only
 health check. Recipes reference it explicitly through `componentRefs`; the
 registry entry itself carries no back-reference to any recipe. Existing
 deployers project that definition into Helm, Helmfile, Argo CD, Argo CD Helm,
-Flux, and local-format outputs. Components do not add custom installation or
+Terraform, Flux, and local-format outputs. Components do not add custom installation or
 controller logic to the bundler.
 
 Relevant contracts:
@@ -424,7 +424,7 @@ the following gates.
 ### AICR qualification
 
 - The component renders consistently through `helm`, `helmfile`, `argocd`,
-  `argocd-helm`, `flux`, and `localformat`. Only the first five are
+  `argocd-helm`, `flux`, `terraform`, and `localformat`. Only the first six are
   `--deployer` values; `localformat` is the shared writer those paths build on,
   so exercise it at the writer and vendored-chart level rather than by passing
   `--deployer localformat`, which fails to parse.

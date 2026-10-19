@@ -26,9 +26,13 @@
 # 1. Builds the aicr binary
 # 2. Ensures a Kind cluster + local registry (ctlptl, reuses .ctlptl.yaml)
 # 3. Generates a recipe via query parameters, with the
-#    nvsentinel-object-monitor and nvsentinel-preflight mixins composed, so
-#    their mixin-gated images are asserted in every manifest format and the
-#    three small controller images are carried through the transfer
+#    nvsentinel-object-monitor, nvsentinel-preflight,
+#    nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor,
+#    nvsentinel-remediation, nvsentinel-slinky-drainer and
+#    nvsentinel-health-events-analyzer mixins composed, so their mixin-gated images are
+#    asserted in every manifest format and the three small controller images
+#    (object monitor, preflight, slurm drain monitor) are carried through the
+#    transfer
 # 4. Runs `aicr mirror list` in all formats (validates the full pipeline)
 # 5. Trims Hauler/Zarf manifests to public images only (avoids NGC auth)
 # 6. Syncs trimmed manifest via Hauler into the local registry
@@ -67,21 +71,21 @@ WORK=""
 # All are asserted in the three `mirror list` formats, but only the ~13 MiB
 # controller image is carried through the Hauler sync, Zarf package and
 # registry verification: preflight-dcgm-diag is ~1.7 GiB and the two NCCL
-# checks ~9.9 GiB each, which would exhaust an ubuntu-latest runner's disk and
+# checks ~9.9 GiB each, which would exhaust an ubuntu-24.04 runner's disk and
 # blow the lane's timeout on every recipe PR. Carrying a mixin-gated image
 # through the whole transfer path is what discovery alone does not prove.
-PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.25.0"
+PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.26.0"
 PREFLIGHT_IMAGES=(
-    "ghcr.io/nvidia/nvsentinel/preflight:v1.25.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag:v1.25.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback:v1.25.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce:v1.25.0"
+    "ghcr.io/nvidia/nvsentinel/preflight:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce:v1.26.0"
 )
 
 # The image the nvsentinel-object-monitor mixin pulls in (#2612). Same
 # invisibility to the static BOM, for a different reason: it lives in a
 # mixin-gated subchart rather than a mixin-gated values override.
-OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.25.0"
+OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.26.0"
 
 # The images the nvsentinel-nic-health-monitor mixin pulls in. The subchart
 # image is invisible to the static BOM for the same reason as the object
@@ -92,13 +96,43 @@ OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.25.
 # for main ones, so asserting only the subchart image would let an
 # init-container regression through.
 NIC_HEALTH_MONITOR_IMAGES=(
-    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.25.0"
+    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.26.0"
     "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 )
 
 # The image the nvsentinel-slurm-drain-monitor mixin pulls in (#2611), from a
 # mixin-gated subchart like the object monitor's.
-SLURM_DRAIN_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.25.0"
+SLURM_DRAIN_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.26.0"
+
+# The images the nvsentinel-remediation mixin pulls in, the widest of the
+# three remediation steps. gpu-reset is not in any pod spec: janitor reads it
+# from its ConfigMap and runs it as a Job, so discovery reaches it only
+# through the embedded-YAML walk. The Percona images are AICR's pins in the
+# psmdb-operator and nvsentinel-mongodb components. The reboot Job image is
+# left out on purpose: janitor-provider gets it as an env var, which discovery
+# cannot see, and the busybox it is pinned to already comes from the NIC
+# mixin, so listing it would prove nothing.
+REMEDIATION_IMAGES=(
+    "ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/node-drainer:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/fault-remediation:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/janitor:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/janitor-provider:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/gpu-reset:v1.26.0"
+    "docker.io/percona/percona-server-mongodb-operator:1.23.1@sha256:78c87b933e184b9af36dbb0078751862c75934c1521c33d3be4d0a38aa58dd0a"
+    "docker.io/percona/percona-server-mongodb:8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c"
+    "docker.io/percona/mongodb_exporter:0.53.0@sha256:0214e482b2cd4b1849f9f4dcef90d328a99ba3727dd1103e7da48b42060bcec1"
+    "docker.io/percona/percona-backup-mongodb:2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5"
+    "docker.io/percona/fluentbit:5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913"
+    "docker.io/percona/pmm-client:3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b"
+)
+
+# The image the nvsentinel-slinky-drainer mixin pulls in (#2615), from the
+# manifest-only slinky-drainer component it adds.
+SLINKY_DRAINER_IMAGE="ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.26.0@sha256:29f8bbe52449ca0dccc34c1dba39c60c7c8a00cda00a5c5076dde9604dd27690"
+
+# The image the nvsentinel-health-events-analyzer mixin pulls in (#2618).
+HEALTH_EVENTS_ANALYZER_IMAGE="ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.26.0"
 
 # Every mixin-gated image, asserted in all three `mirror list` formats.
 MIXIN_IMAGES=(
@@ -106,6 +140,9 @@ MIXIN_IMAGES=(
     "${PREFLIGHT_IMAGES[@]}"
     "${NIC_HEALTH_MONITOR_IMAGES[@]}"
     "${SLURM_DRAIN_MONITOR_IMAGE}"
+    "${REMEDIATION_IMAGES[@]}"
+    "${SLINKY_DRAINER_IMAGE}"
+    "${HEALTH_EVENTS_ANALYZER_IMAGE}"
 )
 
 # The subset carried through the Hauler sync, Zarf package and registry
@@ -200,13 +237,17 @@ ensure_cluster() {
 }
 
 generate_recipe() {
-    msg "Generating recipe (with the nvsentinel-object-monitor and nvsentinel-preflight mixins composed)..."
+    msg "Generating recipe (with the nvsentinel-object-monitor, nvsentinel-preflight, nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor, nvsentinel-remediation, nvsentinel-slinky-drainer and nvsentinel-health-events-analyzer mixins composed)..."
     # No --os: the Kind overlay tree is OS-agnostic, and a stated OS that no
     # Kind overlay distinguishes fails criteria coverage (issue #1542).
     #
     # The recipe is generated through an external --data overlay that composes
-    # both nvsentinel mixins, so every mixin-gated image is discovered by
-    # `mirror list` and asserted in the generated Hauler and Zarf manifests.
+    # the nvsentinel-object-monitor, nvsentinel-preflight,
+    # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor,
+    # nvsentinel-remediation, nvsentinel-slinky-drainer and
+    # nvsentinel-health-events-analyzer mixins, so every mixin-gated image is
+    # discovered by `mirror list` and asserted in the generated Hauler and Zarf
+    # manifests.
     # Only the three small controller images are carried through the sync,
     # package and registry verification -- the three preflight check images
     # are 1.7-9.9 GiB each and would exhaust the runner. None of these images
@@ -230,12 +271,14 @@ REGISTRY_EOF
 
     # Derived from the shipped overlay rather than duplicated, so its base,
     # constraints and validation cannot drift out of sync with the real one;
-    # the only difference is the composed mixin. An external overlay of the
+    # the only difference is the composed mixins. An external overlay of the
     # same name replaces its embedded counterpart.
-    # nvsentinel-slurm-drain-monitor is composed on a non-Slurm leaf here only
-    # because this lane never bundles: CheckNVSentinelSlurmDrainMonitorRequiresSlinky
-    # would reject it at `aicr bundle`, but `mirror list` runs no bundle gates.
-    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor"]' \
+    # nvsentinel-slurm-drain-monitor and nvsentinel-slinky-drainer are composed
+    # on a non-Slurm leaf here only because this lane never bundles:
+    # CheckNVSentinelSlurmDrainMonitorRequiresSlinky and
+    # CheckNVSentinelSlurmCustomDrainCoherent would reject them at `aicr bundle`,
+    # but `mirror list` runs no bundle gates.
+    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor", "nvsentinel-remediation", "nvsentinel-slinky-drainer", "nvsentinel-health-events-analyzer"]' \
         "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
         > "${data_dir}/overlays/h100-kind-training.yaml"
 
@@ -258,8 +301,8 @@ REGISTRY_EOF
     yq -i '(.componentRefs[] | select(.name == "gpu-operator") | .overrides.dcgm.enabled) = true' "${WORK}/recipe.yaml"
 
     # Fail loudly here rather than letting a silently-unapplied mixin turn the
-    # image assertions below into no-ops. Both are checked: either mixin
-    # failing to compose would quietly halve this lane's coverage.
+    # image assertions below into no-ops. Each is checked: any mixin failing
+    # to compose would quietly shrink this lane's coverage.
     if ! grep -q "kubernetesObjectMonitor" "${WORK}/recipe.yaml"; then
         err "nvsentinel-object-monitor mixin did not apply -- the recipe carries no kubernetesObjectMonitor override"
     fi
@@ -271,6 +314,15 @@ REGISTRY_EOF
     fi
     if ! grep -q "slurmDrainMonitor" "${WORK}/recipe.yaml"; then
         err "nvsentinel-slurm-drain-monitor mixin did not apply -- the recipe carries no slurmDrainMonitor override"
+    fi
+    if ! grep -q "janitorProvider" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-remediation mixin did not apply -- the recipe carries no janitorProvider override"
+    fi
+    if ! grep -q "customDrain" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-slinky-drainer mixin did not apply -- the recipe carries no customDrain override"
+    fi
+    if ! grep -q "healthEventsAnalyzer" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-health-events-analyzer mixin did not apply -- the recipe carries no healthEventsAnalyzer override"
     fi
     msg "Recipe generated at ${WORK}/recipe.yaml"
 }

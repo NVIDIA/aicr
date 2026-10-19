@@ -20,6 +20,8 @@
 # (shared HCA, resource rdma/ib), and nicConfigurationOperator manages NIC
 # firmware/config. vendor 15b3 = Mellanox; deviceID 1021 = ConnectX-7,
 # 1023 = ConnectX-8.
+{{- $netop := index .Values "network-operator" }}
+{{- $daemon := $netop.nicConfigurationOperator.configurationDaemon }}
 apiVersion: mellanox.com/v1alpha1
 kind: NicClusterPolicy
 metadata:
@@ -32,13 +34,17 @@ metadata:
     # bundler's post-bundle sequencing (this manifest ships in the
     # network-operator-post bundle, after the operator's CRDs).
     aicr/skip-hook-validation: "true"
+    # Flux does not wait for this CR: the operator holds it at Ready=False
+    # until OFED is built, past helm-controller's timeout (NVIDIA/aicr#2585).
+    aicr/disable-wait: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 spec:
-  # Fabric DaemonSets run only on Mellanox-NIC nodes (labeled by the chart's
-  # NodeFeatureRule); tolerations alone would let them land on untainted
-  # CPU-only nodes.
+  # Fabric DaemonSets run only on Mellanox-NIC nodes (labeled pci-15b3.present
+  # by the nfd-worker rule in components/nfd/values-nvidia-nics.yaml and, for
+  # one release, the chart's NodeFeatureRule); tolerations alone would let them
+  # land on untainted CPU-only nodes.
   nodeAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:
       nodeSelectorTerms:
@@ -76,7 +82,7 @@ spec:
   rdmaSharedDevicePlugin:
     image: k8s-rdma-shared-dev-plugin
     repository: nvcr.io/nvidia/mellanox
-    version: network-operator-v26.4.1
+    version: network-operator-v26.7.0
     imagePullSecrets: []
     config: |
       {
@@ -106,11 +112,7 @@ spec:
       imagePullSecrets: []
       containerResources:
         - name: nic-configuration-daemon
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            memory: 512Mi
+          {{- toYaml $daemon.resources | nindent 10 }}
   # Fabric DaemonSets must land on tainted GPU nodes.
   tolerations:
     - key: nvidia.com/gpu

@@ -35,10 +35,13 @@ hostPaths:
 
 operator:
   upgradeCRD: true
+  # The working set grows with node count (about 3.4Gi peak at 2500 GB300
+  # nodes, #3148). The limit covers that; the request stays sized for small
+  # clusters, so raise it through valueOverrideKeys on large ones.
   resources:
     limits:
       cpu: 500m
-      memory: 700Mi
+      memory: 8Gi
     requests:
       cpu: 200m
       memory: 300Mi

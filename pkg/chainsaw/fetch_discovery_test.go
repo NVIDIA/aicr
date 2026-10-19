@@ -36,6 +36,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // stubDiscovery is a minimal discovery.DiscoveryInterface that serves a fixed
@@ -373,7 +374,7 @@ func TestClusterFetcher_CooldownDeniedNoMatchIsUnavailable(t *testing.T) {
 		}
 		f.lastReset = clock
 
-		if _, err := f.Fetch(context.Background(), "v1", "Pod", "ns", "p1"); !isUnavailable(err) {
+		if _, err := f.Fetch(context.Background(), "v1", "Pod", "ns", "p1"); errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 			t.Fatalf("inside the cooldown: err = %v, want Unavailable", err)
 		}
 
@@ -429,10 +430,6 @@ func TestClusterFetcher_CooldownDeniedNoMatchIsUnavailable(t *testing.T) {
 	})
 }
 
-func isUnavailable(err error) bool {
-	return stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
-}
-
 // TestClusterFetcher_ProbeHonorsContext covers the bound on the partial-discovery
 // probe. DiscoveryInterface is context-free, so on a cold cache
 // ServerGroupsAndResources fans out one request per group-version with nothing
@@ -453,7 +450,7 @@ func TestClusterFetcher_ProbeHonorsContext(t *testing.T) {
 	// ConfigMap is absent from the stub's healthy core group, so a live probe
 	// would clear it to NotFound. With the context already done it must not.
 	_, err := f.Fetch(ctx, "v1", "ConfigMap", "ns", "x")
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 		t.Errorf("err = %v, want code %s — an expired context cannot prove a group was enumerated",
 			err, errors.ErrCodeUnavailable)
 	}

@@ -200,7 +200,7 @@ schemes are `awskms://`, `gcpkms://`, `azurekms://`, and `hashivault://`.
 aicr bundle -r recipe.yaml --attest \
   --signing-key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k \
   -o ./bundles
-aicr verify ./bundles/<bundle-dir> \
+aicr verify ./bundles \
   --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k
 ```
 
@@ -217,7 +217,7 @@ against the local PEM file; this part makes no provider calls:
 cosign public-key --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k > bundle-signer.pub
 
 # Verify anywhere afterward, with no KMS access needed.
-aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub
+aicr verify ./bundles --key ./bundle-signer.pub
 ```
 
 A local PEM key is read from disk only. The bundle's Rekor transparency-log
@@ -323,8 +323,11 @@ The positional argument is auto-detected. Prefer the committed **pointer file**,
 which pins the bundle by digest:
 
 ```shell
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 # Verify a pointer a contributor committed alongside a recipe change (preferred).
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 
 # Verify a pushed OCI bundle directly, pinned by digest.
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
@@ -336,10 +339,51 @@ aicr evidence verify ./out/summary-bundle
 To require a specific signer, pin the OIDC issuer and identity:
 
 ```shell
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" \
   --expected-issuer https://token.actions.githubusercontent.com \
   --expected-identity-regexp '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.+$'
 ```
+
+### Key-Signed Evidence
+
+Where no OIDC identity is available, sign evidence with a KMS key: pass
+`--signing-key <kms-uri>` to `aicr validate --push`, `aicr evidence publish`, or
+`aicr evidence sign`. The same schemes as bundle signing are supported
+(`awskms://`, `gcpkms://`, `azurekms://`, `hashivault://`), and the signature
+goes to Rekor v2 by default. The pointer records `signer.issuer: key` and, as
+`signer.identity`, the key's public-key fingerprint: `sha256:` and the SHA-256
+of the PKIX DER public key. The KMS URI is never recorded, since it names a
+cloud account and cannot be recovered from the signature.
+
+Verify with `--key`, supplying the KMS URI or an exported PEM public key. The
+key is the signer pin, so `--expected-issuer` and `--expected-identity-regexp`
+are rejected alongside it, and a pointer whose `signer` block names another key
+fails the cross-check:
+
+```shell
+# Sign and push with a KMS key.
+aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out \
+  --push ghcr.io/myorg/aicr-evidence --signing-key awskms:///alias/aicr-evidence
+
+# Verify the pointer against the same key, or its exported public key.
+aicr evidence verify ./out/pointer.yaml --key awskms:///alias/aicr-evidence
+cosign public-key --key awskms:///alias/aicr-evidence > evidence-signer.pub
+aicr evidence verify ./out/pointer.yaml --key ./evidence-signer.pub
+```
+
+For air-gapped signing, add `--tlog-upload=false`: no Rekor entry is written
+and the pointer carries no `rekorLogIndex`. Verify such evidence with
+`--key <public-key.pem> --insecure-ignore-tlog`; without a transparency log
+there is no trusted proof of when the signature was made. Evidence signed
+against a private Fulcio/Rekor (`--fulcio-url`, `--rekor-url`,
+`--signing-config`) verifies with `--trust-root <trusted_root.json>`.
+
+Key-signed evidence is for private use. The `Evidence Pointer Contract` gate
+rejects a committed key-signed pointer, because the signer allowlist pins
+keyless OIDC identities, not public keys.
 
 ## Per-Source Pointer Layout and the Signer Allowlist
 
@@ -428,11 +472,14 @@ full input-detection rules and the `--allow-unpinned-tag` escape hatch.
 Both verifiers emit machine-readable JSON for pipeline gating.
 
 ```shell
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 # Bundle verification as JSON.
 aicr verify ./my-bundle --format json
 
 # Evidence verification as JSON to a file.
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" --format json -o result.json
 ```
 
 `aicr evidence verify` exits `0` when every check passes, `2` when the
@@ -450,8 +497,11 @@ non-zero exit would otherwise propagate through the pipeline and abort the scrip
 before the `case` runs. The `|| true` keeps that exit from tripping `set -e`:
 
 ```shell
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 rm -f result.json
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json || true
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" --format json -o result.json || true
 if [ ! -s result.json ]; then
   echo "verifier wrote no result — treat as a failure"; exit 1
 fi

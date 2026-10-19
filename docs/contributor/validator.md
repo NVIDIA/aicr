@@ -364,9 +364,8 @@ Skip. The empty-result inapplicability case is handled by the caller
 (`len(items) == 0`), keeping `Require`'s Skip path off the error branch entirely.
 
 **#1327 standalone boundary.** A standalone validator run carries no recipe
-context: `pkg/validator/v1.ToValidationInput` leaves `ComponentRefs` empty, so
-`RecipeDeclares` returns false (it is nil-safe on a nil `Context` or nil
-`ValidationInput`). On that path a clean-absent probe still `Skip`s, which
+context, so `RecipeDeclares` returns false (it is nil-safe on a nil `Context`
+or nil `ValidationInput`). On that path a clean-absent probe still `Skip`s, which
 preserves the capability-driven automatic selection that #1327 introduced.
 Fail-closed fires **only once the recipe actually declares** the dependency —
 declaration is what converts "inapplicable, so Skip" into "promised but missing,
@@ -622,6 +621,25 @@ prevents concurrent runs from clobbering each other's RBAC. External
 tooling selects by label `app.kubernetes.io/name=aicr-validator`, not
 literal name.
 
+`validator.WithServiceAccountName` (CLI `--validator-service-account-name`,
+facade `WithValidatorServiceAccountName`) replaces that with an
+administrator-provisioned ServiceAccount. The run then skips
+`ensureNamespace`, `EnsureRBAC`, `rollbackRBAC`, and `CleanupRBAC`, and
+`prepareCluster` calls `job.VerifyServiceAccount` instead: a Get, then a `SubjectAccessReview`
+for verb, group, and resource `*` at cluster scope, which a binding to
+`cluster-admin`, or any rule granting `*` for verb, group, and resource,
+satisfies. RBAC matches a requested `*` only against a literal `*`, so a role
+that lists its verbs fails the review even when it covers everything the
+validators use. It fails closed on a missing
+ServiceAccount, on one that disables token automount (the validator pod spec
+does not override it), on a denied review, and on a caller that may not
+create the review. A validator running with less than it needs can read its
+own `Forbidden` as the refusal a negative check expects, so an unverified
+identity is not run. The Job's `serviceAccountName` comes from
+`job.Config.ServiceAccountName`, defaulting to the per-run name. See
+[Running under a pre-provisioned ServiceAccount](../user/validation.md#running-under-a-pre-provisioned-serviceaccount)
+for the manifests and the caller's permissions.
+
 **Image-pull policy** is computed by `v1.ImagePullPolicy(image,
 imageTagOverride)` in `pkg/validator/v1/job_plan.go`:
 side-loaded (`ko.local/*`, `kind.local/*`) → `Never`;
@@ -646,6 +664,15 @@ them:
 2. **`AICR_VALIDATOR_IMAGE_TAG` set** — overrides step 1 for *all* catalog
    images uniformly, including the inner `aiperf-bench` runner the
    `performance` validator launches (so both must exist at that tag).
+   It does not retag the Dynamo runtime images (`vllm-runtime`,
+   `dynamo-frontend`) the inference-perf workload runs. Those take the
+   recipe's `dynamo-platform` chart version, so they match the deployed
+   operator even when an overlay or `--data` overrides the chart pin. When
+   the recipe's ref carries no version they fall back to
+   `defaults.DynamoRuntimeImageTag`, which `make check-dynamo-runtime-image`
+   holds equal to the registry's `dynamo-platform` pin. They resolve through
+   `catalog.ApplyRegistryOverride`, so `AICR_VALIDATOR_IMAGE_REGISTRY` still
+   redirects them.
 
 What CI publishes:
 
@@ -702,7 +729,8 @@ AICR_VALIDATOR_IMAGE_TAG=edge aicr validate -r recipe.yaml -s snapshot.yaml --ph
 
 # Immutable pin (reproducible) — use a published main commit, not blindly HEAD
 # (a docs-only HEAD has no image; verify with the registry check below):
-AICR_VALIDATOR_IMAGE_TAG=sha-<published-main-commit> aicr validate -r recipe.yaml -s snapshot.yaml ...
+SHA="0123456789abcdef0123456789abcdef01234567"  # replace with the full SHA of a published main commit
+AICR_VALIDATOR_IMAGE_TAG="sha-${SHA}" aicr validate -r recipe.yaml -s snapshot.yaml --phase performance
 ```
 
 **Not when emitting evidence.** `aicr validate --emit-attestation` refuses a
@@ -930,7 +958,41 @@ silently fall back.
 Full list (defaults, semantics) is in the `validators/performance`
 package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls`. Inference:
-`inference-perf` (Dynamo + AIPerf).
+`inference-perf` (Dynamo + AIPerf). Opt-in public CRE
+checks: `nccl-cre-all-reduce-bw` and `cre-training-goodput`. Neither branches on
+service or accelerator — `creQualifiedEntries` in
+`validators/performance/cre_qualification.go` records which combinations are
+qualified and the catalog entry and node cap each was measured with, so a new
+combination is an entry there plus a measured threshold rather than a new code
+path. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100` with
+`communication/nccl-all-reduce`; `cre-training-goodput` has no qualified
+combination while the `training/nemotron5-8b` entry it drives does not run on
+the pinned CRE version, so it skips wherever it is declared. Both create the
+CR on an explicitly named set of nodes, wait with a timeout, and tear it down on
+success or failure — deleting the CR and then confirming the `TrainJob`s and
+workload pods it started are gone, since CRE's controller drops its finalizer
+without waiting for them. An unconfirmed teardown fails the check rather than
+warning, because surviving work still holds the GPUs. Teardown only runs if the
+validator pod lives to run it, so each `Certification` is stamped
+`app.kubernetes.io/managed-by=aicr-validator` and the next run reclaims any
+older than `CREOrphanReclaimAge` — the sum of every phase a live run is allowed,
+which is what keeps the sweep from deleting a concurrent validator's run. The catalog timeout
+budgets that whole serial path — Certification wait, measurement finalize, then
+teardown — because the Job's `activeDeadlineSeconds` is the catalog timeout plus
+only `ValidatorJobDeadlineHeadroom`, and a pod killed partway through teardown
+leaves the `TrainJob`s holding GPUs with nothing reporting it.
+
+A terminal Certification does not mean its measurements are readable. CRE marks
+the Job Succeeded before the final log read, and only a measurement with
+configured thresholds keeps the Workflow waiting for it — the Certifications
+AICR builds set none. Results are provisional until `Complete` is `True` with
+reason `JobSucceeded`, and a provisional sweep can stop before the largest
+message sizes, where peak bandwidth is printed. Both readers therefore wait for
+every measurement the run owns to finalize, bounded by
+`CREMeasurementFinalizeTimeout`, and fail closed on expiry. The other
+completion reasons are not weaker evidence but no evidence: `LogsUnavailable`
+completes while leaving the provisional results in place and `NoDataCollected`
+has none, and CRE declines to evaluate a threshold against either.
 
 > **Constraint-name contract.** Each NCCL variant looks up a
 > constraint with the *exact* same name as the check. A recipe
@@ -1273,9 +1335,15 @@ unrecognized value, which keeps a typo'd severity non-silent.
 | `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set |
 | `CheckHostMofedWithoutNetworkOperator` | Host-mode MOFED component paired with `network-operator` |
 | `CheckWildcardAcceleratedToleration` | Accelerated-node tolerations carry no wildcard (keyless) entry — on AKS a wildcard deadlocks nodewright interrupt packages ([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)); wired at `severity: error`, skipped when the component is disabled via `--set` |
+| `CheckNodewrightRuntimeRequiredTaintKey` | The nodewright runtime-required taint key, from `--workload-gate` or the final effective values, has no DNS prefix and is at most 53 characters. The operator writes the key into the `nodewright.nvidia.com/autoTaint_<key>` annotation, and from v0.20.0 refuses to start on one that cannot form it. A `--dynamic` declaration on the path is rejected, since its install-time value is never checked. Blocking |
 | `CheckGB300HostKernelGranule` | Bare-metal GB300 (`service: generic`, `accelerator: gb300`) applies a tuned profile that sizes hugepages for a 64k-granule ARM64 host kernel. A 4k-granule host still boots — Linux rejects the `hugepagesz=512M` clause and drops its paired `hugepages=` count — so the node just runs without that pool. Advisory only (`severity: info`); skipped when the component is disabled or `tuningEnabled` resolves to false on the final effective values (recipe merge plus scalar `--set` and typed `--set-json`/`--set-file`, under the canonical name and its registry aliases). |
 | `CheckDriverOwnershipCoherence` | GPU driver-ownership coherence on the final effective values (recipe merge + `--set`/`--set-json`/`--set-file` under canonical names and registry aliases): a recipe whose snapshot observed no NVIDIA driver (`metadata.gpuDriverState: absent`) must not bundle with the preinstalled-driver assumption. When GPU Operator manages the driver, `nvidia-dra-driver-gpu.nvidiaDriverRoot` must equal `gpu-operator hostPaths.driverInstallDir`; with a preinstalled driver, the DRA root must avoid the unpopulated operator container root and may intentionally differ from `hostPaths.driverInstallDir` ([#1087](https://github.com/NVIDIA/aicr/issues/1087), [#1757](https://github.com/NVIDIA/aicr/issues/1757)). Wired at `severity: error`. |
 | `CheckMariaDBOperatorOwnershipCoherence` | MariaDB Operator installation safety for AICR-provided Slurm accounting: `metadata.mariaDBOperatorState` values `crs-detected` and `unknown` block bundling, `api-detected` or omitted evidence warns, and `absent` proceeds silently. Wired at `severity: warning` so warning results remain non-blocking while returned errors still fail the bundle. |
+| `CheckNVSentinelDatastorePrerequisites` | Cluster prerequisites of `nvsentinel-mongodb` from snapshot evidence. `metadata.defaultStorageClassState`: `absent` and `unknown` block unless `replsets.rs0.volumeSpec.pvc.storageClassName` or `--storage-class` names a class, `multiple` warns, `present` proceeds. `metadata.perconaOperatorState`: `crs-detected`, `operator-detected`, and `unknown` block, `api-detected` warns that psmdb-operator replaces the existing CRDs, `absent` and `aicr-owned` proceed. Omitted evidence warns for either field. |
+| `CheckNVSentinelRemediationPipelineCoherent` | NVSentinel's fault pipeline can work as configured: no quarantine, drain or remediation stage with the embedded `mongodbStore` or without a supported `global.datastore.provider`; each stage has the one before it (`node-drainer` needs `fault-quarantine`, `fault-remediation` needs `node-drainer`), `global.dryRun` is a boolean when `fault-remediation` is on, a live `fault-remediation` has `janitor`, `janitor` has `janitor-provider`, and `fault-remediation` has `metadata-collector`; janitor's GPU reset Job reads the driver from the root the GPU Operator populates, with a clean `driverRoot`, a RuntimeClass coherent with the enabled GPU Operator variant (none under CDI with NRI), and a service manager that waits only for operands the GPU Operator runs, in its namespace, with a custom spec's timeouts set; the GPU reset is rejected on GKE COS. With the `nvsentinel-mongodb-uri` datastore it also requires x509 auth with the `nvsentinel-mongodb-app-client` certificate and both Percona components deployed, enabled and in NVSentinel's namespace. Rejects `--dynamic` on any path it verifies. Wired at `severity: error`. |
+| `CheckNVSentinelMongoDBCoherent` | `nvsentinel-mongodb` is usable by NVSentinel: NVSentinel is deployed, TLS is `requireTLS`, sharding is off, the `$external` x509 app user has `readWrite` on `HealthEventsDatabase` and the `nvsentinelTTLIndex` role, `psmdb-operator` is deployed with `watchAllNamespaces: false` and `disableTelemetry: true`, and `crVersion` and `initImage` are at the operator image's minor. Dependencies are read from the declared component set, so a `bundlers=` subset still sees them. Rejects `--dynamic` on any path it verifies. Wired at `severity: error`. |
+| `CheckNVSentinelSlurmDrainMonitorRequiresSlinky` | NVSentinel's `slurm-drain-monitor` is not enabled without `slinky-slurm` (absent or disabled), or watching a blank namespace or one `slinky-slurm` does not deploy to: the monitor reads the `SlurmNodeStateDrain` condition off Slinky worker pods, which only `slinky-slurm`'s NodeSets create, so it would run and never see a pod. Rejects `--dynamic` on the monitor's toggle and namespace and on `slinky-slurm`'s `enabled`, even with the monitor off. Wired at `severity: error`. |
+| `CheckNVSentinelSlurmCustomDrainCoherent` | NVSentinel drains Slurm nodes through the slinky-drainer plugin: a recipe with `slinky-slurm` and a live (not dry-run) `fault-remediation` has `node-drainer.customDrain` on, while quarantine alone passes; `customDrain` is only on with a live `node-drainer`, a boolean `global.dryRun` that is false, `slinky-slurm`, the `slinky-drainer-crds` component, and the `slinky-drainer` component in NVSentinel's namespace watching the namespace `slinky-slurm` deploys to; and its values match the plugin's contract (DrainRequest kind, resource and `DrainComplete` condition, the `slinky-drain-template` template, NVSentinel's namespace, a positive whole-seconds `timeout`, and empty `userNamespaces` and `podDrainPolicies` with an empty `nodeSelector`, since a scope could leave slurmd nodes on pod eviction); and the slurmd NodeSet and every Slurm control pod in the Slurm namespace (slinky-slurm's controller, REST API, login and enabled accounting, and `slurm-accounting-mariadb` there) render non-empty node selectors (modelled on the bundler's order: `--set`, then node-selector injection unless the overlay opts out with an empty or null value, then `--set-json`), each control pod's giving some label key a different value from slurmd's, since the plugin waits for every Ready pod in that namespace on a drained node to report Slurm DRAIN. Rejects `--dynamic` on any path a rule that can still fire reads, so a monitoring-only Slurm recipe keeps its `--dynamic` paths. Wired at `severity: error`. |
 | `CheckNPDNotDuplicatingProviderNPD` | `node-problem-detector` is bundled only on an allowlist of verified platforms — never where the provider already runs its own NPD (GKE, AKS), on OpenShift (no privileged SCC binding), or on Talos (restricted namespace) |
 | `CheckGKETCPXOInterfacesCoherence` | The final resolved kubeflow-trainer `tcpxoInterfaces` value matches the mapping the recipe records in `configuration.gke.tcpxoInterfaces` |
 | `CheckNVSentinelDriverLabelDetectable` | Where the GPU Operator does not own the driver and no driver pod exists (driver ships in the node image), NVSentinel sets `labeler.assumeDriverInstalled`, so its driver-label-gated DaemonSets do not come up half-rolled-out |

@@ -27,6 +27,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 )
 
@@ -373,7 +375,7 @@ spec:
 
 	provider := &unexpectedLoadProvider{}
 	_, err := LoadFromFileWithProvider(t.Context(), path, "", "test", provider)
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("LoadFromFileWithProvider() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), `apiVersion "aicr.nvidia.com/v1alpha1"`) {
@@ -403,7 +405,7 @@ profie: typo
 	if err == nil {
 		t.Fatal("LoadFromFileWithProvider() error = nil, want invalid request")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 }

@@ -26,6 +26,12 @@
 # Ethernet NICs (class 0200/0207). This rule targets the IB VFs specifically,
 # which is why values-aks.yaml sets nfd.deployNodeFeatureRules=false.
 #
+# Kept for one release so the label does not drop during the upgrade:
+# nfd-worker now produces the same label (components/nfd/values-nvidia-nics-aks.yaml). Once workers
+# strip pci.*, this rule matches nothing. Remove it in the contract change
+# (#3038); a cluster must take this release first, or finish the nfd-worker
+# rollout before network-operator syncs, or unrestarted nodes lose the label.
+#
 # Reference: https://github.com/Azure/aks-rdma-infiniband/blob/main/tests/setup-infra/network-operator-nfd.yaml
 ---
 apiVersion: nfd.k8s-sigs.io/v1alpha1
@@ -33,9 +39,12 @@ kind: NodeFeatureRule
 metadata:
   name: nfd-network-rule
   annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "1"
-    helm.sh/hook-delete-policy: before-hook-creation
+    # Deliberately NOT a Helm hook: this rule labels the nodes the
+    # NicClusterPolicy schedules onto and must be updated in place —
+    # hook-delete-policy would drop the labels on every upgrade and let the
+    # fabric DaemonSets lose their nodes. CRD-before-CR ordering is provided
+    # by the bundler's post-bundle sequencing (network-operator-post bundle).
+    aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}

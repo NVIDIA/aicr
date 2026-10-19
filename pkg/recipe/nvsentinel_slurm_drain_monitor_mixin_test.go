@@ -319,7 +319,7 @@ func TestSlurmDrainMonitorImagePinnedEverywhere(t *testing.T) {
 	}
 
 	const scanWorkflow = "../../.github/workflows/vuln-scan-images.yaml"
-	tag, found := scanMatrixTagFor(t, scanWorkflow, slurmDrainMonitorImage)
+	tag, found := scanMatrixTagFor(t, slurmDrainMonitorImage)
 	switch {
 	case !found:
 		t.Errorf("%s has no scan matrix entry for %s -- #2611 requires the scan job to cover this image", scanWorkflow, slurmDrainMonitorImage)

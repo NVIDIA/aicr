@@ -54,9 +54,10 @@ type EvidencePublishOptions struct {
 	// OIDCResolve is ignored.
 	NoSign bool
 
-	// OIDCResolve carries keyless-signing token-resolution inputs,
-	// consumed only when NoSign is false. Resolution is deferred until
-	// adjacent to signing so Fulcio's nonce-binding window is respected.
+	// OIDCResolve selects KMS signing (SigningKey) or keyless signing and
+	// carries its inputs, consumed only when NoSign is false. Keyless token
+	// resolution is deferred until adjacent to signing so Fulcio's
+	// nonce-binding window is respected.
 	OIDCResolve OIDCResolveOptions
 }
 

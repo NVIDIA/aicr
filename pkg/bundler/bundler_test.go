@@ -45,6 +45,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -239,7 +240,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		_, err := b.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if attester.called != 0 {
@@ -292,7 +293,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		_, err := newBundler(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -302,7 +303,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		cancel()
 		_, err := newBundler(t).runDeployer(
 			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("runDeployer() error = %v, want ErrCodeTimeout", err)
 		}
 	})
@@ -333,7 +334,7 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 		cancel()
 		attester := &closedWorldTestAttester{}
 		files, err := newBundler(attester).attestBundle(ctx, dir, nil, closedWorldRecipeResult())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
 		}
 		if len(files) != 0 {
@@ -350,7 +351,7 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 		}
 		files, err := newBundler(attester).attestBundle(
 			context.Background(), dir, nil, closedWorldRecipeResult())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
 		}
 		if len(files) != 0 {
@@ -371,7 +372,7 @@ func TestAttestBundle_RequiresChecksums(t *testing.T) {
 
 	files, err := b.attestBundle(
 		context.Background(), t.TempDir(), nil, closedWorldRecipeResult())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("attestBundle() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if len(files) != 0 {
@@ -416,7 +417,7 @@ func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 			_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if _, statErr := os.Stat(filepath.Join(dir, "README.md")); !stderrors.Is(statErr, os.ErrNotExist) {
@@ -435,7 +436,7 @@ func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
 			t.Fatalf("New() error = %v", err)
 		}
 		_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if _, statErr := os.Stat(filepath.Join(dir, "README.md")); statErr != nil {
@@ -455,6 +456,7 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
 		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
 		{name: "helmfile", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform},
 	}
 
 	for _, tt := range tests {
@@ -486,7 +488,7 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 }
 
 // TestMake_EveryDeployerEmitsRecipe covers #2753: the recipe write used to be
-// gated on the helm deployer, so four of the five bundle formats carried no
+// gated on the helm deployer, so every other bundle format carried no
 // recipe and could not be fed back to anything that re-resolves one.
 //
 // The byte-identity assertion is the part that would not survive a plausible
@@ -505,6 +507,7 @@ func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
 		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
 		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
 		{name: "helmfile", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform},
 	}
 
 	emitted := make(map[string][]byte, len(tests))
@@ -727,6 +730,7 @@ func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
 		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
 		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
 		{name: "helmfile", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform},
 	}
 
 	for _, tt := range tests {
@@ -817,12 +821,17 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 		wantTargetRevision string
 		wantAppName        string
 	}{
-		// helm and helmfile: the generators declare none of the three fields,
-		// configured or not.
+		// helm, helmfile and terraform: the generators declare none of the
+		// three fields, configured or not. Each installs from chart folders
+		// inside the bundle, so no repository coordinate is observable in
+		// anything they emit -- recording one would describe a source the
+		// bundle never names.
 		{name: "helm", deployer: config.DeployerHelm, configure: true},
 		{name: "helm unset", deployer: config.DeployerHelm},
 		{name: "helmfile", deployer: config.DeployerHelmfile, configure: true},
 		{name: "helmfile unset", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform, configure: true},
+		{name: "terraform unset", deployer: config.DeployerTerraform},
 		{
 			name:               "argocd",
 			deployer:           config.DeployerArgoCD,
@@ -1148,7 +1157,7 @@ func TestMake_NilConfigFailsClosed(t *testing.T) {
 	}
 
 	_, err := bundler.Make(t.Context(), recipeResult, t.TempDir())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "construct the bundler with New") {
@@ -1167,7 +1176,7 @@ func TestMake_InvalidConfigFailsClosed(t *testing.T) {
 	}
 
 	_, err := bundler.Make(t.Context(), recipeResult, t.TempDir())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "invalid node label key") {
@@ -1589,7 +1598,7 @@ func TestMake_UndeclaredDependencyErrors(t *testing.T) {
 					original := recipeResult.DeepCopy()
 					outputDir := filepath.Join(t.TempDir(), "bundle")
 					_, err = bundler.Make(t.Context(), recipeResult, outputDir)
-					if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 						t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 					}
 					const missing = `component "a" depends on "phantom", which is not present in this recipe`
@@ -1692,7 +1701,7 @@ func TestMake_BundlersFilter(t *testing.T) {
 				if makeErr == nil {
 					t.Fatal("Make() expected error, got nil")
 				}
-				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(makeErr) != errors.ErrCodeInvalidRequest {
 					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
 				}
 				if !strings.Contains(makeErr.Error(), tt.wantErrText) {
@@ -1971,7 +1980,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 				}
 				// Pin the structured code: both the re-enable rejection and the
 				// unparseable --set value are invalid-request errors.
-				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(makeErr) != errors.ErrCodeInvalidRequest {
 					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
 				}
 				return
@@ -3021,6 +3030,19 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 			},
 			description: "component default values file value is overwritten by --accelerated-node-toleration",
 		},
+		{
+			name:    "repeated CLI toleration is written once",
+			initial: map[string]any{},
+			policy:  schedulingPathPolicy{},
+			cliTols: []corev1.Toleration{
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule},
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule},
+			},
+			wantValue: []any{
+				map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+			},
+			description: "--accelerated-node-toleration passed twice with the same value renders a single entry",
+		},
 	}
 
 	for _, tt := range tests {
@@ -3046,6 +3068,231 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 				t.Errorf("%s:\n  got  = %#v\n  want = %#v", tt.description, gotList, wantList)
 			}
 		})
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_NFDWorkerGetsSystemAndAcceleratedTolerations
+// pins #3135. The registry declares nfd's worker.tolerations and
+// topologyUpdater.tolerations under BOTH the system and accelerated tiers
+// because those DaemonSets must run on every node; the rendered value must be
+// the union of both flags, not whichever pass ran last.
+func TestApplyNodeSchedulingOverrides_NFDWorkerGetsSystemAndAcceleratedTolerations(t *testing.T) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	nfd := registry.Get("nfd")
+	if nfd == nil {
+		t.Fatalf("registry missing nfd component")
+	}
+	sharedPaths := []string{"worker.tolerations", "topologyUpdater.tolerations"}
+	for _, p := range sharedPaths {
+		if !slices.Contains(nfd.GetSystemTolerationPaths(), p) || !slices.Contains(nfd.GetAcceleratedTolerationPaths(), p) {
+			t.Fatalf("nfd %q must be declared under both system and accelerated tolerationPaths; system=%v accelerated=%v",
+				p, nfd.GetSystemTolerationPaths(), nfd.GetAcceleratedTolerationPaths())
+		}
+	}
+
+	systemTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	acceleratedTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithSystemNodeTolerations([]corev1.Toleration{systemTol}),
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{acceleratedTol}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	values := map[string]any{}
+	b.applyNodeSchedulingOverrides("nfd", values, nil, schedulingPathPolicy{})
+
+	want := []any{
+		map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"},
+		map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+	}
+	for _, p := range sharedPaths {
+		got, ok := component.GetValueByPath(values, p)
+		if !ok {
+			t.Fatalf("%s not present after injection", p)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("nfd %s must tolerate both system and accelerated taints; got accelerated only or wrong order (#3135)\n  got  = %#v\n  want = %#v", p, got, want)
+		}
+	}
+
+	// A system-only path is unaffected by the shared-path union.
+	got, ok := component.GetValueByPath(values, "master.tolerations")
+	if !ok {
+		t.Fatalf("master.tolerations not present after injection")
+	}
+	if wantMaster := want[:1]; !reflect.DeepEqual(got, wantMaster) {
+		t.Errorf("nfd master.tolerations must carry only the system toleration\n  got  = %#v\n  want = %#v", got, wantMaster)
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_SharedPathUnion covers the shared-path
+// rules around the #3135 fix: keyless system entries are dropped only when an
+// accelerated list is merged in, the union is deduplicated, and opt-out /
+// append-mode / values-file-default handling matches non-shared paths.
+func TestApplyNodeSchedulingOverrides_SharedPathUnion(t *testing.T) {
+	const workerPath = "worker.tolerations"
+	const masterPath = "master.tolerations"
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	keyless := corev1.Toleration{Operator: corev1.TolerationOpExists}
+	sysMap := map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"}
+	accMap := map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"}
+	keylessMap := map[string]any{"operator": "Exists"}
+	exampleMap := map[string]any{"key": "example.com/dedicated", "operator": "Exists", "effect": "NoSchedule"}
+
+	tests := []struct {
+		name       string
+		initial    map[string]any
+		policy     schedulingPathPolicy
+		sys        []corev1.Toleration
+		acc        []corev1.Toleration
+		wantWorker []any
+		wantMaster []any // nil = don't check
+	}{
+		{
+			name:       "flags-only overlap is written once",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{sysTol, accTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, accMap},
+			wantMaster: []any{sysMap, accMap},
+		},
+		{
+			name:       "keyless system default is not carried onto the shared path",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{accMap},
+			wantMaster: []any{keylessMap},
+		},
+		{
+			name:       "keyed system entries are carried, keyless dropped",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless, sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, accMap},
+		},
+		{
+			name:       "no accelerated list: keyless system default is written as given",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless},
+			wantWorker: []any{keylessMap},
+			wantMaster: []any{keylessMap},
+		},
+		{
+			name:       "no accelerated list: mixed system list is not narrowed",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless, sysTol},
+			wantWorker: []any{keylessMap, sysMap},
+			wantMaster: []any{keylessMap, sysMap},
+		},
+		{
+			name: "append mode keeps overlay entries and does not repeat the system one",
+			initial: map[string]any{
+				"worker": map[string]any{"tolerations": []any{sysMap, exampleMap}},
+			},
+			policy:     schedulingPathPolicy{appendMode: map[string]struct{}{workerPath: {}}},
+			sys:        []corev1.Toleration{sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, exampleMap, accMap},
+		},
+		{
+			name: "opt-out empty list is preserved",
+			initial: map[string]any{
+				"worker": map[string]any{"tolerations": []any{}},
+			},
+			policy:     schedulingPathPolicy{optOut: map[string]struct{}{workerPath: {}}},
+			sys:        []corev1.Toleration{sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{},
+		},
+		{
+			name: "values-file default is replaced when only accelerated is set",
+			initial: map[string]any{
+				"worker": map[string]any{"tolerations": []any{keylessMap}},
+			},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{accMap},
+		},
+		{
+			name:       "system-only path never receives accelerated entries",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, accMap},
+			wantMaster: []any{sysMap},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithSystemNodeTolerations(tt.sys),
+				config.WithAcceleratedNodeTolerations(tt.acc),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			b.applyNodeSchedulingOverrides("nfd", tt.initial, nil, tt.policy)
+
+			got, ok := component.GetValueByPath(tt.initial, workerPath)
+			if !ok {
+				t.Fatalf("%s not present after injection", workerPath)
+			}
+			if !reflect.DeepEqual(got, tt.wantWorker) {
+				t.Errorf("%s:\n  got  = %#v\n  want = %#v", workerPath, got, tt.wantWorker)
+			}
+			if tt.wantMaster != nil {
+				gotMaster, ok := component.GetValueByPath(tt.initial, masterPath)
+				if !ok {
+					t.Fatalf("%s not present after injection", masterPath)
+				}
+				if !reflect.DeepEqual(gotMaster, tt.wantMaster) {
+					t.Errorf("%s:\n  got  = %#v\n  want = %#v", masterPath, gotMaster, tt.wantMaster)
+				}
+			}
+		})
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_SharedPathDynamicOptOut: a --dynamic path
+// is skipped by the shared-path union too; the other shared path still gets it.
+func TestApplyNodeSchedulingOverrides_SharedPathDynamicOptOut(t *testing.T) {
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithSystemNodeTolerations([]corev1.Toleration{sysTol}),
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{accTol}),
+		config.WithDynamicValues(map[string][]string{"nfd": {"worker.tolerations"}}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values := map[string]any{}
+	policy := b.computeSchedulingPathPolicy(&recipe.ComponentRef{Name: "nfd"}, nil, nil)
+	for path := range b.dynamicPathSetFor("nfd", nil) {
+		policy.optOut[path] = struct{}{}
+	}
+	b.applyNodeSchedulingOverrides("nfd", values, nil, policy)
+
+	if val, ok := component.GetValueByPath(values, "worker.tolerations"); ok {
+		t.Errorf("worker.tolerations should not be baked in when declared dynamic, got: %v", val)
+	}
+	want := []any{
+		map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"},
+		map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+	}
+	got, ok := component.GetValueByPath(values, "topologyUpdater.tolerations")
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Errorf("topologyUpdater.tolerations:\n  got  = %#v\n  want = %#v", got, want)
 	}
 }
 
@@ -4193,7 +4440,7 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 				t.Fatalf("resolveAgentgatewayExposure() error = %v, wantErr %v", gotErr, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(gotErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(gotErr) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", gotErr)
 				}
 			}
@@ -4330,7 +4577,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for missing manifest path")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		msg := err.Error()
@@ -4365,7 +4612,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for missing manifest path")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		msg := err.Error()
@@ -4709,7 +4956,7 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	if makeErr == nil {
 		t.Fatal("Make() = nil error, want the absent-component --dynamic rejection")
 	}
-	if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(makeErr) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", makeErr)
 	}
 	for _, want := range []string{
@@ -5134,7 +5381,7 @@ func TestExtractComponentValues_FailsClosedOnValueReadError(t *testing.T) {
 	}}}
 
 	_, err = bundler.extractComponentValues(context.Background(), recipeResult)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("extractComponentValues() error = %v, want ErrCodeInternal", err)
 	}
 }
@@ -5168,7 +5415,7 @@ func TestComponentValidationError_PreservesStructuredCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := componentValidationError(tt.input)
-			if !stderrors.Is(got, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(got) != tt.wantCode {
 				t.Fatalf("componentValidationError() = %v, want code %s", got, tt.wantCode)
 			}
 		})

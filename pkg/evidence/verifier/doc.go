@@ -25,8 +25,9 @@
 //  2. Signature verify — when attestation.intoto.jsonl is present,
 //     sigstore-go verifies the DSSE-wrapped in-toto Statement against
 //     the Sigstore trusted root (Fulcio cert chain, optional Rekor
-//     entry). The cryptographically anchored predicate body is
-//     extracted from the verified payload.
+//     entry), or, with VerifyOptions.Key, against that public key. The
+//     cryptographically anchored predicate body is extracted from the
+//     verified payload.
 //  3. Predicate parse — use the verified predicate when the signature
 //     step produced one; otherwise fall back to the unsigned
 //     statement.intoto.json (self-consistency only).
@@ -40,7 +41,7 @@
 //
 // The trust chain when a signature is present:
 //
-//	Sigstore trusted root → Fulcio cert (Rekor-logged)
+//	Sigstore trusted root → Fulcio cert (Rekor-logged), or the operator's key
 //	  → DSSE-signed Statement
 //	    → predicate.Manifest.Digest
 //	      → manifest.json

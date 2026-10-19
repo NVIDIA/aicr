@@ -48,11 +48,11 @@ func TestStepsFor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
-			for _, s := range stepsFor(tt.groups, tt.deployer) {
+			for _, s := range (&Transition{StepsByDeployer: tt.groups}).StepsFor(tt.deployer) {
 				got = append(got, s.ID)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("stepsFor(...) step ids = %v, want %v", got, tt.want)
+				t.Errorf("StepsFor(...) step ids = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -524,6 +524,13 @@ func TestReportSourceSerializationTags(t *testing.T) {
 		{"argo applications", reflect.TypeOf(ReportSourceArgo{}), "Applications", "applications", "applications"},
 		{"argo unattributed", reflect.TypeOf(ReportSourceArgo{}), "Unattributed", "unattributed", "unattributed"},
 		{"argo unreadable", reflect.TypeOf(ReportSourceArgo{}), "Unreadable", "unreadable", "unreadable"},
+		{"argo remote", reflect.TypeOf(ReportSourceArgo{}), "Remote", "remote", "remote"},
+		{"argo unplaced", reflect.TypeOf(ReportSourceArgo{}), "Unplaced", "unplaced", "unplaced"},
+		{"row unproven", reflect.TypeOf(ReportComponent{}), "Unproven", "unproven,omitempty", "unproven,omitempty"},
+		{"unproven source", reflect.TypeOf(ReportUnproven{}), "Source", "source", "source"},
+		{"unproven name", reflect.TypeOf(ReportUnproven{}), "Name", "name", "name"},
+		{"unproven namespace", reflect.TypeOf(ReportUnproven{}), "Namespace", "namespace,omitempty", "namespace,omitempty"},
+		{"unproven reason", reflect.TypeOf(ReportUnproven{}), "Reason", "reason", "reason"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -583,6 +590,86 @@ func TestNewReportSource(t *testing.T) {
 	src.Helm.Records = 0
 	if *rep.Source != want {
 		t.Errorf("the report's source changed with the caller's: %+v, want %+v", *rep.Source, want)
+	}
+}
+
+// TestNewReportAttachesUnproven pins that each row takes only its own
+// component's records, as a copy.
+func TestNewReportAttachesUnproven(t *testing.T) {
+	results := Match(Set{},
+		map[string]string{"alpha-operator": "", "beta-operator": "1.0.0"},
+		map[string]string{"alpha-operator": "1.1.0", "beta-operator": "1.1.0"})
+	unproven := map[string][]ReportUnproven{"alpha-operator": {
+		{Source: "argocd", Name: "teamfoo-alpha-operator", Namespace: "team-foo", Reason: "unplaced"},
+	}}
+
+	rep := NewReport(results, ReportOptions{From: "cluster", Unproven: unproven})
+	rows := map[string]ReportComponent{}
+	for _, c := range rep.Components {
+		rows[c.Component] = c
+	}
+	if got := rows["alpha-operator"].Unproven; !reflect.DeepEqual(got, unproven["alpha-operator"]) {
+		t.Errorf("alpha-operator unproven = %+v, want %+v", got, unproven["alpha-operator"])
+	}
+	if got := rows["beta-operator"].Unproven; got != nil {
+		t.Errorf("beta-operator unproven = %+v, want nil", got)
+	}
+
+	unproven["alpha-operator"][0].Name = "mutated"
+	if got := rows["alpha-operator"].Unproven[0].Name; got != "teamfoo-alpha-operator" {
+		t.Errorf("the row's unproven record changed with the caller's: %q", got)
+	}
+}
+
+// TestUnprovenPhrase pins how each record kind reads in the notes cell.
+func TestUnprovenPhrase(t *testing.T) {
+	tests := []struct {
+		name    string
+		records []ReportUnproven
+		want    string
+	}{
+		{
+			name: "unplaced application",
+			records: []ReportUnproven{
+				{Source: "argocd", Name: "teamfoo-gpu-operator", Namespace: "team-foo", Reason: "unplaced"},
+			},
+			want: "unplaced application teamfoo-gpu-operator deploying to team-foo",
+		},
+		{
+			name: "unreadable application with no destination",
+			records: []ReportUnproven{
+				{Source: "argocd", Name: "tenant-a-gpu-operator", Reason: "unreadable"},
+			},
+			want: "unreadable application tenant-a-gpu-operator",
+		},
+		{
+			name: "unreadable helm release",
+			records: []ReportUnproven{
+				{Source: "helm", Name: "gpu-operator", Namespace: "gpu-operator", Reason: "unreadable"},
+			},
+			want: "unreadable release gpu-operator in gpu-operator",
+		},
+		{
+			name:    "unknown source and no reason",
+			records: []ReportUnproven{{Source: "other", Name: "x", Namespace: "ns"}},
+			want:    "record x in ns",
+		},
+		{
+			name: "several records",
+			records: []ReportUnproven{
+				{Source: "argocd", Name: "blue-gpu-operator", Namespace: "team-blue", Reason: "unplaced"},
+				{Source: "argocd", Name: "green-gpu-operator", Reason: "unreadable"},
+			},
+			want: "unplaced application blue-gpu-operator deploying to team-blue, " +
+				"unreadable application green-gpu-operator",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unprovenPhrase(tt.records); got != tt.want {
+				t.Errorf("unprovenPhrase() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

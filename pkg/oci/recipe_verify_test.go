@@ -16,13 +16,14 @@ package oci
 
 import (
 	"context"
-	stderrors "errors"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestAuthorizeDigestMaterialization(t *testing.T) {
@@ -89,7 +90,7 @@ func TestAuthorizeDigestMaterialization(t *testing.T) {
 				cancel()
 			}
 			err := tt.artifact.AuthorizeDigestMaterialization(ctx)
-			if tt.wantCode != "" && !stderrors.Is(err, apperrors.New(tt.wantCode, "")) {
+			if tt.wantCode != "" && errorstest.ReportedCode(err) != tt.wantCode {
 				t.Fatalf("AuthorizeDigestMaterialization() error = %v, want %s", err, tt.wantCode)
 			}
 			if tt.wantCode == "" && err != nil {

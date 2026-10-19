@@ -3,32 +3,8 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-10-05T00:00:00Z",
-  "version": 19,
+  "timestamp": "2026-10-15T00:00:00Z",
+  "version": 20,
   "tooling": "manual curation (.agents/skills/aicr-managing-openvex)",
-  "statements": [
-    {
-      "vulnerability": {
-        "name": "CVE-2026-82049",
-        "description": "CPython: the tarfile module's `data` and `tar` extraction filters (PEP 706) mishandle a crafted archive containing a hard link to a symbolic link, so extraction can alter the permissions or mtime of a file outside the destination directory, or expose that file's contents inside the extracted tree (CWE-59, High, CVSS 4.0 AV:L/AC:L/PR:N/UI:P). It arrives with the runtime base image's interpreter, not with any pip package: grype catalogs it as `pkg:generic/python@3.13.15` at /usr/local/bin/python{,3,3.13} and /usr/local/lib/libpython3.13.so, which is the CPython in nvcr.io/nvidia/distroless/python:3.13-v4.1.5. No bump reaches a fix. 3.13.15 is the newest 3.13 release (2026-08-05), the advisory published 2026-09-14, and the only fixed version grype records is `3.14.0b1` (fix.state=fixed, first-observed 2026-09-18) -- a 3.14 beta, which is why --only-fixed does not withhold it. nvcr.io/nvidia/distroless/python does publish a 3.14-v4.1.5 tag, but the installed aiperf 0.13.0 declares `Requires-Python: <3.14,>=3.11`, so building the venv on 3.14 would fail pip resolution rather than produce a fixed image. The 3.14 move is tracked in #1910."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flaw is reachable only by calling TarFile.extract()/extractall() on an archive an adversary supplied, which is what the CVSS 4.0 vector's AV:L/UI:P records. The aiperf-bench workload extracts no archive, and nothing hands the pod one. buildAIPerfJob sets an exec-form Command of [\"/opt/venv/bin/python\", \"/opt/aicr/aiperf_entrypoint.py\"] (validators/performance/inference_perf_constraint.go:3092), and aiperf_entrypoint.py imports only os, signal, subprocess and sys before execvp-ing `aiperf profile` with the fixed argv built at inference_perf_constraint.go:3023 -- synthetic-prompt flags (--prompt-input-tokens-mean, --prompt-output-tokens-mean, --num-dataset-entries, --random-seed) with no --input-file, no public-dataset selector and no run-mode selection, so aiperf runs in its default local multiprocessing mode (service_run_type defaults to MULTIPROCESSING, aiperf/config/runtime.py:75-78). Across all 1005 .py files of the installed aiperf 0.13.0 wheel, `grep -rnE '^\\s*(import|from)\\s+tarfile'` matches two modules. aiperf/api/routers/tokenizer.py:135-139 opens a tar in write mode only, to build a tokenizer bundle. aiperf/workers/worker_pod_tokenizer_download.py:191-249 does extract bundles, with `extractall(filter=\"data\")`, but its only caller is WorkerGroupManagerBase._prefetch_tokenizers (aiperf/workers/worker_pod_manager.py:266), and a WorkerGroupManager exists only in aiperf's Kubernetes deployment mode: a local multiprocessing run has none (aiperf/records/record_processor_service.py:97-99). Even there it returns without downloading (worker_pod_manager.py:279) unless runtime.dataset_api_base_url is set, an operator-managed field (aiperf/config/runtime.py:116-122) populated only by aiperf/kubernetes/spec_converter.py:769. aiperf's only other archive API is zipfile.ZipFile in write mode (aiperf/plot/dashboard/callbacks.py:1530 and :1955 under `aiperf plot`, and aiperf/operator/routers/results_files_io.py:359 in the operator). In the rest of the dependency closure, datasets/utils/extract.py:130-131 extracts tars for `datasets.load_dataset`; aiperf imports `datasets` only in aiperf/dataset/loader/ (base_hf_dataset.py, hf_asr.py) and aiperf/accuracy/benchmarks/, the latter belonging to an `accuracy` extra that is not installed because validators/performance/requirements.txt pins a bare `aiperf==0.13.0`, and no dataset loader runs under the argv above. The remaining tar-extracting call sites are never invoked in this image: dateutil/zoneinfo/rebuild.py:24 is a tzdata maintenance utility nothing in the venv imports, pyarrow/util.py:293 is inside download_tzdata_on_windows(), pygments/lexers/_php_builtins.py:3300-3304 runs only under `if __name__ == '__main__'`, and setuptools/_vendor/jaraco/context/__init__.py:79-80 is the tarball() helper, which nothing in the venv calls. The pod's only inputs are that argv and the --url cluster-internal Service endpoint; no archive is mounted or fetched. The runtime base is NVIDIA distroless with no shell and no package manager, and the Job supplies exec-form argv rather than a shell string, so there is no path to `python -m tarfile` or to executing an arbitrary script; the benchmark pod is single-shot (BackoffLimit 0, RestartPolicy Never) and runs as non-root nvs (uid 1000)."
-    }
-  ]
+  "statements": []
 }

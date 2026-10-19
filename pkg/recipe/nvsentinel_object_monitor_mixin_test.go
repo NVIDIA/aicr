@@ -271,11 +271,12 @@ func TestMixinNVSentinelObjectMonitor_PolicyNamespacesMatchCatalog(t *testing.T)
 // A substring check cannot tell whose tag it found: once a second override
 // exists, an unrelated image carrying the expected version would satisfy it
 // while this one kept a stale tag.
-func scanMatrixTagFor(t *testing.T, workflowPath, image string) (string, bool) {
+func scanMatrixTagFor(t *testing.T, image string) (string, bool) {
 	t.Helper()
-	data, err := os.ReadFile(workflowPath)
+	const scanWorkflow = "../../.github/workflows/vuln-scan-images.yaml"
+	data, err := os.ReadFile(scanWorkflow)
 	if err != nil {
-		t.Fatalf("reading %s: %v", workflowPath, err)
+		t.Fatalf("reading %s: %v", scanWorkflow, err)
 	}
 	var wf struct {
 		Jobs map[string]struct {
@@ -287,7 +288,7 @@ func scanMatrixTagFor(t *testing.T, workflowPath, image string) (string, bool) {
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(data, &wf); err != nil {
-		t.Fatalf("parsing %s: %v", workflowPath, err)
+		t.Fatalf("parsing %s: %v", scanWorkflow, err)
 	}
 	for _, job := range wf.Jobs {
 		for _, entry := range job.Strategy.Matrix.Include {
@@ -329,7 +330,7 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 	// override, so it is checked structurally; the rest carry the full
 	// image:tag reference.
 	const scanWorkflow = "../../.github/workflows/vuln-scan-images.yaml"
-	tag, found := scanMatrixTagFor(t, scanWorkflow, image)
+	tag, found := scanMatrixTagFor(t, image)
 	switch {
 	case !found:
 		t.Errorf("%s has no scan matrix entry for %s -- #2612 requires the scan job to cover this image", scanWorkflow, image)
@@ -359,18 +360,15 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 }
 
 // objectMonitorOperandIdentities records, per operator, the label its operand
-// DaemonSet pods carry and the component version that label was READ OFF A
-// LIVE DEPLOYMENT at.
+// DaemonSet pods carry and the component version that label was verified at.
 //
-// Neither label is a documented API. Both were obtained by installing the
-// operator at the version below, driving it to create its operands, and reading
-// the labels off the result. They are not the same label between the two
+// Neither label is a stable API. They are not the same label between the two
 // operators, which is exactly why neither can be assumed.
 //
 // The two were verified to different depths, and that difference matters:
 //
 //	gpu-operator     confirmed on a live EKS H100 cluster (v26.7.0) and re-read
-//	                 on a live EKS GB300 cluster (v26.7.1). All 9 operand
+//	                 on a live EKS GB300 cluster (v26.7.1, v26.7.2). All 9 operand
 //	                 DaemonSets carry it, INCLUDING nvidia-driver-daemonset,
 //	                 nvidia-container-toolkit-daemonset and nvidia-dcgm, and
 //	                 the running Pods inherit it (the predicate matches Pods,
@@ -379,12 +377,12 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 //	                 operator's own Deployment (ReplicaSet-owned) and
 //	                 nvidia-cuda-validator (a ClusterPolicy-owned Pod, not a
 //	                 DaemonSet).
-//	network-operator verified only on Kind, against a hand-written
-//	                 NicClusterPolicy, on the mofed driver and rdma-shared-dp
-//	                 operands. No AICR cluster with network-operator was
-//	                 available to confirm it, and AICR ships its own
-//	                 NicClusterPolicy manifests which may enable other
-//	                 operands. Treat this one as the weaker of the two.
+//	network-operator verified in the v26.7.0 source and its heterogeneous
+//	                 cluster documentation. The preceding 26.4.1 behavior was
+//	                 exercised on Kind against a hand-written NicClusterPolicy,
+//	                 on the mofed driver and rdma-shared-dp operands. No AICR
+//	                 hardware cluster with network-operator was available to
+//	                 confirm 26.7.0; treat this as the weaker of the two.
 var objectMonitorOperandIdentities = []struct {
 	component    string
 	verifiedAt   string
@@ -394,14 +392,14 @@ var objectMonitorOperandIdentities = []struct {
 }{
 	{
 		component:    "gpu-operator",
-		verifiedAt:   "v26.7.1",
+		verifiedAt:   "v26.7.2",
 		label:        "app.kubernetes.io/managed-by",
 		policy:       "gpu-operator-pods-health",
 		notCoveredBy: "the bundled node-feature-discovery subchart, which is a Helm dependency rather than a ClusterPolicy operand",
 	},
 	{
 		component:    "network-operator",
-		verifiedAt:   "26.4.1",
+		verifiedAt:   "26.7.0",
 		label:        "ds-owner",
 		policy:       "network-operator-pod-health",
 		notCoveredBy: "nv-ipam-node, which omits the label upstream",

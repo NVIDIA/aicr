@@ -74,6 +74,16 @@ const sampleReport = `{
   }
 }`
 
+// topCandidate is the candidate BuildReport offers as Latest when screening
+// withholds nothing: Candidates are safest first, so it is the last one.
+func topCandidate(l Lookup) (version, updateType string) {
+	if len(l.Candidates) == 0 {
+		return "", ""
+	}
+	c := l.Candidates[len(l.Candidates)-1]
+	return c.Version, c.UpdateType
+}
+
 func TestParseRenovateReport(t *testing.T) {
 	got, err := ParseRenovateReport([]byte(sampleReport))
 	if err != nil {
@@ -100,9 +110,10 @@ func TestParseRenovateReport(t *testing.T) {
 			if !ok {
 				t.Fatalf("dep %q missing from result", tt.dep)
 			}
-			if l.Latest != tt.wantLatest || l.UpdateType != tt.wantType || l.Problem != tt.wantProb {
+			latest, updateType := topCandidate(l)
+			if latest != tt.wantLatest || updateType != tt.wantType || l.Problem != tt.wantProb {
 				t.Errorf("got (%q,%q,%q), want (%q,%q,%q)",
-					l.Latest, l.UpdateType, l.Problem, tt.wantLatest, tt.wantType, tt.wantProb)
+					latest, updateType, l.Problem, tt.wantLatest, tt.wantType, tt.wantProb)
 			}
 		})
 	}
@@ -227,9 +238,10 @@ func TestParseRenovateReportIncompleteUpdates(t *testing.T) {
 				l = dep
 				break
 			}
-			if l.Latest != tt.wantLatest || l.UpdateType != tt.wantType || l.Problem != tt.wantProb {
+			latest, updateType := topCandidate(l)
+			if latest != tt.wantLatest || updateType != tt.wantType || l.Problem != tt.wantProb {
 				t.Errorf("got (%q,%q,%q), want (%q,%q,%q)",
-					l.Latest, l.UpdateType, l.Problem, tt.wantLatest, tt.wantType, tt.wantProb)
+					latest, updateType, l.Problem, tt.wantLatest, tt.wantType, tt.wantProb)
 			}
 		})
 	}
@@ -380,18 +392,19 @@ func TestParseRenovateReportUnsupportedUpdateTypes(t *testing.T) {
 				l = dep
 				break
 			}
-			if l.Latest != tt.wantLatest || l.UpdateType != tt.wantType || l.Problem != tt.wantProb {
+			latest, updateType := topCandidate(l)
+			if latest != tt.wantLatest || updateType != tt.wantType || l.Problem != tt.wantProb {
 				t.Errorf("got (%q,%q,%q), want (%q,%q,%q)",
-					l.Latest, l.UpdateType, l.Problem, tt.wantLatest, tt.wantType, tt.wantProb)
+					latest, updateType, l.Problem, tt.wantLatest, tt.wantType, tt.wantProb)
 			}
 		})
 	}
 }
 
-// Renovate emits one entry per update type, and the report used to keep only
-// the highest-ranked one. That discarded the safer step when both existed: in
-// the 2026-09-28 run kube-prometheus-stack offered minor 84.5.0 alongside major
-// 91.5.2, and only the major reached the digest (#2791). Candidates keeps all
+// The report used to keep only the highest-ranked update. That discarded the
+// safer step when both existed: in the 2026-09-28 run kube-prometheus-stack
+// offered minor 84.5.0 alongside major 91.5.2, and only the major reached the
+// digest (#2791). Candidates keeps all
 // of them, ordered safest-first so the ordering is stable across runs.
 func TestParseRenovateReportCollectsAllCandidates(t *testing.T) {
 	got, err := ParseRenovateReport([]byte(sampleReport))
@@ -434,24 +447,47 @@ func TestParseRenovateReportCollectsAllCandidates(t *testing.T) {
 	}
 }
 
-// Latest stays the highest-ranked candidate. Summary.Behind counts rows whose
-// Latest is non-empty, so changing which candidate wins would silently change
-// the headline counts this report has always published.
-func TestParseRenovateReportLatestStillWins(t *testing.T) {
-	got, err := ParseRenovateReport([]byte(sampleReport))
+// Renovate's publish dates ride along on each candidate so BuildReport can
+// screen them. datasource=docker carries none (Renovate omits both keys), and
+// those deps must come through undated rather than failing the parse.
+func TestParseRenovateReportTimestamps(t *testing.T) {
+	const report = `{"repositories":{"r":{"packageFiles":{"custom.regex":[{"packageFile":"recipes/registry.yaml","deps":[
+      {"depName":"kube-prometheus-stack","depType":"registry-chart","datasource":"helm","currentValue":"84.4.0",
+       "currentVersionTimestamp":"2026-04-29T18:17:39.285Z",
+       "updates":[{"newValue":"84.5.0","updateType":"minor","releaseTimestamp":"2026-05-01T17:59:10.144Z"},
+                  {"newValue":"92.2.0","updateType":"major","releaseTimestamp":"not-a-time"}]},
+      {"depName":"ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler","depType":"registry-chart","datasource":"docker",
+       "currentValue":"v0.16.9",
+       "updates":[{"newValue":"v0.20.1","updateType":"minor"}]}]}]}}}}`
+	got, err := ParseRenovateReport([]byte(report))
 	if err != nil {
 		t.Fatalf("ParseRenovateReport: %v", err)
 	}
-	l := got["ghcr.io/nvidia/nvsentinel"]
-	if l.Latest != "v1.23.0" || l.UpdateType != "minor" {
-		t.Errorf("got Latest=%q UpdateType=%q, want v1.23.0/minor", l.Latest, l.UpdateType)
+
+	helm := got["kube-prometheus-stack"]
+	if helm.Datasource != "helm" {
+		t.Errorf("Datasource = %q, want helm", helm.Datasource)
+	}
+	if want := mustTime(t, "2026-04-29T18:17:39.285Z"); !helm.CurrentPublished.Equal(want) {
+		t.Errorf("CurrentPublished = %v, want %v", helm.CurrentPublished, want)
+	}
+	if want := mustTime(t, "2026-05-01T17:59:10.144Z"); !helm.Candidates[0].Published.Equal(want) {
+		t.Errorf("minor Published = %v, want %v", helm.Candidates[0].Published, want)
+	}
+	if !helm.Candidates[1].Published.IsZero() {
+		t.Errorf("malformed releaseTimestamp parsed as %v, want zero (undated)", helm.Candidates[1].Published)
+	}
+
+	docker := got["ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler"]
+	if docker.Datasource != "docker" || !docker.CurrentPublished.IsZero() || !docker.Candidates[0].Published.IsZero() {
+		t.Errorf("docker dep = %+v, want datasource docker with no dates", docker)
 	}
 }
 
-// Renovate emits at most one update per type, so a rank tie should be
-// unreachable -- but that is its behavior, not a guarantee, and the sort must
-// not fall back to the array order it exists to normalize. Feeding two entries
-// of the same type in both orders must produce the same Candidates.
+// separateMultipleMinor makes Renovate emit one minor per release line, so
+// same-type candidates are the normal case and the sort must not fall back to
+// the array order it exists to normalize. Feeding two entries of the same type
+// in both orders must produce the same Candidates.
 func TestParseRenovateReportCandidateOrderIsTotal(t *testing.T) {
 	report := func(first, second string) string {
 		return `{"repositories":{"r":{"packageFiles":{"custom.regex":[{"packageFile":"recipes/registry.yaml","deps":[

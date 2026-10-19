@@ -50,6 +50,7 @@ func TestTimeoutConstants(t *testing.T) {
 		{"K8sPodReadyTimeout", K8sPodReadyTimeout, 1 * time.Minute, 3 * time.Minute},
 		{"K8sJobCompletionTimeout", K8sJobCompletionTimeout, 1 * time.Minute, 10 * time.Minute},
 		{"K8sCleanupTimeout", K8sCleanupTimeout, 10 * time.Second, 60 * time.Second},
+		{"K8sServiceAccountVerifyTimeout", K8sServiceAccountVerifyTimeout, 10 * time.Second, 60 * time.Second},
 		{"K8sPodTerminationWaitTimeout", K8sPodTerminationWaitTimeout, 30 * time.Second, 120 * time.Second},
 
 		// HTTP client timeouts
@@ -409,20 +410,5 @@ func TestOCIRecipeResourceLimitInvariants(t *testing.T) {
 	if MaxOCIRecipeRetryTrafficBytes != wantTraffic {
 		t.Fatalf("OCI recipe retry traffic limit = %d, want %d",
 			MaxOCIRecipeRetryTrafficBytes, wantTraffic)
-	}
-}
-
-// TestUpgradeCheckClusterBudgetCoversItsReads pins the assumption
-// CLIUpgradeCheckClusterTimeout is summed on: it counts the Helm reader's
-// budget as the longer of the two readers, so an Argo budget that grew past it
-// would leave a run expiring before the read it is waiting on.
-func TestUpgradeCheckClusterBudgetCoversItsReads(t *testing.T) {
-	if ArgoInventoryTimeout > HelmInventoryTimeout {
-		t.Errorf("ArgoInventoryTimeout (%v) exceeds HelmInventoryTimeout (%v), which "+
-			"CLIUpgradeCheckClusterTimeout budgets as the longer reader", ArgoInventoryTimeout, HelmInventoryTimeout)
-	}
-	if CLIUpgradeCheckClusterTimeout <= CLIUpgradeCheckTimeout+AtRiskScanTimeout {
-		t.Errorf("CLIUpgradeCheckClusterTimeout (%v) leaves no room for the inventory read",
-			CLIUpgradeCheckClusterTimeout)
 	}
 }

@@ -15,13 +15,14 @@
 package uatbroker
 
 import (
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 const validRegistryYAML = `
@@ -615,7 +616,7 @@ reservations:
 				t.Fatalf("ParseRegistry err = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(tt.code, "")) {
+				if errorstest.ReportedCode(err) != tt.code {
 					t.Errorf("error code = %v, want %v", err, tt.code)
 				}
 				return
@@ -641,7 +642,7 @@ func TestRegistryLookup(t *testing.T) {
 		t.Errorf("Lookup(gcp-h100) = %+v, want cloud=gcp id=projects/p/reservations/r", res)
 	}
 
-	if _, missErr := reg.Lookup("does-not-exist"); !stderrors.Is(missErr, errors.New(errors.ErrCodeNotFound, "")) {
+	if _, missErr := reg.Lookup("does-not-exist"); errorstest.ReportedCode(missErr) != errors.ErrCodeNotFound {
 		t.Errorf("Lookup(missing) error = %v, want ErrCodeNotFound", missErr)
 	}
 
@@ -687,7 +688,7 @@ func TestLoadRegistryFile(t *testing.T) {
 		t.Errorf("loaded %d reservations, want 2", len(reg.Reservations))
 	}
 
-	if _, err := LoadRegistryFile(filepath.Join(dir, "nope.yaml")); !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if _, err := LoadRegistryFile(filepath.Join(dir, "nope.yaml")); errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("LoadRegistryFile(missing) error = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -766,6 +767,8 @@ func TestCommittedRegistryValid(t *testing.T) {
 		"aws-h100":      CloudAWS,
 		"aws-h100-ct-1": CloudAWS,
 		"aws-h100-ct-2": CloudAWS,
+		"aws-gb300-1":   CloudAWS,
+		"aws-gb300-2":   CloudAWS,
 		"gcp-h100":      CloudGCP,
 		"azure-h100":    CloudAzure,
 		"kind-h100":     CloudKind,
@@ -787,7 +790,10 @@ func TestCommittedRegistryValid(t *testing.T) {
 	// closed rather than sliding in unnoticed.
 	gotNames := append([]string(nil), reg.Names()...)
 	slices.Sort(gotNames)
-	wantNames := []string{"aws-h100", "aws-h100-ct-1", "aws-h100-ct-2", "azure-h100", "gcp-h100", "kind-h100"}
+	wantNames := []string{
+		"aws-gb300-1", "aws-gb300-2", "aws-h100", "aws-h100-ct-1", "aws-h100-ct-2",
+		"azure-h100", "gcp-h100", "kind-h100",
+	}
 	if !slices.Equal(gotNames, wantNames) {
 		t.Errorf("committed registry reservations = %v, want exactly %v", gotNames, wantNames)
 	}
@@ -856,9 +862,51 @@ func TestCommittedRegistryValid(t *testing.T) {
 		"aws-h100":      "ah1",
 		"aws-h100-ct-1": "ch1",
 		"aws-h100-ct-2": "ch2",
+		"aws-gb300-1":   "ag3",
+		"aws-gb300-2":   "ag4",
 		"gcp-h100":      "gh1",
 		"azure-h100":    "zh1",
 		"kind-h100":     "kh1",
+	}
+
+	// The GB300 slots are two leases over ONE physical reservation, the shape
+	// that lets a daytime cluster and a nightly cell run concurrently. Both
+	// must stay on the same reservation-id and cluster-config: that is what
+	// bounds AICR to 2 slots x desired 2 = 4 instances there.
+	//
+	// Both are also in bring-up — manually dispatchable, excluded from the
+	// nightly batch — which keeps an unproven Blackwell lane off the nightly
+	// critical path. OrDefault, not the raw field: it returns [training] when
+	// the key is absent, so an empty result proves the explicit opt-out is
+	// present rather than the key having been dropped.
+	//
+	// Neither may hold the AWS daytime-intent while aws-h100-ct-1 does: only
+	// one reservation per cloud may carry it.
+	var gbReservation, gbConfig string
+	for _, name := range []string{"aws-gb300-1", "aws-gb300-2"} {
+		slot, slotErr := reg.Lookup(name)
+		if slotErr != nil {
+			t.Errorf("committed registry missing %q: %v", name, slotErr)
+			continue
+		}
+		if got := slot.NightlyIntentsOrDefault(); len(got) != 0 {
+			t.Errorf("%s nightly-intents = %v, want empty (bring-up opt-out)", name, got)
+		}
+		if slot.DaytimeIntent != "" {
+			t.Errorf("%s daytime-intent = %q, want empty (aws-h100-ct-1 holds it)", name, slot.DaytimeIntent)
+		}
+		if gbReservation == "" {
+			gbReservation, gbConfig = slot.ReservationID, slot.ClusterConfigPath
+			continue
+		}
+		if slot.ReservationID != gbReservation {
+			t.Errorf("%s reservation-id = %q, want %q (slots share one reservation)",
+				name, slot.ReservationID, gbReservation)
+		}
+		if slot.ClusterConfigPath != gbConfig {
+			t.Errorf("%s cluster-config-path = %q, want %q (slots share one config)",
+				name, slot.ClusterConfigPath, gbConfig)
+		}
 	}
 	for name, slug := range wantSlug {
 		res, lookupErr := reg.Lookup(name)

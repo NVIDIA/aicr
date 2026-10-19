@@ -134,6 +134,11 @@ type Generator struct {
 	// charts/<chart>-<version>.tgz adjacent to a wrapper Chart.yaml).
 	VendorCharts bool
 
+	// Puller fetches upstream chart bytes when VendorCharts is set. nil
+	// resolves to a default *CLIChartPuller; tests inject a stub here
+	// without touching package state. Ignored when VendorCharts is false.
+	Puller localformat.ChartPuller
+
 	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
 	// first deployment heading of README.md. Empty adds nothing.
 	UpgradeNotice string
@@ -189,12 +194,19 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Which components may have their CRDs applied ahead of `helm upgrade`.
 	// Helm never updates a chart's crds/ directory on upgrade, so without
 	// this the bundle pairs a bumped chart with its day-one CRD schema.
-	crdOwners, err := deployer.ResolveCRDOwners(ctx, g.RecipeResult.DataProvider(), g.RecipeResult.ComponentRefs)
+	crdOwners, crdExclusions, err := deployer.ResolveCRDPolicy(ctx, g.RecipeResult.DataProvider(), g.RecipeResult.ComponentRefs)
 	if err != nil {
 		return nil, err
 	}
+	var chartDigests map[string]string
+	if g.VendorCharts {
+		chartDigests, err = deployer.ResolveChartDigests(ctx, g.RecipeResult.DataProvider(), g.RecipeResult.ComponentRefs)
+		if err != nil {
+			return nil, err
+		}
+	}
 
-	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues, crdOwners)
+	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues, crdOwners, crdExclusions, chartDigests)
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
@@ -203,6 +215,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		ComponentPostManifests: g.ComponentPostManifests,
 		ComponentReadiness:     g.ComponentReadiness,
 		VendorCharts:           g.VendorCharts,
+		Puller:                 g.Puller,
 	})
 	if err != nil {
 		// localformat.Write returns StructuredErrors; propagate as-is.
@@ -409,28 +422,33 @@ func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 
 // toLocalformatComponents maps the orchestration ComponentData list to the
 // per-component inputs consumed by localformat.Write. Values, DynamicPaths,
-// and OwnsCRDs are looked up by component name from the caller's maps.
+// OwnsCRDs, CRD exclusions and chart digests are looked up by component name
+// from the caller's maps.
 func toLocalformatComponents(
 	components []ComponentData,
 	values map[string]map[string]any,
 	dynamic map[string][]string,
 	crdOwners map[string]bool,
+	crdExclusions map[string][]string,
+	chartDigests map[string]string,
 ) []localformat.Component {
 
 	out := make([]localformat.Component, 0, len(components))
 	for _, c := range components {
 		out = append(out, localformat.Component{
-			Name:         c.Name,
-			Namespace:    c.Namespace,
-			Repository:   c.Repository,
-			ChartName:    c.ChartName,
-			Version:      c.Version,
-			IsOCI:        c.IsOCI,
-			Tag:          c.Tag,
-			Path:         c.Path,
-			Values:       values[c.Name],
-			DynamicPaths: dynamic[c.Name],
-			OwnsCRDs:     crdOwners[c.Name],
+			Name:                c.Name,
+			Namespace:           c.Namespace,
+			Repository:          c.Repository,
+			ChartName:           c.ChartName,
+			Version:             c.Version,
+			IsOCI:               c.IsOCI,
+			ChartDigest:         chartDigests[c.Name],
+			Tag:                 c.Tag,
+			Path:                c.Path,
+			Values:              values[c.Name],
+			DynamicPaths:        dynamic[c.Name],
+			OwnsCRDs:            crdOwners[c.Name],
+			CRDExcludeSubcharts: crdExclusions[c.Name],
 		})
 	}
 	return out

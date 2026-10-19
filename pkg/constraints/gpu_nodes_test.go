@@ -16,7 +16,6 @@ package constraints
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
@@ -27,6 +26,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/collector/topology"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -502,7 +502,7 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 					t.Fatalf("expected error with code %s, got none (passed=%v, actual=%q)",
 						tt.wantCode, result.Passed, result.Actual)
 				}
-				if !stderrors.Is(result.Error, errors.New(tt.wantCode, "")) {
+				if errorstest.ReportedCode(result.Error) != tt.wantCode {
 					t.Fatalf("error code = %v, want %s", result.Error, tt.wantCode)
 				}
 				return
@@ -544,7 +544,7 @@ func TestEvaluateGPUNodesLabelUnavailableReadings(t *testing.T) {
 			if result.Error == nil {
 				t.Fatalf("expected error, got passed=%v actual=%q", result.Passed, result.Actual)
 			}
-			if !stderrors.Is(result.Error, errors.New(errors.ErrCodeNotFound, "")) {
+			if errorstest.ReportedCode(result.Error) != errors.ErrCodeNotFound {
 				t.Fatalf("error code = %v, want %s", result.Error, errors.ErrCodeNotFound)
 			}
 		})
@@ -642,7 +642,7 @@ func TestEvaluateGPUNodesLabelPerService(t *testing.T) {
 			if result.Error == nil {
 				t.Fatalf("expected error, got passed=%v actual=%q", result.Passed, result.Actual)
 			}
-			if !stderrors.Is(result.Error, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(result.Error) != tt.wantCode {
 				t.Fatalf("error code = %v, want %s", result.Error, tt.wantCode)
 			}
 			if !strings.Contains(result.Error.Error(), tt.wantMessage) {
@@ -806,7 +806,7 @@ func TestGPUNodesLabelRoundTripsCollectorEncoding(t *testing.T) {
 					value, result.Passed)
 				continue
 			}
-			if !stderrors.Is(result.Error, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(result.Error) != errors.ErrCodeInvalidRequest {
 				t.Errorf("eval(%q) error code = %v, want %s", value, result.Error, errors.ErrCodeInvalidRequest)
 			}
 		}
@@ -1045,7 +1045,7 @@ func TestGPUNodesLabelRejectsNonPartitionedItems(t *testing.T) {
 			if result.Error == nil {
 				t.Fatalf("expected an error, got passed=%v actual=%q", result.Passed, result.Actual)
 			}
-			if !stderrors.Is(result.Error, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(result.Error) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", result.Error, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -1117,7 +1117,7 @@ func TestGPUNodesLabelItemsFailClosed(t *testing.T) {
 			if result.Error == nil {
 				t.Fatalf("expected an error, got passed=%v actual=%q", result.Passed, result.Actual)
 			}
-			if !stderrors.Is(result.Error, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(result.Error) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", result.Error, errors.ErrCodeInvalidRequest)
 			}
 		})

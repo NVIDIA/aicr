@@ -223,14 +223,13 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 
 	fromNames, toNames, skipped := c.objectNames(ctx, req, to)
 	fromTable, toTable := componentIdentities(from, fromNames), componentIdentities(to, toNames)
-	var source *upgrade.ReportSource
+	var cluster clusterRead
 	if fromCluster {
-		var versions map[string]string
-		versions, source, err = c.clusterVersions(ctx, dp, req, deployer, to)
+		cluster, err = c.clusterVersions(ctx, dp, req, deployer, to)
 		if err != nil {
 			return nil, err
 		}
-		fromTable = clusterIdentities(versions, toTable)
+		fromTable = clusterIdentities(cluster.versions, toTable)
 	}
 
 	set, comps, err := recipe.LoadUpgradeRecords(ctx, dp)
@@ -276,11 +275,20 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 		From:                req.From,
 		To:                  req.To,
 		Deployer:            deployer,
-		Source:              source,
+		Source:              cluster.source,
+		Unproven:            cluster.unproven,
 		AtRisk:              atRisk,
 		ObjectNamesCompared: skipped == "",
 		ObjectNamesSkipped:  skipped,
 	}), nil
+}
+
+// clusterRead is a cluster read restated for the report. The zero value is an
+// artifact comparison.
+type clusterRead struct {
+	versions map[string]string
+	source   *upgrade.ReportSource
+	unproven map[string][]upgrade.ReportUnproven
 }
 
 // clusterVersions reads the installed inventory as the `from` table, and
@@ -291,11 +299,11 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 // thing separating a bare cluster from a mapping that no longer matches what
 // AICR installed.
 func (c *Client) clusterVersions(ctx context.Context, dp recipe.DataProvider, req UpgradeCheckRequest,
-	deployer string, to *RecipeResult) (map[string]string, *upgrade.ReportSource, error) {
+	deployer string, to *RecipeResult) (clusterRead, error) {
 
 	registry, err := recipe.GetComponentRegistryFor(dp)
 	if err != nil {
-		return nil, nil, err
+		return clusterRead{}, err
 	}
 	result, err := c.deps.readInventory(ctx, inventory.Options{
 		Kubeconfig: req.Kubeconfig,
@@ -303,12 +311,38 @@ func (c *Client) clusterVersions(ctx context.Context, dp recipe.DataProvider, re
 		Components: withRecipeNamespaces(recipe.InventoryComponents(registry), to),
 	})
 	if err != nil {
-		return nil, nil, err
+		return clusterRead{}, err
 	}
 
-	return result.Versions,
-		reportSourceFrom(result.Source, k8sclient.ResolveKubeconfigPath(req.Kubeconfig), len(result.Versions)),
-		nil
+	return clusterRead{
+		versions: result.Versions,
+		source: reportSourceFrom(result.Source, k8sclient.ResolveKubeconfigPath(req.Kubeconfig),
+			len(result.Versions)),
+		unproven: reportUnprovenFrom(result.Unproven),
+	}, nil
+}
+
+// reportUnprovenFrom restates the records behind each component a read placed
+// without a version.
+func reportUnprovenFrom(unproven map[string][]inventory.UnprovenRecord) map[string][]upgrade.ReportUnproven {
+	if len(unproven) == 0 {
+		return nil
+	}
+	out := make(map[string][]upgrade.ReportUnproven, len(unproven))
+	for component, records := range unproven {
+		restated := make([]upgrade.ReportUnproven, len(records))
+		for i, r := range records {
+			restated[i] = upgrade.ReportUnproven{
+				Source:    r.Source,
+				Name:      r.Name,
+				Namespace: r.Namespace,
+				Reason:    string(r.Reason),
+			}
+		}
+		out[component] = restated
+	}
+
+	return out
 }
 
 // withRecipeNamespaces adds, to each component, the namespace the target
@@ -343,7 +377,8 @@ func withRecipeNamespaces(comps []inventory.Component, to *RecipeResult) []inven
 // omission it could fill. It attributes a release to a component by name, and
 // for flux and Argo CD that name is composed from candidate namespaces: a
 // namespace is an input to the attribution rather than a fact recovered from
-// it, and helm and helmfile match on the bare name and recover none at all.
+// it, and helm, helmfile and terraform match on the bare name and recover none
+// at all.
 // Chart, source, path, type and the manifest file sets are likewise in no
 // record the read decodes.
 //
@@ -398,6 +433,7 @@ func reportSourceFrom(info inventory.SourceInfo, kubeconfig string, matched int)
 			Unattributed: info.Argo.Unattributed,
 			Unreadable:   info.Argo.Unreadable,
 			Remote:       info.Argo.Remote,
+			Unplaced:     info.Argo.Unplaced,
 		},
 	}
 }
@@ -415,13 +451,6 @@ func reportSourceFrom(info inventory.SourceInfo, kubeconfig string, matched int)
 // not own is a claim it has not earned. A caller who pressed Ctrl-C, or whose
 // deadline expired, asked for no answer at all, and handing them a report with
 // a nil error says the comparison stands.
-//
-// The caller's context is what separates the two, rather than the returned
-// error's code or the sentinel under it. pkg/inventory bounds the scan by
-// defaults.AtRiskScanTimeout, which is shorter than the CLI's whole-run
-// budget, and codes that expiry ErrCodeTimeout over a context.DeadlineExceeded
-// exactly as it codes the caller's own: matching on either would fail the run
-// for the slow cluster the scan's budget exists to cut short.
 func (c *Client) upgradeCheckScan(ctx context.Context, kubeconfig string,
 	kinds []upgrade.ResourceKind) (*upgrade.AtRiskReport, error) {
 
@@ -430,6 +459,9 @@ func (c *Client) upgradeCheckScan(ctx context.Context, kubeconfig string,
 		Kinds:      atRiskKinds(kinds),
 	})
 	if err != nil {
+		// The caller's context, not err, tells an abort from a failure.
+		// pkg/inventory codes its own step timeout exactly as it codes the
+		// caller's deadline.
 		if aborted := ctx.Err(); aborted != nil {
 			return nil, errors.WrapCtxErrWithContext(aborted, errors.ErrCodeTimeout,
 				"the upgrade check was aborted while scanning for resources an upgrade could disturb",

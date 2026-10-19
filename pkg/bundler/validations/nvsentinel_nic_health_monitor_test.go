@@ -225,7 +225,7 @@ func TestCheckNVSentinelNicHealthMonitorRequiresMetadataCollector(t *testing.T) 
 		{
 			// Helm cannot resolve global.nicHealthMonitor.enabled when the
 			// section itself is not a table, so it warns and renders the
-			// subchart anyway (verified against chart v1.20.0). Reading a
+			// subchart anyway (verified against chart v1.26.0). Reading a
 			// non-map section as "absent, therefore off" would ship exactly
 			// the no-inventory deployment this gate exists to reject.
 			name: "monitor section is a non-map, collector disabled → blocked",

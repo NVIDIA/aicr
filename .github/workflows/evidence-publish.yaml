@@ -112,7 +112,7 @@ concurrency:
 jobs:
   sign:
     name: Sign unsigned evidence pointers
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Manual dispatch runs anywhere. The push auto-trigger runs only in forks
     # (never the canonical repo), never on the fork's default branch (matched

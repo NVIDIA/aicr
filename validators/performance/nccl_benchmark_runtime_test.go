@@ -16,11 +16,12 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -174,7 +175,7 @@ func TestResolveNCCLBenchmarkRuntime(t *testing.T) {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), tt.wantErrSub) {
@@ -241,7 +242,7 @@ func TestValidateNcclAllReduceBwCustomRuntimeGate(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error, got (%q, %v)", msg, passed)
 			}
-			if tt.wantErrCode && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if tt.wantErrCode && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if tt.wantErrSub != "" && !strings.Contains(err.Error(), tt.wantErrSub) {
@@ -662,7 +663,7 @@ func TestCustomRuntimeManagesIMEX(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := customRuntimeManagesIMEX(tt.content)
 			if tt.wantErr != "" {
-				if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) || !strings.Contains(err.Error(), tt.wantErr) {
+				if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("want ErrCodeInvalidRequest containing %q, got %v", tt.wantErr, err)
 				}
 				return

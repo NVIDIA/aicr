@@ -47,7 +47,7 @@ concurrency:
 
 jobs:
   comment:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     # Run regardless of build conclusion: workflow 1 uploads partial
     # reports with `if: always()`. Filter to PR-triggered runs only so
@@ -61,7 +61,7 @@ jobs:
         # leaves none. Don't fail this warning-only gate on a missing
         # artifact — the comment step below no-ops when report.md is absent.
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: recipe-evidence-report
           run-id: ${{ github.event.workflow_run.id }}

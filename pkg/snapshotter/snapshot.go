@@ -136,8 +136,8 @@ func parseClusterConfigPathEnv() string {
 
 // parseDiscoverNetworkEnv reads AICR_DISCOVER_NETWORK. Returns true only
 // when the env var parses cleanly as a positive boolean — silent fallback
-// to false on garbage to avoid accidentally turning on cluster-mutating
-// discovery from a malformed config.
+// to false on garbage to avoid accidentally turning on live discovery from
+// a malformed config.
 func parseDiscoverNetworkEnv() bool {
 	val := strings.TrimSpace(os.Getenv("AICR_DISCOVER_NETWORK"))
 	if val == "" {

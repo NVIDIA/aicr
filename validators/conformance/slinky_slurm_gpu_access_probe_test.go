@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 const testGPUUUID = "GPU-0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
@@ -148,7 +150,7 @@ func TestParseSlurmGPUProbe(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 					t.Fatalf("error = %v, want ErrCodeInternal", err)
 				}
 				return

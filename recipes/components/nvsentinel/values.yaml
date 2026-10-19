@@ -30,7 +30,7 @@ global:
 
   # The chart default is docker.io/bitnamilegacy/os-shell:12-debian-12-r30,
   # which no bump can fix: bitnamilegacy is Bitnami's frozen archive, and
-  # every nvsentinel release through v1.25.0 pins that same tag. It carries
+  # every nvsentinel release through v1.26.0 pins that same tag. It carries
   # 13 critical / 109 high fixable findings and will never receive a patch.
   #
   # Nothing about the image is load-bearing. It runs one command --
@@ -70,9 +70,9 @@ platformConnector:
   maxUnavailable: 1
 
 # Use the generic (privileged-Job) reboot provider so users don't need
-# cloud IAM permissions. When faultRemediation/janitor are enabled, the
-# janitor-provider spawns a privileged Job that runs chroot /host /sbin/reboot
-# on the target node (ADR-028: generic bare-metal reboot provider).
+# cloud IAM permissions. When janitor is enabled, janitor-provider spawns a
+# privileged Job that runs `chroot /host reboot` on the target node
+# (NVSentinel design 028).
 janitor-provider:
   csp:
     provider: generic

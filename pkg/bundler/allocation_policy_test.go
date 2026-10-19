@@ -16,12 +16,12 @@ package bundler
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -173,7 +173,7 @@ func TestEnforceAllocationPolicyOverrides(t *testing.T) {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), tt.wantErrMsg) {
@@ -237,7 +237,7 @@ func TestMake_DynamicAllocationPolicyKeyRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Make to reject the --dynamic allocation-policy declaration")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "recipe overlay") {

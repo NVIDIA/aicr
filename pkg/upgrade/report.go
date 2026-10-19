@@ -16,7 +16,14 @@ package upgrade
 
 import (
 	"fmt"
+	"slices"
 	"strings"
+)
+
+// The ReportUnproven.Source values a cluster read writes.
+const (
+	unprovenSourceHelm = "helm"
+	unprovenSourceArgo = "argocd"
 )
 
 // ReportOptions labels a report with the artifacts it was computed from and
@@ -37,6 +44,10 @@ type ReportOptions struct {
 	// rather than leaving it zero, so silence is never publishable as an
 	// all-clear. Copied for the reason Source is.
 	AtRisk *AtRiskReport
+
+	// Unproven names, per component, the cluster records that left it
+	// unversioned. NewReport copies each list onto that component's row.
+	Unproven map[string][]ReportUnproven
 
 	// ObjectNamesCompared says the object-name axis was assessed, and
 	// ObjectNamesSkipped says why it was not.
@@ -138,7 +149,8 @@ type ReportSourceHelm struct {
 	// Unattributed is records carrying no release name.
 	Unattributed int `json:"unattributed" yaml:"unattributed"`
 
-	// Unreadable is releases whose records could not be read.
+	// Unreadable is releases whose records could not be read, plus releases
+	// with records under both storage drivers, whose rows say dual-driver.
 	Unreadable int `json:"unreadable" yaml:"unreadable"`
 
 	// Uninstalled is releases excluded because `helm uninstall
@@ -174,6 +186,31 @@ type ReportSourceArgo struct {
 	// Remote is Applications matching a component that deploy to another
 	// cluster, excluded so a remote install is never this cluster's baseline.
 	Remote int `json:"remote" yaml:"remote"`
+
+	// Unplaced is Applications matched to a component by a prefixed name that
+	// deploy into none of its namespaces.
+	Unplaced int `json:"unplaced" yaml:"unplaced"`
+}
+
+// ReportUnproven names one cluster record that placed a component without
+// establishing its version.
+type ReportUnproven struct {
+	// Source is "helm" for a Helm release record or "argocd" for an Argo CD
+	// Application.
+	Source string `json:"source" yaml:"source"`
+
+	Name string `json:"name" yaml:"name"`
+
+	// Namespace is where a Helm record is stored, or an Application's
+	// destination. Empty for an unreadable Application that states none.
+	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+
+	// Reason is "unreadable" for a record the read could not decode,
+	// "dual-driver" for a Helm release with records under both storage
+	// drivers, whose revisions cannot be compared, or "unplaced" for an
+	// Application matched by a prefixed name that deploys into none of the
+	// component's namespaces.
+	Reason string `json:"reason" yaml:"reason"`
 }
 
 // ReportComponent is one row.
@@ -198,6 +235,10 @@ type ReportComponent struct {
 
 	// Notes is the one-line justification the table's last column shows.
 	Notes string `json:"notes,omitempty" yaml:"notes,omitempty"`
+
+	// Unproven names the cluster records that left this component
+	// unversioned.
+	Unproven []ReportUnproven `json:"unproven,omitempty" yaml:"unproven,omitempty"`
 
 	// Reason is the stable code for why Verdict is what it is, and Explanation
 	// the sentence an operator reads. Both are empty exactly when Verdict is.
@@ -339,7 +380,7 @@ func NewReport(results []ComponentResult, opts ReportOptions) *Report {
 		rep.AtRisk = opts.AtRisk.clone()
 	}
 	for _, r := range results {
-		rep.Components = append(rep.Components, reportComponent(r, opts.Deployer))
+		rep.Components = append(rep.Components, reportComponent(r, opts.Deployer, opts.Unproven[r.Component]))
 	}
 	rep.Summary.Components = len(rep.Components)
 	for _, c := range rep.Components {
@@ -350,7 +391,7 @@ func NewReport(results []ComponentResult, opts ReportOptions) *Report {
 	return rep
 }
 
-func reportComponent(r ComponentResult, deployer string) ReportComponent {
+func reportComponent(r ComponentResult, deployer string, unproven []ReportUnproven) ReportComponent {
 	c := ReportComponent{
 		Component:       r.Component,
 		Change:          r.Change,
@@ -366,6 +407,7 @@ func reportComponent(r ComponentResult, deployer string) ReportComponent {
 		Reason:          r.Reason,
 		Explanation:     r.Explanation,
 		FailsRun:        r.FailsRun(),
+		Unproven:        slices.Clone(unproven),
 	}
 	if r.Change == ChangeReplaced {
 		c.From = r.ReplacedComponent
@@ -380,7 +422,40 @@ func reportComponent(r ComponentResult, deployer string) ReportComponent {
 		c.Steps = reportSteps(stepsFor(r.Transition.StepsByDeployer, deployer))
 	}
 	c.Notes = notes(r, c)
+	if len(c.Unproven) > 0 {
+		c.Notes = strings.TrimPrefix(c.Notes+", "+unprovenPhrase(c.Unproven), ", ")
+	}
 	return c
+}
+
+// unprovenPhrase renders a row's unproven records for its notes cell.
+func unprovenPhrase(records []ReportUnproven) string {
+	parts := make([]string, len(records))
+	for i, u := range records {
+		noun, preposition := "record", "in"
+		switch u.Source {
+		case unprovenSourceHelm:
+			noun = "release"
+		case unprovenSourceArgo:
+			noun, preposition = "application", "deploying to"
+		}
+		words := []string{noun, u.Name}
+		if u.Reason != "" {
+			words = append([]string{u.Reason}, words...)
+		}
+		if u.Namespace != "" {
+			words = append(words, preposition, u.Namespace)
+		}
+		parts[i] = strings.Join(words, " ")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// StepsFor returns the steps the transition records for deployer: the group
+// naming it, else the remainder group. Nil when no group covers it, which
+// Set.Validate rules out for a manual or blocked transition.
+func (t *Transition) StepsFor(deployer string) []Step {
+	return stepsFor(t.StepsByDeployer, deployer)
 }
 
 // stepsFor selects the group covering deployer: the one naming it, else the

@@ -176,7 +176,7 @@ env:
 jobs:
   reverify:
     name: Re-verify the latest release's Sigstore artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Sized from the stacked per-call bounds, because a job that hits
     # timeout-minutes is CANCELLED, and a cancelled job skips every
     # `if: failure()` step: it would go red with no degraded issue and still

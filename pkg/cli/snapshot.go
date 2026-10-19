@@ -124,9 +124,9 @@ type snapshotCmdOptions struct {
 	// into the gke-gpu-pools subtype at the snapshot orchestration
 	// layer.
 	gkeGPUPoolsPath string
-	// discoverNetwork enables the network collector's live-discovery
-	// path. The collector calls l8k.Discover against the resolved
-	// kubeconfig; discovery is NOT read-only.
+	// discoverNetwork enables the network collector's read-only
+	// live-discovery path (l8k DiscoverReadOnly against the resolved
+	// kubeconfig).
 	discoverNetwork bool
 	requests        corev1.ResourceList
 	limits          corev1.ResourceList
@@ -422,10 +422,9 @@ permission isolation is waived for them.
 		return
 	}
 	fmt.Fprintf(w, `
-WARNING: --discover-network means the ClusterRole in this directory also carries
-cluster-scoped MUTATING rules (nodes: patch, pods/exec: create, CRD/namespace/
-DaemonSet create-delete). Applying it grants them permanently, not for one run.
-Each rule and the discovery step it exists for is explained in %s.
+--discover-network adds one read-only rule (configuration.net.nvidia.com
+nicdevices: get, list) to %s; the grant stays read-only. Live discovery requires
+the Network Operator's nic-configuration-daemon to already be running.
 `, clusterRoleManifestName(res))
 }
 
@@ -529,13 +528,13 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "ServiceAccount to run the agent as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and aicr creates and deletes no RBAC for the run (generate its RBAC manifests with --add-roles-to-service-account, then apply them yourself). Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, so a stray ServiceAccount cannot capture the run.",
+			Usage:    "ServiceAccount to run the agent as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim, the namespace is left untouched, and aicr creates and deletes no RBAC for the run (generate its RBAC manifests with --add-roles-to-service-account, then apply them yourself). Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, so a stray ServiceAccount cannot capture the run.",
 			Value:    name,
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     flagAddRolesToSA,
-			Usage:    "WRITES MANIFESTS AND APPLIES NOTHING. Renders the Role, RoleBinding, ClusterRole and ClusterRoleBinding that grant the agent's permissions to the named ServiceAccount into ./snapshot-rbac-<run-id>/, then exits without taking a snapshot. No cluster is contacted, so no kubeconfig or privileges are needed. Review the files, then grant with 'kubectl apply -f <dir>/' and revoke with 'kubectl delete -f <dir>/' yourself. Add --discover-network to include the mutating live-discovery rules.",
+			Usage:    "WRITES MANIFESTS AND APPLIES NOTHING. Renders the Role, RoleBinding, ClusterRole and ClusterRoleBinding that grant the agent's permissions to the named ServiceAccount into ./snapshot-rbac-<run-id>/, then exits without taking a snapshot. No cluster is contacted, so no kubeconfig or privileges are needed. Review the files, then grant with 'kubectl apply -f <dir>/' and revoke with 'kubectl delete -f <dir>/' yourself. Add --discover-network to include the one extra read-only rule live discovery needs (configuration.net.nvidia.com nicdevices get/list).",
 			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
@@ -586,6 +585,7 @@ func snapshotCmdFlags() []cli.Flag {
 			Name:     "max-nodes-per-entry",
 			Usage:    "Maximum node names per taint/label entry in topology collection (0 = unlimited)",
 			Value:    0,
+			Sources:  cli.EnvVars("AICR_MAX_NODES_PER_ENTRY"),
 			Category: catOutput,
 		},
 		&cli.StringFlag{
@@ -614,7 +614,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "oke-addons",
-			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. Projects the NvidiaGpuPlugin add-on's control-plane state into the K8s oke-addons subtype (installed/absent; any other lifecycle state projects a value no profile constraint accepts). The --all flag on the oci command is required: without it removed and non-ACTIVE add-ons are omitted from the dump and would read as absent instead of failing closed. The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
+			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. Projects the NvidiaGpuPlugin add-on's control-plane state into the K8s oke-addons subtype as installed or absent. Any other lifecycle state projects a value no profile constraint accepts. The NvidiaNetworkOperator add-on is projected the same way into K8s.oke-addons.nvidia-network-operator, which OKE recipes that deploy network-operator require to be absent. The --all flag on the oci command is required. Without it, removed and non-ACTIVE add-ons are omitted from the dump and would read as absent instead of failing closed. Capturing with --page is not supported. A dump with opc-next-page set is rejected, but a final page alone looks like a complete list. The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
 			Sources:  cli.EnvVars("AICR_OKE_ADDONS_PATH"),
 			Category: catAgentDeployment,
 		},
@@ -632,7 +632,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.BoolFlag{
 			Name:     "discover-network",
-			Usage:    "Enable live l8k discovery to populate the NetworkTopology Measurement. NOT read-only — discovery writes nvidia.kubernetes-launch-kit.* node labels and may patch NicClusterPolicy via server-side-apply.",
+			Usage:    "Enable read-only live l8k discovery to populate the NetworkTopology Measurement. Reads nodes, Network Operator pods, and the NicDevice objects an already-running nic-configuration-daemon publishes; creates, patches, and deletes nothing, and never execs into pods. Skipped with a warning when the daemon is not installed. If some daemon pods are not Ready (for example on NotReady nodes) discovery waits up to 5 minutes before proceeding with the Ready ones, so raise --timeout to at least 8m in Job mode on such clusters. If you need the node labels or NicClusterPolicy tuning that `l8k discover` applies, run l8k yourself first.",
 			Sources:  cli.EnvVars("AICR_DISCOVER_NETWORK"),
 			Category: catAgentDeployment,
 		},

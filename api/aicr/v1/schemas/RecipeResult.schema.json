@@ -205,6 +205,7 @@
             "a100",
             "any",
             "b200",
+            "b300",
             "gb200",
             "gb300",
             "h100",
@@ -244,6 +245,7 @@
             "any",
             "dynamo",
             "kubeflow",
+            "kueue",
             "nim",
             "runai",
             "slurm"
@@ -262,6 +264,7 @@
             "kind",
             "lke",
             "metal3",
+            "mk8s",
             "ocp",
             "oke",
             "rke2"
@@ -319,6 +322,9 @@
             ]
           }
         },
+        "defaultStorageClassState": {
+          "type": "string"
+        },
         "excludedOverlays": {
           "type": "array",
           "items": {
@@ -340,6 +346,9 @@
           "type": "string"
         },
         "mariaDBOperatorState": {
+          "type": "string"
+        },
+        "perconaOperatorState": {
           "type": "string"
         },
         "selectedProfile": {

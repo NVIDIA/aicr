@@ -16,12 +16,13 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -123,7 +124,7 @@ func TestResolveNCCLBenchmarkProfile(t *testing.T) {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), tt.wantErrSub) {
@@ -326,7 +327,7 @@ func TestValidateNcclAllReduceBwProfileGate(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error, got (%q, %v)", msg, passed)
 			}
-			if tt.wantErrCode && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if tt.wantErrCode && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if tt.wantErrSub != "" && !strings.Contains(err.Error(), tt.wantErrSub) {

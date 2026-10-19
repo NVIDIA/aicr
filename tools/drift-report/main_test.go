@@ -39,7 +39,7 @@ const runFixtureReport = `{
                 "depName": "ghcr.io/nvidia/nvsentinel",
                 "depType": "registry-chart",
                 "datasource": "docker",
-                "currentValue": "v1.25.0",
+                "currentValue": "v1.26.0",
                 "updates": []
               }
             ]
@@ -65,7 +65,8 @@ func TestRunCreatesOutputDirectories(t *testing.T) {
 	out := filepath.Join(dir, "nested", "drift-report.json")
 	slackOut := filepath.Join(dir, "nested2", "slack-payload.json")
 
-	if err := run(testRepoRoot(t), reportPath, out, slackOut, Meta{}); err != nil {
+	reg := &fakeRegistry{}
+	if err := run(testRepoRoot(t), reportPath, out, slackOut, Meta{}, reg.published); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -82,10 +83,10 @@ func TestRunCreatesOutputDirectories(t *testing.T) {
 	}
 	// runFixtureReport resolves only nvsentinel; every other tracked pin in the
 	// real registry.yaml is absent from the Renovate report and must land as
-	// unresolved, never as current. 31, not 34: three OpenShift twin pairs
+	// unresolved, never as current. 33, not 36: three OpenShift twin pairs
 	// (prometheus-adapter, k8s-nim-operator, nvidia-dra-driver-gpu) share their
 	// non-OCP sibling's chart/registry/version and collapse into one row apiece.
-	const wantUnresolved = 31
+	const wantUnresolved = 33
 	if report.Summary.Unresolved != wantUnresolved {
 		t.Errorf("Summary.Unresolved = %d, want %d", report.Summary.Unresolved, wantUnresolved)
 	}
@@ -94,6 +95,9 @@ func TestRunCreatesOutputDirectories(t *testing.T) {
 	}
 	if len(report.Current) != 1 {
 		t.Errorf("len(Current) = %d, want 1 (nvsentinel)", len(report.Current))
+	}
+	if len(reg.asked) != 0 {
+		t.Errorf("asked the registry for %v; a current pin needs no publish date", reg.asked)
 	}
 
 	slackData, err := os.ReadFile(slackOut) //nolint:gosec // test-controlled path

@@ -41,8 +41,9 @@ func TestKubernetesCollector_Collect(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
-	// Should have 6 subtypes: server, image, policy, node, Slinky, and MariaDB.
-	assert.Len(t, m.Subtypes, 7)
+	// server, image, policy, node, Slinky, MariaDB, OKE legacy plugin,
+	// default StorageClass, and Percona.
+	assert.Len(t, m.Subtypes, 9)
 
 	// Find the server subtype
 	var serverSubtype *measurement.Subtype
@@ -80,6 +81,9 @@ func TestKubernetesCollector_CustomResourceFailuresAreIsolated(t *testing.T) {
 	collector.mariaDBDiscovery = &stubSlinkyDiscovery{
 		groupsErr: stderrors.New("MariaDB discovery unavailable"),
 	}
+	collector.perconaDiscovery = &stubSlinkyDiscovery{
+		groupsErr: stderrors.New("Percona discovery unavailable"),
+	}
 
 	m, err := collector.Collect(context.Background())
 	if err != nil {
@@ -103,6 +107,16 @@ func TestKubernetesCollector_CustomResourceFailuresAreIsolated(t *testing.T) {
 		t,
 		mariaDBStateUnknown,
 		m.GetSubtype(SubtypeMariaDBOperator).Data[mariaDBKeyCollectionState].Any(),
+	)
+	assert.Equal(
+		t,
+		perconaStateUnknown,
+		m.GetSubtype(SubtypePerconaServerMongoDB).Data[perconaKeyCollectionState].Any(),
+	)
+	assert.Equal(
+		t,
+		storageClassStateAbsent,
+		m.GetSubtype(SubtypeDefaultStorageClass).Data[storageClassKeyCollectionState].Any(),
 	)
 }
 
@@ -209,10 +223,12 @@ func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
 	// All standard subtypes should be present; custom-resource detection is unknown.
-	assert.Len(t, m.Subtypes, 7)
+	assert.Len(t, m.Subtypes, 9)
 	foundSlinky := false
 	foundMariaDB := false
 	foundOKELegacy := false
+	foundStorage := false
+	foundPercona := false
 	for _, subtype := range m.Subtypes {
 		if subtype.Name == SubtypeSlinkySlurm {
 			assert.Equal(t, slinkyStateUnknown, subtype.Data[slinkyKeyCollectionState].Any())
@@ -226,10 +242,20 @@ func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 			assert.Equal(t, okeLegacyPluginUnknown, subtype.Data[okeLegacyKeyPlugin].Any())
 			foundOKELegacy = true
 		}
+		if subtype.Name == SubtypeDefaultStorageClass {
+			assert.Equal(t, storageClassStateUnknown, subtype.Data[storageClassKeyCollectionState].Any())
+			foundStorage = true
+		}
+		if subtype.Name == SubtypePerconaServerMongoDB {
+			assert.Equal(t, perconaStateUnknown, subtype.Data[perconaKeyCollectionState].Any())
+			foundPercona = true
+		}
 	}
 	assert.True(t, foundSlinky, "expected slinky-slurm subtype")
 	assert.True(t, foundMariaDB, "expected mariadb-operator subtype")
 	assert.True(t, foundOKELegacy, "expected oke-legacy-plugin subtype")
+	assert.True(t, foundStorage, "expected default-storage-class subtype")
+	assert.True(t, foundPercona, "expected percona-server-mongodb subtype")
 }
 
 // Helper function defined in image_test.go

@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -729,7 +731,7 @@ func TestSnapshotsWithContext_MidTraversalCancellation(t *testing.T) {
 			if result != nil {
 				t.Fatalf("SnapshotsWithContext() result = %#v, want nil after cancellation", result)
 			}
-			if !stderrors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("SnapshotsWithContext() error = %v, want code %s", err, tt.wantCode)
 			}
 			if !stderrors.Is(err, tt.cause) {

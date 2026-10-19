@@ -17,6 +17,7 @@ package recipe
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -170,6 +171,13 @@ type ComponentConfig struct {
 	// See https://github.com/NVIDIA/aicr/issues/2264.
 	OwnsCRDs bool `yaml:"ownsCRDs,omitempty"`
 
+	// OwnsCRDsExcludeSubcharts names subcharts, by chart name, whose CRDs an
+	// OwnsCRDs component does not own. Its CRD step collects every crds/
+	// directory in the archive, disabled subcharts included, so a bundled
+	// dependency that another registry component owns would otherwise be
+	// re-applied at the parent's pinned schema. Valid only with OwnsCRDs.
+	OwnsCRDsExcludeSubcharts []string `yaml:"ownsCRDsExcludeSubcharts,omitempty"`
+
 	// ManifestsUseChartCRDs signals that the component's attached
 	// manifestFiles (wrapped by the bundler into an injected -post
 	// local-helm release) instantiate CRs whose CRDs this component's
@@ -232,6 +240,13 @@ type HelmConfig struct {
 
 	// DefaultVersion is the default chart version if not specified in recipe.
 	DefaultVersion string `yaml:"defaultVersion,omitempty"`
+
+	// DefaultDigest is the SHA-256 of the chart archive that DefaultRepository,
+	// DefaultChart and DefaultVersion resolve to, written sha256:<hex>. It is
+	// the digest of the .tgz for OCI charts too, not of the OCI manifest. When
+	// set, `aicr bundle --vendor-charts` refuses a pulled chart whose bytes
+	// differ, for refs that still use this exact chart.
+	DefaultDigest string `yaml:"defaultDigest,omitempty"`
 
 	// DefaultNamespace is the Kubernetes namespace for deploying this component.
 	DefaultNamespace string `yaml:"defaultNamespace,omitempty"`
@@ -509,6 +524,9 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 		if err := validateMixinSafeOverridePaths(comp); err != nil {
 			return nil, err
 		}
+		if err := validateHelmDefaultDigest(comp); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build index for fast lookup
@@ -519,6 +537,36 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 	}
 
 	return &registry, nil
+}
+
+// helmDigestPattern is the only accepted spelling of helm.defaultDigest.
+var helmDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// validateHelmDefaultDigest rejects a malformed helm.defaultDigest, and one on
+// an entry that pins no repository, chart or version, since such a digest
+// names no single archive to verify against.
+func validateHelmDefaultDigest(comp *ComponentConfig) error {
+	digest := comp.Helm.DefaultDigest
+	if digest == "" {
+		return nil
+	}
+	if !helmDigestPattern.MatchString(digest) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("registry component %q declares helm.defaultDigest %q; it must be sha256:<64 lowercase hex>, the SHA-256 of the chart archive", comp.Name, digest))
+	}
+	if comp.Helm.DefaultRepository == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("registry component %q declares helm.defaultDigest but pins no chart repository (helm.defaultRepository)", comp.Name))
+	}
+	if comp.Helm.DefaultChart == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("registry component %q declares helm.defaultDigest but pins no chart (helm.defaultChart)", comp.Name))
+	}
+	if comp.Helm.DefaultVersion == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("registry component %q declares helm.defaultDigest but pins no chart version (helm.defaultVersion)", comp.Name))
+	}
+	return nil
 }
 
 // validateMixinSafeOverridePaths rejects a malformed mixinSafeOverridePaths
@@ -665,6 +713,19 @@ func (r *ComponentRegistry) Validate() []error {
 				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("duplicate valueOverrideKey %q: used by both %s and %s", key, existing, comp.Name)))
 			}
 			overrideKeys[key] = comp.Name
+		}
+	}
+
+	for _, comp := range r.Components {
+		if len(comp.OwnsCRDsExcludeSubcharts) > 0 && !comp.OwnsCRDs {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: ownsCRDsExcludeSubcharts is set without ownsCRDs", comp.Name)))
+		}
+		for _, name := range comp.OwnsCRDsExcludeSubcharts {
+			if name == "" || strings.ContainsAny(name, "/*?[] ") || name == "." || name == ".." {
+				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q: ownsCRDsExcludeSubcharts entry %q must be a bare subchart name", comp.Name, name)))
+			}
 		}
 	}
 

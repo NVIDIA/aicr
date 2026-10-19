@@ -104,7 +104,7 @@ Tab completion for commands and flags is installed automatically by both the Hom
 **Opt out** (install script only): set `AICR_NO_COMPLETIONS=1` before running the script:
 
 ```shell
-AICR_NO_COMPLETIONS=1 curl -sfL https://get.aicr.run | bash -s --
+curl -sfL https://get.aicr.run | AICR_NO_COMPLETIONS=1 bash -s --
 ```
 
 **Manual setup** (build from source or `go install`):

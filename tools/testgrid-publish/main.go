@@ -38,7 +38,8 @@
 //	testgrid-publish --bundle <oci-ref> --bucket <gcs-bucket>
 //	testgrid-publish --bundle ghcr.io/nvidia/aicr-evidence:sha256-abc123 \
 //	                 --bucket aicr-testgrid-staging \
-//	                 --source-class uat
+//	                 --source-class uat \
+//	                 --run-url https://github.com/NVIDIA/aicr/actions/runs/123
 package main
 
 import (
@@ -50,6 +51,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"time"
 
@@ -65,6 +67,7 @@ func main() {
 		bundleDir   string
 		bucket      string
 		sourceClass string
+		runURL      string
 		plainHTTP   bool
 		insecureTLS bool
 		dryRun      bool
@@ -73,6 +76,7 @@ func main() {
 	flag.StringVar(&bundleDir, "bundle-dir", "", "pre-materialized bundle directory (alternative to --bundle)")
 	flag.StringVar(&bucket, "bucket", "", "GCS bucket to publish to (required)")
 	flag.StringVar(&sourceClass, "source-class", sourceClassUAT, "bundle origin: "+sourceClassUAT+" or "+sourceClassCommunity)
+	flag.StringVar(&runURL, "run-url", "", "GitHub Actions run URL that produced the bundle (optional)")
 	flag.BoolVar(&plainHTTP, "plain-http", false, "use plain HTTP for OCI registry (dev only)")
 	flag.BoolVar(&insecureTLS, "insecure-tls", false, "skip TLS verification for OCI registry (dev only)")
 	flag.BoolVar(&dryRun, "dry-run", false, "print output paths and started.json without writing to GCS")
@@ -100,6 +104,7 @@ func main() {
 		bundleDir:   bundleDir,
 		bucket:      bucket,
 		sourceClass: sourceClass,
+		runURL:      runURL,
 		plainHTTP:   plainHTTP,
 		insecureTLS: insecureTLS,
 		dryRun:      dryRun,
@@ -114,6 +119,7 @@ type runConfig struct {
 	bundleDir   string // pre-materialized (alternative to bundleRef)
 	bucket      string
 	sourceClass string
+	runURL      string // optional; empty when the caller has no run to link
 	plainHTTP   bool
 	insecureTLS bool
 	dryRun      bool
@@ -143,6 +149,10 @@ func localBundleDigest(dir string, dryRun bool) (string, error) {
 }
 
 func run(ctx context.Context, cfg runConfig) error {
+	if err := validateRunURL(cfg.runURL); err != nil {
+		return err
+	}
+
 	var dir, digest string
 	var cleanup func()
 
@@ -257,6 +267,7 @@ func run(ctx context.Context, cfg runConfig) error {
 			metaKeySignerIssuer:   signerIssuer,
 			metaKeySourceClass:    cfg.sourceClass,
 			metaKeyEvidenceDigest: digest,
+			metaKeyAICRRunURL:     cfg.runURL,
 		},
 	}
 
@@ -292,6 +303,24 @@ func run(ctx context.Context, cfg runConfig) error {
 		"passed", allPassed,
 	)
 	return nil
+}
+
+// runURLPattern matches a GitHub Actions run URL, optionally pinned to one
+// attempt. Owner and repo need a non-dot character, so "." and ".." cannot
+// pass. It is matched against the raw value, which is what gets published,
+// and is the same pattern as the run_url check in
+// .github/workflows/testgrid-publish.yml.
+var runURLPattern = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*/actions/runs/[0-9]+(/attempts/[0-9]+)?$`)
+
+// validateRunURL accepts an empty value or a GitHub Actions run URL. The
+// value is published permanently as the build's run link, so anything else
+// (other schemes, hosts or GitHub pages) is rejected.
+func validateRunURL(raw string) error {
+	if raw == "" || runURLPattern.MatchString(raw) {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest,
+		"--run-url must be https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>]")
 }
 
 // resultString returns "SUCCESS" or "FAILURE".

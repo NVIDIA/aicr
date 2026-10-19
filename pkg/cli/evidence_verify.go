@@ -83,12 +83,33 @@ tell 1 from 2.
 			}, func() []string { return []string{evidenceVerifyFormatText, evidenceVerifyFormatJSON} }),
 			&cli.StringFlag{
 				Name:     "expected-issuer",
-				Usage:    "Pin the OIDC issuer URL on the signing certificate (empty = any issuer).",
+				Usage:    "Pin the OIDC issuer URL on the signing certificate (empty = any issuer). Keyless only; not valid with --key.",
 				Category: catEvidence,
 			},
 			&cli.StringFlag{
 				Name:     "expected-identity-regexp",
-				Usage:    "Pin the signer's SubjectAlternativeName via regex (empty = any identity).",
+				Usage:    "Pin the signer's SubjectAlternativeName via regex (empty = any identity). Keyless only; not valid with --key.",
+				Category: catEvidence,
+			},
+			&cli.StringFlag{
+				Name: flagVerifyKey,
+				Usage: "Verify evidence signed with --signing-key against a KMS key URI (awskms:// | gcpkms:// | azurekms:// | " +
+					"hashivault://) or a local PEM public-key file. The key pins the signer: evidence signed by any other " +
+					"key, or keylessly, fails. A KMS URI makes a live GetPublicKey call to resolve the key.",
+				Category: catEvidence,
+			},
+			&cli.StringFlag{
+				Name: flagTrustRoot,
+				Usage: "Verify against a private Sigstore trusted root (a trusted_root.json from a self-hosted Fulcio/Rekor). " +
+					"Additive to AICR's built-in public-good root. Composes with --key. The verify counterpart to " +
+					"--fulcio-url / --rekor-url / --signing-config on the signing commands.",
+				Category: catEvidence,
+			},
+			&cli.BoolFlag{
+				Name: flagInsecureIgnoreTLog,
+				Usage: "Skip transparency-log verification for evidence signed with --signing-key ... --tlog-upload=false. " +
+					"Requires --key; a local PEM key verifies fully offline. \"insecure\" because, with no transparency " +
+					"log, there is no trusted timestamp proving when the signature was made.",
 				Category: catEvidence,
 			},
 			&cli.StringFlag{
@@ -122,6 +143,9 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) (err error) {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"input is required: aicr evidence verify <pointer|oci-ref|directory>")
 	}
+	if flagErr := validateSingleValueFlags(cmd, flagVerifyKey, flagTrustRoot); flagErr != nil {
+		return flagErr
+	}
 	format := cmd.String(flagFormat)
 	if format != evidenceVerifyFormatText && format != evidenceVerifyFormatJSON {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
@@ -138,6 +162,9 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) (err error) {
 		BundleRef:              cmd.String("bundle"),
 		ExpectedIssuer:         cmd.String("expected-issuer"),
 		ExpectedIdentityRegexp: cmd.String("expected-identity-regexp"),
+		Key:                    cmd.String(flagVerifyKey),
+		TrustRoot:              cmd.String(flagTrustRoot),
+		IgnoreTLog:             cmd.Bool(flagInsecureIgnoreTLog),
 		PlainHTTP:              cmd.Bool("registry-plain-http"),
 		InsecureTLS:            cmd.Bool("registry-insecure-tls"),
 		AllowUnpinnedTag:       cmd.Bool("allow-unpinned-tag"),

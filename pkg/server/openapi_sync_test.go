@@ -263,7 +263,8 @@ func TestOpenAPIBundleContract(t *testing.T) {
 		"ConfiguredRecipeResponse metadata.propertyNames.enum")
 	for _, field := range []string{
 		"version", "appliedOverlays", "excludedOverlays", "constraintWarnings",
-		"gpuDriverState", "mariaDBOperatorState", "selectedProfile",
+		"gpuDriverState", "mariaDBOperatorState", "defaultStorageClassState",
+		"perconaOperatorState", "selectedProfile",
 	} {
 		if !openAPIHasString(configuredMetadataNames, field) {
 			t.Errorf("ConfiguredRecipeResponse metadata does not allow %s", field)
@@ -308,8 +309,10 @@ func TestOpenAPIBundleContract(t *testing.T) {
 	profileMetadataNames := openAPISequence(t,
 		openAPIObjectAt(t, profileMetadata, "propertyNames")["enum"],
 		"ProfileRecipeResponse metadata.propertyNames.enum")
-	if !openAPIHasString(profileMetadataNames, "mariaDBOperatorState") {
-		t.Error("ProfileRecipeResponse metadata does not allow mariaDBOperatorState")
+	for _, field := range []string{"mariaDBOperatorState", "defaultStorageClassState", "perconaOperatorState"} {
+		if !openAPIHasString(profileMetadataNames, field) {
+			t.Errorf("ProfileRecipeResponse metadata does not allow %s", field)
+		}
 	}
 	profileConfiguration := openAPIObjectAt(t, profileClosure, "properties", "configuration")
 	if got := profileConfiguration["$ref"]; got != "#/components/schemas/ConfiguredRecipeConfiguration" {

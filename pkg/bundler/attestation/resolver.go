@@ -96,7 +96,7 @@ type ResolveOptions struct {
 	// attestation (#409). The zero value (false) is the safe default: a caller
 	// constructing ResolveOptions without setting it still gets a Rekor entry.
 	//
-	// It affects ONLY the KMS path. Keyless (OIDC) signing ignores this field
+	// It affects ONLY the KMS path. Keyless (OIDC) signing never honors it
 	// and always uploads to Rekor, because keyless needs Fulcio + Rekor network
 	// access to produce a verifiable certificate; that is a fail-safe. The CLI
 	// boundary (pkg/cli) rejects DisableTLogUpload without a SigningKey so a

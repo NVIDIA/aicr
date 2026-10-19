@@ -16,15 +16,15 @@
 Package bundler provides orchestration for generating deployment bundles from recipes.
 
 The bundler package generates deployment-ready artifacts (Helm per-component bundles,
-Argo CD applications, Flux HelmRelease manifests, helmfile release graphs, or rendered
-local manifests) from recipe configurations. Component configuration is loaded from
+Argo CD applications, Flux HelmRelease manifests, helmfile release graphs, Terraform
+modules, or rendered local manifests) from recipe configurations. Component configuration is loaded from
 the declarative component registry (recipes/registry.yaml).
 
 # Architecture
 
   - DefaultBundler: Orchestrates bundle generation; the concrete output is produced by a deployer
   - Component Registry: Declarative configuration in recipes/registry.yaml
-  - Deployers: helm (default), argocd, argocd-helm, flux, helmfile, localformat
+  - Deployers: helm (default), argocd, argocd-helm, flux, helmfile, terraform, localformat
   - result.Output: Aggregated generation results
 
 # Quick Start

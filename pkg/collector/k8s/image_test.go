@@ -91,8 +91,8 @@ func TestImageCollector_Collect(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
-	// Should have 6 subtypes, including Slinky and MariaDB detection.
-	assert.Len(t, m.Subtypes, 7)
+	// server, image, policy, node, and five custom-resource evidence subtypes.
+	assert.Len(t, m.Subtypes, 9)
 
 	// Find the image subtype
 	var imageSubtype *measurement.Subtype

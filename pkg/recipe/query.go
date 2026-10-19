@@ -40,6 +40,23 @@ func HydrateResult(result *RecipeResult) (map[string]any, error) {
 	return HydrateResultWithContext(ctx, result)
 }
 
+// projectObservedStates copies the snapshot-observed metadata states into
+// metadata. They are omitempty in the recipe schema, so each is projected
+// only when recorded to keep `aicr query` output matching the recipe YAML
+// and the OpenAPI schema.
+func projectObservedStates(metadata map[string]any, m *RecipeResultMetadata) {
+	for key, value := range map[string]string{
+		"gpuDriverState":           m.GPUDriverState,
+		"mariaDBOperatorState":     m.MariaDBOperatorState,
+		"defaultStorageClassState": m.DefaultStorageClassState,
+		"perconaOperatorState":     m.PerconaOperatorState,
+	} {
+		if value != "" {
+			metadata[key] = value
+		}
+	}
+}
+
 // HydrateResultWithContext builds a fully hydrated map from a RecipeResult,
 // honoring ctx for cancellation/timeout on the underlying values reads.
 func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[string]any, error) {
@@ -53,12 +70,7 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 		"excludedOverlays":   result.Metadata.ExcludedOverlays,
 		"constraintWarnings": result.Metadata.ConstraintWarnings,
 	}
-	// GPUDriverState is omitempty in the recipe schema: project it only
-	// when recorded so `aicr query` output matches the recipe YAML and
-	// the OpenAPI schema.
-	if result.Metadata.GPUDriverState != "" {
-		metadata["gpuDriverState"] = result.Metadata.GPUDriverState
-	}
+	projectObservedStates(metadata, &result.Metadata)
 	if result.Metadata.SelectedProfile != nil {
 		metadata["selectedProfile"] = map[string]any{
 			hydratedNameKey: result.Metadata.SelectedProfile.Name,
@@ -69,9 +81,6 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 			metadata["selectedProfile"].(map[string]any)["advertiser"] =
 				result.Metadata.SelectedProfile.Advertiser
 		}
-	}
-	if result.Metadata.MariaDBOperatorState != "" {
-		metadata["mariaDBOperatorState"] = result.Metadata.MariaDBOperatorState
 	}
 
 	hydrated := map[string]any{

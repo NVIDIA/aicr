@@ -16,11 +16,12 @@ package catalog_test
 
 import (
 	"context"
-	stderrors "errors"
 	"io/fs"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/catalog"
 )
@@ -98,7 +99,7 @@ func TestComputeDigest_MissingRegistry(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing registry, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 }
@@ -115,7 +116,7 @@ func TestComputeDigest_MissingCatalog(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing catalog, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 }

@@ -132,6 +132,7 @@ One-liner per field:
 | `helm.defaultRepository` | Helm repo URL injected when an overlay leaves it empty |
 | `helm.defaultChart` | Chart name (e.g. `nvidia/gpu-operator`) |
 | `helm.defaultVersion` | Default chart version |
+| `helm.defaultDigest` | Optional `sha256:<hex>` of the pinned chart archive (the `.tgz`, for OCI charts too). `--vendor-charts` refuses a pulled chart whose bytes differ, for refs that keep the registry's source, chart and version |
 | `helm.defaultNamespace` | Install namespace |
 | `kustomize.defaultSource` | Git or OCI source URL |
 | `kustomize.defaultPath` | Subpath within the source |
@@ -147,6 +148,8 @@ One-liner per field:
 | `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
 | `upgrades.file` | Path to a `ComponentUpgrades` transition record (relative to data dir); empty means no transition records ([recipe.md](recipe.md#transition-records)) |
+| `ownsCRDs` | Audited assertion that the component solely owns every CRD its chart ships and none uses webhook conversion, so deployers may replace its CRDs on upgrade instead of leaving them at their first-install schema. Audited chart versions are pinned in `pkg/recipe/ownscrds_audit_test.go`; per-deployer behavior is in the [component catalog](../user/component-catalog.md#upgrade-uninstall-and-troubleshooting) |
+| `ownsCRDsExcludeSubcharts` | Bare subchart names whose CRDs an `ownsCRDs` component does not own. The bundle's `apply-crds.sh` otherwise collects every `crds/` directory in the chart, disabled subcharts included, and would re-apply a CRD another component owns at this chart's schema. `nvsentinel` lists `mongodb-store`, whose Percona CRDs belong to `psmdb-operator`. Valid only with `ownsCRDs` |
 | `manifestFiles` | Default manifest YAML paths bundled when the componentRef declares none (ref-declared lists take precedence). No opt-out: an empty ref-declared list is indistinguishable from absent (len == 0 → defaults filled) — to suppress the defaults, declare a replacement list. Helm components only; the loader rejects the combination with `kustomize:` |
 | `mixinSafeOverridePaths` | Exact dotted value paths (e.g. `global.tracing.enabled`) a `RecipeMixin` may set on this component via `Overrides`. Empty (the default) means the component hasn't opted into mixin overrides — a mixin introducing it fresh still has unrestricted `valuesFile`/`overrides`, but once the component is already in the chain (or has a non-empty allowlist), every mixin Overrides path is validated against this list ([recipe.md](recipe.md#mixin-composition)) |
 | `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` | Narrow service-specific flags (see godoc) |
@@ -184,6 +187,17 @@ nodeScheduling:
 The controller (a Deployment) lands on management nodes; the kubelet-plugin
 DaemonSet lands on GPU nodes — each routed by its own selector/toleration
 pair.
+
+A `tolerationPaths` entry may appear under **both** tiers for a DaemonSet that
+must run on every node (`nfd` `worker.tolerations` and
+`topologyUpdater.tolerations`, `aws-ebs-csi-driver` `node.tolerations`). The
+bundler writes such a path once, with the keyed `--system-node-toleration`
+entries followed by the `--accelerated-node-toleration` entries, deduplicated;
+keyless system entries (the tolerate-all default) are left out so they never
+widen a restricted accelerated list. With no accelerated entries at all, the
+path receives the system list as given. The usual opt-out (`[]`) and append-mode (non-empty overlay list) rules still
+apply. `nodeSelectorPaths` must not be shared: a selector cannot mean "both
+node classes".
 
 `gpu-operator` is the exception worth knowing: its `accelerated` block is
 tolerations-only. Its operand DaemonSets have no chart/CRD nodeSelector
@@ -367,12 +381,12 @@ pods depend on).
 
 ## Deployers
 
-AICR ships five output adapters in
+AICR ships six output adapters in
 [`pkg/bundler/deployer/`](https://github.com/NVIDIA/aicr/tree/main/pkg/bundler/deployer):
-`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. Each calls
+`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`. Each calls
 `localformat.Write()` and then layers its own orchestration files
 (`deploy.sh`, `helmfile.yaml`, Argo `Application` CRs, Flux
-`HelmRelease`s). **Components do not need to be deployer-aware** —
+`HelmRelease`s, Terraform module calls). **Components do not need to be deployer-aware** —
 the bundler renders per-deployer from one component definition.
 
 ### Deployment ordering
@@ -403,6 +417,26 @@ exactly its dependencies' terminal releases, nothing more. This is the
 most faithful and most parallel rendering — a component waits only for
 what it actually needs — and it reads naturally to flux users because
 `dependsOn` mirrors `dependencyRefs` one-for-one. See `declaredDependsOn`.
+
+**terraform — the exact DAG, on the module call.** Terraform's
+`depends_on` is a native dependency graph, so the terraform deployer
+projects the declared edges onto it the same way flux does, and the two
+deployers emit the same edge set for the same recipe. It differs in
+where the edge is attached: each component is **one module call**, and
+the edge sits on the call, so it orders everything the module contains
+rather than one resource inside it. A component's `-pre`, `-post` and
+`-readiness` folders become slots on that same module and chain inside
+it, so `depends_on = [module.gpu_operator]` covers the component's gate
+without naming it — the claim the module boundary is there to make. The
+slots are assigned by the same `-pre`/`-post`/`-readiness` suffix test
+argocd's `waveForFolder` uses. See `buildComponents` and `phaseOf`.
+
+The readiness slot hardcodes `wait` rather than reading the bundle-wide
+variable: an async component (see `deployer.ComponentOverrideFor`) may
+skip waiting on its own workloads, never on the gate that asserts it came
+up. The gate Job is a helm hook, so the release blocks on it without
+`wait_for_jobs`, and its `timeout` is the gate's own deadline plus the
+buffer `deploy.sh` adds, not `var.timeout`.
 
 **argocd / argocd-helm — tiers as sync-wave bands.** Argo CD's
 `sync-wave` is a single integer per Application. Applications sharing a
@@ -436,13 +470,14 @@ possible shell. The readiness gates already sequence it correctly.
 `aicr bundle --serial` forces every deployer to install components
 strictly one at a time in `DeploymentOrder`, an escape hatch for
 reproducing the pre-parallelism ordering or bisecting a misbehaving
-rollout. It affects the four concurrent deployers: argocd and
+rollout. It affects the five concurrent deployers: argocd and
 argocd-helm fall back to a linear sync-wave per folder, flux chains each
 `HelmRelease` `dependsOn` to the previous component instead of
-projecting the DAG, and helmfile chains every release to its predecessor
+projecting the DAG, helmfile chains every release to its predecessor
 via `needs:` (one linear apply chain) instead of only within a
-component. The helm `deploy.sh` is already serial, so the flag is a
-no-op for it. Off by default.
+component, and terraform chains every module call via `depends_on`. The
+helm `deploy.sh` is already serial, so the flag is a no-op for it. Off
+by default.
 
 See [index.md](index.md#community-standard-deployment-targets) for
 the deployer matrix.

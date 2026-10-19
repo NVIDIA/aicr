@@ -16,12 +16,13 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -97,7 +98,7 @@ func TestWaitForDeploymentAvailable_NeverReady(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for never-ready deployment")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("expected ErrCodeInternal, got %v", err)
 	}
 }
@@ -118,7 +119,7 @@ func TestWaitForDeploymentAvailable_ParentCanceled(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on canceled parent context")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("expected ErrCodeTimeout for cancellation, got %v", err)
 	}
 }
@@ -134,7 +135,7 @@ func TestWaitForDeploymentAvailable_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing deployment")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 }

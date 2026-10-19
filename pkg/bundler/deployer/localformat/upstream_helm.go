@@ -79,19 +79,22 @@ type applyCRDsData struct {
 	ReleaseFilter         string
 	FromUpstreamEnv       bool
 	CRDStepTimeoutSeconds int
+	// ExcludeSubcharts names subcharts whose crds/ the step skips.
+	ExcludeSubcharts []string
 }
 
 // writeApplyCRDsScript renders apply-crds.sh into folderDir and returns its
 // path relative to the bundle root, or "" when the component does not own its
 // CRDs. Non-owning components get no file at all, so the absence of the step
 // is visible on disk rather than encoded as a no-op script.
-func writeApplyCRDsScript(folderDir, dir, name, namespace string, fromUpstreamEnv bool) (string, error) {
+func writeApplyCRDsScript(folderDir, dir string, c Component, fromUpstreamEnv bool) (string, error) {
 	data := applyCRDsData{
-		Name:                  name,
-		Namespace:             namespace,
-		ReleaseFilter:         "^" + regexp.QuoteMeta(name) + "$",
+		Name:                  c.Name,
+		Namespace:             c.Namespace,
+		ReleaseFilter:         "^" + regexp.QuoteMeta(c.Name) + "$",
 		FromUpstreamEnv:       fromUpstreamEnv,
 		CRDStepTimeoutSeconds: int(defaults.BundleCRDStepTimeout.Seconds()),
+		ExcludeSubcharts:      c.CRDExcludeSubcharts,
 	}
 	if err := renderTemplateToFile(applyCRDsTmpl, data, folderDir, "apply-crds.sh", 0o755); err != nil {
 		return "", err
@@ -155,7 +158,7 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 		filepath.Join(dir, "install.sh"),
 	}
 	if c.OwnsCRDs {
-		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c.Name, c.Namespace, true)
+		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c, true)
 		if crdErr != nil {
 			return Folder{}, crdErr
 		}

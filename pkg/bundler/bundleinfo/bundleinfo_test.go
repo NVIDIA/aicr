@@ -31,6 +31,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 )
 
@@ -210,7 +211,7 @@ func TestWriteRejectsEscapingPaths(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 			// Write rejects a malformed record for several reasons under this
@@ -237,7 +238,7 @@ func TestWriteRejectsNilInfo(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -290,7 +291,7 @@ func TestWriteRejectsIncompleteRecord(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -312,7 +313,7 @@ func TestReadRejectsOversizeFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -367,7 +368,7 @@ func TestReadRejectsNonRegularFile(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -458,7 +459,7 @@ func TestReadFailsClosed(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(tt.code, "")) {
+			if errorstest.ReportedCode(err) != tt.code {
 				t.Errorf("error = %v, want code %s", err, tt.code)
 			}
 			if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {
@@ -570,7 +571,7 @@ func TestReadRejectsIncompleteRecord(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
@@ -654,7 +655,7 @@ func TestReadRejectsTrailingDocument(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -681,7 +682,7 @@ func TestWriteRefusesSymlinkedTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 
@@ -764,7 +765,7 @@ func TestContextErrorsAreCodedByCause(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("error = %v, want code %s", err, tt.wantCode)
 			}
 			if !stderrors.Is(err, tt.wantErr) {
@@ -788,7 +789,7 @@ func TestWriteRejectsOversizeRecord(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -820,5 +821,165 @@ func TestSettingsKeysAreAllowlisted(t *testing.T) {
 	}
 	for key := range allowed {
 		t.Errorf("allowlist declares %q but Settings has no such field; remove the stale entry", key)
+	}
+}
+
+// TestReadAcceptsWarnings is the readers-first half of #3223: a record that
+// carries warnings must read back intact, so a later release can write them
+// without this one rejecting the bundle. The strict decoder fails on any
+// field the type does not declare, which is the failure this guards against.
+func TestReadAcceptsWarnings(t *testing.T) {
+	withWarnings := func() *bundleinfo.BundleInfo {
+		info := sample()
+		info.Warnings = []bundleinfo.Warning{
+			{Code: "STORAGE_CLASS_UNRESOLVED", Component: "nvsentinel", Message: "no default StorageClass to resolve"},
+			{Code: "DRA_EVICTION_UNVERIFIED", Message: "cannot verify DRA eviction coordination"},
+		}
+		return info
+	}
+
+	dir := t.TempDir()
+	if _, err := bundleinfo.Write(context.Background(), dir, withWarnings()); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	got, err := bundleinfo.Read(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !reflect.DeepEqual(got.Warnings, withWarnings().Warnings) {
+		t.Errorf("Warnings = %+v, want %+v", got.Warnings, withWarnings().Warnings)
+	}
+
+	// The case that matters across releases: a record a later writer
+	// produced, read by this binary's strict decoder. Appended by hand so it
+	// does not depend on this binary's own writer emitting the field.
+	t.Run("record written elsewhere", func(t *testing.T) {
+		dir := t.TempDir()
+		if _, err := bundleinfo.Write(context.Background(), dir, sample()); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		path := filepath.Join(dir, bundleinfo.FileName)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		raw = append(raw, []byte("warnings:\n  - code: STORAGE_CLASS_UNRESOLVED\n    component: nvsentinel\n    message: no default StorageClass to resolve\n")...)
+		if writeErr := os.WriteFile(path, raw, 0o600); writeErr != nil {
+			t.Fatalf("WriteFile: %v", writeErr)
+		}
+		got, err := bundleinfo.Read(context.Background(), dir)
+		if err != nil {
+			t.Fatalf("Read() error = %v; this binary must accept a record that carries warnings", err)
+		}
+		want := []bundleinfo.Warning{{Code: "STORAGE_CLASS_UNRESOLVED", Component: "nvsentinel", Message: "no default StorageClass to resolve"}}
+		if !reflect.DeepEqual(got.Warnings, want) {
+			t.Errorf("Warnings = %+v, want %+v", got.Warnings, want)
+		}
+	})
+}
+
+// TestReadRejectsWarningShapeDrift pins the two ways a record can disagree
+// with this release's Warning: a key the type does not declare, which the
+// strict decoder refuses, and a bad entry after a good one, which must be
+// reported at its own index.
+func TestReadRejectsWarningShapeDrift(t *testing.T) {
+	tests := []struct {
+		name     string
+		warnings string
+		wantErr  string
+	}{
+		{
+			name:     "unknown key in a warning",
+			warnings: "warnings:\n  - code: STORAGE_CLASS_UNRESOLVED\n    message: m\n    severity: high\n",
+			wantErr:  "failed to parse bundle info",
+		},
+		{
+			name:     "bad entry after a good one",
+			warnings: "warnings:\n  - code: STORAGE_CLASS_UNRESOLVED\n    message: m\n  - code: bad\n    message: m\n",
+			wantErr:  "warnings[1].code",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := bundleinfo.Write(context.Background(), dir, sample()); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			path := filepath.Join(dir, bundleinfo.FileName)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+			if writeErr := os.WriteFile(path, append(raw, []byte(tt.warnings)...), 0o600); writeErr != nil {
+				t.Fatalf("WriteFile: %v", writeErr)
+			}
+			_, err = bundleinfo.Read(context.Background(), dir)
+			if err == nil {
+				t.Fatal("Read() error = nil, want the record rejected")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Read() error = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestWarningsAreValidated pins the shape a warning must have on both sides:
+// a stable UPPER_SNAKE code automation can key on, and a message for people.
+func TestWarningsAreValidated(t *testing.T) {
+	tests := []struct {
+		name    string
+		warning bundleinfo.Warning
+		wantErr string
+	}{
+		{name: "empty code", warning: bundleinfo.Warning{Message: "m"}, wantErr: "warnings[0].code"},
+		{name: "lowercase code", warning: bundleinfo.Warning{Code: "storage_class", Message: "m"}, wantErr: "warnings[0].code"},
+		{name: "code with a space", warning: bundleinfo.Warning{Code: "STORAGE CLASS", Message: "m"}, wantErr: "warnings[0].code"},
+		{name: "code with a trailing underscore", warning: bundleinfo.Warning{Code: "STORAGE_", Message: "m"}, wantErr: "warnings[0].code"},
+		{name: "code with a trailing newline", warning: bundleinfo.Warning{Code: "STORAGE\n", Message: "m"}, wantErr: "warnings[0].code"},
+		{name: "code with a non-ASCII letter", warning: bundleinfo.Warning{Code: "STOR\u0410GE", Message: "m"}, wantErr: "warnings[0].code"},
+		{name: "empty message", warning: bundleinfo.Warning{Code: "STORAGE_CLASS_UNRESOLVED"}, wantErr: "warnings[0].message"},
+		{name: "whitespace-only message", warning: bundleinfo.Warning{Code: "STORAGE_CLASS_UNRESOLVED", Message: "  "}, wantErr: "warnings[0].message"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := sample()
+			info.Warnings = []bundleinfo.Warning{tt.warning}
+
+			_, err := bundleinfo.Write(context.Background(), t.TempDir(), info)
+			if err == nil {
+				t.Fatal("Write() error = nil, want the malformed warning rejected")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Write() error = %v, want it to name %s", err, tt.wantErr)
+			}
+
+			// Read must refuse the same record when it arrives from elsewhere,
+			// so write it by hand past Write's own check.
+			dir := t.TempDir()
+			valid := sample()
+			if _, writeErr := bundleinfo.Write(context.Background(), dir, valid); writeErr != nil {
+				t.Fatalf("Write(valid): %v", writeErr)
+			}
+			path := filepath.Join(dir, bundleinfo.FileName)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+			raw = append(raw, []byte("warnings:\n  - code: \""+tt.warning.Code+"\"\n    message: \""+tt.warning.Message+"\"\n")...)
+			if writeErr := os.WriteFile(path, raw, 0o600); writeErr != nil {
+				t.Fatalf("WriteFile: %v", writeErr)
+			}
+			_, err = bundleinfo.Read(context.Background(), dir)
+			if err == nil {
+				t.Fatal("Read() error = nil, want the malformed warning rejected")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Read() error = %v, want it to name %s", err, tt.wantErr)
+			}
+		})
 	}
 }

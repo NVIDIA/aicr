@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
@@ -93,7 +95,7 @@ func TestRecipeDeclaresRDMAFabric(t *testing.T) {
 		{
 			name: "marker present among several manifests",
 			manifestFiles: []string{
-				"components/network-operator/manifests/nfd-network-rule.yaml",
+				"components/network-operator/manifests/talos-namespace.yaml",
 				"components/network-operator/manifests/nic-cluster-policy-aks.yaml",
 				"components/network-operator/manifests/nvidia-peermem-reloader.yaml",
 			},
@@ -304,7 +306,7 @@ func TestRDMAFabricProbe_FailsClosedOnListError(t *testing.T) {
 	// inner error — e.g. ErrCodeTimeout from a canceled node scan — would instead
 	// propagate unchanged). Assert the propagated code, not the removed
 	// gate-context message, so the fail-closed contract is pinned to the code.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("expected ErrCodeInternal on plain list failure, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "failed to list nodes") {

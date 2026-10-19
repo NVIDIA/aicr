@@ -219,7 +219,7 @@ make test-coverage
 
 ```bash
 # Run all linters (Go, YAML, license headers, agents sync, docs gates, chart-version pins,
-# vendored Go proxy action digests, upgrade records)
+# vendored Go proxy action digests, upgrade records, Dynamo runtime image tag)
 make lint
 
 # Or run individually for a faster loop (all of these already run as part of `make lint`)
@@ -233,15 +233,19 @@ make check-docs-mdx-parse  # real MDX parser, authoritative (needs Node 20+)
 
 # YAML-labelled code blocks throughout docs/ must contain parseable YAML
 make check-docs-yaml       # syntax only; partial YAML fragments are valid
+
+# Shell code blocks in docs/ must not use <placeholder>s that bash reads as redirection
+make check-docs-shell
 ```
 
 `check-docs-mdx-parse` warns and skips when Node is unavailable locally, but
 hard-fails in CI. See
 [Docs MDX Gate](docs/contributor/tests.md#docs-mdx-gate).
 
-`check-docs-yaml` has the same local-warning and CI-hard-fail behavior for a
-missing Node runtime. See
-[Docs YAML Fence Gate](docs/contributor/tests.md#docs-yaml-fence-gate).
+`check-docs-yaml` and `check-docs-shell` have the same local-warning and
+CI-hard-fail behavior for a missing Node runtime. See
+[Docs YAML Fence Gate](docs/contributor/tests.md#docs-yaml-fence-gate) and
+[Docs Shell Placeholder Gate](docs/contributor/tests.md#docs-shell-placeholder-gate).
 
 ### 5. Run E2E Tests
 
@@ -476,7 +480,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make qualify` | Full qualification (test-coverage, lint, tuning-check, coverage-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
-| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, and upgrade records |
+| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, upgrade records, and the Dynamo runtime image tag |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
 | `make e2e` | CLI end-to-end tests |
@@ -595,11 +599,14 @@ nvidia-uvm`). The cleanup script detects driver-managed mode (via the
 prints this guidance; the fix is to reboot the GPU nodes before reinstalling:
 
 ```bash
-kubectl cordon <gpu-node>            # each GPU node
+NODE="my-gpu-node"                 # replace with a GPU node; repeat for each one
+INSTANCE_ID="i-0123456789abcdef0"  # replace with the instance ID at the end of its .spec.providerID
+
+kubectl cordon "${NODE}"
 # reboot the instances, e.g. on EKS:
-aws ec2 reboot-instances --instance-ids <ids>
+aws ec2 reboot-instances --instance-ids "${INSTANCE_ID}"
 # wait for the nodes to report Ready, then
-kubectl uncordon <gpu-node>
+kubectl uncordon "${NODE}"
 ```
 
 ### Excluding Out-of-Band Installs from Cleanup

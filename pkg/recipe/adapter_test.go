@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -598,7 +600,7 @@ func TestGetValuesForComponent_BuilderIntegration(t *testing.T) {
 
 func TestGetManifestContent(t *testing.T) {
 	t.Run("existing manifest", func(t *testing.T) {
-		content, err := GetManifestContent("components/network-operator/manifests/nfd-network-rule.yaml")
+		content, err := GetManifestContent("components/network-operator/manifests/talos-namespace.yaml")
 		if err != nil {
 			t.Fatalf("GetManifestContent() error = %v", err)
 		}
@@ -855,7 +857,7 @@ func TestGetManifestContentWithProvider(t *testing.T) {
 // preserving back-compat for callers that don't have a RecipeResult-bound
 // provider.
 func TestGetManifestContentWithProvider_NilFallback(t *testing.T) {
-	content, err := GetManifestContentWithProvider(nil, "components/network-operator/manifests/nfd-network-rule.yaml")
+	content, err := GetManifestContentWithProvider(nil, "components/network-operator/manifests/talos-namespace.yaml")
 	if err != nil {
 		t.Fatalf("GetManifestContentWithProvider(nil): %v", err)
 	}
@@ -875,7 +877,7 @@ func TestGetManifestContentWithProvider_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing manifest, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 	if !stderrors.Is(err, fs.ErrNotExist) {

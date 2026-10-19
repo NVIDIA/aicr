@@ -29,6 +29,9 @@
 # programmatically from Go (see applyInferenceWorkerScheduling in
 # inference_perf_constraint.go) so taint values with YAML-special characters
 # cannot break the template.
+#
+# Images are substituted by inferenceTemplateData, tagged with the recipe's
+# dynamo-platform chart version, and honor AICR_VALIDATOR_IMAGE_REGISTRY.
 
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
@@ -45,7 +48,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2
+              image: "${DYNAMO_VLLM_RUNTIME_IMAGE}"
               env:
                 - name: SERVED_MODEL_NAME
                   # Quoted so a scalar-looking model ID (e.g. a pure-numeric or
@@ -86,7 +89,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2
+              image: "${DYNAMO_VLLM_RUNTIME_IMAGE}"
               workingDir: /workspace/examples/backends/vllm
               # GKE's managed device plugin (the gke-default gpuStack value)
               # mounts the node's driver tree at /usr/local/nvidia via its

@@ -27,7 +27,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
-	stderrors "errors"
 	"io"
 	"math/big"
 	"net"
@@ -49,6 +48,7 @@ import (
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/oci"
 )
 
@@ -394,7 +394,7 @@ func assertAcceptanceMarker(t *testing.T, result *aicr.RecipeResult, want string
 
 func assertAcceptanceErrorCode(t *testing.T, err error, code apperrors.ErrorCode) {
 	t.Helper()
-	if !stderrors.Is(err, apperrors.New(code, "")) {
+	if errorstest.ReportedCode(err) != code {
 		t.Fatalf("error = %v, want code %s", err, code)
 	}
 }

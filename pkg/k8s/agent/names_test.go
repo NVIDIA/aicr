@@ -16,12 +16,12 @@ package agent
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -235,7 +235,7 @@ func TestValidateRunID(t *testing.T) {
 			if err == nil {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %v", err, errors.ErrCodeInvalidRequest)
 			}
 			// The message must name the field and echo the offending
@@ -264,7 +264,7 @@ func TestDeployRejectsInvalidRunIDBeforeCreatingAnything(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Deploy() with RunID %q should fail", runID)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("Deploy() error = %v, want code %v", err, errors.ErrCodeInvalidRequest)
 			}
 
@@ -393,7 +393,7 @@ func TestValidateResolvedNames(t *testing.T) {
 			if err == nil {
 				t.Fatalf("validateResolvedNames() = nil, want an error naming %s", tt.wantField)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %v", err, errors.ErrCodeInvalidRequest)
 			}
 			if !strings.Contains(err.Error(), tt.wantField) {
@@ -449,7 +449,7 @@ func TestDeployRejectsInvalidResolvedNameBeforeCreatingAnything(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Deploy() with config %+v should fail", cfg)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("Deploy() error = %v, want code %v", err, errors.ErrCodeInvalidRequest)
 			}
 			// Not even the Step-0 SelfSubjectAccessReview may have been

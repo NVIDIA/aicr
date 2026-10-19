@@ -1,0 +1,52 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# topograph Helm values
+# Kubernetes-scoped Topograph: the k8s engine labels nodes with their
+# network topology (fabric.topograph.run/tier-N, closest switch tier first;
+# accelerator.topograph.run/domain) so topology-aware schedulers such as
+# Kueue TAS can place pods by domain. Unlike slinky-topograph it has no
+# Slurm dependency and writes node labels, not a topology.conf.
+#
+# provider.name is the REQUIRED per-overlay override (aws, gcp, test, ...).
+# Cloud providers need IAM access to the provider's topology API: GCP
+# roles/compute.viewer (compute.instances.list) via Workload Identity,
+# AWS ec2:DescribeInstanceTopology via IRSA or EKS Pod Identity. See
+# "Topology-aware scheduling" in docs/user/component-catalog.md.
+
+# Stabilize the Deployment name; health-check assertions and dependencyRef
+# consumers rely on it. nodeObserver and nodeDataBroker names derive from it.
+fullnameOverride: topograph
+
+service:
+  type: ClusterIP
+  port: 49021
+
+engine:
+  name: k8s
+
+# Topology request batching delay: collects parallel node events into one
+# provider API query.
+config:
+  requestAggregationDelay: 15s
+
+serviceAccount:
+  create: true
+  name: topograph
+
+# Node Observer and Node Data Broker are rendered from the same chart and
+# enabled by default; leaves that do not need the broker (the Kind dra
+# provider) set nodeDataBroker.enabled: false in their overrides.
+nodeObserver: {}
+nodeDataBroker: {}

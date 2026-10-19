@@ -75,6 +75,8 @@ spec:
           name: pre-installation
           securityContext:
             privileged: true
+          # Runs under the node's /bin/sh (via nsenter), so the script must stay
+          # POSIX. Diverges from upstream, which uses bash-only `done < <(...)`.
           command:
             - nsenter
             - -at
@@ -85,14 +87,14 @@ spec:
             - |
               /sbin/iptables -I INPUT -p tcp -m tcp -j ACCEPT && modprobe import-helper
               sudo mkdir -p /dev/aperture_devices
-              while IFS= read -r line; do
+              lspci -nn -D | grep '1ae0:0084' | while IFS= read -r line; do
                 BDF=$( echo "$line" | awk '{print $1}' );
                 target_aperture_path="/dev/aperture_devices/$BDF"
                 host_aperture_device=$(readlink -f "/sys/bus/pci/devices/$BDF");
                 sudo mkdir -p $target_aperture_path;
                 sudo umount -R $target_aperture_path;
                 sudo mount --bind $host_aperture_device $target_aperture_path;
-              done < <(lspci -nn -D | grep '1ae0:0084')
+              done
               if [ -d /dev/aperture_devices ]; then
                   chmod -R a+r /dev/aperture_devices/
                   chmod a+rw /dev/aperture_devices/*/resource*

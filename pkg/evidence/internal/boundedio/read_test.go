@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func writeFile(t *testing.T, dir, name string, body []byte) string {
@@ -59,7 +61,7 @@ func TestReadFile_RejectsOversize(t *testing.T) {
 	if got != nil {
 		t.Errorf("expected no body on oversize, got %d bytes", len(got))
 	}
-	if !isCode(err, errors.ErrCodeInvalidRequest) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -76,7 +78,7 @@ func TestReadFile_RejectsSymlink(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if _, err := ReadFile(context.Background(), link, "pointer", 1024); !isCode(err, errors.ErrCodeInvalidRequest) {
+	if _, err := ReadFile(context.Background(), link, "pointer", 1024); errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest for a symlink, got %v", err)
 	}
 }
@@ -90,7 +92,7 @@ func TestReadFile_RejectsDirectory(t *testing.T) {
 func TestReadFile_MissingFileIsNotFound(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "absent.yaml")
 
-	if _, err := ReadFile(context.Background(), missing, "bundle recipe.yaml", 1024); !isCode(err, errors.ErrCodeNotFound) {
+	if _, err := ReadFile(context.Background(), missing, "bundle recipe.yaml", 1024); errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 }
@@ -141,7 +143,7 @@ func TestReadFile_StorageFaultsAreNotVerdicts(t *testing.T) {
 			}
 
 			_, err := readBoundedWithOpener("/bundle/recipe.yaml", "bundle recipe.yaml", 1024, open)
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Fatalf("got %v, want code %s", err, tt.wantCode)
 			}
 			// The chain must stay walkable so callers can still see the errno.
@@ -172,7 +174,7 @@ func TestStatError_PostOpenClassification(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := statError("bundle recipe.yaml", tt.err)
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Fatalf("got %v, want code %s", err, tt.wantCode)
 			}
 			if !stderrors.Is(err, tt.err) {
@@ -255,7 +257,7 @@ func TestReadAllBounded_MidReadFaults(t *testing.T) {
 			if body != nil {
 				t.Errorf("expected no body on a mid-read fault, got %q", body)
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Fatalf("got %v, want code %s", err, tt.wantCode)
 			}
 			if !stderrors.Is(err, tt.injected) {
@@ -278,7 +280,7 @@ func TestReadAllBounded_GrewAfterStat(t *testing.T) {
 	if body != nil {
 		t.Errorf("expected no body when the payload exceeds the cap, got %d bytes", len(body))
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("got %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -292,7 +294,7 @@ func TestReadFile_NonErrnoOpenFailure(t *testing.T) {
 	}
 
 	_, err := readBoundedWithOpener("/bundle/recipe.yaml", "bundle recipe.yaml", 1024, open)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("got %v, want ErrCodeInternal", err)
 	}
 }

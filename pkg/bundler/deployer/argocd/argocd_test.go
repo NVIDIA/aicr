@@ -16,7 +16,6 @@ package argocd
 
 import (
 	"context"
-	stderrors "errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -34,6 +33,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -2416,7 +2416,7 @@ func TestGenerate_DeployerOptions_InvalidRejected(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -2494,7 +2494,7 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.errSubstr) {

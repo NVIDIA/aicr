@@ -89,6 +89,11 @@ spec:
       overrides:
         driver:
           enabled: false
+        # Clears the rke2 root's NRI_MANAGEMENT_CDI_DEVICE_NAMESPACES entry:
+        # metadata-collector uses the host mount below, not NRI plugin mode,
+        # so the nvsentinel namespace needs no management CDI device.
+        toolkit:
+          env: []
 
     # The reference image preinstalls the driver on the host
     # (gpu-operator driver.enabled is false above), so there is no driver
@@ -126,7 +131,15 @@ spec:
         # glibc 2.35) load the host libc and exit 127 with "undefined symbol:
         # __tunable_is_initialized". The host NVML resolves its own
         # dependencies against the container's glibc.
+        #
+        # nriPlugin stays off here although the rke2 root turns it on: this
+        # validated host-mount wiring predates it, and the two NVML sources
+        # must not be combined. Moving this leaf onto NRI plugin mode is a
+        # separate change; it would also give the collector nvidia-smi, which
+        # this mount lacks, so the NIC topology matrix stays empty here.
         metadata-collector:
+          nriPlugin:
+            enabled: false
           runtimeClassName: ""
           extraEnv:
             - name: LD_LIBRARY_PATH
@@ -140,6 +153,16 @@ spec:
               hostPath:
                 path: /usr/lib/aarch64-linux-gnu/libnvidia-ml.so.1
                 type: File
+        # janitor's GPU reset Job chroots into the driver root to run
+        # nvidia-smi; with a host-installed driver that root is the host's.
+        # Its RuntimeClass is cleared at the rke2 root. Inert unless the
+        # nvsentinel-remediation mixin enables janitor.
+        janitor:
+          config:
+            controllers:
+              gpuReset:
+                resetJob:
+                  hostDriverRootPath: /
 
     # GPU-allocation policy is unchanged: resources.gpus stays disabled
     # (the gpu-operator device plugin remains the whole-GPU advertiser per

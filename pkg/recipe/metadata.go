@@ -88,6 +88,32 @@ const (
 	MariaDBOperatorStateUnknown     = "unknown"
 )
 
+// DefaultStorageClassState values recorded in
+// RecipeResult.Metadata.DefaultStorageClassState by snapshot-driven
+// resolution of a recipe containing the nvsentinel-mongodb component.
+const (
+	DefaultStorageClassStatePresent  = "present"
+	DefaultStorageClassStateMultiple = "multiple"
+	DefaultStorageClassStateAbsent   = "absent"
+	DefaultStorageClassStateUnknown  = "unknown"
+)
+
+// PerconaOperatorState values recorded in
+// RecipeResult.Metadata.PerconaOperatorState by snapshot-driven resolution
+// of a recipe containing the nvsentinel-mongodb component.
+// PerconaOperatorStateAICROwned means the only PerconaServerMongoDB found is
+// AICR's own nvsentinel/nvsentinel-mongodb; PerconaOperatorStateOperatorDetected
+// means no foreign CR exists but a Percona operator pod AICR did not install
+// runs: outside the nvsentinel namespace, or there under another Helm release.
+const (
+	PerconaOperatorStateAbsent           = "absent"
+	PerconaOperatorStateAPIDetected      = "api-detected"
+	PerconaOperatorStateAICROwned        = "aicr-owned"
+	PerconaOperatorStateOperatorDetected = "operator-detected"
+	PerconaOperatorStateCRsDetected      = "crs-detected"
+	PerconaOperatorStateUnknown          = "unknown"
+)
+
 // ComponentType represents the type of component deployment.
 type ComponentType string
 
@@ -157,7 +183,7 @@ type ComponentRef struct {
 
 	// ManifestFiles lists manifest files to include in the component bundle.
 	// Paths are relative to the data directory.
-	// Example: ["components/network-operator/manifests/nfd-network-rule.yaml"]
+	// Example: ["components/network-operator/manifests/nic-cluster-policy-aks.yaml"]
 	ManifestFiles []string `json:"manifestFiles,omitempty" yaml:"manifestFiles,omitempty"`
 
 	// PreManifestFiles lists manifest files that must be bundled and applied
@@ -721,7 +747,7 @@ func (ref *ComponentRef) HasExternalChart() bool {
 // EffectiveChart returns the chart name a Helm-typed ref deploys: the
 // explicit Chart, falling back to the component name when unset (a
 // source-only ref). Every ComponentRef consumer derives the chart through
-// this method — the flux, argocd, helmfile, and helm deployers, pkg/mirror,
+// this method — the flux, argocd, helmfile, helm, and terraform deployers, pkg/mirror,
 // and the facade/query/BOM projections. (localformat keeps an equivalent
 // fallback on its own Component type, which is constructed from
 // EffectiveChart-derived inputs but also serves direct callers.)
@@ -1198,6 +1224,18 @@ type RecipeResultMetadata struct {
 	// accounting. Consumed by the bundle-time
 	// CheckMariaDBOperatorOwnershipCoherence validation.
 	MariaDBOperatorState string `json:"mariaDBOperatorState,omitempty" yaml:"mariaDBOperatorState,omitempty"`
+
+	// DefaultStorageClassState records the snapshot's default StorageClass
+	// evidence for a recipe containing nvsentinel-mongodb, whose volumes
+	// name no class. Consumed by the bundle-time
+	// CheckNVSentinelDatastorePrerequisites validation.
+	DefaultStorageClassState string `json:"defaultStorageClassState,omitempty" yaml:"defaultStorageClassState,omitempty"`
+
+	// PerconaOperatorState records Percona Operator for MongoDB API, CR, and
+	// operator-pod conflict evidence for a recipe containing
+	// nvsentinel-mongodb. Consumed by the bundle-time
+	// CheckNVSentinelDatastorePrerequisites validation.
+	PerconaOperatorState string `json:"perconaOperatorState,omitempty" yaml:"perconaOperatorState,omitempty"`
 }
 
 // RecipeResult represents the final merged recipe output.
@@ -1412,6 +1450,8 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 	out.Metadata.Version = r.Metadata.Version
 	out.Metadata.GPUDriverState = r.Metadata.GPUDriverState
 	out.Metadata.MariaDBOperatorState = r.Metadata.MariaDBOperatorState
+	out.Metadata.DefaultStorageClassState = r.Metadata.DefaultStorageClassState
+	out.Metadata.PerconaOperatorState = r.Metadata.PerconaOperatorState
 	if r.Metadata.SelectedProfile != nil {
 		selected := *r.Metadata.SelectedProfile
 		selected.OwnedPaths = cloneOwnedPaths(r.Metadata.SelectedProfile.OwnedPaths)

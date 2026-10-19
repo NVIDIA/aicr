@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -109,7 +111,7 @@ func TestBuildOrchestratorAffinity_RequiredMissingComponent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing required component")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }

@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -290,7 +292,7 @@ func TestCheckDRASupport_IMEXFailsWhenCliqueNodesLackUsableComputeDomainSlice(t 
 			if err == nil {
 				t.Fatal("expected failure: clique-labeled node without a usable compute-domain slice")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 				t.Errorf("error = %v, want ErrCodeInternal", err)
 			}
 			if !strings.Contains(err.Error(), "[node1] carry the "+labelNVIDIAGPUClique) ||
@@ -383,7 +385,7 @@ func TestCheckDRASupport_IMEXTemplateNeverGenerated(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a timeout waiting for the ResourceClaimTemplate")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error = %v, want ErrCodeTimeout", err)
 	}
 	if !strings.Contains(err.Error(), "did not reconcile ComputeDomain") {
@@ -752,7 +754,7 @@ func TestCheckDRASupport_IMEXAllOccupiedNeverPassesUnverified(t *testing.T) {
 			if err == nil {
 				t.Fatal("all-occupied candidates with no verifiable holder must FAIL, got pass")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 				t.Errorf("error = %v, want ErrCodeUnavailable", err)
 			}
 			if !strings.Contains(err.Error(), "IMEX channel subtest inconclusive") {

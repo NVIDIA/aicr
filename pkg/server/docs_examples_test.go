@@ -29,7 +29,7 @@ import (
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 )
 
-// REST is one of the four surfaces ROADMAP §1 freezes at v1, and the curl
+// REST is one of the four surfaces ROADMAP.md freezes at v1, and the curl
 // examples in docs/user/api-reference.md are the form most integrators actually
 // copy. Nothing derived them from the server.
 //

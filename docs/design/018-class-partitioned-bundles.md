@@ -68,13 +68,23 @@ Two gaps block a safe split today:
   attested, or published. In v1 the bundle set is the provenance and
   verification unit; class directories can be invoked separately after
   predecessor-class requirements are satisfied, but are not independently
-  *published*. A standalone class artifact with an externally-satisfied
+  *published*. A standalone class artifact with an externally satisfied
   profile-lock contract is follow-up work.
 - Cross-version compatibility between sub-bundles. AICR emits the set and
   its ordering contract; verifying that an ops bundle from one generation
   is compatible with a core bundle deployed from another is
   operator-managed, and a deploy-time compatibility protocol is explicit
   follow-up work.
+- In-place migration of installed components between bundles. When a
+  class change moves a component on a cluster with a deployed split, the
+  supported path is **redeployment** from the newly generated set, not a
+  live handoff of the release from one owner to the other. Redeploying
+  core components can disrupt running workloads, so the operator
+  schedules it. `split.yaml` records the class map so the change stays
+  auditable. Keeping a deployed split across an AICR upgrade that
+  reclassifies a component — `aicr recipe --inherit-from` reading the
+  prior set's class map, as it already keeps namespaces — is follow-up
+  work, gated as described under the registry class rules.
 - OCI output for split generation. Multi-artifact naming and
   partial-publish recovery are undefined; `--split` with OCI output is
   rejected in v1.
@@ -82,9 +92,9 @@ Two gaps block a safe split today:
   initial `ops` components but disable them all, so a split has nothing
   to offer OCP until the `-ocp` monitoring variants are classified;
   `--split` rejects all-disabled classes (see Partition validation).
-- Reassigning a component's class per recipe shape. Class is registry-only
-  and stable; moving a component between classes is a coordinated
-  migration, not a recipe-authoring decision.
+- Reassigning a component's class per recipe shape in v1. Class is
+  registry-only and stable; per-shape reassignment is possible follow-up
+  work (see Configurable classes).
 - Changing recipe resolution, overlay matching, or mixin composition. The
   class is read at bundle time only.
 - A generic dependency solver or per-class release tooling.
@@ -142,7 +152,7 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   `ops`. The class set is a **closed enumeration in Go**, not
   registry-defined strings: an unenumerated class cannot be pre-validated
   against the catalog, so new classes are added only in code, at a
-  release — cheap to extend, but the constraints are kept.
+  release — cheap to extend, without giving up pre-validation.
 - Omitted means `core`. This default is **availability-safe, not
   classification-safe**: an unclassified component lands in the bundle
   that must always be installed, but a component that *should* be `ops`
@@ -150,11 +160,20 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   signal beyond the external-replacement warning below.
 - The field is named `class`, not `type`, because `componentRefs[].type`
   already means Helm-vs-Kustomize.
-- Class is **registry-only and stable**. Overlays cannot reassign it, and
-  it is not recorded in the resolved `RecipeResult` — so `recipe.yaml`,
-  checksums, and attestations of ordinary bundles are unchanged. Moving a
-  component between classes is a registry change treated as a coordinated
-  migration for clusters with a deployed split.
+- Class is **registry-only and stable**. Overlays cannot reassign it in
+  v1 (see Configurable classes), and it is not recorded in the resolved
+  `RecipeResult` — so `recipe.yaml`, checksums, and attestations of
+  ordinary bundles are unchanged. Moving a component between classes is a
+  registry change; clusters with a deployed split pick it up by
+  redeployment (see Non-Goals).
+- v1 introduces the classes, so no deployed split predates them. The
+  first release that changes a **built-in** component's class ships only
+  once `aicr recipe --inherit-from` keeps the class recorded in the prior
+  set's `split.yaml` and `aicr upgrade-check` reports the class move as an
+  identity change. Until then the embedded classification stays fixed,
+  so an AICR upgrade never moves a running component between bundles.
+  Reclassification in an operator's own `--data` registry is the
+  operator's change and is applied by redeployment.
 - The default applies uniformly to **external registry entries** too: an
   external `registry.yaml` entry replaces the embedded entry wholesale, so
   a replacement for an `ops` component that omits `class` lands in `core`.
@@ -164,8 +183,9 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
 - External entries carry `class` like embedded ones, so an internal or
   third-party catalog can classify its own components into the existing
   classes **without any public change**. Only a brand-new class *name*
-  requires extending the Go enum — a one-value, release-time addition
-  made when a concrete consumer needs it.
+  requires extending the Go enum — a release-time addition, made when a
+  concrete consumer needs it, that also defines the new class's place in
+  the class ordering (see Configurable classes).
 
 Initial classification: `kube-prometheus-stack`, `prometheus-adapter`, and
 `k8s-ephemeral-storage-metrics` are `ops`; everything else, including
@@ -204,7 +224,7 @@ Direction is the floor, not the goal: classification should also
 models exist where no ordering between bundles can be enforced at all. In
 the DGXC Runtime, for example, the runtime and operations stacks deploy as
 separate Argo CD app-of-apps with no enforceable ordering between them.
-The install-core-first contract therefore binds only the sequential helm
+The install-core-first contract therefore binds only the sequential Helm
 `deploy.sh` path. In an externally managed, reconciliation-based model,
 each class converges independently and cut edges are not enforced — but
 convergence is not free: a sync that races a missing prerequisite (such
@@ -218,7 +238,7 @@ supported operating model **given such a retry policy**; note
 this describes externally managed deployments — v1's own generated
 output rejects the Argo/Flux deployers until their class-derived
 identities land (see the support matrix). The v1 bridge for such models:
-operators consume the helm-local bundle set with their own per-class
+operators consume the Helm-local bundle set with their own per-class
 Application/Kustomization wrappers; AICR-generated Argo/Flux split output
 is the deferred follow-up.
 
@@ -230,7 +250,7 @@ compatibility; a live set-identity or preflight protocol remains
 deferred.
 
 The existing catalog violates the rule, and fixing it is a prerequisite.
-Three core components declare dependencyRefs on `kube-prometheus-stack`
+Three core components declare `dependencyRefs` on `kube-prometheus-stack`
 (declared to guarantee the ServiceMonitor CRDs exist before their monitors
 are applied; the prerequisite PR verifies each edge's actual purpose
 before repointing it): `gpu-operator` in 26 declarations (including
@@ -268,6 +288,57 @@ To keep the boundary fixed, a standing guard test validates the
 raw overlay/mixin YAML — and fails on any `core` → `ops` edge or
 class-level cycle, in the spirit of the existing deployment-order guard
 tests.
+
+### Configurable classes
+
+Operators may disagree with the shipped classification. In v1 the
+per-component assignment is configurable and everything else is fixed:
+
+- **Assignment is configurable through the registry.** `class` is an
+  ordinary registry field, so an external `--data` registry can classify
+  its own components and reclassify an embedded one by replacing its
+  entry (wholesale, per the external-entry rules above). This is the
+  supported way to change the shipped defaults, and it needs no public
+  change. A `--data` catalog never runs through AICR's CI, but partition
+  validation runs on the resolved recipe at every `--split`, so a custom
+  cut gets the same direction, cycle, cohesion, and all-disabled checks
+  as the embedded one.
+- **Per-invocation cuts are rejected.** A bundle-time flag or
+  caller-supplied list that changes class would let two invocations
+  against the same catalog place one component in different bundles —
+  the cross-call collision this design exists to prevent (see
+  Alternatives Considered). Fixing the assignment per catalog keeps
+  ownership stable.
+- **Overlay-level reassignment is deferred, not rejected.** It does not
+  reintroduce the cross-call collision: the class would still be decided
+  by the resolved recipe, so a given recipe always yields the same
+  partition. Its cost is complexity instead (see Alternatives
+  Considered), and no consumer needs it yet.
+- **Class names are closed.** A new name requires extending the Go enum.
+  User-defined names would also need a user-declared ordering between
+  classes, because the only ordering contract today is `core` before
+  `ops`. That is follow-up work once a consumer needs a class AICR does
+  not ship.
+
+The dependency graph bounds how far any reassignment can go. Because
+`core` must be dependency-closed, moving a component to `ops` forces every
+`core` component that depends on it, directly or transitively, to move
+too; moving one to `core` likewise pulls in its dependencies (see Open
+Questions). A component at the edge of the graph, such as
+`kube-prometheus-stack`, can move without forcing anything else. Moving
+`gpu-operator` to `ops` would drag `nvsentinel` and the rest of the GPU
+stack with it, leaving a `core` too small to mean "runtime". Reassignment
+is practical at narrow points in the graph — the shipped cut is one, made
+narrow by the `prometheus-operator-crds` repoint — not at its foundation.
+
+That narrowness suggests deriving classes instead of declaring them:
+label one component at the cut and let every dependent inherit its class.
+This ADR keeps the field explicit. Under derivation, adding a dependency
+edge could silently move a component into another bundle and change its
+owner; with an explicit field, the same edge fails the direction guard
+and the ownership change goes through review. A follow-up can have the
+guard's failure name the components that would have to move, which keeps
+the convenience of derivation without its implicitness.
 
 ### Bundle generation with `--split`
 
@@ -412,8 +483,8 @@ ops). `recipeDigest` plus the class map identify the **resolved recipe and
 its partition**, not the rendered payload: bundle-time inputs (`--set`,
 typed overrides, scheduling settings) land in the extracted component
 values, not in `recipe.yaml`, so two invocations can share a
-`recipeDigest` yet render different class directories. The rendered payload is
-identified by the digest of the root `checksums.txt` — which remains the
+`recipeDigest` yet render different class directories. The rendered
+payload is identified by the digest of the root `checksums.txt` — which remains the
 bundle attestation's in-toto subject, exactly as today; the split changes
 neither contract. The `split.yaml` schema, defined with the
 implementation, restates this scope note alongside the `recipeDigest`
@@ -422,8 +493,10 @@ field.
 Because class lives only in the registry, the same `recipeDigest` can
 partition differently after a registry classification change. The
 per-component class map in `split.yaml` is deliberately the record that
-disambiguates, and a set generated before a class migration stays
-auditable through its recorded map.
+disambiguates, and a set generated before a class change stays
+auditable through its recorded map. It is also the record that
+class-aware `--inherit-from` (follow-up) reads, so its class map is a
+stable, versioned part of the `split.yaml` schema.
 
 `split.yaml` lets an operator answer "which recipe and partition produced
 what is deployed here" — it is not a deploy-time enforcement mechanism,
@@ -570,9 +643,8 @@ as a **standalone** deployable rather than one member of a co-deployed set.
 Such an artifact would have to prove that every profile-required component
 it omits is supplied by a compatible sibling bundle — today's whole-union
 validation gives that for free, and a standalone artifact would not. That
-proof obligation,
-not a registry property, is the thing to design against if standalone class
-artifacts are ever pursued.
+proof obligation, not a registry property, is the thing to design against
+if standalone class artifacts are ever pursued.
 
 ## Alternatives Considered
 
@@ -596,13 +668,21 @@ artifacts are ever pursued.
   classes; override-induced cases are enforced at bundle time) before
   any user runs `bundle`. The class field makes the partition a
   reviewed, stable contract maintained once by component authors.
-- **Per-class emission and overlay-level class reassignment.** Considered
-  and dropped: emitting a single class, or letting overlays reassign class
-  per shape, lets two generation calls disagree about which bundle owns a
-  component — reintroducing across calls the collision that single
-  resolution prevents within one. Atomic complete generation and a
-  registry-only stable class close that hole; per-shape needs, if they
-  materialize, are follow-up work with an explicit migration story.
+- **Per-class emission.** Rejected: emitting a single class lets two
+  generation calls disagree about which bundle owns a component —
+  reintroducing across calls the collision that single resolution
+  prevents within one. Atomic complete generation closes that hole.
+- **Overlay-level class reassignment.** Deferred, not rejected. A given
+  recipe would still always yield the same partition, so the cross-call
+  collision does not arise. The reasons to wait are elsewhere:
+  - class would become part of resolution — merged through overlays and
+    mixins and recorded in `recipe.yaml` to stay auditable — undoing the
+    "class is not a criteria axis" simplicity; and
+  - no consumer needs it yet: the closest candidate, OCP's monitoring
+    stack, already uses separate `-ocp` component variants, which can
+    carry their own registry class.
+
+  Per-shape needs, if they materialize, are follow-up work.
 
 ## Consequences
 
@@ -625,7 +705,8 @@ artifacts are ever pursued.
 - Docs gain the class concept: component catalog (per-component class),
   bundling guide (`--split`, set layout, ordering contract, deployer
   support matrix), and contributor recipe docs (class field, direction
-  rule, migration note for class moves).
+  rule, and a note that a class change on a deployed cluster is applied
+  by redeployment).
 
 ## Implementation Plan
 
@@ -654,8 +735,12 @@ artifacts are ever pursued.
 5. Docs and examples as listed above.
 
 Deferred (explicitly out of the first version): additional classes,
-per-shape class reassignment, standalone verified per-class artifacts
-(with a class-subset selector such as `--classes`, once the
-externally-satisfied profile-lock contract exists), OCI split output, a
-deploy-time compatibility protocol, multi-instance components, and a
-registry-level `conflictsWith` declaration.
+user-defined class names, per-shape (overlay-level) class reassignment,
+standalone verified per-class artifacts (with a class-subset selector
+such as `--classes`, once the externally satisfied profile-lock contract
+exists), OCI split output, a deploy-time compatibility protocol,
+multi-instance components, a registry-level `conflictsWith`
+declaration, class inheritance in `aicr recipe --inherit-from` with
+class-move reporting in `aicr upgrade-check` (a prerequisite for any
+built-in reclassification), and a direction-guard diagnostic that names
+the components a reassignment would also move.

@@ -16,7 +16,6 @@ package cli
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,6 +26,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -76,6 +77,15 @@ func TestBuildCriteriaFromCmd(t *testing.T) {
 			validate: func(t *testing.T, c *recipe.Criteria) {
 				if c.Service != recipe.CriteriaServiceEKS {
 					t.Errorf("Service = %v, want %v", c.Service, recipe.CriteriaServiceEKS)
+				}
+			},
+		},
+		{
+			name: "Nebius B300 criteria",
+			args: []string{"cmd", "--service", "mk8s", "--accelerator", "b300"},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if c.Service != recipe.CriteriaServiceMK8s || c.Accelerator != recipe.CriteriaAcceleratorB300 {
+					t.Errorf("criteria = %+v, want mk8s/b300", c)
 				}
 			},
 		},
@@ -659,6 +669,12 @@ func TestRecipeCmd_CommandStructure(t *testing.T) {
 		t.Error("Description should not be empty")
 	}
 
+	for _, value := range []string{"mk8s", "b300"} {
+		if !strings.Contains(cmd.Description, ", "+value+",") {
+			t.Errorf("Description missing criterion %q", value)
+		}
+	}
+
 	requiredFlags := []string{
 		"service", "accelerator", "intent", "os", "profile",
 		"nodes", "snapshot", "output", "format",
@@ -971,7 +987,7 @@ func TestRecipeClientFromCmd_PreservesClientErrorCode(t *testing.T) {
 			ctx, cancel := tt.ctx()
 			defer cancel()
 			err := testCmd.Run(ctx, tt.args)
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("recipeClientFromCmd() error = %v, want code %s", err, tt.wantCode)
 			}
 		})

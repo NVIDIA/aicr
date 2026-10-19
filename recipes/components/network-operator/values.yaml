@@ -25,6 +25,12 @@ deployCR: true
 
 nfd:
   enabled: false
+  # For one release both the chart's nvidia-nics-rules and the nfd-worker rule
+  # (components/nfd/values-nvidia-nics*.yaml) produce pci-15b3.present, so the
+  # label is never missing while nfd-worker rolls. Once a node's worker strips
+  # pci.*, the chart rule matches nothing. Remove it in the contract change
+  # (#3038); a cluster must take this release first, or finish the nfd-worker
+  # rollout before network-operator syncs, or unrestarted nodes lose the label.
   deployNodeFeatureRules: true
 
 sriovNetworkOperator:

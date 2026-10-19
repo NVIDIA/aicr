@@ -15,10 +15,11 @@
 package main
 
 import (
-	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestCoordinateFor(t *testing.T) {
@@ -127,7 +128,7 @@ func TestCoordinateFor(t *testing.T) {
 				t.Fatalf("CoordinateFor() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 				}
 				return

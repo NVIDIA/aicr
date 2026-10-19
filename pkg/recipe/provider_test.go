@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -181,7 +183,7 @@ func TestLayeredDataProvider_ValidatesRawExternalRegistryBeforeMerge(t *testing.
 				if err == nil {
 					t.Fatal("ReadFile() error = nil, want raw external header rejection")
 				}
-				if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 				}
 				if observed := fmt.Sprintf("apiVersion %q", tt.apiVersion); !strings.Contains(err.Error(), observed) {

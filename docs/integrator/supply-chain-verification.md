@@ -462,7 +462,8 @@ gh api repos/NVIDIA/aicr/releases | \
 # --log fails. Open it in a browser or narrow to one job.
 gh run list --repo NVIDIA/aicr --workflow=on-tag.yaml
 gh run view 34368619680 --repo NVIDIA/aicr --web
-gh run view 34368619680 --repo NVIDIA/aicr --job <job-id> --log
+JOB_ID="71284569301"  # replace with a job ID that gh run view lists for the run
+gh run view 34368619680 --repo NVIDIA/aicr --job "${JOB_ID}" --log
 ```
 
 **Verify in the transparency log (Rekor):**
@@ -472,7 +473,8 @@ gh run view 34368619680 --repo NVIDIA/aicr --job <job-id> --log
 rekor-cli search --sha "${DIGEST#sha256:}"
 
 # Get entry details
-rekor-cli get --uuid <entry-uuid>
+ENTRY_UUID="24296fb24b8ad77a9b24515adba040a49ac89311d9f6dbf097c125e7315c9d60e31b3e2ac55b9030"  # replace with a UUID that rekor-cli search printed
+rekor-cli get --uuid "${ENTRY_UUID}"
 ```
 
 ## Verifying the SBOM
@@ -945,9 +947,9 @@ each one is covered separately below. Every gate is marked either *advisory* (a
 pipeline step that an operator holding cluster credentials can bypass) or
 *binding* (the cluster itself refuses to proceed).
 
-### Gating the helm and helmfile deployers
+### Gating the helm, helmfile and terraform deployers
 
-The default `helm` deployer and `helmfile` are push-based: the same pipeline
+The default `helm` deployer, `helmfile` and `terraform` are push-based: the same pipeline
 step that verifies is the one that installs, so verification and use cannot
 drift apart.
 
@@ -965,7 +967,8 @@ bundle* can reach and therefore passes an unsigned bundle. Add
 `--require-creator` to pin who built it and `--cli-version-constraint` to floor
 the `aicr` version that produced it; `--format json` emits a machine-readable
 result for a pipeline that needs to branch. For `helmfile`, run the same
-`aicr verify .` before `helmfile apply`. See [Automation](automation.md) for
+`aicr verify .` before `helmfile apply`; for `terraform`, run it in the step
+that generates the bundle, before `terraform init` resolves the module. See [Automation](automation.md) for
 the full four-stage pipeline and its GitLab, CircleCI, and Terraform
 equivalents.
 
@@ -1209,19 +1212,18 @@ jq -r '.verificationMaterial.certificate.rawBytes' \
 |--------------|--------------------------------------|-----|
 | Interactive keyless (`aicr bundle --attest`, browser or `--oidc-device-flow`) | Fulcio certificate: your email address in the SAN, plus the OIDC issuer that authenticated you, which is `https://oauth2.sigstore.dev/auth` for the default browser flow | public-good Rekor v2 |
 | Non-interactive keyless (ambient CI OIDC, or `--identity-token`) | Fulcio certificate: the workload identity URL in the SAN; under GitHub Actions the issuer is `https://token.actions.githubusercontent.com` | public-good Rekor v2 |
-| Keyless evidence signing (`aicr validate --emit-attestation --push`, `aicr evidence publish`, `aicr evidence sign`) | as keyless above; these commands take no key and no log override | public-good Rekor v2 |
-| KMS key (`aicr bundle --signing-key <kms-uri>`) | a public key, not a certificate: no SAN and no issuer to match, only the key itself | public-good Rekor v2 |
+| KMS key (`--signing-key <kms-uri>`) | a public key, not a certificate: no SAN and no issuer to match, only the key itself | public-good Rekor v2 |
 | Private Fulcio alone (`aicr bundle --fulcio-url`) | as keyless above, but the certificate is issued by your own CA | public-good Rekor v2 |
 | Private Fulcio plus private log (`aicr bundle --fulcio-url` with `--rekor-url`) | as keyless above, but the certificate is issued by your own CA | your private Rekor v1 |
 | Rekor v1 opt-out (`aicr bundle --rekor-url https://rekor.sigstore.dev`) | as keyless above | public-good Rekor v1 |
-| Air-gapped KMS (`aicr bundle --tlog-upload=false`) | nothing is uploaded | none |
+| Air-gapped KMS (`--tlog-upload=false`) | nothing is uploaded | none |
 
-The flags in the first column are `aicr bundle` flags. `--signing-key`,
-`--fulcio-url`, `--rekor-url`, `--signing-config`, and `--tlog-upload` are
-registered on that command only; the evidence-signing paths
-(`aicr validate --emit-attestation --push`, `aicr evidence publish`,
-`aicr evidence sign`) are keyless-only and always write to the default Rekor v2,
-with no key and no Rekor v1 override.
+The flags in the first column are registered on `aicr bundle` and on the
+evidence-signing commands (`aicr validate --emit-attestation --push`,
+`aicr evidence publish`, `aicr evidence sign`), and behave the same on both.
+The one difference is configuration: only `aicr bundle` also reads them from
+`AICR_FULCIO_URL`, `AICR_REKOR_URL`, and `AICR_SIGNING_CONFIG`, so evidence
+signing changes its CA or log only when a flag is passed.
 
 Note the third column carefully. Rekor v2 is the default for every keyless and
 KMS signing path in the CLI, and only `--rekor-url` and `--signing-config` change

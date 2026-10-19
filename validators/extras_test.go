@@ -17,12 +17,13 @@ package validators
 import (
 	"bytes"
 	"encoding/json"
-	stderrors "errors"
 	"io"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
@@ -116,7 +117,7 @@ func TestEmitExtraWriteError(t *testing.T) {
 	if err == nil {
 		t.Fatal("EmitExtra() = nil, want error when the sink write fails")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 		t.Errorf("EmitExtra() error = %v, want ErrCodeInternal", err)
 	}
 }

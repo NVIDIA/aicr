@@ -46,8 +46,8 @@ spec:
           # result as a NodeCondition, a non-fatal unhealthy one as a
           # Kubernetes Event. STORE_ONLY would convert the failure to
           # exit 0 and drop the event, which is the whole point of #2610.
-          # Nothing cordons, drains or reboots -- AICR deploys no remediation
-          # component (all six default off and none is enabled here).
+          # Nothing cordons, drains or reboots unless a remediation step
+          # (nvsentinel-quarantine, nvsentinel-remediation) is also composed.
           processingStrategy: EXECUTE_REMEDIATION
           webhook:
             # Chart default is Fail, which would make a webhook outage reject

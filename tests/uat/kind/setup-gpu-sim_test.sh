@@ -267,9 +267,9 @@ check "labelling touches only the mapped workers" "4" \
 #
 # NVSentinel's GPU health monitors are DaemonSets gated on the node label
 # nvsentinel.dgxc.nvidia.com/dcgm.version. Its labeler writes that label only
-# when it finds a READY pod carrying app=nvidia-dcgm (v1.25.0 also accepts
+# when it finds a READY pod carrying app=nvidia-dcgm (v1.26.0 also accepts
 # app=nvidia-dcgm-dra) whose IMAGE STRING matches `dcgm:<major>.`
-# (labeler/pkg/labeler/labeler.go, verified at the v1.25.0 this repo pins).
+# (labeler/pkg/labeler/labeler.go, verified at the v1.26.0 this repo pins).
 # Nothing in that path inspects a GPU, which is why a mocked NVML
 # driver under a real DCGM host engine is enough.
 #
@@ -300,7 +300,7 @@ check "the host engine release is the one gpu-operator ships" \
     "${DCGM_VERSION}"
 
 # 2. The pod label is the labeler's selector (--dcgm-app-label, default
-#    nvidia-dcgm,nvidia-dcgm-dra at v1.25.0). Rename it and the labeler sees
+#    nvidia-dcgm,nvidia-dcgm-dra at v1.26.0). Rename it and the labeler sees
 #    no DCGM pod at all.
 check "the DaemonSet carries the app label the labeler selects on" "1" \
     "$(dcgm_manifest | grep -cE '^        app: nvidia-dcgm$' | tr -d ' ')"

@@ -103,6 +103,9 @@
 #   KWOK_GITEA_PASSWORD      (flux-git / argocd-git) Password for KWOK_GITEA_USER.
 #                            CI-only credential for the ephemeral in-cluster
 #                            Gitea — not a secret. Default: aicr-kwok-ci.
+#   KWOK_MIXINS              Comma-separated opt-in mixins to compose onto the
+#                            recipe's leaf overlay, for mixins no shipped
+#                            recipe composes. Default: none.
 #
 # This script:
 # 1. Generates a recipe from the cluster config
@@ -417,6 +420,7 @@ capture_failure_diagnostics() {
 # Cleanup function
 cleanup() {
     local exit_code=$?
+    local cleanup_failed=0
     log_info "Cleaning up..."
 
     if [[ "$exit_code" -ne 0 ]]; then
@@ -521,20 +525,9 @@ cleanup() {
             fi
         fi
 
-        # Uninstall all Helm releases from component namespaces (excludes
-        # argocd because we want the install-infra.sh-managed release to
-        # survive recipe-to-recipe).
-        local releases
-        releases=$(helm list -A -o json 2>/dev/null \
-            | jq -r '.[] | select(.namespace != "kube-system") | select(.namespace != "argocd") | "\(.name) \(.namespace)"' \
-            || true)
-        if [[ -n "$releases" ]]; then
-            while IFS=' ' read -r name ns; do
-                if [[ -n "$name" ]]; then
-                    log_info "Uninstalling release $name from $ns..."
-                    timeout 60s helm uninstall "$name" -n "$ns" --wait 2>/dev/null || true
-                fi
-            done <<< "$releases"
+        if ! cleanup_recipe_helm_releases; then
+            log_error "Helm release cleanup failed; this recipe cannot be treated as clean"
+            cleanup_failed=1
         fi
         # Clean up stale APIServices before namespace deletion to prevent hangs
         cleanup_stale_apiservices
@@ -586,7 +579,10 @@ cleanup() {
         done
     fi
 
-    exit $exit_code
+    if (( exit_code == 0 && cleanup_failed != 0 )); then
+        exit_code=1
+    fi
+    exit "$exit_code"
 }
 
 # Find aicr binary (goreleaser puts it in platform-specific dirs)
@@ -728,21 +724,9 @@ cleanup_old_tests() {
         fi
     fi
 
-    # Find and uninstall old Helm releases from component namespaces.
-    # Skip the argocd namespace so the install-infra.sh-managed Argo CD
-    # release survives recipe-to-recipe.
-    local releases
-    releases=$(helm list -A -o json 2>/dev/null \
-        | jq -r '.[] | select(.namespace != "kube-system") | select(.namespace != "argocd") | "\(.namespace) \(.name)"' \
-        || true)
-    if [[ -n "$releases" ]]; then
-        log_info "Uninstalling old releases..."
-        echo "$releases" | while read -r ns release; do
-            if [[ -n "$release" ]]; then
-                log_info "  Uninstalling $release from $ns..."
-                helm uninstall "$release" -n "$ns" --wait 2>/dev/null || true
-            fi
-        done
+    if ! cleanup_recipe_helm_releases; then
+        log_error "Failed to clean old Helm releases; refusing to start this recipe"
+        return 1
     fi
 
     # Clean up stale APIServices left by prometheus-adapter
@@ -903,7 +887,8 @@ generate_bundle() {
 
     # Without --platform, *-slurm overlays resolve to their non-platform
     # parent and the bundle omits the slinky-slurm operator/cluster.
-    # Scoped to slurm: kubeflow/dynamo are not yet validated under KWOK.
+    # The native Nebius Dynamo leaf also needs its platform: it has no
+    # non-platform parent leaf to resolve. Other Dynamo lanes are unchanged.
     local service accelerator intent os platform
     service=$(yq eval '.spec.criteria.service // ""' "$recipe_overlay")
     accelerator=$(yq eval '.spec.criteria.accelerator // ""' "$recipe_overlay")
@@ -918,14 +903,31 @@ generate_bundle() {
     [[ -n "$accelerator" ]] && recipe_args+=(--accelerator "$accelerator")
     [[ -n "$intent" ]] && recipe_args+=(--intent "$intent")
     [[ -n "$os" ]] && recipe_args+=(--os "$os")
-    # Only forward --platform for platforms validated under KWOK. Other
-    # platforms (kubeflow, dynamo, nim) historically resolve to their
+    # Only forward --platform for explicitly covered KWOK lanes. Other
+    # platform leaves (kubeflow, dynamo, nim) historically resolve to their
     # non-platform parent here; preserve that behavior to avoid regressing
     # existing matrix lanes. Extend as additional platforms are validated.
-    if [[ "$platform" == "slurm" ]]; then
+    if [[ "$platform" == "slurm" || "$recipe" == "b300-mk8s-ubuntu-inference-dynamo" ]]; then
         recipe_args+=(--platform "$platform")
     elif [[ -n "$platform" ]]; then
         log_info "platform=$platform not yet validated under KWOK — resolving without --platform"
+    fi
+
+    # A --data overlay of the same name replaces the embedded leaf; the empty
+    # registry merges into the embedded one unchanged.
+    if [[ -n "${KWOK_MIXINS:-}" ]]; then
+        local data_dir="${WORK_DIR}/data"
+        mkdir -p "${data_dir}/overlays"
+        printf '%s\n' 'kind: ComponentRegistry' 'apiVersion: aicr.run/v1beta1' \
+            'metadata:' '  name: kwok-mixins' 'components: []' >"${data_dir}/registry.yaml"
+        if ! MIXINS="$KWOK_MIXINS" yq eval \
+                '.spec.mixins = ((.spec.mixins // []) + (strenv(MIXINS) | split(",") | map(trim) | map(select(. != ""))))' \
+                "$recipe_overlay" >"${data_dir}/overlays/${recipe}.yaml"; then
+            log_error "Failed to compose KWOK_MIXINS=${KWOK_MIXINS} onto ${recipe}"
+            return 1
+        fi
+        log_info "Composing mixins: ${KWOK_MIXINS}"
+        recipe_args+=(--data "$data_dir")
     fi
 
     # Generate resolved recipe from criteria
@@ -1015,6 +1017,15 @@ generate_bundle() {
     if grep -qx "slinky-slurm" <<< "$bundled_components"; then
         conditional_sets+=(
             --set "slurmcluster:controller.persistence.enabled=false"
+        )
+    fi
+    if grep -qx "nvsentinel-mongodb" <<< "$bundled_components"; then
+        # platform-connectors tolerates every taint, so one pod lands on the
+        # real Kind node, where it needs the datastore's client certificate
+        # and a reachable MongoDB; KWOK simulates both, so it never becomes
+        # ready and Flux, which waits on it, never converges.
+        conditional_sets+=(
+            --set-json 'nvsentinel:platformConnector.affinity={"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"node-role.kubernetes.io/control-plane","operator":"DoesNotExist"}]}]}}}'
         )
     fi
     if grep -qx "dynamo-platform" <<< "$bundled_components"; then
@@ -2361,6 +2372,19 @@ main() {
         kubectl label node "$cp_node" eks.amazonaws.com/compute-type=hybrid --overwrite
         kubectl taint nodes "$cp_node" nfd-excluded=true:NoSchedule --overwrite
     done
+
+    # nvsentinel-mongodb ships a cert-manager Certificate, and cert-manager's
+    # webhook runs on a KWOK fake that serves nothing, so the create would
+    # time out. The webhook's namespaceSelector skips namespaces carrying
+    # this label; harmless under KWOK, where no certificate is really issued.
+    local mongodb_ns
+    mongodb_ns=$(yq eval '.componentRefs[] | select(.name == "nvsentinel-mongodb") | .namespace' \
+        "${WORK_DIR}/recipe.yaml")
+    if [[ -n "$mongodb_ns" ]]; then
+        log_info "Disabling cert-manager validation in namespace ${mongodb_ns} for KWOK"
+        kubectl create namespace "$mongodb_ns" --dry-run=client -o yaml | kubectl apply -f -
+        kubectl label namespace "$mongodb_ns" cert-manager.io/disable-validation=true --overwrite
+    fi
 
     log_debug "Step 5: Deploying bundle..."
     deploy_bundle

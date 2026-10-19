@@ -16,12 +16,12 @@ package cli
 
 import (
 	"context"
-	stderrors "errors"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestRootCommand(t *testing.T) {
@@ -99,7 +99,7 @@ func TestEmbeddedClientPreservesClientErrorCode(t *testing.T) {
 				_ = client.Close()
 				t.Errorf("embeddedClient() client = %v, want nil", client)
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("embeddedClient() error = %v, want code %s", err, tt.wantCode)
 			}
 		})

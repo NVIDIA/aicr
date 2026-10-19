@@ -68,18 +68,26 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 		}
 	}
 
-	// Step 1: Ensure namespace exists
-	if err := d.ensureNamespace(ctx); err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to ensure namespace", err)
-	}
-
 	// ServiceAccount mode is already decided at this point: Step 0's gate
 	// resolves it (resolveServiceAccount) because the permissions it must
 	// demand differ between the two modes. Resolving there rather than here
-	// also means the decision is made before ensureNamespace, which is
-	// harmless — a ServiceAccount cannot exist in a namespace that does
+	// also means the decision is made before ensureNamespace, which Step 1
+	// relies on — a ServiceAccount cannot exist in a namespace that does
 	// not, so the Get correctly reports NotFound and the run stays in
-	// prefix mode.
+	// prefix mode, and a found ServiceAccount proves the namespace exists.
+
+	// Step 1: Ensure the namespace exists, in prefix mode only. In
+	// exact-ServiceAccount mode the ServiceAccount resolved above proves the
+	// namespace exists, and it belongs to whoever provisioned that
+	// ServiceAccount: it is not created, read or relabeled, so the caller
+	// needs no cluster-scoped namespace permission. `aicr validate
+	// --validator-service-account-name` leaves its namespace alone the same
+	// way.
+	if d.managesRBAC() {
+		if err := d.ensureNamespace(ctx); err != nil {
+			return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "failed to ensure namespace")
+		}
+	}
 
 	// Step 2: Create this run's RBAC. Every name carries the run ID, so
 	// nothing here can already exist; an AlreadyExists is reported as an

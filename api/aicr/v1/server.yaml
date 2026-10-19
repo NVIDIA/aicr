@@ -727,6 +727,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "409":
+          description: A vendored chart's archive does not match the digest its registry entry pins (helm.defaultDigest)
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "413":
           description: Request body exceeds the maximum allowed size
           headers:
@@ -921,7 +930,7 @@ components:
       description: Kubernetes service/environment type.
       schema:
         type: string
-        enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s, any]
+        enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s, mk8s, any]
         default: any
     Accelerator:
       name: accelerator
@@ -930,7 +939,7 @@ components:
       description: GPU/accelerator type.
       schema:
         type: string
-        enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any]
+        enum: [h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
         default: any
     GPUAlias:
       name: gpu
@@ -939,7 +948,7 @@ components:
       description: Backward-compatible alias for accelerator.
       schema:
         type: string
-        enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any]
+        enum: [h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
         default: any
     Intent:
       name: intent
@@ -966,7 +975,7 @@ components:
       description: Platform/framework type.
       schema:
         type: string
-        enum: [dynamo, kubeflow, nim, runai, slurm, any]
+        enum: [dynamo, kubeflow, kueue, nim, runai, slurm, any]
         default: any
     Nodes:
       name: nodes
@@ -1122,7 +1131,7 @@ components:
       description: Bundle deployment method.
       schema:
         type: string
-        enum: [helm, argocd, argocd-helm, flux, helmfile]
+        enum: [helm, argocd, argocd-helm, flux, helmfile, terraform]
         default: helm
     BundleRepo:
       name: repo
@@ -1138,10 +1147,11 @@ components:
       required: false
       description: >
         Taint for nodewright-operator workload gating (format:
-        key=value:effect or key:effect).
+        key=value:effect or key:effect). The key must have no DNS prefix
+        (no `/`) and be at most 53 characters.
       schema:
         type: string
-      example: "skyhook.nvidia.com/runtime=required:NoSchedule"
+      example: "nodewright.nvidia.com=runtime-required:NoSchedule"
     WorkloadSelector:
       name: workload-selector
       in: query
@@ -1241,12 +1251,12 @@ components:
         service:
           type: string
           description: Kubernetes service type
-          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s, any]
+          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s, mk8s, any]
           example: eks
         accelerator:
           type: string
           description: GPU/accelerator type
-          enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any]
+          enum: [h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
           example: h100
         intent:
           type: string
@@ -1261,7 +1271,7 @@ components:
         platform:
           type: string
           description: Platform/framework type
-          enum: [dynamo, kubeflow, nim, runai, slurm, any]
+          enum: [dynamo, kubeflow, kueue, nim, runai, slurm, any]
           example: kubeflow
         nodes:
           type: integer
@@ -1413,7 +1423,10 @@ components:
                   type: object
                   description: >
                     Canonical component names mapped to sorted owned dotted
-                    paths. Every listed component includes synthetic "enabled".
+                    paths. A listed component includes synthetic "enabled"
+                    when the profile owns its presence; a component the
+                    profile references as optional lists only its override
+                    paths and may be omitted from a bundle.
                   additionalProperties:
                     type: array
                     items:
@@ -1427,6 +1440,24 @@ components:
                 bundling; API-only detection or omitted evidence produces a
                 non-blocking warning.
               enum: [absent, api-detected, crs-detected, unknown]
+            defaultStorageClassState:
+              type: string
+              description: >
+                Default StorageClass evidence recorded during snapshot-driven
+                resolution of a recipe containing nvsentinel-mongodb, whose
+                volumes name no StorageClass. "multiple" means more than one
+                StorageClass is annotated as the default.
+              enum: [present, multiple, absent, unknown]
+            perconaOperatorState:
+              type: string
+              description: >
+                Percona Operator for MongoDB conflict evidence recorded during
+                snapshot-driven resolution of a recipe containing
+                nvsentinel-mongodb. "aicr-owned" means the only
+                PerconaServerMongoDB found is AICR's own; "operator-detected"
+                means a Percona operator pod AICR did not install runs, with
+                no other PerconaServerMongoDB resources.
+              enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
         criteria:
           $ref: "#/components/schemas/Criteria"
           description: Original criteria parameters
@@ -1733,11 +1764,19 @@ components:
                   - constraintWarnings
                   - gpuDriverState
                   - mariaDBOperatorState
+                  - defaultStorageClassState
+                  - perconaOperatorState
                   - selectedProfile
               properties:
                 mariaDBOperatorState:
                   type: string
                   enum: [absent, api-detected, crs-detected, unknown]
+                defaultStorageClassState:
+                  type: string
+                  enum: [present, multiple, absent, unknown]
+                perconaOperatorState:
+                  type: string
+                  enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
                 excludedOverlays:
                   type: array
                   items:
@@ -1879,6 +1918,8 @@ components:
                       - constraintWarnings
                       - gpuDriverState
                       - mariaDBOperatorState
+                      - defaultStorageClassState
+                      - perconaOperatorState
                       - selectedProfile
                   not:
                     required: [selectedProfile]
@@ -1886,6 +1927,12 @@ components:
                     mariaDBOperatorState:
                       type: string
                       enum: [absent, api-detected, crs-detected, unknown]
+                    defaultStorageClassState:
+                      type: string
+                      enum: [present, multiple, absent, unknown]
+                    perconaOperatorState:
+                      type: string
+                      enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
                     excludedOverlays:
                       type: array
                       items:

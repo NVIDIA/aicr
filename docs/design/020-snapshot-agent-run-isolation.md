@@ -367,3 +367,16 @@ whole list, not one run per missing verb.
    watch ignores label selectors, so pods are created explicitly with the
    required labels and selector strings are asserted directly where
    apiserver-side filtering cannot be simulated.
+
+## Amendment: read-only network discovery (#3240)
+
+The references above to a `DiscoverNetwork` run's "mutating grants" (decision
+notes around RBAC additivity, the `--add-roles-to-service-account` rendering,
+and the least-privilege consequence) describe the grant as it stood when this
+ADR was written. Since #3240 the network collector calls k8s-launch-kit's
+`DiscoverReadOnly`, and the `DiscoverNetwork` delta on the ClusterRole is a
+single read rule (`configuration.net.nvidia.com` nicdevices `get`/`list`); no
+mode of the snapshot agent holds cluster-scoped write or `pods/exec`. The
+run-isolation argument is unchanged — per-run identities still prevent RBAC
+additivity across runs — it simply no longer has a mutating case to protect
+against. The body is left as the historical record.

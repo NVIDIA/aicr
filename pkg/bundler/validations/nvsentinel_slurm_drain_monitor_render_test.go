@@ -32,7 +32,7 @@ const (
 	// slurmDrainMonitorImage is the image docs/user/container-images.md
 	// discloses for the mixin. The static BOM cannot see a mixin-gated
 	// subchart, so this assertion is what keeps that note honest.
-	slurmDrainMonitorImage = "ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.25.0"
+	slurmDrainMonitorImage = "ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.26.0"
 	slurmDrainMonitorName  = "slurm-drain-monitor"
 )
 
