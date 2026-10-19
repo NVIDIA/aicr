@@ -82,6 +82,38 @@ transitions:
               that starts while the pod is gone fails with not found; rerun
               it. Ready on the new pod is when slurmdbd can reach its database
               again.
+      - deployers: [terraform]
+        steps:
+          - id: apply-after-operator
+            description: >-
+              Regenerate the bundle at the new pins and run terraform apply,
+              the same apply that moves mariadb-operator-crds and
+              mariadb-operator.
+            reason: >-
+              This release depends on both in the bundle's module graph, so
+              terraform upgrades it only once the operator release is ready.
+              It renders spec.image with the digest-pinned 11.8.8 image, and
+              the operator rolls the pod for any spec.image change. From
+              26.6.0 only the image reference changes; a database first
+              reconciled by operator 26.3.0 also moves from
+              docker-registry1.mariadb.com/library/mariadb:11.8.5 to the 11.8.8
+              patch release.
+          - id: await-accounting-restart
+            description: >-
+              Read the image the upgrade rendered,
+              `IMG=$(kubectl get mariadb mariadb -n slurm -o jsonpath='{.spec.image}')`,
+              wait for the pod to run it, then for it to be ready:
+              `kubectl wait pod mariadb-0 -n slurm --timeout=10m
+              --for=jsonpath='{.spec.containers[?(@.name=="mariadb")].image}'=$IMG`,
+              then `kubectl wait pod mariadb-0 -n slurm --timeout=10m
+              --for=condition=Ready`.
+            reason: >-
+              Reading the target from the MariaDB keeps this wait right after
+              a later patch or digest update of the pinned image. The operator
+              deletes and recreates mariadb-0 to change its image, so a wait
+              that starts while the pod is gone fails with not found; rerun
+              it. Ready on the new pod is when slurmdbd can reach its database
+              again.
       - steps:
           - id: sync-after-operator
             description: >-

@@ -51,7 +51,7 @@ transitions:
       for a featureGates block. If neither sets TopologyAwareScheduling to
       false, the disable-tas-subgates step does not apply.
     stepsByDeployer:
-      - deployers: [helm, helmfile]
+      - deployers: [helm, helmfile, terraform]
         steps:
           - id: disable-tas-subgates
             description: >-
@@ -73,7 +73,8 @@ transitions:
               gate.
           - id: upgrade-kueue
             description: >-
-              Re-run install.sh (helm) or helmfile apply (helmfile).
+              Re-run install.sh (helm), helmfile apply (helmfile), or
+              terraform apply on the regenerated bundle (terraform).
             reason: >-
               Moves kueue to 0.19.6 with the gate list it validates at
               startup.

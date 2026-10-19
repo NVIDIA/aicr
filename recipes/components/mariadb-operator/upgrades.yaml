@@ -159,6 +159,93 @@ transitions:
               Upstream recommends returning it to false so a later operator
               bump does not update the data plane unattended. An instance left
               at true gets exactly that on the next bump.
+      - deployers: [terraform]
+        steps:
+          - id: enable-dataplane-autoupdate
+            description: >-
+              For every HA MariaDB the precondition listed:
+              `kubectl patch mariadb <name> -n <namespace> --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'`.
+              Where your own Terraform configuration manages that MariaDB, set
+              the field there and apply it instead.
+            reason: >-
+              Upstream requires this before the operator moves, and the
+              terraform apply below moves the CRDs and the operator in one run,
+              so the flag has to be set before it. A live patch to a resource
+              your own configuration manages is drift its next plan reverts. A
+              non-HA instance, such as the accounting database AICR ships,
+              needs no patch: it has no agent or init container to update.
+          - id: apply-bundle
+            description: >-
+              Regenerate the bundle at the new pins and run terraform apply.
+            reason: >-
+              The bundle's module graph upgrades mariadb-operator-crds in place
+              first and moves the operator to 26.10.1 only after it. Never
+              remove the mariadb-operator-crds module from the configuration,
+              or destroy or replace its release, to achieve the version change:
+              uninstalling it deletes the CRDs and cascade-deletes every
+              MariaDB.
+          - id: await-dataplane-template
+            description: >-
+              For each HA MariaDB patched in the first step, set
+              IMG=ghcr.io/mariadb-operator/mariadb-operator:26.10.1 and wait
+              until its StatefulSet renders both data-plane containers from it:
+              `kubectl wait sts <name> -n <namespace> --timeout=10m
+              --for=jsonpath='{.spec.template.spec.initContainers[?(@.name=="init")].image}'=$IMG`,
+              then the same with
+              `--for=jsonpath='{.spec.template.spec.containers[?(@.name=="agent")].image}'=$IMG`.
+            reason: >-
+              The MariaDB Updated and Ready conditions cannot show this. The
+              operator computes both against whatever StatefulSet exists, so
+              they are already True before 26.10.1 first reconciles the
+              resource, and a flag reverted at that point leaves 26.10.1
+              keeping the old init and agent images. The operator writes the
+              new images into the MariaDB spec before it renders the
+              StatefulSet, so once the template carries them the revert can no
+              longer take them back. A resource that names its own init or
+              agent image, such as a mirror, keeps that repository and takes
+              only the 26.10.1 tag, so set IMG to match. Skip non-HA instances:
+              they have no init or agent container, so this wait runs to its
+              timeout.
+          - id: await-dataplane-pods
+            description: >-
+              Wait until every pod runs the new data plane, naming each pod,
+              `<name>-0` up to `<name>-<replicas-1>`:
+              `kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace>
+              --timeout=15m
+              --for=jsonpath='{.status.initContainerStatuses[?(@.name=="init")].image}'=$IMG`,
+              then the same with
+              `--for=jsonpath='{.status.containerStatuses[?(@.name=="agent")].image}'=$IMG`.
+            reason: >-
+              A new template only starts the roll: under the default
+              ReplicasFirstPrimaryLast strategy the operator deletes and
+              recreates the pods one at a time, replicas first. Name the pods
+              rather than selecting them with -l. A label selector resolves the
+              pod list once, when the command starts, so a pod being recreated
+              at that moment is never waited on; a named pod that is missing
+              fails the command instead, and you rerun it.
+          - id: await-dataplane-rollout
+            description: >-
+              Wait until the roll has finished, with N the replica count:
+              `kubectl wait sts <name> -n <namespace> --timeout=15m
+              --for=jsonpath='{.status.updatedReplicas}'=N`, then the same with
+              `--for=jsonpath='{.status.readyReplicas}'=N`.
+            reason: >-
+              updatedReplicas counts the pods on the StatefulSet's newest
+              revision, so N updated and N ready is the finished roll. Both
+              counts mean that only after the steps above: before the new
+              template exists they already equal N for the old revision.
+          - id: revert-dataplane-autoupdate
+            description: >-
+              For every HA MariaDB patched in the first step:
+              `kubectl patch mariadb <name> -n <namespace> --type merge -p
+              '{"spec":{"updateStrategy":{"autoUpdateDataPlane":false}}}'`,
+              or set it back to false in your own Terraform configuration and
+              apply it.
+            reason: >-
+              Upstream recommends returning it to false so a later operator
+              bump does not update the data plane unattended. An instance left
+              at true gets exactly that on the next bump.
       - steps:
           - id: enable-dataplane-autoupdate
             description: >-

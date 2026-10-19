@@ -3076,9 +3076,9 @@ h100-eks-ubuntu-training-kueue:
   017-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   017-kueue-post/values.yaml: 5bf77f2d10a8237b9ac58176da05ea8be51456a6156e039fa4c95595c464fa17
   README.md: 2f8139bc1a9b0fa95bbde00bfdfc71488d9078a80ba757a7b7129fdd56af2961
-  UPGRADING.md: edf33e124e5c9ea59a9ac864bb15535862221f6e10f669d4003a32a949b1f1f8
+  UPGRADING.md: 2a8d0af7a0cccb90b8d08329a4b0dac12f392910e589a1cc018df6cd76db2ca5
   bundle-info.yaml: 99a6288219d20499825d0c3394f87f3e0b8e92fe571e35f73674234392f7cd54
-  checksums.txt: a73d2475b81e5bc8de284eda2a95224fd19606cc073246aa4384edde365c1270
+  checksums.txt: 7f3d21542dbb01da9f0831950fda5b4b71e63a143903ce8f226dc2fb93398c04
   deploy.sh: f1d15f2c19ebf1bd8136d7b2393e80964fe372d2755dd1e78b8505ecd9dce006
   recipe.yaml: 1394c063547edd39f30fad98f38a649e48c77fbda64dad6134faa5346746b310
 h100-eks-ubuntu-training-slurm:
@@ -3421,9 +3421,9 @@ h100-gke-cos-training-kueue:
   018-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   018-kueue-post/values.yaml: 5bf77f2d10a8237b9ac58176da05ea8be51456a6156e039fa4c95595c464fa17
   README.md: f870a04e252dc55eadff2e6223b626ef70a2712c5f7bc8f1faaab21d9491e291
-  UPGRADING.md: edf33e124e5c9ea59a9ac864bb15535862221f6e10f669d4003a32a949b1f1f8
+  UPGRADING.md: 2a8d0af7a0cccb90b8d08329a4b0dac12f392910e589a1cc018df6cd76db2ca5
   bundle-info.yaml: ac14d48b1f4dbf7cfbab89b91e8c3590ae3c19f926d977912b10699cd444717c
-  checksums.txt: 7be3888cb478ddb7fa3ee6469e94441f42515619d1a6e9df40517021eba02b2a
+  checksums.txt: a43c57335e3aaad25d4dad6f4449858245c44d2ccf32929d2e37331bb9b3089d
   deploy.sh: 35d70d033297a44687aa29b1a82b30b521d398981b23ceac58b5ce067ff3bda2
   recipe.yaml: d5997b57340370eab80bfb28965c0b34fad621d7254119b3a5bc175ae9941a68
 h100-gke-cos-training-slurm:
@@ -3734,9 +3734,9 @@ h100-kind-training-kueue:
   015-kueue-post/templates/topology-accelerator.yaml: 1ca4ffa711704422d5ec1796cac645bfc0e10d0b1538e2d48c22013300609ea9
   015-kueue-post/values.yaml: 5bf77f2d10a8237b9ac58176da05ea8be51456a6156e039fa4c95595c464fa17
   README.md: 50321c1178e5c80afced39d2a8568d5a771f228cfec7f82dffc5dbbe7a777b20
-  UPGRADING.md: ac81e7c926140ffbdb220f990790a15222d18d013901c15d220e129c44b9b061
+  UPGRADING.md: 66fdae3c38d75b0fb0a3bc507bde2bad71bc37360c80b21a4ed5e78db9839107
   bundle-info.yaml: 5dbe9fd7e67ae09222338427998701df63653ee60b25b0808b9f449911472ded
-  checksums.txt: cef7437106bf9bd5683595d76e4bc15834d6db0dafb093a651028312a1a0ab7d
+  checksums.txt: 765846da82aaa6447c523a2228bdee22247e305df325492541dd0ddb73a8e945
   deploy.sh: cbe36b426daa2ff5076f4463ef1342eeaca319f56dcace1d3a2559dbf1a82583
   recipe.yaml: cc8bb31e4b2e0740f72e10294718c2f9553624d9ea35fc398dafb0a89d9c600c
 h100-kind-training-slurm:

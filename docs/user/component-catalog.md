@@ -2323,11 +2323,14 @@ the operator moves, then upgrade CRDs first and the operator second:
      --version 26.10.1 --namespace mariadb-system
    ```
    With Argo CD or Flux, sync the `mariadb-operator-crds` application or
-   HelmRelease to `26.10.1` before the operator instead. Never `helm uninstall`,
-   prune or delete the CRD release: that deletes the CRDs and cascade-deletes
-   every `MariaDB`, `User`, `Database` and `Grant` with them.
+   HelmRelease to `26.10.1` before the operator instead. With Terraform, steps 2
+   and 3 are one `terraform apply` of the regenerated bundle: the chart ships its
+   CRDs as templates, so the in-place upgrade applies them, and the module graph
+   moves the operator only after this release. Never `helm uninstall`, prune,
+   delete or `terraform destroy` the CRD release: that deletes the CRDs and
+   cascade-deletes every `MariaDB`, `User`, `Database` and `Grant` with them.
 3. Upgrade `mariadb-operator` to `26.10.1` (re-run `install.sh`, `helmfile
-   apply`, or sync the release).
+   apply`, `terraform apply` on the regenerated bundle, or sync the release).
 4. For each HA MariaDB enabled in step 1, wait until the `26.10.1` data plane
    is running before continuing. The `Updated` and `Ready` conditions cannot
    show this: the operator computes both against whatever StatefulSet exists,

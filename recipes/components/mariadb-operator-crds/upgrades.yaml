@@ -62,6 +62,24 @@ transitions:
             reason: >-
               The operator moves only once the 26.10.1 CRD schema is
               Established.
+      - deployers: [terraform]
+        steps:
+          - id: apply-bundle
+            description: >-
+              Regenerate the bundle at the new pins and run terraform apply.
+            reason: >-
+              The chart ships its CRDs as templates rather than in crds/, so
+              the provider's in-place upgrade of this release applies the new
+              schema, and the bundle's module graph applies mariadb-operator
+              only after it. Never remove this module from the configuration,
+              or destroy or replace its release, to achieve the version change:
+              uninstalling it deletes the CRDs and cascade-deletes every
+              MariaDB, User, Database and Grant.
+          - id: continue-with-operator
+            description: >-
+              Continue with mariadb-operator's await-dataplane-template step.
+            reason: >-
+              The same terraform apply moved the operator to 26.10.1.
       - steps:
           - id: sync-crds
             description: >-
