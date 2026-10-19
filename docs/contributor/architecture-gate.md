@@ -137,8 +137,9 @@ policy:
 - **`tracking: "#NNNN"`** names the issue that will remove this
   exception. Use it when the reference is a real gap the facade should
   eventually close, and someone intends to close it — for example
-  `pkg/evidence/cncf` is tracked under `#2561` because the facade
-  documents that it has no CNCF-evidence entry point yet.
+  `pkg/mirror` is tracked under `#2025` because the facade discovers a
+  mirror inventory but has no entry point for rendering it in
+  `aicr mirror list`'s output formats.
 - **`permanent: true`** asserts the exception will never go away
   because the underlying reason is structural, not a backlog item —
   for example CLI flag-string parsing that has no facade equivalent by

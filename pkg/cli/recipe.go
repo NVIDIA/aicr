@@ -106,7 +106,14 @@ func recipeCmdFlags() []cli.Flag {
 			Name: flagInheritFrom,
 			Usage: `Path to a prior recipe file, or to a bundle directory, whose resolved namespace, chart, source, path, manifest files and pre-manifest files this recipe keeps.
 	A bundle directory also supplies the fullnameOverride/nameOverride object names it installed with.
-	Use on an AICR upgrade so a component already running is not relocated, replaced or renamed by a moved default.`,
+	Use on an AICR upgrade so a component already running is not relocated, replaced or renamed by a moved default.
+	Use --inherit=namespace to keep only namespaces and take other settings from the new release.`,
+			Category: catInput,
+		},
+		&cli.StringFlag{
+			Name:     flagInherit,
+			Value:    "all",
+			Usage:    "Fields to keep from --inherit-from: all or namespace (requires --inherit-from)",
 			Category: catInput,
 		},
 		&cli.StringFlag{
@@ -180,7 +187,7 @@ Override snapshot-detected criteria:
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS,
 				flagPlatform, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces,
-				flagInheritFrom, "snapshot", "config", flagOutput,
+				flagInheritFrom, flagInherit, "snapshot", "config", flagOutput,
 				flagFormat); err != nil {
 				return err
 			}

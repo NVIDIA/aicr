@@ -1,7 +1,7 @@
 # Measurement Schema
 
 The `Measurement` type in `github.com/NVIDIA/aicr/pkg/measurement` is the
-on-wire shape used throughout aicr's Snapshot → Recipe → Validate → Bundle
+on-wire shape used throughout aicr's Snapshot -> Recipe -> Validate -> Bundle
 pipeline. Snapshots serialize a `[]*Measurement` to YAML/JSON; recipes and
 validators consume the same shape. This page is the schema contract — any
 external producer (cross-repo Go library, CI tool, custom collector) emitting
@@ -241,6 +241,72 @@ Both `slinky-slurm` and `mariadb-operator` remain in raw snapshots and
 including all Slinky items. Constraint evaluation consumes the raw snapshot
 before evidence packaging.
 
+## K8s default-storage-class shape
+
+`K8s.default-storage-class` records which StorageClasses carry
+`storageclass.kubernetes.io/is-default-class: "true"` (or the beta
+`storageclass.beta.kubernetes.io/is-default-class` annotation, which
+Kubernetes still honors). It does not inspect provisioners, capacity, or
+existing PVCs.
+
+```yaml
+- subtype: default-storage-class
+  data:
+    collection-state: present
+    default-count: 1
+    default-classes: gp3
+```
+
+The fields are:
+
+- `collection-state` — `present` (exactly one default), `multiple` (more than
+  one; Kubernetes binds class-less PVCs to the newest), `absent` (none), or
+  `unknown` (the StorageClass List failed).
+- `default-count` — the number of default StorageClasses. Omitted when
+  `unknown`.
+- `default-classes` — the default StorageClass names, sorted and
+  comma-joined. Omitted when there are none.
+
+## K8s percona-server-mongodb shape
+
+`K8s.percona-server-mongodb` records conflict evidence for the Percona
+Operator for MongoDB: API group `psmdb.percona.com`, resource
+`perconaservermongodbs`, Kind `PerconaServerMongoDB`, plus operator pods
+labeled `app.kubernetes.io/name` `psmdb-operator` or
+`percona-server-mongodb-operator`. AICR's own `nvsentinel-mongodb` CR and
+AICR's own operator pods (namespace `nvsentinel`, `app.kubernetes.io/instance`
+ending in `psmdb-operator`: bare under helm, helmfile and terraform,
+`<namePrefix>psmdb-operator` under Argo CD, `nvsentinel-psmdb-operator` under
+Flux) are not counted as conflicts. A foreign operator installed in
+`nvsentinel` under such a release name is read as AICR's own.
+
+```yaml
+- subtype: percona-server-mongodb
+  data:
+    collection-state: aicr-owned
+    api-available: true
+    api-version: v1
+```
+
+`collection-state` is one of:
+
+- `absent` — the API group was conclusively not found.
+- `api-detected` — the group is served but no PerconaServerMongoDB CRs exist
+  and no Percona operator pod AICR did not install runs.
+- `aicr-owned` — the only PerconaServerMongoDB is `nvsentinel/nvsentinel-mongodb`.
+- `operator-detected` — no foreign CR exists, but a Percona operator pod AICR
+  did not install runs, in any namespace.
+- `crs-detected` — a PerconaServerMongoDB other than AICR's own exists.
+- `unknown` — discovery, the CR List, or the operator pod List was
+  inconclusive.
+
+`api-available` and `api-version` follow the
+[mariadb-operator](#k8s-mariadb-operator-shape) semantics.
+
+Snapshot-driven resolution of a recipe containing `nvsentinel-mongodb` records
+both states as recipe metadata (`defaultStorageClassState`,
+`perconaOperatorState`). Neither subtype is kept in minimal evidence.
+
 ## K8s aks-gpu-pools shape
 
 `K8s.aks-gpu-pools` projects AKS GPU agent-pool driver ownership for ADR-015
@@ -303,7 +369,9 @@ constraints; `K8s.aks-gpu-pools.gpu-pool-count` and
 ## K8s oke-addons shape
 
 `K8s.oke-addons` projects the OKE `NvidiaGpuPlugin` cluster add-on's
-control-plane state for `gpuStack` profile qualification on the OKE family.
+control-plane state for `gpuStack` profile qualification on the OKE family,
+and the `NvidiaNetworkOperator` add-on's state for the OKE recipes that
+deploy `network-operator`.
 Like `aks-gpu-pools`, it is not produced by a cluster collector: the
 projection is attached at the snapshot orchestration layer from the
 operator-supplied dump
@@ -311,7 +379,9 @@ operator-supplied dump
 passed to `aicr snapshot --oke-addons` (merged
 controller-side in both agent Job mode and local mode). A missing, truncated,
 or malformed dump fails the command — a file error is never degraded into a
-"reading unavailable" measurement.
+"reading unavailable" measurement. A dump capturing a partial page, with
+`opc-next-page` set, fails the same way. Capturing with `--page` is not
+supported, because a final page alone looks like a complete list.
 
 ```yaml
 type: K8s
@@ -320,6 +390,7 @@ subtypes:
     data:
       addon-count: 3
       nvidia-gpu-plugin: installed
+      nvidia-network-operator: absent
 ```
 
 The fields are:
@@ -330,6 +401,9 @@ The fields are:
   or, for any other lifecycle state, the state preserved verbatim, lowercased
   with an `addon-` prefix (e.g. `addon-deleting`, `addon-needs_attention`).
   Always emitted.
+- `nvidia-network-operator` (`string`) is the `NvidiaNetworkOperator`
+  add-on's state, normalized the same way as `nvidia-gpu-plugin`. Always
+  emitted.
 - `addon-count` (`int`) — the number of add-ons in the dump. Always emitted,
   including `0`.
 
@@ -341,8 +415,17 @@ observed lifecycle state as the actual. When the subtype is absent (no
 `--oke-addons` dump), constraint evaluation reports the reading unavailable
 and fails closed rather than guessing an ownership mode.
 
-The constraint path is `K8s.oke-addons.nvidia-gpu-plugin` in profile value
-constraints; `K8s.oke-addons.addon-count` uses the same non-item path form.
+The OKE recipes that deploy `network-operator` (`gb200-oke-training`,
+`l40s-oke-training`, and their descendants) declare
+`K8s.oke-addons.nvidia-network-operator: absent`. Any other reading,
+including a missing one, fails snapshot-based recipe generation and the
+`aicr validate` pre-flight, because the add-on and AICR's `network-operator`
+would both reconcile the same `NicClusterPolicy`. Criteria-only generation
+evaluates no reading and only records the constraint in the recipe.
+
+The constraint paths are `K8s.oke-addons.nvidia-gpu-plugin` in profile value
+constraints and `K8s.oke-addons.nvidia-network-operator` in recipe
+constraints. `K8s.oke-addons.addon-count` uses the same non-item path form.
 
 ## K8s gke-gpu-pools shape
 
@@ -602,7 +685,11 @@ subtypes:
 
 - **`identity`** — group identity and high-level facts. Strings (machineType,
   gpuType, linkType, identifier, nodeSelector) live in `context`. Numeric
-  facts (pf-count, rail-count) live in `data`.
+  facts (pf-count, rail-count) live in `data`. When the source carries no
+  `identifier` (l8k's read-only discovery never assigns one), the collector
+  derives the same value l8k's mutating path would have — from machineType
+  and gpuType — so the key is stable across both paths; it is omitted only
+  when either input is also empty.
 - **`capabilities`** — boolean cluster capabilities (sriov, rdma, ib) as
   scalar `Reading` values in `data`.
 - **`pfs`** — per-PF records as `items`. Per-PF descriptive identifiers

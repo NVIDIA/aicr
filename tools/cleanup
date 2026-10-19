@@ -162,27 +162,40 @@ AICR_CHECK_NS_PREFIXES=(
     gang-scheduling-test-
 )
 
-# CRD API-group suffixes owned by AICR components. Matched as substrings
-# against `kubectl get crd -o name`. New component groups should be added here.
-AICR_CRD_PATTERNS=(
+# CRD API groups owned by AICR components. Matched exactly against the group
+# of each CRD (`<plural>.<group>`), never as a substring or suffix: other
+# vendors also publish `*.nvidia.com` groups, and deleting a CRD cascades to
+# every CR of that kind (#3097). Each subgroup must be listed on its own,
+# including groups an operator applies at runtime from its image rather than
+# shipping in its chart (network-operator: nv-ipam, configuration.net). New
+# component groups should be added here.
+AICR_CRD_GROUPS=(
     nfd.k8s-sigs.io
     nvidia.com
+    resource.nvidia.com
+    maintenance.nvidia.com
+    nv-ipam.nvidia.com
+    configuration.net.nvidia.com
+    nvcre.nvidia.com
     mellanox.com
     cert-manager.io
+    acme.cert-manager.io
     skyhook.nvidia.com
     nodewright.nvidia.com
     nvsentinel.nvidia.com
+    preflight.nvsentinel.nvidia.com
+    nvsentinel.dgxc.nvidia.com
+    healthevents.dgxc.nvidia.com
+    janitor.dgxc.nvidia.com
     monitoring.coreos.com
     scheduling.run.ai
     kai.scheduler
     grove.io
-    nvidia.io
-    dynamo.nvidia.com
+    scheduler.grove.io
     agentgateway.dev
     apps.nvidia.com
     kueue.x-k8s.io
     jobset.x-k8s.io
-    kubeflow.org
     trainer.kubeflow.org
     slinky.slurm.net
 )
@@ -317,9 +330,22 @@ is_excluded_ns() {
     return 1
 }
 
+# is_aicr_crd <crd-name>: true when the CRD's API group is exactly one of
+# AICR_CRD_GROUPS. Accepts either `<plural>.<group>` or the `kubectl -o name`
+# form with its `customresourcedefinition.apiextensions.k8s.io/` prefix.
+is_aicr_crd() {
+    local name="${1##*/}" g group
+    [[ "$name" == *.* ]] || return 1
+    group="${name#*.}"
+    for g in "${AICR_CRD_GROUPS[@]}"; do
+        [[ "$group" == "$g" ]] && return 0
+    done
+    return 1
+}
+
 # is_excluded_crd <crd-name>: true when the CRD name contains any --exclude-crd
-# match. Applied after pattern matching, so a broad pattern (e.g. nvidia.com)
-# cannot pull an excluded group's CRDs (e.g. skyhook.nvidia.com) back in.
+# match. Applied after group matching, so an owned group (e.g. nvidia.com) can
+# still be fenced out per install.
 is_excluded_crd() {
     local target="$1" pat
     (( ${#EXCLUDE_CRD[@]} == 0 )) && return 1
@@ -460,33 +486,28 @@ kc delete clusterrolebinding aicr-node-reader --ignore-not-found
 if ! $KEEP_CRDS; then
     msg "Phase 3: Deleting AICR component CRDs..."
     if $DRY_RUN; then
-        for pat in "${AICR_CRD_PATTERNS[@]}"; do
-            echo "  match CRDs against pattern: ${pat}"
+        for grp in "${AICR_CRD_GROUPS[@]}"; do
+            echo "  match CRDs in API group: ${grp}"
         done
         for pat in "${EXCLUDE_CRD[@]:+${EXCLUDE_CRD[@]}}"; do
             echo "  excluding CRDs matching: ${pat}"
         done
     else
         all_crds="$(kubectl get crd -o name --request-timeout=30s 2>/dev/null || true)"
-        for pat in "${AICR_CRD_PATTERNS[@]}"; do
-            # shellcheck disable=SC2086
-            matches=$(echo "$all_crds" | grep -F "$pat" || true)
-            for crd in $matches; do
-                # Fence out operator-owned CRDs. Checked here (post-match) so a
-                # broad pattern (nvidia.com) cannot pull an excluded group's
-                # CRDs (skyhook.nvidia.com) back in.
-                if is_excluded_crd "$crd"; then
-                    msg "  skip (excluded): $crd"
-                    continue
-                fi
-                # --request-timeout bounds the API call so a wedged apiserver
-                # cannot park this step indefinitely. Don't swallow failures:
-                # a timed-out delete leaves a stale CRD that breaks reinstall,
-                # so warn (but keep going — cleanup is best-effort).
-                if ! kubectl delete "$crd" --ignore-not-found --wait=false --request-timeout=30s; then
-                    msg "WARNING: failed to delete $crd (timeout or apiserver error); it may persist — rerun cleanup or remove manually"
-                fi
-            done
+        for crd in $all_crds; do
+            is_aicr_crd "$crd" || continue
+            # Fence out operator-owned CRDs in an otherwise AICR-owned group.
+            if is_excluded_crd "$crd"; then
+                msg "  skip (excluded): $crd"
+                continue
+            fi
+            # --request-timeout bounds the API call so a wedged apiserver
+            # cannot park this step indefinitely. Don't swallow failures:
+            # a timed-out delete leaves a stale CRD that breaks reinstall,
+            # so warn (but keep going — cleanup is best-effort).
+            if ! kubectl delete "$crd" --ignore-not-found --wait=false --request-timeout=30s; then
+                msg "WARNING: failed to delete $crd (timeout or apiserver error); it may persist — rerun cleanup or remove manually"
+            fi
         done
     fi
 else

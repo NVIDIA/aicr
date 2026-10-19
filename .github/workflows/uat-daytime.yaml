@@ -81,7 +81,7 @@ jobs:
   # `daytime-intent:` edit in infra/uat/reservations.yaml, no workflow change.
   enumerate:
     if: github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       action: ${{ steps.action.outputs.action }}
       lifecycle: ${{ steps.action.outputs.lifecycle }}
@@ -151,7 +151,7 @@ jobs:
   drive:
     needs: enumerate
     if: needs.enumerate.outputs.matrix != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A daytime-up dispatch (provision + deploy) can run ~90 min; watching it
     # blocks this job for that long. Stay under GitHub's 6h hosted-job cap.
     timeout-minutes: 200

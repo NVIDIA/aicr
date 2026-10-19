@@ -19,10 +19,14 @@ import (
 	"context"
 	stderrors "errors"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -146,7 +150,7 @@ func TestResolveServiceAccount(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("resolveServiceAccount() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && !stderrors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != tt.wantErrCode {
 				t.Errorf("error = %v, want code %s", err, tt.wantErrCode)
 			}
 			if got := d.existingServiceAccount(); got != tt.wantExisting {
@@ -400,7 +404,7 @@ func TestDeploy_FailsWhenServiceAccountGetForbidden(t *testing.T) {
 	if err == nil {
 		t.Fatal("Deploy() error = nil; an unreadable, explicitly-named ServiceAccount must fail the run")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeUnauthorized, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeUnauthorized {
 		t.Errorf("Deploy() error code = %v, want ErrCodeUnauthorized", err)
 	}
 	if !strings.Contains(err.Error(), "refusing to guess") {
@@ -419,4 +423,300 @@ func TestDeploy_FailsWhenServiceAccountGetForbidden(t *testing.T) {
 		t.Errorf("run-scoped ServiceAccount Get error = %v, want NotFound", saErr)
 	}
 	assertNoRBACObjects(ctx, t, clientset)
+}
+
+// namespacesResource is the resource the Namespace reactors and action
+// filters below match on.
+const namespacesResource = "namespaces"
+
+// forbidNamespaceVerbs makes every Namespace request with one of verbs fail
+// Forbidden, the way the apiserver answers an identity holding no
+// cluster-scoped namespace grant. Authorization runs before the object is
+// looked up, so a create on an existing namespace is Forbidden, never
+// AlreadyExists. "*" covers every verb.
+func forbidNamespaceVerbs(clientset *fake.Clientset, verbs ...string) {
+	for _, verb := range verbs {
+		clientset.PrependReactor(verb, namespacesResource, func(action k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Resource: namespacesResource}, testNamespace,
+				stderrors.New(`User "system:serviceaccount:aicr-discovery:snapshot-runner" cannot `+
+					action.GetVerb()+` resource "namespaces" in API group "" at the cluster scope`))
+		})
+	}
+}
+
+// namespaceVerbs returns, in order, the verb of every Namespace request the
+// clientset received.
+func namespaceVerbs(clientset *fake.Clientset) []string {
+	var verbs []string
+	for _, a := range clientset.Actions() {
+		if a.GetResource().Resource == namespacesResource {
+			verbs = append(verbs, a.GetVerb())
+		}
+	}
+	return verbs
+}
+
+// trackedNamespace reads a Namespace straight from the tracker, past any
+// reactor that stands in for a caller who may not read it.
+func trackedNamespace(t *testing.T, clientset *fake.Clientset, name string) *corev1.Namespace {
+	t.Helper()
+	obj, err := clientset.Tracker().Get(corev1.SchemeGroupVersion.WithResource(namespacesResource), "", name)
+	if err != nil {
+		t.Fatalf("reading Namespace %q from the tracker: %v", name, err)
+	}
+	ns, ok := obj.(*corev1.Namespace)
+	if !ok {
+		t.Fatalf("tracker returned %T, want *corev1.Namespace", obj)
+	}
+	return ns
+}
+
+// TestDeploy_ExistingServiceAccountLeavesNamespaceAlone is the contract
+// from #3238: in exact-ServiceAccount mode the namespace belongs to whoever
+// provisioned the ServiceAccount, so the run neither reads, creates nor
+// relabels it, and a caller holding no cluster-scoped namespace grant
+// completes Deploy.
+func TestDeploy_ExistingServiceAccountLeavesNamespaceAlone(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+
+	const saName = "snapshot-agent"
+	provisioned := map[string]string{labelAppManagedBy: "Helm", "team": "platform"}
+	clientset := fake.NewClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testNamespace, Labels: maps.Clone(provisioned)}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: testNamespace}},
+	)
+	allowAllPermissionChecks(clientset)
+	forbidNamespaceVerbs(clientset, "*")
+
+	d := NewDeployer(clientset, Config{
+		Namespace:          testNamespace,
+		ServiceAccountName: saName,
+		Image:              "aicr:test",
+		RunID:              testRunID,
+	})
+	if err := d.Deploy(ctx); err != nil {
+		t.Fatalf("Deploy() error = %v; exact-ServiceAccount mode must not need any namespace permission", err)
+	}
+
+	if verbs := namespaceVerbs(clientset); len(verbs) != 0 {
+		t.Errorf("Deploy issued %v on namespaces; exact-ServiceAccount mode must leave the namespace alone", verbs)
+	}
+	if got := trackedNamespace(t, clientset, testNamespace).Labels; !maps.Equal(got, provisioned) {
+		t.Errorf("namespace labels = %v, want the provisioner's %v unchanged", got, provisioned)
+	}
+	if _, err := clientset.BatchV1().Jobs(testNamespace).Get(ctx, d.jobName(), metav1.GetOptions{}); err != nil {
+		t.Errorf("Job not created: %v", err)
+	}
+}
+
+// TestDeploy_PrefixModeUsesExistingNamespaceWithoutCreate pins the read
+// before the create: a prefix-mode caller that may read the namespace but
+// not create namespaces completes Deploy when the namespace already exists
+// and is labeled, because a create-first flow would be refused Forbidden.
+func TestDeploy_PrefixModeUsesExistingNamespaceWithoutCreate(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+
+	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   testNamespace,
+		Labels: map[string]string{labelAppManagedBy: appName},
+	}})
+	allowAllPermissionChecks(clientset)
+	forbidNamespaceVerbs(clientset, verbCreate, verbPatch, verbUpdate)
+
+	d := NewDeployer(clientset, Config{
+		Namespace: testNamespace,
+		Image:     "aicr:test",
+		RunID:     testRunID,
+	})
+	if err := d.Deploy(ctx); err != nil {
+		t.Fatalf("Deploy() error = %v; an existing, labeled namespace must need no namespace write", err)
+	}
+
+	if got, want := namespaceVerbs(clientset), []string{verbGet}; !slices.Equal(got, want) {
+		t.Errorf("namespace requests = %v, want %v", got, want)
+	}
+	if !d.hasCreated(kindServiceAccount) {
+		t.Error("prefix mode created no run-scoped ServiceAccount")
+	}
+}
+
+// TestDeploy_PrefixModeMissingNamespaceNotCreatable keeps the failure
+// explicit when the namespace does not exist and the caller may not create
+// it: a permission error, not an internal one, and nothing created after it.
+func TestDeploy_PrefixModeMissingNamespaceNotCreatable(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+
+	clientset := fake.NewClientset()
+	allowAllPermissionChecks(clientset)
+	forbidNamespaceVerbs(clientset, verbCreate)
+
+	d := NewDeployer(clientset, Config{
+		Namespace: testNamespace,
+		Image:     "aicr:test",
+		RunID:     testRunID,
+	})
+	err := d.Deploy(ctx)
+	if err == nil {
+		t.Fatal("Deploy() error = nil; a missing namespace the caller cannot create must fail the run")
+	}
+	errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeUnauthorized)
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("Deploy() error = %v, want it to say the namespace does not exist", err)
+	}
+	if _, jobErr := clientset.BatchV1().Jobs(testNamespace).Get(ctx, d.jobName(), metav1.GetOptions{}); !apierrors.IsNotFound(jobErr) {
+		t.Errorf("Job Get error = %v, want NotFound", jobErr)
+	}
+	assertNoRBACObjects(ctx, t, clientset)
+}
+
+// TestEnsureNamespace covers every branch of the prefix-mode namespace flow:
+// read first, create only when the namespace is absent or unreadable, and
+// label an existing namespace only when the label is missing.
+func TestEnsureNamespace(t *testing.T) {
+	nsGR := schema.GroupResource{Resource: namespacesResource}
+
+	tests := []struct {
+		name string
+		// seedLabels, when non-nil, pre-creates the namespace with them.
+		seedLabels map[string]string
+		// forbid lists the Namespace verbs the caller does not hold.
+		forbid []string
+		// reactors installs any further Namespace reactors.
+		reactors    func(*fake.Clientset)
+		wantVerbs   []string
+		wantErrCode aicrerrors.ErrorCode
+		wantErrMsg  string
+		// wantLabels is the namespace's labels afterwards; nil skips the
+		// check (the namespace is not expected to exist).
+		wantLabels map[string]string
+	}{
+		{
+			name:       "absent namespace is created with the label",
+			wantVerbs:  []string{verbGet, verbCreate},
+			wantLabels: map[string]string{labelAppManagedBy: appName},
+		},
+		{
+			name:       "existing labeled namespace needs no write",
+			seedLabels: map[string]string{labelAppManagedBy: appName},
+			forbid:     []string{verbCreate, verbPatch, verbUpdate},
+			wantVerbs:  []string{verbGet},
+			wantLabels: map[string]string{labelAppManagedBy: appName},
+		},
+		{
+			name:       "existing unlabeled namespace is labeled without create",
+			seedLabels: map[string]string{"foo": "bar"},
+			forbid:     []string{verbCreate},
+			wantVerbs:  []string{verbGet, verbPatch},
+			wantLabels: map[string]string{"foo": "bar", labelAppManagedBy: appName},
+		},
+		{
+			name:        "absent namespace the caller may not create fails explicitly",
+			forbid:      []string{verbCreate},
+			wantVerbs:   []string{verbGet, verbCreate},
+			wantErrCode: aicrerrors.ErrCodeUnauthorized,
+			wantErrMsg:  "does not exist and the caller may not create it",
+		},
+		{
+			name:       "unreadable namespace falls back to create",
+			forbid:     []string{verbGet},
+			wantVerbs:  []string{verbGet, verbCreate},
+			wantLabels: map[string]string{labelAppManagedBy: appName},
+		},
+		{
+			name:        "unreadable namespace the caller may not create fails explicitly",
+			seedLabels:  map[string]string{labelAppManagedBy: appName},
+			forbid:      []string{verbGet, verbCreate},
+			wantVerbs:   []string{verbGet, verbCreate},
+			wantErrCode: aicrerrors.ErrCodeUnauthorized,
+			wantErrMsg:  "may neither read nor create",
+		},
+		{
+			name:        "existing namespace the caller may create but not read fails explicitly",
+			seedLabels:  map[string]string{labelAppManagedBy: appName},
+			forbid:      []string{verbGet},
+			wantVerbs:   []string{verbGet, verbCreate, verbGet},
+			wantErrCode: aicrerrors.ErrCodeUnauthorized,
+			wantErrMsg:  "exists but the caller may not read it",
+			wantLabels:  map[string]string{labelAppManagedBy: appName},
+		},
+		{
+			name:        "namespace labeled by another manager the caller may not patch fails explicitly",
+			seedLabels:  map[string]string{labelAppManagedBy: "Helm"},
+			forbid:      []string{verbPatch},
+			wantVerbs:   []string{verbGet, verbPatch},
+			wantErrCode: aicrerrors.ErrCodeUnauthorized,
+			wantErrMsg:  "may not label namespace",
+			wantLabels:  map[string]string{labelAppManagedBy: "Helm"},
+		},
+		{
+			name:       "namespace created after the read is labeled",
+			seedLabels: map[string]string{"foo": "bar"},
+			reactors: func(clientset *fake.Clientset) {
+				var reads int
+				clientset.PrependReactor(verbGet, namespacesResource, func(k8stesting.Action) (bool, runtime.Object, error) {
+					reads++
+					if reads == 1 {
+						return true, nil, apierrors.NewNotFound(nsGR, testNamespace)
+					}
+					return false, nil, nil
+				})
+			},
+			wantVerbs:  []string{verbGet, verbCreate, verbGet, verbPatch},
+			wantLabels: map[string]string{"foo": "bar", labelAppManagedBy: appName},
+		},
+		{
+			name: "unexpected read error fails without a create",
+			reactors: func(clientset *fake.Clientset) {
+				clientset.PrependReactor(verbGet, namespacesResource, func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewInternalError(stderrors.New("apiserver exploded"))
+				})
+			},
+			wantVerbs:   []string{verbGet},
+			wantErrCode: aicrerrors.ErrCodeInternal,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var objs []runtime.Object
+			if tt.seedLabels != nil {
+				objs = append(objs, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+					Name: testNamespace, Labels: maps.Clone(tt.seedLabels),
+				}})
+			}
+			clientset := fake.NewClientset(objs...)
+			forbidNamespaceVerbs(clientset, tt.forbid...)
+			if tt.reactors != nil {
+				tt.reactors(clientset)
+			}
+
+			d := NewDeployer(clientset, Config{Namespace: testNamespace, RunID: testRunID})
+			err := d.ensureNamespace(context.Background())
+
+			if tt.wantErrCode != "" {
+				if err == nil {
+					t.Fatalf("ensureNamespace() error = nil, want %s", tt.wantErrCode)
+				}
+				errorstest.WantReportedCode(t, err, tt.wantErrCode)
+				if !strings.Contains(err.Error(), tt.wantErrMsg) {
+					t.Errorf("ensureNamespace() error = %v, want it to contain %q", err, tt.wantErrMsg)
+				}
+			} else if err != nil {
+				t.Fatalf("ensureNamespace() error = %v", err)
+			}
+
+			if got := namespaceVerbs(clientset); !slices.Equal(got, tt.wantVerbs) {
+				t.Errorf("namespace requests = %v, want %v", got, tt.wantVerbs)
+			}
+			if tt.wantLabels != nil {
+				if got := trackedNamespace(t, clientset, testNamespace).Labels; !maps.Equal(got, tt.wantLabels) {
+					t.Errorf("namespace labels = %v, want %v", got, tt.wantLabels)
+				}
+			}
+		})
+	}
 }

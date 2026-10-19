@@ -37,6 +37,8 @@ cd "${SCRIPT_DIR}"
 RELEASE='k8s-aibom'
 NAMESPACE='k8s-aibom-system'
 RELEASE_FILTER='^k8s-aibom$'
+# Subcharts whose CRDs another component owns; their crds/ is not collected.
+EXCLUDE_SUBCHARTS=()
 
 if ! command -v kubectl >/dev/null 2>&1; then
   echo "ERROR: kubectl is required to apply ${RELEASE} CRDs before upgrade." >&2
@@ -284,6 +286,17 @@ capture_bounded() {
   return ${rc}
 }
 
+# excluded_path reports whether $1 lies under an excluded subchart's directory.
+excluded_path() {
+  local name
+  for name in ${EXCLUDE_SUBCHARTS[@]+"${EXCLUDE_SUBCHARTS[@]}"}; do
+    case "$1" in
+      */charts/"${name}"/*|*/charts/"${name}"-[0-9]*.tgz) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 # Read CRDs out of the chart archive rather than out of `helm show crds`.
 #
 # That command's output shape is version-dependent: Helm 4 prepends "---"
@@ -316,6 +329,7 @@ collect_crds() { # $1 = chart .tgz, $2 = destination directory
   fi
   while IFS= read -r f; do
     [[ -z "${f}" ]] && continue
+    excluded_path "${f}" && continue
     if ! cp "${f}" "${2}/$(printf '%s' "${f#"${work}"/}" | tr '/' '_')"; then
       rm -rf "${work}"
       return 1
@@ -332,6 +346,7 @@ collect_crds() { # $1 = chart .tgz, $2 = destination directory
   fi
   while IFS= read -r sub; do
     [[ -z "${sub}" ]] && continue
+    excluded_path "${sub}" && continue
     if ! collect_crds "${sub}" "${2}"; then
       echo "ERROR: cannot read the packaged dependency ${sub##*/}; refusing to" >&2
       echo "       continue and report its CRDs as absent." >&2

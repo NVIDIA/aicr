@@ -15,11 +15,12 @@
 package expr
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestParseConstraintExpression(t *testing.T) {
@@ -78,7 +79,7 @@ func TestParseConstraintExpression(t *testing.T) {
 					t.Errorf("expected error, got nil")
 					return
 				}
-				if tt.wantErrCode != "" && !stderrors.Is(err, errors.New(tt.wantErrCode, "")) {
+				if tt.wantErrCode != "" && errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Errorf("error = %v, want code %s", err, tt.wantErrCode)
 				}
 				return
@@ -632,7 +633,7 @@ func TestParseConstraintExpression_MalformedGKESuffix(t *testing.T) {
 				t.Errorf("ParseConstraintExpression(%q) error = %v, wantErr %v", tt.expr, err, tt.wantErr)
 			}
 			if err != nil && tt.wantErrCode != "" {
-				if !stderrors.Is(err, errors.New(tt.wantErrCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Errorf("ParseConstraintExpression(%q) error code = %v, want %v", tt.expr, err, tt.wantErrCode)
 				}
 			}

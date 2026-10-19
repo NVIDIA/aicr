@@ -41,8 +41,90 @@ spec:
         enableDNSHostnames: true
         publishNotReadyAddresses: true
       replicatedJobs:
+      - name: node
+        template:
+          spec:
+            template:
+              spec:
+                resourceClaims:
+                - name: imex-channel
+                  resourceClaimTemplateName: nccl-all-reduce-imex
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command: ["sh", "-c"]
+                  args:
+                  # sshd is installed at runtime. HTTPS and the main component
+                  # only (35 MB of indexes down to ~6 MB): plain-HTTP fetches
+                  # from ports.ubuntu.com were observed to stall for minutes
+                  # (#3109). ca-certificates ships in the image. Skipped for an
+                  # AICR_NCCL_RUNTIME_IMAGE override without a deb822 sources file.
+                  - |
+                    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                      sed -i -e 's|http://ports.ubuntu.com|https://ports.ubuntu.com|g' \
+                             -e 's|^Components:.*|Components: main|' /etc/apt/sources.list.d/ubuntu.sources
+                    fi &&
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys &&
+                    /usr/sbin/sshd -De
+                  # Ready only once sshd listens; the launcher's dependsOn
+                  # waits on it, so mpirun never races the install.
+                  readinessProbe:
+                    tcpSocket:
+                      port: 22
+                    periodSeconds: 5
+                    failureThreshold: 120
+                  resources:
+                    claims:
+                    - name: imex-channel
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                  - name: dshm
+                    mountPath: /dev/shm
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+      # Listed after "node": JobSet requires a dependsOn target to precede
+      # the job that depends on it.
       - name: launcher
         replicas: 1
+        dependsOn:
+        - name: node
+          status: Ready
         template:
           spec:
             template:
@@ -122,71 +204,6 @@ spec:
                 volumes:
                 - name: ssh-config
                   emptyDir: {}
-      - name: node
-        template:
-          spec:
-            template:
-              spec:
-                resourceClaims:
-                - name: imex-channel
-                  resourceClaimTemplateName: nccl-all-reduce-imex
-                initContainers:
-                - name: fix-ssh-perms
-                  image: nvcr.io/nvidia/pytorch:25.06-py3
-                  command:
-                  - /bin/sh
-                  - -c
-                  - |
-                    apt-get update &&
-                    apt-get install -y --no-install-recommends openssh-server &&
-                    mkdir -p /var/run/sshd &&
-                    chmod 0755 /var/run/sshd &&
-                    mkdir -p /root/.ssh &&
-                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys &&
-                    chmod 700 /root/.ssh &&
-                    chmod 600 /root/.ssh/authorized_keys
-                  volumeMounts:
-                  - name: mpi-ssh-auth
-                    mountPath: /tmp/mpi-keys
-                    readOnly: true
-                  - name: ssh-config
-                    mountPath: /root/.ssh
-                containers:
-                - name: node
-                  image: nvcr.io/nvidia/pytorch:25.06-py3
-                  command: ["sh", "-c"]
-                  args:
-                  - |
-                    apt-get update &&
-                    apt-get install -y --no-install-recommends openssh-server &&
-                    mkdir -p /var/run/sshd &&
-                    chmod 0755 /var/run/sshd &&
-                    mkdir -p /root/.ssh &&
-                    cp /tmp/mpi-keys/* /root/.ssh/ &&
-                    chmod 700 /root/.ssh &&
-                    chmod 600 /root/.ssh/authorized_keys &&
-                    /usr/sbin/sshd -De
-                  resources:
-                    claims:
-                    - name: imex-channel
-                    limits:
-                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
-                    requests:
-                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
-                  securityContext:
-                    capabilities:
-                      add: ["IPC_LOCK"]
-                  volumeMounts:
-                  - name: ssh-config
-                    mountPath: /root/.ssh
-                  - name: dshm
-                    mountPath: /dev/shm
-                volumes:
-                - name: ssh-config
-                  emptyDir: {}
-                - name: dshm
-                  emptyDir:
-                    medium: Memory
       successPolicy:
         operator: All
         targetReplicatedJobs:

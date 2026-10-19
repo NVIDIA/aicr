@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -428,7 +430,7 @@ func TestWithSnapshotCriteriaRelaxation_OptionConfig(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected an error for an unknown dimension, got nil")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -740,7 +742,7 @@ func TestWithSnapshotCriteriaRelaxation_RejectedOnCriteriaPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected WithSnapshotCriteriaRelaxation to be rejected on the criteria-only path")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "snapshot resolve path") {

@@ -34,10 +34,10 @@ import (
 // inapplicable Skip — otherwise a false-PASS lets a broken or unauthorized
 // cluster pass conformance.
 //
-// #1327 boundary: standalone validator runs carry no recipe context (empty
-// ComponentRefs; see pkg/validator/v1.ToValidationInput), so RecipeDeclares
-// returns false and capability-driven automatic selection keeps its existing
-// Skip behavior. Fail-closed fires ONLY once the recipe actually declares the
+// #1327 boundary: standalone validator runs carry no recipe context (no
+// ValidationInput, or one with no ComponentRefs), so RecipeDeclares returns
+// false and capability-driven automatic selection keeps its existing Skip
+// behavior. Fail-closed fires ONLY once the recipe actually declares the
 // dependency.
 
 // RecipeDeclares reports whether component is present AND enabled in the

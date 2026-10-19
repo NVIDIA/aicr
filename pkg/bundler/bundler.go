@@ -40,6 +40,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/flux"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helmfile"
+	tfdeployer "github.com/NVIDIA/aicr/pkg/bundler/deployer/terraform"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/types"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
@@ -300,24 +301,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, err
 	}
 
-	enabledRefs, filteredOrder, excludedReasons, filterErr := b.filterEnabledComponents(recipeResult)
-	if filterErr != nil {
-		return nil, filterErr
+	recipeResult, err := b.filterAndValidateRecipe(recipeResult)
+	if err != nil {
+		return nil, err
 	}
-
-	// A --set / --set-json / --set-file naming a component that is not in
-	// the generated bundle cannot take effect. Reject it rather than drop
-	// it on the floor. Runs immediately after filtering, so the "present"
-	// set is exactly what will be rendered.
-	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, enabledRefs, excludedReasons); overrideErr != nil {
-		return nil, overrideErr
-	}
-
-	// Work on a shallow copy so the caller's RecipeResult is not mutated
-	filtered := *recipeResult
-	filtered.ComponentRefs = enabledRefs
-	filtered.DeploymentOrder = filteredOrder
-	recipeResult = &filtered
 
 	// Bundle-time override policy for GPU allocation-policy keys (#1327):
 	// reject --dynamic declarations, warn on static overrides. Runs after
@@ -358,6 +345,8 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if warningErr := b.warnPeermemReadinessDisabled(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
+	b.warnNFDNICLabelMismatch(componentValues)
+	b.warnNRIManagementAllowlist(recipeResult, componentValues)
 
 	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
@@ -814,21 +803,29 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	// Readiness gate emission is wired for the deployers whose ordering
 	// primitive can block on the gate Job:
 	//   - helm: deploy.sh runs the folder's install.sh with
-	//     `helm upgrade --install --wait --wait-for-jobs`.
+	//     `helm upgrade --install --wait`; the gate Job is a helm hook, and
+	//     helm blocks on hook completion as part of the release.
 	//   - argocd / argocd-helm: the gate folder inherits the next sync-wave,
 	//     and Argo CD's built-in batch/Job health blocks that wave until the
 	//     Job completes.
+	//   - terraform: the gate is the last helm_release in the component's
+	//     module call, and the provider blocks on the hook as helm does.
 	// Flux and helmfile wrap each folder in HelmRelease / needs semantics that
 	// need dedicated gating wiring (not yet implemented). Fail clearly rather
 	// than silently dropping the opt-in flag and shipping a bundle without the
 	// readiness gate the user asked for. See #904.
 	if b.Config.ReadinessHooks() {
 		switch b.Config.Deployer() {
-		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm:
-			// supported
+		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm, config.DeployerTerraform:
+			// supported. terraform gates on the emitted readiness release
+			// natively: the gate arrives as one more folder in the
+			// component's chain and becomes the last helm_release in its
+			// module; the gate Job is a helm hook, so that release does not
+			// apply until the Job COMPLETES, and a dependent's depends_on
+			// on the module call waits for it.
 		case config.DeployerFlux, config.DeployerHelmfile:
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm",
+				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm, terraform",
 					b.Config.Deployer()))
 		}
 	}
@@ -1018,6 +1015,9 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			Serial:                 b.Config.Serial(),
 		}, nil
 
+	case config.DeployerTerraform:
+		return b.terraformDeployer(ctx, recipeResult, componentValues, dynamicValues, dataFiles, upgradeNotice)
+
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
@@ -1128,7 +1128,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 
 	// Map deployer type to result and deployment names
-	resultType, deploymentType := deployerResultNames(b.Config.Deployer())
+	resultType, deploymentType := deployerResultNames(b.Config.Deployer(), b.Config.TerraformChildModule())
 
 	// Build result
 	resultOutput := &result.Output{
@@ -1173,9 +1173,55 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	return resultOutput, nil
 }
 
+// terraformDeployer builds the terraform Generator, the one deployer that
+// collects all three manifest kinds (pre, post, readiness).
+func (b *DefaultBundler) terraformDeployer(
+	ctx context.Context,
+	recipeResult *recipe.RecipeResult,
+	componentValues map[string]map[string]any,
+	dynamicValues map[string][]string,
+	dataFiles []string,
+	upgradeNotice string,
+) (deployer.Deployer, error) {
+
+	componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to collect component pre-manifests")
+	}
+	componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to collect component post-manifests")
+	}
+	componentReadiness, err := b.collectComponentReadiness(ctx, recipeResult)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to collect component readiness manifests")
+	}
+	return &tfdeployer.Generator{
+		RecipeResult:           recipeResult,
+		ComponentValues:        componentValues,
+		Version:                b.Config.Version(),
+		IncludeChecksums:       false,
+		UpgradeNotice:          upgradeNotice,
+		ComponentPreManifests:  componentPreManifests,
+		ComponentPostManifests: componentPostManifests,
+		ComponentReadiness:     componentReadiness,
+		DataFiles:              dataFiles,
+		DynamicValues:          dynamicValues,
+		VendorCharts:           b.Config.VendorCharts(),
+		ClusterRollover:        b.Config.TerraformClusterRollover(),
+		ChildModule:            b.Config.TerraformChildModule(),
+		Serial:                 b.Config.Serial(),
+	}, nil
+}
+
 // deployerResultNames returns the result type and deployment type display names
 // for a given deployer type, preserving the human-readable names used in output.
-func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
+// terraformChildModule distinguishes the two forms the terraform deployer emits;
+// it is ignored for every other deployer.
+func deployerResultNames(dt config.DeployerType, terraformChildModule bool) (types.BundleType, string) {
 	switch dt {
 	case config.DeployerHelm:
 		return "helm-bundle", "Helm per-component bundle"
@@ -1187,6 +1233,11 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 		return "flux-manifests", "Flux manifests"
 	case config.DeployerHelmfile:
 		return "helmfile-bundle", "Helmfile release graph"
+	case config.DeployerTerraform:
+		if terraformChildModule {
+			return "terraform-bundle", "Terraform child module"
+		}
+		return "terraform-bundle", "Terraform root module"
 	default:
 		return types.BundleType(dt), string(dt)
 	}
@@ -1436,6 +1487,31 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 	return mergeOverridesAcrossKeys(allOverrides, b.componentOverrideKeys(componentName, provider))
 }
 
+func (b *DefaultBundler) filterAndValidateRecipe(recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, error) {
+	enabledRefs, filteredOrder, excludedReasons, filterErr := b.filterEnabledComponents(recipeResult)
+	if filterErr != nil {
+		return nil, filterErr
+	}
+
+	// A --set / --set-json / --set-file naming a component that is not in
+	// the generated bundle cannot take effect. Reject it rather than drop
+	// it on the floor. Runs immediately after filtering, so the "present"
+	// set is exactly what will be rendered.
+	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, enabledRefs, excludedReasons); overrideErr != nil {
+		return nil, overrideErr
+	}
+
+	// Work on a shallow copy so the caller's RecipeResult is not mutated
+	filtered := *recipeResult
+	filtered.ComponentRefs = enabledRefs
+	filtered.DeploymentOrder = filteredOrder
+	spec := recipe.RecipeMetadataSpec{ComponentRefs: filtered.ComponentRefs}
+	if err := spec.ValidateDependencies(); err != nil {
+		return nil, err
+	}
+	return &filtered, nil
+}
+
 // filterEnabledComponents resolves the set of components to bundle by applying
 // recipe-level overrides.enabled, bundle-time --set enabled toggles, and the
 // positive bundlers component-name filter (config.WithBundlers, #1531), then
@@ -1560,8 +1636,8 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 	// removed above. After filtering, such a dependency is no longer present in
 	// the ref slice, so a deployer that recomputes ordering from these refs
 	// (e.g. helmfile via ComponentRefsTopologicalLevels) would otherwise treat
-	// the dangling edge as an undeclared dependency and fail with a false
-	// circular-dependency error. The dependency is assumed satisfied externally
+	// the dangling edge as an undeclared dependency and report it as missing.
+	// The dependency is assumed satisfied externally
 	// (the reason it was disabled). An edge to a genuinely undeclared component
 	// is left intact so topology validation still errors on a malformed recipe.
 	for i := range enabledRefs {
@@ -1855,7 +1931,7 @@ type schedulingPathPolicy struct {
 	// these", so CLI tolerations augment the overlay list rather than
 	// replace it (e.g. bcm.yaml's `controller.tolerations` for the
 	// BCM-master taints must coexist with the KWOK system-pool taint
-	// passed via --system-node-toleration).
+	// passed via --system-node-toleration). Appended entries are deduplicated.
 	appendMode map[string]struct{}
 }
 
@@ -1979,6 +2055,37 @@ func splitPaths(paths []string, appendMode map[string]struct{}) (appendPaths, re
 	return
 }
 
+// applyTolerationPaths writes tolerations to paths under the policy: opt-out
+// paths are skipped, append-mode paths are appended to, the rest replaced.
+func applyTolerationPaths(values map[string]any, tolerations []corev1.Toleration, paths []string, policy schedulingPathPolicy) {
+	if len(tolerations) == 0 {
+		return
+	}
+	paths = filterPaths(paths, policy.optOut)
+	if len(paths) == 0 {
+		return
+	}
+	appendPaths, replacePaths := splitPaths(paths, policy.appendMode)
+	if len(replacePaths) > 0 {
+		component.ApplyTolerationsOverrides(values, tolerations, replacePaths...)
+	}
+	if len(appendPaths) > 0 {
+		component.AppendTolerationsOverrides(values, tolerations, appendPaths...)
+	}
+}
+
+// pathSet returns paths as a set, in the shape filterPaths takes for skip.
+func pathSet(paths []string) map[string]struct{} {
+	if len(paths) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		set[p] = struct{}{}
+	}
+	return set
+}
+
 // applyNodeSchedulingOverrides applies node selectors and tolerations to component values.
 // Uses the component registry to determine the correct paths for each component.
 // The provider argument scopes the registry lookup to the recipe's bound DataProvider;
@@ -1988,9 +2095,10 @@ func splitPaths(paths []string, appendMode map[string]struct{}) (appendPaths, re
 // computed once at the top of extractComponentValues. opt-out paths are
 // skipped entirely; append-mode paths receive CLI tolerations appended to
 // whatever the overlay already wrote (so bcm.yaml's BCM-master tolerations
-// coexist with --system-node-toleration); other paths use REPLACE semantics
-// so the documented system → accelerated overwrite for shared paths like
-// NFD's worker.tolerations still produces "accelerated wins".
+// coexist with --system-node-toleration); other paths use REPLACE semantics.
+// A toleration path declared under both tiers (component.SharedTolerationPaths)
+// is written once with component.SharedTolerations, so NFD's worker DaemonSet
+// tolerates both system and GPU taints (#3135).
 //
 // Does not enforce requireNodeSelector: a later --set-json/--set-file
 // override can null out an injected selector, so validateRequiredNodeSelectors
@@ -2025,19 +2133,15 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		}
 	}
 
-	// Apply system tolerations — split into append-mode (overlay had a
-	// non-empty list, e.g. bcm) and replace-mode (no overlay).
-	if tolerations := b.Config.SystemNodeTolerations(); len(tolerations) > 0 {
-		if paths := filterPaths(comp.GetSystemTolerationPaths(), policy.optOut); len(paths) > 0 {
-			appendPaths, replacePaths := splitPaths(paths, policy.appendMode)
-			if len(replacePaths) > 0 {
-				component.ApplyTolerationsOverrides(values, tolerations, replacePaths...)
-			}
-			if len(appendPaths) > 0 {
-				component.AppendTolerationsOverrides(values, tolerations, appendPaths...)
-			}
-		}
-	}
+	// Tolerations: a path declared under both tiers is written once with the
+	// union (after the accelerated pass); every other path gets its tier's list.
+	systemTols := b.Config.SystemNodeTolerations()
+	acceleratedTols := b.Config.AcceleratedNodeTolerations()
+	systemTolPaths := comp.GetSystemTolerationPaths()
+	acceleratedTolPaths := comp.GetAcceleratedTolerationPaths()
+	shared := component.SharedTolerationPaths(systemTolPaths, acceleratedTolPaths)
+	sharedSet := pathSet(shared)
+	applyTolerationPaths(values, systemTols, filterPaths(systemTolPaths, sharedSet), policy)
 
 	// Apply accelerated node selector
 	acceleratedSelector := b.Config.AcceleratedNodeSelector()
@@ -2047,18 +2151,9 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		}
 	}
 
-	// Apply accelerated tolerations
-	if tolerations := b.Config.AcceleratedNodeTolerations(); len(tolerations) > 0 {
-		if paths := filterPaths(comp.GetAcceleratedTolerationPaths(), policy.optOut); len(paths) > 0 {
-			appendPaths, replacePaths := splitPaths(paths, policy.appendMode)
-			if len(replacePaths) > 0 {
-				component.ApplyTolerationsOverrides(values, tolerations, replacePaths...)
-			}
-			if len(appendPaths) > 0 {
-				component.AppendTolerationsOverrides(values, tolerations, appendPaths...)
-			}
-		}
-	}
+	applyTolerationPaths(values, acceleratedTols, filterPaths(acceleratedTolPaths, sharedSet), policy)
+
+	applyTolerationPaths(values, component.SharedTolerations(systemTols, acceleratedTols), shared, policy)
 
 	// Apply workload selector
 	if workloadSelector := b.Config.WorkloadSelector(); len(workloadSelector) > 0 {
@@ -3418,11 +3513,13 @@ const draChartVersionAnnotation = header.Domain + "/gpu-operator-chart-version"
 // filtered resolved recipe before derived values are written; recipes that
 // disable either remain untouched.
 const (
-	gpuOperatorComponentName      = "gpu-operator"
-	draComponentName              = "nvidia-dra-driver-gpu"
-	draEvictionEnvName            = "NODE_LABEL_FOR_GPU_POD_EVICTION"
-	draEvictionNodeSelectorPath   = "kubeletPlugin.nodeSelector"
-	gpuOperatorDRAEvictionEnvPath = "driver.manager.env"
+	gpuOperatorComponentName       = "gpu-operator"
+	gpuOperatorOCPComponentName    = "gpu-operator-ocp"
+	gpuOperatorOCPOLMComponentName = "gpu-operator-ocp-olm"
+	draComponentName               = "nvidia-dra-driver-gpu"
+	draEvictionEnvName             = "NODE_LABEL_FOR_GPU_POD_EVICTION"
+	draEvictionNodeSelectorPath    = "kubeletPlugin.nodeSelector"
+	gpuOperatorDRAEvictionEnvPath  = "driver.manager.env"
 
 	// draNodeLabelerComponentName is the manifest-only component that mirrors
 	// GFD's nvidia.com/gpu.present onto the eviction label, so the label is
@@ -3432,17 +3529,18 @@ const (
 	draNodeLabelerComponentName = "dra-node-labeler"
 	draNodeLabelerKeyPath       = "labelKey"
 	draNodeLabelerValuePath     = "labelValue"
-	// draNodeLabelerEnabledPath is the manifest's render gate. The manifest is
-	// default-off (values.yaml enabled: false) so the deployment validator,
-	// which resolves effective values without the bundle-time eviction flag,
-	// sees an empty render and suppresses the health check on the default path
-	// (issue #2846). The bundler flips it true here in the same opt-in path
-	// that keeps the component in the bundle, so bundle and gate never drift.
+	// draNodeLabelerEnabledPath is the manifest's render gate, default-off in
+	// values.yaml, and the same key as the ComponentRef `enabled` override
+	// IsEnabled reads: overrides merge into component values. On the opt-in
+	// path the bundler sets it true in the Helm values AND on the labeler's
+	// ref, so the recipe.yaml written into the bundle renders the labeler for
+	// the deployment validator (#2846, #2848). A recipe without the opt-in
+	// renders nothing and the validator suppresses the health check.
 	draNodeLabelerEnabledPath = "enabled"
 )
 
 var (
-	gpuOperatorComponentNames = []string{gpuOperatorComponentName, "gpu-operator-ocp"}
+	gpuOperatorComponentNames = []string{gpuOperatorComponentName, gpuOperatorOCPComponentName}
 	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
 )
 
@@ -3673,6 +3771,7 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		// the bundle only on this opt-in path, so this is where its objects
 		// must start rendering (issue #2846).
 		values[draNodeLabelerEnabledPath] = true
+		persistDRANodeLabelerGate(recipeResult)
 		b.warnDRAEvictionLabelDerived(draNames, label)
 		return nil
 	}
@@ -3680,6 +3779,24 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 	b.warnDRAEvictionNodeLabelRequired(draNames, label)
 
 	return nil
+}
+
+// persistDRANodeLabelerGate records the labeler's effective render gate on its
+// ComponentRef. componentValues never reach the recipe.yaml written into the
+// bundle; the deployment validator reads that file, so without this the
+// deployed labeler resolves enabled=false there and its health check is
+// suppressed (#2848). The Overrides map is copied first because the filtered
+// recipe still shares it with the caller's RecipeResult.
+func persistDRANodeLabelerGate(recipeResult *recipe.RecipeResult) {
+	for i := range recipeResult.ComponentRefs {
+		ref := &recipeResult.ComponentRefs[i]
+		if ref.Name != draNodeLabelerComponentName {
+			continue
+		}
+		overrides := serializer.DeepCopyAnyMap(ref.Overrides)
+		overrides[draNodeLabelerEnabledPath] = true
+		ref.Overrides = overrides
+	}
 }
 
 // warnDRAEvictionLabelDerived is the counterpart of
@@ -3933,7 +4050,7 @@ func invalidDRAEvictionManagedValue(componentName, path, wantType string, value 
 // Injection point: called from DefaultBundler.Make AFTER
 // extractComponentValues (so the values map is populated and user
 // --set overrides have already been applied) and BEFORE buildDeployer
-// (so every deployer — Helm, helmfile, Flux, Argo CD, argocd-helm —
+// (so every deployer — Helm, helmfile, Flux, Argo CD, argocd-helm, terraform —
 // receives the same final map). Placing the call after --set means a
 // user override of this specific annotation key is intentionally NOT
 // honored; the annotation must always reflect the actual resolved
@@ -3971,6 +4088,31 @@ func (b *DefaultBundler) injectDRAChartVersionAnnotation(
 		// matches the "no chart pin, no rollout trigger" semantic and
 		// is exercised by the disabled-component unit tests.
 		return
+	}
+	if gpuOperatorComponentName == gpuOperatorOCPComponentName && gpuOperatorVersion == "" {
+		// gpu-operator-ocp is a ClusterPolicy CR, not a Helm chart, so
+		// ComponentRef.Version is never populated for it — the empty
+		// check below would always skip injection on OCP. Fall back to
+		// the OLM Subscription channel (gpu-operator-ocp-olm) as the
+		// rollout-trigger value instead.
+		//
+		// KNOWN LIMITATION: the channel pin (e.g. "v25.10") only
+		// changes on a channel re-pin, not on every operator update.
+		// With installPlanApproval: Automatic (the default —
+		// components/gpu-operator-ocp-olm/values.yaml), OLM can
+		// upgrade to newer CSVs inside the same channel — reloading
+		// the driver — without the channel string changing, so this
+		// annotation catches bundle-driven operator bumps (a recipe
+		// regenerated against a different channel) but NOT in-channel
+		// auto-upgrades. The stale-NVML gap this annotation exists to
+		// close (#973) remains open for that case on OCP. See #2135.
+		if olmValues, ok := componentValues[gpuOperatorOCPOLMComponentName]; ok {
+			if sub, ok := olmValues["subscription"].(map[string]any); ok {
+				if channel, ok := sub["channel"].(string); ok {
+					gpuOperatorVersion = channel
+				}
+			}
+		}
 	}
 	if gpuOperatorVersion == "" {
 		// gpu-operator is enabled but the resolver produced an empty

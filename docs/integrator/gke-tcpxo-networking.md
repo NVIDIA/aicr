@@ -103,7 +103,8 @@ actually being usable, not just nameable:
   cluster. Verify a Network's state with:
 
   ```shell
-  kubectl get network.networking.gke.io <name> -o jsonpath='{.status.conditions}'
+  NETWORK="gpu-nic-0"  # replace with the gpu-nic Network to inspect
+  kubectl get network.networking.gke.io "${NETWORK}" -o jsonpath='{.status.conditions}'
   ```
 
 - **`gke-gpu-nic-topology`** (sibling) reads each a3 GPU node's
@@ -118,7 +119,8 @@ actually being usable, not just nameable:
   total). Verify a node's mapping with:
 
   ```shell
-  kubectl get node <gpu-node> -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
+  NODE="gke-my-cluster-a3-mega-pool-1a2b3c4d-x7k2"  # replace with the GPU node name
+  kubectl get node "${NODE}" -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
   ```
 
 ## The shipped `torch-distributed-tcpxo` runtime
@@ -337,7 +339,8 @@ the mapping on the deployed `ClusterTrainingRuntime` exactly and in order, and
 every network that mapping selects must exist on the cluster. It then derives
 the benchmark runtime from the deployed one — copying the worker pod template
 wholesale (metadata and spec), re-applying only the benchmark's own worker
-`image`, `command`, `args`, `resources`, and `terminationMessagePolicy`, and
+`image`, `command`, `args`, `resources`, `terminationMessagePolicy`, and
+`readinessProbe`, and
 merging volumes and mounts additively, so the workers run under the shipped
 NCCL environment rather than the fixture's — and labels the result
 `runtimeSource: delivered-artifact`. A mismatch in either comparison fails the
@@ -371,8 +374,9 @@ returns a successful *skipped* result without measuring bandwidth. The selected
 nodes also need **free** GPU capacity (the TrainJob places a full GPU node per
 worker); if the GPUs are already occupied the workers stay Pending and the check
 times out — it does not skip. If Kubeflow Trainer is not already installed, the validator
-downloads and installs it (Trainer v2.2.0 from GitHub, then removes it
-afterward), so the validator environment needs GitHub egress.
+downloads and installs it from GitHub, then removes it afterward, so the
+validator environment needs GitHub egress. See
+[Validation](../user/validation.md) for choosing the installed release.
 
 ### Manual standalone benchmark
 
@@ -420,8 +424,13 @@ kubectl delete ns nccl-test
 If RxDM reports `Number of GPUs detected 7 is not equal to the actual number of GPUs 8`, check the GPU node pool's additional network configuration:
 
 ```shell
-gcloud container node-pools describe <pool-name> \
-  --cluster <cluster> --region <region> --project <project> \
+POOL="a3-mega-pool"       # replace with the GPU node pool name
+CLUSTER="my-cluster"      # replace with your GKE cluster name
+REGION="us-central1"      # replace with the cluster region
+PROJECT="my-gcp-project"  # replace with your GCP project ID
+
+gcloud container node-pools describe "${POOL}" \
+  --cluster "${CLUSTER}" --region "${REGION}" --project "${PROJECT}" \
   --format="yaml(networkConfig.additionalNodeNetworkConfigs)"
 ```
 
@@ -430,7 +439,8 @@ If a **gVNIC network** appears in the list, it is taking a GPU NIC PCI slot. Rem
 You can also verify the node NIC mapping:
 
 ```shell
-kubectl get node <gpu-node> \
+NODE="gke-my-cluster-a3-mega-pool-1a2b3c4d-x7k2"  # replace with the GPU node name
+kubectl get node "${NODE}" \
   -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
 ```
 

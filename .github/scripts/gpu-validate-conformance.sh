@@ -15,9 +15,10 @@
 
 set -euo pipefail
 
+# bundle/recipe.yaml is the deployed set generate-bundle.sh wrote (#2848).
 AICR_VALIDATOR_IMAGE_REGISTRY=ko.local \
 ./aicr validate \
-  --recipe recipe.yaml \
+  --recipe bundle/recipe.yaml \
   --snapshot snapshot.yaml \
   --phase conformance \
   --namespace gpu-operator \

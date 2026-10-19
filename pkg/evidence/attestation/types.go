@@ -143,10 +143,15 @@ func CTRFRelPath(p Phase) string {
 // Fingerprint and CriteriaMatch are pkg/fingerprint types used
 // directly so the predicate-v1 schema stays exactly aligned with what
 // fingerprint.FromMeasurements and Fingerprint.Match produce.
+//
+// AICRCommit is the git commit the aicr binary was built from. It is
+// omitted when the binary carries no valid commit stamp, so evidence from
+// an unstamped build serializes without the field.
 type Predicate struct {
 	SchemaVersion           string                  `json:"schemaVersion" yaml:"schemaVersion"`
 	AttestedAt              time.Time               `json:"attestedAt" yaml:"attestedAt"`
 	AICRVersion             string                  `json:"aicrVersion" yaml:"aicrVersion"`
+	AICRCommit              string                  `json:"aicrCommit,omitempty" yaml:"aicrCommit,omitempty"`
 	ValidatorCatalogVersion string                  `json:"validatorCatalogVersion" yaml:"validatorCatalogVersion"`
 	ValidatorImages         []ValidatorImage        `json:"validatorImages" yaml:"validatorImages"`
 	Recipe                  RecipeRef               `json:"recipe" yaml:"recipe"`
@@ -312,12 +317,21 @@ type PointerBundle struct {
 	PredicateType string `json:"predicateType" yaml:"predicateType"`
 }
 
-// PointerSigner records OIDC identity claims for the attestation
-// signer. Present only on signed bundles (see PointerAttestation.Signer
-// for the unsigned case). RekorLogIndex is nil when no Rekor entry was
-// created (e.g., signed with --no-rekor); a nil pointer distinguishes
-// that case from a legitimate Rekor index 0 — the first-ever Rekor
-// entry occupies that position.
+// KeySignerIssuer is the PointerSigner.Issuer of a bundle signed with a KMS
+// key rather than a keyless Fulcio certificate. A key signature carries no
+// OIDC issuer, so the pointer records this fixed value and identifies the
+// signer by its public key fingerprint instead.
+const KeySignerIssuer = "key"
+
+// PointerSigner records the attestation signer's identity claims. Present
+// only on signed bundles (see PointerAttestation.Signer for the unsigned
+// case). A keyless signature records the Fulcio certificate's OIDC identity
+// and issuer; a KMS key signature records Issuer KeySignerIssuer and, as
+// Identity, the key's "sha256:<hex>" fingerprint (SHA-256 of the PKIX DER
+// public key). RekorLogIndex is nil when no Rekor entry was created (e.g.,
+// signed with --tlog-upload=false); a nil pointer distinguishes that case
+// from a legitimate Rekor index 0 — the first-ever Rekor entry occupies that
+// position.
 type PointerSigner struct {
 	Identity      string `json:"identity" yaml:"identity"`
 	Issuer        string `json:"issuer" yaml:"issuer"`

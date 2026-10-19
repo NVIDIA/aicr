@@ -457,6 +457,56 @@ func TestReplaceRegistry(t *testing.T) {
 	}
 }
 
+func TestApplyRegistryOverride(t *testing.T) {
+	const (
+		repoPath = "team/image"
+		img      = "registry.example.com/org/" + repoPath + ":v1.2.3"
+		mirrored = "localhost:5001/" + repoPath + ":v1.2.3"
+	)
+
+	tests := []struct {
+		name     string
+		registry string
+		tag      string
+		want     string
+	}{
+		{
+			name: "no override leaves the image unchanged",
+			want: img,
+		},
+		{
+			name:     "registry override replaces host and first path segment",
+			registry: "localhost:5001",
+			want:     mirrored,
+		},
+		{
+			name:     "registry override that keeps the source path",
+			registry: "mirror.example.com/org",
+			want:     "mirror.example.com/org/" + repoPath + ":v1.2.3",
+		},
+		{
+			name: "tag override is ignored",
+			tag:  "latest",
+			want: img,
+		},
+		{
+			name:     "tag override is ignored alongside a registry override",
+			registry: "localhost:5001",
+			tag:      "latest",
+			want:     mirrored,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", tt.registry)
+			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.tag)
+			if got := ApplyRegistryOverride(img); got != tt.want {
+				t.Errorf("ApplyRegistryOverride(%q) = %q, want %q", img, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadWithRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "localhost:5001")
 
@@ -1257,6 +1307,71 @@ func TestEmbeddedCatalog_NCCLEntriesExist(t *testing.T) {
 	}
 }
 
+func TestEmbeddedCatalog_CRENCCLAllReduceBWEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.CRENCCLAllReduceBWCheckName {
+			if v.Phase != "performance" {
+				t.Errorf("%q phase = %q, want performance", v1.CRENCCLAllReduceBWCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Fatalf("no embedded catalog entry named %q", v1.CRENCCLAllReduceBWCheckName)
+}
+
+func TestEmbeddedCatalog_CRETrainingGoodputEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.CRETrainingGoodputCheckName {
+			if v.Phase != "performance" {
+				t.Errorf("%q phase = %q, want performance", v1.CRETrainingGoodputCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Fatalf("no embedded catalog entry named %q", v1.CRETrainingGoodputCheckName)
+}
+
+// TestCRECatalogTimeoutCoversTeardown asserts both CRE checks budget the whole
+// serial path inside their catalog timeout: the Certification wait, the wait
+// for CRE to finalize the measurement, and the teardown that confirms the
+// TrainJobs are gone. The Job's activeDeadlineSeconds is the catalog timeout
+// plus only ValidatorJobDeadlineHeadroom, so a timeout that merely equals the
+// Certification wait gets the pod killed partway through teardown — the
+// creCleanupFailure guard never reports it and the TrainJobs keep holding GPUs
+// until CRE's own cleanup catches up.
+func TestCRECatalogTimeoutCoversTeardown(t *testing.T) {
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	required := defaults.CRECertificationTimeout +
+		defaults.CREMeasurementFinalizeTimeout +
+		defaults.CRECertificationTeardownTimeout
+
+	seen := 0
+	for _, v := range catalog.Validators {
+		if v.Name != v1.CRENCCLAllReduceBWCheckName && v.Name != v1.CRETrainingGoodputCheckName {
+			continue
+		}
+		seen++
+		if v.Timeout < required {
+			t.Errorf("%s: catalog timeout %v must cover Certification wait + measurement finalize + teardown (%v)",
+				v.Name, v.Timeout, required)
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("found %d CRE catalog entries, want 2", seen)
+	}
+}
+
 func TestCatalogEmbedding(t *testing.T) {
 	// Simulate embedding in a CR spec
 	type ValidatorCatalogSpec struct {
@@ -1524,9 +1639,9 @@ func TestIsImmutableRefAcceptsResolveImageOutput(t *testing.T) {
 }
 
 // TestIsImmutableRefRejectsUnpublishedShortSHAResolution documents a deliberate
-// asymmetry with ResolveImage: isValidCommit accepts a 7-40 char SHA, so a
-// binary stamped with a short commit resolves to :sha-<short> — a tag on-push
-// never published, since it tags with the full github.sha. Such a run cannot
+// asymmetry with ResolveImage. IsValidCommit accepts a 7-40 char SHA, so a
+// binary stamped with a short commit resolves to :sha-<short>. On-push never
+// publishes that tag, since it tags with the full github.sha. Such a run cannot
 // produce evidence anyway (the validator Job would fail to pull), so the gate
 // rejecting it is correct rather than a coupling break.
 func TestIsImmutableRefRejectsUnpublishedShortSHAResolution(t *testing.T) {

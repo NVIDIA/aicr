@@ -16,7 +16,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -29,7 +28,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
@@ -315,8 +313,9 @@ func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 }
 
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
-// The agent deployer creates the namespace itself (ensureNamespace, with the
-// managed-by label) using the same explicit kubeconfig (#1787), so no
+// The agent deployer ensures the namespace itself (ensureNamespace, with the
+// managed-by label, unless --service-account-name names an existing
+// ServiceAccount) using the same explicit kubeconfig (#1787), so no
 // pre-create happens here — deployAndWaitForResult's up-front pool-file
 // projection must run before ANY cluster mutation so a malformed
 // --aks-gpu-pools file fails without side effects.
@@ -386,6 +385,43 @@ func runSkipCheckPreflight(
 	return client.PreflightSkipChecks(ctx, rec, opts...)
 }
 
+// resolveValidatorServiceAccount resolves --validator-service-account-name
+// (flag over config) and, when one is named, verifies it before the
+// live-capture branch creates the snapshot agent's Job and RBAC, for the same
+// reason runSkipCheckPreflight runs early. ValidateState repeats the check for
+// callers that reach it directly.
+func resolveValidatorServiceAccount(
+	ctx context.Context,
+	cmd *cli.Command,
+	client *aicr.Client,
+	opts aicr.ValidateSettings,
+	kubeconfig, namespace string,
+	noCluster bool,
+) (string, error) {
+
+	name := stringFlagOrConfig(cmd, flagValidatorSA, opts.ValidatorServiceAccountName)
+	err := client.PreflightValidatorServiceAccount(ctx,
+		aicr.WithValidationKubeconfig(kubeconfig),
+		aicr.WithValidationNamespace(namespace),
+		aicr.WithValidationNoCluster(noCluster),
+		aicr.WithValidatorServiceAccountName(name),
+	)
+	return name, err
+}
+
+// warnRetainedValidatorBinding warns that --no-cleanup leaves the per-run
+// cluster-admin ClusterRoleBinding in place. A run using an existing validator
+// ServiceAccount created no binding, so it has none to warn about.
+func warnRetainedValidatorBinding(shared validateSharedResolved, validatorSA string) {
+	if !shared.noCleanup || validatorSA != "" {
+		return
+	}
+	slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",
+		"namespace", shared.namespace,
+		"bindingSelector", "app.kubernetes.io/name=aicr-validator",
+		"cleanupHint", "kubectl delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator")
+}
+
 // validationConfig holds all parameters for a validation run.
 type validationConfig struct {
 	// Input
@@ -417,6 +453,10 @@ type validationConfig struct {
 	imagePullSecrets    []string
 	noCluster           bool
 
+	// validatorServiceAccountName names an existing ServiceAccount the
+	// validator Jobs run as; empty keeps per-run RBAC.
+	validatorServiceAccountName string
+
 	// Scheduling
 	nodeSelector map[string]string
 	tolerations  []corev1.Toleration
@@ -434,6 +474,10 @@ type validationConfig struct {
 
 	// Recipe-evidence bundle config; nil disables --emit-attestation work.
 	evidence *recipeEvidenceConfig
+
+	// imageRefs receives the pushed evidence bundle's digest; nil when
+	// --image-refs is unset.
+	imageRefs *imageRefsTarget
 }
 
 // runValidation runs validation using the container-per-validator engine.
@@ -492,6 +536,7 @@ func runValidation(
 		// the override always clears the validator's default tolerate-all.
 		aicr.WithValidationTimeout(0),
 		aicr.WithValidationFailFast(cfg.failFast),
+		aicr.WithValidatorServiceAccountName(cfg.validatorServiceAccountName),
 	}
 	// Pass phases only when explicitly selected. cfg.phases is nil when the
 	// user requested all phases (or used the "all" wildcard), and
@@ -557,7 +602,11 @@ func runValidation(
 
 	// If cleanup is disabled, provide helpful debugging info
 	if !cfg.cleanup {
-		slog.Info("cleanup disabled - Jobs and RBAC kept for debugging",
+		kept := "Jobs and RBAC"
+		if cfg.validatorServiceAccountName != "" {
+			kept = "Jobs and ConfigMaps"
+		}
+		slog.Info("cleanup disabled - validator "+kept+" kept for debugging",
 			"namespace", cfg.validationNamespace,
 			"runID", runID)
 		slog.Info("to inspect Job logs: kubectl logs -l " + labels.RunID + "=" + runID + " -n " + cfg.validationNamespace)
@@ -567,12 +616,8 @@ func runValidation(
 
 	// Generate conformance evidence if requested.
 	if cfg.evidenceDir != "" {
-		evidenceCtx, evidenceCancel := context.WithTimeout(ctx, defaults.EvidenceRenderTimeout)
-		defer evidenceCancel()
-
-		renderer := cncf.New(cncf.WithOutputDir(cfg.evidenceDir))
-		if renderErr := renderer.Render(evidenceCtx, combined); renderErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "evidence rendering failed", renderErr)
+		if renderErr := client.RenderCNCFEvidence(ctx, combined, cfg.evidenceDir); renderErr != nil {
+			return renderErr
 		}
 		slog.Info("conformance evidence written", "dir", cfg.evidenceDir)
 	}
@@ -583,7 +628,11 @@ func runValidation(
 	// source), and attestation.Emit; the CLI shim only adds the interactive
 	// signing-disclosure prompt.
 	if cfg.evidence != nil {
-		if err := emitRecipeEvidence(ctx, client, rec, snap, results, cfg.evidence); err != nil {
+		emission, err := emitRecipeEvidence(ctx, client, rec, snap, results, cfg.evidence)
+		if err != nil {
+			return err
+		}
+		if err := writeEvidenceImageRefs(ctx, cfg.imageRefs, emission); err != nil {
 			return err
 		}
 	}
@@ -686,9 +735,14 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "ServiceAccount the live snapshot-capture agent runs as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and the agent creates and deletes no RBAC for the run (generate its RBAC manifests with 'aicr snapshot --add-roles-to-service-account', then apply them yourself). Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, and the agent's run-scoped names are derived from the \"aicr-validate\" base instead.",
+			Usage:    "ServiceAccount the live snapshot-capture agent runs as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim, and the agent leaves the namespace untouched and creates and deletes no RBAC for the run (generate its RBAC manifests with 'aicr snapshot --add-roles-to-service-account', then apply them yourself). The validator Jobs still apply the namespace unless --validator-service-account-name is set. Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, and the agent's run-scoped names are derived from the \"aicr-validate\" base instead.",
 			Value:    name,
 			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
+			Name:     flagValidatorSA,
+			Usage:    "Existing ServiceAccount in --namespace that the validator Jobs run as, instead of a per-run ServiceAccount bound to cluster-admin. For the validator Jobs the run then creates and deletes no ServiceAccount or ClusterRoleBinding and does not apply the namespace, so the caller needs no permission to grant cluster-admin. An administrator must create the namespace and the ServiceAccount and bind it to the cluster-admin ClusterRole; the run verifies that binding and fails before creating anything when the ServiceAccount is missing, unbound, or cannot be checked. Without --snapshot, the snapshot-capture agent still creates or labels the namespace and creates its own RBAC unless --service-account-name names an existing ServiceAccount for it.",
+			Category: catDeployment,
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
@@ -708,7 +762,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.BoolFlag{
 			Name:     "no-cleanup",
-			Usage:    "Skip removal of Job and RBAC resources on completion (leaves cluster-admin binding active)",
+			Usage:    "Skip removal of Job and RBAC resources on completion (leaves the per-run validator cluster-admin binding active unless --validator-service-account-name is set)",
 			Category: catAgentDeployment,
 		},
 		&cli.BoolFlag{
@@ -719,7 +773,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "oke-addons",
-			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. When validate captures a live snapshot, the NvidiaGpuPlugin add-on's control-plane state is projected into the K8s oke-addons subtype so profile constraints recorded in OKE recipes can evaluate. The --all flag on the oci command is required: without it removed and non-ACTIVE add-ons are omitted from the dump and would read as absent instead of failing closed. Ignored when --snapshot supplies a pre-captured snapshot.",
+			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. When validate captures a live snapshot, the NvidiaGpuPlugin add-on's control-plane state is projected into the K8s oke-addons subtype so profile constraints recorded in OKE recipes can evaluate. The NvidiaNetworkOperator add-on is projected the same way into K8s.oke-addons.nvidia-network-operator, which OKE recipes that deploy network-operator require to be absent. The --all flag on the oci command is required. Without it, removed and non-ACTIVE add-ons are omitted from the dump and would read as absent instead of failing closed. Capturing with --page is not supported. A dump with opc-next-page set is rejected, but a final page alone looks like a complete list. Ignored when --snapshot supplies a pre-captured snapshot.",
 			Sources:  cli.EnvVars("AICR_OKE_ADDONS_PATH"),
 			Category: catAgentDeployment,
 		},
@@ -737,6 +791,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 	}
 	flags = append(flags, validateEvidenceFlags()...)
+	flags = append(flags, evidenceSigningFlags()...)
 	return append(flags,
 		configFlag(),
 		dataFlag(),
@@ -766,7 +821,7 @@ func validateEvidenceFlags() []cli.Flag {
 			Name:    "feature",
 			Aliases: []string{"f"},
 			Usage: "Evidence feature to collect (repeatable, default: all). Only used with --cncf-submission.\n" +
-				"Options: " + strings.Join(cncf.ValidFeatures, ", "),
+				"Options: " + strings.Join(aicr.CNCFEvidenceFeatures(), ", "),
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
@@ -815,7 +870,16 @@ func validateEvidenceFlags() []cli.Flag {
 			Usage: `OCI registry reference (e.g. ghcr.io/myorg/aicr-evidence) to push the signed summary bundle to.
 	Sigstore keyless OIDC signing uses the same precedence chain as ` + "`aicr bundle --attest`" + `:
 	--identity-token > COSIGN_IDENTITY_TOKEN env > GitHub Actions ambient OIDC >
-	--oidc-device-flow > interactive browser flow.`,
+	--oidc-device-flow > interactive browser flow. --signing-key signs with a KMS key instead.`,
+			Category: catEvidence,
+		},
+		&cli.StringFlag{
+			Name: flagImageRefs,
+			Usage: `File to receive the digest of the evidence bundle --push published (sha256:...), the value pointer.yaml
+	records as bundle.digest, in the format aicr bundle --image-refs writes. Requires --emit-attestation and --push.
+	The parent must be an existing real directory; the target must be absent or a regular file, clear of
+	--emit-attestation and --output. A mount point such as a Kubernetes termination-message file is written in place.
+	The target is checked, including that it can be written, before validation starts.`,
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{
@@ -849,6 +913,14 @@ func validateEvidenceFlags() []cli.Flag {
 		},
 		assumeYesFlag(catEvidence),
 	}
+}
+
+// warnIgnoredProjections notes each provider projection flag a pre-captured
+// --snapshot makes inert.
+func warnIgnoredProjections(cmd *cli.Command, snapshotFilePath string) {
+	warnIgnoredAKSGPUPools(cmd, snapshotFilePath)
+	warnIgnoredOKEAddons(cmd, snapshotFilePath)
+	warnIgnoredGKEGPUPools(cmd, snapshotFilePath)
 }
 
 // warnIgnoredAKSGPUPools notes that the pool projection only applies to live
@@ -949,7 +1021,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", "gke-gpu-pools", flagPush, flagIdentityToken); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", flagValidatorSA, "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", "gke-gpu-pools", flagPush, flagImageRefs, flagIdentityToken, flagSigningKey, flagFulcioURL, flagRekorURL, flagSigningConfig); err != nil {
 				return err
 			}
 
@@ -988,6 +1060,12 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				return err
 			}
 
+			evidenceCfg, imageRefs, err := prepareRecipeEvidence(ctx, cmd, cfg, cncfSubmission, noCluster)
+			if err != nil {
+				return err
+			}
+			defer closeEvidenceImageRefs(imageRefs)
+
 			// recipeFilePath is resolved once here (flag > config) so both the
 			// --cncf-submission short-circuit below and the normal validation path
 			// further down consume the same value, rather than each resolving it
@@ -1003,11 +1081,11 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// standalone runs pass no policy and keep capability-driven
 			// detection (#1327 contract).
 			if cncfSubmission {
-				policy, policyErr := resolveCNCFAllocationPolicy(ctx, cmd, cfg, recipeFilePath)
-				if policyErr != nil {
-					return policyErr
-				}
-				return runCNCFSubmission(ctx, evidenceDir, features, cmd.String("kubeconfig"), policy)
+				return runCNCFSubmission(ctx, cmd, cfg, recipeFilePath, aicr.CNCFCollectOptions{
+					Dir:        evidenceDir,
+					Features:   features,
+					Kubeconfig: cmd.String("kubeconfig"),
+				})
 			}
 
 			phases, err := validator.ParsePhaseSelection(stringSliceFlagOrConfig(cmd, "phase", phaseStringsFallback(opts)))
@@ -1016,9 +1094,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			}
 
 			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", input.SnapshotPath)
-			warnIgnoredAKSGPUPools(cmd, snapshotFilePath)
-			warnIgnoredOKEAddons(cmd, snapshotFilePath)
-			warnIgnoredGKEGPUPools(cmd, snapshotFilePath)
+			warnIgnoredProjections(cmd, snapshotFilePath)
 			kubeconfig := cmd.String("kubeconfig")
 
 			if recipeFilePath == "" {
@@ -1087,6 +1163,11 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// directly and must remain covered. An empty skip list returns
 			// immediately, without loading the catalog.
 			if err = runSkipCheckPreflight(ctx, client, rec, phases, skipChecks); err != nil {
+				return err
+			}
+
+			validatorSA, err := resolveValidatorServiceAccount(ctx, cmd, client, opts, kubeconfig, shared.namespace, noCluster)
+			if err != nil {
 				return err
 			}
 
@@ -1167,98 +1248,60 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// pkg/recipe.RecipeResult via Resolved(). Advisory only.
 			validator.WarnPhasesAgainstRecipe(phases, rec.Resolved())
 
-			if shared.noCleanup {
-				slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",
-					"namespace", shared.namespace,
-					"bindingSelector", "app.kubernetes.io/name=aicr-validator",
-					"cleanupHint", "kubectl delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator")
-			}
-
-			attOpts, _, err := cfg.EvidenceAttestationOptions()
-			if err != nil {
-				return err
-			}
-			evidenceCfg := evidenceConfigForRunMode(noCluster, buildRecipeEvidenceConfig(cmd, attOpts))
+			warnRetainedValidatorBinding(shared, validatorSA)
 
 			return runValidation(ctx, client, rec, snap, validationConfig{
-				phases:                phases,
-				skipChecks:            skipChecks,
-				runID:                 runID,
-				kubeconfig:            kubeconfig,
-				output:                cmd.String("output"),
-				outFormat:             serializer.FormatJSON,
-				failOnError:           failOnError,
-				failFast:              failFast,
-				validationNamespace:   shared.namespace,
-				cleanup:               !shared.noCleanup,
-				imagePullSecrets:      shared.imagePullSecrets,
-				noCluster:             noCluster,
-				nodeSelector:          shared.nodeSelector,
-				tolerations:           shared.tolerations,
-				imageRegistryOverride: os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"),
-				imageTagOverride:      os.Getenv("AICR_VALIDATOR_IMAGE_TAG"),
-				evidenceDir:           evidenceDir,
-				evidence:              evidenceCfg,
+				phases:                      phases,
+				skipChecks:                  skipChecks,
+				runID:                       runID,
+				kubeconfig:                  kubeconfig,
+				output:                      cmd.String("output"),
+				outFormat:                   serializer.FormatJSON,
+				failOnError:                 failOnError,
+				failFast:                    failFast,
+				validationNamespace:         shared.namespace,
+				validatorServiceAccountName: validatorSA,
+				cleanup:                     !shared.noCleanup,
+				imagePullSecrets:            shared.imagePullSecrets,
+				noCluster:                   noCluster,
+				nodeSelector:                shared.nodeSelector,
+				tolerations:                 shared.tolerations,
+				imageRegistryOverride:       os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"),
+				imageTagOverride:            os.Getenv("AICR_VALIDATOR_IMAGE_TAG"),
+				evidenceDir:                 evidenceDir,
+				evidence:                    evidenceCfg,
+				imageRefs:                   imageRefs,
 			})
 		},
 	}
 }
 
-// resolveCNCFAllocationPolicy resolves the recipe-configured GPU allocation
-// policy for --cncf-submission runs. recipeFilePath is the caller's already
-// resolved (flag > config) --recipe value; without one (no --recipe flag and
-// no config recipe input) it returns "" — a standalone run keeps the evidence
-// script's capability-driven detection, mirroring the #1327 contract ("only
-// recipe-less standalone runs select automatically"). With recipe context,
-// load/resolution errors fail closed: an invalid allocation configuration
-// must not silently collect evidence for the wrong mechanism.
-func resolveCNCFAllocationPolicy(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, recipeFilePath string) (string, error) {
+// runCNCFSubmission handles --cncf-submission through the facade.
+// recipeFilePath is the caller's already resolved (flag > config) --recipe
+// value. When set, its GPU allocation policy selects the mechanism the
+// collector exercises. When empty, the collector detects the mechanism from
+// cluster capabilities, and the embedded client is used so an unread --data
+// or spec.recipe.data path cannot fail the run.
+func runCNCFSubmission(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, recipeFilePath string, opts aicr.CNCFCollectOptions) error {
 	if recipeFilePath == "" {
-		return "", nil
+		client, err := embeddedClient(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = client.Close() }()
+		return client.CollectCNCFEvidence(ctx, nil, opts)
 	}
 
 	client, err := recipeClientFromCmd(ctx, cmd, cfg)
 	if err != nil {
-		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
+		return err
 	}
 	defer func() { _ = client.Close() }()
 
 	slog.Info("loading recipe to resolve the GPU allocation policy for CNCF evidence collection", "uri", recipeFilePath)
 	rec, err := client.LoadRecipe(ctx, recipeFilePath, cmd.String("kubeconfig"))
 	if err != nil {
-		return "", err
+		return err
 	}
-	return v1.ResolveGPUAllocationPolicy(ctx, rec.Resolved())
-}
-
-// runCNCFSubmission handles --cncf-submission: validates feature names and
-// runs the behavioral evidence collector against the live cluster. policy is
-// the recipe-resolved GPU allocation policy ("" for standalone runs — see
-// resolveCNCFAllocationPolicy).
-func runCNCFSubmission(ctx context.Context, evidenceDir string, features []string, kubeconfig, policy string) error {
-	// Validate feature names.
-	for _, f := range features {
-		if !cncf.IsValidFeature(f) {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("unknown feature %q; valid features: %s",
-					f, strings.Join(cncf.ValidFeatures, ", ")))
-		}
-	}
-
-	cncfTimeout := defaults.CNCFSubmissionTimeout
-	ctx, cancel := context.WithTimeout(ctx, cncfTimeout)
-	defer cancel()
-
-	slog.Info("starting CNCF submission evidence collection",
-		"evidenceDir", evidenceDir, "features", features, "gpuAllocationPolicy", policy)
-
-	opts := []cncf.CollectorOption{
-		cncf.WithFeatures(features),
-		cncf.WithKubeconfig(kubeconfig),
-	}
-	if policy != "" {
-		opts = append(opts, cncf.WithAllocationPolicy(policy))
-	}
-	collector := cncf.NewCollector(evidenceDir, opts...)
-	return collector.Run(ctx)
+	return client.CollectCNCFEvidence(ctx, rec, opts)
 }

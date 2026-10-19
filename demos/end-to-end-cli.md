@@ -193,10 +193,12 @@ aicr bundle \
 
 `--image-refs` is OCI-output-only. Its target must have an existing real parent
 directory and be outside, and not aliased to, the planned or completed bundle.
-AICR writes the reference file with mode `0600` and replaces its directory
-entry with an anchored same-directory rename. Validation plus rename is not an
-atomic identity-conditioned operation, so do not allow concurrent mutation of
-the parent directory.
+For an ordinary target like this one, AICR writes the reference file with mode
+`0600` and replaces its directory entry with an anchored same-directory rename.
+Validation plus rename is not an atomic identity-conditioned operation, so do
+not allow concurrent mutation of the parent directory. A target on a different
+device from its directory, such as a Kubernetes Job's default
+termination-message file, is written in place instead.
 
 Review manifest:
 
@@ -206,9 +208,11 @@ crane manifest "ghcr.io/${GHCR_OWNER}/aicr-bundle-example@$(cat ./oci-refs/bundl
 
 ## Validate Cluster
 
+Against the bundle's `recipe.yaml`, the recipe the bundle deployed:
+
 ```shell
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe ./bundle/recipe.yaml \
   --require-gpu \
   --phase all
 ```

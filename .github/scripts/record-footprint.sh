@@ -37,7 +37,7 @@
 # percentage of the totals the runner itself reports, which self-calibrates to
 # whatever runner the job lands on, survives a runner-size change, and goes red
 # at the moment the run is actually about to die rather than at a number
-# somebody guessed. On the ubuntu-latest root filesystem (about 73 GiB) the
+# somebody guessed. On the ubuntu-24.04 root filesystem (about 73 GiB) the
 # default 10% floor sits near 7.3 GiB, roughly the room one more kind node image
 # plus an operator's images needs.
 #

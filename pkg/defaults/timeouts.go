@@ -47,16 +47,18 @@ const (
 	TopologyListPageSize = int64(500)
 )
 
-// Network topology collector constants. Network discovery delegates to the
-// k8s-launch-kit library, which boots a NIC-configuration daemon and pod-exec
-// probes each east-west PF — both bounded above by l8k's own internal
-// timeouts. CollectorNetworkTimeout caps the worst case as a defense in depth
-// so a hung pod exec can't outlive the snapshot.
+// Network topology collector constants. Network discovery delegates to
+// k8s-launch-kit's read-only path: a poll for an already-installed
+// nic-configuration-daemon's pods to report Ready, then a handful of List
+// calls. l8k bounds that poll at 5 minutes on its own (the collector hands it
+// a deadline-free context so that bound applies — NVIDIA/k8s-launch-kit#305),
+// so the collector's bound must sit above it with headroom for the Lists.
+// Job mode's --timeout defaults to 5 minutes; on clusters where some daemon
+// pods are not Ready, raise it above this value or the Job deadline fires
+// first.
 const (
 	// CollectorNetworkTimeout is the upper bound for the network collector.
-	// Longer than the topology timeout because l8k discovery includes
-	// DaemonSet rollout + per-node pod-exec probes.
-	CollectorNetworkTimeout = 10 * time.Minute
+	CollectorNetworkTimeout = 7 * time.Minute
 
 	// MaxClusterConfigBytes caps the size of an --cluster-config YAML file
 	// the collector will read into memory. Used as the io.LimitReader bound
@@ -252,6 +254,11 @@ const (
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second
 
+	// K8sServiceAccountVerifyTimeout bounds the read-only ServiceAccount Get
+	// and SubjectAccessReview that vet an administrator-provisioned validator
+	// ServiceAccount before a run uses it.
+	K8sServiceAccountVerifyTimeout = 30 * time.Second
+
 	// DiscoveryRefreshCooldown rate-limits how often the shared cluster
 	// fetcher (pkg/chainsaw) invalidates its cached discovery data after a
 	// no-match. The refresh exists so a CRD installed by the component being
@@ -365,19 +372,11 @@ const (
 	// CLISnapshotTimeout is the default timeout for snapshot operations.
 	CLISnapshotTimeout = 5 * time.Minute
 
-	// CLIUpgradeCheckTimeout bounds one `aicr upgrade-check` run. The command
-	// performs two recipe operations, each already bounded by
-	// RecipeOperationTimeout, plus the registry's upgrade-record reads, so the
-	// ceiling is derived from the operation it repeats rather than picked.
+	// CLIUpgradeCheckTimeout bounds one `aicr upgrade-check` run that reads no
+	// cluster. Such a run performs two recipe operations, each already bounded
+	// by RecipeOperationTimeout, plus the registry's upgrade-record reads, so
+	// the ceiling is derived from the operation it repeats rather than picked.
 	CLIUpgradeCheckTimeout = 3 * RecipeOperationTimeout
-
-	// CLIUpgradeCheckClusterTimeout bounds an `aicr upgrade-check` run that
-	// reads the cluster: CLIUpgradeCheckTimeout's artifact work, plus the
-	// longer of the two inventory readers (one runs per deployer), plus the
-	// at-risk scan. Summing them lets every inner budget be reached before the
-	// run's own expires, so a slow scan times out on its own budget and leaves
-	// a report rather than taking the run down with it.
-	CLIUpgradeCheckClusterTimeout = CLIUpgradeCheckTimeout + HelmInventoryTimeout + AtRiskScanTimeout
 
 	// OIDCAuthTimeout is the maximum time to wait for a user to complete
 	// any interactive OIDC authentication flow — browser callback or
@@ -739,7 +738,10 @@ const (
 	NCCLExecutionLockStaleAge = 20 * time.Minute
 
 	// NCCLLauncherPodTimeout is the maximum time to wait for the NCCL launcher pod to be created.
-	NCCLLauncherPodTimeout = 5 * time.Minute
+	// A runtime whose launcher declares a JobSet dependsOn on the workers creates
+	// it only once every worker is Ready, so this also covers worker image pull
+	// and any runtime sshd install. Kept under NCCLExecutionLockStaleAge.
+	NCCLLauncherPodTimeout = 15 * time.Minute
 
 	// NCCLTrainerArchiveDownloadTimeout is the timeout for downloading the Kubeflow Trainer
 	// source archive from GitHub. The archive is several MB, so a longer timeout than the
@@ -760,6 +762,53 @@ const (
 	// bound instead of the much shorter DiagnosticTimeout used for the rest of
 	// createUnstructured's calls.
 	NCCLResourceRecreateWait = 5 * time.Minute
+
+	// CRECertificationTimeout is AICR's wait budget for a Cluster Readiness
+	// Engine Certification to reach Succeeded or Failed. The same duration is
+	// written on spec.timeoutPerJob, but that is a backstop against a job left
+	// running forever, not a deadline matched to this one: CRE starts the
+	// per-job clock when the workload is first observed running, and starts it
+	// over when a workload is replaced, while AICR's starts at creation. CRE's
+	// bound can therefore fire well after AICR gives up, which is why teardown
+	// confirms the workloads stopped rather than trusting it.
+	CRECertificationTimeout = 30 * time.Minute
+
+	// CRECertificationDeleteTimeout bounds the removal of the Certification
+	// object itself. The shorter DiagnosticTimeout would expire while the CR is
+	// still held by finalizers.
+	CRECertificationDeleteTimeout = 5 * time.Minute
+
+	// CRECertificationTeardownTimeout bounds the whole teardown: removing the
+	// Certification and then confirming the TrainJobs and GPU pods it started
+	// are gone. It must outlast CRE's own drain barrier, which waits up to five
+	// minutes for workload pods to exit and then proceeds regardless
+	// (podDrainGracePeriod in pkg/controller/pod_drain.go), plus the
+	// termination grace of the multi-node GPU pods left behind.
+	CRECertificationTeardownTimeout = 10 * time.Minute
+
+	// CREMeasurementFinalizeTimeout bounds the wait for CRE to finalize a
+	// BandwidthMeasurement or GoodputMeasurement after its Job succeeded.
+	// Certification success does not imply the measurement is final: CRE marks
+	// the Job Succeeded first and only then performs the final log read, which
+	// it retries for as long as the measurement's own measurementTimeout (5m by
+	// default, and never less than two minutes) before completing as
+	// LogsUnavailable. Sized to that retry window, because expiry here fails
+	// the check rather than falling back to the provisional results.
+	CREMeasurementFinalizeTimeout = 5 * time.Minute
+
+	// CREOrphanReclaimAge is how old an AICR-labeled Certification must be
+	// before a later run treats it as abandoned and tears it down. A validator
+	// pod killed mid-run never runs its deferred teardown, and the names carry
+	// a nonce, so the only way the GPUs come back is for a subsequent run to
+	// reclaim what it finds.
+	//
+	// The sum of every phase a live run is allowed, so nothing still in
+	// progress can reach this age. That matters because two validators can
+	// share a namespace, and a sweep that is merely "old enough" would delete
+	// a healthy concurrent run's Certification.
+	CREOrphanReclaimAge = CRECertificationTimeout +
+		CREMeasurementFinalizeTimeout +
+		CRECertificationTeardownTimeout
 )
 
 // Inference performance validation timeouts.
@@ -1617,7 +1666,7 @@ const (
 	// tasks within a single oras.Copy invocation.
 	OCIPushConcurrency = 3
 
-	// OCIImageRefsWriteTimeout bounds final atomic image-reference output.
+	// OCIImageRefsWriteTimeout bounds the final write of an image-reference file.
 	OCIImageRefsWriteTimeout = 30 * time.Second
 
 	// OCIBundlePublishTimeout bounds the complete verify, stage, package,
@@ -1673,23 +1722,15 @@ const (
 	MaxOCIRecipeFiles = 4096
 )
 
-// AtRiskListPageSize caps how many objects one List pulls while scanning for
-// resources an upgrade could disturb. Sized between the two inventory page
-// sizes: the objects are ordinary custom resources rather than Helm storage
-// records carrying rendered manifests, but a tenant's CR can hold an arbitrary
-// spec, so the page stays well under the Argo ceiling.
-//
-// Nothing is retained across pages beyond the objects found at risk, which on
-// a healthy cluster is none, so the page bounds the peak as well as the
-// response.
+// AtRiskListPageSize is the most objects the at-risk scan asks for in one List
+// request.
 const AtRiskListPageSize int64 = 200
 
-// AtRiskScanTimeout bounds the whole advisory at-risk scan: one discovery
-// mapping and one paged cluster-wide List per affected kind. Shorter than
-// ArgoInventoryTimeout per kind is not expressible here, so the budget covers
-// the handful of kinds a single upgrade's records name.
-//
-// The scan is advisory and never changes the exit code, so it is bounded
-// tightly on purpose: an operator waiting on a warning has already been given
-// the verdict.
-const AtRiskScanTimeout = 60 * time.Second
+// AtRiskStepTimeout bounds each step of the at-risk scan, which is resolving
+// one kind or listing one page with its retries. The scan has no total budget.
+const AtRiskStepTimeout = 60 * time.Second
+
+// AtRiskExpiredContinueRetries is the most expired-continue-token 410s in a
+// row, with no page served between them, that the at-risk scan resumes from
+// before it fails the list.
+const AtRiskExpiredContinueRetries = 3

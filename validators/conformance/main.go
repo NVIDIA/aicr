@@ -27,7 +27,14 @@ import (
 )
 
 func main() {
-	validators.Run(map[string]validators.CheckFunc{
+	validators.Run(conformanceChecks())
+}
+
+// conformanceChecks maps each check name accepted as the first argument to its
+// implementation. Every catalog entry that runs this image needs a key here
+// (TestConformanceChecksMatchCatalog).
+func conformanceChecks() map[string]validators.CheckFunc {
+	return map[string]validators.CheckFunc{
 		"dra-support":               CheckDRASupport,
 		"gang-scheduling":           CheckGangScheduling,
 		"accelerator-metrics":       CheckAcceleratorMetrics,
@@ -39,7 +46,8 @@ func main() {
 		"secure-accelerator-access": CheckSecureAcceleratorAccess,
 		"slinky-slurm-health":       CheckSlinkySlurmHealth,
 		"slinky-slurm-imex-channel": CheckSlinkySlurmIMEXChannel,
+		"slinky-slurm-gpu-access":   CheckSlinkySlurmGPUAccess,
 		"gpu-operator-health":       CheckGPUOperatorHealth,
 		"platform-health":           CheckPlatformHealth,
-	})
+	}
 }

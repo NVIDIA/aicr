@@ -538,15 +538,17 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 			t.Errorf("unknown service should return nil, got ns=%v tols=%v", ns, tols)
 		}
 	})
-	t.Run("any service returns nil", func(t *testing.T) {
-		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceAny, "", nil)
-		if err != nil {
-			t.Fatalf("platformWorkerScheduling() error = %v", err)
-		}
-		if ns != nil || tols != nil {
-			t.Errorf("any service should return nil, got ns=%v tols=%v", ns, tols)
-		}
-	})
+	for _, service := range []recipe.CriteriaServiceType{recipe.CriteriaServiceAny, recipe.CriteriaServiceMK8s} {
+		t.Run(string(service)+" service returns nil", func(t *testing.T) {
+			ns, tols, err := platformWorkerScheduling(service, "", nil)
+			if err != nil {
+				t.Fatalf("platformWorkerScheduling() error = %v", err)
+			}
+			if ns != nil || tols != nil {
+				t.Errorf("%s service should return nil, got ns=%v tols=%v", service, ns, tols)
+			}
+		})
+	}
 }
 
 func TestCommonGPUProduct(t *testing.T) {

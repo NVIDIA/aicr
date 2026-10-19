@@ -290,6 +290,38 @@ Supply chain — upstream release-workflow changes, not AICR work:
    reports none — no signature, SBOM, or provenance. The chart is published by
    a `helm push` with no signing step.
 
+#### Gap 1 closes at the shipped pin and gap 2 partly
+
+The findings above are v0.1.0. Rechecked at the pin AICR ships:
+
+| Artifact | Digest |
+|---|---|
+| Chart `v0.6.0` | `sha256:af20cf1d7827a35e60a539ef9f7fc8445e0def61f345e8bdb030afc76f01f6cf` |
+| Image index `manager:v0.6.0` | `sha256:8008c6f9f7e19b317caf0f91afab06b88027c14d7dd03e4173bd49cd1f3cd27a` |
+
+Both carry a cosign signature and a SLSA v1.0 provenance attestation, and both
+verify against certificate identity
+`https://github.com/NVIDIA/cluster-readiness-engine/.github/workflows/attest.yml@refs/tags/v0.6.0`
+at the GitHub Actions OIDC issuer. The chart attestations bind the chart digest
+— confirmed by running `cosign tree` against the digest rather than the tag.
+Anonymous `helm pull` succeeds with an empty registry config, so no pull secret
+is required.
+
+Two details make the recheck non-obvious:
+
+- `cosign verify-attestation --type slsaprovenance` **fails** on this pin. That
+  shorthand resolves to SLSA v0.2 and the predicate here is
+  `https://slsa.dev/provenance/v1`; use `--type slsaprovenance1`. A query by the
+  shorthand reports no provenance on an image that has it.
+- SBOMs bind the per-platform children, not the index. `cosign tree` on the
+  index shows only the signature and provenance; the CycloneDX attestation is on
+  `linux/amd64` and `linux/arm64` individually.
+
+Gap 2 therefore closes only in part. The release-and-supply-chain gate above
+asks for signature, SBOM, **and** provenance on both artifacts; the chart has
+the first and third and no SBOM at all, so that gate still does not pass and
+follow-up 2 stays open.
+
 Execution safety — these live in the `Certification` API, so driving
 `Certification` rather than `WorkloadRun` does not close them:
 
@@ -345,9 +377,15 @@ not available to stock recipes yet.
 
 ## Follow-Up Decisions
 
-1. Upstream: add build provenance to the controller image, attributable to the
-   release workflow and meeting a stated SLSA build level.
-2. Upstream: sign the Helm chart and publish chart SBOM and provenance.
+1. ~~Upstream: add build provenance to the controller image, attributable to
+   the release workflow and meeting a stated SLSA build level.~~ Closed at
+   v0.2.0 and still verifying at the current v0.6.0 pin — SLSA v1.0 provenance
+   verifies against the release workflow identity.
+2. Upstream: publish a chart SBOM. ~~Sign the Helm chart and publish chart
+   provenance.~~ Signature and SLSA v1.0 provenance have been present since
+   v0.2.0 and bind the chart digest; the **SBOM** is still absent at v0.6.0,
+   because the CycloneDX attestation covers the image's per-platform children
+   only. Open, so item 6 is not yet reached.
 3. Upstream: add a run-level cap on the node footprint, so a `Certification`
    cannot span every matched node without an explicit `target.nodeNames`.
 4. Upstream: add a total run deadline to `CertificationSpec`, and make
@@ -355,7 +393,11 @@ not available to stock recipes yet.
    a finalizer held until children are gone, or an equivalent guarantee.
 5. Upstream: publish the workload runtime closure as digest-pinned,
    discoverable artifacts, so the catalog's images and fetched source can be
-   inventoried and mirrored.
+   inventoried and mirrored. AICR now derives the closure for the supported
+   paths itself (`recipes/components/nvcre/workload-images.yaml`), which makes
+   the images mirrorable but does not remove the upstream ask: the inventory
+   has to be re-derived on every chart bump because the catalog ships inside
+   the manager image.
 6. AICR: record the qualified artifact set in this ADR's Status once items 1–5
    close, and re-run the gates against that pin.
 7. AICR: a separate amendment for any stock-recipe adoption, which requires

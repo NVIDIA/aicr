@@ -28,6 +28,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -74,7 +75,8 @@ type AgentConfig struct {
 	//     Namespace: it is used verbatim, and the run creates NO
 	//     ServiceAccount, Role, RoleBinding, ClusterRole or
 	//     ClusterRoleBinding — and deletes none at cleanup. aicr adds and
-	//     removes no permissions on an identity it did not create. This
+	//     removes no permissions on an identity it did not create, and does
+	//     not create, read or relabel the Namespace. This
 	//     is how a ServiceAccount carrying IRSA
 	//     (eks.amazonaws.com/role-arn) or GKE Workload Identity
 	//     (iam.gke.io/gcp-service-account) annotations stays usable: both
@@ -89,8 +91,9 @@ type AgentConfig struct {
 	// capture the run.
 	//
 	// Using an existing ServiceAccount waives per-run permission
-	// isolation: concurrent runs sharing it share its grants, and grants
-	// provisioned for DiscoverNetwork persist beyond any one run.
+	// isolation: concurrent runs sharing it share its grants, and the
+	// (read-only) grants provisioned for DiscoverNetwork persist beyond any
+	// one run.
 	ServiceAccountName string
 
 	// NodeSelector for targeting specific nodes
@@ -169,10 +172,10 @@ type AgentConfig struct {
 	// snapshot as the gke-gpu-pools subtype.
 	GKEGPUPoolsPath string
 
-	// DiscoverNetwork enables the in-pod network collector's live l8k
-	// discovery path. Discovery is NOT read-only — it writes node labels
-	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
-	// server-side-apply. RBAC must allow those writes.
+	// DiscoverNetwork enables the in-pod network collector's read-only l8k
+	// discovery path (DiscoverReadOnly). It creates, patches, and deletes
+	// nothing; the agent's ClusterRole gains only
+	// configuration.net.nvidia.com nicdevices get/list.
 	DiscoverNetwork bool
 
 	// Requests overrides the agent container's per-resource requests.
@@ -939,15 +942,19 @@ func ParseResourceList(spec string) (corev1.ResourceList, error) {
 	return result, nil
 }
 
-// ParseNodeSelectors parses node selector strings in format "key=value".
+// ParseNodeSelectors parses key=value selectors into a map. It returns an error
+// for a pair that is not a valid Kubernetes node label.
 func ParseNodeSelectors(selectors []string) (map[string]string, error) {
 	result := make(map[string]string)
 	for _, s := range selectors {
-		parts := strings.SplitN(s, "=", 2)
-		if len(parts) != 2 {
+		key, value, ok := strings.Cut(s, "=")
+		if !ok {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, expected key=value", s))
 		}
-		result[parts[0]] = parts[1]
+		if err := (bundlercfg.NodeLabel{Key: key, Value: value}).Validate(); err != nil {
+			return nil, err
+		}
+		result[key] = value
 	}
 	return result, nil
 }
@@ -971,21 +978,9 @@ func effectiveAgentTolerations(tolerations []corev1.Toleration) []corev1.Tolerat
 	return tolerations
 }
 
-func validateTaintEffect(effect corev1.TaintEffect) error {
-	switch effect {
-	case corev1.TaintEffectNoSchedule:
-		return nil
-	case corev1.TaintEffectPreferNoSchedule:
-		return nil
-	case corev1.TaintEffectNoExecute:
-		return nil
-	default:
-		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid taint effect %q, expected %s, %s, or %s", effect, corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute))
-	}
-}
-
-// ParseTolerations parses toleration strings in format "key=value:effect" or "key:effect".
-// If no tolerations are provided, returns DefaultTolerations() which accepts all taints.
+// ParseTolerations parses key=value:effect and key:effect tolerations. It
+// returns an error for a toleration the API server would reject. Empty input
+// returns DefaultTolerations, which tolerates all taints.
 func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 	// Return default "tolerate all" if no custom tolerations specified
 	if len(tolerations) == 0 {
@@ -1000,26 +995,14 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 		}
 
 		// Format: key=value:effect or key:effect (for exists operator)
-		var key, value, effect string
-
-		// Split by colon to get effect
 		parts := strings.Split(t, ":")
 		if len(parts) != 2 {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, expected key=value:effect or key:effect", t))
 		}
-		effect = parts[1]
+		effect := parts[1]
+		key, value, _ := strings.Cut(parts[0], "=")
 
-		// Parse key and value
-		if strings.Contains(parts[0], "=") {
-			kvParts := strings.SplitN(parts[0], "=", 2)
-			key = kvParts[0]
-			value = kvParts[1]
-		} else {
-			key = parts[0]
-			// No value means Exists operator
-		}
-
-		if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+		if err := bundlercfg.ValidateTaintEffect(corev1.TaintEffect(effect)); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
 		}
 
@@ -1036,6 +1019,9 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 		}
 
 		result = append(result, toleration)
+	}
+	if err := bundlercfg.ValidateTolerations(result); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -1082,7 +1068,7 @@ func ParseTaint(taintStr string) (*corev1.Taint, error) {
 			fmt.Sprintf("invalid taint value %q: %s", value, strings.Join(errs, "; ")))
 	}
 
-	if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+	if err := bundlercfg.ValidateTaintEffect(corev1.TaintEffect(effect)); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
 	}
 

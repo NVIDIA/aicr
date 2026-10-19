@@ -16,12 +16,13 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -140,7 +141,7 @@ func TestCheckSlinkySlurmHealthFailsWhenSlinkyAPIUnavailable(t *testing.T) {
 	if validators.IsSkip(err) {
 		t.Fatalf("error = %v, want a blocking failure but got a Skip — a declared dependency must not skip (#2122)", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("error code = %v, want ErrCodeNotFound", err)
 	}
 	if !strings.Contains(err.Error(), "recipe declares slinky-slurm") {
@@ -853,7 +854,7 @@ func TestRunnableSlinkyNodeSetPodsPreservesCancellation(t *testing.T) {
 			}
 
 			_, err := runnableSlinkyNodeSetPods(ctx, slinkySlurmNamespace)
-			if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 				t.Fatalf("error = %v, want timeout error", err)
 			}
 			if err == nil || !strings.Contains(err.Error(), "canceled while resolving NodeSet pod nodes") {

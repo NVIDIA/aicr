@@ -1,8 +1,8 @@
 # Nodewright
 
-Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [NodeWright Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/nodewright-crd.yaml) (`nodewright.nvidia.com/v1alpha1`) that define one or more nodewright packages to deploy. Operator v0.18.0 renamed the kind from `Skyhook`, and AICR's manifests now declare `NodeWright`; the registry pins v0.19.0. On a cluster that predates the rename the operator mirrors each legacy Skyhook into a NodeWright of the same name and writes status only on the NodeWright, so applying these manifests adopts the mirrored object rather than creating a second one. The legacy kind is read-only from v0.18.0 on: its admission webhook rejects any spec, `pause` or `disable` change, which is why the manifests moved. See the [upstream migration guide](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md).
+Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [NodeWright Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/nodewright-crd.yaml) (`nodewright.nvidia.com/v1alpha1`) that define one or more nodewright packages to deploy. Operator v0.18.0 renamed the kind from `Skyhook`, and AICR's manifests now declare `NodeWright`; the registry pins v0.20.0. On a cluster that predates the rename the operator mirrors each legacy Skyhook into a NodeWright of the same name and writes status only on the NodeWright, so applying these manifests adopts the mirrored object rather than creating a second one. The legacy kind is read-only from v0.18.0 on: its admission webhook rejects any spec, `pause` or `disable` change, which is why the manifests moved. See the [upstream migration guide](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md).
 
-The registry default namespace is `nodewright`. A deployment made before that moved still runs in `skyhook`, and Helm cannot relocate a release, so pass `aicr recipe --inherit-from <prior recipe or bundle>` to keep it where it is; the health-check assertions follow the inherited namespace. These packages were selected to provide two main functions:
+The registry default namespace is `nodewright`. A deployment made before that moved still runs in `skyhook`, and Helm cannot relocate a release, so pass `aicr recipe --inherit-from <prior recipe or bundle> --inherit=namespace` to keep it where it is while using the new release's chart, source, manifests and object names; the health-check assertions follow the inherited namespace. These packages were selected to provide two main functions:
 1. Optimize a node for inference or training workloads via grub, sysctl and systemd service settings.
 2. Be able to install all of the necessary software to bring a vanilla Kubernetes node to the AICR spec.
 
@@ -91,6 +91,7 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | gb200        | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| gke     | gb300        | gb200   | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | rke2    | vr200        | -       | -                  | nvidia-tuned 0.10.0     |
 
@@ -102,6 +103,11 @@ but AKS recipes disable it by default via `nodewright-customizations`
 `tuningEnabled: false` under the Azure-managed driver profile; see
 [AKS GPU setup](../aks-gpu-setup.md#infiniband-rdma-host-setup-nodewright)
 for the rationale and re-enable path.
+
+The `eks` rows likewise do not apply to the `os=amazonlinux` leaves
+(`*-eks-amazonlinux-inference`). Those leaves disable
+`nodewright-customizations` entirely (`enabled: false`), so no setup or tuning
+package is rendered and host setup and tuning must come from the AMI.
 
 The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
 applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
@@ -174,8 +180,12 @@ is unaffected by `tuningEnabled: false`: its `tuning` CR still renders with the
 Workload-gate taint key: operator v0.18.0 changed the chart default
 `runtimeRequiredTaint` from `skyhook.nvidia.com=runtime-required:NoSchedule`
 to `nodewright.nvidia.com=runtime-required:NoSchedule`. The operator recognizes
-both until v0.20.0 (tolerates, removes on completion, never double-taints), but
-auto-taints newly joined nodes with the configured key only. Node pools that
+both through v0.20.x (tolerates, removes on completion, never double-taints)
+and drops the legacy key in v0.21.0, but auto-taints newly joined nodes with
+the configured key only. The key must have no DNS prefix and be at most 53
+characters, since it names the `nodewright.nvidia.com/autoTaint_<key>` node
+annotation; `aicr bundle` rejects any other key, which operator v0.20.0 refuses
+to start on. Node pools that
 pre-taint with the legacy key should pass
 `--workload-gate skyhook.nvidia.com=runtime-required:NoSchedule` to
 `aicr bundle` so the cluster carries a single key.

@@ -106,6 +106,7 @@ func TestResolveRecipeForMirrorRejectsInheritFromWithRecipe(t *testing.T) {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "recipe"},
 			&cli.StringFlag{Name: flagInheritFrom},
+			&cli.StringFlag{Name: flagInherit},
 		},
 	}
 	if err := cmd.Run(context.Background(), []string{"mirror", "--recipe", "r.yaml",
@@ -115,5 +116,38 @@ func TestResolveRecipeForMirrorRejectsInheritFromWithRecipe(t *testing.T) {
 	_, err := resolveRecipeForMirror(context.Background(), cmd, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "cannot be combined with --recipe") {
 		t.Fatalf("resolveRecipeForMirror() error = %v, want the conflict rejection", err)
+	}
+}
+
+func TestMirrorNamespaceInheritance(t *testing.T) {
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	prior := priorRecipeFile(t, filepath.Join(t.TempDir(), "prior.yaml"), "gpu-operator", "legacy-gpu-operator")
+	cmd := &cli.Command{Flags: mirrorListFlags()}
+	if runErr := cmd.Run(t.Context(), []string{"list", "--service", "eks", "--accelerator", "h100", "--intent", "training",
+		"--inherit-from", prior, "--inherit=namespace"}); runErr != nil {
+		t.Fatal(runErr)
+	}
+	result, err := resolveRecipeForMirror(t.Context(), cmd, nil, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := result.GetComponentRef("gpu-operator")
+	if ref == nil || ref.Namespace != "legacy-gpu-operator" || ref.Source == "https://charts.invalid/prior" {
+		t.Fatalf("mirror resolution must inherit only the namespace: %+v", ref)
+	}
+}
+
+func TestMirrorRejectsInheritSelectionWithRecipe(t *testing.T) {
+	cmd := &cli.Command{Flags: mirrorListFlags()}
+	if err := cmd.Run(t.Context(), []string{"list", "--recipe", "recipe.yaml", "--inherit=namespace"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := resolveRecipeForMirror(t.Context(), cmd, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined with --recipe") {
+		t.Fatalf("error = %v, want conflicting input rejection", err)
 	}
 }

@@ -15,13 +15,14 @@
 package recipe
 
 import (
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // newTestLayeredProvider builds a LayeredDataProvider over a temp dir holding a
@@ -272,7 +273,7 @@ spec:
 		if err == nil {
 			t.Fatal("expected an error for duplicate componentRef names, got nil")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
 		}
 		if !strings.Contains(err.Error(), "duplicate") {
@@ -373,7 +374,7 @@ spec:
 	t.Run("malformed selection is rejected before I/O", func(t *testing.T) {
 		layered, path := newProfileCatalog(t)
 		_, err := LoadFromFileWithProviderProfile(t.Context(), path, "", "vtest", layered, "not-a-selection")
-		if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("error = %v, want ErrCodeInvalidRequest for malformed selection", err)
 		}
 	})
@@ -390,7 +391,7 @@ spec:
 		if err == nil || !strings.Contains(err.Error(), "already baked") {
 			t.Fatalf("error = %v, want baked-in selection rejection", err)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})

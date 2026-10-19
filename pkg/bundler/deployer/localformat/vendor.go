@@ -114,6 +114,31 @@ type VendorRecord struct {
 	PullerVersion string `json:"pullerVersion,omitempty"`
 }
 
+// ArchiveSHA256 returns the hex SHA-256 of a chart archive, the value a
+// VendorRecord records and helm.defaultDigest pins (with a sha256: prefix).
+func ArchiveSHA256(tgz []byte) string {
+	sum := sha256.Sum256(tgz)
+	return hex.EncodeToString(sum[:])
+}
+
+// VerifyChartDigest refuses a pulled chart archive whose SHA-256 differs from
+// c.ChartDigest. It hashes tgz itself rather than trusting the puller's
+// VendorRecord. An empty ChartDigest verifies nothing.
+func VerifyChartDigest(c Component, tgz []byte) error {
+	if c.ChartDigest == "" {
+		return nil
+	}
+	pulled := "sha256:" + ArchiveSHA256(tgz)
+	if pulled == c.ChartDigest {
+		return nil
+	}
+	return errors.NewWithContext(errors.ErrCodeConflict,
+		fmt.Sprintf("chart %s %s for component %q does not match the digest the component registry pins "+
+			"(pulled %s, pinned %s); refusing to vendor it", c.ChartName, c.Version, c.Name, pulled, c.ChartDigest),
+		map[string]any{"component": c.Name, "chart": c.ChartName, "version": c.Version,
+			"pulledDigest": pulled, "pinnedDigest": c.ChartDigest})
+}
+
 // ChartPuller fetches an upstream Helm chart and returns the raw .tgz
 // bytes plus a provenance record. The implementation choice — shelling
 // out to the helm CLI vs the in-process Helm SDK — is hidden behind this

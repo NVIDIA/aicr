@@ -32,6 +32,38 @@ func TestBuildPredicate_FillsConstantFields(t *testing.T) {
 	}
 }
 
+func TestBuildPredicate_AICRCommit(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	tests := []struct {
+		name   string
+		commit string
+		want   string
+	}{
+		{"full sha", sha, sha},
+		{"short sha", "abc1234", "abc1234"},
+		{"uppercase sha is lowercased", "ABC1234", "abc1234"},
+		{"unstamped build", "unknown", ""},
+		{"empty", "", ""},
+		{"too short", "abc12", ""},
+		{"not hex", "zzzzzzz", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := BuildPredicate(PredicateInputs{AICRCommit: tt.commit})
+			if p.AICRCommit != tt.want {
+				t.Errorf("AICRCommit = %q, want %q", p.AICRCommit, tt.want)
+			}
+			body, err := json.Marshal(p)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if has := strings.Contains(string(body), `"aicrCommit"`); has != (tt.want != "") {
+				t.Errorf("aicrCommit key present = %v, want %v:\n%s", has, tt.want != "", body)
+			}
+		})
+	}
+}
+
 func TestBuildPredicate_SortsValidatorImages(t *testing.T) {
 	p := BuildPredicate(PredicateInputs{
 		ValidatorImages: []ValidatorImage{

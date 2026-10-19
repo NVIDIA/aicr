@@ -95,7 +95,7 @@ Use in shell scripts:
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform",
 				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces,
-				flagInheritFrom, "snapshot", "config", "format", "selector"); err != nil {
+				flagInheritFrom, flagInherit, "snapshot", "config", "format", "selector"); err != nil {
 				return err
 			}
 
@@ -319,8 +319,8 @@ func gkeTCPXOInterfacesResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aic
 	return []aicr.RecipeResolveOption{aicr.WithGKETCPXOInterfaces(value)}, nil
 }
 
-// inheritFromResolveOptions turns the --inherit-from flag into a resolve
-// option. Unlike the mode selections there is no AICRConfig fallback: the
+// inheritFromResolveOptions turns the inheritance flags into resolve
+// options. There is no AICRConfig fallback: the
 // value names a prior artifact on the invoking machine's disk, so it belongs
 // to the invocation rather than to a shared, committed configuration.
 //
@@ -328,10 +328,14 @@ func gkeTCPXOInterfacesResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aic
 // closed on a cm:// URI, a missing path, or a directory holding no recipe.
 func inheritFromResolveOptions(cmd *cli.Command) []aicr.RecipeResolveOption {
 	ref := cmd.String(flagInheritFrom)
-	if ref == "" {
-		return nil
+	var opts []aicr.RecipeResolveOption
+	if ref != "" {
+		opts = append(opts, aicr.WithInheritFrom(ref))
 	}
-	return []aicr.RecipeResolveOption{aicr.WithInheritFrom(ref)}
+	if cmd.IsSet(flagInherit) {
+		opts = append(opts, aicr.WithInherit(cmd.String(flagInherit)))
+	}
+	return opts
 }
 
 // buildSelectionResolveOptions gathers every generation-time selection into one

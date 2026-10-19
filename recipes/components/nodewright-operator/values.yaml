@@ -28,10 +28,13 @@ limitRange:
 
 controllerManager:
   manager:
+    # The working set grows with node count (about 8.9Gi peak on the leader at
+    # 2500 GB300 nodes, #3148). The limit covers that; the request stays sized
+    # for small clusters, so raise it through valueOverrideKeys on large ones.
     resources:
       limits:
         cpu: 1000m
-        memory: 4000Mi
+        memory: 12Gi
       requests:
         cpu: 1000m
         memory: 2000Mi

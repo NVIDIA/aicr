@@ -193,6 +193,47 @@ func TestInjectDRAChartVersionAnnotation_PreservesExistingValues(t *testing.T) {
 	}
 }
 
+// TestInjectDRAChartVersionAnnotation_OCPFallbackToOLMChannel pins the
+// OCP fallback added for #2135: gpu-operator-ocp is a ClusterPolicy
+// CR, not a Helm chart, so ComponentRef.Version is always empty for
+// it. Instead of skipping injection (the pre-fix behavior), the
+// helper reads the OLM Subscription channel from the
+// gpu-operator-ocp-olm component's values and mirrors that onto both
+// nvidia-dra-driver-gpu-ocp pod templates.
+func TestInjectDRAChartVersionAnnotation_OCPFallbackToOLMChannel(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	const draOCPComponentName = "nvidia-dra-driver-gpu-ocp"
+	componentValues := map[string]map[string]any{
+		gpuOperatorOCPComponentName: {},
+		draOCPComponentName:         {},
+		gpuOperatorOCPOLMComponentName: {
+			"subscription": map[string]any{
+				"channel": "v25.10",
+			},
+		},
+	}
+	rr := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: gpuOperatorOCPComponentName, Version: ""},
+			{Name: draOCPComponentName, Version: "0.4.1"},
+		},
+	}
+
+	b.injectDRAChartVersionAnnotation(componentValues, rr)
+
+	for _, podPath := range []string{"controller", "kubeletPlugin"} {
+		got := dig(componentValues[draOCPComponentName], podPath, "podAnnotations", draChartVersionAnnotation)
+		if got != "v25.10" {
+			t.Errorf("podAnnotations[%s][%s] = %v, want v25.10 (OLM channel fallback)",
+				podPath, draChartVersionAnnotation, got)
+		}
+	}
+}
+
 // TestInjectDRAChartVersionAnnotation_OverridesUserSet pins the
 // "internal annotation always reflects the actual chart version"
 // invariant. A user --set that wrote a stale value into the

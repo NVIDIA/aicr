@@ -38,9 +38,11 @@
 # package installation at runtime — the image is a digest-pinned busybox,
 # mirrorable for air-gapped installs like every other pinned image).
 #
-# nodeAffinity targets IB-capable nodes (labeled by the nfd-network-rule
-# manifest), the same scoping as nic-cluster-policy-aks.yaml — GPUDirect
-# RDMA is only meaningful where GPU and IB coexist.
+# nodeAffinity targets IB-capable nodes (labeled pci-15b3.present by the
+# nfd-worker rule in components/nfd/values-nvidia-nics-aks.yaml and, for one
+# release, the nfd-network-rule manifest), the same scoping as
+# nic-cluster-policy-aks.yaml: GPUDirect RDMA is only meaningful where GPU and
+# IB coexist.
 #
 # Reference: https://github.com/Azure/aks-rdma-infiniband/blob/main/configs/nvidia-peermem-reloader/ds.yaml
 # Guidance:  https://azure.github.io/aks-rdma-infiniband/configurations/gpu-drivers

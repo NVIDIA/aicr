@@ -82,6 +82,7 @@ case "$1" in
     validate)
         # Readiness-gate attempts: write the CTRF report to --output per
         # AICR_STUB_GATE, then exit with the matching verdict.
+        printf '%s\n' "$*" > "${PWD}/validate-args"
         out=""; while (( $# )); do [[ "$1" == --output ]] && out="$2"; shift; done
         case "${AICR_STUB_GATE:-pass}" in
             pass)      cp "${AICR_STUB_FIXTURES:?}/ctrf-pass.json" "${out}"; exit 0 ;;
@@ -324,6 +325,11 @@ run_lib "${d}" 'phase_readiness' EXPECTED_GPU_NODES=skip READINESS_TIMEOUT_SECON
 d="${WORK}/gate-pass"
 run_lib "${d}" 'phase_readiness' "${gate_env[@]}" AICR_STUB_GATE=pass; rc=$?
 [[ "${rc}" == 0 ]] && pass "passing gate exits 0" || { fail "passing gate: want rc 0, got ${rc}"; sed "s/^/    | /" "${d}/log" >&2; }
+# The deployed set lives in bundle/recipe.yaml (#2848); the gate must read it
+# rather than the config's input recipe.
+grep -q -- '--recipe bundle/recipe.yaml' "${d}/validate-args" 2>/dev/null \
+    && pass "gate validates the bundle's recipe.yaml" \
+    || { fail "gate validate args lack --recipe bundle/recipe.yaml"; cat "${d}/validate-args" >&2 2>/dev/null; }
 ! grep -q -- '--- failed validator output' "${d}/cluster-debug/readiness-gate.log" 2>/dev/null \
     && [[ -z "$(ls -A "${d}/tmp")" ]] \
     && pass "passing gate logs no failure block and cleans up" || fail "passing gate: stray failure block or leaked scratch"

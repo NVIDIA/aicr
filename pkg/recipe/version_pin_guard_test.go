@@ -533,6 +533,9 @@ type versionPinExemption struct {
 }
 
 var versionPinExemptions = []versionPinExemption{
+	{source: "b300-mk8s-ubuntu-inference-dynamo", component: "network-operator", field: "version", expectedPin: "25.7.0", expectedDefault: "26.7.0", reason: "Nebius Marketplace packages the DOCA driver for managed B300 workers; the upstream chart is a different distribution."},
+	{source: "b300-mk8s-ubuntu-inference-dynamo", component: "kai-scheduler", field: "version", expectedPin: "v0.17.1", expectedDefault: "v0.16.9", reason: "Matches the Nebius reference stack in ansjindal/ai-factory-dli PR307; other services retain the registry version."},
+	{source: "b300-mk8s-ubuntu-inference-dynamo", component: "dynamo-platform", field: "version", expectedPin: "1.5.0", expectedDefault: "1.4.2", reason: "Matches the Nebius reference stack in ansjindal/ai-factory-dli PR307; qualify the matching operator rather than an untested downgrade."},
 	{
 		source:          "aks",
 		component:       "kube-prometheus-stack",

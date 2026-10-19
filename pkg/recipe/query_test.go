@@ -377,6 +377,8 @@ func TestHydrateResult(t *testing.T) {
 		}
 		result.Metadata.GPUDriverState = GPUDriverStateAbsent
 		result.Metadata.MariaDBOperatorState = MariaDBOperatorStateAPIDetected
+		result.Metadata.DefaultStorageClassState = DefaultStorageClassStateMultiple
+		result.Metadata.PerconaOperatorState = PerconaOperatorStateAICROwned
 
 		hydrated, err := HydrateResult(result)
 		if err != nil {
@@ -392,9 +394,17 @@ func TestHydrateResult(t *testing.T) {
 		if got := metadata["mariaDBOperatorState"]; got != MariaDBOperatorStateAPIDetected {
 			t.Errorf("mariaDBOperatorState = %v, want %q", got, MariaDBOperatorStateAPIDetected)
 		}
+		if got := metadata["defaultStorageClassState"]; got != DefaultStorageClassStateMultiple {
+			t.Errorf("defaultStorageClassState = %v, want %q", got, DefaultStorageClassStateMultiple)
+		}
+		if got := metadata["perconaOperatorState"]; got != PerconaOperatorStateAICROwned {
+			t.Errorf("perconaOperatorState = %v, want %q", got, PerconaOperatorStateAICROwned)
+		}
 
 		result.Metadata.GPUDriverState = ""
 		result.Metadata.MariaDBOperatorState = ""
+		result.Metadata.DefaultStorageClassState = ""
+		result.Metadata.PerconaOperatorState = ""
 		hydrated, err = HydrateResult(result)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -406,9 +416,10 @@ func TestHydrateResult(t *testing.T) {
 		if _, exists := metadata["gpuDriverState"]; exists {
 			t.Errorf("gpuDriverState = %v, want absent (omitempty contract)", metadata["gpuDriverState"])
 		}
-		if _, exists := metadata["mariaDBOperatorState"]; exists {
-			t.Errorf("mariaDBOperatorState = %v, want absent (omitempty contract)",
-				metadata["mariaDBOperatorState"])
+		for _, key := range []string{"mariaDBOperatorState", "defaultStorageClassState", "perconaOperatorState"} {
+			if _, exists := metadata[key]; exists {
+				t.Errorf("%s = %v, want absent (omitempty contract)", key, metadata[key])
+			}
 		}
 	})
 

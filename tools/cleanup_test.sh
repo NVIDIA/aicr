@@ -29,8 +29,9 @@ CLEANUP="${SCRIPT_DIR}/cleanup"
 # --- Stub kubectl/helm/sleep on PATH ------------------------------------------
 # All three log their args to $KLOG/$HLOG when set, so the live (--yes) path can
 # assert which resources actually received destructive calls.
-# kubectl: context name for detection; `get crd` returns an excluded CRD plus
-# AICR-owned NVIDIA and JobSet CRDs; `get ns` reports existence plus a
+# kubectl: context name for detection; `get crd` returns an excluded CRD,
+# AICR-owned NVIDIA (bare and subgroup) and JobSet CRDs, and non-AICR
+# `*.nvidia.com` and bare `kubeflow.org` CRDs that must never match (#3097); `get ns` reports existence plus a
 # Terminating phase so the phase-4 finalizer rescue engages; `api-resources`/`get configmaps` feed that
 # rescue one patchable object. helm: `ls` (phase 1) returns two releases — one
 # out-of-band, one AICR-owned; `list` (driver probe) returns nothing so the
@@ -52,6 +53,10 @@ if [[ "$1" == "get" ]]; then
         crd)
             printf '%s\n' \
                 "customresourcedefinition.apiextensions.k8s.io/clusterpolicies.nvidia.com" \
+                "customresourcedefinition.apiextensions.k8s.io/computedomains.resource.nvidia.com" \
+                "customresourcedefinition.apiextensions.k8s.io/ippools.nv-ipam.nvidia.com" \
+                "customresourcedefinition.apiextensions.k8s.io/workloadruns.excalibur.nvidia.com" \
+                "customresourcedefinition.apiextensions.k8s.io/notebooks.kubeflow.org" \
                 "customresourcedefinition.apiextensions.k8s.io/jobsets.jobset.x-k8s.io" \
                 "customresourcedefinition.apiextensions.k8s.io/nodes.skyhook.nvidia.com"
             ;;
@@ -92,6 +97,19 @@ STUB
 
 chmod +x "${STUB_DIR}/kubectl" "${STUB_DIR}/helm" "${STUB_DIR}/sleep"
 export PATH="${STUB_DIR}:${PATH}"
+# An inherited (exported) function would shadow a stub here and in the cleanup
+# subshell, and a spoofed `command` would fool the gate below.
+unset -f command kubectl helm sleep
+
+# Hermeticity gate. If the stubs do not shadow the real binaries (mktemp or a
+# stub write failed, e.g. an unwritable temp dir), the live --yes case below
+# would run cleanup against the current kube-context. Abort instead.
+for bin in kubectl helm sleep; do
+    if [[ -z "${STUB_DIR}" || "$(command -v "${bin}")" != "${STUB_DIR}/${bin}" ]]; then
+        echo "FATAL: ${bin} does not resolve to the test stub ($(command -v "${bin}" || echo none)); refusing to run" >&2
+        exit 1
+    fi
+done
 
 # run <args...>: capture combined stdout+stderr into $OUT and exit code into $RC.
 OUT=""
@@ -139,7 +157,7 @@ check_contains "phase4-check-backstop-exact-deleted" "kubectl delete ns gang-sch
 
 # 4. Phase 3: excluded CRD match is echoed under dry-run.
 check_contains "phase3-excluded-crd-echoed" "excluding CRDs matching: skyhook.nvidia.com"
-check_contains "phase3-jobset-pattern-owned" "match CRDs against pattern: jobset.x-k8s.io"
+check_contains "phase3-jobset-group-owned" "match CRDs in API group: jobset.x-k8s.io"
 
 # 5. Asymmetric invocation warns (ns without crd, and crd without ns).
 run --dry-run --exclude-ns skyhook
@@ -178,9 +196,13 @@ KLOG="${KLOG}" HLOG="${HLOG}" "${CLEANUP}" --yes \
 klog="$(cat "${KLOG}")"; hlog="$(cat "${HLOG}")"
 rm -f "${KLOG}" "${HLOG}"
 
-# CRD phase: non-excluded CRD deleted; the excluded group is never touched even
-# though the broad nvidia.com pattern matches it.
+# CRD phase: owned groups are deleted, an owned group fenced by --exclude-crd
+# is never touched, and unowned groups never match (#3097).
 has     "live-crd-nonexcluded-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/clusterpolicies.nvidia.com"
+has     "live-crd-owned-subgroup-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/computedomains.resource.nvidia.com"
+has     "live-crd-operator-applied-group-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/ippools.nv-ipam.nvidia.com"
+has_not "live-crd-unowned-nvidia-group-untouched" "${klog}" "excalibur"
+has_not "live-crd-unowned-kubeflow-group-untouched" "${klog}" "notebooks.kubeflow.org"
 has     "live-crd-jobset-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/jobsets.jobset.x-k8s.io"
 has_not "live-nothing-skyhook-in-kubectl" "${klog}" "skyhook"
 # Namespace phase: backstop deleted; excluded namespace neither deleted nor

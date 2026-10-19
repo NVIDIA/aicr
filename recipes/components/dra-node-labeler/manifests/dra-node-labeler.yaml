@@ -138,7 +138,7 @@ spec:
           # and is not pinned in this repo's values.yaml, so nothing holds the two
           # together — the catalog carries a kubectl image for each, listed
           # separately in docs/user/container-images.md.
-          image: docker.io/alpine/kubectl:1.37.1@sha256:7b4cc9a9ce0d064cedeb85550266c11f2b32f010ca299525518646261e4d955e
+          image: docker.io/alpine/kubectl:1.37.1@sha256:b568e8beb6a79aee269c142343078a278b85e7710f1c0e7d8d6b21d1eb566a48
           command:
             - /bin/sh
             - -c

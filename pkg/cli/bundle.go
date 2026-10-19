@@ -83,6 +83,15 @@ type bundleCmdOptions struct {
 	// components. Off by default (parallel). An escape hatch for operators.
 	serial bool
 
+	// terraformClusterRollover emits the cluster-rollover containment shim
+	// in a --deployer terraform bundle. Off by default. See
+	// config.WithTerraformClusterRollover for why it is not the default.
+	terraformClusterRollover bool
+
+	// terraformChildModule emits a --deployer terraform bundle as a child
+	// module rather than a root module. Off by default.
+	terraformChildModule bool
+
 	// attest enables bundle attestation and binary verification.
 	attest bool
 
@@ -197,6 +206,8 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		vendorCharts:              boolFlagOrConfig(cmd, "vendor-charts", bundleOpts.VendorCharts),
 		readinessHooks:            cmd.Bool("readiness-hooks"),
 		serial:                    cmd.Bool("serial"),
+		terraformClusterRollover:  cmd.Bool("terraform-cluster-rollover"),
+		terraformChildModule:      cmd.Bool("terraform-child-module"),
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", bundleOpts.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
 		signingKey:                stringFlagOrConfig(cmd, flagSigningKey, bundleOpts.OIDCResolve.SigningKey),
@@ -211,7 +222,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		signingConfigPath: cmd.String(flagSigningConfig),
 		insecureTLS:       boolFlagOrConfig(cmd, flagInsecureTLS, bundleInput.InsecureTLS),
 		plainHTTP:         boolFlagOrConfig(cmd, flagPlainHTTP, bundleInput.PlainHTTP),
-		imageRefsPath:     stringFlagOrConfig(cmd, "image-refs", bundleInput.ImageRefsPath),
+		imageRefsPath:     stringFlagOrConfig(cmd, flagImageRefs, bundleInput.ImageRefsPath),
 	}
 
 	// Rekor v2 is the default for both keyless and KMS --attest signing: the
@@ -267,12 +278,10 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		}
 		// For OCI output, retain one absolute planned path from preflight
 		// through generation and publication.
-		opts.outputDir, err = filepath.Abs("./bundle")
+		opts.outputDir, err = ociBundleStagingPath()
 		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to resolve OCI bundle output path", err)
+			return nil, err
 		}
-		opts.outputDir = filepath.Clean(opts.outputDir)
 		// Derive the Helm chart name from the OCI artifact path so the
 		// argocd-helm bundle's Chart.yaml and parent Application
 		// `source.chart` match what `helm push` actually publishes. Without
@@ -343,6 +352,19 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		if cmd.IsSet("flux-namespace") {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--flux-namespace is only valid with --deployer flux")
+		}
+	}
+
+	// Reject the terraform-specific flag on other deployers, for the same
+	// reason as the flux flags above: silent acceptance with no effect.
+	if opts.deployer != config.DeployerTerraform {
+		if cmd.IsSet("terraform-cluster-rollover") {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--terraform-cluster-rollover is only valid with --deployer terraform")
+		}
+		if cmd.IsSet("terraform-child-module") {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--terraform-child-module is only valid with --deployer terraform")
 		}
 	}
 
@@ -489,12 +511,18 @@ func validateTLogUpload(opts *bundleCmdOptions) error {
 				"requires --attest with --"+flagSigningKey+"; keyless OIDC signing needs "+
 				"Fulcio/Rekor network access")
 	}
-	if opts.rekorURL != "" {
+	return validateTLogOptOutTarget(opts.rekorURL, opts.signingConfigPath)
+}
+
+// validateTLogOptOutTarget rejects a transparency-log target alongside
+// --tlog-upload=false; see validateTLogUpload. Shared with evidence signing.
+func validateTLogOptOutTarget(rekorURL, signingConfigPath string) error {
+	if rekorURL != "" {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"--"+flagTLogUpload+"=false is mutually exclusive with --"+flagRekorURL+
 				": one skips the transparency log, the other selects a Rekor endpoint")
 	}
-	if opts.signingConfigPath != "" {
+	if signingConfigPath != "" {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"--"+flagTLogUpload+"=false is mutually exclusive with --"+flagSigningConfig+
 				": one skips the transparency log, the other selects a signing config")
@@ -545,13 +573,20 @@ func validateSigningKeyExclusivity(cmd *cli.Command, opts *bundleCmdOptions) err
 	// a YAML block-scalar config value) does not reach the KMS URI parser and
 	// fail late at sign time.
 	opts.signingKey = trimmed
+	return validateKeylessOnlyUnset(opts.identityToken, opts.oidcDeviceFlow, opts.fulcioURL)
+}
+
+// validateKeylessOnlyUnset rejects the keyless-only options that are
+// meaningless under KMS signing; see validateSigningKeyExclusivity. Shared with
+// evidence signing.
+func validateKeylessOnlyUnset(identityToken string, deviceFlow bool, fulcioURL string) error {
 	conflicts := []struct {
 		name   string
 		active bool
 	}{
-		{flagIdentityToken, opts.identityToken != ""},
-		{flagOIDCDeviceFlow, opts.oidcDeviceFlow},
-		{flagFulcioURL, opts.fulcioURL != ""},
+		{flagIdentityToken, identityToken != ""},
+		{flagOIDCDeviceFlow, deviceFlow},
+		{flagFulcioURL, fulcioURL != ""},
 	}
 	for _, c := range conflicts {
 		if c.active {
@@ -626,6 +661,33 @@ func resolveOutputTarget(cmd *cli.Command, input aicr.BundleInputOptions) (*oci.
 	return ref, nil
 }
 
+// ociBundleStagingPath returns the bundle directory under the working
+// directory, with symlinks in the working directory path resolved.
+func ociBundleStagingPath() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal,
+			"failed to resolve working directory for OCI bundle staging", err)
+	}
+	// Preflight rejects symlinked ancestors, and macOS /tmp and $TMPDIR are symlinks.
+	resolved, err := filepath.EvalSymlinks(wd)
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal,
+			"failed to resolve working directory symlinks for OCI bundle staging", err)
+	}
+	return filepath.Join(resolved, "bundle"), nil
+}
+
+// ociBundleStagingError wraps err with stagingDir, keeping err's error code,
+// or ErrCodeInternal if err has none.
+func ociBundleStagingError(stagingDir string, err error) error {
+	code := errors.ErrCodeInternal
+	if structured, ok := stderrors.AsType[*errors.StructuredError](err); ok {
+		code = structured.Code
+	}
+	return errors.Wrap(code, "cannot stage OCI bundle in "+stagingDir, err)
+}
+
 //nolint:funlen // bundle command is inherently large (flags + description + action)
 func bundleCmd() *cli.Command {
 	return &cli.Command{
@@ -649,6 +711,7 @@ Use --deployer argocd to generate Argo CD Applications.
 Use --deployer argocd-helm to generate a Helm chart that renders the Argo CD Applications, with values overridable at install time.
 Use --deployer flux to generate Flux HelmRelease and Kustomization manifests.
 Use --deployer helmfile to generate a helmfile.yaml release graph (apply/diff/destroy with the upstream helmfile CLI).
+Use --deployer terraform to generate a Terraform root module (plan/apply with terraform), or a child module with --terraform-child-module.
 
 Helm:
   - README.md: Root deployment guide with ordered steps
@@ -693,10 +756,30 @@ Flux with OCI output (--output oci://...):
   (default: aicr-bundle). Use --flux-namespace to target a non-default Flux
   installation namespace (default: flux-system).
 
+Flux network-operator migration (git and OCI output):
+  The one-time network-operator migration in the component catalog's upgrade
+  notes needs Flux v2.8+ (helm-controller v1.5.0+) because it sets
+  spec.upgrade.serverSideApply. That is separate from the OCI prerequisites
+  above, and AICR does not emit the field.
+
 Helmfile:
   - helmfile.yaml: Declarative release graph (repositories + releases + needs)
   - NNN-<component>/: Per-component chart dirs (Chart.yaml, values.yaml)
   - README.md: helmfile apply/diff/destroy walkthrough
+  - checksums.txt: SHA256 checksums of generated files
+
+Terraform:
+  - main.tf: One module call per component; depends_on carries the recipe's
+    dependency graph exactly, so independent components apply concurrently
+  - versions.tf / variables.tf / outputs.tf: Provider config and the cluster
+    connection surface (root form; a child module uses the caller's provider).
+    The bundle does not create a cluster
+  - modules/component/: The shared module every call resolves to, holding the
+    component's pre / chart / post / readiness releases chained in order
+  - NNN-<component>/: Per-component values.yaml and cluster-values.yaml, plus
+    Chart.yaml + templates/ for a bundled chart (no install.sh: Terraform is
+    the only installer)
+  - README.md: terraform init/plan/apply walkthrough
   - checksums.txt: SHA256 checksums of generated files
 
 Examples:
@@ -715,6 +798,9 @@ Generate Flux manifests:
 
 Generate Helmfile release graph:
   aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer helmfile
+
+Generate a Terraform root module (add --terraform-child-module for a child module):
+  aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer terraform
 
 Override values in generated bundle:
   aicr bundle --recipe recipe.yaml --set gpuoperator:driver.version=570.133.20
@@ -820,7 +906,7 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     "workload-gate",
-				Usage:    "Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
+				Usage:    "Taint for nodewright-operator runtime required (format: key=value:effect or key:effect; the key must have no DNS prefix and be at most 53 characters). This is a day 2 option for cluster scaling operations.",
 				Category: catScheduling,
 			},
 			&cli.StringSliceFlag{
@@ -877,8 +963,9 @@ Package with explicit tag (overrides CLI version):
 	network access. Each vendored chart is recorded in provenance.yaml with
 	name, version, source URL, and SHA256. Trades the upstream CVE-yank
 	fail-loud signal for offline deployability — vendored bundles silently
-	install a frozen chart version even after upstream yank. Requires the
-	'helm' binary on PATH at bundle time.`,
+	install a frozen chart version even after upstream yank. A chart that keeps
+	its registry pin must match the registry's helm.defaultDigest when one is
+	set, or the bundle fails. Requires the 'helm' binary on PATH at bundle time.`,
 				Category: "Deployment",
 			},
 			&cli.BoolFlag{
@@ -887,22 +974,46 @@ Package with explicit tag (overrides CLI version):
 	component that ships a recipes/components/<name>/readiness.yaml chainsaw
 	Test. The chart runs the gate CLI as a post-component Job so deployers
 	block on component-specific readiness signals (e.g. ClusterPolicy state)
-	that Helm/Argo CD cannot assess natively: helm waits via
-	--wait-for-jobs, Argo CD via the gate's sync-wave and built-in Job
-	health. Supported with --deployer helm, argocd, and argocd-helm; off by
-	default. See #904.`,
+	that Helm/Argo CD cannot assess natively: under helm and terraform the
+	gate Job is a post-install/post-upgrade hook the release blocks on, under
+	Argo CD it is held by the gate's sync-wave and built-in Job health.
+	Supported with --deployer helm, argocd, argocd-helm, and terraform; off
+	by default. See #904.`,
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{
 				Name: "serial",
 				Usage: `Sequence components strictly one at a time in deployment order,
 	disabling the parallel rollout of independent components. Affects the
-	argocd, argocd-helm, flux, and helmfile deployers (helm is already
-	serial): argocd falls back to a linear sync-wave per folder, flux chains
-	each HelmRelease dependsOn to the previous component, and helmfile chains
-	every release via needs: into one linear apply order. An escape hatch for
+	argocd, argocd-helm, flux, helmfile, and terraform deployers (helm is
+	already serial): argocd falls back to a linear sync-wave per folder, flux
+	chains each HelmRelease dependsOn to the previous component, helmfile
+	chains every release via needs:, and terraform chains every module call
+	via depends_on, into one linear apply order. An escape hatch for
 	reproducing the pre-parallelism ordering or bisecting a misbehaving
 	rollout; off by default.`,
+				Category: catDeployment,
+			},
+			&cli.BoolFlag{
+				Name: "terraform-cluster-rollover",
+				Usage: `Emit a containment shim in each component module so replacing the
+	cluster replaces every release, instead of leaving state that describes
+	objects in a cluster that no longer exists (--deployer terraform only).
+	The shim keys on var.cluster_keepers: attributes of the cluster that change
+	when it is rebuilt (its CA certificate, a provider id, an endpoint minted
+	per cluster), which the caller sets; the variable is required in both
+	forms. Off by default.`,
+				Category: catDeployment,
+			},
+			&cli.BoolFlag{
+				Name: "terraform-child-module",
+				Usage: `Emit the bundle as a child module rather than a standalone root
+	module: no provider configuration and no cluster-connection variables, so
+	the calling configuration owns the provider and the module calls inherit
+	it (--deployer terraform only). Use this when the cluster is declared in
+	the same configuration as the bundle — a module carrying its own provider
+	block cannot take depends_on, count or for_each, which is exactly what a
+	caller needs to sequence the bundle behind the cluster that hosts it.`,
 				Category: catDeployment,
 			},
 			&cli.StringFlag{
@@ -996,8 +1107,8 @@ Package with explicit tag (overrides CLI version):
 				Category: catOCIRegistry,
 			},
 			&cli.StringFlag{
-				Name:     "image-refs",
-				Usage:    "Path to file where the published image reference will be written (only used with OCI output)",
+				Name:     flagImageRefs,
+				Usage:    "File to receive the published bundle digest (sha256:...); valid only with OCI output. A target on a different device from its directory, such as a Kubernetes termination-message file, is written in place. The target is checked, including that it can be written, before the bundle is generated.",
 				Category: catOCIRegistry,
 			},
 		},
@@ -1082,10 +1193,17 @@ func prepareBundlePublicationTargets(
 	}
 	preflightCtx, preflightCancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
 	bundleTarget, err := deps.prepareBundleOutput(preflightCtx, opts.outputDir)
+	if err != nil {
+		// --output is a registry reference, so name the local path that failed.
+		err = ociBundleStagingError(opts.outputDir, err)
+	}
 	err = authoritativeFilesystemContextError(preflightCtx, "bundle output preflight canceled", err)
 	var imageRefs *imageRefsTarget
 	if err == nil && opts.imageRefsPath != "" {
 		imageRefs, err = deps.prepareImageRefsTarget(preflightCtx, bundleTarget, opts.imageRefsPath)
+		if err == nil {
+			err = imageRefs.preflightWrite(preflightCtx)
+		}
 		err = authoritativeFilesystemContextError(preflightCtx,
 			"image-reference target preflight canceled", err)
 	}
@@ -1161,6 +1279,11 @@ func runBundleCmdWithDependencies(
 		outputType = "Flux manifests"
 	case config.DeployerHelmfile:
 		outputType = "Helmfile release graph"
+	case config.DeployerTerraform:
+		outputType = "Terraform root module"
+		if opts.terraformChildModule {
+			outputType = "Terraform child module"
+		}
 	}
 	slog.Info("generating bundle",
 		slog.String("deployer", opts.deployer.String()),
@@ -1208,6 +1331,8 @@ func runBundleCmdWithDependencies(
 		config.WithVendorCharts(opts.vendorCharts),
 		config.WithReadinessHooks(opts.readinessHooks),
 		config.WithSerial(opts.serial),
+		config.WithTerraformClusterRollover(opts.terraformClusterRollover),
+		config.WithTerraformChildModule(opts.terraformChildModule),
 		config.WithOCISourceName(opts.ociSourceName),
 		config.WithFluxNamespace(opts.fluxNamespace),
 		config.WithBundleChartName(opts.bundleChartName),
@@ -1471,7 +1596,7 @@ func defaultBundlePublishDependencies() bundlePublishDependencies {
 		packageAndPush:      oci.PackageAndPush,
 		packageAndPushHelm:  oci.PackageAndPushHelmChart,
 		writeImageRefs: func(ctx context.Context, target *imageRefsTarget, data []byte) error {
-			return target.writeAtomic(ctx, data)
+			return target.write(ctx, data)
 		},
 	}
 }
@@ -1565,7 +1690,7 @@ func pushOCIBundleWithDependencies(
 		if err := imageRefs.validateTarget(publishCtx); err != nil {
 			return err
 		}
-		if err := imageRefs.validateBundleAliases(publishCtx); err != nil {
+		if err := imageRefs.validateGuardAliases(publishCtx); err != nil {
 			return err
 		}
 	}
@@ -1608,7 +1733,7 @@ func pushOCIBundleWithDependencies(
 		return err
 	}
 	if imageRefs != nil {
-		if err := imageRefs.validateBundleAliases(publishCtx); err != nil {
+		if err := imageRefs.validateGuardAliases(publishCtx); err != nil {
 			return err
 		}
 	}
@@ -1671,7 +1796,7 @@ func pushOCIBundleWithDependencies(
 		return err
 	}
 	if imageRefs != nil {
-		if err := imageRefs.validateBundleAliases(publishCtx); err != nil {
+		if err := imageRefs.validateGuardAliases(publishCtx); err != nil {
 			return err
 		}
 	}

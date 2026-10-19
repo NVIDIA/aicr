@@ -38,7 +38,7 @@ const (
 	pinnedGKERef = "${{ env.GKE_ACTUATOR_IMAGE }}"
 
 	// githubHostedRunner is the runs-on label for GitHub-hosted Ubuntu runners.
-	githubHostedRunner = "ubuntu-latest"
+	githubHostedRunner = "ubuntu-24.04"
 	// githubHostedJobCapMinutes is the hard 6h execution ceiling GitHub imposes
 	// on a job running on a GitHub-hosted runner. A job-level timeout-minutes
 	// above this is silently clamped to it, so a UAT teardown budget that reads

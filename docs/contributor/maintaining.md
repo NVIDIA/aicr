@@ -20,7 +20,7 @@ The short form:
 | Step | Command | Notes |
 |------|---------|-------|
 | 1. Pre-flight | `make qualify` on `main` | Must pass. Tests + lint + e2e + scan. |
-| 2. Bump | `make bump-patch` (or `bump-minor`/`bump-rc`) | Tags HEAD and pushes the tag. To promote a pre-release to stable on the same SHA, use `make bump-promote TAG=<rc-tag>` (e.g. `TAG=v1.3.0-rc2`). |
+| 2. Bump | `make bump-patch` (or `bump-minor`/`bump-rc`) | Tags HEAD and pushes the tag. To take an RC to GA, delete the RC release and tags first; see [Promoting an RC to GA](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#promoting-an-rc-to-ga). |
 | 3. Push | `git push origin <tag>` (done by the bump target) | Triggers the `On Tag Release` (`on-tag.yaml`) workflow. |
 | 4. Verify | `gh release view <tag>` + `cosign verify-attestation ...` | See RELEASE.md §Verification. |
 
@@ -479,6 +479,20 @@ retained for 90 days — long enough to review weeks after the Monday post. A
 manual `workflow_dispatch` run has Slack posting off by default so it can be
 validated silently, and a same-repo PR touching the drift surface also runs
 the report against its own branch, always without posting.
+
+Renovate offers the highest version number per release line, which is not the
+same as the newest release: a registry can carry a frozen or retracted line
+numbered above the maintained one. The report therefore screens candidates by
+publish date. Helm dates come from Renovate, and OCI dates come from each chart
+manifest's `org.opencontainers.image.created` annotation. Within each update
+type, the report walks down from the highest version. A version published more
+than a day before the current pin is withheld and listed in the row's
+`predating` field. The first version that is not withheld is offered, and lower
+versions of that type are dropped. A chart whose every candidate was withheld
+is counted as `withheld` rather than behind, so a reviewer decides it
+explicitly. A version that could not be dated is still offered, as before the
+screen existed. Its row's `unscreened` field says why, and the digest counts
+such rows.
 
 On receiving the Monday digest, review it with the
 [`aicr-reviewing-component-drift`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-reviewing-component-drift/SKILL.md)

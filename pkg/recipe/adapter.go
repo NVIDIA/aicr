@@ -37,7 +37,7 @@ func GetEmbeddedFS() embed.FS {
 
 // GetManifestContent retrieves a manifest file from the embedded catalog
 // (defaultEmbeddedProvider). Path should be relative to data directory (e.g.,
-// "components/network-operator/manifests/nfd-network-rule.yaml").
+// "components/network-operator/manifests/talos-namespace.yaml").
 //
 // This entry point is preserved for back-compat with callers that have no
 // RecipeResult-bound provider available. Internally derives a
@@ -62,7 +62,7 @@ func GetManifestContent(path string) ([]byte, error) {
 // GetManifestContentWithContext to honor their own deadline instead.
 //
 // Path should be relative to the data root (e.g.,
-// "components/network-operator/manifests/nfd-network-rule.yaml").
+// "components/network-operator/manifests/talos-namespace.yaml").
 func GetManifestContentWithProvider(dp DataProvider, path string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
 	defer cancel()

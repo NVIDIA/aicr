@@ -16,7 +16,7 @@ package attestation
 
 import (
 	"context"
-	stderrors "errors"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +25,7 @@ import (
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -129,6 +130,37 @@ func TestEmit_MinimalByDefault_RedactsSnapshotAndRecordsPolicy(t *testing.T) {
 	}
 	if len(res.Bundle.Predicate.Redaction.Applied) == 0 {
 		t.Errorf("expected applied rules recorded")
+	}
+}
+
+func TestEmit_StampsAICRCommitIntoStatement(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	dir := t.TempDir()
+	res, err := Emit(context.Background(), EmitOptions{
+		OutDir:      dir,
+		Recipe:      emitRecipe(),
+		Snapshot:    snapshotWithSensitiveData(),
+		AICRVersion: "main",
+		AICRCommit:  sha,
+	})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if res.Bundle.Predicate.AICRCommit != sha {
+		t.Errorf("predicate AICRCommit = %q, want %q", res.Bundle.Predicate.AICRCommit, sha)
+	}
+	stmt, err := os.ReadFile(filepath.Join(dir, SummaryBundleDirName, StatementFilename))
+	if err != nil {
+		t.Fatalf("read statement: %v", err)
+	}
+	var parsed struct {
+		Predicate Predicate `json:"predicate"`
+	}
+	if err := json.Unmarshal(stmt, &parsed); err != nil {
+		t.Fatalf("parse statement: %v", err)
+	}
+	if parsed.Predicate.AICRCommit != sha {
+		t.Errorf("statement predicate aicrCommit = %q, want %q", parsed.Predicate.AICRCommit, sha)
 	}
 }
 
@@ -394,7 +426,7 @@ func TestEmit_RejectsMutableValidatorTag(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Emit to fail closed on a mutable validator tag")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	// The offending ref must be named — the operator has to know which

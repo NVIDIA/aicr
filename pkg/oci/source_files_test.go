@@ -34,6 +34,8 @@ import (
 	"github.com/opencontainers/go-digest"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func writeSourceFixture(t *testing.T, root string) map[string]string {
@@ -1300,7 +1302,7 @@ func TestPreparePackageSourceRejectsRetainedWorkspacePathSwaps(t *testing.T) {
 				context.Background(), source, output, "", []string{"a.txt"}, deps)
 			if prepared != nil {
 				if closeErr := prepared.Close(); closeErr != nil &&
-					!stderrors.Is(closeErr, apperrors.New(apperrors.ErrCodeInternal, "")) {
+					errorstest.ReportedCode(closeErr) != apperrors.ErrCodeInternal {
 
 					t.Errorf("prepared.Close() error = %v", closeErr)
 				}
@@ -1396,7 +1398,7 @@ func TestOwnedLayoutRejectsRetainedPathSwapsBeforeArchiveOpen(t *testing.T) {
 			archiveName, _, buildErr := buildDeterministicTarGzip(
 				context.Background(), prepared, layout, archiveOptions{})
 			if closeErr := layout.Close(); closeErr != nil &&
-				!stderrors.Is(closeErr, apperrors.New(apperrors.ErrCodeInternal, "")) {
+				errorstest.ReportedCode(closeErr) != apperrors.ErrCodeInternal {
 
 				t.Errorf("layout.Close() error = %v", closeErr)
 			}

@@ -124,6 +124,7 @@ Currently on disk:
 | eks | h100 | `eks/system-m7i.yaml` | `eks/p5-h100.yaml` |
 | eks | gb200 | `eks/system-m7i.yaml` | `eks/p6-gb200.yaml` |
 | eks | gb300 | `eks/system-m7i.yaml` | `eks/p6e-gb300.yaml` |
+| gke | gb300 | `gke/system-n2.yaml` | `gke/a4x-maxgpu-4g-metal.yaml` |
 | k0s | h200 | `k0s/system-generic.yaml` | `k0s/accelerated-h200.yaml` |
 | rke2 | vr200 | `rke2/system-generic.yaml` | `rke2/accelerated-vr200.yaml` |
 
@@ -245,6 +246,12 @@ profiles on the next run.
 ## CI Integration
 
 `.github/workflows/kwok-recipes.yaml` calls the same `run-all-recipes.sh` used by `make kwok-test-all`. CI uses a single shared Kind cluster with cleanup between recipes.
+
+Per-recipe cleanup sweeps Helm releases outside the `argocd` namespace,
+including all AICR components registered with `kube-system` as their default
+namespace. It preserves the shared `kwok-controller` and `kwok-stage-fast`
+releases, the install-infra-managed Argo CD release, and unknown Helm releases
+in `kube-system`.
 
 Manual trigger:
 ```bash

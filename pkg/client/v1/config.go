@@ -504,21 +504,19 @@ func (c *Config) BundleInputOptions() (BundleInputOptions, error) {
 // the other derivations use.
 //
 // Not every field reaches Client.ValidateState. Image, JobName,
-// ServiceAccountName and RequireGPU configure the validator's own
-// Kubernetes Job, but pkg/validator exposes no WithValidationImage,
-// WithValidationJobName, WithValidationServiceAccountName or
-// WithValidationRequireGPU option for ValidateState to accept them through —
-// see options.go. They are carried here anyway so a caller (the CLI's
-// parseValidateAgentConfig, in particular) can read spec.validate.agent with
-// its own flag-over-config precedence instead of reaching for Unwrap(). The
-// remaining nine fields (Namespace, ImagePullSecrets, NodeSelector,
-// Tolerations, Phases, NoCluster, Cleanup, FailFast, Timeout) do reach
-// ValidateState via a matching WithValidation* option.
+// ServiceAccountName and RequireGPU configure the live snapshot-capture
+// agent's Kubernetes Job, and ValidateState has no option to accept them
+// through — see options.go. They are carried here anyway so a caller (the
+// CLI's parseValidateAgentConfig, in particular) can read spec.validate.agent
+// with its own flag-over-config precedence instead of reaching for Unwrap().
+// The remaining eleven fields (Namespace, ValidatorServiceAccountName,
+// ImagePullSecrets, NodeSelector, Tolerations, Phases, SkipChecks, NoCluster,
+// Cleanup, FailFast, Timeout) do reach ValidateState via a matching option.
 type ValidateSettings struct {
 	Namespace string
 
 	// Image, JobName, ServiceAccountName and RequireGPU have no
-	// WithValidation* option — see the type godoc above. A caller feeds them
+	// ValidateState option — see the type godoc above. A caller feeds them
 	// into its own agent/Job construction instead of ValidateState.
 	Image              string
 	ImagePullSecrets   []string
@@ -528,6 +526,11 @@ type ValidateSettings struct {
 	Tolerations        []corev1.Toleration
 	RequireGPU         bool
 	Phases             []Phase
+
+	// ValidatorServiceAccountName is
+	// spec.validate.agent.validatorServiceAccountName verbatim. It reaches
+	// ValidateState through WithValidatorServiceAccountName.
+	ValidatorServiceAccountName string
 
 	// SkipChecks is spec.validate.execution.skipChecks verbatim. It reaches
 	// ValidateState through WithValidationSkipChecks.
@@ -553,13 +556,14 @@ type ValidateSettings struct {
 // individual fields with its own flag precedence instead of replaying a
 // built option list.
 //
-// Thirteen settings project: namespace, image, image pull secrets, job name,
-// service account name, node selector, tolerations, require-GPU, phases,
-// no-cluster, cleanup, fail-fast and timeout. Only nine of them reach
-// Client.ValidateState — image, job name, service account name and
-// require-GPU have no WithValidation* counterpart and are carried purely for
-// the caller's own agent/Job construction. See the ValidateSettings type
-// godoc for which is which.
+// Fifteen settings project: namespace, image, image pull secrets, job name,
+// service account name, validator service account name, node selector,
+// tolerations, require-GPU, phases, skip checks, no-cluster, cleanup,
+// fail-fast and timeout. Only eleven of them reach Client.ValidateState —
+// image, job name, service account name and require-GPU have no
+// ValidateState counterpart and are carried purely for the caller's own
+// agent/Job construction. See the ValidateSettings type godoc for which is
+// which.
 //
 // # Where the rest of spec.validate goes
 //
@@ -573,9 +577,9 @@ type ValidateSettings struct {
 //   - EvidenceAttestation configures the recipe-evidence bundle.
 //     EvidenceAttestationOptions derives it; it is not folded in here because
 //     it targets Client.EmitRecipeEvidence rather than ValidateState.
-//   - EvidenceCNCF configures the CNCF AI Conformance markdown path, which has
-//     no facade emission method to receive it. See EvidenceAttestationOptions
-//     for why that half stays un-projected.
+//   - EvidenceCNCF configures CNCF AI Conformance evidence.
+//     CNCFEvidenceOptions derives it for Client.RenderCNCFEvidence and
+//     Client.CollectCNCFEvidence rather than ValidateState.
 //
 // # Two mappings that are not pass-throughs
 //
@@ -636,17 +640,18 @@ func (c *Config) ValidateSettings() (ValidateSettings, bool, error) {
 	}
 
 	return ValidateSettings{
-		Namespace:          resolved.Namespace,
-		Image:              resolved.Image,
-		ImagePullSecrets:   resolved.ImagePullSecrets,
-		JobName:            resolved.JobName,
-		ServiceAccountName: resolved.ServiceAccountName,
-		NodeSelector:       resolved.NodeSelector,
-		Tolerations:        resolved.Tolerations,
-		RequireGPU:         resolved.RequireGPU,
-		Phases:             phases,
-		SkipChecks:         resolved.SkipChecks,
-		NoCluster:          resolved.NoCluster,
+		Namespace:                   resolved.Namespace,
+		Image:                       resolved.Image,
+		ImagePullSecrets:            resolved.ImagePullSecrets,
+		JobName:                     resolved.JobName,
+		ServiceAccountName:          resolved.ServiceAccountName,
+		ValidatorServiceAccountName: resolved.ValidatorServiceAccountName,
+		NodeSelector:                resolved.NodeSelector,
+		Tolerations:                 resolved.Tolerations,
+		RequireGPU:                  resolved.RequireGPU,
+		Phases:                      phases,
+		SkipChecks:                  resolved.SkipChecks,
+		NoCluster:                   resolved.NoCluster,
 		// Inverted on purpose. See the field godoc.
 		Cleanup:  !resolved.NoCleanup,
 		FailFast: resolved.FailFast,
@@ -717,7 +722,9 @@ func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
 //     binary rather than of the document. Set it after deriving.
 //   - OIDCResolve is excluded by the spec itself: a keyless-signing identity
 //     token is a short-lived secret and must not live in a version-controlled
-//     file. The caller resolves it at sign time.
+//     file, and the signing mode it selects (a KMS SigningKey, private
+//     Sigstore endpoints) is set per invocation. The caller resolves it at
+//     sign time.
 //   - NoSign and Full are command-line-only, for the same reason FailOnError
 //     and IgnoreTLog are. Both weaken the ARTIFACT: NoSign pushes an unsigned
 //     bundle, Full ships unredacted payloads. A checked-in file that can
@@ -767,10 +774,9 @@ func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
 // The evidence section carries two kinds; this method covers one.
 // CNCFEvidenceOptions covers the other — it is a separate method, not folded
 // in here, because the two target different consumers: this one feeds
-// Client.EmitRecipeEvidence, while CNCF AI Conformance markdown has no
-// Client.Emit* counterpart and is consumed directly by the caller (the CLI's
-// validateFlagCombinations, cncf.New and runCNCFSubmission). Reading that
-// half through Unwrap() is no longer necessary.
+// Client.EmitRecipeEvidence, while CNCF AI Conformance evidence goes through
+// Client.RenderCNCFEvidence and Client.CollectCNCFEvidence, after the caller
+// decides which of the two a run takes.
 //
 // Returns (zero, false, nil) for a nil Config, an absent spec.validate, or an
 // absent evidence.attestation. An empty out also returns ok=false, but unlike
@@ -819,13 +825,12 @@ func (c *Config) EvidenceAttestationOptions() (EvidenceOptions, bool, error) {
 	return opts, true, nil
 }
 
-// CNCFEvidenceOptions carries spec.validate.evidence.cncf — the CNCF AI
-// Conformance evidence-markdown settings (--evidence-dir / --cncf-submission
-// / --feature). Consumed by the CALLER, not by a Client method: there is no
-// Client.Emit* for CNCF evidence, so validateFlagCombinations, cncf.New and
-// runCNCFSubmission read this directly. Mirrors SnapshotOutputOptions, which
-// carries spec.snapshot.output the same way despite Client.CollectSnapshot
-// not consuming it either.
+// CNCFEvidenceOptions carries spec.validate.evidence.cncf, the CNCF AI
+// Conformance evidence settings (--evidence-dir / --cncf-submission /
+// --feature). The CALLER reads it, applies its own flag precedence, and then
+// picks a Client method. CNCFSubmission true means Client.CollectCNCFEvidence
+// with Dir and Features in CNCFCollectOptions. Otherwise a non-empty Dir
+// means Client.RenderCNCFEvidence after ValidateState.
 type CNCFEvidenceOptions struct {
 	// Dir is spec.validate.evidence.cncf.dir, the directory CNCF AI
 	// Conformance evidence markdown is written to.

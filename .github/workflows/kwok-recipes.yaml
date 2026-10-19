@@ -78,7 +78,7 @@ jobs:
   script-tests:
     name: KWOK Script Tests
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -91,6 +91,7 @@ jobs:
           # yq is required by profile-select_test.sh. Fail closed so a runner
           # image without yq cannot silently skip the assertions.
           command -v yq >/dev/null || { echo "::error::yq is required for kwok/scripts/lib tests"; exit 1; }
+          bash kwok/scripts/lib/cleanup_test.sh
           bash kwok/scripts/lib/sync-budget_test.sh
           bash kwok/scripts/lib/deployer-map_test.sh
           bash kwok/scripts/lib/upgrade-readback_test.sh
@@ -102,7 +103,7 @@ jobs:
   discover:
     name: Discover Recipes
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       tier1_pairs: ${{ steps.classify.outputs.tier1_pairs }}
@@ -503,7 +504,7 @@ jobs:
   prime-images:
     name: 'Prime Image Cache (${{ matrix.image }})'
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # A failed kind_node pull must not skip every tier. Lanes that miss the
     # cache fall back to `kind create cluster` pulling the node image itself.
@@ -549,7 +550,7 @@ jobs:
   build-aicr:
     name: Build aicr
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -597,7 +598,7 @@ jobs:
           key: kwok-gobuild-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ hashFiles('go.sum') }}
 
       - name: Upload aicr binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: kwok-aicr-bin
           path: dist/
@@ -663,7 +664,7 @@ jobs:
   summary:
     name: KWOK Test Summary (advisory)
     needs: [script-tests, discover, prime-images, build-aicr, test-tier1, test-tier2, test-tier3]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     if: always()
     steps:

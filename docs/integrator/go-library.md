@@ -73,7 +73,7 @@ go get github.com/NVIDIA/aicr@latest
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v0.22.0
+go get github.com/NVIDIA/aicr@v1.0.0
 ```
 
 ## Quick start
@@ -246,8 +246,11 @@ reported as no drift.
 // K8s.aks-gpu-pools.gpu-driver reading (a snapshot without it fails
 // closed). On OKE, OKEAddonsPath plays the same role from an
 // `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`
-// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading. On GKE,
-// GKEGPUPoolsPath plays the same role from a
+// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading. The same
+// dump supplies K8s.oke-addons.nvidia-network-operator, which OKE recipes
+// that deploy network-operator require to be absent, so resolving them from
+// a snapshot without it fails closed. On GKE, GKEGPUPoolsPath plays the same
+// role from a
 // `gcloud container node-pools list --cluster <cluster> --format=json`
 // dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
 // It's required only when resolving the GKE `bundle-installer` gpuStack
@@ -279,7 +282,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	// full run-scoped RBAC set. Leaving it unset, as here, keeps the
 	// run-scoped default and never probes for an existing ServiceAccount.
 	Namespace:       "aicr-snapshot",
-	Image:           "ghcr.io/nvidia/aicr:v0.22.0",
+	Image:           "ghcr.io/nvidia/aicr:v1.0.0",
 	Timeout:         5 * time.Minute,
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
@@ -369,7 +372,9 @@ meanings depending on the cluster:
 - A ServiceAccount of exactly that name already exists in `Namespace`: the
   agent pod runs as it verbatim, and `CollectSnapshot` creates **no**
   ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, and
-  deletes none at cleanup.
+  deletes none at cleanup. It also leaves the namespace alone: it does not
+  create, read, or relabel it, so the caller needs no permission on the
+  Namespace object.
 - Otherwise it is a name prefix and the run creates and owns the full
   run-scoped RBAC set, named `<prefix>-<run-id>`.
 
@@ -389,8 +394,8 @@ the applied objects are permanent and no run cleanup removes them:
 res, err := snapshotter.WriteAgentRoleManifests(&snapshotter.AgentRolesConfig{
 	Namespace:          "gpu-operator",
 	ServiceAccountName: "irsa-snapshotter",
-	// DiscoverNetwork also renders the cluster-scoped MUTATING rules live
-	// network discovery needs — permanent once applied, not for one run's lifetime.
+	// DiscoverNetwork also renders the one read-only rule live network
+	// discovery needs (configuration.net.nvidia.com nicdevices get/list).
 	DiscoverNetwork: false,
 })
 if err != nil {
@@ -406,9 +411,9 @@ for _, obj := range res.Objects {
 ```
 
 Adopting one ServiceAccount across runs waives per-run permission isolation:
-concurrent runs sharing it hold the same grants, and a `DiscoverNetwork`
-provisioning leaves mutating cluster permissions in place until an operator
-removes them. See
+concurrent runs sharing it hold the same grants, and the grants (read-only,
+including the `DiscoverNetwork` nicdevices read) stay in place until an
+operator removes them. See
 [Agent Deployment](../user/agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity)
 for the full migration path and teardown commands.
 
@@ -474,6 +479,21 @@ are created. The other facade options cover the production-controller knobs:
   `WithValidationImageTagOverride` — resolve validator images against a
   commit SHA, a mirror registry prefix, or a fixed tag. Empty values leave
   the default resolution in place.
+- `WithValidatorServiceAccountName(name)` runs the validator Jobs as an
+  existing ServiceAccount in the validation namespace instead of a per-run
+  ServiceAccount bound to `cluster-admin`, so the caller needs no permission
+  to grant `cluster-admin`. The run creates and deletes no ServiceAccount or
+  ClusterRoleBinding and does not apply the namespace. It verifies the
+  ServiceAccount's `cluster-admin` grant with a `SubjectAccessReview` before
+  deploying anything and fails with `ErrCodeNotFound` when it is missing,
+  `ErrCodeInvalidRequest` when it disables token automount,
+  `ErrCodeUnauthorized` when it is not bound or the caller may not read it or
+  create the review, and `ErrCodeCanceled`, `ErrCodeTimeout`,
+  `ErrCodeUnavailable` or `ErrCodeInternal` when the check cannot complete.
+  Unrelated
+  to `ValidateSettings().ServiceAccountName`, which names the snapshot agent's
+  ServiceAccount. Not in v1.0.0 or earlier. See
+  [Running under a pre-provisioned ServiceAccount](../user/validation.md#running-under-a-pre-provisioned-serviceaccount).
 
 `PreflightSkipChecks(ctx, recipe, opts...)` runs only the skip-list guard
 from `ValidateState`, with no Kubernetes call, so a caller that does its own
@@ -482,9 +502,46 @@ The CLI does this before deploying a snapshot agent. Pass the same options you
 will pass to `ValidateState`; it returns nil at once when no skip list is set.
 `PreflightSkipChecks` is not in v0.22.0 or earlier.
 
+`PreflightValidatorServiceAccount(ctx, opts...)` runs only the
+`WithValidatorServiceAccountName` check from `ValidateState`: a Get and a
+`SubjectAccessReview`, creating nothing. The CLI runs it before deploying a
+snapshot agent, so a missing or unbound ServiceAccount is reported before any
+object exists. Pass the same options you will pass to `ValidateState`; it
+returns nil without contacting the cluster when no name is set or
+`WithValidationNoCluster(true)` is. Not in v1.0.0 or earlier.
+
 `MergeReports(results)` merges the per-phase CTRF reports from a
 `ValidateState` run into one `*ctrf.Report` (`pkg/validator/ctrf`) stamped
 with the Client's version, the same combined document `aicr validate` writes.
+
+### CNCF AI Conformance evidence
+
+Two methods produce CNCF AI Conformance evidence, matching
+`aicr validate --evidence-dir` and `aicr validate --cncf-submission`:
+
+- `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
+  submission requirement, plus `index.md`, from a CTRF report such as the one
+  `MergeReports` returns. Skipped checks are omitted, so a report from a run
+  that used `WithValidationSkipChecks` is refused with
+  `ErrCodeInvalidRequest`.
+- `CollectCNCFEvidence(ctx, recipe, opts)` deploys GPU test workloads and
+  captures behavioral evidence under `opts.Dir`. It needs `bash` and
+  `kubectl` on `PATH` and runs for up to 20 minutes. `recipe` is optional.
+  When set, its GPU allocation policy selects the mechanism the DRA and
+  secure-access sections exercise, and an unresolvable policy fails the call.
+  When nil, the collector detects the mechanism from the cluster.
+  `opts.Features` restricts collection, and `CNCFEvidenceFeatures()` lists
+  the accepted names. `opts.NoCluster` reports every section as skipped without
+  touching a cluster.
+
+```go
+err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
+	Dir:      "./cncf-evidence",
+	Features: []string{"dra-support", "gang-scheduling"},
+})
+```
+
+Neither method is in v0.22.0 or earlier.
 
 ## Recipe sources
 
@@ -670,19 +727,23 @@ result, err := client.ResolveRecipe(ctx, aicr.RecipeRequest{
 	Accelerator: "h100",
 	Intent:      "training",
 	InheritFrom: "./bundles-v0.17.0", // or a recipe file
+	Inherit:     "namespace",
 })
 ```
 
 `RecipeRequest.InheritFrom` is honored by `ResolveRecipe`;
-`aicr.WithInheritFrom(ref)` is the equivalent for
+`aicr.WithInheritFrom(ref)` with `aicr.WithInherit("namespace")` is the
+equivalent for
 `ResolveRecipeFromCriteriaWithOptions` and
 `ResolveRecipeFromSnapshotWithOptions`. A bundle directory is read through the
 `recipe.yaml` at its root. A component the prior artifact does not name keeps
-the registry default.
+the registry default. Omit `Inherit` / `WithInherit`, or select `"all"`, to
+preserve the prior chart, source, kustomize path and manifest sets as well as
+the namespace.
 
 A **bundle directory** carries one thing a recipe file cannot: the merged
 values each release installed with, which is where `fullnameOverride` and
-`nameOverride` live. Given one, the resolve also pins those object names,
+`nameOverride` live. In `"all"` mode, the resolve also pins those object names,
 writing a `ComponentRef.Overrides` entry only where the inherited name differs
 from what this binary resolves. Given a recipe file, namespaces are still
 pinned and a warning records that object names were not, because a recipe
@@ -1048,12 +1109,8 @@ derive step rather than the load step.
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
 All five spec sections have a derivation, and every one of them has a
-destination — including `spec.validate.evidence.cncf`, which
-`CNCFEvidenceOptions()` carries even though no `Client` method consumes CNCF
-AI Conformance evidence directly; the caller does (the CLI's
-`validateFlagCombinations`, `cncf.New`, and `runCNCFSubmission`). That mirrors
-`SnapshotOutputOptions()`, which projects `spec.snapshot.output` for the same
-reason: `Client.CollectSnapshot` does not consume it either, but the caller
+destination. `SnapshotOutputOptions()` projects `spec.snapshot.output` even
+though `Client.CollectSnapshot` does not consume it, because the caller
 performing delivery does. Needing `Unwrap()` anywhere is worth reporting — it
 means a derivation is missing, and `pkg/config` carries no stability
 guarantee.
@@ -1200,13 +1257,15 @@ so `ValidateSettings()` carries settings from both `spec.validate.agent` and
 `spec.validate.execution` as a plain value, not an option slice, so you read
 and override individual fields directly — but not every field it carries
 reaches `Client.ValidateState`.
-Ten do, via a matching `WithValidation*` option: namespace, image pull
-secrets, node selector, tolerations, no-cluster, cleanup, phases, skip checks,
-fail-fast, and timeout. `WithValidationSkipChecks` is not in v0.22.0 or
-earlier, so a module pinned there has only nine. Four do not: image, job name, service account name and
-require-GPU have no `WithValidationImage`, `WithValidationJobName`,
-`WithValidationServiceAccountName` or `WithValidationRequireGPU` for
-`ValidateState` to accept them through. They ride on `ValidateSettings()`
+Eleven do, via a matching option: namespace, image pull secrets, node
+selector, tolerations, no-cluster, cleanup, phases, skip checks, fail-fast,
+timeout, and the validator service account name
+(`ValidatorServiceAccountName`, through `WithValidatorServiceAccountName`).
+`WithValidationSkipChecks` is not in v0.22.0 or earlier and
+`WithValidatorServiceAccountName` is not in v1.0.0 or earlier, so a module
+pinned to v1.0.0 has ten and one pinned to v0.22.0 has nine. Four do not: image, job name, service account name and
+require-GPU configure the snapshot agent, and `ValidateState` has no option to
+accept them through. They ride on `ValidateSettings()`
 anyway so a caller building its own validator agent config (the CLI's
 `parseValidateAgentConfig`, in particular) can read them with its own
 flag-over-config precedence instead of reaching for `Unwrap()` — see the
@@ -1227,6 +1286,11 @@ results, err := client.ValidateState(ctx, rec, snap,
     aicr.WithValidationTolerations(opts.Tolerations),
     aicr.WithValidationNoCluster(opts.NoCluster),
     aicr.WithValidationCleanup(opts.Cleanup),
+    aicr.WithValidatorServiceAccountName(opts.ValidatorServiceAccountName),
+    // Phases, SkipChecks, FailFast and Timeout map the same way, through
+    // WithValidationPhases, WithValidationSkipChecks, WithValidationFailFast
+    // and WithValidationTimeout; FailFast and Timeout are pointers, so pass
+    // them only when non-nil.
 )
 ```
 
@@ -1251,10 +1315,10 @@ The rest of the section has other homes, and knowing which saves a search:
 
 | Field | Home |
 |---|---|
-| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState` — `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. The CLI reads them directly to build the validator's own agent Job. |
+| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState`: they configure the snapshot-capture agent, not the validator Jobs, so a `ValidateState` option here would have nothing to translate into. The CLI reads them directly to build the agent Job. `.validatorServiceAccountName` is not in this row; it reaches `ValidateState` through `WithValidatorServiceAccountName`. |
 | `spec.validate.input.recipe`, `.snapshot`, `spec.validate.execution.failOnError` | `ValidateInputOptions()`, which targets the CALLER rather than `ValidateState` — see below. |
 | `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
-| `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which targets the CALLER — there is no `Client.Emit*` for CNCF AI Conformance evidence — see below. |
+| `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which the caller reads to choose between `RenderCNCFEvidence` and `CollectCNCFEvidence`. See below. |
 
 One inversion worth knowing: config says `noCleanup`, the field says
 `Cleanup`. `ValidateSettings()` flips it, so `noCleanup: true` becomes
@@ -1323,7 +1387,7 @@ rest of `EvidenceOptions` stays yours, and the reasons differ:
 | Field | Why it is not derived |
 |---|---|
 | `Commit` | Names the running binary, not the document. It selects the validator catalog the bundle's BOM is built against. Set it after deriving. |
-| `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file; resolve it at sign time. |
+| `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file, and the signing mode it selects (a KMS `SigningKey`, private Sigstore endpoints) is set per invocation; resolve it at sign time. |
 | `NoSign`, `Full`, `AllowMutableValidatorTags` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. All three weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads, `AllowMutableValidatorTags` lets the predicate name validator images that can later resolve to different code — and a checked-in file that can silently disable signing or provenance is a supply-chain downgrade no reviewer would see in a diff. |
 
 **Why `plainHTTP` and `insecureTLS` project anyway.** They weaken a run too, so
@@ -1373,13 +1437,12 @@ if err != nil {
 evidenceDir := cncfOpts.Dir // caller applies its own flag-over-config precedence
 ```
 
-Unlike `EvidenceAttestationOptions()`, this one has no `Client.Emit*`
-counterpart at all: there is no `Client.EmitCNCFEvidence` for
-`CNCFEvidenceOptions()` to feed. The caller — the CLI's
-`validateFlagCombinations`, `cncf.New`, and `runCNCFSubmission` — consumes the
-three fields (`Dir`, `CNCFSubmission`, `Features`) directly, applying its own
-flag-over-config precedence the same way `SnapshotOutputOptions()` and
-`ValidateInputOptions()` already do for their own caller-consumed fields.
+Unlike `EvidenceAttestationOptions()`, it does not map onto one method's
+options. The caller applies its own flag-over-config precedence, the same way
+`SnapshotOutputOptions()` and `ValidateInputOptions()` do, then branches on
+`CNCFSubmission`. When true, it passes `Dir` and `Features` to
+`CollectCNCFEvidence` in `CNCFCollectOptions` and skips `ValidateState`. When
+false, a non-empty `Dir` goes to `RenderCNCFEvidence` after `ValidateState`.
 `CNCFEvidenceOptions()` returns the zero value (never an error) for an absent
 section, and an error only when `spec.validate` is present but malformed.
 
@@ -1598,6 +1661,15 @@ An invalid bundle is a verdict, not an error — branch on `Exit`. The
 means "we could not check this", which is different from "we checked it
 and it failed".
 
+Evidence signed with a KMS key (`OIDCResolve.SigningKey` on
+`EvidenceOptions` or `EvidencePublishOptions`) verifies with `Key`, a KMS
+URI or a PEM public-key path; `result.Signer` then reports issuer `key` and
+the key's `sha256:` fingerprint. `Key` is the signer pin, so setting it with
+`ExpectedIssuer` or `ExpectedIdentityRegexp` is an error, as is
+`IgnoreTLog` without `Key`. `TrustRoot` adds a private Sigstore root for
+evidence signed against a private Fulcio/Rekor. A bad key or trust root
+returns an error, not a verdict.
+
 Pair it with `RecipeDigest` to detect evidence that has gone stale
 against the recipe on your branch:
 
@@ -1685,7 +1757,12 @@ aicr.ValidateIdentityPattern(
 
 The producing half of the supply chain is on the facade too.
 `EmitRecipeEvidence` builds a bundle from a completed validation run;
-`PublishEvidence` signs and pushes one that already exists on disk:
+`EmitRecipeEvidenceWithResult` does the same and also returns an
+`EvidenceEmission` carrying the pushed reference and digest (the `bundle.oci`
+and `bundle.digest` values in `pointer.yaml`; both empty without `Push`), so a
+caller can hand on what was published without reading `pointer.yaml` back. It
+is not in v1.0.0 or earlier. `PublishEvidence` signs and pushes a bundle that
+already exists on disk:
 
 ```go
 err := client.PublishEvidence(ctx, aicr.EvidencePublishOptions{

@@ -37,7 +37,7 @@ constrained:
       SupportedBundleQueryParameters: behavioral
   pkg/bundler/attestation:
     reason: >-
-      Two legitimate uses. First, pkg/client/v1.BundleAttester and
+      Three legitimate uses. First, pkg/client/v1.BundleAttester and
       BundleOptions.OIDCResolve are transparent aliases of this package's
       Attester and OIDC-resolve types, so any caller populating those facade
       fields calls the concrete constructors (ResolveAttesterLazy,
@@ -46,17 +46,25 @@ constrained:
       pkg/bundler/result below. Second, the CLI's pre-signing keyless-OIDC
       disclosure banner needs the same OIDC-source classification before
       MakeBundle runs, which is inherently interactive CLI UX the facade has
-      no reason to expose.
+      no reason to expose. Third, the evidence-signing commands check their
+      signing flags before any validation run or push, the same input
+      parsing as pkg/bundler/config.ValidateHTTPSURL: ValidateSigningKeyRef
+      rejects a --signing-key that names no KMS scheme, and
+      LoadSigningConfigForValidation parses --signing-config once so a bad
+      file fails up front and the config checked is the one signed with.
+      pkg/evidence/attestation repeats the scheme check for SDK callers.
     permanent: true
     symbols:
       Attester: type
       BundleMetadataPaths: behavioral
       FindBinaryAttestation: behavioral
+      LoadSigningConfigForValidation: behavioral
       OIDCSourceKind.Interactive: behavioral
       ResolveAttester: behavioral
       ResolveAttesterLazy: behavioral
       ResolveOptions: type
       SelectOIDCSource: behavioral
+      ValidateSigningKeyRef: behavioral
   pkg/bundler/checksum:
     reason: >-
       Local-disk staging and verification of an already-generated, on-disk
@@ -111,6 +119,7 @@ constrained:
       DeployerFlux: const
       DeployerHelm: const
       DeployerHelmfile: const
+      DeployerTerraform: const
       DeployerType: type
       DeployerType.String: behavioral
       GetDeployerTypes: behavioral
@@ -147,6 +156,8 @@ constrained:
       WithStorageClass: behavioral
       WithSystemNodeSelector: behavioral
       WithSystemNodeTolerations: behavioral
+      WithTerraformChildModule: behavioral
+      WithTerraformClusterRollover: behavioral
       WithTargetRevision: behavioral
       WithValueOverridePaths: behavioral
       WithValueOverridesTypedPaths: behavioral
@@ -215,30 +226,6 @@ constrained:
       SignExisting: behavioral
       SignExistingOptions: type
       ValidateSignablePointer: behavioral
-  pkg/evidence/cncf:
-    reason: >-
-      Acknowledged gap, not a settled design. cncf.Collector.Run is
-      cluster-touching business logic -- kubeconfig handling, feature
-      sections, a --no-cluster short-circuit -- invoked directly from
-      pkg/cli. pkg/client/v1's own doc comment on Config.CNCFEvidenceOptions
-      states plainly that there is no Client.Emit* for CNCF evidence today:
-      the facade emits no CNCF evidence at all, and validateFlagCombinations,
-      cncf.New, and runCNCFSubmission read the config and run the collector
-      directly because nothing else exists to call. That is a self-declared
-      absence of facade coverage, not a permanent exclusion.
-    tracking: "#2561"
-    symbols:
-      Collector.Run: behavioral
-      CollectorOption: type
-      IsValidFeature: behavioral
-      New: behavioral
-      NewCollector: behavioral
-      Renderer.Render: behavioral
-      ValidFeatures: var
-      WithAllocationPolicy: behavioral
-      WithFeatures: behavioral
-      WithKubeconfig: behavioral
-      WithOutputDir: behavioral
   pkg/evidence/verifier:
     reason: >-
       Same `aicr evidence sign <pointer>` two-phase CI publish/sign split as
@@ -269,7 +256,8 @@ constrained:
       StructureHealth: type
   pkg/mirror:
     reason: >-
-      Mirror-inventory listing and rendering (`aicr mirror list`) has no
+      Client.MirrorInventory discovers a recipe's images and charts, but the
+      `aicr mirror list` output schema and its format rendering have no
       facade equivalent. This is the epic's named open exception.
     tracking: "#2025"
     symbols:
@@ -445,10 +433,7 @@ constrained:
       GenerateRunID lets the CLI mint the validation run ID before calling
       Client.ValidateState so the same ID also drives its own progress and
       log-tail UX (it is then supplied back to the facade via
-      WithValidationRunID). ResolveGPUAllocationPolicy feeds the CNCF
-      evidence collector's WithAllocationPolicy -- the same CLI-only
-      CNCF-evidence path tracked under pkg/evidence/cncf above (#2561).
+      WithValidationRunID).
     permanent: true
     symbols:
       GenerateRunID: behavioral
-      ResolveGPUAllocationPolicy: behavioral

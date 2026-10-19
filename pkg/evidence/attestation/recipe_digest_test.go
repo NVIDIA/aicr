@@ -16,13 +16,14 @@ package attestation
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -148,7 +149,7 @@ func TestComputeRecipeDigestWithProfile_RejectsFullResultInput(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "already baked") {
 		t.Fatalf("error = %v, want baked-in selection rejection", err)
 	}
-	if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != apperrors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 }

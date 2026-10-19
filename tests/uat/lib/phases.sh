@@ -113,7 +113,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/platform-crd-map.sh"
 # Lives alongside this file in tests/uat/lib/.
 # shellcheck source=./cuj-dispatch.sh
 source "$(dirname "${BASH_SOURCE[0]}")/cuj-dispatch.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/sxid-fault-inject.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/fault-inject.sh"
 
 # Train-job knobs (overridable for local reproduction or future inference variant).
 TRAINJOB_NAMESPACE="${TRAINJOB_NAMESPACE:-kubeflow}"
@@ -435,6 +435,90 @@ inject_push_target() {
   echo "evidence push target: $(yq '.spec.validate.evidence.attestation.push' "${config}")"
 }
 
+# Bundle override every composed run carries; see uat_compose_nvsentinel_mixin.
+UAT_NVSENTINEL_BREAKER_OFF="nvsentinel:fault-quarantine.circuitBreaker.enabled=false"
+
+# uat_compose_nvsentinel_mixin re-resolves recipe.yaml with the opt-in
+# NVSentinel mixin named by UAT_NVSENTINEL_MIXIN composed onto its leaf
+# overlay, so the faultinject phase can run Stage 2 (nvsentinel-quarantine) or
+# Stages 2 and 3 (nvsentinel-remediation) on real hardware (#2625). Unset is a
+# no-op: no shipped recipe composes either mixin. nvsentinel-remediation brings
+# nvsentinel-health-events-analyzer with it, because the bundle fails live
+# remediation without the analyzer.
+#
+# The leaf is replaced through a --data overlay of the same name, the way the
+# KWOK lane composes KWOK_MIXINS; the empty registry merges into the embedded
+# one unchanged. The overlay is read from this checkout, so the aicr binary
+# must be built from the same tree: uat-run.yaml refuses the knob with a
+# released aicr_version. Bundle and validate need no --data, because these
+# mixins reference only embedded components.
+uat_compose_nvsentinel_mixin() {
+  local mixin="${UAT_NVSENTINEL_MIXIN:-}" want mixins
+  case "${mixin}" in
+    "") return 0 ;;
+    nvsentinel-quarantine) want=quarantine mixins="${mixin}" ;;
+    nvsentinel-remediation) want=remediation mixins="${mixin},nvsentinel-health-events-analyzer" ;;
+    *)
+      echo "::error::UAT_NVSENTINEL_MIXIN='${mixin}' is not nvsentinel-quarantine or nvsentinel-remediation" >&2
+      return 1
+      ;;
+  esac
+
+  local leaf overlay data_dir="uat-data"
+  leaf="$(yq -r '.metadata.appliedOverlays[-1] // ""' recipe.yaml)"
+  overlay="$(dirname "${BASH_SOURCE[0]}")/../../../recipes/overlays/${leaf}.yaml"
+  if [[ -z "${leaf}" || ! -f "${overlay}" ]]; then
+    echo "::error::cannot compose ${mixin}: leaf overlay '${leaf}' not found at ${overlay}" >&2
+    return 1
+  fi
+
+  rm -rf "${data_dir}"
+  mkdir -p "${data_dir}/overlays"
+  printf '%s\n' 'kind: ComponentRegistry' 'apiVersion: aicr.run/v1beta1' \
+    'metadata:' '  name: uat-nvsentinel-mixin' 'components: []' > "${data_dir}/registry.yaml"
+  MIXINS="${mixins}" yq '.spec.mixins = ((.spec.mixins // []) + (strenv(MIXINS) | split(",")))' \
+    "${overlay}" > "${data_dir}/overlays/${leaf}.yaml"
+
+  echo "composing ${mixins} onto ${leaf}"
+  "${AICR_BIN}" recipe --config "${config}" --data "${data_dir}"
+  test -f recipe.yaml
+
+  # Fail closed if the mixin did not land: a run asked to prove Stage 2 or 3
+  # must not report green after silently running Stage 1 only.
+  local got
+  got="$(uat_nvsentinel_remediation_mode recipe.yaml)"
+  if [[ "${got}" != "${want}" ]]; then
+    echo "::error::recipe composed with ${mixin} deploys NVSentinel remediation step '${got}', want '${want}'" >&2
+    return 1
+  fi
+
+  # The UAT cells run two GPU nodes, where the chart-default breaker
+  # (percentage: 50) trips on the first cordon and then halts every event,
+  # so Stage 3 would never see the node uncordoned. The KWOK e2e for these
+  # mixins disables it for the same reason. Appended to the config's set list
+  # because a --set flag would replace that list rather than extend it.
+  yq -i ".spec.bundle.deployment.set += [\"${UAT_NVSENTINEL_BREAKER_OFF}\"]" "${config}"
+}
+
+# uat_assert_nvsentinel_breaker_disabled fails prep when a composed run's
+# bundle does not carry the breaker override, so Stage 3 cannot fail late as
+# "never uncordoned" after a full remediation run. A no-op when
+# UAT_NVSENTINEL_MIXIN is unset.
+uat_assert_nvsentinel_breaker_disabled() {
+  [[ -n "${UAT_NVSENTINEL_MIXIN:-}" ]] || return 0
+  local dir got
+  dir="$(find bundle -maxdepth 1 -type d -name '*-nvsentinel' -print -quit)"
+  if [[ -z "${dir}" || ! -f "${dir}/values.yaml" ]]; then
+    echo "::error::bundle has no nvsentinel values.yaml to check the circuit-breaker override against" >&2
+    return 1
+  fi
+  got="$(yq '.["fault-quarantine"].circuitBreaker.enabled' "${dir}/values.yaml")"
+  if [[ "${got}" != "false" ]]; then
+    echo "::error::bundle's nvsentinel values set fault-quarantine.circuitBreaker.enabled=${got}, want false" >&2
+    return 1
+  fi
+}
+
 phase_prep() {
   # Capture cluster state on snapshot failure so the post-mortem has
   # actual pod scheduling / image pull / event data instead of just the
@@ -492,6 +576,7 @@ phase_prep() {
   echo "::group::Generate recipe"
   "${AICR_BIN}" recipe --config "${config}"
   test -f recipe.yaml
+  uat_compose_nvsentinel_mixin
   echo "::endgroup::"
 
   echo "::group::Validate (dry-run, --no-cluster)"
@@ -592,6 +677,14 @@ phase_prep() {
       exit 1
       ;;
   esac
+  # Every deployer writes the post-filter recipe at the bundle root; the
+  # readiness gate and the conformance run validate against it (#2848).
+  test -f bundle/recipe.yaml || {
+    echo "expected bundle/recipe.yaml (written by every deployer) — got:" >&2
+    ls -la bundle >&2 || true
+    exit 1
+  }
+  uat_assert_nvsentinel_breaker_disabled
   echo "::endgroup::"
 }
 
@@ -1198,6 +1291,12 @@ install_readiness_gate() {
   # gate never emits/pushes an evidence bundle -- that is the conformance phase's
   # job (phase_conformance, `--phase all`).
   #
+  # Validate the bundle's recipe.yaml, not the config's input recipe: the bundle
+  # records the component set it deployed -- components the bundler dropped are
+  # absent, bundle-time derivations such as the dra-node-labeler opt-in are
+  # persisted -- so it is the inventory the deployed cluster must satisfy
+  # (#2848). The CLI flag overrides spec.validate.input.recipe.
+  #
   # All scratch files live in one mktemp dir, removed on every return/exit path
   # below. gate_report is each attempt's CTRF report (validate always writes CTRF
   # JSON to --output), from which failing validators' output is extracted.
@@ -1266,7 +1365,7 @@ install_readiness_gate() {
     # cannot be diagnosed from stale data.
     rm -f "${gate_report}"
     attempt_extract="" attempt_names=""
-    if timeout "${remaining}" "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output "${gate_report}" > "${gate_log}" 2>&1; then
+    if timeout "${remaining}" "${AICR_BIN}" validate --config "${gate_config}" --recipe bundle/recipe.yaml --phase deployment --output "${gate_report}" > "${gate_log}" 2>&1; then
       # Validate passed -> the CURRENTLY PRESENT nodes converged. Fold in the
       # GPU-node census (#2096): a late-joining GPU node that Skyhook just
       # cordoned+tuned re-opens convergence WITHOUT failing this attempt (it was
@@ -1432,7 +1531,11 @@ phase_conformance() {
   # registry — so that lane opts out explicitly. Every cloud lane resolves
   # :uat-<run_id> or a release tag and must keep failing closed, which is why
   # this is an opt-in per lane rather than a default.
-  local -a validate_args=(--config "${config}" --phase "${VALIDATE_PHASES}" --output report.json)
+  # --recipe reads the bundle's recipe.yaml, the deployed set (see
+  # install_readiness_gate). The emitted evidence binds predicate.recipe.digest
+  # to that file, so recipe-evidence-check.sh reports these rows as stale
+  # against the overlay digest until the comparison follows (#2848 follow-up).
+  local -a validate_args=(--config "${config}" --recipe bundle/recipe.yaml --phase "${VALIDATE_PHASES}" --output report.json)
   if [[ "${UAT_ALLOW_MUTABLE_VALIDATOR_TAGS:-}" == "true" ]]; then
     validate_args+=(--allow-mutable-validator-tags)
   fi
@@ -1871,7 +1974,7 @@ uat_main() {
 
   if [[ -z "${phase}" || -z "${config}" ]]; then
     echo "Usage: $0 <phase> <test-config.yaml>" >&2
-    echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
+    echo "Phases: prep | install | readiness | conformance | train | serve | verify | faultinject | debug | all" >&2
     exit 2
   fi
 
@@ -1891,7 +1994,7 @@ uat_main() {
     train)       phase_train ;;
     serve)       phase_serve ;;
     verify)      phase_verify ;;
-    sxidfault)   phase_sxid_fault_inject ;;
+    faultinject) phase_fault_inject ;;
     debug)
       # Refresh cloud credentials first (no-op on AWS/GCP; Azure redeems a fresh
       # federated session). A failure that surfaces after a long phase can leave a
@@ -1935,7 +2038,7 @@ uat_main() {
       ;;
     *)
       echo "unknown phase: ${phase}" >&2
-      echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
+      echo "Phases: prep | install | readiness | conformance | train | serve | verify | faultinject | debug | all" >&2
       exit 2
       ;;
   esac

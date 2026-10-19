@@ -26,6 +26,8 @@ import (
 	"k8s.io/client-go/discovery"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 type fakeGroups struct{ err error }
@@ -83,7 +85,7 @@ func TestGroupDiscoveryFailure(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("GroupDiscoveryFailure() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil && !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+			if err != nil && errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 				t.Errorf("GroupDiscoveryFailure() error = %v, want %s", err, errors.ErrCodeUnavailable)
 			}
 		})

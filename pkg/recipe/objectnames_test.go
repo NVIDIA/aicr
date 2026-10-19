@@ -25,13 +25,14 @@
 package recipe
 
 import (
-	stderrors "errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestObjectNameValues(t *testing.T) {
@@ -322,7 +323,7 @@ func TestObjectNameValuesRejectsAnUnaddressablePath(t *testing.T) {
 				t.Fatalf("ObjectNameValues() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 				}
 				return

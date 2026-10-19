@@ -41,6 +41,19 @@ REGISTRY_NAME = ctlptl-registry
 # instead of silently degrading to a stale image (see its yq-missing check).
 KIND_NODE_IMAGE ?= $(shell yq -r '.testing.kind_node_image' .settings.yaml 2>/dev/null)
 
+# ctlptl registry image (single source of truth: .settings.yaml
+# testing_tools.registry_image, an ECR Public mirror). Unset, ctlptl pulls
+# docker.io/library/registry:3 anonymously, which shared CI runners rate-limit.
+KIND_REGISTRY_IMAGE ?= $(shell yq -r '.testing_tools.registry_image' .settings.yaml 2>/dev/null)
+
+# Docker Hub pull-through mirror (single source of truth: .settings.yaml
+# build.dockerhub_mirror, an https:// URL). Image refs need the bare host.
+DOCKERHUB_MIRROR ?= $(shell yq -r '.build.dockerhub_mirror' .settings.yaml 2>/dev/null)
+DOCKERHUB_MIRROR_HOST = $(patsubst https://%,%,$(DOCKERHUB_MIRROR))
+# The same image on the Docker Hub mirror (identical index digest), the fallback
+# when ECR Public sheds an anonymous pull.
+KIND_REGISTRY_MIRROR_IMAGE = $(patsubst public.ecr.aws/docker/%,$(DOCKERHUB_MIRROR_HOST)/%,$(KIND_REGISTRY_IMAGE))
+
 # Default target
 all: help
 
@@ -108,12 +121,16 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell check-docs-links bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records check-dynamo-runtime-image ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, vendored action digests, and runner labels)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
 check-depproxy-kit: ## Verifies the vendored Go proxy action matches upstream digests
 	@./tools/check-depproxy-kit
+
+.PHONY: check-runner-labels
+check-runner-labels: ## Rejects the floating ubuntu-latest runner label under .github/
+	@./tools/check-runner-labels
 
 # Standalone target — NOT part of `make lint` because it requires Docker
 # (the validator runs in the same image renovatebot/github-action wraps).
@@ -144,8 +161,12 @@ check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 	@./tools/check-docs-filenames
 
+.PHONY: check-dynamo-runtime-image
+check-dynamo-runtime-image: ## Verifies the inference-perf Dynamo runtime image tag matches the dynamo-platform chart version
+	@GOFLAGS="-mod=readonly" go run ./tools/check-dynamo-runtime-image
+
 .PHONY: check-upgrade-records
-check-upgrade-records: ## Verifies committed ComponentUpgrades records are well-formed (ADR-021)
+check-upgrade-records: ## Verifies ComponentUpgrades records are well-formed and cover pins moved since the merge base (ADR-021; uses AICR_UPGRADE_BASE_REF, else a fetched upstream/main or origin/main)
 	@./tools/check-upgrade-records
 
 # Deliberately NOT in `lint` or `qualify`: it re-downloads each pinned tool's
@@ -178,6 +199,14 @@ check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node
 .PHONY: check-docs-yaml
 check-docs-yaml: ## Validates YAML-labelled code blocks throughout docs/ (requires Node; CI-blocking)
 	@./tools/check-docs-yaml
+
+.PHONY: check-docs-shell
+check-docs-shell: ## Rejects unquoted <placeholder>s that bash reads as redirection in docs/ shell blocks (requires Node; CI-blocking)
+	@./tools/check-docs-shell
+
+.PHONY: check-docs-links
+check-docs-links: ## Verifies links on Fern-published docs reach a published page or an existing repo path (CI-blocking)
+	@GOFLAGS="-mod=readonly" go run ./tools/check-docs-links
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -391,11 +420,35 @@ nvsentinel-object-monitor-e2e: ## Live Kind test: nvsentinel-object-monitor mixi
 	echo "Running nvsentinel-object-monitor mixin e2e test..."; \
 	tests/e2e/nvsentinel-object-monitor/run.sh
 
+.PHONY: nvsentinel-slurm-drain-monitor-e2e
+nvsentinel-slurm-drain-monitor-e2e: ## Live Kind test: nvsentinel-slurm-drain-monitor mixin turns an [HC] Slurm drain into a STORE_ONLY health event (#2611)
+	@set -e; \
+	echo "Running nvsentinel-slurm-drain-monitor mixin e2e test..."; \
+	tests/e2e/nvsentinel-slurm-drain-monitor/run.sh
+
 .PHONY: nvsentinel-preflight-e2e
 nvsentinel-preflight-e2e: ## Live Kind test: nvsentinel-preflight mixin injects node checks into opted-in GPU pods (#2610)
 	@set -e; \
 	echo "Running nvsentinel-preflight mixin e2e test..."; \
 	tests/e2e/nvsentinel-preflight/run.sh
+
+.PHONY: nvsentinel-remediation-e2e
+nvsentinel-remediation-e2e: ## Live Kind test: nvsentinel-observe dry-run carries a GPU fault to a GPU-scoped reset without acting
+	@set -e; \
+	echo "Running nvsentinel-observe mixin dry-run e2e test..."; \
+	tests/e2e/nvsentinel-remediation/run.sh
+
+.PHONY: nvsentinel-slinky-drainer-e2e
+nvsentinel-slinky-drainer-e2e: ## Live Kind test: nvsentinel-slinky-drainer mixin drains a quarantined Slurm node through Slurm, not eviction (#2615)
+	@set -e; \
+	echo "Running nvsentinel-slinky-drainer mixin e2e test..."; \
+	tests/e2e/nvsentinel-slinky-drainer/run.sh
+
+.PHONY: nvsentinel-health-events-analyzer-e2e
+nvsentinel-health-events-analyzer-e2e: ## Live Kind test: nvsentinel-health-events-analyzer derives STORE_ONLY events named after the matching rule (#2618)
+	@set -e; \
+	echo "Running nvsentinel-health-events-analyzer mixin e2e test..."; \
+	tests/e2e/nvsentinel-health-events-analyzer/run.sh
 
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
@@ -418,7 +471,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 	@printf '%s\n' "Regenerating pkg/bundler/testdata/layout/manifests/ from the fixture recipe." \
 		"A removed path is a broken promise to integrator automation -- read the diff."
 # Every manifest is rendered under $$tmp first and copied over the committed
-# files only after all five deployers succeed. Writing them in place meant a
+# files only after every deployer succeeds. Writing them in place meant a
 # failure partway left a mixed old/new baseline set, which is worse than no
 # refresh: the manifests would disagree with each other and with the bundler.
 #
@@ -432,7 +485,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 # set -e can catch.
 	@set -e; tmp=$$(mktemp -d); \
 	  trap 'rm -rf "$$tmp"' EXIT; \
-	  for d in helm argocd argocd-helm flux helmfile; do \
+	  for d in helm argocd argocd-helm flux helmfile terraform; do \
 	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
 	      -r pkg/bundler/testdata/layout/recipe.yaml \
 	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
@@ -440,7 +493,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 	    sed 's|^\./||' "$$tmp/raw-$$d.txt" > "$$tmp/rel-$$d.txt"; \
 	    LC_ALL=C sort "$$tmp/rel-$$d.txt" > "$$tmp/$$d.txt"; \
 	  done; \
-	  for d in helm argocd argocd-helm flux helmfile; do \
+	  for d in helm argocd argocd-helm flux helmfile terraform; do \
 	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
 	  done
 	@echo "Bundle layout manifests updated."
@@ -633,6 +686,14 @@ bom-pinning-check: ## Verifies every Helm component in the registry has a pinned
 	  -strict \
 	  -skip-helm
 
+.PHONY: nvcre-closure
+nvcre-closure: ## Regenerates the NVCRE workload runtime closure from the registry's pinned chart version
+	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure
+
+.PHONY: nvcre-closure-check
+nvcre-closure-check: ## Verifies the committed NVCRE workload closure matches the pinned chart version
+	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure -check
+
 .PHONY: registry-inventory
 registry-inventory: ## Extracts the build/CI registry & package egress inventory (YAML + Markdown) from structured sources
 	@GOFLAGS="-mod=readonly" go run ./tools/registry-inventory \
@@ -803,13 +864,24 @@ validator-binaries: ## Builds Linux validator binaries (VALIDATOR_PHASES, VALIDA
 		./tools/build-validator-binaries
 
 .PHONY: image-validators
-image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG)
+image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG, VALIDATOR_ARCHES)
 	@set -e; \
-	arch="$$(go env GOARCH)"; \
+	arch="$(VALIDATOR_ARCHES)"; \
+	if [ -z "$${arch}" ]; then arch="$$(go env GOARCH)"; fi; \
+	arch="$$(echo "$${arch}" | tr ',' ' ')"; \
+	if [ "$$(echo $${arch} | wc -w)" -gt 1 ]; then \
+		echo "VALIDATOR_ARCHES=\"$${arch}\" names more than one architecture;" >&2; \
+		echo "each image is tagged per phase without an architecture suffix, so" >&2; \
+		echo "a second arch would overwrite the first. Build one at a time, or" >&2; \
+		echo "use validator-binaries, which does accept a list." >&2; \
+		exit 1; \
+	fi; \
+	echo "Building validator images for linux/$${arch}"; \
 	VALIDATOR_ARCHES="$${arch}" ./tools/build-validator-binaries; \
 	for phase in deployment performance conformance; do \
 		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
 		docker build -f validators/$${phase}/Dockerfile \
+			--platform linux/$${arch} \
 			--build-arg TARGETARCH=$${arch} \
 			-t $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) .; \
 		if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
@@ -819,6 +891,7 @@ image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IM
 	done; \
 	echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
 	docker build -f validators/performance/aiperf-bench.Dockerfile \
+		--platform linux/$${arch} \
 		-t $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG) .; \
 	if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
 		echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
@@ -908,6 +981,43 @@ validate-local: image-validators ## Builds validator images and runs validation 
 	AICR_VALIDATOR_IMAGE_REGISTRY=$(IMAGE_REGISTRY) $$AICR_BIN validate \
 		--recipe "$(RECIPE)" \
 		--phase deployment
+
+.PHONY: validate-performance
+validate-performance: ## Recipe performance phase on the current kubecontext (RECIPE= [SNAPSHOT=] [NODE_SELECTOR=])
+	@set -e; \
+	if [ -z "$(RECIPE)" ]; then \
+		echo "Usage: make validate-performance RECIPE=<path-to-recipe.yaml> [SNAPSHOT=<path>] [NODE_SELECTOR=nvidia.com/gpu.present=true]"; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$(RECIPE)" ]; then \
+		echo "Error: recipe file $(RECIPE) not found"; \
+		exit 1; \
+	fi; \
+	AICR_BIN=$$(command -v aicr 2>/dev/null || true); \
+	if [ -z "$$AICR_BIN" ]; then \
+		HOST_GOOS=$$(go env GOOS); HOST_GOARCH=$$(go env GOARCH); \
+		DIST_DIR=$$(find dist -maxdepth 1 -type d -name "aicr_$${HOST_GOOS}_$${HOST_GOARCH}*" 2>/dev/null | head -1); \
+		if [ -n "$$DIST_DIR" ] && [ -x "$$DIST_DIR/aicr" ]; then \
+			AICR_BIN="$$DIST_DIR/aicr"; \
+		fi; \
+	fi; \
+	if [ -z "$$AICR_BIN" ]; then \
+		echo "Error: aicr binary not found. Run 'make build' or put aicr on PATH."; \
+		exit 1; \
+	fi; \
+	set -- validate --recipe "$(RECIPE)" --phase performance --fail-on-error; \
+	if [ -n "$(SNAPSHOT)" ]; then \
+		if [ ! -f "$(SNAPSHOT)" ]; then \
+			echo "Error: snapshot file $(SNAPSHOT) not found"; \
+			exit 1; \
+		fi; \
+		set -- "$$@" --snapshot "$(SNAPSHOT)"; \
+	fi; \
+	if [ -n "$(NODE_SELECTOR)" ]; then \
+		set -- "$$@" --node-selector "$(NODE_SELECTOR)"; \
+	fi; \
+	echo "Running performance phase with $$AICR_BIN"; \
+	"$$AICR_BIN" "$$@"
 
 .PHONY: python-licenses
 python-licenses: ## Refreshes the committed Python license section for the aiperf-bench image (needs network)
@@ -1030,6 +1140,9 @@ tilt-ci: ## Runs Tilt in CI mode (no UI, waits for resources)
 # =============================================================================
 
 .PHONY: cluster-create
+# Exported to the recipe rather than pasted into it, so a quote in a
+# DOCKERHUB_MIRROR override cannot rewrite the validation command.
+cluster-create: export DOCKERHUB_MIRROR := $(DOCKERHUB_MIRROR)
 cluster-create: ## Creates local Kind cluster with registry
 	@echo "Creating local development cluster..."
 	@if ! command -v ctlptl >/dev/null 2>&1; then \
@@ -1060,8 +1173,32 @@ cluster-create: ## Creates local Kind cluster with registry
 		echo "Check the key exists and .settings.yaml is valid YAML."; \
 		exit 1; \
 	fi
-	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE) (from .settings.yaml)"
-	img="$(KIND_NODE_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img)' $(CTLPTL_CONFIG_FILE) | ctlptl apply -f -
+	@if [ -z "$(KIND_REGISTRY_IMAGE)" ] || [ "$(KIND_REGISTRY_IMAGE)" = "null" ]; then \
+		echo "Error: could not resolve testing_tools.registry_image from .settings.yaml."; \
+		exit 1; \
+	fi
+	@# Same bash test as .github/actions/load-versions, so CI and local runs accept
+	@# exactly the same values (grep would match a multi-line value line by line).
+	@bash -c '[[ $$DOCKERHUB_MIRROR =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$$ ]]' || { \
+		echo "Error: DOCKERHUB_MIRROR (default: .settings.yaml build.dockerhub_mirror) must be an https:// host URL with no path, got '$$DOCKERHUB_MIRROR'."; \
+		exit 1; \
+	}
+	@# kind pulls the node image only when it is not already local, so seeding it
+	@# from the Docker Hub mirror keeps the anonymous Docker Hub rate limit out
+	@# of the critical path. On a mirror miss kind pulls from Docker Hub.
+	@docker image inspect "$(KIND_NODE_IMAGE)" >/dev/null 2>&1 || \
+		{ docker pull -q "$(DOCKERHUB_MIRROR_HOST)/$(KIND_NODE_IMAGE)" && docker tag "$(DOCKERHUB_MIRROR_HOST)/$(KIND_NODE_IMAGE)" "$(KIND_NODE_IMAGE)"; } || \
+		echo "Warning: $(DOCKERHUB_MIRROR_HOST)/$(KIND_NODE_IMAGE) unavailable; kind will pull from Docker Hub"
+	@# ctlptl drops its pull's progress stream, where the daemon reports mid-pull
+	@# failures such as a refused layer download, so those surface only as a
+	@# misleading "No such image" at container create. Pulling here keeps the
+	@# real error in the log and adds the mirror as a second source.
+	@docker image inspect "$(KIND_REGISTRY_IMAGE)" >/dev/null 2>&1 || \
+		docker pull -q "$(KIND_REGISTRY_IMAGE)" || \
+		{ echo "Warning: $(KIND_REGISTRY_IMAGE) pull failed; trying $(KIND_REGISTRY_MIRROR_IMAGE)"; \
+		  docker pull -q "$(KIND_REGISTRY_MIRROR_IMAGE)" && docker tag "$(KIND_REGISTRY_MIRROR_IMAGE)" "$(KIND_REGISTRY_IMAGE)"; }
+	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE), registry image: $(KIND_REGISTRY_IMAGE) (from .settings.yaml)"
+	img="$(KIND_NODE_IMAGE)" reg="$(KIND_REGISTRY_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img) | (select(.kind == "Registry")).image = strenv(reg)' $(CTLPTL_CONFIG_FILE) | ctlptl apply -f -
 	@echo "Waiting for nodes to be ready..."
 	@kubectl wait --for=condition=ready nodes --all --timeout=300s
 	@echo "Cluster created. Registry at localhost:$(REGISTRY_PORT)"

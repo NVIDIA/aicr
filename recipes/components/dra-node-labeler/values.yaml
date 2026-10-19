@@ -25,13 +25,14 @@ labelValue: "true"
 
 # enabled gates whether the manifest renders any objects (ADR-015: the manifest
 # renders NOTHING unless enabled is true). It is default-off and opt-in: the
-# bundler flips it true in the same --dra-eviction-node-label path that keeps
-# this component in the bundle (pkg/bundler injectDRAEvictionLabel), so the two
-# always agree. Default-off fails closed for the validator, which resolves the
-# recipe's effective values WITHOUT the bundle-time flag: on the default path
-# (no eviction opt-in) the component renders no objects, so the deployment
-# validator suppresses its health check instead of asserting a DaemonSet the
-# bundler never deployed (issue #2846). This is a component enablement gate,
-# distinct from the ComponentRef `enabled` override that IsEnabled reads; the
-# manifest keys on this Helm value, not on that override.
+# bundler sets it true in the same --dra-eviction-node-label path that keeps
+# this component in the bundle (pkg/bundler injectDRAEvictionLabel), both in
+# the Helm values and as an `enabled: true` override on the component ref, so
+# the recipe.yaml written into the bundle renders the labeler and the
+# deployment validator checks it (#2848). It is the same key as the
+# ComponentRef `enabled` override IsEnabled reads: overrides merge into these
+# values, and `--set dra-node-labeler:enabled=false` drops the component. The
+# default fails closed for a recipe without the opt-in: it renders no objects,
+# so the deployment validator suppresses the health check instead of asserting
+# a DaemonSet the bundle never carried (issue #2846).
 enabled: false

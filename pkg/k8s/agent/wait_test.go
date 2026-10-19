@@ -24,6 +24,8 @@ import (
 	"time"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	batchv1 "k8s.io/api/batch/v1"
@@ -673,7 +675,7 @@ func TestFindOrWatchPodNameAuthorizesByJobOwnership(t *testing.T) {
 			t.Fatalf("findOrWatchPodName() = %q, nil error; a pod owned by another run's Job "+
 				"must not satisfy the re-List branch", got)
 		}
-		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeUnavailable, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeUnavailable {
 			t.Errorf("error = %v, want code ErrCodeUnavailable", err)
 		}
 	})
@@ -703,7 +705,7 @@ func TestFindOrWatchPodNameAuthorizesByJobOwnership(t *testing.T) {
 
 		if _, err := d.findOrWatchPodName(ctx); err == nil {
 			t.Fatal("findOrWatchPodName() = nil error, want the re-List failure surfaced")
-		} else if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeUnavailable, "")) {
+		} else if errorstest.ReportedCode(err) != aicrerrors.ErrCodeUnavailable {
 			t.Errorf("error = %v, want code ErrCodeUnavailable", err)
 		}
 	})

@@ -128,12 +128,10 @@ var catalog = map[Type]typeSpec{
 			// cluster with no GPU pools; that is a runtime NotFound, not an
 			// unaddressable path.
 			"aks-gpu-pools": {scalar: closedKeys("gpu-pool-count", "gpu-pools", "gpu-driver")},
-			// oke-addons is the OKE control-plane add-on projection supplied via
-			// `aicr snapshot --oke-addons` / `aicr validate --oke-addons` —
-			// pkg/collector/k8s/okeaddons.go. nvidia-gpu-plugin normalizes the
-			// NvidiaGpuPlugin add-on state (installed/absent; any other
-			// lifecycle state projects a fail-closed marker).
-			"oke-addons": {scalar: closedKeys("addon-count", "nvidia-gpu-plugin")},
+			// oke-addons is the OKE add-on projection supplied via
+			// `aicr snapshot --oke-addons` / `aicr validate --oke-addons`
+			// (pkg/collector/k8s/okeaddons.go).
+			"oke-addons": {scalar: closedKeys("addon-count", "nvidia-gpu-plugin", "nvidia-network-operator")},
 			// gke-gpu-pools is the GKE GPU node-pool driver-installation
 			// projection supplied via `aicr snapshot --gke-gpu-pools` /
 			// `aicr validate --gke-gpu-pools` (pkg/collector/k8s/gkegpupools.go).
@@ -166,6 +164,10 @@ var catalog = map[Type]typeSpec{
 			},
 			// pkg/collector/k8s/mariadb.go
 			"mariadb-operator": {scalar: closedKeys("collection-state", "api-available", "api-version")},
+			// pkg/collector/k8s/storageclass.go
+			"default-storage-class": {scalar: closedKeys("collection-state", "default-count", "default-classes")},
+			// pkg/collector/k8s/percona.go
+			"percona-server-mongodb": {scalar: closedKeys("collection-state", "api-available", "api-version")},
 		},
 	},
 

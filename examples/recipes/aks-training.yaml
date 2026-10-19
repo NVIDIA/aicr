@@ -52,7 +52,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v26.7.1
+    version: v26.7.2
     valuesFile: components/gpu-operator/values-aks-training.yaml
     dependencyRefs:
       - nfd
@@ -122,7 +122,7 @@ componentRefs:
     type: Helm
     source: https://kubernetes-sigs.github.io/node-feature-discovery/charts
     version: 0.19.0
-    valuesFile: components/nfd/values.yaml
+    valuesFile: components/nfd/values-nvidia-nics-aks.yaml
     overrides:
       topologyUpdater:
         enable: true
@@ -144,7 +144,7 @@ componentRefs:
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.19.0
+    version: v0.20.0
     valuesFile: components/nodewright-operator/values.yaml
   - name: nvidia-dra-driver-gpu
     namespace: nvidia-dra-driver

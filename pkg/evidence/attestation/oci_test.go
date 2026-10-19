@@ -31,6 +31,8 @@ import (
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/oci"
 )
 
@@ -62,7 +64,7 @@ func TestAttachSigstoreBundleAsReferrerRequiresExcludedRoots(t *testing.T) {
 			Size:      123,
 		},
 	})
-	if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) ||
+	if errorstest.ReportedCode(err) != apperrors.ErrCodeInvalidRequest ||
 		!strings.Contains(err.Error(), "ExcludedRoots") {
 
 		t.Fatalf("error = %v, want InvalidRequest for missing ExcludedRoots", err)
@@ -224,7 +226,7 @@ func TestPublishOCIRejectsInSourceTempBeforeRegistryIO(t *testing.T) {
 		Reference:   "oci://ghcr.io/test/evidence:1.2.3",
 		AICRVersion: "1.2.3",
 	}, deps)
-	if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != apperrors.ErrCodeInternal {
 		t.Fatalf("pushWithDependencies() error = %v, want %s", err, apperrors.ErrCodeInternal)
 	}
 	if result != nil {

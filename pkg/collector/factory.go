@@ -75,10 +75,9 @@ func WithClusterConfigPath(path string) Option {
 	}
 }
 
-// WithDiscoverNetwork enables live l8k network discovery for the network
-// collector. Discovery is NOT read-only — it writes nvidia.kubernetes-
-// launch-kit.* node labels and patches NicClusterPolicy via server-side
-// apply. Default off.
+// WithDiscoverNetwork enables read-only live l8k network discovery
+// (DiscoverReadOnly) for the network collector. It requires the Network
+// Operator's nic-configuration-daemon to already be running. Default off.
 func WithDiscoverNetwork(enabled bool) Option {
 	return func(f *DefaultFactory) {
 		f.DiscoverNetwork = enabled
@@ -109,8 +108,8 @@ type DefaultFactory struct {
 	// pre-existing l8k cluster-config.yaml. Mutually exclusive with
 	// DiscoverNetwork — file path wins when both are set.
 	ClusterConfigPath string
-	// DiscoverNetwork, when true, opts the network collector into live
-	// l8k discovery. Discovery is NOT read-only.
+	// DiscoverNetwork, when true, opts the network collector into read-only
+	// live l8k discovery (DiscoverReadOnly).
 	DiscoverNetwork bool
 	// KubeconfigPath overrides the kubeconfig used by the network
 	// collector's discovery path. Empty falls back to KUBECONFIG /
@@ -205,8 +204,8 @@ func (f *DefaultFactory) CreateNodeTopologyCollector() Collector {
 // neither ClusterConfigPath nor DiscoverNetwork is configured, the
 // returned collector is inactive — Collect returns (nil, nil) and the
 // snapshotter treats it as a no-op. Activating it is an explicit opt-in
-// because live discovery is cluster-mutating and the file-source path
-// requires a user-supplied YAML.
+// because live discovery requires a running Network Operator daemon and the
+// file-source path requires a user-supplied YAML.
 func (f *DefaultFactory) CreateNetworkCollector() Collector {
 	return &network.Collector{
 		ClusterConfigPath: f.ClusterConfigPath,

@@ -112,7 +112,7 @@ metadata:
   name: aicr-images
 spec:
   images:
-    - name: nvcr.io/nvidia/gpu-operator:v26.7.1
+    - name: nvcr.io/nvidia/gpu-operator:v26.7.2
     - name: registry.k8s.io/nfd/node-feature-discovery:v0.19.0
     # ...
 ---
@@ -124,7 +124,7 @@ spec:
   charts:
     - name: gpu-operator
       repoURL: https://helm.ngc.nvidia.com/nvidia
-      version: v26.7.1
+      version: v26.7.2
     # ...
 ```
 
@@ -184,10 +184,10 @@ components:
         namespace: gpu-operator
         repoName: gpu-operator
         url: https://helm.ngc.nvidia.com/nvidia
-        version: v26.7.1
+        version: v26.7.2
       # ...
     images:
-      - nvcr.io/nvidia/gpu-operator:v26.7.1
+      - nvcr.io/nvidia/gpu-operator:v26.7.2
       - registry.k8s.io/nfd/node-feature-discovery:v0.19.0
       # ...
     name: aicr-images
@@ -327,3 +327,24 @@ source path (`${REGISTRY}/nvidia/aicr-validators/...`), set the variable to
 credentials. Some benchmark checks pin workload images the variable does not
 rewrite, such as the NCCL runtime image (override it with
 `AICR_NCCL_RUNTIME_IMAGE`); see [Validation](validation.md).
+
+The inference performance check also runs the Dynamo runtime images
+`nvcr.io/nvidia/ai-dynamo/vllm-runtime` and
+`nvcr.io/nvidia/ai-dynamo/dynamo-frontend`. The variable rewrites them by the
+same rule, so `nvcr.io/nvidia/ai-dynamo/vllm-runtime:<version>` resolves to
+`${REGISTRY}/ai-dynamo/vllm-runtime:<version>`. `<version>` is the
+`dynamo-platform` chart version your recipe deploys, which `aicr mirror list`
+reports. The check tags both images with that version, so an overlay or
+`--data` override of the chart moves them with it. Mirror both images to that
+path at that tag. The check copies the Secrets named by `--image-pull-secret`
+that exist in the validator namespace into its per-run namespace, so the Dynamo
+pods and the model-cache Job pull with the same credentials. A named Secret
+missing from the validator namespace is skipped with a warning in the check's
+log, and those pods then pull without it. If the check times out while one of
+those pods is still failing to pull, the error names the pod and the image it
+could not pull.
+`AICR_VALIDATOR_IMAGE_TAG` does not retag the Dynamo images, because their tag
+follows the `dynamo-platform` chart the recipe deploys, so a retag would run a
+runtime that differs from the operator. Registry redirection does not make the
+check fully offline, since its model-cache Job still downloads weights from
+Hugging Face.

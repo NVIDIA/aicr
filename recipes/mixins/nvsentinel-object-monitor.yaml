@@ -34,18 +34,19 @@
 # in these namespaces would, once unhealthy for 30m, raise a fatal event blaming
 # the operator. Each policy therefore also requires a label that only that
 # operator's own operands carry. They are not the same label, and neither was
-# guessable -- both were read off live deployments at the versions this repo
-# pins:
+# guessable -- both were independently verified at the versions this repo
+# pins (live for GPU Operator, source for Network Operator):
 #
-#   gpu-operator v26.7.1      app.kubernetes.io/managed-by = gpu-operator
+#   gpu-operator v26.7.2      app.kubernetes.io/managed-by = gpu-operator
 #                             Confirmed on a live EKS H100 cluster at v26.7.0 and
-#                             re-read on a live EKS GB300 cluster at v26.7.1: all
-#                             9 operand DaemonSets including driver, toolkit and
-#                             dcgm, and the running Pods inherit it. The bundled
-#                             NFD subchart does not carry it and is out of scope.
-#   network-operator 26.4.1   ds-owner = NicClusterPolicy
-#                             Kind-only, and the label is per-operand rather than
-#                             universal: mofed + rdma-shared-dp carry it,
+#                             re-read on a live EKS GB300 cluster at v26.7.1 and
+#                             v26.7.2: all 9 operand DaemonSets including driver,
+#                             toolkit and dcgm, and the running Pods inherit it.
+#                             The bundled NFD subchart does not carry it and is
+#                             out of scope.
+#   network-operator 26.7.0   ds-owner = NicClusterPolicy
+#                             Source-verified, and the label is per-operand
+#                             rather than universal: mofed + rdma-shared-dp carry it,
 #                             nv-ipam-node does not. So coverage depends on which
 #                             NicClusterPolicy a recipe ships -- the oke-l40s one
 #                             enables none of the verified operands. Under-match,
@@ -54,14 +55,14 @@
 #
 # A bump that changes either label makes the policy match nothing, and nothing
 # here can observe that -- the labels come from the operators' controllers, not
-# from a chart AICR renders. So each label is bound to the version it was read
+# from a chart AICR renders. So each label is bound to the version it was verified
 # at: TestObjectMonitorOperandIdentityPinnedToVerifiedVersion fails when either
 # component is bumped in recipes/registry.yaml, forcing revalidation first.
 #
-# isFatal: true is deliberate, not inherited. With no quarantine component
-# enabled in this repo it only produces a node condition today; once
-# remediation lands (#1014) these policies would drive a real cordon/drain,
-# correct for a node that can no longer run GPU or RDMA workloads.
+# isFatal: true is deliberate, not inherited. Alone it only produces a node
+# condition; composed with nvsentinel-quarantine or nvsentinel-remediation
+# these policies drive a real cordon/drain, correct for a node that can no
+# longer run GPU or RDMA workloads.
 # quarantineOverrides/drainOverrides are left unset so that behavior follows
 # whatever mode the recipe's remediation config picks.
 #

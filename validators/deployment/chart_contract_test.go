@@ -23,6 +23,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -82,18 +83,15 @@ type chartContracts struct {
 	DRADriver          draChartContract        `json:"nvidia-dra-driver-gpu"`
 }
 
-// nodewrightChartContract records the nodewright chart's served CRDs, its
-// controller Deployment name rendered with the chart's own values (an
-// out-of-band install) and with the values AICR ships, and its default
-// runtime-required taint. BundleValuesSHA256 identifies the AICR values the
-// bundle render used, so changing them invalidates BundleDeployment.
+// nodewrightChartContract records the nodewright chart's served CRDs, the
+// labels on its controller Deployment, and its default runtime-required taint.
+// BundleValuesSHA256 identifies the AICR values the labels were rendered with.
 type nodewrightChartContract struct {
-	Version              string   `json:"version"`
-	BundleValuesSHA256   string   `json:"bundleValuesSHA256"`
-	ServedResources      []string `json:"servedResources"`
-	DefaultDeployment    string   `json:"defaultDeployment"`
-	BundleDeployment     string   `json:"bundleDeployment"`
-	RuntimeRequiredTaint string   `json:"runtimeRequiredTaint"`
+	Version              string            `json:"version"`
+	BundleValuesSHA256   string            `json:"bundleValuesSHA256"`
+	ServedResources      []string          `json:"servedResources"`
+	ControllerLabels     map[string]string `json:"controllerLabels"`
+	RuntimeRequiredTaint string            `json:"runtimeRequiredTaint"`
 }
 
 // draChartContract records the DaemonSets the DRA driver chart renders with
@@ -223,14 +221,9 @@ func TestValidatorConstantsMatchChartContracts(t *testing.T) {
 			detail: fmt.Sprintf("defaultRuntimeRequiredTaint is %q, the chart renders %s=%q", defaultRuntimeRequiredTaint.ToString(), runtimeRequiredTaintEnv, nw.RuntimeRequiredTaint),
 		},
 		{
-			name:   "nodewrightOperatorDeploymentOutOfBand is the chart's own name",
-			ok:     nodewrightOperatorDeploymentOutOfBand == nw.DefaultDeployment,
-			detail: fmt.Sprintf("nodewrightOperatorDeploymentOutOfBand is %q, the chart renders %q with its own values", nodewrightOperatorDeploymentOutOfBand, nw.DefaultDeployment),
-		},
-		{
-			name:   "nodewrightOperatorDeployment is the bundle's name",
-			ok:     nodewrightOperatorDeployment == nw.BundleDeployment,
-			detail: fmt.Sprintf("nodewrightOperatorDeployment is %q, the chart renders %q with the values AICR ships", nodewrightOperatorDeployment, nw.BundleDeployment),
+			name:   "nodewrightControllerLabels are the controller Deployment's labels",
+			ok:     maps.Equal(nodewrightControllerLabels, nw.ControllerLabels),
+			detail: fmt.Sprintf("nodewrightControllerLabels is %v, the chart renders %v on its controller Deployment", nodewrightControllerLabels, nw.ControllerLabels),
 		},
 		{
 			name:   "draKubeletPluginSuffix names exactly one rendered DaemonSet",
@@ -300,13 +293,24 @@ func TestChartContractsMatchPinnedCharts(t *testing.T) {
 	nwValues := bundleValues(ctx, t, store, nodewrightOperatorComponent)
 	draValues := bundleValues(ctx, t, store, draDriverComponent)
 	nwDefault := render(nodewrightOperatorComponent, nil)
+	nameOverridden := maps.Clone(nwValues)
+	nameOverridden["nameOverride"] = "custom"
+	controllerLabels := selectorLabels(t, nwDefault)
+	for variant, docs := range map[string][]map[string]any{
+		"the values AICR ships": render(nodewrightOperatorComponent, nwValues),
+		"nameOverride set":      render(nodewrightOperatorComponent, nameOverridden),
+	} {
+		if got := selectorLabels(t, docs); !maps.Equal(controllerLabels, got) {
+			t.Fatalf("the controller Deployment's labels differ between the chart's own values %v and %s %v. "+
+				"The validator selects it by label, so they must agree", controllerLabels, variant, got)
+		}
+	}
 	got := chartContracts{
 		NodewrightOperator: nodewrightChartContract{
 			Version:              registry.Get(nodewrightOperatorComponent).Helm.DefaultVersion,
 			BundleValuesSHA256:   valuesDigest(t, nwValues),
 			ServedResources:      servedResources(t, nwDefault),
-			DefaultDeployment:    soleName(t, nwDefault, "Deployment"),
-			BundleDeployment:     soleName(t, render(nodewrightOperatorComponent, nwValues), "Deployment"),
+			ControllerLabels:     controllerLabels,
 			RuntimeRequiredTaint: deploymentEnv(t, nwDefault, runtimeRequiredTaintEnv),
 		},
 		DRADriver: draChartContract{
@@ -395,14 +399,25 @@ func names(docs []map[string]any, kind string) []string {
 	return out
 }
 
-func soleName(t *testing.T, docs []map[string]any, kind string) string {
+// selectorLabels returns the sole Deployment's labels named in
+// nodewrightControllerLabels.
+func selectorLabels(t *testing.T, docs []map[string]any) map[string]string {
 	t.Helper()
 
-	got := names(docs, kind)
-	if len(got) != 1 {
-		t.Fatalf("rendered chart has %d %s objects %v, want exactly one", len(got), kind, got)
+	if got := names(docs, "Deployment"); len(got) != 1 {
+		t.Fatalf("rendered chart has %d Deployment objects %v, want exactly one", len(got), got)
 	}
-	return got[0]
+	var out map[string]string
+	for _, doc := range docs {
+		if doc["kind"] == "Deployment" {
+			out = maps.Clone((&unstructured.Unstructured{Object: doc}).GetLabels())
+		}
+	}
+	maps.DeleteFunc(out, func(key, _ string) bool {
+		_, selected := nodewrightControllerLabels[key]
+		return !selected
+	})
+	return out
 }
 
 // deploymentEnv returns the value of env var name on the sole Deployment's

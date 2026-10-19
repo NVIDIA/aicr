@@ -65,7 +65,7 @@ runs:
   using: 'composite'
   steps:
     - name: Setup Go
-      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
       with:
         go-version: '${{ inputs.go_version }}'
         # Caching is done explicitly below. setup-go restores on an exact
@@ -156,7 +156,7 @@ runs:
         go mod tidy -diff \
           || { echo "go.mod/go.sum are not tidy; run 'make tidy' and commit the result" >&2; exit 1; }
 
-    # The ubuntu-latest runner image bundles Helm 3; the unit tests that
+    # The ubuntu-24.04 runner image bundles Helm 3; the unit tests that
     # shell out to helm (pkg/bundler/deployer/argocdhelm live-render tests)
     # must run against the Helm major pinned in .settings.yaml. The
     # setup-build-tools step replaces any preinstalled binary that does not

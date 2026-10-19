@@ -17,7 +17,6 @@ package recipe
 import (
 	"bytes"
 	"context"
-	stderrors "errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -25,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1447,7 +1448,7 @@ func TestLoadComponentRegistry_ReleaseNHeaders(t *testing.T) {
 				if err == nil {
 					t.Fatal("GetComponentRegistryFor() error = nil, want header rejection")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1614,7 +1615,7 @@ func TestLoadRegistry_RejectsKustomizeManifestFiles(t *testing.T) {
 	// mirroring the coherence-check precedent in
 	// componentref_coherence_test.go. Asserting only the message would stay
 	// green if the guard's code silently regressed to ErrCodeInternal.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -1771,6 +1772,118 @@ func TestComponentRegistryValidate_MixinSafeOverridePaths(t *testing.T) {
 			}
 			if !found {
 				t.Errorf("Validate() = %v, want an error containing %q", errs, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestComponentRegistryValidate_OwnsCRDsExcludeSubcharts(t *testing.T) {
+	tests := []struct {
+		name     string
+		ownsCRDs bool
+		exclude  []string
+		wantErrs []string
+	}{
+		{name: "owner with bare subchart names passes", ownsCRDs: true, exclude: []string{"mongodb-store", "sub_chart.v2"}},
+		{name: "owner without exclusions passes", ownsCRDs: true},
+		{name: "exclusions without ownsCRDs are rejected", exclude: []string{"mongodb-store"}, wantErrs: []string{"set without ownsCRDs"}},
+		{name: "empty name is rejected", ownsCRDs: true, exclude: []string{""}, wantErrs: []string{`entry "" must be a bare subchart name`}},
+		{name: "path separator is rejected", ownsCRDs: true, exclude: []string{"charts/mongodb-store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob star is rejected", ownsCRDs: true, exclude: []string{"mongodb-*"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob question mark is rejected", ownsCRDs: true, exclude: []string{"mongodb?store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob bracket is rejected", ownsCRDs: true, exclude: []string{"mongodb[a]"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "space is rejected", ownsCRDs: true, exclude: []string{"mongodb store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "dot is rejected", ownsCRDs: true, exclude: []string{"."}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "dot-dot is rejected", ownsCRDs: true, exclude: []string{".."}, wantErrs: []string{"must be a bare subchart name"}},
+		{
+			name:     "both rules report independently",
+			exclude:  []string{"a/b"},
+			wantErrs: []string{"set without ownsCRDs", "must be a bare subchart name"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &ComponentRegistry{
+				Components: []ComponentConfig{{
+					Name:                     "test-component",
+					DisplayName:              "Test Component",
+					OwnsCRDs:                 tt.ownsCRDs,
+					OwnsCRDsExcludeSubcharts: tt.exclude,
+				}},
+			}
+			errs := registry.Validate()
+			if len(errs) != len(tt.wantErrs) {
+				t.Fatalf("Validate() = %v, want %d error(s) containing %q", errs, len(tt.wantErrs), tt.wantErrs)
+			}
+			for i, want := range tt.wantErrs {
+				if !strings.Contains(errs[i].Error(), want) {
+					t.Errorf("Validate()[%d] = %v, want it to contain %q", i, errs[i], want)
+				}
+				if errorstest.ReportedCode(errs[i]) != errors.ErrCodeInvalidRequest {
+					t.Errorf("Validate()[%d] code = %v, want ErrCodeInvalidRequest", i, errs[i])
+				}
+			}
+		})
+	}
+}
+
+// TestLoadComponentRegistry_HelmDefaultDigest pins the load-time contract for
+// helm.defaultDigest: the SHA-256 of the pinned chart archive, written
+// sha256:<64 lowercase hex>, and only on an entry that pins both a chart and
+// a version. A malformed digest on any loaded registry, external --data
+// registries included, fails the load rather than reaching bundle time.
+func TestLoadComponentRegistry_HelmDefaultDigest(t *testing.T) {
+	const validDigest = "sha256:0d3b0d3f8f5c2b7a9e1c4d6f8a0b2c4e6f8a0b2c4d6e8f0a1b3c5d7e9f1a3b5c"
+	tests := []struct {
+		name         string
+		helm         string
+		noRepository bool
+		wantErr      string
+	}{
+		{name: "absent", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0"},
+		{name: "valid", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: " + validDigest},
+		{name: "missing algorithm", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: " + validDigest[len("sha256:"):],
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "wrong algorithm", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: sha512:" + validDigest[len("sha256:"):],
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "uppercase hex", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: sha256:" + strings.ToUpper(validDigest[len("sha256:"):]),
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "short", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: sha256:abc",
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "no pinned version", helm: "defaultChart: example/chart\n    defaultDigest: " + validDigest,
+			wantErr: "pins no chart version"},
+		{name: "no chart", helm: "defaultVersion: 1.0.0\n    defaultDigest: " + validDigest,
+			wantErr: "pins no chart"},
+		{name: "no repository", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: " + validDigest,
+			noRepository: true, wantErr: "pins no chart repository"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := "defaultRepository: https://charts.example.com\n    "
+			if tt.noRepository {
+				repository = ""
+			}
+			registry := fmt.Sprintf("apiVersion: aicr.run/v1beta1\nkind: %s\ncomponents:\n- name: example\n  helm:\n    %s%s\n",
+				ComponentRegistryKind, repository, tt.helm)
+			dp := newInMemoryProvider("registry-digest-"+tt.name, map[string][]byte{"registry.yaml": []byte(registry)})
+			t.Cleanup(func() { EvictCachedRegistry(dp) })
+
+			reg, err := GetComponentRegistryFor(dp)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("GetComponentRegistryFor() error = nil, want rejection containing %q", tt.wantErr)
+				}
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if !strings.Contains(err.Error(), tt.wantErr) || !strings.Contains(err.Error(), `"example"`) {
+					t.Errorf("error = %v, want it to name the component and contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetComponentRegistryFor() error = %v", err)
+			}
+			if tt.name == "valid" && reg.Get("example").Helm.DefaultDigest != validDigest {
+				t.Errorf("DefaultDigest = %q, want %q", reg.Get("example").Helm.DefaultDigest, validDigest)
 			}
 		})
 	}

@@ -24,8 +24,9 @@
 #    (resolveNodewrightGVR) fails closed when the recipe pins v0.18.0+ and
 #    that group is not served, so its absence is never mistaken for a
 #    legacy operator.
-# 2. skyhook-operator-controller-manager Deployment has at least one
-#    available replica.
+# 2. Every Deployment labeled as the controller-manager has at least one
+#    available replica. Chainsaw cannot count, so the Go readiness check
+#    separately requires exactly one such Deployment.
 # 3. No pods stuck in Pending/Failed/Unknown phases or known-bad
 #    container-waiting states.
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -54,10 +55,24 @@ spec:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
-                name: skyhook-operator-controller-manager
                 namespace: nodewright
+                labels:
+                  app.kubernetes.io/component: manager
+                  control-plane: controller-manager
               status:
                 (availableReplicas > `0`): true
+        # Any match without an available replica fails (omitted at zero).
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                namespace: nodewright
+                labels:
+                  app.kubernetes.io/component: manager
+                  control-plane: controller-manager
+              status:
+                ((availableReplicas || `0`) > `0`): false
     - name: validate-all-pods-healthy
       try:
         - error:

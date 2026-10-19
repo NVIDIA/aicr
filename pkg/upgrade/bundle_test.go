@@ -16,7 +16,6 @@ package upgrade
 
 import (
 	"bytes"
-	stderrors "errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -24,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // Every record below is synthetic, for the same reason as syntheticSet.
@@ -380,7 +381,7 @@ func TestBundleRenderersRejectMalformedCalls(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(r.name+"/"+tt.name, func(t *testing.T) {
 				err := r.render(tt.writer, tt.notes, tt.deployer)
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), tt.wantText) {

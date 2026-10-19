@@ -23,7 +23,8 @@ trap 'rm -rf "${TMP}"' EXIT
 unset GITHUB_TOKEN
 
 # The stub answers for github.com blob URLs and their raw.githubusercontent.com
-# equivalents alike, and fails if the auth config travels with any other host.
+# equivalents alike, except that raw.githubusercontent.com rate-limits the
+# rawthrottled owner, and fails if the auth config travels with any other host.
 cat > "${TMP}/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -31,22 +32,34 @@ printf '%s\n' "$*" >> "${STUB_ARGV_LOG:-/dev/null}"
 head_request=false
 config=""
 prev=""
+prevprev=""
 rc=0
 for arg in "$@"; do
     if [[ "${prev}" == "--config" ]]; then
         config=${arg}
     fi
+    # The normalizer passes each URL as "--output /dev/null <url>", and real
+    # curl reports a result for every one, even a string that is not a URL.
+    is_url=false
+    if [[ "${prevprev}" == "--output" && "${prev}" == "/dev/null" ]]; then
+        is_url=true
+    fi
+    prevprev=${prev}
     prev=${arg}
     if [[ "${arg}" == "--head" ]]; then
         head_request=true
         continue
     fi
-    [[ "${arg}" == https://* ]] || continue
+    "${is_url}" || continue
     lookup=${arg}
     if [[ "${arg}" =~ ^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)$ ]]; then
         if [[ -z "${config}" ]] || ! grep -q '^header = "Authorization: Bearer ' "${config}"; then
             echo "raw.githubusercontent.com probed without the auth config" >&2
             exit 1
+        fi
+        if [[ "${BASH_REMATCH[1]}" == "rawthrottled" ]]; then
+            printf '%s\t429\t\n' "${arg}"
+            continue
         fi
         lookup="https://github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/blob/${BASH_REMATCH[3]}"
     elif [[ -n "${config}" ]]; then
@@ -64,7 +77,20 @@ for arg in "$@"; do
         https://github.com/flaky/repo/blob/v1.0.0/sub/LICENSE | \
         https://github.com/flaky/repo/blob/v2.0.0/LICENSE | \
         https://github.com/kyverno/kyverno/blob/48769d003e55/LICENSE | \
-        https://github.com/root/module/blob/v1.2.3/LICENSE)
+        https://github.com/root/module/blob/v1.2.3/LICENSE | \
+        https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE | \
+        https://github.com/evanphx/json-patch/blob/v4.13.0/LICENSE | \
+        https://github.com/go-pseudo/pseudo/blob/0123456789ab/LICENSE | \
+        https://github.com/go-pseudo3/pseudo3/blob/0123456789ab/LICENSE | \
+        https://github.com/go-mdlicense/mdlicense/blob/v2.1.0/LICENSE.md | \
+        https://github.com/go-nested/nested/blob/v2.0.0/LICENSE | \
+        https://github.com/go-nested/nested/blob/v2.0.0/sub/LICENSE | \
+        https://github.com/go-copying/copying/blob/v1.0.0/COPYING | \
+        https://github.com/go-copying/copying/blob/v1.0.0/LICENSE | \
+        https://github.com/imdario/mergo/blob/v1.0.2/LICENSE | \
+        https://github.com/rawthrottled/repo/blob/v1.0.0/sub/LICENSE | \
+        https://github.com/rawthrottled/repo/blob/v1.0.0/LICENSE | \
+        https://github.com/rawthrottled/repo/blob/v2.0.0/LICENSE)
             printf '%s\t200\t\n' "${arg}"
             ;;
         # Like real curl, a failed transfer is still reported, and fails the exit status.
@@ -75,6 +101,11 @@ for arg in "$@"; do
             ;;
         https://github.com/throttled/*)
             printf '%s\t503\t\n' "${arg}"
+            ;;
+        # go-licenses' placeholder when it cannot discover a license URL.
+        Unknown)
+            printf '%s\t000\tCould not resolve host: Unknown\n' "${arg}"
+            rc=6
             ;;
         *)
             printf '%s\t404\t\n' "${arg}"
@@ -88,6 +119,36 @@ fi
 exit "${rc}"
 EOF
 chmod +x "${TMP}/curl"
+
+# The stub answers `go list -m` for the gopkg.in and vanity modules the cases below use,
+# with a module directory under ${GO_STUB_MODCACHE}, and fails like go for any
+# other module.
+cat > "${TMP}/go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" != "list -m -f {{if not .Replace}}{{.Version}} {{.Dir}}{{end}} "* ]]; then
+    echo "unexpected go invocation: $*" >&2
+    exit 2
+fi
+module=${*: -1}
+case "${module}" in
+    gopkg.in/yaml.v3) version=v3.0.1 ;;
+    gopkg.in/evanphx/json-patch.v4) version=v4.13.0 ;;
+    gopkg.in/pseudo.v1) version=v1.0.0-20200102030405-0123456789ab ;;
+    gopkg.in/pseudo3.v1) version=v1.2.4-0.20200102030405-0123456789ab ;;
+    gopkg.in/mdlicense.v2) version=v2.1.0 ;;
+    gopkg.in/nested.v2) version=v2.0.0 ;;
+    gopkg.in/copying.v1) version=v1.0.0 ;;
+    dario.cat/mergo) version=v1.0.2 ;;
+    # The format prints nothing for a replaced module.
+    gopkg.in/replaced.v1) exit 0 ;;
+    *) echo "go: module ${module}: not a known dependency" >&2; exit 1 ;;
+esac
+printf '%s %s\n' "${version}" "${GO_STUB_MODCACHE}/${module}@${version}"
+EOF
+chmod +x "${TMP}/go"
+
+modcache="${TMP}/modcache"
 
 cat > "${TMP}/input.csv" <<'EOF'
 github.com/root/module,https://github.com/root/module/blob/v1.2.3/LICENSE,MIT
@@ -114,6 +175,21 @@ golang.org/x/term,https://cs.opensource.google/go/x/term/+/v0.34.0:LICENSE,BSD-3
 github.com/google/cel-go,https://github.com/cel-expr/cel-go/blob/v0.31.0/LICENSE,Apache-2.0
 EOF
 diff -u "${TMP}/expected.csv" "${TMP}/actual.csv"
+
+# The tool runs under whichever bash is first on PATH, and on macOS that can be
+# the stock /bin/bash 3.2, which keeps the quotes of a quoted ${var/pat/rep}
+# replacement in its result. Repeat the main case under it where it exists;
+# Linux runners have no bash 3 to try.
+if [[ -x /bin/bash ]] && (( $(/bin/bash -c 'echo "${BASH_VERSINFO[0]}"') < 4 )); then
+    PATH="/bin:${PATH}" CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/input.csv" > "${TMP}/actual-bash3.csv"
+    diff -u "${TMP}/expected.csv" "${TMP}/actual-bash3.csv"
+fi
+# Linux runners cannot run that case, so the construct itself is also rejected
+# everywhere: a ${var/pattern/replacement} whose replacement is quoted.
+if grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*//?("[^"]*"|[^/}"])*/"' "${TOOL}" | grep -vE '^[0-9]+:[[:space:]]*#'; then
+    echo "normalizer quotes a \${var/pattern/replacement} replacement, which bash 3.2 keeps in its output" >&2
+    exit 1
+fi
 
 cat > "${TMP}/broken.csv" <<'EOF'
 github.com/example/repo/missing,https://github.com/example/repo/blob/missing/v1.2.3/missing/LICENSE,Apache-2.0
@@ -162,8 +238,9 @@ if ! grep -qF "github.com/root/module," "${TMP}/multi.out"; then
 fi
 
 # With a token, github.com blob URLs are probed through raw.githubusercontent.com
-# with the token in a curl config file. The output still cites github.com, and
-# the token never reaches curl's argv.
+# with the token in a curl config file. The output still cites github.com, the
+# token never reaches curl's argv, and while raw answers every probe no
+# github.com blob URL is probed.
 GITHUB_TOKEN=stub-token-value STUB_ARGV_LOG="${TMP}/argv.log" CURL_BIN="${TMP}/curl" \
     "${TOOL}" "${TMP}/input.csv" > "${TMP}/actual-token.csv"
 diff -u "${TMP}/expected.csv" "${TMP}/actual-token.csv"
@@ -200,6 +277,53 @@ for msg in "rate-limited (HTTP 429/503)" "Set GITHUB_TOKEN"; do
         exit 1
     fi
 done
+
+# raw.githubusercontent.com can rate-limit a whole repository, with or without a
+# token, while github.com still serves the same files. An inconclusive raw probe
+# is repeated at the github.com URL for the same ref and path, without the token
+# and two at a time, and that answer stands in for it: a 200 resolves the
+# top-ranked candidate and a 404 moves on to the next one. Rows raw answered are
+# left alone.
+cat > "${TMP}/raw-throttled.csv" <<'EOF'
+github.com/rawthrottled/repo/sub,https://github.com/rawthrottled/repo/blob/v1.0.0/sub/LICENSE,MIT
+github.com/rawthrottled/repo/v2/sub,https://github.com/rawthrottled/repo/blob/v2.0.0/sub/LICENSE,MIT
+github.com/blang/semver/v4,https://github.com/blang/semver/blob/v4.0.0/v4/LICENSE,MIT
+EOF
+if ! GITHUB_TOKEN=stub-token-value STUB_ARGV_LOG="${TMP}/raw-throttled-argv.log" CURL_BIN="${TMP}/curl" \
+    "${TOOL}" "${TMP}/raw-throttled.csv" > "${TMP}/raw-throttled.out" 2> "${TMP}/raw-throttled.err"; then
+    echo "normalizer failed on URLs only raw.githubusercontent.com rate-limited:" >&2
+    cat "${TMP}/raw-throttled.err" >&2
+    exit 1
+fi
+cat > "${TMP}/raw-throttled.expected" <<'EOF'
+github.com/rawthrottled/repo/sub,https://github.com/rawthrottled/repo/blob/v1.0.0/sub/LICENSE,MIT
+github.com/rawthrottled/repo/v2/sub,https://github.com/rawthrottled/repo/blob/v2.0.0/LICENSE,MIT
+github.com/blang/semver/v4,https://github.com/blang/semver/blob/v4.0.0/LICENSE,MIT
+EOF
+diff -u "${TMP}/raw-throttled.expected" "${TMP}/raw-throttled.out"
+recheck_argv=$(grep -F https://github.com/rawthrottled/ "${TMP}/raw-throttled-argv.log")
+if [[ "${recheck_argv}" != *"--parallel-max 2 "* ]]; then
+    echo "normalizer did not recheck two at a time: ${recheck_argv}" >&2
+    exit 1
+fi
+if [[ "${recheck_argv}" == *--config* || "${recheck_argv}" == *blang/semver* ]]; then
+    echo "normalizer rechecked with the token or rechecked a conclusive probe: ${recheck_argv}" >&2
+    exit 1
+fi
+
+# A URL that stays inconclusive on github.com too still fails, and the report
+# says both hosts were tried.
+if GITHUB_TOKEN=stub-token-value CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/throttled.csv" \
+    > /dev/null 2> "${TMP}/throttled-token.err"; then
+    echo "normalizer accepted a URL rate-limited on both hosts" >&2
+    exit 1
+fi
+if ! grep -qF "tried (503: after raw.githubusercontent.com answered 503): https://github.com/throttled/repo/blob/v1.0.0/LICENSE" \
+    "${TMP}/throttled-token.err"; then
+    echo "normalizer did not report the github.com recheck:" >&2
+    cat "${TMP}/throttled-token.err" >&2
+    exit 1
+fi
 
 # One failed transfer makes curl exit non-zero for the whole batch. When every
 # package still resolves, that must not fail the run.
@@ -240,6 +364,89 @@ if grep -qF "github.com/flaky/repo/sub," "${TMP}/flaky-blocking.out"; then
     echo "normalizer emitted a fallback URL for a package whose preferred probe failed" >&2
     exit 1
 fi
+
+# The same holds with a token when the github.com recheck fails too, and the
+# report keeps the error from each host.
+if GITHUB_TOKEN=stub-token-value CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/flaky-blocking.csv" \
+    > "${TMP}/flaky-blocking-token.out" 2> "${TMP}/flaky-blocking-token.err"; then
+    echo "normalizer skipped past a candidate whose probe failed on both hosts" >&2
+    exit 1
+fi
+if ! grep -qF "tried (000: Connection reset by peer, after raw.githubusercontent.com failed: Connection reset by peer): https://github.com/flaky/repo/blob/v2.0.0/sub/LICENSE" \
+    "${TMP}/flaky-blocking-token.err"; then
+    echo "normalizer did not report the failed probe on each host:" >&2
+    cat "${TMP}/flaky-blocking-token.err" >&2
+    exit 1
+fi
+if grep -qF "github.com/flaky/repo/sub," "${TMP}/flaky-blocking-token.out"; then
+    echo "normalizer emitted a fallback URL for a package whose preferred probe failed on both hosts" >&2
+    exit 1
+fi
+
+# When gopkg.in is down, go-licenses cannot read the go-source tag that names a
+# gopkg.in module's repository and emits "Unknown". The URL is derived from
+# gopkg.in's fixed naming rule, the module version and the license file
+# go-licenses chose (the fourth column), then probed like any other candidate.
+# copying.v1 also has a reachable COPYING, which go-licenses did not choose.
+m="${modcache}/gopkg.in"
+cat > "${TMP}/gopkgin.csv" <<EOF
+gopkg.in/yaml.v3,Unknown,MIT,${m}/yaml.v3@v3.0.1/LICENSE
+gopkg.in/evanphx/json-patch.v4,Unknown,BSD-3-Clause,${m}/evanphx/json-patch.v4@v4.13.0/LICENSE
+gopkg.in/pseudo.v1/sub,Unknown,MIT,${m}/pseudo.v1@v1.0.0-20200102030405-0123456789ab/LICENSE
+gopkg.in/pseudo3.v1,Unknown,MIT,${m}/pseudo3.v1@v1.2.4-0.20200102030405-0123456789ab/LICENSE
+gopkg.in/mdlicense.v2,Unknown,MIT,${m}/mdlicense.v2@v2.1.0/LICENSE.md
+gopkg.in/nested.v2/sub,Unknown,BSD-3-Clause,${m}/nested.v2@v2.0.0/sub/LICENSE
+gopkg.in/copying.v1,Unknown,MIT,${m}/copying.v1@v1.0.0/LICENSE
+EOF
+GO_STUB_MODCACHE="${modcache}" GO_BIN="${TMP}/go" CURL_BIN="${TMP}/curl" \
+    "${TOOL}" "${TMP}/gopkgin.csv" > "${TMP}/gopkgin.out"
+cat > "${TMP}/gopkgin.expected" <<'EOF'
+gopkg.in/yaml.v3,https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE,MIT
+gopkg.in/evanphx/json-patch.v4,https://github.com/evanphx/json-patch/blob/v4.13.0/LICENSE,BSD-3-Clause
+gopkg.in/pseudo.v1/sub,https://github.com/go-pseudo/pseudo/blob/0123456789ab/LICENSE,MIT
+gopkg.in/pseudo3.v1,https://github.com/go-pseudo3/pseudo3/blob/0123456789ab/LICENSE,MIT
+gopkg.in/mdlicense.v2,https://github.com/go-mdlicense/mdlicense/blob/v2.1.0/LICENSE.md,MIT
+gopkg.in/nested.v2/sub,https://github.com/go-nested/nested/blob/v2.0.0/sub/LICENSE,BSD-3-Clause
+gopkg.in/copying.v1,https://github.com/go-copying/copying/blob/v1.0.0/LICENSE,MIT
+EOF
+diff -u "${TMP}/gopkgin.expected" "${TMP}/gopkgin.out"
+
+# A VANITY_REPOSITORIES module whose host served no go-import meta tags is
+# derived the same way, from its pinned repository.
+v="${modcache}/dario.cat"
+cat > "${TMP}/vanity.csv" <<EOF
+dario.cat/mergo,Unknown,BSD-3-Clause,${v}/mergo@v1.0.2/LICENSE
+EOF
+GO_STUB_MODCACHE="${modcache}" GO_BIN="${TMP}/go" CURL_BIN="${TMP}/curl" \
+    "${TOOL}" "${TMP}/vanity.csv" > "${TMP}/vanity.out"
+cat > "${TMP}/vanity.expected" <<'EOF'
+dario.cat/mergo,https://github.com/imdario/mergo/blob/v1.0.2/LICENSE,BSD-3-Clause
+EOF
+diff -u "${TMP}/vanity.expected" "${TMP}/vanity.out"
+
+# An "Unknown" URL is still fatal outside gopkg.in and VANITY_REPOSITORIES, for
+# a module whose version go cannot resolve, for a replaced one, and when
+# go-licenses chose no license file or one outside the module's copy.
+for row in \
+    "example.com/vanity,Unknown,MIT" \
+    "dario.cat/mergo,Unknown,BSD-3-Clause,${v}/mergo@v1.0.1/LICENSE" \
+    "dario.cat/mergoextra,Unknown,MIT,${v}/mergo@v1.0.2/LICENSE" \
+    "gopkg.in/unresolvable.v1,Unknown,MIT,${m}/unresolvable.v1@v1.0.0/LICENSE" \
+    "gopkg.in/replaced.v1,Unknown,MIT,${m}/replaced.v1@v1.0.0/LICENSE" \
+    "gopkg.in/yaml.v3,Unknown,MIT,Unknown" \
+    "gopkg.in/yaml.v3,Unknown,MIT,${m}/yaml.v3@v3.0.0/LICENSE" \
+    "gopkg.in/yaml.v3,Unknown,MIT"; do
+    printf '%s\n' "${row}" > "${TMP}/unknown.csv"
+    if GO_STUB_MODCACHE="${modcache}" GO_BIN="${TMP}/go" CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/unknown.csv" \
+        > /dev/null 2> "${TMP}/unknown.err"; then
+        echo "normalizer accepted an Unknown license URL for ${row}" >&2
+        exit 1
+    fi
+    if ! grep -qF "no reachable license source URL for ${row%%,*}:" "${TMP}/unknown.err"; then
+        echo "normalizer did not report ${row%%,*} as unreachable" >&2
+        exit 1
+    fi
+done
 
 # curl failing outright, without a result per URL, is still fatal.
 printf '#!/usr/bin/env bash\nexit 2\n' > "${TMP}/curl-broken"

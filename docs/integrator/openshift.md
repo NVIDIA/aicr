@@ -207,13 +207,19 @@ The deployment proceeds through the three-folder cycle per operator: OLM install
 **Manual step-by-step deployment** is also supported. Each folder can be installed independently using standard Helm:
 
 ```bash
-helm upgrade --install <release> ./<folder> --create-namespace -n <namespace>
+FOLDER="001-my-component"   # replace with a numbered folder in ocp-bundle/
+RELEASE="my-component"      # replace with the folder name minus its numeric prefix
+NAMESPACE="my-namespace"    # replace with the component's namespace
+helm upgrade --install "${RELEASE}" "./${FOLDER}" --create-namespace -n "${NAMESPACE}"
 ```
 
 For readiness gate folders, add the wait flags:
 
 ```bash
-helm upgrade --install <release> ./<readiness-folder> -n <namespace> --wait --timeout 10m
+FOLDER="002-my-component-readiness"  # replace with a readiness folder in ocp-bundle/
+RELEASE="my-component-readiness"     # replace with the folder name minus its numeric prefix
+NAMESPACE="my-namespace"             # replace with the component's namespace
+helm upgrade --install "${RELEASE}" "./${FOLDER}" -n "${NAMESPACE}" --wait --timeout 10m
 ```
 
 ### 4. Monitor Operator Readiness
@@ -223,7 +229,8 @@ After OLM subscriptions are installed, verify operator readiness by checking CSV
 **Check CSV phase:**
 
 ```bash
-oc get csv -n <operator-namespace>
+NAMESPACE="gpu-operator"  # replace with the operator's namespace
+oc get csv -n "${NAMESPACE}"
 ```
 
 **Expected Output:**
@@ -236,7 +243,8 @@ NAME                                  DISPLAY        VERSION   REPLACES   PHASE
 **Check operator Deployment:**
 
 ```bash
-oc get deployment -n <operator-namespace>
+NAMESPACE="gpu-operator"  # replace with the operator's namespace
+oc get deployment -n "${NAMESPACE}"
 ```
 
 The readiness gate asserts only the first of these, the CSV phase — OLM advances a CSV to `Succeeded` only once the operator's Deployment reports available, so that one signal covers both. If you used `--readiness-hooks`, the bundle already waited on it before applying CRs.
@@ -246,7 +254,8 @@ The readiness gate asserts only the first of these, the CSV phase — OLM advanc
 After CRs are applied, monitor the operator workloads in the respective namespace:
 
 ```bash
-watch oc get pods -n <operator-namespace>
+NAMESPACE="gpu-operator"  # replace with the operator's namespace
+watch oc get pods -n "${NAMESPACE}"
 ```
 
 Pods should reach Running or Completed status. The specific set of pods depends on the operator and the CR configuration (e.g., the GPU Operator creates DaemonSets for driver, toolkit, device plugin, DCGM, and related components).
@@ -271,7 +280,10 @@ aicr snapshot --output snapshot.yaml
 
 ### 7. Validate Deployment
 
-Validate the deployed components against the recipe and snapshot:
+Validate the deployed components against the bundle's recipe (the component
+set it deployed) and the snapshot. The shell is still inside `ocp-bundle/`
+from step 3, so `recipe.yaml` here is the bundle's recipe and `snapshot.yaml`
+is the file step 6 wrote there:
 
 ```bash
 aicr validate \
@@ -287,7 +299,7 @@ The OCP overlay defines validation checks for both deployment and conformance ph
 
 OCP component values can be customized at bundle time using `--set` with the component's override key. Each component in the registry declares a `valueOverrideKeys` entry that determines the `--set` prefix. The general pattern is:
 
-```bash
+```text
 aicr bundle -r recipe.yaml \
   --set <override-key>:<value-path>=<value> \
   --readiness-hooks \
@@ -330,7 +342,10 @@ The available intents and platforms follow the same overlay inheritance pattern 
 Users who prefer plain Kubernetes manifests over Helm-based deployment can run `helm template` on any emitted folder to produce static YAML with all values resolved:
 
 ```bash
-helm template <release> ./<bundle-folder> -n <namespace> > manifests.yaml
+FOLDER="006-gpu-operator-ocp"  # replace with a numbered folder in ocp-bundle/
+RELEASE="gpu-operator-ocp"     # replace with the folder name minus its numeric prefix
+NAMESPACE="gpu-operator"       # replace with the component's namespace
+helm template "${RELEASE}" "./${FOLDER}" -n "${NAMESPACE}" > manifests.yaml
 ```
 
 This works outside of AICR with a standard Helm installation and produces manifests suitable for `oc apply -f`.

@@ -576,6 +576,8 @@ schemaVersion: 1.0.0
 materialSliceVersion: 1
 attestedAt: 2026-05-08T10:23:11Z
 aicrVersion: v0.13.0
+# Build commit of the aicr binary. Omitted when the binary has no commit stamp.
+aicrCommit: 0123456789abcdef0123456789abcdef01234567
 validatorCatalogVersion: v2.4.0
 validatorImages:
   - image: ghcr.io/nvidia/aicr/validator-deployment

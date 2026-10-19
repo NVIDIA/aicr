@@ -69,7 +69,7 @@ concurrency:
 jobs:
   test:
     name: NVSentinel Object Monitor E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The script's bounded waits alone sum to ~15 minutes worst case (node
     # ready + a cold pull of the whole NVSentinel image set + the condition and
     # negative windows), before kind create and go build. A cold amd64 runner

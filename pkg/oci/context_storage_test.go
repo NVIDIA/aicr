@@ -31,6 +31,8 @@ import (
 	"oras.land/oras-go/v2/registry"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 type testReadOnlyStorage struct {
@@ -653,7 +655,7 @@ func assertErrorCode(t *testing.T, err error, code apperrors.ErrorCode) {
 	if err == nil {
 		t.Fatalf("expected %s error, got nil", code)
 	}
-	if !stderrors.Is(err, apperrors.New(code, "")) {
+	if errorstest.ReportedCode(err) != code {
 		t.Fatalf("error = %v, want code %s", err, code)
 	}
 }

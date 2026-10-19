@@ -28,6 +28,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -125,7 +126,7 @@ func successfulDependencies(
 
 func assertErrorCode(t *testing.T, err error, code apperrors.ErrorCode) {
 	t.Helper()
-	if !stderrors.Is(err, apperrors.New(code, "")) {
+	if errorstest.ReportedCode(err) != code {
 		t.Fatalf("error = %v, want code %s", err, code)
 	}
 }

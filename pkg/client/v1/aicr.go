@@ -61,6 +61,9 @@
 //     records, for CI gates detecting stale evidence.
 //   - EmitRecipeEvidence / PublishEvidence — build, then sign and push, a
 //     recipe-evidence bundle.
+//   - RenderCNCFEvidence writes CNCF AI Conformance evidence markdown from a
+//     CTRF report. CollectCNCFEvidence collects behavioral submission
+//     evidence from a live cluster.
 //   - VerifyBinaryAttestation — package-level; prove an aicr binary was
 //     built by NVIDIA CI.
 //
@@ -844,6 +847,12 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	}
 
 	var resolveOpts []RecipeResolveOption
+	if req.InheritFrom != "" {
+		resolveOpts = append(resolveOpts, WithInheritFrom(req.InheritFrom))
+	}
+	if req.Inherit != "" {
+		resolveOpts = append(resolveOpts, WithInherit(req.Inherit))
+	}
 	if req.Profile != "" {
 		resolveOpts = append(resolveOpts, WithProfile(req.Profile))
 	}
@@ -852,6 +861,10 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	}
 	if req.GKETCPXOInterfaces != "" {
 		resolveOpts = append(resolveOpts, WithGKETCPXOInterfaces(req.GKETCPXOInterfaces))
+	}
+	resolveCfg, err := resolveRecipeConfig(resolveOpts...)
+	if err != nil {
+		return nil, err
 	}
 	internal, err := c.resolveCriteria(ctx, builder, criteria, resolveOpts...)
 	if err != nil {
@@ -869,7 +882,7 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	// emitted recipe, the Components view and anything bundled from them all
 	// name the namespace the prior artifact deployed into.
 	if req.InheritFrom != "" {
-		if inheritErr := c.inheritIdentity(ctx, req.InheritFrom, builder.DataProvider(), internal); inheritErr != nil {
+		if inheritErr := c.inheritIdentity(ctx, req.InheritFrom, resolveCfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
 	}
@@ -886,8 +899,8 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	return result, nil
 }
 
-// inheritIdentity overwrites resolved's component identity (namespace, chart,
-// source, kustomize path and manifest sets) with the one a prior recipe or
+// inheritIdentity overwrites the selected parts of resolved's component
+// identity with the ones a prior recipe or
 // bundle already deployed, so a moved registry default does not relocate or
 // replace a running component when the recipe is regenerated.
 //
@@ -900,7 +913,7 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 // nested load with "already closed" while Close itself is still waiting on that
 // same call's inflight count to drain.
 func (c *Client) inheritIdentity(
-	ctx context.Context, inheritFrom string, dp recipe.DataProvider, resolved *recipe.RecipeResult,
+	ctx context.Context, inheritFrom string, selection *recipe.InheritMode, dp recipe.DataProvider, resolved *recipe.RecipeResult,
 ) error {
 
 	path, err := inheritedRecipePath(inheritFrom)
@@ -934,11 +947,17 @@ func (c *Client) inheritIdentity(
 	if criteriaErr := checkInheritCriteria(resolved.Criteria, priorInternal.Criteria, inheritFrom); criteriaErr != nil {
 		return criteriaErr
 	}
-	if applyErr := recipe.ApplyInheritedIdentity(resolved.ComponentRefs, priorInternal.ComponentRefs); applyErr != nil {
+	mode := recipe.InheritAll
+	if selection != nil {
+		mode = *selection
+	}
+	if applyErr := recipe.ApplyInheritedIdentityWithMode(resolved.ComponentRefs, priorInternal.ComponentRefs, mode); applyErr != nil {
 		return applyErr
 	}
-	if namesErr := c.inheritObjectNames(ctx, inheritFrom, resolved); namesErr != nil {
-		return namesErr
+	if mode == recipe.InheritAll {
+		if namesErr := c.inheritObjectNames(ctx, inheritFrom, resolved); namesErr != nil {
+			return namesErr
+		}
 	}
 	// The inherited fields land after the resolved recipe was last validated,
 	// and a prior artifact can carry a combination the current registry's
@@ -1117,6 +1136,10 @@ func resolveRecipeConfig(opts ...RecipeResolveOption) (*recipeResolveConfig, err
 	if cfg.optErr != nil {
 		return nil, cfg.optErr
 	}
+	if cfg.inheritMode != nil && cfg.inheritFrom == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"inherit selection (--inherit / Inherit) requires --inherit-from (InheritFrom)")
+	}
 	return cfg, nil
 }
 
@@ -1216,7 +1239,7 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 		return nil, err
 	}
 	if cfg.inheritFrom != "" {
-		if inheritErr := c.inheritIdentity(ctx, cfg.inheritFrom, builder.DataProvider(), internal); inheritErr != nil {
+		if inheritErr := c.inheritIdentity(ctx, cfg.inheritFrom, cfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
 	}
@@ -1417,11 +1440,16 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	if applyErr := applyMariaDBOperatorState(ctx, internal, internalSnap); applyErr != nil {
 		return nil, applyErr
 	}
+	// NVSentinel datastore prerequisites follow the same observational
+	// pattern; CheckNVSentinelDatastorePrerequisites enforces them.
+	if applyErr := applyNVSentinelDatastoreState(ctx, internal, internalSnap); applyErr != nil {
+		return nil, applyErr
+	}
 	// Last write to the refs before the facade projection, so the emitted
 	// recipe and the Components view agree on where each component lives.
 	if resolveCfg.inheritFrom != "" {
 		if inheritErr := c.inheritIdentity(
-			ctx, resolveCfg.inheritFrom, builder.DataProvider(), internal); inheritErr != nil {
+			ctx, resolveCfg.inheritFrom, resolveCfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
 	}
@@ -2244,44 +2272,6 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 	}
 }
 
-// ValidateState evaluates a resolved recipe against an observed cluster
-// snapshot, runs the selected validation phases (by default
-// PhaseDeployment, PhaseConformance, PhasePerformance) in order, and
-// returns one PhaseResult per phase run. Pass WithValidationPhases to
-// restrict the run to a subset.
-//
-// recipe must come from a prior Client.ResolveRecipe call on this
-// Client — it carries the unexported internal recipe state needed to
-// drive constraint evaluation. Passing a RecipeResult constructed by
-// the caller (or one produced by a different Client whose internal
-// has since been evicted) returns ErrCodeInvalidRequest.
-//
-// snap is the Snapshot returned by Client.CollectSnapshot or by any
-// other snapshotter source.
-//
-// opts configure the validator run. Pass WithValidationNoCluster(true)
-// from unit tests so no Kubernetes resources are created and every
-// check reports as "skipped". WithValidationNamespace, WithValidationRunID,
-// WithValidationCleanup, WithValidationTolerations,
-// WithValidationNodeSelector, WithValidationKubeconfig, and
-// WithValidationPhases cover the production-controller knobs. The validator
-// catalog loads through this Client's own DataProvider, so a Client built from
-// FilesystemSource validates against that recipe source rather than the
-// package global.
-//
-// Errors:
-//   - ErrCodeInvalidRequest when the Client, recipe, or snap is nil,
-//     when recipe lacks internal state, or when the Client has been
-//     Closed.
-//   - All validator errors propagate unwrapped — readiness-check
-//     failures surface as ErrCodeInvalidRequest, infrastructure
-//     failures as ErrCodeInternal.
-//
-// All phases run by default and produce results regardless of earlier
-// failures. Pass WithValidationFailFast(true) to stop after the first
-// failed phase (useful for skipping expensive checks like inference-perf
-// when deployment already failed). Callers wanting per-phase control can
-// reach into pkg/validator.ValidatePhase directly.
 // PreflightSkipChecks runs ValidateState's skip-list guard on its own, without
 // running any validation, so a caller that does cluster work of its own before
 // ValidateState can reject an unusable skip list first.
@@ -2372,6 +2362,95 @@ func (c *Client) PreflightSkipChecks(
 	return v.PreflightSkipChecks(ctx, internalPhases, validationInput)
 }
 
+// PreflightValidatorServiceAccount runs ValidateState's check of the
+// ServiceAccount named by WithValidatorServiceAccountName on its own, so a
+// caller that does cluster work of its own before ValidateState can fail
+// before that work instead of after it.
+//
+// The CLI is that caller: `aicr validate` without --snapshot deploys a
+// snapshot-capture agent, and its RBAC, before it has a Snapshot to hand
+// ValidateState. A missing or unbound validator ServiceAccount would
+// otherwise surface only after that capture.
+//
+// Pass the same options ValidateState will get: WithValidatorServiceAccountName
+// supplies the ServiceAccount, and WithValidationNamespace and
+// WithValidationKubeconfig where to look for it. The check issues a Get and a
+// SubjectAccessReview and creates nothing. It returns nil without contacting
+// the cluster when no ServiceAccount is named or WithValidationNoCluster(true)
+// is set. ValidateState runs the same check itself, so running both is
+// idempotent.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client is nil or has been Closed, when
+//     the kubeconfig cannot be loaded, or when the ServiceAccount sets
+//     automountServiceAccountToken: false.
+//   - ErrCodeNotFound when the ServiceAccount does not exist.
+//   - ErrCodeUnauthorized when it is not bound to cluster-admin, or when the
+//     caller's credentials are rejected or it may not read the ServiceAccount
+//     or create a SubjectAccessReview.
+//   - ErrCodeCanceled, ErrCodeTimeout, ErrCodeUnavailable or ErrCodeInternal
+//     when the check itself cannot complete.
+func (c *Client) PreflightValidatorServiceAccount(ctx context.Context, opts ...ValidateOption) error {
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	return validator.New(validateOptionsFromConfig(buildValidateConfig(opts))...).PreflightServiceAccount(ctx)
+}
+
+// ValidateState evaluates a resolved recipe against an observed cluster
+// snapshot, runs the selected validation phases (by default
+// PhaseDeployment, PhaseConformance, PhasePerformance) in order, and
+// returns one PhaseResult per phase run. Pass WithValidationPhases to
+// restrict the run to a subset.
+//
+// recipe must come from a prior Client.ResolveRecipe call on this
+// Client — it carries the unexported internal recipe state needed to
+// drive constraint evaluation. Passing a RecipeResult constructed by
+// the caller (or one produced by a different Client whose internal
+// has since been evicted) returns ErrCodeInvalidRequest.
+//
+// snap is the Snapshot returned by Client.CollectSnapshot or by any
+// other snapshotter source.
+//
+// opts configure the validator run. Pass WithValidationNoCluster(true)
+// from unit tests so no Kubernetes resources are created and every
+// check reports as "skipped". WithValidationNamespace, WithValidationRunID,
+// WithValidationCleanup, WithValidationTolerations,
+// WithValidationNodeSelector, WithValidationKubeconfig,
+// WithValidationPhases, and WithValidatorServiceAccountName cover the
+// production-controller knobs. The validator
+// catalog loads through this Client's own DataProvider, so a Client built from
+// FilesystemSource validates against that recipe source rather than the
+// package global.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client, recipe, or snap is nil,
+//     when recipe lacks internal state, or when the Client has been
+//     Closed.
+//   - All validator errors propagate unwrapped — readiness-check
+//     failures surface as ErrCodeInvalidRequest, infrastructure
+//     failures as ErrCodeInternal. With WithValidatorServiceAccountName,
+//     the ServiceAccount check fails before anything is deployed, with the
+//     codes PreflightValidatorServiceAccount documents.
+//
+// All phases run by default and produce results regardless of earlier
+// failures. Pass WithValidationFailFast(true) to stop after the first
+// failed phase (useful for skipping expensive checks like inference-perf
+// when deployment already failed). Callers wanting per-phase control can
+// reach into pkg/validator.ValidatePhase directly.
 func (c *Client) ValidateState(
 	ctx context.Context,
 	recipe *RecipeResult,

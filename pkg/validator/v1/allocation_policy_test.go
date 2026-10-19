@@ -16,12 +16,12 @@ package v1
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
 )
@@ -426,7 +426,7 @@ func TestResolveGPUAllocationPolicy(t *testing.T) {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {
@@ -699,7 +699,7 @@ func TestResolveGPUAllocationPolicyExternalAdvertiser(t *testing.T) {
 			if tt.wantErr {
 				// Every rejection in this table is a configuration defect
 				// the caller must surface as invalid input.
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 				}
 				if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {

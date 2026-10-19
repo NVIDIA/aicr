@@ -346,6 +346,7 @@ func TestStability_Validate(t *testing.T) {
 
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, ...aicr.ValidateOption) ([]*aicr.PhaseResult, error)]((*aicr.Client).ValidateState)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, ...aicr.ValidateOption) error]((*aicr.Client).PreflightSkipChecks)
+	requireSignature[func(*aicr.Client, context.Context, ...aicr.ValidateOption) error]((*aicr.Client).PreflightValidatorServiceAccount)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationKubeconfig)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationNamespace)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationRunID)
@@ -361,6 +362,7 @@ func TestStability_Validate(t *testing.T) {
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationImageTagOverride)
 	requireSignature[func(bool) aicr.ValidateOption](aicr.WithValidationFailFast)
 	requireSignature[func(...string) aicr.ValidateOption](aicr.WithValidationSkipChecks)
+	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidatorServiceAccountName)
 
 	_ = []aicr.ValidateOption{
 		aicr.WithValidationKubeconfig("/path/to/kubeconfig"),
@@ -378,6 +380,7 @@ func TestStability_Validate(t *testing.T) {
 		aicr.WithValidationImageTagOverride("tag"),
 		aicr.WithValidationFailFast(true),
 		aicr.WithValidationSkipChecks("gpu-operator-health"),
+		aicr.WithValidatorServiceAccountName("aicr-validator"),
 	}
 }
 
@@ -479,6 +482,22 @@ func TestStability_HealthAndEvidence(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria) (*health.Report, error)]((*aicr.Client).ComputeHealth)
 	requireSignature[func(*aicr.Client, []*aicr.PhaseResult) *ctrf.Report]((*aicr.Client).MergeReports)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, []*aicr.PhaseResult, aicr.EvidenceOptions) error]((*aicr.Client).EmitRecipeEvidence)
+	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, []*aicr.PhaseResult, aicr.EvidenceOptions) (*aicr.EvidenceEmission, error)]((*aicr.Client).EmitRecipeEvidenceWithResult)
+	requireSignature[func(*aicr.Client, context.Context, *ctrf.Report, string) error]((*aicr.Client).RenderCNCFEvidence)
+	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, aicr.CNCFCollectOptions) error]((*aicr.Client).CollectCNCFEvidence)
+	requireSignature[func() []string](aicr.CNCFEvidenceFeatures)
+
+	_ = aicr.EvidenceEmission{
+		PushedReference: "",
+		PushedDigest:    "",
+	}
+
+	_ = aicr.CNCFCollectOptions{
+		Dir:        "",
+		Features:   []string(nil),
+		Kubeconfig: "",
+		NoCluster:  false,
+	}
 }
 
 // TestStability_Verification pins the consumer-side verification surface: the
@@ -534,6 +553,9 @@ func TestStability_Verification(t *testing.T) {
 	_ = ev.BundleRef
 	_ = ev.ExpectedIssuer
 	_ = ev.ExpectedIdentityRegexp
+	_ = ev.Key
+	_ = ev.TrustRoot
+	_ = ev.IgnoreTLog
 	_ = ev.PlainHTTP
 	_ = ev.InsecureTLS
 	_ = ev.AllowUnpinnedTag
@@ -625,6 +647,7 @@ func TestStability_Config(t *testing.T) {
 	_ = vs.ImagePullSecrets
 	_ = vs.JobName
 	_ = vs.ServiceAccountName
+	_ = vs.ValidatorServiceAccountName
 	_ = vs.NodeSelector
 	_ = vs.Tolerations
 	_ = vs.RequireGPU
@@ -636,6 +659,7 @@ func TestStability_Config(t *testing.T) {
 	requireType[*bool](aicr.ValidateSettings{}.FailFast)
 	requireType[*time.Duration](aicr.ValidateSettings{}.Timeout)
 	requireType[bool](aicr.ValidateSettings{}.Cleanup)
+	requireType[string](aicr.ValidateSettings{}.ValidatorServiceAccountName)
 
 	var vi aicr.ValidateInputOptions
 	_ = vi.RecipePath

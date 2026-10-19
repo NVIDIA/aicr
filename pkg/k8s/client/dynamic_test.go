@@ -15,12 +15,12 @@
 package client
 
 import (
-	stderrors "errors"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"k8s.io/client-go/rest"
 )
 
@@ -78,7 +78,7 @@ func TestNewDynamicClientForConfig(t *testing.T) {
 		if got != nil {
 			t.Errorf("client = %v, want nil on error", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -112,7 +112,7 @@ func TestNewRESTMapperForConfig(t *testing.T) {
 		if got != nil {
 			t.Errorf("mapper = %v, want nil on error", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -142,6 +142,37 @@ func TestNewRESTMapperForConfig(t *testing.T) {
 		// would hold a view that drifts from the mapper's across a Reset().
 		if mapper == nil || disco == nil {
 			t.Errorf("mapper = %v, discovery = %v, want both", mapper, disco)
+		}
+	})
+}
+
+func TestNewMetadataClientForConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := NewMetadataClientForConfig(nil)
+		if err == nil {
+			t.Fatal("expected an error for a nil rest config")
+		}
+		if got != nil {
+			t.Errorf("client = %v, want nil on error", got)
+		}
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+			t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+
+	t.Run("valid config yields a client", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := NewMetadataClientForConfig(&rest.Config{Host: "https://127.0.0.1:6443"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Error("client = nil, want a constructed client")
 		}
 	})
 }

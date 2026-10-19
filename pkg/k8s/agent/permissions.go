@@ -191,12 +191,13 @@ func (d *Deployer) CheckPermissions(ctx context.Context) ([]permissionCheck, err
 // ServiceAccount mode: everything Deploy, WaitForCompletion, GetSnapshot and
 // Cleanup issue that is not RBAC creation or deletion.
 //
-// Deliberately absent: Namespace create/get/patch. ensureNamespace's three
-// branches need a different verb depending on whether the namespace already
-// exists and is already labeled, and the documented path — an operator's
-// pre-existing, previously-labeled namespace such as `gpu-operator` —
-// needs none of them. Demanding the cluster-scoped `namespaces: create`
-// that only the fresh-namespace branch uses would fail the majority case.
+// Deliberately absent: Namespace get/create/patch. Exact-ServiceAccount mode
+// never touches the namespace. In prefix mode ensureNamespace needs `get` for
+// a namespace that exists (and `patch` when it lacks the managed-by label)
+// but `create` for one that does not, so demanding either cluster-scoped
+// verb would fail callers who need only the other. ensureNamespace reports
+// a refused namespace request itself, as a permission error, before any RBAC
+// is created.
 //
 // Also absent: `get` on Role, RoleBinding, ClusterRole and ClusterRoleBinding.
 // Cleanup reads those only to re-establish ownership of an entry whose

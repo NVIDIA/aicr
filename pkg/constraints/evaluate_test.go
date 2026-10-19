@@ -15,10 +15,11 @@
 package constraints
 
 import (
-	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -149,7 +150,7 @@ func TestEvaluate(t *testing.T) {
 			if result.Error == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !stderrors.Is(result.Error, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(result.Error) != tt.wantCode {
 				t.Errorf("error code mismatch: want %s, got %v", tt.wantCode, result.Error)
 			}
 		})
@@ -269,7 +270,7 @@ func TestEvaluate_NilSnapshot(t *testing.T) {
 			if result.Error == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !stderrors.Is(result.Error, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(result.Error) != tt.wantCode {
 				t.Errorf("error code mismatch: want %s, got %v", tt.wantCode, result.Error)
 			}
 			if result.Passed {

@@ -17,7 +17,7 @@ This walkthrough covers:
 5. Confirm the value actually moved.
 6. Override the value at install time, no re-bundle.
 7. Push as a pre-built OCI artifact and confirm the split survives.
-8. Deployer differences (helm / helmfile / argocd-helm / flux).
+8. Deployer differences (helm / helmfile / argocd-helm / flux / terraform).
 
 ## Prerequisites
 
@@ -217,6 +217,7 @@ provenance is required.
 | `argocd-helm` | `dynamic` pre-populates paths in the chart's root `values.yaml`; override at install via `helm install … --set <key>=<value>`. |
 | `argocd` | **Not supported.** A `dynamic` declaration with `deployer: argocd` is rejected — use `argocd-helm` for install-time values. |
 | `flux` | Dynamic paths go into a per-component `configmap-values.yaml`, referenced by the HelmRelease via `spec.valuesFrom` (merged before inline values). |
+| `terraform` | Edit `cluster-values.yaml`; the component's module call lists it after `values.yaml` in `values_files`, so it wins at `terraform apply`. |
 
 Pick the deployer to match how the consumer installs; the dynamic value lands in the right place for that path.
 
@@ -226,7 +227,7 @@ Pick the deployer to match how the consumer installs; the dynamic value lands in
 
 **Override seems ignored at install** — confirm `install.sh` lists `-f cluster-values.yaml` *after* `-f values.yaml`. With Helm the last `-f` wins; the order matters.
 
-**`dynamic` rejected** — you set `deployer: argocd`. Switch to `argocd-helm` (or `helm` / `helmfile` / `flux`), which support install-time values.
+**`dynamic` rejected** — you set `deployer: argocd`. Switch to `argocd-helm` (or `helm` / `helmfile` / `flux` / `terraform`), which support install-time values.
 
 ## Links
 

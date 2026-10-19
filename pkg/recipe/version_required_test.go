@@ -16,13 +16,14 @@ package recipe
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // These tests pin the #1615 invariant: an ENABLED Helm componentRef that is
@@ -46,7 +47,7 @@ func wantEmptyVersionError(t *testing.T, err error, component string) {
 	if err == nil {
 		t.Fatalf("expected an error for Helm component %q without a chart version, got nil", component)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %v", err, errors.ErrCodeInvalidRequest)
 	}
 	for _, want := range []string{component, "chart version"} {
@@ -463,7 +464,7 @@ func TestPrepareAndValidateRejectsEmptyHelmVersion(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
 					t.Fatalf("error = %v, want substring %q", err, tt.wantMsg)
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want %v", err, errors.ErrCodeInvalidRequest)
 				}
 				return

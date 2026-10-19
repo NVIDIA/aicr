@@ -41,7 +41,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v26.7.1
+    version: v26.7.2
     valuesFile: components/gpu-operator/values-eks-training.yaml
     dependencyRefs:
       - cert-manager
@@ -59,7 +59,7 @@ componentRefs:
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.19.0
+    version: v0.20.0
     valuesFile: components/nodewright-operator/values.yaml
   - name: prometheus-operator-crds
     namespace: monitoring

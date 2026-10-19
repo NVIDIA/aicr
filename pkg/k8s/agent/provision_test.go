@@ -15,12 +15,13 @@
 package agent
 
 import (
-	stderrors "errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -265,20 +266,17 @@ func TestBuildServiceAccountRoleManifests_ParseableYAML(t *testing.T) {
 }
 
 // TestBuildServiceAccountRoleManifests_DiscoverNetwork covers both rule sets.
-// The default grant must stay read-only, and the --discover-network grant
-// must carry the mutating rules AND explain them in the header — the header
-// is what an operator reads to decide whether to apply the file at all, so a
-// silent "nodes: patch" would defeat the point of writing manifests out
-// instead of applying them.
+// Both grants must be read-only; the --discover-network grant adds exactly
+// the nicdevices read and explains it in the header — the header is what an
+// operator reads to decide whether to apply the file at all.
 func TestBuildServiceAccountRoleManifests_DiscoverNetwork(t *testing.T) {
 	tests := []struct {
 		name            string
 		discoverNetwork bool
 		wantRuleCount   int
-		wantMutating    bool
 	}{
 		{name: "default grant is read-only", discoverNetwork: false, wantRuleCount: len(clusterRules(false))},
-		{name: "discovery grant adds the mutating rules", discoverNetwork: true, wantRuleCount: len(clusterRules(true)), wantMutating: true},
+		{name: "discovery grant adds only the nicdevices read", discoverNetwork: true, wantRuleCount: len(clusterRules(false)) + 1},
 	}
 
 	for _, tt := range tests {
@@ -294,24 +292,31 @@ func TestBuildServiceAccountRoleManifests_DiscoverNetwork(t *testing.T) {
 			if len(cr.Rules) != tt.wantRuleCount {
 				t.Errorf("ClusterRole rules = %d, want %d", len(cr.Rules), tt.wantRuleCount)
 			}
-			for _, want := range []struct{ resource, verb string }{
+			for _, forbidden := range []struct{ resource, verb string }{
 				{"nodes", "patch"},
 				{"pods/exec", verbCreate},
 				{"customresourcedefinitions", verbCreate},
+				{"nicclusterpolicies", verbPatch},
 			} {
-				if got := hasRule(cr.Rules, want.resource, want.verb); got != tt.wantMutating {
-					t.Errorf("%s: %s present = %v, want %v", want.resource, want.verb, got, tt.wantMutating)
+				if hasRule(cr.Rules, forbidden.resource, forbidden.verb) {
+					t.Errorf("%s: %s granted; discovery must stay read-only", forbidden.resource, forbidden.verb)
 				}
+			}
+			if got := hasRule(cr.Rules, "nicdevices", verbList); got != tt.discoverNetwork {
+				t.Errorf("nicdevices: list present = %v, want %v", got, tt.discoverNetwork)
 			}
 
 			header := string(m.Content)
-			for _, want := range []string{"nodes: patch", "pods/exec: create", "MUTATING"} {
-				if strings.Contains(header, want) != tt.wantMutating {
-					t.Errorf("header mentions %q = %v, want %v; header:\n%s", want, !tt.wantMutating, tt.wantMutating, header)
+			for _, banned := range []string{"nodes: patch", "pods/exec: create", "MUTATING"} {
+				if strings.Contains(header, banned) {
+					t.Errorf("header mentions %q; header:\n%s", banned, header)
 				}
 			}
-			if !tt.wantMutating && !strings.Contains(header, "READ-ONLY") {
-				t.Errorf("read-only grant does not say so in the header:\n%s", header)
+			if !strings.Contains(header, "READ-ONLY") {
+				t.Errorf("grant does not say it is read-only in the header:\n%s", header)
+			}
+			if strings.Contains(header, "nicdevices") != tt.discoverNetwork {
+				t.Errorf("header explains nicdevices = %v, want %v; header:\n%s", !tt.discoverNetwork, tt.discoverNetwork, header)
 			}
 		})
 	}
@@ -415,7 +420,7 @@ func TestBuildServiceAccountRoleManifests_Rejections(t *testing.T) {
 			if err == nil {
 				t.Fatal("BuildServiceAccountRoleManifests() error = nil, want ErrCodeInvalidRequest")
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, aicrerrors.ErrCodeInvalidRequest)
 			}
 			if tt.wantInMsg != "" && !strings.Contains(err.Error(), tt.wantInMsg) {

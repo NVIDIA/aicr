@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Rejects the floating `ubuntu-latest` runner label anywhere under .github/.
+#
+# GitHub repoints `ubuntu-latest` at a new Ubuntu release on its own schedule,
+# which changes the toolchain under every job at once (#3275). Hosted runners
+# are pinned to ubuntu-24.04 instead, and this guard keeps a new workflow or
+# composite action from reintroducing the floating label.
+#
+# The match is the literal string, in values and comments alike: a comment
+# naming the label is the next copy-paste source. Self-hosted labels such as
+# linux-amd64-gpu-h100-latest-1 do not contain it and pass.
+#
+# Usage: check-runner-labels [ROOT]   (ROOT defaults to the repository root)
+# Exit: 0 clean, 1 violations found, 2 missing .github/ or grep error.
+
+set -euo pipefail
+
+readonly LABEL="ubuntu-latest"
+
+root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+if [[ ! -d "${root}/.github" ]]; then
+    echo "ERROR: ${root}/.github not found" >&2
+    exit 2
+fi
+
+# grep rc: 0 matches, 1 no match, >=2 error. Paths are reported relative to
+# root because grep runs from there.
+rc=0
+hits=$(cd "${root}" && grep -rnIF -- "${LABEL}" .github) || rc=$?
+
+case "${rc}" in
+    0)
+        printf '%s\n' "${hits}"
+        count=$(printf '%s\n' "${hits}" | wc -l | tr -d ' ')
+        echo "ERROR: ${count} reference(s) to ${LABEL} under .github/. Pin GitHub-hosted runners to ubuntu-24.04 (see #3275)." >&2
+        exit 1
+        ;;
+    1)
+        echo "OK: no ${LABEL} runner labels under .github/"
+        ;;
+    *)
+        echo "ERROR: grep failed scanning ${root}/.github (rc=${rc})" >&2
+        exit 2
+        ;;
+esac

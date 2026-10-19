@@ -19,6 +19,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 )
@@ -143,7 +145,7 @@ func TestClassifyNCCLAllReduceBWResult(t *testing.T) {
 				if validators.IsSkip(err) {
 					t.Fatalf("expected a blocking failure, got a Skip: %v", err)
 				}
-				if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantCode {
 					t.Fatalf("expected error code %q, got %v", tt.wantCode, err)
 				}
 			}

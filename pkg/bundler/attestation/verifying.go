@@ -50,6 +50,28 @@ func PublicGoodTrustedRoot(context.Context) (root.TrustedMaterial, error) {
 	return tm, nil
 }
 
+// NewUnionTrustedRoot loads the private trusted_root.json at path and returns a
+// TrustedRootSource that unions it with AICR's public-good root. The public-good
+// half keeps NVIDIA-signed artifacts verifiable; the private half admits
+// artifacts signed against a private Fulcio/Rekor. The file is loaded eagerly so
+// a bad path (missing, oversized, malformed) fails fast with the loader's
+// ErrCodeInvalidRequest, rather than being deferred into the lazy source where
+// verification would fold it into a generic failure. The public-good half stays
+// lazy inside the closure so it resolves under ctx.
+func NewUnionTrustedRoot(path string) (TrustedRootSource, error) {
+	priv, err := trust.LoadTrustedMaterialFromFile(path)
+	if err != nil {
+		return nil, err // already ErrCodeInvalidRequest
+	}
+	return func(ctx context.Context) (root.TrustedMaterial, error) {
+		pg, err := PublicGoodTrustedRoot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return root.TrustedMaterialCollection{pg, priv}, nil
+	}, nil
+}
+
 // VerificationIdentity is the verification dual of SigningIdentity: it supplies
 // the trust anchors and the signer-matching policy for one verification flavor.
 // It is one of the two composable axes of VerifyStatementWith; pair it with a

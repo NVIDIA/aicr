@@ -210,50 +210,8 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 		}
 	}
 
-	if b.Scheduling != nil {
-		if b.Scheduling.Nodes < 0 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("spec.bundle.scheduling.nodes must be >= 0, got %d", b.Scheduling.Nodes))
-		}
-		out.Nodes = b.Scheduling.Nodes
-		out.StorageClass = b.Scheduling.StorageClass
-		out.SharedStorageClass = b.Scheduling.SharedStorageClass
-
-		// maps.Clone preserves nil-vs-explicitly-empty: clone(nil) is nil,
-		// clone({}) is non-nil empty.
-		out.SystemNodeSelector = maps.Clone(b.Scheduling.SystemNodeSelector)
-		out.AcceleratedNodeSelector = maps.Clone(b.Scheduling.AcceleratedNodeSelector)
-		out.WorkloadSelector = maps.Clone(b.Scheduling.WorkloadSelector)
-		var err error
-		out.DRAEvictionNodeLabel, err = resolveDRAEvictionNodeLabel(b.Scheduling.DRAEvictionNodeLabel)
-		if err != nil {
-			return nil, err
-		}
-
-		if b.Scheduling.SystemNodeTolerations != nil {
-			tols, err := snapshotter.ParseTolerations(b.Scheduling.SystemNodeTolerations)
-			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-					"invalid spec.bundle.scheduling.systemNodeTolerations", err)
-			}
-			out.SystemNodeTolerations = tols
-		}
-		if b.Scheduling.AcceleratedNodeTolerations != nil {
-			tols, err := snapshotter.ParseTolerations(b.Scheduling.AcceleratedNodeTolerations)
-			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-					"invalid spec.bundle.scheduling.acceleratedNodeTolerations", err)
-			}
-			out.AcceleratedNodeTolerations = tols
-		}
-		if b.Scheduling.WorkloadGate != "" {
-			t, err := snapshotter.ParseTaint(b.Scheduling.WorkloadGate)
-			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-					"invalid spec.bundle.scheduling.workloadGate", err)
-			}
-			out.WorkloadGate = t
-		}
+	if err := resolveScheduling(b.Scheduling, out); err != nil {
+		return nil, err
 	}
 
 	if err := resolveAttestation(b.Attestation, out); err != nil {
@@ -266,6 +224,72 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 	}
 
 	return out, nil
+}
+
+// resolveScheduling copies s onto out. It returns an error naming the offending
+// spec.bundle.scheduling key for any invalid value, including a selector or
+// toleration the API server would reject. A nil s is a no-op.
+func resolveScheduling(s *SchedulingSpec, out *BundleResolved) error {
+	if s == nil {
+		return nil
+	}
+	if s.Nodes < 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("spec.bundle.scheduling.nodes must be >= 0, got %d", s.Nodes))
+	}
+	out.Nodes = s.Nodes
+	out.StorageClass = s.StorageClass
+	out.SharedStorageClass = s.SharedStorageClass
+
+	selectors := []struct {
+		path     string
+		selector map[string]string
+	}{
+		{"spec.bundle.scheduling.systemNodeSelector", s.SystemNodeSelector},
+		{"spec.bundle.scheduling.acceleratedNodeSelector", s.AcceleratedNodeSelector},
+		{"spec.bundle.scheduling.workloadSelector", s.WorkloadSelector},
+	}
+	for _, sel := range selectors {
+		if err := bundlercfg.ValidateNodeSelector(sel.selector); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sel.path, err)
+		}
+	}
+
+	// maps.Clone keeps a nil selector nil and an empty one empty.
+	out.SystemNodeSelector = maps.Clone(s.SystemNodeSelector)
+	out.AcceleratedNodeSelector = maps.Clone(s.AcceleratedNodeSelector)
+	out.WorkloadSelector = maps.Clone(s.WorkloadSelector)
+	var err error
+	out.DRAEvictionNodeLabel, err = resolveDRAEvictionNodeLabel(s.DRAEvictionNodeLabel)
+	if err != nil {
+		return err
+	}
+
+	if s.SystemNodeTolerations != nil {
+		tols, err := snapshotter.ParseTolerations(s.SystemNodeTolerations)
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				"invalid spec.bundle.scheduling.systemNodeTolerations", err)
+		}
+		out.SystemNodeTolerations = tols
+	}
+	if s.AcceleratedNodeTolerations != nil {
+		tols, err := snapshotter.ParseTolerations(s.AcceleratedNodeTolerations)
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				"invalid spec.bundle.scheduling.acceleratedNodeTolerations", err)
+		}
+		out.AcceleratedNodeTolerations = tols
+	}
+	if s.WorkloadGate != "" {
+		t, err := snapshotter.ParseTaint(s.WorkloadGate)
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				"invalid spec.bundle.scheduling.workloadGate", err)
+		}
+		out.WorkloadGate = t
+	}
+	return nil
 }
 
 // resolveAttestation projects the bundle attestation spec onto the resolved
@@ -394,6 +418,13 @@ type ValidateResolved struct {
 	// See pkg/snapshotter.AgentConfig.ServiceAccountName.
 	ServiceAccountName string
 
+	// ValidatorServiceAccountName is
+	// spec.validate.agent.validatorServiceAccountName: an existing,
+	// administrator-provisioned ServiceAccount the validator Jobs run as
+	// instead of a per-run one. Empty keeps per-run RBAC. See
+	// pkg/validator.Validator.ServiceAccountName.
+	ValidatorServiceAccountName string
+
 	// NodeSelector is spec.validate.agent.nodeSelector. Nil if unset;
 	// non-nil empty if `{}` was explicit.
 	NodeSelector map[string]string
@@ -501,8 +532,12 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 		out.Image = v.Agent.Image
 		out.JobName = v.Agent.JobName
 		out.ServiceAccountName = v.Agent.ServiceAccountName
+		out.ValidatorServiceAccountName = v.Agent.ValidatorServiceAccountName
 		out.RequireGPU = v.Agent.RequireGPU
 		out.ImagePullSecrets = slices.Clone(v.Agent.ImagePullSecrets)
+		if err := bundlercfg.ValidateNodeSelector(v.Agent.NodeSelector); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.validate.agent.nodeSelector", err)
+		}
 		out.NodeSelector = maps.Clone(v.Agent.NodeSelector)
 		if v.Agent.Tolerations != nil {
 			if len(v.Agent.Tolerations) == 0 {
@@ -792,6 +827,9 @@ func (s *SnapshotSpec) Resolve() (*SnapshotResolved, error) {
 		out.Requests = s.Agent.Requests
 		out.Limits = s.Agent.Limits
 		out.ImagePullSecrets = slices.Clone(s.Agent.ImagePullSecrets)
+		if err := bundlercfg.ValidateNodeSelector(s.Agent.NodeSelector); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.snapshot.agent.nodeSelector", err)
+		}
 		out.NodeSelector = maps.Clone(s.Agent.NodeSelector)
 		if s.Agent.Tolerations != nil {
 			if len(s.Agent.Tolerations) == 0 {

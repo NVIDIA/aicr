@@ -18,12 +18,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestBuildManifest_DeterministicOrder(t *testing.T) {
@@ -88,7 +89,7 @@ func TestBuildManifestContext_Cancelled(t *testing.T) {
 	cancel()
 
 	_, err := BuildManifestContext(ctx, dir)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("BuildManifestContext() error = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -167,7 +168,7 @@ func TestHashFileSHA256Context_Cancelled(t *testing.T) {
 	cancel()
 
 	_, err := HashFileSHA256Context(ctx, path)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("HashFileSHA256Context() error = %v, want ErrCodeTimeout", err)
 	}
 }

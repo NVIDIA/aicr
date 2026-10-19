@@ -78,6 +78,7 @@ type Meta struct {
 	// verified predicate's attestedAt.
 	RunID         string `json:"runId"`
 	AICRVersion   string `json:"aicrVersion"`
+	AICRCommit    string `json:"aicrCommit,omitempty"`
 	K8sVersion    string `json:"k8sVersion"`
 	K8sConstraint string `json:"k8sConstraint"`
 	BundleDigest  string `json:"bundleDigest"`

@@ -14,7 +14,8 @@
 
 # Fern's navigation manifest, and therefore the authoritative list of pages
 # Fern publishes (see tools/docs-published-files). A page missing here is not
-# published and not gated by the MDX checkers.
+# published, not gated by the MDX checkers, and not a valid relative link
+# target from a published page (tools/check-docs-links).
 #
 # Deliberately excluded:
 #   - docs/design/ and docs/conformance/ (mirrored in .lychee.toml)
@@ -90,6 +91,8 @@ navigation:
         path: integrator/oke-gpu-setup.md
       - page: RKE2 VR200 Setup
         path: integrator/rke2-vr200-setup.md
+      - page: Nebius B300 Inference
+        path: integrator/nebius-b300.md
       - page: k0s H200 Setup
         path: integrator/k0s-h200-setup.md
       - page: EKS Dynamo Networking
@@ -98,6 +101,8 @@ navigation:
         path: integrator/gke-tcpxo-networking.md
       - page: GKE GB200 Networking
         path: integrator/gke-gb200-networking.md
+      - page: GKE A4X Max Networking
+        path: integrator/gke-a4x-max-networking.md
       - page: OpenShift Deployment
         path: integrator/openshift.md
       - page: Talos Integration

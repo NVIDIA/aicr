@@ -28,6 +28,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // fifoCancelTimeout is the deadline the FIFO test relies on to fire while the
@@ -300,7 +301,7 @@ func TestGenerateChecksums_PostPublishVerificationFailureRollsBack(t *testing.T)
 				prior:        tt.priorManifest,
 			}
 			err := GenerateChecksums(ctx, dir, []string{payload})
-			if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 				t.Fatalf("GenerateChecksums() error = %v, want ErrCodeTimeout", err)
 			}
 
@@ -586,7 +587,7 @@ func TestSHA256RawContext(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		_, err := SHA256RawContext(ctx, path)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("SHA256RawContext() error = %v, want ErrCodeTimeout", err)
 		}
 	})
@@ -606,7 +607,7 @@ func TestSHA256RawContext(t *testing.T) {
 
 		select {
 		case err := <-result:
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("SHA256RawContext(FIFO) error = %v, want ErrCodeInvalidRequest", err)
 			}
 		case <-time.After(time.Second):

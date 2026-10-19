@@ -134,7 +134,9 @@ type AgentConfig struct {
 	//   - A ServiceAccount of exactly this name already exists in
 	//     Namespace: it is used verbatim, and the run creates NO
 	//     ServiceAccount, Role, RoleBinding, ClusterRole or
-	//     ClusterRoleBinding — and deletes none at cleanup. This is how a
+	//     ClusterRoleBinding — and deletes none at cleanup. The Namespace
+	//     is not created, read or relabeled either, so the caller needs no
+	//     permission on it. This is how a
 	//     ServiceAccount carrying IRSA (eks.amazonaws.com/role-arn) or
 	//     GKE Workload Identity (iam.gke.io/gcp-service-account)
 	//     annotations stays usable: both providers pin trust to the
@@ -149,8 +151,9 @@ type AgentConfig struct {
 	// Empty falls back to NameBase and is never probed for existence.
 	//
 	// Using an existing ServiceAccount waives per-run permission
-	// isolation: concurrent runs sharing it share its grants, and grants
-	// provisioned for DiscoverNetwork persist beyond any one run.
+	// isolation: concurrent runs sharing it share its grants, and the
+	// (read-only) grants provisioned for DiscoverNetwork persist beyond any
+	// one run.
 	ServiceAccountName string
 
 	NodeSelector     map[string]string
@@ -186,10 +189,11 @@ type AgentConfig struct {
 	// outside the facade; see Client.CollectSnapshot.
 	ClusterConfigPath string
 
-	// DiscoverNetwork enables the in-pod network collector's live l8k
-	// discovery. Discovery is NOT read-only — it writes
-	// nvidia.kubernetes-launch-kit.* node labels and patches NicClusterPolicy
-	// via server-side-apply, so the agent's RBAC must allow those writes.
+	// DiscoverNetwork enables the in-pod network collector's read-only l8k
+	// discovery (DiscoverReadOnly). It reads nodes, Network Operator pods,
+	// and the NicDevice objects an already-running nic-configuration-daemon
+	// publishes; it creates, patches, and deletes nothing. The agent's
+	// ClusterRole gains only configuration.net.nvidia.com nicdevices get/list.
 	DiscoverNetwork bool
 
 	// AKSGPUPoolsPath points at an operator-supplied
@@ -249,11 +253,11 @@ type AgentConfig struct {
 // upstream pkg/recipe.Criteria via WrapCriteria.
 //
 // Field meanings match the pkg/recipe.Criteria documentation:
-//   - Service: Kubernetes service flavor (eks/gke/aks/oke/kind/lke/bcm).
-//   - Accelerator: GPU model identifier (h100/h200/b200/gb200/a100/l40/l40s/rtx-pro-6000).
+//   - Service: Kubernetes service flavor (eks/gke/aks/oke/ocp/kind/lke/bcm/metal3/rke2/generic/k0s/mk8s).
+//   - Accelerator: GPU model identifier (h100/h200/b200/b300/gb200/gb300/a100/l40/l40s/rtx-pro-6000/vr200).
 //   - Intent: workload intent (training/inference).
 //   - OS: worker-node OS (ubuntu/rhel/cos/amazonlinux/talos/ol).
-//   - Platform: framework overlay (dynamo/kubeflow/nim/runai/slurm).
+//   - Platform: framework overlay (dynamo/kubeflow/kueue/nim/runai/slurm).
 //   - Nodes: worker-node count hint (0 = unspecified).
 //
 // Empty string is the "unspecified" sentinel for every field except Nodes,
@@ -365,7 +369,7 @@ type RecipeRequest struct {
 	// Platform is the workload platform overlay. Mapped to
 	// CriteriaPlatform. Supported values are defined by
 	// pkg/recipe.GetCriteriaPlatformTypes — today "", "any", "dynamo",
-	// "kubeflow", "nim".
+	// "kubeflow", "kueue", "nim", "runai", "slurm".
 	Platform string
 
 	// Profile is an optional name=value configuration profile selection.
@@ -378,10 +382,13 @@ type RecipeRequest struct {
 	AccountingMode string
 
 	// InheritFrom is a prior recipe file or bundle directory whose resolved
-	// namespace, chart, source, path, manifest files and pre-manifest files this
-	// resolution preserves. Empty means resolve from the registry alone. A cm://
-	// URI is rejected because it is not supported yet.
+	// identity this resolution preserves according to Inherit. Empty resolves
+	// from the registry alone. A cm:// URI is not supported yet.
 	InheritFrom string
+
+	// Inherit selects "all" or "namespace" from InheritFrom. Empty defaults
+	// to "all". An explicit selection requires InheritFrom.
+	Inherit string
 
 	// PinnedName reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable; set the criteria
@@ -406,6 +413,7 @@ type RecipeResolveOption func(*recipeResolveConfig)
 type recipeResolveConfig struct {
 	profile              string
 	inheritFrom          string
+	inheritMode          *recipe.InheritMode
 	accountingMode       *recipe.AccountingMode
 	runtimeInventoryMode *recipe.RuntimeInventoryMode
 	tcpxoInterfaces      *[]recipe.NetworkInterfaceMapping
@@ -440,9 +448,10 @@ func WithProfile(profile string) RecipeResolveOption {
 
 // WithInheritFrom names a prior recipe file or bundle directory whose resolved
 // namespace, chart, source, path, manifest files and pre-manifest files this
-// resolve keeps, so a moved registry default does not relocate or replace a
+// resolve keeps by default, so a moved registry default does not relocate or replace a
 // component that is already running. A component the prior artifact does not
-// name keeps its registry default. Empty resolves from the registry alone.
+// name keeps its registry default. WithInherit narrows the fields preserved.
+// Empty resolves from the registry alone.
 //
 // The reference is read when the resolve runs: a cm:// URI, an unreadable
 // path, or a directory holding no recipe is rejected with
@@ -450,6 +459,20 @@ func WithProfile(profile string) RecipeResolveOption {
 func WithInheritFrom(ref string) RecipeResolveOption {
 	return func(cfg *recipeResolveConfig) {
 		cfg.inheritFrom = ref
+	}
+}
+
+// WithInherit selects "all" or "namespace" from WithInheritFrom. Omitting
+// this option preserves all supported identity fields, including object names
+// from bundles. An explicit selection requires a nonempty inheritance source.
+func WithInherit(mode string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		parsed, err := recipe.ParseInheritMode(mode)
+		if err != nil {
+			cfg.recordOptErr(err)
+			return
+		}
+		cfg.inheritMode = &parsed
 	}
 }
 
@@ -603,10 +626,11 @@ type SelectedProfile struct {
 
 	// OwnedPaths maps each locked component to its sorted dotted value
 	// paths, and is the union across every value of the declaration rather
-	// than only the selected one. Every listed component carries the
-	// synthetic "enabled" path recording that the profile owns its
-	// presence. Overriding any listed path is rejected at bundle time
-	// unless the override agrees with the selected value.
+	// than only the selected one. A listed component carries the synthetic
+	// "enabled" path when the profile owns its presence; a component the
+	// profile references as optional lists only its override paths and may
+	// be omitted from a bundle. Overriding any listed path is rejected at
+	// bundle time unless the override agrees with the selected value.
 	OwnedPaths map[string][]string
 }
 

@@ -17,6 +17,7 @@ package attestation
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	intoto "github.com/in-toto/attestation/go/v1"
@@ -26,12 +27,14 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 )
 
 // PredicateInputs is the data BuildPredicate needs.
 type PredicateInputs struct {
 	AttestedAt              time.Time
 	AICRVersion             string
+	AICRCommit              string
 	ValidatorCatalogVersion string
 	ValidatorImages         []ValidatorImage
 	Recipe                  RecipeRef
@@ -52,8 +55,15 @@ type PredicateInputs struct {
 // BuildPredicate constructs the predicate body from in. The result matches
 // the shape PredicateTypeV3 requires (see StatementPredicateType) whether
 // or not the recipe is profile-bearing. ValidatorImages is sorted by image
-// for deterministic field ordering.
+// for deterministic field ordering. AICRCommit is lowercased and dropped
+// unless it is a 7-40 character hex SHA, so the ldflags default "unknown"
+// is never recorded.
 func BuildPredicate(in PredicateInputs) *Predicate {
+	commit := strings.ToLower(in.AICRCommit)
+	if !catalog.IsValidCommit(commit) {
+		commit = ""
+	}
+
 	images := append([]ValidatorImage(nil), in.ValidatorImages...)
 	sort.Slice(images, func(i, j int) bool {
 		return images[i].Image < images[j].Image
@@ -72,6 +82,7 @@ func BuildPredicate(in PredicateInputs) *Predicate {
 		SchemaVersion:           PredicateSchemaVersion,
 		AttestedAt:              in.AttestedAt.UTC().Truncate(time.Second),
 		AICRVersion:             in.AICRVersion,
+		AICRCommit:              commit,
 		ValidatorCatalogVersion: in.ValidatorCatalogVersion,
 		ValidatorImages:         images,
 		Recipe:                  in.Recipe,

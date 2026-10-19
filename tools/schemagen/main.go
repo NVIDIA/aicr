@@ -14,7 +14,7 @@
 
 // Command schemagen writes JSON Schema documents for AICR's published artifacts.
 //
-// Artifact schemas are one of the four surfaces ROADMAP section 1 freezes at v1
+// Artifact schemas are one of the four surfaces ROADMAP.md freezes at v1
 // (issue #2113). The committed output serves two audiences that would otherwise
 // disagree: integrators validating catalogs and snapshots they author, and the
 // merge gate diffing the contract for breaking changes.

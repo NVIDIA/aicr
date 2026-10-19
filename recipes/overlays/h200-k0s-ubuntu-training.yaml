@@ -74,6 +74,15 @@ spec:
           # NVSentinel DaemonSets come up with 0 desired pods while the
           # rest of the stack looks healthy.
           assumeDriverInstalled: true
+        # janitor's GPU reset Job chroots into the driver root to run
+        # nvidia-smi; with a host-installed driver that root is the host's.
+        # Inert unless the nvsentinel-remediation mixin enables janitor.
+        janitor:
+          config:
+            controllers:
+              gpuReset:
+                resetJob:
+                  hostDriverRootPath: /
 
   validation:
     deployment:

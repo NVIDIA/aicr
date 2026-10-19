@@ -255,7 +255,7 @@ func TestNICHealthMonitorImagePinnedEverywhere(t *testing.T) {
 	const image = "ghcr.io/nvidia/nvsentinel/nic-health-monitor"
 
 	const scanWorkflow = "../../.github/workflows/vuln-scan-images.yaml"
-	tag, found := scanMatrixTagFor(t, scanWorkflow, image)
+	tag, found := scanMatrixTagFor(t, image)
 	switch {
 	case !found:
 		t.Errorf("%s has no scan matrix entry for %s -- the scan job must cover this image", scanWorkflow, image)

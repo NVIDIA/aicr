@@ -95,6 +95,12 @@ func writeVendoredHelmFolder(
 			fmt.Sprintf("pull vendored chart for component %q", c.Name),
 		)
 	}
+	if err = VerifyChartDigest(c, tgz); err != nil {
+		return Folder{}, VendorRecord{}, err
+	}
+	// provenance.yaml must name the bytes written below, not whatever the
+	// puller reported.
+	rec.SHA256 = ArchiveSHA256(tgz)
 
 	// 2. Write charts/<tarball>.
 	chartsDir, err := deployer.SafeJoin(folderDir, "charts")
@@ -171,7 +177,7 @@ func writeVendoredHelmFolder(
 	// it needs no network at deploy time; `helm show crds ./` recurses into
 	// the subchart tarball written above.
 	if c.OwnsCRDs {
-		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c.Name, c.Namespace, false)
+		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c, false)
 		if crdErr != nil {
 			return Folder{}, VendorRecord{}, crdErr
 		}

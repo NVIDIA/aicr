@@ -34,6 +34,7 @@ spec:
 
   mixins:
     - os-ubuntu
+    - nvsentinel-slurm-drain-monitor
 
   constraints:
     # The IMEX ComputeDomain reconciles a ResourceClaimTemplate through the
@@ -68,6 +69,16 @@ spec:
   # Accelerated nodeSelector/tolerations on slurmd are injected via the
   # registry's nodesets.slinky.podSpec.{nodeSelector,tolerations} paths.
   componentRefs:
+    # The nvsentinel-slurm-drain-monitor mixin enables the monitor, but a mixin
+    # cannot carry expectedResources, so normal deployment validation verifies
+    # the Deployment from here. To opt out, remove this entry together with the
+    # mixin; removing only the mixin fails deployment validation.
+    - name: nvsentinel
+      type: Helm
+      expectedResources:
+        - kind: Deployment
+          namespace: nvsentinel
+          name: slurm-drain-monitor
     - name: mariadb-operator-crds
       type: Helm
       valuesFile: components/mariadb-operator-crds/values.yaml
@@ -139,13 +150,15 @@ spec:
   # K8s-native nccl-all-reduce-bw checks are dropped on Slinky leaves:
   # those checks launch Pods against the cluster scheduler, so on a
   # Slinky-managed cluster they bypass slurmd entirely and measure the
-  # wrong path. Slurm-specific health is covered by the conformance check.
+  # wrong path. Slurm-specific health and GPU access are covered by the
+  # conformance checks.
   validation:
     conformance:
       checks:
         - slinky-slurm-health
         # Selected only by IMEX-capable Slinky Slurm recipes.
         - slinky-slurm-imex-channel
+        - slinky-slurm-gpu-access
     performance:
       checks: []
       constraints: []

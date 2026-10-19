@@ -65,6 +65,10 @@ on:
         description: 'Skip UAT test execution (manual runs only; the nightly batch always tests).'
         type: boolean
         default: false
+      nvsentinel_remediation:
+        description: 'none | quarantine | remediation: the NVSentinel mixin prep composes so faultinject runs Stage 2 or Stages 2-3 (#2625). Bounded by uat-run.yaml.'
+        type: string
+        default: none
 
 permissions:
   contents: read
@@ -83,11 +87,13 @@ jobs:
     # its resource group. The repository guard is preserved as the second
     # conjunct so forks still skip the job.
     if: always() && github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Budget = uncapped non-UAT steps (build, validator image push, AKS
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 25
     # + readiness 65 + validate 40 + the selected CUJ (train 25 OR serve 40) +
-    # verify 5 + sxidfault 10 = up to 200) + ~8 failure-path debug collection
+    # verify 5 + faultinject 10 = up to 200; a manual training run with
+    # nvsentinel_remediation=remediation takes faultinject to 30, for 205, #2625)
+    # + ~8 failure-path debug collection
     # (Collect cluster debug bundle) + the always()-run Destroy Cluster teardown.
     # Only one of train/serve runs per intent, so the budget counts the larger
     # (serve). Teardown = up to 3 retries × ~26m real destroy = up to ~78m. The
@@ -95,7 +101,7 @@ jobs:
     # always() steps, so an undersized cap would skip teardown and leak the GPU
     # node / resource group even after a LATE failure. ~30 setup + 200 UAT + ~8
     # debug = 238, + ~78 teardown = 316, so 330 leaves ~14m of teardown headroom
-    # on a worst-case run.
+    # on a worst-case run, and ~9m on the 205m remediation run above.
     timeout-minutes: 330
     permissions:
       contents: read
@@ -145,10 +151,12 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      # v0.1.7 — carries the 60m worker-pool create/update timeouts
-      # (mchmarny/cluster#31); the prior pin's 30m cap killed H100 pool
-      # provisioning mid-allocation (run 29116054044).
-      AKS_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks@sha256:70f049e45cd0025e0d2172503f9d0569baeabff27080919e2fa04f3339b9f9ee"
+      # v0.1.9 — still carries the 60m worker-pool create/update timeouts
+      # (mchmarny/cluster#31); the pin before those killed H100 pool
+      # provisioning mid-allocation at 30m (run 29116054044). Nothing in
+      # v0.1.7..v0.1.9 touches AKS provisioning: only image/aks.dockerfile and
+      # a CDPATH guard in provider/aks/tools change.
+      AKS_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks:v0.1.9@sha256:1439c350c218b0507ddefdad6ef0c5040d1ebf9f21282b0d0ec7ce9c0f428d37"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
@@ -704,6 +712,9 @@ jobs:
           # snapshot-agent image"); release cell = the released aicr image at that
           # version. Honored by `aicr snapshot`.
           AICR_IMAGE: ${{ inputs.aicr_version == '' && format('ghcr.io/nvidia/aicr-validators/agent:{0}', env.VALIDATOR_TAG) || format('ghcr.io/nvidia/aicr:{0}', inputs.aicr_version) }}
+          # Empty unless a manual dispatch asked for an NVSentinel remediation
+          # step; phase_prep then composes that mixin (uat_compose_nvsentinel_mixin).
+          UAT_NVSENTINEL_MIXIN: ${{ inputs.nvsentinel_remediation != 'none' && format('nvsentinel-{0}', inputs.nvsentinel_remediation) || '' }}
         run: ./tests/uat/azure/run prep "${TEST_CONFIG}"
 
       # Per-stage credential refresh. A federated az session cannot
@@ -871,25 +882,28 @@ jobs:
           EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-azure\.yaml@refs/heads/.+$'
         run: ./tests/uat/azure/run verify "${TEST_CONFIG}"
 
-      - name: "UAT - sxid fault injection (NVSentinel detection, #2625)"
-        id: sxidfault
+      - name: "UAT - fault injection (NVSentinel, #2625)"
+        id: faultinject
         if: steps.conformance.outcome == 'success'
-        timeout-minutes: 10
+        # 10m for Stage 1, 15m with quarantine (Stage 2 waits up to 3m), 30m
+        # with remediation (Stage 3 waits up to 12m for the reboot and 5m for
+        # the uncordon). See the job budget comment for where the extra fits.
+        timeout-minutes: ${{ inputs.nvsentinel_remediation == 'remediation' && 30 || inputs.nvsentinel_remediation == 'quarantine' && 15 || 10 }}
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
-        run: ./tests/uat/azure/run sxidfault "${TEST_CONFIG}"
+        run: ./tests/uat/azure/run faultinject "${TEST_CONFIG}"
 
-      # phase_sxid_fault_inject records the Stage 1-3 outcome as CTRF
-      # (sxidfault-result.json, #2625). Upload it on every outcome once the
+      # phase_fault_inject records the Stage 1-3 outcome as CTRF
+      # (faultinject-result.json, #2625). Upload it on every outcome once the
       # step ran, mirroring the snapshot-result.json upload above.
-      - name: Upload sxidfault result
-        if: always() && steps.sxidfault.outcome != 'skipped'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - name: Upload faultinject result
+        if: always() && steps.faultinject.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: uat-azure-sxidfault-result-${{ github.run_id }}-${{ github.run_attempt }}
-          path: sxidfault-result.json
+          name: uat-azure-faultinject-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: faultinject-result.json
           retention-days: 30
           if-no-files-found: warn
 
@@ -913,7 +927,7 @@ jobs:
       # scoped tighter (30d).
       - name: Upload evidence pointer
         if: always() && steps.conformance.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-evidence-pointer-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/pointer.yaml
@@ -926,7 +940,7 @@ jobs:
       # so the step has a machine-readable record on green and red runs alike.
       - name: Upload snapshot result
         if: always() && steps.prep.outcome != 'skipped'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-snapshot-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: snapshot-result.json
@@ -953,7 +967,7 @@ jobs:
 
       - name: Upload failure debug
         if: failure() && (steps.prep.outcome != 'skipped' || steps.client.outcome == 'success')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: uat-azure-debug-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -1008,7 +1022,7 @@ jobs:
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Serve | disabled (vLLM excluded from UAT) |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
-            echo "| SXID fault injection | ${{ steps.sxidfault.outcome }} |"
+            echo "| Fault injection | ${{ steps.faultinject.outcome }} |"
             if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""
               echo "**Evidence (OCI):** \`${{ steps.evidence_ref.outputs.ref }}\`"
@@ -1082,7 +1096,7 @@ jobs:
       # step, so a failure before Update Config cannot leave the destroy
       # targeting the committed placeholder id (aicr-uat) instead of this
       # run's cluster. Its only tool dependencies — yq, docker, az — are all
-      # preinstalled on the ubuntu-latest runner image, so it does not depend
+      # preinstalled on the ubuntu-24.04 runner image, so it does not depend
       # on the setup-build-tools step having run either.
       - name: Destroy Cluster
         if: >-
@@ -1205,7 +1219,10 @@ jobs:
   ingest-evidence:
     name: Ingest UAT evidence
     needs: uat-azure
-    if: needs.uat-azure.outputs.bundle_ref != ''
+    # A run that composed an NVSentinel remediation mixin validated a recipe
+    # no catalog leaf ships, so its evidence must not be recorded against the
+    # shipped recipe below.
+    if: needs.uat-azure.outputs.bundle_ref != '' && inputs.nvsentinel_remediation == 'none'
     permissions:
       contents: read
       id-token: write  # WIF for the publish job

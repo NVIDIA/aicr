@@ -88,6 +88,32 @@ const (
 	MariaDBOperatorStateUnknown     = "unknown"
 )
 
+// DefaultStorageClassState values recorded in
+// RecipeResult.Metadata.DefaultStorageClassState by snapshot-driven
+// resolution of a recipe containing the nvsentinel-mongodb component.
+const (
+	DefaultStorageClassStatePresent  = "present"
+	DefaultStorageClassStateMultiple = "multiple"
+	DefaultStorageClassStateAbsent   = "absent"
+	DefaultStorageClassStateUnknown  = "unknown"
+)
+
+// PerconaOperatorState values recorded in
+// RecipeResult.Metadata.PerconaOperatorState by snapshot-driven resolution
+// of a recipe containing the nvsentinel-mongodb component.
+// PerconaOperatorStateAICROwned means the only PerconaServerMongoDB found is
+// AICR's own nvsentinel/nvsentinel-mongodb; PerconaOperatorStateOperatorDetected
+// means no foreign CR exists but a Percona operator pod AICR did not install
+// runs: outside the nvsentinel namespace, or there under another Helm release.
+const (
+	PerconaOperatorStateAbsent           = "absent"
+	PerconaOperatorStateAPIDetected      = "api-detected"
+	PerconaOperatorStateAICROwned        = "aicr-owned"
+	PerconaOperatorStateOperatorDetected = "operator-detected"
+	PerconaOperatorStateCRsDetected      = "crs-detected"
+	PerconaOperatorStateUnknown          = "unknown"
+)
+
 // ComponentType represents the type of component deployment.
 type ComponentType string
 
@@ -157,7 +183,7 @@ type ComponentRef struct {
 
 	// ManifestFiles lists manifest files to include in the component bundle.
 	// Paths are relative to the data directory.
-	// Example: ["components/network-operator/manifests/nfd-network-rule.yaml"]
+	// Example: ["components/network-operator/manifests/nic-cluster-policy-aks.yaml"]
 	ManifestFiles []string `json:"manifestFiles,omitempty" yaml:"manifestFiles,omitempty"`
 
 	// PreManifestFiles lists manifest files that must be bundled and applied
@@ -315,6 +341,36 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 // relocation this function exists to prevent. A prior component absent from
 // the current recipe is never copied, so it is not validated.
 func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
+	return ApplyInheritedIdentityWithMode(refs, prior, InheritAll)
+}
+
+// InheritMode selects which deployment identity fields a prior artifact supplies.
+type InheritMode string
+
+const (
+	InheritAll       InheritMode = "all"
+	InheritNamespace InheritMode = "namespace"
+)
+
+// ParseInheritMode parses an explicit inheritance selection.
+func ParseInheritMode(value string) (InheritMode, error) {
+	mode := InheritMode(value)
+	switch mode {
+	case InheritAll, InheritNamespace:
+		return mode, nil
+	default:
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid inherit mode %q: must be all or namespace", value))
+	}
+}
+
+// ApplyInheritedIdentityWithMode preserves the selected identity fields and
+// retargets health checks to inherited namespaces. Unselected fields stay as
+// resolved. An invalid inherited value leaves refs unmodified.
+func ApplyInheritedIdentityWithMode(refs []ComponentRef, prior []ComponentRef, mode InheritMode) error {
+	if _, err := ParseInheritMode(string(mode)); err != nil {
+		return err
+	}
 	if len(prior) == 0 {
 		return nil
 	}
@@ -323,6 +379,9 @@ func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
 	work := slices.Clone(refs)
 	pinned := make(map[string]ComponentRef, len(prior))
 	for _, p := range prior {
+		if mode == InheritNamespace {
+			p = ComponentRef{Name: p.Name, Namespace: p.Namespace}
+		}
 		pinned[p.Name] = p
 	}
 	for i := range work {
@@ -688,7 +747,7 @@ func (ref *ComponentRef) HasExternalChart() bool {
 // EffectiveChart returns the chart name a Helm-typed ref deploys: the
 // explicit Chart, falling back to the component name when unset (a
 // source-only ref). Every ComponentRef consumer derives the chart through
-// this method — the flux, argocd, helmfile, and helm deployers, pkg/mirror,
+// this method — the flux, argocd, helmfile, helm, and terraform deployers, pkg/mirror,
 // and the facade/query/BOM projections. (localformat keeps an equivalent
 // fallback on its own Component type, which is constructed from
 // EffectiveChart-derived inputs but also serves direct callers.)
@@ -1165,6 +1224,18 @@ type RecipeResultMetadata struct {
 	// accounting. Consumed by the bundle-time
 	// CheckMariaDBOperatorOwnershipCoherence validation.
 	MariaDBOperatorState string `json:"mariaDBOperatorState,omitempty" yaml:"mariaDBOperatorState,omitempty"`
+
+	// DefaultStorageClassState records the snapshot's default StorageClass
+	// evidence for a recipe containing nvsentinel-mongodb, whose volumes
+	// name no class. Consumed by the bundle-time
+	// CheckNVSentinelDatastorePrerequisites validation.
+	DefaultStorageClassState string `json:"defaultStorageClassState,omitempty" yaml:"defaultStorageClassState,omitempty"`
+
+	// PerconaOperatorState records Percona Operator for MongoDB API, CR, and
+	// operator-pod conflict evidence for a recipe containing
+	// nvsentinel-mongodb. Consumed by the bundle-time
+	// CheckNVSentinelDatastorePrerequisites validation.
+	PerconaOperatorState string `json:"perconaOperatorState,omitempty" yaml:"perconaOperatorState,omitempty"`
 }
 
 // RecipeResult represents the final merged recipe output.
@@ -1379,6 +1450,8 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 	out.Metadata.Version = r.Metadata.Version
 	out.Metadata.GPUDriverState = r.Metadata.GPUDriverState
 	out.Metadata.MariaDBOperatorState = r.Metadata.MariaDBOperatorState
+	out.Metadata.DefaultStorageClassState = r.Metadata.DefaultStorageClassState
+	out.Metadata.PerconaOperatorState = r.Metadata.PerconaOperatorState
 	if r.Metadata.SelectedProfile != nil {
 		selected := *r.Metadata.SelectedProfile
 		selected.OwnedPaths = cloneOwnedPaths(r.Metadata.SelectedProfile.OwnedPaths)
@@ -1705,88 +1778,12 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 	return result
 }
 
-// ValidateDependencies validates that all dependencyRefs reference existing components.
-// Returns an error if any dependency is missing or if there are circular dependencies.
+// ValidateDependencies checks the enabled deployment graph, reporting all
+// missing dependencies and any cycle together. Declared disabled dependencies
+// are treated as provided externally; disabled components' own edges are ignored.
 func (s *RecipeMetadataSpec) ValidateDependencies() error {
-	// Build a set of known component names
-	known := make(map[string]bool)
-	for _, c := range s.ComponentRefs {
-		known[c.Name] = true
-	}
-
-	// Check all dependencyRefs point to known components
-	for _, c := range s.ComponentRefs {
-		for _, dep := range c.DependencyRefs {
-			if !known[dep] {
-				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("component %q references unknown dependency %q", c.Name, dep))
-			}
-		}
-	}
-
-	// Check for circular dependencies
-	if err := s.detectCycles(); err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "dependency validation failed", err)
-	}
-
-	return nil
-}
-
-// detectCycles uses DFS to detect circular dependencies.
-func (s *RecipeMetadataSpec) detectCycles() error {
-	// Build adjacency list
-	deps := make(map[string][]string)
-	for _, c := range s.ComponentRefs {
-		deps[c.Name] = c.DependencyRefs
-	}
-
-	// Track visited nodes and recursion stack
-	visited := make(map[string]bool)
-	recStack := make(map[string]bool)
-	var path []string
-
-	var dfs func(node string) error
-	dfs = func(node string) error {
-		visited[node] = true
-		recStack[node] = true
-		path = append(path, node)
-
-		for _, neighbor := range deps[node] {
-			if !visited[neighbor] {
-				if err := dfs(neighbor); err != nil {
-					return err
-				}
-			} else if recStack[neighbor] {
-				// Found a cycle - build the cycle path
-				cycleStart := -1
-				for i, n := range path {
-					if n == neighbor {
-						cycleStart = i
-						break
-					}
-				}
-				// Build cycle path: copy to avoid modifying original path slice
-				cyclePath := make([]string, len(path)-cycleStart+1)
-				copy(cyclePath, path[cycleStart:])
-				cyclePath[len(cyclePath)-1] = neighbor
-				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("circular dependency detected: %v", cyclePath))
-			}
-		}
-
-		path = path[:len(path)-1]
-		recStack[node] = false
-		return nil
-	}
-
-	// Run DFS from each unvisited node
-	for _, c := range s.ComponentRefs {
-		if !visited[c.Name] {
-			if err := dfs(c.Name); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
+	_, err := s.TopologicalLevels()
+	return err
 }
 
 // TopologicalLevels returns components grouped into dependency-depth tiers
@@ -1797,10 +1794,9 @@ func (s *RecipeMetadataSpec) detectCycles() error {
 //
 // Within each level, names are sorted alphabetically for determinism.
 //
-// Error semantics match TopologicalSort: missing or cyclic dependencies
-// surface as ErrCodeInvalidRequest with "circular dependencies exist."
-// (Same trade-off — a dependency on an undeclared component appears as
-// a cycle because its in-degree never drains to zero.)
+// Error semantics match TopologicalSort and ValidateDependencies: missing
+// dependencies are named in recipe order, one per line, alongside any cycle.
+// Both conditions return ErrCodeInvalidRequest.
 func (s *RecipeMetadataSpec) TopologicalLevels() ([][]string, error) {
 	return ComponentRefsTopologicalLevels(s.ComponentRefs)
 }
@@ -1808,32 +1804,42 @@ func (s *RecipeMetadataSpec) TopologicalLevels() ([][]string, error) {
 // buildDependencyGraph constructs the dependency graph shared by
 // TopologicalSort and ComponentRefsTopologicalLevels. It centralizes the
 // enabled-filtering and external-satisfaction semantics so the two traversals
-// (flat Kahn sort vs. level-grouped BFS) stay in lock-step — the duplication
+// (flat Kahn sort vs. level-grouped BFS) stay in lock-step - the duplication
 // this removes is exactly what caused the double-fix in #1465 (see #1466).
 //
 // Only enabled components are nodes. A dependency edge pointing at a declared-
 // but-disabled component is treated as already satisfied (the dependency is
 // assumed provided externally, e.g. a CSP-managed cert-manager) and excluded
-// from the in-degree count. An edge to an undeclared component is retained so
-// it still surfaces as a cycle/missing-dependency error. See componentSets and
-// edgeSatisfiedExternally.
+// from the in-degree count. An edge from an enabled component to an undeclared
+// component is collected once in recipe order and excluded from the graph,
+// so callers can still detect a genuine cycle and report both conditions.
 //
 // Returns the per-node in-degree, the reverse adjacency (dependency name → the
-// components that depend on it), and the number of enabled nodes. Callers
-// compare their processed count against enabledCount to detect cycles/missing
-// dependencies (a node whose in-degree never drains to zero is never emitted).
-func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, dependents map[string][]string, enabledCount int) {
+// components that depend on it), the number of enabled nodes, and missing-edge
+// diagnostics. Callers compare their processed count against enabledCount to
+// detect cycles (a node whose in-degree never drains to zero is never emitted).
+func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, dependents map[string][]string, enabledCount int, missing []string) {
 	declared, enabled := componentSets(refs)
 
 	inDegree = make(map[string]int, len(enabled))
 	dependents = make(map[string][]string, len(enabled))
+	seenMissing := make(map[[2]string]struct{})
 	for _, c := range refs {
 		if _, ok := enabled[c.Name]; !ok {
 			continue
 		}
 		degree := 0
 		for _, dep := range c.DependencyRefs {
-			if edgeSatisfiedExternally(dep, declared, enabled) {
+			if _, ok := declared[dep]; !ok {
+				edge := [2]string{c.Name, dep}
+				if _, seen := seenMissing[edge]; !seen {
+					seenMissing[edge] = struct{}{}
+					missing = append(missing, fmt.Sprintf(
+						"component %q depends on %q, which is not present in this recipe", c.Name, dep))
+				}
+				continue
+			}
+			if _, ok := enabled[dep]; !ok {
 				continue
 			}
 			degree++
@@ -1841,15 +1847,30 @@ func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, depende
 		}
 		inDegree[c.Name] = degree
 	}
-	return inDegree, dependents, len(enabled)
+	return inDegree, dependents, len(enabled), missing
+}
+
+func dependencyGraphError(missing []string, hasCycle bool) error {
+	problems := slices.Clone(missing)
+	if len(missing) > 0 {
+		problems = append(problems,
+			"(a dependency provided outside the recipe must remain declared with enabled: false)")
+	}
+	if hasCycle {
+		problems = append(problems, "circular dependencies exist")
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest, strings.Join(problems, "\n"))
 }
 
 // ComponentRefsTopologicalLevels is the free-function form of
-// RecipeMetadataSpec.TopologicalLevels — operates on a bare
+// RecipeMetadataSpec.TopologicalLevels - operates on a bare
 // []ComponentRef slice. Callers that have refs but not a full
 // RecipeMetadataSpec (e.g., the bundler post-resolution) use this.
 func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
-	inDegree, dependents, enabledCount := buildDependencyGraph(refs)
+	inDegree, dependents, enabledCount, missing := buildDependencyGraph(refs)
 
 	// Seed level 0: components with no incoming edges.
 	current := make([]string, 0, len(inDegree))
@@ -1879,9 +1900,8 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 		current = next
 	}
 
-	if processed != enabledCount {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"cannot determine deployment levels: circular dependencies exist")
+	if err := dependencyGraphError(missing, processed != enabledCount); err != nil {
+		return nil, err
 	}
 	return levels, nil
 }
@@ -1890,7 +1910,7 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 // Components with no dependencies come first, then components that depend only
 // on already-listed components, etc.
 func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
-	inDegree, dependents, enabledCount := buildDependencyGraph(s.ComponentRefs)
+	inDegree, dependents, enabledCount, missing := buildDependencyGraph(s.ComponentRefs)
 
 	// Kahn's algorithm
 	// https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/
@@ -1918,9 +1938,8 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 		sort.Strings(queue)
 	}
 
-	// Check if all enabled nodes were processed (no cycles)
-	if len(result) != enabledCount {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "cannot determine deployment order: circular dependencies exist")
+	if err := dependencyGraphError(missing, len(result) != enabledCount); err != nil {
+		return nil, err
 	}
 
 	return result, nil
@@ -1928,10 +1947,10 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 
 // componentSets returns two sets over refs: every declared component name,
 // and the subset whose IsEnabled() reports true. Components disabled via
-// overrides.enabled=false are excluded from dependency ordering: they are
-// assumed to be provided externally (for example a CSP-managed cert-manager on
+// overrides.enabled=false or overrides.install=false are excluded from
+// ordering: they are assumed to be provided externally (for example a CSP-managed cert-manager on
 // OKE), so dependency edges pointing at them are treated as already satisfied
-// rather than causing a false "circular dependencies" error. This mirrors the
+// rather than being reported as missing dependencies. This mirrors the
 // bundler, which filters disabled components before generating deployment
 // artifacts. The declared set lets callers distinguish a disabled component
 // (skip the edge) from an undeclared one (still an error).
@@ -1945,17 +1964,6 @@ func componentSets(refs []ComponentRef) (declared, enabled map[string]struct{}) 
 		}
 	}
 	return declared, enabled
-}
-
-// edgeSatisfiedExternally reports whether a dependency edge pointing at dep
-// should be dropped from ordering because dep is a declared-but-disabled
-// component (assumed provided externally). Edges to enabled components are
-// real, and edges to undeclared components are retained so they still surface
-// as missing-dependency errors.
-func edgeSatisfiedExternally(dep string, declared, enabled map[string]struct{}) bool {
-	_, isDeclared := declared[dep]
-	_, isEnabled := enabled[dep]
-	return isDeclared && !isEnabled
 }
 
 // deepMergeMap copies all key-value pairs from src into dst. For keys whose

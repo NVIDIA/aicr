@@ -1,0 +1,70 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Turns on NVSentinel's slurm-drain-monitor subchart, which reads the Slurm
+# drain reason off Slinky worker pods and turns a matching reason into an
+# NVSentinel health event. Every platform: slurm leaf composes this mixin and no
+# other leaf does (TestSlurmDrainMonitorScopedToSlurmLeaves). See
+# docs/user/component-catalog.md#slurm-drain-monitor.
+#
+# Slurm-only. The monitor watches worker pods in the namespace slinky-slurm
+# deploys to, so it needs that component. CheckNVSentinelSlurmDrainMonitorRequiresSlinky
+# rejects a bundle without it, or with the two namespaces out of step, because
+# either case deploys a monitor that runs and never sees a pod.
+#
+# What it reads, verified against the Slinky slurm-operator v1.2.0 source:
+# the NodeSet controller labels worker pods app.kubernetes.io/name=slurmd and
+# app.kubernetes.io/component=worker (internal/builder/labels), and sets pod
+# condition SlurmNodeStateDrain=True with .Message carrying the Slurm node
+# reason (slurmcontrol.nodeState). Its own drains are prefixed
+# "slurm-operator: ", which the monitor skips. The labels were confirmed on a
+# live Slinky 1.2.0 NodeSet as well; the instance label is release-dependent,
+# so it is deliberately not part of the selector. The selector is bound to
+# that version by TestSlurmDrainMonitorSelectorPinnedToVerifiedSlinkyVersion.
+#
+# STORE_ONLY, as #2611 asks, and with a real cost: NVSentinel's platform
+# connector creates no node condition and no Kubernetes Event for a STORE_ONLY
+# event, and AICR deploys no NVSentinel datastore. A matched drain is therefore
+# visible today only in the platform-connector log, as "Skipping non-remediation
+# health event ... agent=slurm-drain-monitor". Moving to EXECUTE_REMEDIATION
+# would surface it as a node Event (isFatal: false), and would also hand it to
+# any remediation a recipe enables later (#2609), so it is a deliberate step.
+#
+# patterns restates the chart default so the reason-to-action mapping is pinned
+# here rather than inherited: a reason prefixed [HC] (a Slurm health check)
+# maps to CONTACT_SUPPORT, non-fatal.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-slurm-drain-monitor
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        global:
+          slurmDrainMonitor:
+            enabled: true
+        slurm-drain-monitor:
+          namespace: slurm
+          labelSelector: "app.kubernetes.io/name=slurmd,app.kubernetes.io/component=worker"
+          processingStrategy: STORE_ONLY
+          patterns:
+            - name: slurm-healthcheck
+              regex: '^\[HC\]'
+              checkName: SlurmHealthCheck
+              componentClass: NODE
+              isFatal: false
+              message: ""
+              recommendedAction: CONTACT_SUPPORT

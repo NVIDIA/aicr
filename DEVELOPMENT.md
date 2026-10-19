@@ -219,7 +219,7 @@ make test-coverage
 
 ```bash
 # Run all linters (Go, YAML, license headers, agents sync, docs gates, chart-version pins,
-# vendored Go proxy action digests, upgrade records)
+# vendored Go proxy action digests, upgrade records, Dynamo runtime image tag)
 make lint
 
 # Or run individually for a faster loop (all of these already run as part of `make lint`)
@@ -233,15 +233,19 @@ make check-docs-mdx-parse  # real MDX parser, authoritative (needs Node 20+)
 
 # YAML-labelled code blocks throughout docs/ must contain parseable YAML
 make check-docs-yaml       # syntax only; partial YAML fragments are valid
+
+# Shell code blocks in docs/ must not use <placeholder>s that bash reads as redirection
+make check-docs-shell
 ```
 
 `check-docs-mdx-parse` warns and skips when Node is unavailable locally, but
 hard-fails in CI. See
 [Docs MDX Gate](docs/contributor/tests.md#docs-mdx-gate).
 
-`check-docs-yaml` has the same local-warning and CI-hard-fail behavior for a
-missing Node runtime. See
-[Docs YAML Fence Gate](docs/contributor/tests.md#docs-yaml-fence-gate).
+`check-docs-yaml` and `check-docs-shell` have the same local-warning and
+CI-hard-fail behavior for a missing Node runtime. See
+[Docs YAML Fence Gate](docs/contributor/tests.md#docs-yaml-fence-gate) and
+[Docs Shell Placeholder Gate](docs/contributor/tests.md#docs-shell-placeholder-gate).
 
 ### 5. Run E2E Tests
 
@@ -476,7 +480,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make qualify` | Full qualification (test-coverage, lint, tuning-check, coverage-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
-| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, and upgrade records |
+| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, upgrade records, and the Dynamo runtime image tag |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
 | `make e2e` | CLI end-to-end tests |
@@ -595,11 +599,14 @@ nvidia-uvm`). The cleanup script detects driver-managed mode (via the
 prints this guidance; the fix is to reboot the GPU nodes before reinstalling:
 
 ```bash
-kubectl cordon <gpu-node>            # each GPU node
+NODE="my-gpu-node"                 # replace with a GPU node; repeat for each one
+INSTANCE_ID="i-0123456789abcdef0"  # replace with the instance ID at the end of its .spec.providerID
+
+kubectl cordon "${NODE}"
 # reboot the instances, e.g. on EKS:
-aws ec2 reboot-instances --instance-ids <ids>
+aws ec2 reboot-instances --instance-ids "${INSTANCE_ID}"
 # wait for the nodes to report Ready, then
-kubectl uncordon <gpu-node>
+kubectl uncordon "${NODE}"
 ```
 
 ### Excluding Out-of-Band Installs from Cleanup
@@ -608,7 +615,7 @@ On shared or bring-up clusters, a registry component may be deliberately
 installed and owned outside AICR (for example, nodewright/skyhook installed
 out-of-band by the platform team, with the AICR recipe intentionally excluding
 it). Stock `tools/cleanup` would otherwise destroy such an install three ways:
-the Helm uninstall in its namespace, the CRD pattern match, and the namespace
+the Helm uninstall in its namespace, the CRD group match, and the namespace
 deletion. Fence it out of all three phases:
 
 ```bash
@@ -617,11 +624,15 @@ tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com,nodewright.n
 
 Both flags are repeatable and accept comma-separated values. `--exclude-ns`
 protects a namespace from Helm uninstall and namespace deletion; `--exclude-crd`
-protects CRDs whose name contains the given match from deletion, applied *after*
-pattern matching so a broad pattern (`nvidia.com`) cannot pull an excluded
-group's CRDs (`skyhook.nvidia.com`, and its v0.18.0 rename
-`nodewright.nvidia.com`) back in. Run with `--dry-run` first to confirm what
-will and will not be removed.
+protects CRDs whose name contains the given match from deletion. It is applied
+*after* group matching, so it can fence out a group AICR otherwise owns
+(`skyhook.nvidia.com`, and its v0.18.0 rename `nodewright.nvidia.com`). Run
+with `--dry-run` first to confirm what will and will not be removed.
+
+Phase 3 only deletes CRDs whose API group exactly matches a group AICR
+components install (`AICR_CRD_GROUPS` in `tools/cleanup`). An unrelated
+`*.nvidia.com` group, such as a third-party harness, is never matched and needs
+no `--exclude-crd`.
 
 ### Debugging Tests
 

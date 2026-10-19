@@ -101,22 +101,6 @@ const (
 	// with the run ID so concurrent runs don't collide).
 	modelCachePopulateJobPrefix = "aicr-model-cache-populate"
 
-	// cacheWorkerImage is the image used by the populate Job to download
-	// weights. It must carry python3 + huggingface_hub; reuse the vLLM runtime
-	// image so it is already node-cached. Keep in sync with the worker image in
-	// testdata/inference/dynamo-deployment.yaml.
-	//
-	// NOTE: this is pinned to nvcr.io and is NOT run through
-	// catalog.ResolveImage, so AICR_VALIDATOR_IMAGE_REGISTRY does not rewrite it
-	// (unlike the AIPerf image) — a registry-override consistency gap. Propagating
-	// imagePullSecrets only helps when the private creds are for nvcr.io itself.
-	// This matches the Dynamo worker image (also pinned in the template,
-	// drift-guarded by TestCacheWorkerImageMatchesTemplate). Routing this through
-	// ResolveImage for registry-override parity is tracked in #1159. Note that
-	// registry parity alone is not air-gap support: the populate Job's
-	// snapshot_download still reaches huggingface.co for the weights.
-	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2"
-
 	// Resource requests for the populate container. snapshot_download is
 	// network/IO-bound, not compute-bound, so requests stay small; they exist so
 	// the pod gets a Burstable QoS class and schedules under ResourceQuota /
@@ -133,11 +117,16 @@ const (
 	// freshly provisioned volume is group-writable by the cacheWorkerImage's
 	// non-root user. It must match that image's non-root UID/GID — if the vLLM
 	// runtime image rebuilds under a different non-root UID, the workers' RO
-	// mount would silently fail to load weights. Co-located with cacheWorkerImage
-	// so the drift surface is in one place; the worker RO mount relies on the
-	// same group ownership.
+	// mount would silently fail to load weights.
 	cacheWorkerFSGroup = int64(1000)
 )
+
+// cacheWorkerImage returns the image the model-cache populate Job runs.
+func cacheWorkerImage(config *inferenceWorkloadConfig) string {
+	// The workers' own vLLM runtime image, so the Job writes HF_HOME in the
+	// layout the offline workers read.
+	return dynamoRuntimeImage(dynamoVLLMRuntimeImageName, config.dynamoRuntimeTag)
+}
 
 // storageCompatibilityRule declares that on a given CSI provisioner, the
 // listed machine families can only attach a StorageClass whose
@@ -369,10 +358,7 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 	}
 
 	jobName := fmt.Sprintf("%s-%s", modelCachePopulateJobPrefix, config.runID)
-	// Propagate the validator pod's imagePullSecrets to the populate Job, same
-	// as the AIPerf Job — so a private-mirror / air-gapped cluster can pull the
-	// cacheWorkerImage. nil on a public-registry cluster (a no-op there).
-	job := buildModelCachePopulateJob(jobName, config, getOwnPullSecrets(ctx))
+	job := buildModelCachePopulateJob(jobName, config)
 	jobCtx, jobCancel := context.WithTimeout(ctx.Ctx, defaults.K8sJobCreationTimeout)
 	_, err = ctx.Clientset.BatchV1().Jobs(config.namespace).Create(jobCtx, job, metav1.CreateOptions{})
 	jobCancel()
@@ -387,6 +373,10 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 		return terr
 	}
 	if werr := pod.WaitForJobCompletion(ctx.Ctx, ctx.Clientset, config.namespace, jobName, populateTimeout); werr != nil {
+		if pullErr := imagePullTimeoutError(ctx.Ctx, ctx.Clientset, config.namespace,
+			batchv1.JobNameLabel+"="+jobName, werr); pullErr != nil {
+			return pullErr
+		}
 		return wrapPopulateJobError(werr, populateTimeout)
 	}
 	slog.Info("Model cache populated", "pvc", modelCachePVCName)
@@ -437,7 +427,7 @@ func buildModelCachePVC(namespace string, qty resource.Quantity, storageClass st
 // RWO PVC binds there, mounts the PVC read-write at HF_HOME, and uses the
 // optional HF token. fsGroup makes the freshly provisioned volume group-writable
 // for the image's non-root user.
-func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pullSecrets []v1.LocalObjectReference) *batchv1.Job {
+func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig) *batchv1.Job {
 	// BackoffLimit 0 (single attempt): snapshot_download does not resume across
 	// pods, so each Job retry restarts the multi-GB download from scratch and
 	// burns the parent context deadline (a 100Gi-class download retried 2× could
@@ -459,11 +449,11 @@ func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pu
 					RestartPolicy:    v1.RestartPolicyNever,
 					NodeSelector:     config.gpuNodeSelector,
 					Tolerations:      config.gpuTolerations,
-					ImagePullSecrets: pullSecrets,
+					ImagePullSecrets: config.pullSecrets,
 					SecurityContext:  &v1.PodSecurityContext{FSGroup: ptr.To(cacheWorkerFSGroup)},
 					Containers: []v1.Container{{
 						Name:  "populate",
-						Image: cacheWorkerImage,
+						Image: cacheWorkerImage(config),
 						Resources: v1.ResourceRequirements{
 							Requests: v1.ResourceList{
 								v1.ResourceCPU:    resource.MustParse(cacheJobCPURequest),

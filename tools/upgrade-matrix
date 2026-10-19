@@ -154,8 +154,9 @@ def main():
             cells = []
             for i, t in enumerate(tags):
                 v = snaps[t].get(c, (None,))[0] or "–"
-                prev = snaps[tags[i - 1]].get(c, (None,))[0] if i else None
-                cells.append(f"**{v}**" if prev and v != prev else v)
+                prev = snaps[tags[i - 1]].get(c) if i else None
+                # Compare whole entries: a chart-change can keep its version string.
+                cells.append(f"**{v}**" if prev and snaps[t].get(c) != prev else v)
             print(f"| `{c}` | " + " | ".join(cells) + " |")
         print(f"\n**bold** = changed from the previous release. "
               f"{len(comps)} components across {len(tags)} releases.")

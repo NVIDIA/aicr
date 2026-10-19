@@ -63,7 +63,7 @@ jobs:
   build:
     name: Build site
     if: github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -162,7 +162,7 @@ jobs:
     # builds (a credential-free preview of the generator output), but must never
     # overwrite the single live Pages site with a branch build.
     if: github.repository == 'nvidia/aicr' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       pages: write     # deploy to the Pages environment

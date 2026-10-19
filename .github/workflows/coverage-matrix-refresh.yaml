@@ -45,7 +45,7 @@ permissions:
 jobs:
   refresh:
     name: Regenerate coverage matrix and open PR on drift
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: write

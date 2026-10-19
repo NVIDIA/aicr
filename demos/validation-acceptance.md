@@ -94,7 +94,7 @@ Expected:
 
 ```shell
 aicr validate \
-    --recipe recipe.yaml \
+    --recipe bundle/recipe.yaml \
     --namespace aicr-validation \
     --toleration dedicated=worker-workload:NoSchedule \
     --toleration dedicated=worker-workload:NoExecute \
@@ -112,7 +112,7 @@ Expected:
 
 ```shell
 aicr validate \
-    --recipe recipe.yaml \
+    --recipe bundle/recipe.yaml \
     --snapshot snapshot.yaml \
     --namespace aicr-validation \
     --toleration dedicated=worker-workload:NoSchedule \
@@ -129,7 +129,7 @@ Expected:
 
 ```shell
 aicr validate \
-    --recipe recipe.yaml \
+    --recipe bundle/recipe.yaml \
     --snapshot snapshot.yaml \
     --namespace aicr-validation \
     --toleration dedicated=worker-workload:NoSchedule \
@@ -146,7 +146,7 @@ Expected:
 
 ```shell
 aicr validate \
-    --recipe recipe.yaml \
+    --recipe bundle/recipe.yaml \
     --snapshot snapshot.yaml \
     --namespace aicr-validation \
     --toleration dedicated=worker-workload:NoSchedule \

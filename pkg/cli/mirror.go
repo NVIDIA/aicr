@@ -140,7 +140,7 @@ func flagMatchesName(f cli.Flag, name string) bool {
 //nolint:gocyclo // linear option resolution
 func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 	if validErr := validateSingleValueFlags(cmd, "recipe", "service", "accelerator",
-		"intent", "os", "platform", flagProfile, flagGKETCPXOInterfaces, "snapshot", "config", "format", "output"); validErr != nil {
+		"intent", "os", "platform", flagProfile, flagGKETCPXOInterfaces, flagInheritFrom, flagInherit, "snapshot", "config", "format", "output"); validErr != nil {
 		return validErr
 	}
 
@@ -239,9 +239,9 @@ func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *aicr.Con
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--gke-tcpxo-interfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
 		}
-		if cmd.IsSet(flagInheritFrom) {
+		if cmd.IsSet(flagInheritFrom) || cmd.IsSet(flagInherit) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"--inherit-from pins component identity during criteria resolution and cannot be combined with --recipe. The recipe file already records the identity it resolved to")
+				"--inherit-from/--inherit pin component identity during criteria resolution and cannot be combined with --recipe. The recipe file already records the identity it resolved to")
 		}
 		// The config-file mapping is equally a criteria-resolution input; the
 		// recipe file on disk already records its mapping. Mirror the profile

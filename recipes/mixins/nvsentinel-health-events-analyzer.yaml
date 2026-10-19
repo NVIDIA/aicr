@@ -1,0 +1,82 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Turns on NVSentinel's health-events-analyzer, which runs aggregation rules
+# over the health events in NVSentinel's datastore and publishes a derived
+# event, with the rule name as its checkName, when a pattern matches: an XID
+# repeating on one GPU, XID 13 clustering on one GPC and TPC, an XID 74 whose
+# registers show a hardware fault, repeated NIC errors, or a node remediated
+# again and again (MultipleRemediations). See
+# docs/user/component-catalog.md#health-events-analyzer.
+#
+# Needs the datastore, so compose it with nvsentinel-observe, -quarantine or
+# -remediation. CheckNVSentinelRemediationPipelineCoherent rejects a bundle
+# without one, and rejects a live remediation step without this mixin:
+# fault-remediation.maxRemediationAttempts resets when a node leaves
+# quarantine, so MultipleRemediations is the only signal that repair is not
+# fixing a node.
+#
+# STORE_ONLY, as #2618 asks: derived events are stored and counted in
+# rule_matched_total, but platform-connectors sets no node condition and no
+# Kubernetes Event for them. EXECUTE_REMEDIATION would set a node condition
+# named after the rule, which the analyzer never clears, since it publishes no
+# healthy event. Neither strategy cordons a node: none of fault-quarantine's
+# rule sets matches the analyzer's events.
+#
+# Every rule toggle the pinned chart has is restated, all on, so the rule set
+# is chosen here rather than inherited. TestNVSentinelHealthEventsAnalyzerChartRender,
+# in the weekly render check, fails when a chart bump adds a rule this list
+# does not name.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-health-events-analyzer
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        global:
+          healthEventsAnalyzer:
+            enabled: true
+        health-events-analyzer:
+          processingStrategy: STORE_ONLY
+          # Remediation feedback.
+          enableMultipleRemediationsRule: true
+          # Repeated and clustered XIDs.
+          enableRepeatedXIDErrorOnSameGPURule: true
+          enableRepeatedXID31OnSameGPURule: true
+          enableRepeatedXID31OnDifferentGPURule: true
+          enableRepeatedXID13OnSameGPCAndTPCRule: true
+          enableRepeatedXID13OnDifferentGPCAndTPCRule: true
+          enableXIDErrorSoloNoBurstRule: true
+          # XID 74 (NVLink) register decode.
+          enableXID74Reg0SoloNVLinkErrorRule: true
+          enableXID74Reg0ECCParityErrorRule: true
+          enableRepeatedXID74Reg0HardwareIssueRule: true
+          enableXID74Reg0SignalIntegrityErrorRule: true
+          enableXID74Reg0Bit27Or29SetRule: true
+          enableRepeatedXID74Reg2HardwareIssueRule: true
+          enableXID74Reg2Bit13SetRule: true
+          enableRepeatedXID74Reg2Bit16Or19SetRule: true
+          enableRepeatedXID74Reg2Bit17Or18SetRule: true
+          enableXID74Reg3UnexpectedErrorRule: true
+          enableXID74Reg3Bit18SetRule: true
+          enableXID74Reg4HardwareIssueRule: true
+          enableXID74Reg4ECCErrorRule: true
+          # Repeated NIC errors. RepeatedNICDegradation reads nic-health-monitor
+          # events, which the analyzer skips while that monitor is STORE_ONLY,
+          # as the nvsentinel-nic-health-monitor mixin ships it.
+          enableRepeatedNICDriverErrorRule: true
+          enableRepeatedNICDegradationRule: true

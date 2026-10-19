@@ -104,7 +104,7 @@ Tab completion for commands and flags is installed automatically by both the Hom
 **Opt out** (install script only): set `AICR_NO_COMPLETIONS=1` before running the script:
 
 ```shell
-AICR_NO_COMPLETIONS=1 curl -sfL https://get.aicr.run | bash -s --
+curl -sfL https://get.aicr.run | AICR_NO_COMPLETIONS=1 bash -s --
 ```
 
 **Manual setup** (build from source or `go install`):
@@ -210,5 +210,6 @@ rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/aicr.fish"
 ## Getting Help
 
 - **Documentation**: [User Documentation](https://github.com/NVIDIA/aicr/blob/main/docs/user/index.md)
-- **Issues**: [GitHub Issues](https://github.com/NVIDIA/aicr/issues)
+- **Support**: [Where to ask questions](https://github.com/NVIDIA/aicr/blob/main/SUPPORT.md)
+- **Bugs and scoped feature requests**: [GitHub Issues](https://github.com/NVIDIA/aicr/issues)
 - **API Server**: See [Kubernetes Deployment](../integrator/kubernetes-deployment.md)

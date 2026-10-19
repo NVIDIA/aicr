@@ -60,6 +60,25 @@ Recipe files in `recipes/` are embedded at compile time. Integrators can extend 
 
 For query matching and overlay merging internals, see [Data Architecture](../contributor/recipe.md).
 
+### Recipe stewardship and composition
+
+A resolved recipe is not a standalone, independently owned configuration file.
+It is materialized from a directed acyclic graph of registry defaults, overlays,
+mixins, [configuration profiles](#configuration-profiles), and any external
+configuration supplied via `--data`. AICR deliberately attaches no NCP, ISV, or
+NVIDIA owner to that output: AICR maintainers are accountable for the catalog
+accepted into the project, and the AICR community collectively owns and evolves
+it. See
+[Areas of Ownership](https://github.com/NVIDIA/aicr/blob/main/GOVERNANCE.md#areas-of-ownership).
+
+`metadata.appliedOverlays` records the order in which overlays were merged into a
+result. It is deliberately not an attribution ledger: once configuration is
+loaded into the graph, resolution materializes the effective configuration rather
+than preserving authorship for every contributing value. Repository history
+identifies who contributed a given source file — an overlay, a mixin, a values
+file — but that describes the layer, not the resolved recipe. See
+[Observable RecipeResult Surfaces](../contributor/recipe.md#observable-reciperesult-surfaces).
+
 ## Recipe Structure
 
 ### Multi-Level Inheritance
@@ -139,15 +158,25 @@ For example, `--platform slurm` leaves inline three `componentRefs`:
 
 This is the same shape `dynamo-platform` uses across the `*-inference-dynamo` leaves. See `recipes/overlays/h100-eks-ubuntu-training-slurm.yaml` for the full example.
 
-When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-talos` mixin to your overlay's `spec.mixins` list (e.g. `spec.mixins: [os-talos]`, or `[platform-kubeflow, os-talos]` if you already mix in a non-OS fragment). OS-scoped mixins are mutually exclusive — combining `os-ubuntu` and `os-talos` in one overlay is a recipe authoring error, not a supported composition. The mixin overrides namespaces for affected components and supplies PSA-privileged Namespace manifests via `componentRefs[].preManifestFiles`, which are applied before each chart — see [Talos integration](talos-integration.md) for the component list and labels.
+When authoring a recipe targeting Amazon Linux 2023 (`criteria.os: amazonlinux`), append the `os-amazonlinux` mixin to your overlay's `spec.mixins` list. It supplies the `OS.release.ID` / `OS.release.VERSION_ID` constraints and the 6.1 kernel floor; see the `*-eks-amazonlinux-inference` overlays for the full example. It is mutually exclusive with the other OS-scoped mixins.
+
+When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-talos` mixin to your overlay's `spec.mixins` list (e.g. `spec.mixins: [os-talos]`, or `[platform-kubeflow, os-talos]` if you already mix in a non-OS fragment). OS-scoped mixins (`os-ubuntu`, `os-talos`, `os-amazonlinux`) are mutually exclusive — combining any two in one overlay is a recipe authoring error, not a supported composition. The mixin overrides namespaces for affected components and supplies PSA-privileged Namespace manifests via `componentRefs[].preManifestFiles`, which are applied before each chart — see [Talos integration](talos-integration.md) for the component list and labels.
 
 **`nvsentinel-observability`** turns on NVSentinel's audit logging and distributed tracing for a leaf that opts in (`spec.mixins: [nvsentinel-observability]`). `nvsentinel` is always base-chained, so this mixin sets `Overrides` on an already-present component — normally rejected outright (see [Mixin composition](../contributor/recipe.md#mixin-composition)) — but the specific `global.auditLogging.*`/`global.tracing.enabled`/`.insecure` paths it needs are explicitly allowlisted on `nvsentinel`'s own registry entry (`mixinSafeOverridePaths`, `recipes/registry.yaml`), and any path outside that allowlist, or one colliding with a value your leaf already set, fails the compose step rather than silently applying. See [component catalog](../user/component-catalog.md#audit-logging-and-tracing) for the values it sets and the bundle-time endpoint requirement.
 
 **`nvsentinel-object-monitor`** turns on NVSentinel's Kubernetes Object Monitor for a leaf that opts in (`spec.mixins: [nvsentinel-object-monitor]`), carrying policies that watch GPU Operator and Network Operator DaemonSet pod health. It uses the same allowlist mechanism, via the `global.kubernetesObjectMonitor.enabled`/`kubernetes-object-monitor.policies` entries on `nvsentinel`'s registry entry. See [component catalog](../user/component-catalog.md#kubernetes-object-monitor) for the policies it sets and the deliberate `isFatal`/quarantine/`node-not-ready` decisions.
 
-**`nvsentinel-preflight`** turns on NVSentinel's preflight admission webhook for a leaf that opts in (`spec.mixins: [nvsentinel-preflight]`), so GPU pods in an opted-in namespace run node checks before the workload starts. It reaches `nvsentinel` through the same `mixinSafeOverridePaths` allowlist as `nvsentinel-observability`, with its own `preflight.*` paths. It is also the one mixin that adds a `dependencyRefs` entry to an already-chained component (`kai-scheduler`, which must be applied before the preflight controller starts): `dependencyRefs` merges as a deduplicated union rather than a replacement, which is why it is in `mixinComponentRefSafeForMerge`'s safe set while `valuesFile`, `patches` and `version` are not. See [component catalog](../user/component-catalog.md#preflight-checks) for the values it sets, the namespace label that actually enables injection, and its limitations.
+**`nvsentinel-preflight`** turns on NVSentinel's preflight admission webhook for a leaf that opts in (`spec.mixins: [nvsentinel-preflight]`), so GPU pods in an opted-in namespace run node checks before the workload starts. It reaches `nvsentinel` through the same `mixinSafeOverridePaths` allowlist as `nvsentinel-observability`, with its own `preflight.*` paths. It also adds a `dependencyRefs` entry to an already-chained component (`kai-scheduler`, which must be applied before the preflight controller starts), as the `nvsentinel-observe`, `nvsentinel-quarantine` and `nvsentinel-remediation` mixins do (`nvsentinel-mongodb`, which must be deployed before NVSentinel, which connects to it at startup): `dependencyRefs` merges as a deduplicated union rather than a replacement, which is why it is in `mixinComponentRefSafeForMerge`'s safe set while `valuesFile`, `patches` and `version` are not. See [component catalog](../user/component-catalog.md#preflight-checks) for the values it sets, the namespace label that actually enables injection, and its limitations.
 
-**`npd`** installs the upstream `node-problem-detector` DaemonSet, whose Node Conditions the `nvsentinel-object-monitor` policies read. Unlike the three mixins above it contributes a brand-new component name rather than composing overrides onto `nvsentinel`, so it needs no `mixinSafeOverridePaths` entry — a mixin may always carry a full `componentRefs` entry for a component no overlay in the chain declares. It is supported only on EKS, Kind and RKE2 — the platforms verified to run no NPD of their own. `CheckNPDNotDuplicatingProviderNPD` fails the bundle on every other platform, including GKE and AKS (which run their own), OKE, OpenShift, Talos and anything unverified. See [component catalog](../user/component-catalog.md#node-problem-detector) for which platforms need it and why the policies ship `STORE_ONLY`.
+**`nvsentinel-slurm-drain-monitor`** turns on NVSentinel's Slurm drain monitor; every `platform: slurm` leaf composes it (`spec.mixins: [nvsentinel-slurm-drain-monitor]`), turning Slurm drain reasons on Slinky worker pods into `STORE_ONLY` health events. It uses the same allowlist mechanism, via `global.slurmDrainMonitor.enabled` and `slurm-drain-monitor.*` entries on `nvsentinel`'s registry entry, and `CheckNVSentinelSlurmDrainMonitorRequiresSlinky` fails the bundle on a recipe without `slinky-slurm`. See [component catalog](../user/component-catalog.md#slurm-drain-monitor) for what it reads, where its events are visible, and its limitations.
+
+**`npd`** installs the upstream `node-problem-detector` DaemonSet, whose Node Conditions the `nvsentinel-object-monitor` policies read. Unlike the four mixins above it contributes a brand-new component name rather than composing overrides onto `nvsentinel`, so it needs no `mixinSafeOverridePaths` entry — a mixin may always carry a full `componentRefs` entry for a component no overlay in the chain declares. It is supported only on EKS, Kind and RKE2 — the platforms verified to run no NPD of their own. `CheckNPDNotDuplicatingProviderNPD` fails the bundle on every other platform, including GKE and AKS (which run their own), OKE, OpenShift, Talos and anything unverified. See [component catalog](../user/component-catalog.md#node-problem-detector) for which platforms need it and why the policies ship `STORE_ONLY`.
+
+**`nvsentinel-observe`, `nvsentinel-quarantine` and `nvsentinel-remediation`** are the three steps of NVSentinel remediation, adopted one at a time (`spec.mixins: [nvsentinel-observe]`, then swap the name). They set `global.*` toggles and pin `processingStrategy: EXECUTE_REMEDIATION` on the GPU and syslog monitors; observe and remediation also carry the `COMPONENT_RESET` → `GPUReset` action map, and remediation adds the pinned reboot Job image and a three-attempt repair cap, all through the same `mixinSafeOverridePaths` allowlist; every pair sets a shared path, so composing two is a collision error, which is what makes them mutually exclusive. Mixin override keys may not contain a dot, so the GPU-reset template key is `gpureset` rather than upstream's `gpureset-template.yaml`. No step sets a `node-drainer` mode, so the chart's wait-for-completion drain applies, except where `nvsentinel-slinky-drainer` is composed alongside. Like `npd`, each step also carries full `componentRefs` for two components no overlay declares, `psmdb-operator` and `nvsentinel-mongodb`, and wires NVSentinel's `global.datastore.*` to them in place of the chart's embedded `mongodbStore`. A bundle composing a step therefore needs `--system-node-selector`, which `nvsentinel-mongodb` requires. The GPU reset Job's driver root and RuntimeClass are platform facts, set by the platform overlays rather than the mixin. See [component catalog](../user/component-catalog.md#graded-remediation) for what each step does, how to choose a drain mode, and its prerequisites.
+
+**`nvsentinel-slinky-drainer`** drains quarantined Slurm nodes through Slurm. It composes on a `platform: slurm` leaf alongside `nvsentinel-quarantine` or `nvsentinel-remediation` (`spec.mixins: [nvsentinel-quarantine, nvsentinel-slinky-drainer]`), never with `nvsentinel-observe`. It turns on `node-drainer.customDrain` and empties `node-drainer.userNamespaces` through `nvsentinel`'s `mixinSafeOverridePaths`, adds `dependencyRefs` entries so the plugin's CRD and template exist before NVSentinel starts, and carries full `componentRefs` entries for `slinky-drainer-crds` and `slinky-drainer` (which depends on the CRD component), manifest-only components no overlay declares. `CheckNVSentinelSlurmCustomDrainCoherent` fails the bundle on any other combination, including a Slurm leaf with `nvsentinel-remediation` but without this mixin. See [component catalog](../user/component-catalog.md#slurm-drain-through-slinky).
+
+**`nvsentinel-health-events-analyzer`** turns on NVSentinel's health events analyzer, composed beside a remediation step (`spec.mixins: [nvsentinel-remediation, nvsentinel-health-events-analyzer]`) because it reads the datastore the step adds. It sets `global.healthEventsAnalyzer.enabled`, `processingStrategy: STORE_ONLY` and every rule toggle the chart ships through the same `mixinSafeOverridePaths` allowlist, and sets no path a step sets, so it composes with any of them. `CheckNVSentinelRemediationPipelineCoherent` fails the bundle when the analyzer has no datastore, and when `fault-remediation` runs live without it or with its `MultipleRemediations` rule off. See [component catalog](../user/component-catalog.md#health-events-analyzer) for the rules, where derived events are visible, and why its node conditions need clearing by hand.
 
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
 
@@ -371,6 +400,16 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 > applied by any deployer. An enabled ref that sets `patches` is rejected at
 > recipe resolution (rather than silently producing an unpatched bundle), so do
 > not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
+
+### Kueue topology-aware scheduling
+
+The `platform=kueue` leaves (`h100-kind-training-kueue`, `h100-gke-cos-training-kueue`, `h100-eks-ubuntu-training-kueue`) show the pattern for an opt-in that differs per provider. Each leaf declares `topograph` (the Kubernetes-scoped component, `k8s` engine, labels nodes) and `kueue` with `topograph` in its `dependencyRefs`, and sets only what is provider-specific:
+
+- `topograph` `overrides.provider.name`: `gcp`, `aws`, or `dra` (Kind, reading the existing `nvidia.com/gpu.clique` node label).
+- `kueue` `manifestFiles`: the `Topology` whose levels match the depth that provider produces (`topology-accelerator.yaml` or `topology-tiers-3.yaml`, widest level first, ending in `kubernetes.io/hostname`), then `tas-flavor.yaml`, `cluster-queue-tas.yaml`, and `local-queue.yaml`. Hook weights order them Topology (0), flavor (1), ClusterQueue (5), LocalQueue (10).
+- `kueue` `healthCheckAsserts`: required whenever `manifestFiles` is overridden, since the registry check pins `default-flavor`. Assert existence and ClusterQueue `Active`, never node labels; Topograph labels nodes after install.
+
+`default-flavor` stays topology-free, so recipes that do not select `platform: kueue` render as before. See [Topology-aware scheduling](../user/component-catalog.md#topology-aware-scheduling-with-kueue-and-topograph) for IAM requirements and a sample Job.
 
 ## Preview recipes
 
@@ -726,7 +765,7 @@ Profile declarations are intentionally narrow:
   so `Operator-Managed` and `operator-managed` would collapse onto one evidence
   directory.
 - A value permits only `constraints` and
-  `componentRefs{name,overrides}` in the core mechanism. `valuesFile`,
+  `componentRefs{name,optional,overrides}` in the core mechanism. `valuesFile`,
   component identity/deployment fields, literal dotted keys, nested empty
   maps, and root `overrides.enabled` are rejected.
 - Override leaves must be JSON/YAML scalar values. Finite numbers and YAML
@@ -787,6 +826,16 @@ lock on owned paths is enforced per surface:
   `enabled` — so reselecting a profile changes owned **value** paths
   only, never which components are present. Presence changes are
   catalog/composition changes.
+- **Optional references**: a `componentRefs` entry with `optional: true`
+  owns its override paths but not presence. The bundle may omit the
+  component (`--set <component>:enabled=false` or a `bundlers=` list);
+  when it ships, its owned paths are locked as above. Recipe resolution
+  still requires the component to be enabled. Every value must agree on
+  `optional` for a component, an optional reference must assign at least
+  one override, and GPU allocation-policy components (`gpu-operator`,
+  `nvidia-dra-driver-gpu` and their OCP variants) cannot be optional.
+  The GKE-COS and OKE `gpuStack` profiles reference `nvsentinel` this
+  way.
 
 **Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is
 resolved from a snapshot (via `aicr recipe --snapshot` or
@@ -810,7 +859,9 @@ component values already set `gpu-operator.driver.enabled=false` and carry the
 coordinated preinstalled-driver configuration. This prerequisite is independent
 of whether the recipe declares an ADR-015 profile. It scopes auto-detection to
 statically prepared overlays such as AKS, GKE-COS, and OKE. Bare EKS is skipped
-with a warning instead of leaving the Operator half-configured. The policy is
+with a warning instead of leaving the Operator half-configured. The EKS
+`os=amazonlinux` leaves carry the preinstalled-driver values statically but
+declare no profile, so they are not auto-detected either. The policy is
 only-false and never forces `true`, so recipes resolved without a snapshot use
 their static defaults.
 
@@ -1002,7 +1053,7 @@ spec:
 # recipes/registry.yaml
 - name: gpu-operator
   helm:
-    defaultVersion: v26.7.1  # Changed from v26.7.0
+    defaultVersion: v26.7.2  # Changed from v26.7.1
 ```
 
 **Adding components:**
@@ -1043,7 +1094,7 @@ spec:
                 state: ready
 ```
 
-When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. This is now enforced rather than advisory: the effective budget is the **smaller** of the authored `spec.timeouts.assert` and the caller's per-component budget, so an authored value larger than the caller allows is capped rather than honored. A shorter authored value still shortens the budget as before. That caller budget is the gate's `--timeout` (`defaults.ReadinessGateExecTimeout`, 2m) for a readiness Job, and `defaults.ChainsawAssertTimeout` for `aicr validate --phase deployment` — not the `expected-resources` catalog timeout, which is the outer Job envelope rather than a per-component assertion budget. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
+When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers, or by the readiness `helm_release` that ends the component's module call for `terraform` (the same hook, so that release blocks on it). Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. This is now enforced rather than advisory: the effective budget is the **smaller** of the authored `spec.timeouts.assert` and the caller's per-component budget, so an authored value larger than the caller allows is capped rather than honored. A shorter authored value still shortens the budget as before. That caller budget is the gate's `--timeout` (`defaults.ReadinessGateExecTimeout`, 2m) for a readiness Job, and `defaults.ChainsawAssertTimeout` for `aicr validate --phase deployment` — not the `expected-resources` catalog timeout, which is the outer Job envelope rather than a per-component assertion budget. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
 
 **Supported operations.** The gate evaluates the Test in-process against its own read-only ServiceAccount — it ships no Chainsaw binary and shells out to nothing. Only `assert` and `error` are honored; every other operation (`apply`, `create`, `delete`, `patch`, `update`, `script`, `command`, `wait`, `sleep`, `get`, `describe`, `events`, `podLogs`, `proxy`) is rejected before evaluation, as are `catch`, `finally`, and `cleanup` blocks. A readiness test that declares one fails the gate with an invalid-request error naming the offending step.
 
@@ -1195,7 +1246,7 @@ aicr bundle --recipe recipe.yaml \
 helm install ... --set image.repository=602401143452.dkr.ecr.eu-west-1.amazonaws.com/eks/aws-efa-k8s-device-plugin
 ```
 
-`--dynamic` is supported with `helm`, `helmfile`, `argocd-helm`, and `flux` deployers; `argocd` does not support it (use `argocd-helm` instead). See [Dynamic Install-Time Values](../user/cli-reference.md#dynamic-install-time-values) for the broader pattern.
+`--dynamic` is supported with `helm`, `helmfile`, `argocd-helm`, `flux`, and `terraform` deployers; `argocd` does not support it (use `argocd-helm` instead). See [Dynamic Install-Time Values](../user/cli-reference.md#dynamic-install-time-values) for the broader pattern.
 
 **Partition-aware variants.** Standard AWS uses account ID `602401143452`. GovCloud and China use different accounts and URI suffixes:
 
@@ -1269,6 +1320,8 @@ and add `--emit-attestation` (writes the bundle to disk) and
 `--push` (signs and uploads the OCI artifact):
 
 ```bash
+OWNER="my-github-org"  # replace with your GHCR owner (or replace the whole --push ref below)
+
 # 1. Capture snapshot and resolve the recipe you're contributing.
 aicr snapshot --output snapshot.yaml
 aicr recipe --service eks --accelerator gb200 --os ubuntu \
@@ -1283,7 +1336,7 @@ aicr validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/<owner>/aicr-evidence
+  --push "ghcr.io/${OWNER}/aicr-evidence"
 
 # 3. Commit the SIGNED pointer. The bundle bytes live in OCI; the repo
 #    only stores the locator. The blocking Evidence Pointer Contract gate
@@ -1295,10 +1348,10 @@ aicr validate \
 #    hand: step 2 already logged the exact destination as the `copyTo`
 #    field of its "evidence pointer written" line, e.g.
 #      copyTo=recipes/evidence/<recipe>/<src>/sha256-<digest>.yaml
-DEST=recipes/evidence/<recipe>/<src>/sha256-<digest>.yaml   # from the copyTo log line
-mkdir -p "$(dirname "$DEST")"
-cp ./out/pointer.yaml "$DEST"
-git add "$DEST"
+DEST="recipes/evidence/gb200-eks-ubuntu-training/0123456789abcdef0123456789abcdef/sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.yaml"  # replace with the copyTo path step 2 logged
+mkdir -p "$(dirname "${DEST}")"
+cp ./out/pointer.yaml "${DEST}"
+git add "${DEST}"
 ```
 
 > **The signer must be allowlisted.** The blocking *Evidence Pointer Contract*
@@ -1333,10 +1386,13 @@ committing the nested pointer, as above, satisfies it.) A clean local
 run keeps the sticky comment green:
 
 ```bash
+RECIPE="gb200-eks-ubuntu-training"                                                # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 # Verify the emitted pointer before committing it...
 aicr evidence verify ./out/pointer.yaml
 # ...or the committed nested pointer after copying it into place:
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 ```
 
 Exit 0 means the signature verified, the predicate parsed, every

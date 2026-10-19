@@ -39,6 +39,32 @@ obligation self-renewing rather than something you can defer:
   that makes the obligation self-renewing: a bump that leaves a hole below the
   new pin fails, whatever any record's ceiling says.
 
+A coverage gate enforces the obligation itself. No record assesses an upgrade
+into a pinned version, in the registry or in any overlay or mixin override, that
+falls inside no record's `to` range: `aicr upgrade-check` reports `unknown`, or
+`blocked` when the version lies past the record's highest ceiling. So:
+
+- A component's record must cover every pin it has reached
+  (`TestRecordedComponentsCoverTheirPins`, part of `make test`).
+- A pin no record covers may not move, and a record that exists on the merge
+  base may not disappear while its component remains
+  (`TestChangedPinsHaveUpgradeRecords`). A deleted record moves no pin, so only
+  a comparison with the base can see it. Moves are compared per source: the
+  registry default, `base.yaml`, and each overlay and mixin's own
+  `componentRefs`. Bumping one overlay's override counts even when another
+  source already pins that version, and a source that adds or drops an
+  override is compared against the registry default. What a recipe inherits is not
+  resolved, so re-parenting an overlay or attaching a mixin that pins a
+  different version goes unseen.
+
+A record reaches a pin unless every one of its `to` ranges starts above it. A
+record written ahead of its bump reaches nothing yet, so the gate treats those
+pins as recordless until the pin gets there, and the bump that gets it there
+must land inside a `to`. A record with no transitions, such as one carrying only
+a `replaces` block, reaches no pin at all. Components that predate records are not gated until their pin next moves, and a
+component new to the registry needs no record for its first pin, since nobody
+upgrades into it from an earlier release.
+
 ## Where a record lives
 
 `recipes/components/<component>/upgrades.yaml`, referenced from the component's
@@ -157,12 +183,13 @@ transitions:
       - group: example.io
         kinds: [Widget]
     stepsByDeployer:
-      - deployers: [helm, helmfile]
+      - deployers: [helm, helmfile]   # every deployer these steps are written for
         steps:
           - id: stable-kebab-case-id
             description: What to do.
             reason: Why, and what happens if you skip it.
-      - steps:                 # omit `deployers` for the remainder
+      - steps:                 # omit `deployers` for the remainder: every
+                               # deployer no group names, terraform included
           - id: reconcile
             description: Sync as usual.
 ```
@@ -220,14 +247,26 @@ grove is pinned at one.
 
 **Deployer groups must partition.** No two explicit groups may claim the same
 deployer, at most one group may omit `deployers` (that one is *the* remainder),
-and a `manual` or `blocked` verdict must cover all five of `argocd`,
-`argocd-helm`, `flux`, `helm`, `helmfile`. Otherwise an Argo CD operator gets a
+and a `manual` or `blocked` verdict must cover all six of `argocd`,
+`argocd-helm`, `flux`, `helm`, `helmfile`, `terraform`. Otherwise an Argo CD operator gets a
 verdict promising steps with none for them.
 
 Write the steps a given deployer needs in that deployer's group, even when they
 duplicate another group's. A group is one ordered sequence a reader follows top
 to bottom, not a fragment to be assembled. Step ids may repeat across groups,
 since a consumer addresses a step as (deployer, id).
+
+The remainder is a convenience, not a default. A step written for Flux or Argo
+CD reads wrong under `terraform`, which also lands there unless a group names
+it. For an `ownsCRDs` component, a `manual` or `blocked` record must give
+`helmfile` and `terraform` an explicit group with a step that applies the CRDs,
+since nothing applies them on those two deployers. A test in `pkg/recipe`
+enforces that ([ADR-021](https://github.com/NVIDIA/aicr/blob/main/docs/design/021-component-upgrade-safety.md)).
+
+**`affectedResources` may not name core `Secret`.** The at-risk scan lists every
+kind a crossed record names, cluster-wide, and the permission to list Secrets
+reads every Secret's data whatever the scan keeps. A `Secret` kind in a CRD
+group is unaffected.
 
 ### Where your lowest `from` floor starts is a real decision
 
@@ -278,15 +317,22 @@ on its own" into something the tool says rather than something prose asks for.
 ## Checking your work
 
 ```bash
+OLD_RECIPE="old-recipe.yaml"  # replace with a recipe generated before your pin change
+NEW_RECIPE="new-recipe.yaml"  # replace with a recipe generated after it
+
 make lint                                   # includes check-upgrade-records
 ./tools/check-upgrade-records               # just this gate
-aicr upgrade-check --from <old> --to <new> --deployer helm
+aicr upgrade-check --from "${OLD_RECIPE}" --to "${NEW_RECIPE}" --deployer helm
 ```
 
 The gate runs every well-formedness rule over every record the registry
-references. It **asserts no verdict**, so "make the test green" cannot be
-satisfied by writing `safe`; flipping a `manual` record to `safe` makes it fail
-harder, because `safe` may not carry steps.
+references, then both coverage checks above against the merge base with
+`upstream/main` when your clone has that remote, else `origin/main`; set
+`AICR_UPGRADE_BASE_REF` to compare against another ref, and fetch the base
+first, since a stale one reports moves that are already on `main`. CI runs it
+on every pull request. None of these **asserts a verdict**, so "make the test
+green" cannot be satisfied by writing `safe`; flipping a `manual` record to
+`safe` makes it fail harder, because `safe` may not carry steps.
 
 Do not add a Go test asserting a verdict for a real component. Verdicts for real
 components are validated empirically, by KWOK and UAT. Pinning them in the unit

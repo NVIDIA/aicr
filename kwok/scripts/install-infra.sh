@@ -124,7 +124,7 @@
 #   21  registry not reachable on host port within 60s
 #   30  Argo CD Helm install failed
 #   31  `applications.argoproj.io` CRD not Established in 120s
-#   32  argocd-cm diff-customization patch failed
+#   32  argocd-cm diff or health customization patch failed
 #   40  Repository secret apply failed
 #   60  Flux install manifest apply failed
 #   61  Flux controller (source/kustomize/helm) not Ready in 180s
@@ -517,6 +517,18 @@ configure_argocd_diff_customizations() {
     if ! kc patch configmap argocd-cm -n "${ARGOCD_NAMESPACE}" --type merge -p \
             '{"data":{"resource.customizations.ignoreDifferences.storage.k8s.io_CSIDriver":"jqPathExpressions:\n- .spec.preventPodSchedulingIfMissing\n"}}'; then
         log_error "Failed to patch argocd-cm with CSIDriver diff customization"
+        dump_argocd_diagnostics
+        exit 32
+    fi
+
+    # KWOK simulates psmdb-operator, so a PerconaServerMongoDB never gets a
+    # status, and Argo CD's built-in health check reads that as Unknown, which
+    # the sync gate rejects. Report it Progressing until the operator writes
+    # one, and use the built-in check's ready state once it does.
+    log_info "Patching argocd-cm: PerconaServerMongoDB health without an operator status (KWOK)..."
+    if ! kc patch configmap argocd-cm -n "${ARGOCD_NAMESPACE}" --type merge -p \
+            '{"data":{"resource.customizations.health.psmdb.percona.com_PerconaServerMongoDB":"hs = {}\nif obj.status == nil or obj.status.state == nil then\n  hs.status = \"Progressing\"\n  hs.message = \"No operator status yet\"\nelseif obj.status.state == \"ready\" then\n  hs.status = \"Healthy\"\n  hs.message = \"Cluster is ready\"\nelseif obj.status.state == \"error\" then\n  hs.status = \"Degraded\"\n  hs.message = obj.status.message or \"Cluster is in error\"\nelse\n  hs.status = \"Progressing\"\n  hs.message = \"Cluster is \" .. obj.status.state\nend\nreturn hs\n"}}'; then
+        log_error "Failed to patch argocd-cm with PerconaServerMongoDB health customization"
         dump_argocd_diagnostics
         exit 32
     fi

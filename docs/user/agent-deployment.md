@@ -74,7 +74,8 @@ data:
   the cluster if anything is missing — see
   [Pre-flight permission gate](#pre-flight-permission-gate). Pointing
   `--service-account-name` at a ServiceAccount you provisioned yourself
-  requires **no** RBAC permissions at all
+  requires **no** RBAC permissions at all, and no permission on the
+  Namespace object itself: the run leaves it untouched.
 
 ## Quick Start
 
@@ -146,17 +147,17 @@ aicr snapshot \
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
-- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the run-scoped `aicr-node-reader-<run-id>` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, DaemonSets, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, and official MariaDB CRs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
+- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the run-scoped `aicr-node-reader-<run-id>` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, DaemonSets, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, official MariaDB CRs, StorageClasses, and PerconaServerMongoDB CRs (not cluster-admin); with `--discover-network` the retained ClusterRole additionally reads `configuration.net.nvidia.com` NicDevices (see [Security Considerations](#security-considerations)) and stays read-only.
 - `--privileged`: Run agent in privileged mode (default: enabled; required for GPU/SystemD collectors). Set to `false` for PSS-restricted namespaces.
 - `--require-gpu`: In privileged mode (the default), requests an `nvidia.com/gpu` resource for the agent pod (required in CDI environments). With `--privileged=false` it adds no GPU request, but still disables automatic GPU-node selection; pass `--node-selector` to target GPU nodes.
 - `--runtime-class`: Set `runtimeClassName` on the agent pod for `nvidia-smi` access without consuming a GPU. Use with `--node-selector` to target GPU nodes.
 - `--os`: Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `sles`). Selects the per-OS pod configuration and service collector backend.
 - `--requests` / `--limits`: Override agent container resource requests/limits (comma-separated `name=quantity` pairs).
 - `--cluster-config`: Path to a pre-existing k8s-launch-kit cluster-config.yaml to ingest network topology (local agent mode only).
-- `--oke-addons`: Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump, projected into the `K8s.oke-addons.nvidia-gpu-plugin` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
+- `--oke-addons`: Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump, projected into the `K8s.oke-addons.nvidia-gpu-plugin` and `K8s.oke-addons.nvidia-network-operator` readings. It runs controller-side, so it works in agent Job mode too. The file never enters the pod, and the CLI merges the projection into the returned snapshot.
 - `--aks-gpu-pools`: Path to an `az aks nodepool list -o json` dump, projected into the `K8s.aks-gpu-pools.gpu-driver` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
 - `--gke-gpu-pools`: Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump, projected into the `K8s.gke-gpu-pools.gpu-driver-installation` reading (required only to resolve the GKE `bundle-installer` gpuStack value from a snapshot). Controller-side: works in agent Job mode too. The file never enters the pod. The CLI merges the projection into the returned snapshot.
-- `--discover-network`: Enable live l8k discovery to populate the NetworkTopology measurement. **Not read-only** — writes `nvidia.kubernetes-launch-kit.*` node labels and may patch `NicClusterPolicy`.
+- `--discover-network`: Enable read-only live l8k discovery to populate the NetworkTopology measurement. Reads the NicDevices an already-running Network Operator `nic-configuration-daemon` publishes; no writes, no pod exec. Skipped with a warning when the daemon is not installed. If any daemon pod is not Ready, discovery waits up to 5 minutes before proceeding with the Ready nodes, which exceeds the default `--timeout` of `5m`; set `--timeout` to at least `8m` on such clusters.
 
 ### 4. Check Agent Logs (Debugging)
 
@@ -262,8 +263,8 @@ run-scoped ServiceAccount does not help.
 
 | Does a ServiceAccount of exactly that name exist in `--namespace`? | Behavior |
 |---|---|
-| Yes | Used verbatim. aicr creates **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding for the run, binds nothing to it, and deletes nothing at cleanup. |
-| No | The value is a name prefix. The run creates `<prefix>-<run-id>` plus the full run-scoped RBAC set, and deletes them at cleanup — the pre-existing behavior. |
+| Yes | Used verbatim. aicr creates **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding for the run, binds nothing to it, and deletes nothing at cleanup. The namespace is left untouched: it is not created, and its labels are not changed. |
+| No | The value is a name prefix. The run creates `<prefix>-<run-id>` plus the full run-scoped RBAC set, and deletes them at cleanup — the pre-existing behavior. It also creates the namespace if absent and labels it `app.kubernetes.io/managed-by=aicr`, replacing any other value of that label. |
 
 An unset `--service-account-name` is never probed for existence, so a stray
 ServiceAccount named `aicr` cannot silently capture a run.
@@ -292,12 +293,13 @@ kubectl annotate serviceaccount irsa-snapshotter -n gpu-operator \
 # 2. Write the RBAC manifests. Applies NOTHING, contacts no cluster, takes no
 #    snapshot. Prints the directory it wrote and the commands below.
 aicr snapshot --namespace gpu-operator --add-roles-to-service-account irsa-snapshotter
+RUN_ID="20260821-142233-9f3a1c0b7e2d4a55"  # replace with the run ID in the directory name printed above
 
 # 3. Read what you are about to grant. Each file explains its rules.
-less snapshot-rbac-<run-id>/*.yaml
+less "snapshot-rbac-${RUN_ID}"/*.yaml
 
 # 4. Grant it, once you are satisfied.
-kubectl apply -f snapshot-rbac-<run-id>/
+kubectl apply -f "snapshot-rbac-${RUN_ID}/"
 
 # 5. Capture snapshots as that ServiceAccount, as often as you like.
 aicr snapshot \
@@ -306,7 +308,7 @@ aicr snapshot \
   --output cm://gpu-operator/aicr-snapshot
 
 # 6. Revoke the grant when the ServiceAccount no longer needs it.
-kubectl delete -f snapshot-rbac-<run-id>/
+kubectl delete -f "snapshot-rbac-${RUN_ID}/"
 ```
 
 Step 2 does **not** check that the ServiceAccount exists — it contacts no
@@ -345,7 +347,8 @@ list, and no `aicr snapshot` or `aicr validate` invocation deletes them.
 Teardown is one command, which is why keeping the directory is worth it:
 
 ```shell
-kubectl delete -f snapshot-rbac-<run-id>/
+RUN_ID="20260821-142233-9f3a1c0b7e2d4a55"  # replace with the run ID in your snapshot-rbac directory name
+kubectl delete -f "snapshot-rbac-${RUN_ID}/"
 ```
 
 If you no longer have the directory, delete the objects by name instead:
@@ -374,21 +377,13 @@ understanding before you choose it:
   the same ServiceAccount hold exactly the same grants. Run isolation's
   guarantee that one run's permissions cannot reach another run's does not
   apply to them.
-- **`--discover-network` grants become permanent.** With a run-owned
-  ServiceAccount, the cluster-scoped **mutating** discovery rules
-  (`nodes: patch`, `pods/exec: create`, CRD / namespace / DaemonSet
-  create-delete — see [Security Considerations](#security-considerations))
-  exist for one run and are revoked at cleanup. Rendered with
-  `aicr snapshot --add-roles-to-service-account <sa> --discover-network` and
-  applied, they sit on that ServiceAccount until you remove them.
-
-Generate without `--discover-network` unless you need live network discovery;
-that grant is read-only. When you do use it, `03-clusterrole.yaml` carries a
-warning header naming every mutating rule and the discovery step it exists for
-— read it before applying, which is precisely what writing manifests instead of
-applying them is for. If you need discovery only occasionally, prefer a
-run-owned ServiceAccount for those runs, or keep a separate ServiceAccount used
-only for discovery.
+- **`--discover-network` adds one read-only rule.** Rendered with
+  `aicr snapshot --add-roles-to-service-account <sa> --discover-network`, the
+  ClusterRole additionally grants `configuration.net.nvidia.com` nicdevices
+  `get`/`list` (see [Security Considerations](#security-considerations)).
+  Like the rest of the grant it is permanent on an adopted ServiceAccount,
+  and like the rest it is read-only; `03-clusterrole.yaml` explains it in
+  its header.
 
 ## Post-Deployment
 
@@ -530,24 +525,29 @@ pod and carries only `app.kubernetes.io/name`, `app.kubernetes.io/component` and
 [Job Completes but No Output](#job-completes-but-no-output).)
 
 ```shell
-# From the failing Job (or use the runID the CLI logged at start).
-RUN_ID=$(kubectl get job -n gpu-operator <job-name> -o jsonpath='{.metadata.labels.aicr\.run/run-id}')
+# From the failing Job (or set RUN_ID to the runID the CLI logged at start).
+JOB_NAME="aicr-20260821-142233-9f3a1c0b7e2d4a55"  # replace with the failing Job's name
+RUN_ID="$(kubectl get job -n gpu-operator "${JOB_NAME}" -o jsonpath='{.metadata.labels.aicr\.run/run-id}')"
 
-SA=$(kubectl get sa -n gpu-operator -l app.kubernetes.io/name=aicr,aicr.run/run-id=$RUN_ID -o jsonpath='{.items[0].metadata.name}')
-kubectl auth can-i get nodes --as=system:serviceaccount:gpu-operator:$SA
-kubectl auth can-i get pods --as=system:serviceaccount:gpu-operator:$SA
+SA="$(kubectl get sa -n gpu-operator -l "app.kubernetes.io/name=aicr,aicr.run/run-id=${RUN_ID}" -o jsonpath='{.items[0].metadata.name}')"
+kubectl auth can-i get nodes --as="system:serviceaccount:gpu-operator:${SA}"
+kubectl auth can-i get pods --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list controllers.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list nodesets.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list loginsets.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list restapis.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list accountings.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
 kubectl auth can-i list mariadbs.k8s.mariadb.com --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:$SA
+  --as="system:serviceaccount:gpu-operator:${SA}"
+kubectl auth can-i list storageclasses.storage.k8s.io \
+  --as="system:serviceaccount:gpu-operator:${SA}"
+kubectl auth can-i list perconaservermongodbs.psmdb.percona.com --all-namespaces \
+  --as="system:serviceaccount:gpu-operator:${SA}"
 ```
 
 ### Job Pending
@@ -572,8 +572,9 @@ Check ConfigMap and container logs:
 ```shell
 # Every name below is run-scoped, so start from the run ID. The CLI logs it
 # when it starts ("snapshot agent run: runID=..."); this reads it back off the
-# Job instead. Substitute your own Job name (or use the logged run ID).
-RUN_ID=$(kubectl get job -n gpu-operator <job-name> -o jsonpath='{.metadata.labels.aicr\.run/run-id}')
+# Job instead. Set JOB_NAME to your own Job (or set RUN_ID to the logged run ID).
+JOB_NAME="aicr-20260821-142233-9f3a1c0b7e2d4a55"  # replace with your snapshot Job's name
+RUN_ID="$(kubectl get job -n gpu-operator "${JOB_NAME}" -o jsonpath='{.metadata.labels.aicr\.run/run-id}')"
 
 # Check if the staging ConfigMap was created. Without an explicit
 # "-o cm://<namespace>/<name>", the agent stages its result in a run-scoped
@@ -584,10 +585,10 @@ RUN_ID=$(kubectl get job -n gpu-operator <job-name> -o jsonpath='{.metadata.labe
 # carry the aicr.run/run-id label the Job and RBAC resources do. Address it by
 # name: with concurrent runs, the label selector below matches every run's
 # staging ConfigMap plus any delivered cm:// artifact in the namespace.
-kubectl get configmap -n gpu-operator aicr-agent-snapshot-$RUN_ID
+kubectl get configmap -n gpu-operator "aicr-agent-snapshot-${RUN_ID}"
 
 # View ConfigMap contents
-kubectl get configmap -n gpu-operator aicr-agent-snapshot-$RUN_ID -o yaml
+kubectl get configmap -n gpu-operator "aicr-agent-snapshot-${RUN_ID}" -o yaml
 
 # Or list every aicr-written ConfigMap in the namespace (all runs)
 kubectl get configmap -n gpu-operator -l app.kubernetes.io/name=aicr
@@ -649,7 +650,8 @@ select on it: its value changes every invocation.
 Inspect the named object and delete it yourself if it is a stale leftover:
 
 ```shell
-kubectl get role -n gpu-operator aicr-<run-id> -o yaml
+RUN_ID="20260821-142233-9f3a1c0b7e2d4a55"  # replace with the run ID from the warning
+kubectl get role -n gpu-operator "aicr-${RUN_ID}" -o yaml
 ```
 
 The staging ConfigMap is warned about the same way, but proved differently. It
@@ -673,7 +675,8 @@ liveJobUID=<other-uid>
 Delete it by hand once you have confirmed it is not a live run's:
 
 ```shell
-kubectl get cm -n gpu-operator aicr-agent-snapshot-<run-id> -o yaml
+RUN_ID="20260821-142233-9f3a1c0b7e2d4a55"  # replace with the run ID from the warning
+kubectl get cm -n gpu-operator "aicr-agent-snapshot-${RUN_ID}" -o yaml
 ```
 
 ## Security Considerations
@@ -681,7 +684,7 @@ kubectl get cm -n gpu-operator aicr-agent-snapshot-<run-id> -o yaml
 ### RBAC Permissions
 
 The agent requires these permissions (created automatically by the CLI):
-- **ClusterRole** (`aicr-node-reader-<run-id>`, run-scoped): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`); and `get`/`list` access to DaemonSets (`apps`, for OKE legacy device-plugin detection)
+- **ClusterRole** (`aicr-node-reader-<run-id>`, run-scoped): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`); `get`/`list` access to DaemonSets (`apps`, for OKE legacy device-plugin detection); `list` access to StorageClasses (`storage.k8s.io`, for default StorageClass detection); and cluster-wide `list` access to PerconaServerMongoDB CRs (`psmdb.percona.com`)
 - **Role** (`aicr-<run-id>`, run-scoped): Create/update ConfigMaps and list pods in the deployment namespace
 
 The baseline ClusterRole above is read-only (`get`/`list` only). Slinky
@@ -689,24 +692,19 @@ detection projects only allowlisted identity, association, and boolean fields;
 it omits free-form configuration, status, pod templates, and Secret/ConfigMap
 references or contents. MariaDB detection records only official API-group and
 CR presence; it does not inspect database configuration, Services, operator
-Deployments, pods, or external databases.
+Deployments, pods, or external databases. Percona detection records API-group
+and PerconaServerMongoDB CR presence and whether a Percona operator pod that
+AICR did not install runs; StorageClass detection records only which
+classes are annotated as the default.
 
-**Additional privileges with `--discover-network`.** When `--discover-network`
-is set, the CLI appends a set of **cluster-scoped mutating** rules to the
-ClusterRole so k8s-launch-kit's live discovery can run. These grant far more
-than read access:
-- `apiextensions.k8s.io` CustomResourceDefinitions: `get`, `list`, `create`, `update`, `patch`
-- `namespaces`: `get`, `create`, `delete` (l8k creates and tears down a bootstrap namespace)
-- `apps/daemonsets`: `get`, `list`, `watch`, `create`, `delete`
-- `serviceaccounts`, `configmaps`: `get`, `create`, `delete`
-- `rbac.authorization.k8s.io` roles, rolebindings: `get`, `create`, `delete`
-- `pods/exec`: `create` (l8k exec's into the discovery DaemonSet pods to read VPD / link state)
-- `nodes`: `patch` (writes `nvidia.kubernetes-launch-kit.*` node labels)
-- `configuration.net.nvidia.com` nicdevices: `get`, `list`
-- `mellanox.com` nicclusterpolicies: `get`, `patch`
-
-Use `--discover-network` only against clusters where this mutation and the
-broader RBAC grant are acceptable.
+**Additional read with `--discover-network`.** When `--discover-network` is
+set, the ClusterRole gains one rule: `configuration.net.nvidia.com`
+nicdevices: `get`, `list`. k8s-launch-kit's read-only discovery lists nodes
+and pods (already granted) and the `NicDevice` objects an existing
+`nic-configuration-daemon` publishes; it never creates, patches, deletes, or
+execs. A daemon node without a `NicDevice` fails the collector rather than
+being probed, and a cluster without the Network Operator's daemon gets the
+`NetworkTopology` measurement skipped with a warning.
 
 ### Pre-flight permission gate
 
@@ -768,6 +766,15 @@ creates and deletes no RBAC at all, so none of the five kinds above is
 demanded of you. What it requires instead is that the ServiceAccount was
 actually provisioned — see below.
 
+**Namespace permissions are not part of the gate.** In exact-ServiceAccount
+mode the run does not touch the Namespace object, so it needs no permission
+on it. In prefix mode the run reads the namespace before creating it. An
+existing namespace needs `namespaces: get`, plus `patch` when it lacks the
+`app.kubernetes.io/managed-by=aicr` label. A missing namespace needs
+`namespaces: create`. When one of those requests is refused, the run fails
+with a permission error naming the verb to grant, before it creates any
+RBAC.
+
 #### What the agent ServiceAccount must be able to do
 
 The agent pod runs as a ServiceAccount, not as you, so its permissions are
@@ -777,7 +784,8 @@ derived from the same rule set the run-scoped `Role` and `ClusterRole` grant
 (and that `--add-roles-to-service-account` renders), so the gate cannot fall
 behind what the agent needs: namespaced `configmaps` and `pods` access, plus
 cluster-scoped `nodes`, `pods`, `apps` DaemonSets, `nvidia.com` ClusterPolicies,
-the Slinky CRs and the MariaDB CRs — widened to the full mutating set when
+the Slinky CRs, the MariaDB CRs, StorageClasses, and the PerconaServerMongoDB
+CRs — plus `configuration.net.nvidia.com` NicDevices when
 `--discover-network` is passed.
 
 This check runs **in exact-ServiceAccount mode only**. In prefix mode the

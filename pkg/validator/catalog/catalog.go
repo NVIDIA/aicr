@@ -107,14 +107,21 @@ func ResolveImage(image, version, commit string) string {
 	commit = strings.ToLower(commit)
 	if isReleaseVersion(version) {
 		image = replaceLatestTag(image, version)
-	} else if isValidCommit(commit) {
+	} else if IsValidCommit(commit) {
 		image = replaceLatestWithSHA(image, commit)
 	}
 	if tag := os.Getenv("AICR_VALIDATOR_IMAGE_TAG"); tag != "" {
 		image = replaceTag(image, tag)
 	}
+	return ApplyRegistryOverride(image)
+}
+
+// ApplyRegistryOverride returns image with its registry host and first path
+// segment replaced by AICR_VALIDATOR_IMAGE_REGISTRY, or image unchanged when
+// that variable is unset. It never applies AICR_VALIDATOR_IMAGE_TAG.
+func ApplyRegistryOverride(image string) string {
 	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
-		image = replaceRegistry(image, override)
+		return replaceRegistry(image, override)
 	}
 	return image
 }
@@ -283,10 +290,10 @@ func replaceLatestTag(image, version string) string {
 	return image
 }
 
-// isValidCommit returns true for non-empty strings that look like a git short
-// or full SHA (7-40 hex characters). The sentinel value "unknown" (set by
-// ldflags default) is explicitly rejected.
-func isValidCommit(commit string) bool {
+// IsValidCommit returns true for non-empty strings that look like a git short
+// or full SHA (7-40 lowercase hex characters). The sentinel value "unknown"
+// (set by ldflags default) is explicitly rejected.
+func IsValidCommit(commit string) bool {
 	if commit == "" || commit == "unknown" {
 		return false
 	}

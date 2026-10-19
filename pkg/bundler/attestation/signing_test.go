@@ -22,7 +22,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	stderrors "errors"
 	"math/big"
 	"net/url"
 	"testing"
@@ -35,6 +34,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestSignStatement_RejectsEmptyStatement(t *testing.T) {
@@ -295,7 +296,7 @@ func TestSignStatementWithRejectsNilStrategies(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := SignStatementWith(context.Background(), validStatementJSON(t), tt.id, tt.tlog)
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 			}
 		})

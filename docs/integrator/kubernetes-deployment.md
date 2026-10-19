@@ -619,7 +619,7 @@ as HTTP 429 responses with the `X-RateLimit-*` headers.
 ```shell
 # Update image
 kubectl set image deployment/aicrd \
-  api-server=ghcr.io/nvidia/aicrd:v0.22.0 \
+  api-server=ghcr.io/nvidia/aicrd:v1.0.0 \
   -n aicr
 
 # Watch rollout

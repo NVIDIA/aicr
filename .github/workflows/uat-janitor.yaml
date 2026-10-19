@@ -103,7 +103,7 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'gcp')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -137,7 +137,7 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'aws')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -146,7 +146,7 @@ jobs:
     env:
       AWS_REGION: "us-east-1"
       JANITOR_CONFIG: "tests/uat/aws/cluster-config.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:91762c28d63c6f47774e86a922b84596a8daed031b225b9e7a25bd4910829f9b"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.3@sha256:ff1a04bedf1aa4b30e316404a69a60068b269c6bba3a9d09231f68a69b7898b6"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -175,7 +175,7 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'aws')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -184,7 +184,7 @@ jobs:
     env:
       AWS_REGION: "us-east-1"
       JANITOR_CONFIG: "tests/uat/aws/cluster-config-gb200.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:91762c28d63c6f47774e86a922b84596a8daed031b225b9e7a25bd4910829f9b"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.3@sha256:ff1a04bedf1aa4b30e316404a69a60068b269c6bba3a9d09231f68a69b7898b6"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -206,7 +206,7 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'azure')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -217,7 +217,7 @@ jobs:
       AZURE_TENANT_ID: "43083d15-7273-40c1-b7db-39efd9ccc17a"
       AZURE_SUBSCRIPTION_ID: "e88faa01-b4fd-49d3-b934-0ad9f9fca307"
       JANITOR_CONFIG: "tests/uat/azure/cluster-config.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks@sha256:70f049e45cd0025e0d2172503f9d0569baeabff27080919e2fa04f3339b9f9ee"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks:v0.1.9@sha256:1439c350c218b0507ddefdad6ef0c5040d1ebf9f21282b0d0ec7ce9c0f428d37"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

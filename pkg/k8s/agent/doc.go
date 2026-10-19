@@ -56,21 +56,22 @@ Render the RBAC that grants such a ServiceAccount the agent's permissions
 with BuildServiceAccountRoleManifests (CLI: aicr snapshot
 --add-roles-to-service-account). That path APPLIES NOTHING and contacts no
 cluster: it writes manifests the operator reviews and applies themselves, so
-the decision to grant cluster-scoped -- and, under DiscoverNetwork, mutating
--- permissions is an informed one. What they then apply sits outside every
-run: no run-ID label, never in a created-set, never deleted by run cleanup,
-and removed with kubectl delete -f.
+the decision to grant cluster-scoped permissions is an informed one. What
+they then apply sits outside every run: no run-ID label, never in a
+created-set, never deleted by run cleanup, and removed with kubectl delete -f.
 
 The trade-off is deliberate and opt-in: an adopted ServiceAccount waives
 per-run permission isolation. Concurrent runs sharing it share its grants, and
-a DiscoverNetwork grant leaves cluster-scoped mutating permissions in
-place permanently rather than for one run's lifetime.
+the grants stay in place permanently rather than for one run's lifetime.
 
 Two objects are deliberately NOT run-scoped:
 
-  - The Namespace is ensured, never deleted: it is created if absent and
-    labeled "app.kubernetes.io/managed-by=aicr", patching the label onto a
-    pre-existing namespace rather than silently dropping intent.
+  - The Namespace is never deleted. In prefix mode it is ensured: read
+    first, created if absent, and labeled
+    "app.kubernetes.io/managed-by=aicr", patching the label onto a
+    pre-existing namespace rather than silently dropping intent. In
+    exact-ServiceAccount mode it belongs to whoever provisioned the
+    ServiceAccount and is not read, created or labeled.
   - A caller-supplied "cm://namespace/name" Output is the caller's delivered
     artifact. It is written on purpose and never deleted
     (Config.OwnsOutputConfigMap is false for it).
