@@ -60,7 +60,7 @@ The report grows a `READ FROM CLUSTER` block above the rows, naming the kubeconf
 
 A component installed outside its registry default namespace is still found: the read also tries the namespace your `--to` recipe puts it in (an overlay or mixin can move it, and `--inherit-from` keeps it where it was), and under `flux` the namespace the release itself records. A strict run also fails when the block reports AICR-stamped releases that match no component, since that means the read lost track of something AICR installed.
 
-One axis the cluster read does not cover is the namespace. [When a component moves namespace](#when-a-component-moves-namespace) is an artifact-to-artifact comparison only: the read recovers a version and no namespace, because the namespace is an input to the attribution rather than something the records hand back, and three of the six deployers could not report one at all. A relocation row therefore never appears against `--from cluster`. Keep the artifact comparison for that question.
+One axis the cluster read does not cover is the namespace. [When a component moves namespace](#when-a-component-moves-namespace) is an artifact-to-artifact comparison only: the read recovers a version and no namespace, because the namespace is an input to the attribution rather than something the records hand back, and three of the seven deployers could not report one at all. A relocation row therefore never appears against `--from cluster`. Keep the artifact comparison for that question.
 
 ## Objects the upgrade could destroy
 

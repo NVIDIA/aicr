@@ -42,7 +42,7 @@ shown here will not disappear or be renamed without a deliberate, reviewed
 change. Automation may read these paths.
 
 Every deployer writes `bundle-info.yaml`, `checksums.txt`, `README.md` and
-`recipe.yaml` at the bundle root. Five of the six group components into
+`recipe.yaml` at the bundle root. Six of the seven group components into
 ordered `NNN-<component>` directories; Flux is the exception and uses a plain
 `<component>` directory with shared `sources/`.
 
