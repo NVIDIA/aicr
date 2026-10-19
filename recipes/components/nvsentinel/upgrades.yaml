@@ -284,7 +284,7 @@ transitions:
       no record. This rests on the CRD diff and upstream's notes; the
       rollback itself was not exercised.
     stepsByDeployer:
-      - deployers: [helmfile]
+      - deployers: [helmfile, fleet]
         steps:
           - id: apply-new-crds
             description: >-
@@ -295,13 +295,17 @@ transitions:
               EXCLUDE_SUBCHARTS=mongodb-store, so the Percona CRDs
               psmdb-operator owns are left alone.
             reason: >-
-              helmfile never updates CRDs for ownsCRDs components. Without
-              a GPUReset CRD from v1.27.0 or later, the API server prunes
+              helmfile and fleet never update CRDs for ownsCRDs components
+              (Fleet's Helm upgrade skips crds/). Without a GPUReset CRD
+              from v1.27.0 or later, the API server prunes
               status.managedServices and every GPU reset stalls before its
               Job.
           - id: apply
             description: >-
-              Run helmfile apply from a bundle generated at the new pin.
+              Run helmfile apply from a bundle generated at the new pin
+              (helmfile), or push the regenerated bundle (fleet GitRepo
+              mode) or apply the regenerated helmops.yaml (fleet HelmOp
+              mode) and let Fleet reconcile it.
             reason: >-
               Rolls the DaemonSets and Deployments to v1.28.0.
           - id: reset-breaker
