@@ -19,7 +19,8 @@ kind: ComponentUpgrades
 component: psmdb-operator
 transitions:
   # A patch boundary that still changes the CRDs. Manual rather than safe
-  # because helmfile and terraform never apply a changed crds/ directory.
+  # because helmfile, terraform and fleet never apply a changed crds/
+  # directory.
   - from: ">=1.23.0 <1.23.2"
     to: "=1.23.2"
     verdict: manual
@@ -83,6 +84,37 @@ transitions:
             reason: >-
               The module graph orders psmdb-operator before nvsentinel-mongodb,
               so the operator is upgraded before the cluster's images move.
+          - id: verify
+            description: >-
+              kubectl get perconaservermongodb nvsentinel-mongodb -n
+              nvsentinel reports ready.
+            reason: >-
+              The members restart one at a time; ready means all three rejoined
+              on the new images.
+      - deployers: [fleet]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Before applying the regenerated bundle, apply the new CRDs to
+              every downstream cluster the bundle targets, using the
+              CRD-apply command under "Upgrade, uninstall, and
+              troubleshooting" in docs/user/component-catalog.md, with
+              CHART=psmdb-operator,
+              REPO=https://percona.github.io/percona-helm-charts/,
+              VERSION=1.23.2 and MANAGER set to the manager that section's
+              managed-fields check reports for the installed CRDs.
+            reason: >-
+              Fleet's Helm upgrade skips crds/, so Fleet never applies a
+              changed crds/ directory, and Percona requires the new CRDs
+              before the new operator.
+          - id: apply-bundle
+            description: >-
+              Push the regenerated bundle (GitRepo mode) or apply the
+              regenerated helmops.yaml (HelmOp mode) and let Fleet reconcile
+              it.
+            reason: >-
+              Each Fleet bundle dependsOn the one before it, so psmdb-operator
+              is upgraded before nvsentinel-mongodb's images move.
           - id: verify
             description: >-
               kubectl get perconaservermongodb nvsentinel-mongodb -n
@@ -193,6 +225,37 @@ transitions:
             reason: >-
               The module graph orders psmdb-operator before nvsentinel-mongodb,
               so the operator is upgraded before the cluster's crVersion moves.
+          - id: verify
+            description: >-
+              kubectl get perconaservermongodb nvsentinel-mongodb -n
+              nvsentinel reports ready.
+            reason: >-
+              The members restart one at a time; ready means all three rejoined
+              on the new images.
+      - deployers: [fleet]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Before applying the regenerated bundle, apply the new CRDs to
+              every downstream cluster the bundle targets, using the
+              CRD-apply command under "Upgrade, uninstall, and
+              troubleshooting" in docs/user/component-catalog.md, with
+              CHART=psmdb-operator,
+              REPO=https://percona.github.io/percona-helm-charts/,
+              VERSION=<new> and MANAGER set to the manager that section's
+              managed-fields check reports for the installed CRDs.
+            reason: >-
+              Fleet's Helm upgrade skips crds/, so Fleet never applies a
+              changed crds/ directory, and Percona requires the new CRDs
+              before the new operator.
+          - id: apply-bundle
+            description: >-
+              Push the regenerated bundle (GitRepo mode) or apply the
+              regenerated helmops.yaml (HelmOp mode) and let Fleet reconcile
+              it.
+            reason: >-
+              Each Fleet bundle dependsOn the one before it, so psmdb-operator
+              is upgraded before nvsentinel-mongodb's crVersion moves.
           - id: verify
             description: >-
               kubectl get perconaservermongodb nvsentinel-mongodb -n
