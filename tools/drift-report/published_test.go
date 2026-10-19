@@ -151,7 +151,7 @@ func TestFillPublished(t *testing.T) {
 				{Version: "92.2.0", UpdateType: "major"},
 			}},
 		// A current docker pin has nothing to screen.
-		"ghcr.io/nvidia/nvsentinel": {DepName: "ghcr.io/nvidia/nvsentinel", Datasource: "docker", Current: "v1.26.0"},
+		"ghcr.io/nvidia/nvsentinel": {DepName: "ghcr.io/nvidia/nvsentinel", Datasource: "docker", Current: "v1.28.0"},
 		// An unresolved pin is never screened either.
 		"ghcr.io/broken/chart": {DepName: "ghcr.io/broken/chart", Datasource: "docker", Current: "v1.0.0",
 			Problem: "lookup failed", Candidates: []Candidate{{Version: "v1.1.0", UpdateType: "minor"}}},

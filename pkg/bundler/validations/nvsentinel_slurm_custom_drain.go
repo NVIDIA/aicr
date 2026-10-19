@@ -29,7 +29,7 @@ import (
 
 // Paths and names CheckNVSentinelSlurmCustomDrainCoherent reads. The
 // customDrain contract values are what node-drainer must be told for the
-// slinky-drainer plugin AICR vendors (NVSentinel v1.26.0): the plugin's CRD,
+// slinky-drainer plugin AICR vendors (NVSentinel v1.28.0): the plugin's CRD,
 // its template ConfigMap and the condition it sets when a drain completes.
 const (
 	slinkyDrainerComponent             = "slinky-drainer"
@@ -228,7 +228,7 @@ func CheckNVSentinelSlurmCustomDrainCoherent(ctx context.Context, componentName 
 // customDrainContractViolations checks node-drainer's customDrain values
 // against the vendored plugin, and the unscoped form of the scope rules
 // node-drainer validates at startup (pkg/config/config.go, NVSentinel
-// v1.26.0).
+// v1.28.0).
 func customDrainContractViolations(componentName string, values map[string]any, sentinelNS string) []error {
 	var errs []error
 	fail := func(format string, args ...any) {

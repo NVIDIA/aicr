@@ -224,8 +224,8 @@ func TestSlinkyDrainerImagePinnedEverywhere(t *testing.T) {
 }
 
 // upstreamSlinkyDrainTemplate is key drain-template.yaml of NVSentinel
-// v1.26.0's plugins/slinky-drainer/config/drain-template/drain-template-configmap.yaml
-// (commit a5b9e90f). node-drainer renders it into each DrainRequest, so a
+// v1.28.0's plugins/slinky-drainer/config/drain-template/drain-template-configmap.yaml
+// (commit 5b438529). node-drainer renders it into each DrainRequest, so a
 // drifted copy creates requests the plugin cannot read.
 const upstreamSlinkyDrainTemplate = `apiVersion: nvsentinel.nvidia.com/v1alpha1
 kind: DrainRequest
@@ -287,7 +287,7 @@ func TestSlinkyDrainTemplateMatchesUpstream(t *testing.T) {
 		t.Fatalf("decoding drain-template.yaml: %v", err)
 	}
 	if string(decoded) != upstreamSlinkyDrainTemplate {
-		t.Errorf("decoded template differs from NVSentinel v1.26.0's:\n%s", fmt.Sprintf("%q", decoded))
+		t.Errorf("decoded template differs from NVSentinel v1.28.0's:\n%s", fmt.Sprintf("%q", decoded))
 	}
 }
 

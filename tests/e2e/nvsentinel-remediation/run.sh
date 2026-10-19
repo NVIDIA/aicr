@@ -374,10 +374,11 @@ test_gpu_scoped_event_reaches_dry_run() {
     fail "event delivered" "platform-connectors accepted the event but set no GpuXidError condition"
   fi
 
-  if wait_for_log fault-quarantine "${since}" "Cordoning node" "${NODE}"; then
+  # In dry run fault-quarantine logs this instead of "Cordoning node" (v1.27.0).
+  if wait_for_log fault-quarantine "${since}" "Would cordon node (dry run)" "${NODE}"; then
     pass "fault-quarantine matched the event and decided to cordon"
   else
-    fail "fault-quarantine matched the event" "no 'Cordoning node' for ${NODE} within ${PIPELINE_WAIT_SECONDS}s"
+    fail "fault-quarantine matched the event" "no 'Would cordon node (dry run)' for ${NODE} within ${PIPELINE_WAIT_SECONDS}s"
   fi
 
   if wait_for_log fault-remediation "${since}" "DRY-RUN: Skipping custom resource creation" "${NODE}"; then

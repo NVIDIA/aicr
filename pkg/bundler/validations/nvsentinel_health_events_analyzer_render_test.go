@@ -29,7 +29,7 @@ const (
 	// healthEventsAnalyzerImage is the image docs/user/container-images.md
 	// discloses for the mixin. The static BOM cannot see a mixin-gated
 	// subchart, so this assertion is what keeps that note honest.
-	healthEventsAnalyzerImage = "ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.26.0"
+	healthEventsAnalyzerImage = "ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.28.0"
 	healthEventsAnalyzerName  = "health-events-analyzer"
 )
 
