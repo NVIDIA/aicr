@@ -134,7 +134,7 @@ backup:
   enabled: false
   image:
     repository: docker.io/percona/percona-backup-mongodb
-    tag: "2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5"
+    tag: "2.17.0@sha256:d3b1f82393991542ca1222c8c80a83830383a2fd51f064f6da939af776b9c01d"
 logcollector:
   enabled: false
   image:
