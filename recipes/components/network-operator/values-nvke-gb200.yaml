@@ -70,3 +70,9 @@ sriov-network-operator:
       enabled: true
   sriovOperatorConfig:
     deploy: true
+    # No firmware writes: the mellanox plugin rewrites NUM_OF_VFS to each
+    # policy's numVfs and resets the NIC, which these trays reject, leaving
+    # the node drained. SR-IOV, NUM_OF_VFS and the IB link type are host
+    # prerequisites (docs/integrator/nvke-gb200-setup.md).
+    disablePlugins:
+      - mellanox

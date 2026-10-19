@@ -23,11 +23,9 @@
 #   rail 2  0010:03:00.0  mlx5_3
 #   rail 3  0012:03:00.0  mlx5_4
 # numVfs 16 is the CX-7 firmware's NUM_OF_VFS on these trays (k8s-launch-kit
-# proposes 8). The config daemon's Mellanox plugin rewrites firmware to
-# exactly numVfs and then needs a firmware reset, which this SKU rejects
-# (mstfwreset level 3 "not supported in the current state"), leaving the node
-# cordoned forever; matching the firmware count keeps the plugin out of the
-# firmware and VF creation is a sysfs write with no drain or reboot.
+# proposes 8) and cannot exceed it: the network-operator values disable the
+# config daemon's mellanox plugin, so nothing in the cluster changes firmware
+# and VF creation is a sysfs write with no drain or reboot.
 # The IPPool subnets are IPoIB-only on the isolated IB fabric.
 # The VF netdevs are IPoIB children, so ib_ipoib must be loaded on the host
 # (rdma-modules component).

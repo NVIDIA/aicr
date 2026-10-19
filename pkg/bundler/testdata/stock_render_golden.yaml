@@ -1541,12 +1541,12 @@ gb200-nvke-ubuntu-training:
   012-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   012-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  012-network-operator/values.yaml: ce3b53dfca383d9443717cde86e0f5d1e882c022bf902f04a0bed9517458d831
+  012-network-operator/values.yaml: 3365fc51f74f52bf9cc2c81ceea8ad53f166f6018386cc086e3c31347937de0e
   013-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   013-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   013-network-operator-post/templates/nic-cluster-policy-nvke-gb200.yaml: f31d3c0daf7817f27d087f2b64bf0a37170b21296bdb9758c9e5fc386d629705
-  013-network-operator-post/values.yaml: ce3b53dfca383d9443717cde86e0f5d1e882c022bf902f04a0bed9517458d831
+  013-network-operator-post/values.yaml: 3365fc51f74f52bf9cc2c81ceea8ad53f166f6018386cc086e3c31347937de0e
   014-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   014-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -1559,12 +1559,12 @@ gb200-nvke-ubuntu-training:
   016-sriov-ib-networks/Chart.yaml: cf11fef32f24b6aefc8716a9431095cfb684127211b920f22faa6070114dd946
   016-sriov-ib-networks/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-sriov-ib-networks/install.sh: 8f4bff183a9169f137fd0c47dc059b67b1fa6121531af7d3000b093de7c277fc
-  016-sriov-ib-networks/templates/nvke-gb200.yaml: a4f1de76967bb0cd9c1fe68bd16c646420750f11e54d7210d410479457400a03
+  016-sriov-ib-networks/templates/nvke-gb200.yaml: 5e1ced9e40316ed6bf0d325ea87e3677cc308f553e121996647e0f61598b2988
   016-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: ed5dcff397d780ef3f37a3d55055f2d89dbf0170fdce55cd83030ecd2236d5e2
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 1e9e1f0cac27afb0b2509fad49cff0fb54f894aeed3af351941ff14b0d7349e0
-  checksums.txt: 85802534d733a9c14385f01b6f94672f9406657de6de74af98f4ee8a3fd36c44
+  checksums.txt: f4600b698757ab1868ce36dea96fc306bc18abdd5b8c0ff59c13a5a1b83ffda0
   deploy.sh: 6b1ca68f57b4def8a85283654c51c54dbaf71c4969ecca1720e71893fb47d81a
   recipe.yaml: 1aad7da619d4194f781359a2cced5c8cba89ed57e6c6818017c0c1d754d0856f
 gb200-oke-ubuntu-inference-dynamo:

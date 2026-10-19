@@ -102,15 +102,17 @@ spec:
 This is the shape k8s-launch-kit generates for
 `--deployment-type sriov --fabric infiniband` on this topology, minus its
 `secondaryNetwork.multus`/`cniPlugins` (preinstalled on NVKE, see above) and
-with the Maintenance Operator budget set to one node, and with `numVfs`
-raised from l8k's 8 to the firmware's 16. That last point matters: the
-config daemon's Mellanox plugin rewrites firmware `NUM_OF_VFS` to exactly
-`numVfs` and then runs `mstfwreset -l 3`, which this tray's firmware rejects
-("not supported in the current state of this device"), so a policy that
-differs from the firmware count drains the node and then loops on the reset
-with the node cordoned. With the counts equal, VF creation is a sysfs write
-and no drain or reboot happens. Check `mstconfig -d <pf> q NUM_OF_VFS` before
-changing `numVfs`. The policies and pools select nodes by
+with the Maintenance Operator budget set to one node, with `numVfs` raised
+from l8k's 8 to the firmware's 16, and with the SR-IOV config daemon's
+`mellanox` plugin disabled (`sriovOperatorConfig.disablePlugins`). That
+plugin rewrites firmware `NUM_OF_VFS` to exactly `numVfs` and then runs
+`mstfwreset -l 3`, which this tray's firmware rejects ("not supported in the
+current state of this device"); with it enabled, a policy that differed from
+the firmware count drained the node and then looped on the reset with the
+node cordoned. With the plugin off, firmware is a host prerequisite (SR-IOV
+enabled, `NUM_OF_VFS`, IB link type) and VF creation is a sysfs write with no
+drain or reboot, so `numVfs` must not exceed the firmware count. Check
+`mstconfig -d <pf> q NUM_OF_VFS` before changing `numVfs`. The policies and pools select nodes by
 `feature.node.kubernetes.io/rdma.available=true` rather than
 `pci-15b3.present`: the control plane carries that label (and
 `pci-0302_10de.present`) without any ConnectX-7, and when it was selected
