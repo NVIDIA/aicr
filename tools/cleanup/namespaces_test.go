@@ -16,11 +16,52 @@ package main
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// catalogNamespaces maps every namespace the embedded catalog deploys into,
+// from a registry defaultNamespace or a recipe componentRef, to where it is
+// named.
+func catalogNamespaces(t *testing.T) map[string]string {
+	t.Helper()
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	store, err := recipe.LoadMetadataStoreFor(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor() error = %v", err)
+	}
+
+	named := map[string]string{}
+	add := func(ns, source string) {
+		if ns != "" && named[ns] == "" {
+			named[ns] = source
+		}
+	}
+	for _, c := range registry.Components {
+		add(c.Helm.DefaultNamespace, "the defaultNamespace of "+c.Name)
+	}
+	addRefs := func(refs []recipe.ComponentRef, recipeName string) {
+		for _, ref := range refs {
+			add(ref.Namespace, "the "+ref.Name+" componentRef of "+recipeName)
+		}
+	}
+	if store.Base != nil {
+		addRefs(store.Base.Spec.ComponentRefs, "the base recipe")
+	}
+	for _, name := range slices.Sorted(maps.Keys(store.Overlays)) {
+		addRefs(store.Overlays[name].Spec.ComponentRefs, "overlay "+name)
+	}
+	for _, name := range slices.Sorted(maps.Keys(store.Mixins)) {
+		addRefs(store.Mixins[name].Spec.ComponentRefs, "mixin "+name)
+	}
+	return named
+}
 
 func TestOwnedNamespaces(t *testing.T) {
 	got, err := ownedNamespaces(context.Background())
@@ -33,33 +74,50 @@ func TestOwnedNamespaces(t *testing.T) {
 	if slices.Contains(got, "") {
 		t.Error("ownedNamespaces() contains an empty namespace")
 	}
-	for ns := range notOwnedNamespaces {
-		if slices.Contains(got, ns) {
-			t.Errorf("ownedNamespaces() contains not-owned namespace %q", ns)
-		}
+	owned := map[string]bool{}
+	for _, ns := range got {
+		owned[ns] = true
 	}
-	for _, ns := range runtimeNamespaces {
-		if !slices.Contains(got, ns) {
-			t.Errorf("ownedNamespaces() is missing runtime namespace %q", ns)
-		}
-	}
+	catalog := catalogNamespaces(t)
 
-	registry, err := recipe.GetComponentRegistry()
-	if err != nil {
-		t.Fatalf("GetComponentRegistry() error = %v", err)
-	}
-	for _, c := range registry.Components {
-		ns := c.Helm.DefaultNamespace
-		if ns == "" || notOwnedNamespaces[ns] != "" {
-			continue
+	t.Run("catalog namespaces are owned or excepted", func(t *testing.T) {
+		for ns, source := range catalog {
+			if !owned[ns] && notOwnedNamespaces[ns] == "" {
+				t.Errorf("%q, %s, is not cleaned up and notOwnedNamespaces gives no reason", ns, source)
+			}
 		}
-		if !slices.Contains(got, ns) {
-			t.Errorf("ownedNamespaces() is missing %q, the defaultNamespace of %s", ns, c.Name)
+	})
+
+	t.Run("owned namespaces come from the catalog or runtimeNamespaces", func(t *testing.T) {
+		for _, ns := range got {
+			if catalog[ns] == "" && runtimeNamespaces[ns] == "" {
+				t.Errorf("%q is cleaned up, but no recipe names it and runtimeNamespaces gives no reason", ns)
+			}
 		}
-	}
-	for _, ns := range []string{"privileged-gpu-operator", "privileged-nodewright-operator"} {
-		if !slices.Contains(got, ns) {
-			t.Errorf("ownedNamespaces() is missing mixin namespace %q", ns)
+	})
+
+	t.Run("exceptions are reasoned and current", func(t *testing.T) {
+		for ns, reason := range notOwnedNamespaces {
+			if reason == "" {
+				t.Errorf("notOwnedNamespaces[%q] has no reason", ns)
+			}
+			if owned[ns] {
+				t.Errorf("not-owned namespace %q is cleaned up", ns)
+			}
 		}
-	}
+		for ns, reason := range runtimeNamespaces {
+			if reason == "" {
+				t.Errorf("runtimeNamespaces[%q] has no reason", ns)
+			}
+			if source := catalog[ns]; source != "" {
+				t.Errorf("runtimeNamespaces lists %q, which is already %s", ns, source)
+			}
+			if notOwnedNamespaces[ns] != "" {
+				t.Errorf("%q is in both runtimeNamespaces and notOwnedNamespaces", ns)
+			}
+			if !owned[ns] {
+				t.Errorf("runtime namespace %q is not cleaned up", ns)
+			}
+		}
+	})
 }

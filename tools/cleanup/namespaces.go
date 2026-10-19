@@ -27,8 +27,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// notOwnedNamespaces are namespaces recipes deploy into that cleanup must
-// never delete, each with the reason.
+// notOwnedNamespaces maps namespaces cleanup must never delete, even when a
+// recipe deploys into them, to the reason.
 var notOwnedNamespaces = map[string]string{
 	defaults.KubeSystemNamespace: "shared control-plane namespace, and deleting it breaks the cluster",
 	metav1.NamespaceDefault:      "shared namespace for workloads that name none",
@@ -36,15 +36,12 @@ var notOwnedNamespaces = map[string]string{
 	corev1.NamespaceNodeLease:    "shared namespace holding the kubelet heartbeat Leases",
 }
 
-// runtimeNamespaces are namespaces cleanup owns that no recipe names.
-var runtimeNamespaces = []string{
-	// Nodewright's former name. Older installs keep their release here
-	// because Helm cannot move a release.
-	"skyhook",
-	// Created by kai-scheduler.
-	"kai-resource-reservation",
-	// Created by the CNCF evidence collector, without a per-run suffix.
-	"gang-scheduling-test",
+// runtimeNamespaces maps namespaces cleanup owns that no recipe names to the
+// reason.
+var runtimeNamespaces = map[string]string{
+	"skyhook":                  "Nodewright's former name, kept by older installs because Helm cannot move a release",
+	"kai-resource-reservation": "created by kai-scheduler",
+	"gang-scheduling-test":     "created by the CNCF evidence collector, without a per-run suffix",
 }
 
 // ownedNamespaces returns the sorted namespaces any recipe in the embedded
@@ -64,7 +61,7 @@ func ownedNamespaces(ctx context.Context) ([]string, error) {
 	}
 
 	set := map[string]bool{}
-	for _, ns := range runtimeNamespaces {
+	for ns := range runtimeNamespaces {
 		set[ns] = true
 	}
 	for _, c := range registry.Components {
