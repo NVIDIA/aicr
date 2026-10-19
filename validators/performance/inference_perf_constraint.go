@@ -460,6 +460,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// Guard B: dynamo-platform must be declared in the recipe's componentRefs.
 	// Presence of a Criteria block is independent and not consulted here.
 	if !hasDynamoPlatform(ctx) {
+		validators.EmitExtraOrWarn(map[string]string{validators.ExtraKeySkipReason: validators.SkipReasonComponentNotInRecipe})
 		return &inferenceResult{status: inferenceSkipMsgNoDynamoPlatform}, nil
 	}
 
@@ -516,6 +517,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	policy := ctx.ValidationInput.GetGPUAllocationPolicy()
 	fmt.Printf("--- GPU allocation policy ---\nconfigured policy: %s\n%s\n",
 		policy, mode.Summary())
+	validators.EmitExtraOrWarn(validators.GPUAllocationPolicyExtra(policy))
 	if verifyErr := allocmode.Verify(policy, mode); verifyErr != nil {
 		return nil, verifyErr
 	}
@@ -524,6 +526,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	validators.EmitExtraOrWarn(validators.GPUAllocationResolvedExtra(config.useDRAWorkerClaims(), true))
 	wiring := "device plugin (resources.limits nvidia.com/gpu)"
 	if config.useDRAWorkerClaims() {
 		wiring = "DRA (gpu.nvidia.com ResourceClaimTemplate)"

@@ -95,8 +95,8 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 	// this check's business. This also covers the #1327 standalone-run boundary,
 	// where there is no recipe context at all.
 	if !validators.RecipeDeclares(ctx, tcpxoComponent) {
-		return validators.Skip(
-			tcpxoComponent + " not declared in recipe — GPUDirect TCPXO networking is inapplicable")
+		return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe,
+			tcpxoComponent+" not declared in recipe, so GPUDirect TCPXO networking is inapplicable")
 	}
 
 	// Evidence to stdout.

@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // fullSnapshot builds a snapshot exercising every collector measurement type
@@ -517,6 +518,151 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			},
 			want: map[string]string{"runtimeSource": "delivered-artifact"},
 		},
+		{
+			name: "nccl bandwidth outcome and scope survive",
+			in: map[string]string{
+				"achievedGbps": "305.4", "thresholdGbps": "300", "tolerancePct": "10",
+				"passMargin": "+1.8", "workerNodes": "2", "gpusInvolved": "16",
+				"transport": "net", "fabric": "efa",
+			},
+			want: map[string]string{
+				"achievedGbps": "305.4", "thresholdGbps": "300", "tolerancePct": "10",
+				"passMargin": "+1.8", "workerNodes": "2", "gpusInvolved": "16",
+				"transport": "net", "fabric": "efa",
+			},
+		},
+		{
+			name: "negative pass margin survives",
+			in:   map[string]string{"passMargin": "-12.3"},
+			want: map[string]string{"passMargin": "-12.3"},
+		},
+		{
+			name: "decimal finer than one place is dropped",
+			in:   map[string]string{"achievedGbps": "305.42", "ttftP99Ms": "182.3"},
+			want: map[string]string{"ttftP99Ms": "182.3"},
+		},
+		{
+			name: "unsigned or malformed margin is dropped",
+			in:   map[string]string{"passMargin": "1.8", "achievedGbps": "-1"},
+			want: nil,
+		},
+		{
+			name: "decimal exceeding the digit bound is dropped",
+			in:   map[string]string{"throughputTokPerSec": "1234567"},
+			want: nil,
+		},
+		{
+			name: "NaN and Inf measurements are dropped",
+			in:   map[string]string{"achievedGbps": "NaN", "passMargin": "+Inf"},
+			want: nil,
+		},
+		{
+			name: "unlisted transport or fabric is dropped",
+			in:   map[string]string{"transport": "socket", "fabric": "10.0.0.5"},
+			want: nil,
+		},
+		{
+			name: "readiness gate counts survive",
+			in: map[string]string{
+				"draReady": "8", "draDesired": "8", "nodewrightComplete": "3",
+				"nodewrightExpected": "3", "namespacesActive": "6", "namespacesExpected": "6",
+			},
+			want: map[string]string{
+				"draReady": "8", "draDesired": "8", "nodewrightComplete": "3",
+				"nodewrightExpected": "3", "namespacesActive": "6", "namespacesExpected": "6",
+			},
+		},
+		{
+			name: "inference metrics and scope survive",
+			in: map[string]string{
+				"throughputTokPerSec": "4120.5", "ttftP99Ms": "182.3", "throughputThreshold": "5000",
+				"ttftThresholdMs": "200", "scaledThreshold": "2500", "gpusBenchmarked": "4", "gpusPerNode": "8",
+			},
+			want: map[string]string{
+				"throughputTokPerSec": "4120.5", "ttftP99Ms": "182.3", "throughputThreshold": "5000",
+				"ttftThresholdMs": "200", "scaledThreshold": "2500", "gpusBenchmarked": "4", "gpusPerNode": "8",
+			},
+		},
+		{
+			name: "allocation policy codes survive",
+			in:   map[string]string{"configuredPolicy": "dra-resource-claim", "resolvedMode": "device-plugin-extended-resource", "nodeLocal": "true"},
+			want: map[string]string{"configuredPolicy": "dra-resource-claim", "resolvedMode": "device-plugin-extended-resource", "nodeLocal": "true"},
+		},
+		{
+			name: "unknown policy, unresolvable mode, non-boolean flag are dropped",
+			in:   map[string]string{"configuredPolicy": "my-policy", "resolvedMode": "unspecified", "nodeLocal": "yes"},
+			want: nil,
+		},
+		{
+			name: "operator version and verdict survive",
+			in:   map[string]string{"detectedVersion": "v25.3.0", "versionSatisfied": "false"},
+			want: map[string]string{"detectedVersion": "v25.3.0", "versionSatisfied": "false"},
+		},
+		{
+			name: "two-component version survives",
+			in:   map[string]string{"detectedVersion": "v25.10"},
+			want: map[string]string{"detectedVersion": "v25.10"},
+		},
+		{
+			name: "one-component version survives",
+			in:   map[string]string{"detectedVersion": "v25"},
+			want: map[string]string{"detectedVersion": "v25"},
+		},
+		{
+			name: "pre-release versions survive",
+			in:   map[string]string{"detectedVersion": "v25.3.0-rc.1", "versionSatisfied": "true"},
+			want: map[string]string{"detectedVersion": "v25.3.0-rc.1", "versionSatisfied": "true"},
+		},
+		{
+			name: "undotted pre-release survives",
+			in:   map[string]string{"detectedVersion": "v26.7-beta2"},
+			want: map[string]string{"detectedVersion": "v26.7-beta2"},
+		},
+		{
+			name: "pre-release with build metadata is dropped",
+			in:   map[string]string{"detectedVersion": "v25.3.0-rc.1+acme"},
+			want: nil,
+		},
+		{
+			name: "over-long pre-release number is dropped",
+			in:   map[string]string{"detectedVersion": "v25.3.0-rc.12345"},
+			want: nil,
+		},
+		{
+			name: "non-numeric version is dropped",
+			in:   map[string]string{"detectedVersion": "vlatest"},
+			want: nil,
+		},
+		{
+			name: "version with free-text suffix is dropped",
+			in:   map[string]string{"detectedVersion": "v25.3.0-acme-prod"},
+			want: nil,
+		},
+		{
+			name: "version with build metadata is dropped",
+			in:   map[string]string{"detectedVersion": "v25.3.0+acme"},
+			want: nil,
+		},
+		{
+			name: "unprefixed version is dropped",
+			in:   map[string]string{"detectedVersion": "25.3.0"},
+			want: nil,
+		},
+		{
+			name: "non-canonical version is dropped",
+			in:   map[string]string{"detectedVersion": "v025.03.0"},
+			want: nil,
+		},
+		{
+			name: "over-long version component is dropped",
+			in:   map[string]string{"detectedVersion": "v12345.0.0"},
+			want: nil,
+		},
+		{
+			name: "new skip codes survive",
+			in:   map[string]string{"skipReason": "component-not-in-recipe"},
+			want: map[string]string{"skipReason": "component-not-in-recipe"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -524,6 +670,24 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			got := out.Results.Tests[0].Extra
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("redacted Extra = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCTRFKeepsEveryGPUAllocationPolicy checks that every pkg/validator/v1 GPU
+// allocation policy survives redaction as configuredPolicy.
+func TestCTRFKeepsEveryGPUAllocationPolicy(t *testing.T) {
+	for _, policy := range []string{
+		validatorv1.GPUAllocationPolicyUnspecified,
+		validatorv1.GPUAllocationPolicyDevicePluginExtendedResource,
+		validatorv1.GPUAllocationPolicyDRAResourceClaim,
+		validatorv1.GPUAllocationPolicyDRAExtendedResource,
+	} {
+		t.Run(policy, func(t *testing.T) {
+			out, _ := redact.CTRF(reportWithExtra(map[string]string{"configuredPolicy": policy}))
+			if got := out.Results.Tests[0].Extra["configuredPolicy"]; got != policy {
+				t.Errorf("configuredPolicy %q dropped by redaction (got %q)", policy, got)
 			}
 		})
 	}

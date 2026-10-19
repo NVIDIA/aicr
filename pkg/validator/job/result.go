@@ -20,6 +20,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -243,19 +244,12 @@ func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.Runt
 	return extra, prov, stdout
 }
 
-// parseExtraSentinels scans the raw pod logs for the two sentinel transports —
-// ctrf.ExtraLinePrefix (a check's structured Extra map) and
-// ctrf.ProvenanceLinePrefix (a derived runtime's RuntimeProvenance record) —
-// and returns the logs with every sentinel line removed plus the LAST VALID
-// non-empty payload of each.
-//
-// Each sentinel is parsed as it is encountered: a malformed one is logged at
-// WARN and skipped WITHOUT discarding an earlier valid payload, so a valid
-// coverage/skip line followed by a garbled line still yields the valid map. A
-// merged/garbled line must never flip a passing check to an error — the exit
-// code, not this map, is the verdict. Returns (logs, nil, nil) when no sentinel
-// is present; extra is nil unless some line parsed to a non-empty object, and
-// prov is nil unless some line parsed to a record carrying both digests.
+// parseExtraSentinels returns logs with every ctrf.ExtraLinePrefix and
+// ctrf.ProvenanceLinePrefix line removed as cleaned, the valid Extra payloads
+// merged as extra (a later value wins per key), and the last valid provenance
+// record as prov. A malformed line is logged and skipped without discarding
+// earlier payloads. extra is nil unless some line parsed to a non-empty
+// object, and prov is nil unless some record carried both digests.
 func parseExtraSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance) {
 	if !strings.Contains(logs, ctrf.ExtraLinePrefix) && !strings.Contains(logs, ctrf.ProvenanceLinePrefix) {
 		return logs, nil, nil
@@ -266,9 +260,13 @@ func parseExtraSentinels(logs string) (cleaned string, extra map[string]string, 
 		if payload, ok := strings.CutPrefix(line, ctrf.ExtraLinePrefix); ok {
 			var parsed map[string]string
 			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+				// Logged, not returned, because the exit code is the verdict.
 				slog.Warn("failed to parse validator extra sentinel; dropping", "error", err)
 			} else if len(parsed) > 0 {
-				extra = parsed // keep the last VALID non-empty payload
+				if extra == nil {
+					extra = make(map[string]string, len(parsed))
+				}
+				maps.Copy(extra, parsed)
 			}
 			continue // transport, not human evidence — strip it
 		}

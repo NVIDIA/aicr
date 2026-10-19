@@ -15,6 +15,7 @@
 package validators
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"net/url"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -153,7 +155,19 @@ func TestCapabilityRequire(t *testing.T) {
 				AbsentMsg:       "recipe declares kai-scheduler but its Deployment is absent — apply the bundle or check RBAC",
 				InapplicableMsg: "KAI scheduler not found — cluster may use a different scheduler",
 			}
+			var extra bytes.Buffer
+			origOut := extrasOut
+			extrasOut = &extra
 			err := capability.Require(ctx, tt.probeErr, tt.present)
+			extrasOut = origOut
+
+			wantExtra := ""
+			if tt.want == wantSkip {
+				wantExtra = ctrf.ExtraLinePrefix + `{"skipReason":"component-not-in-recipe"}` + "\n"
+			}
+			if extra.String() != wantExtra {
+				t.Errorf("Require() emitted %q, want %q", extra.String(), wantExtra)
+			}
 
 			switch tt.want {
 			case wantProceed:

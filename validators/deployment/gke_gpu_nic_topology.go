@@ -34,11 +34,9 @@ import (
 // gkenet.RequiredGPUNICInterfaces.
 const gkeAcceleratorLabel = "cloud.google.com/gke-accelerator=nvidia-h100-mega-80gb"
 
-// Coverage keys for EmitExtra (constants so the package's literal-occurrence count
-// stays under the goconst threshold).
 const (
-	topoKeyValidated = "nodesValidated"
-	topoKeyTotal     = "nodesTotal"
+	topoKeyValidated = validators.ExtraKeyNodesValidated
+	topoKeyTotal     = validators.ExtraKeyNodesTotal
 )
 
 // checkGKEGPUNICTopology is the case-1 arm of #2265: a GPU node pool provisioned
@@ -61,8 +59,8 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 	// the component is not asking for TCPXO, so node topology is not this check's
 	// business. Mirrors the sibling check's declaration gate.
 	if !validators.RecipeDeclares(ctx, tcpxoComponent) {
-		return validators.Skip(
-			tcpxoComponent + " not declared in recipe — GPUDirect TCPXO networking is inapplicable")
+		return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe,
+			tcpxoComponent+" not declared in recipe, so GPUDirect TCPXO networking is inapplicable")
 	}
 
 	// Coverage is recorded once the node list succeeded (a list error must not
@@ -168,7 +166,7 @@ func checkGKEGPUNICTopology(ctx *validators.Context) error {
 		return errors.New(errors.ErrCodeConflict, nicTopologyMsg(strings.Join(problems, "; "), remediationDisplacement))
 	}
 	if verifiedCount == 0 {
-		return validators.Skip(fmt.Sprintf("could not verify NIC topology on any of the %d a3 GPU node(s) (%d without a nic-info annotation)", totalNodes, len(unverified)))
+		return validators.SkipWithReason(validators.SkipReasonNoVerifiableNodes, fmt.Sprintf("could not verify NIC topology on any of the %d a3 GPU node(s) (%d without a nic-info annotation)", totalNodes, len(unverified)))
 	}
 	if len(unverified) > 0 || len(displacementUnverified) > 0 {
 		fmt.Printf("Verified NIC topology on %d a3 GPU node(s); %d node(s) have no nic-info annotation (unverified); %d node(s) displacement unverified (no north-interfaces annotation, or no GPU NIC Networks discovered to join against)\n", verifiedCount, len(unverified), len(displacementUnverified))

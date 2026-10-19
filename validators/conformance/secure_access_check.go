@@ -324,7 +324,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	// no spare capacity, or pass using capacity elsewhere without exercising
 	// Slurm's own isolation.
 	if recipeHasComponent(ctx, "slinky-slurm") {
-		return validators.Skip("Slurm-managed GPU allocation (slinky-slurm in recipe) is not mediated by the Kubernetes scheduler; on GPU-backed Slinky recipes slinky-slurm-gpu-access verifies Slurm's GPU access and isolation path instead")
+		return validators.SkipWithReason(validators.SkipReasonSlurmManagedGPUs, "Slurm-managed GPU allocation (slinky-slurm in recipe) is not mediated by the Kubernetes scheduler. On GPU-backed Slinky recipes slinky-slurm-gpu-access verifies Slurm's GPU access and isolation path instead")
 	}
 
 	// Bound ALL work to the check-local budget so one bounded namespace
@@ -374,6 +374,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	// configured policy in the artifacts.
 	recordRawTextArtifact(ctx, "GPU allocation policy", "",
 		fmt.Sprintf("configured policy: %s", policy))
+	validators.EmitExtraOrWarn(validators.GPUAllocationPolicyExtra(policy))
 	if verifyErr := verifyGPUAllocationPolicy(policy, mode); verifyErr != nil {
 		return verifyErr
 	}
@@ -382,6 +383,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	case policy == validatorv1.GPUAllocationPolicyDRAResourceClaim,
 		policy == validatorv1.GPUAllocationPolicyUnspecified && mode.DRAUsable:
 		recordRawTextArtifact(ctx, "Secure access mode", "", "mode exercised: DRA (gpu.nvidia.com ResourceClaim)")
+		validators.EmitExtraOrWarn(validators.GPUAllocationResolvedExtra(true, false))
 		return runDRASecureAccessTest(ctx, dynClient, mode.APIVersion)
 	case policy == validatorv1.GPUAllocationPolicyDevicePluginExtendedResource,
 		policy == validatorv1.GPUAllocationPolicyUnspecified && mode.DevicePluginUsable:
@@ -398,6 +400,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 				"kubectl get deviceclasses -o yaml", mode.ExtendedResourceDetail)
 		}
 		recordRawTextArtifact(ctx, "Secure access mode", "", "mode exercised: device plugin (nvidia.com/gpu limits)")
+		validators.EmitExtraOrWarn(validators.GPUAllocationResolvedExtra(false, false))
 		return runDevicePluginSecureAccessTest(ctx, mode.DevicePluginNodes)
 	default:
 		return errors.New(errors.ErrCodeUnavailable, fmt.Sprintf(

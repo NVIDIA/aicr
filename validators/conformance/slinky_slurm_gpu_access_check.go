@@ -45,11 +45,11 @@ func CheckSlinkySlurmGPUAccess(ctx *validators.Context) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
 	}
 	if !recipeHasComponent(ctx, slinkySlurmComponent) {
-		return validators.Skip("slinky-slurm component not present in recipe")
+		return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe, "slinky-slurm component not present in recipe")
 	}
 	criteria := ctx.ValidationInput.Criteria
 	if criteria.Service == recipe.CriteriaServiceKind {
-		return validators.Skip("recipe service is kind: Kind Slinky leaves run without task/cgroup, so there is no Slurm GPU device confinement to verify")
+		return validators.SkipWithReason(validators.SkipReasonUnsupportedService, "recipe service is kind: Kind Slinky leaves run without task/cgroup, so there is no Slurm GPU device confinement to verify")
 	}
 
 	namespace := resolveSlinkySlurmNamespace(ctx)
@@ -68,7 +68,7 @@ func CheckSlinkySlurmGPUAccess(ctx *validators.Context) error {
 				"recipe criteria require service=%s accelerator=%s, but no NodeSet pod has a positive nvidia.com/gpu request or limit",
 				criteria.Service, criteria.Accelerator))
 		}
-		return validators.Skip("no NodeSet pod has a positive nvidia.com/gpu request or limit and the recipe criteria are incomplete: no GPU-backed Slurm node to verify")
+		return validators.SkipWithReason(validators.SkipReasonNoGPUBackedNodeSet, "no NodeSet pod has a positive nvidia.com/gpu request or limit and the recipe criteria are incomplete: no GPU-backed Slurm node to verify")
 	}
 
 	loginPod, err := findReadySlinkyLoginPod(ctx, namespace)

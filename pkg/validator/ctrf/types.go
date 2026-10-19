@@ -38,20 +38,18 @@ const (
 	// StatusOther indicates an unexpected outcome (crash, OOM, timeout, etc.).
 	StatusOther = "other"
 
-	// ExtraLinePrefix marks a single stdout line as the transport for a check's
-	// structured TestResult.Extra map. An in-pod check emits one such line via
-	// EmitExtra; pkg/validator/job.ExtractResult parses the last one and strips
-	// all prefixed lines from the human-readable Stdout evidence.
+	// ExtraLinePrefix marks a stdout line carrying one JSON object for
+	// TestResult.Extra. pkg/validator/job.ExtractResult merges every such line,
+	// a later value winning per key, and strips them from Stdout.
 	//
 	// The prefix lives here (not in validators/ or pkg/validator/job) because it
 	// is the shared contract between the in-pod producer and the orchestrator
 	// consumer, and both packages import ctrf.
 	ExtraLinePrefix = "##AICR-EXTRA## "
 
-	// ProvenanceLinePrefix marks a single stdout line as the transport for a
-	// check's RuntimeProvenance record (one JSON object). Same producer/consumer
-	// contract as ExtraLinePrefix; the last valid line wins and every prefixed
-	// line is stripped from Stdout.
+	// ProvenanceLinePrefix marks a stdout line carrying one JSON
+	// RuntimeProvenance record. Every such line is stripped from Stdout, and
+	// the last valid one wins.
 	ProvenanceLinePrefix = "##AICR-PROVENANCE## "
 )
 
@@ -168,7 +166,9 @@ type Summary struct {
 	Stop int64 `json:"stop"`
 }
 
-// TestResult represents an individual test case result.
+// TestResult represents an individual test case result. Message and Stdout
+// are free-form text that minimal evidence redaction strips, while Extra is
+// the low-cardinality outcome data it keeps.
 type TestResult struct {
 	// Name is the name or title of the test case.
 	Name string `json:"name"`
@@ -189,22 +189,17 @@ type TestResult struct {
 	// Stdout contains standard output lines from test execution.
 	Stdout []string `json:"stdout,omitempty"`
 
-	// Extra carries structured, low-cardinality outcome data that survives the
-	// default "minimal" redaction policy (unlike Stdout and Message, which are
-	// free-form log text stripped by default). It mirrors the CTRF spec's
-	// `extra` object.
+	// Extra holds low-cardinality outcome data, mirroring the CTRF spec's
+	// extra object. Each value must be one of:
+	//   - a count ("2")
+	//   - a number rounded to one decimal place ("305.4", "+1.8")
+	//   - "true" or "false"
+	//   - a "v"-prefixed numeric version ("v25.3.0", "v25.3.0-rc.1")
+	//   - a closed-set code ("no-gpu-nodes")
 	//
-	// CONTRACT: values MUST take one of two low-cardinality shapes — a bare
-	// decimal count ("1", "2") or a closed-set enum code ("no-gpu-nodes",
-	// "delivered-artifact"). NEVER node names, IPs, hostnames, digests of
-	// cluster-specific content, or any operator-identifying free text; those
-	// belong in Stdout, which is redacted by default. The redact package enforces this at the
-	// publication boundary with a fail-closed key AND value allowlist: only
-	// listed keys survive, and only values matching the key's canonical shape
-	// (decimal count / member of that key's closed enum set — a kebab-case
-	// regex would still admit an arbitrary identifier) — so an identifier
-	// smuggled under an allowed key is dropped, not published (see
-	// pkg/evidence/redact).
+	// Never node names, IPs, hostnames, digests of cluster-specific content,
+	// or other operator-identifying text. Keys are the validators.ExtraKey*
+	// constants.
 	Extra map[string]string `json:"extra,omitempty"`
 
 	// RuntimeProvenance binds a derived-runtime measurement to the templates it

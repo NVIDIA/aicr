@@ -70,7 +70,7 @@
 //
 // Supported:
 //   - Major.Minor.Patch version components
-//   - Optional "v" prefix
+//   - Optional "v" prefix, recorded in Version.Prefixed
 //   - Flexible precision (1-3 components)
 //   - Numeric version components
 //   - Prerelease / build metadata after the numeric core (e.g., "1.2.3-alpha",
@@ -90,6 +90,10 @@
 //   - ErrTooManyComponents: More than 3 version components
 //   - ErrNonNumeric: Component contains non-numeric characters
 //   - ErrNegativeComponent: Component is a negative number
+//
+// ParseCanonical additionally returns ErrNotCanonical for any input that is not
+// exactly Version.String() with an optional "v" prefix, including one with a
+// prerelease or build suffix.
 //
 // For constant initialization, use MustParseVersion which panics on error:
 //

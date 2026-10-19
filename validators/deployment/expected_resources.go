@@ -506,9 +506,14 @@ func markUndispatched(
 	return failures
 }
 
+// verifyNamespacesActive returns a failure for each distinct namespace in refs
+// that is not Active, and publishes the active and expected counts.
 func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef) []string {
 	var failures []string
 	seen := make(map[string]bool, len(refs))
+	defer func() {
+		emitExtraOrWarn(namespaceCoverageExtra(len(seen)-len(failures), len(seen)))
+	}()
 
 	for _, ref := range refs {
 		if ref.Namespace == "" || seen[ref.Namespace] {
@@ -532,6 +537,13 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 	}
 
 	return failures
+}
+
+func namespaceCoverageExtra(active, expected int) map[string]string {
+	return map[string]string{
+		validators.ExtraKeyNamespacesActive:   strconv.Itoa(active),
+		validators.ExtraKeyNamespacesExpected: strconv.Itoa(expected),
+	}
 }
 
 // verifyGPUReadinessSignals runs the three Go-resident deep checks (nodewright,
@@ -735,6 +747,7 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 		// still be listed and asserted. See #1844.
 		fmt.Printf("  Nodewright: all Skyhook CRs suppressed by effective values (manifestFiles=%v); nothing to verify\n",
 			ref.ManifestFiles)
+		emitExtraOrWarn(nodewrightCoverageExtra(0, 0))
 		return nil
 	}
 
@@ -742,6 +755,10 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 	if err != nil {
 		return err
 	}
+
+	// complete is from the last status pass, or 0 if none ran.
+	complete := 0
+	defer func() { emitExtraOrWarn(nodewrightCoverageExtra(complete, len(expectedNames))) }()
 
 	// Poll two signals until both hold continuously for the stability window, or
 	// the budget elapses:
@@ -772,6 +789,7 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 				return resolveErr
 			}
 			if !registered {
+				complete = 0
 				return errors.New(errors.ErrCodeNotFound,
 					fmt.Sprintf("Nodewright: neither %s nor %s serves its resource yet (recipe declared %d CR(s))",
 						nodewrightGVR.GroupVersion(), legacySkyhookGVR.GroupVersion(), len(expectedNames)))
@@ -795,6 +813,7 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 				return nil
 			})
 			_ = g.Wait()
+			complete = len(expectedNames) - len(statusFailures)
 
 			if taintErr != nil {
 				// A transient node-list failure (e.g. an apiserver hiccup while
@@ -820,6 +839,13 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 			fmt.Printf("  Nodewright runtime-required taint (%s): cleared from all nodes (stable ≥%s)\n",
 				taintStrings(gate), gpuReadinessStabilityWindow)
 		})
+}
+
+func nodewrightCoverageExtra(complete, expected int) map[string]string {
+	return map[string]string{
+		validators.ExtraKeyNodewrightComplete: strconv.Itoa(complete),
+		validators.ExtraKeyNodewrightExpected: strconv.Itoa(expected),
+	}
 }
 
 // resolveNodewrightGVR returns the Nodewright CR resource the cluster serves,
@@ -1461,20 +1487,37 @@ func verifyDRAKubeletPluginReady(ctx *validators.Context, namespace string) erro
 		return ambiguousDRAKubeletPluginError(namespace, matches)
 	}
 
+	// last is the most recently observed DaemonSet. Nothing is published if
+	// none was found.
+	var last *appsv1.DaemonSet
+	defer func() {
+		if last != nil {
+			emitExtraOrWarn(draRolloutExtra(last.Status.NumberReady, last.Status.DesiredNumberScheduled))
+		}
+	}()
+
 	// Poll until the kubelet-plugin DaemonSet is fully rolled out continuously
 	// for the stability window, or the budget elapses. See pkg/defaults
 	// GPUReadiness* for sizing.
-	var healthyName string
 	return pollUntilStable(ctx,
 		fmt.Sprintf("DRA kubelet-plugin DaemonSet in namespace %s", namespace),
 		func() error {
-			name, probeErr := draKubeletPluginProbe(ctx, namespace)
-			healthyName = name
+			ds, probeErr := draKubeletPluginProbe(ctx, namespace)
+			if ds != nil {
+				last = ds
+			}
 			return probeErr
 		},
 		func() {
-			fmt.Printf("  DaemonSet %s/%s: healthy (stable ≥%s)\n", namespace, healthyName, gpuReadinessStabilityWindow)
+			fmt.Printf("  DaemonSet %s/%s: healthy (stable ≥%s)\n", namespace, last.Name, gpuReadinessStabilityWindow)
 		})
+}
+
+func draRolloutExtra(ready, desired int32) map[string]string {
+	return map[string]string{
+		validators.ExtraKeyDRAReady:   strconv.Itoa(int(ready)),
+		validators.ExtraKeyDRADesired: strconv.Itoa(int(desired)),
+	}
 }
 
 // listDRAKubeletPluginDaemonSets lists DaemonSets in the namespace and returns
@@ -1513,42 +1556,42 @@ func ambiguousDRAKubeletPluginError(namespace string, matches []appsv1.DaemonSet
 			len(matches), namespace, draKubeletPluginSuffix, formatNames(matchedNames)))
 }
 
-// draKubeletPluginProbe does one readiness pass: it locates the kubelet-plugin
-// DaemonSet by name suffix and reports nil (plus the DaemonSet name) when it is
-// fully rolled out, or an error describing the unhealthy/missing state. The
-// ambiguous (>1 match) case is caught fail-fast upstream in
-// verifyDRAKubeletPluginReady; the guard here only fires if a second matching
-// DaemonSet appears mid-poll.
-func draKubeletPluginProbe(ctx *validators.Context, namespace string) (string, error) {
+// draKubeletPluginProbe returns the kubelet-plugin DaemonSet in namespace and
+// a nil error if it is fully rolled out. The DaemonSet is nil unless exactly
+// one matches, and the error describes a missing, ambiguous, or unready
+// plugin.
+func draKubeletPluginProbe(ctx *validators.Context, namespace string) (*appsv1.DaemonSet, error) {
 	matches, seenNames, err := listDRAKubeletPluginDaemonSets(ctx, namespace)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	switch len(matches) {
 	case 0:
-		return "", errors.New(errors.ErrCodeNotFound,
+		return nil, errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("no kubelet-plugin DaemonSet (name suffix %q) found in namespace %s (DaemonSets in namespace: %s)",
 				draKubeletPluginSuffix, namespace, formatNames(seenNames)))
 	case 1:
 		// proceed
 	default:
-		return "", ambiguousDRAKubeletPluginError(namespace, matches)
+		// verifyDRAKubeletPluginReady fails fast on this before polling, so it
+		// fires only if a second match appears mid-poll.
+		return nil, ambiguousDRAKubeletPluginError(namespace, matches)
 	}
 
-	ds := matches[0]
+	ds := &matches[0]
 	if ds.Status.DesiredNumberScheduled == 0 || ds.Status.NumberReady == 0 {
-		return ds.Name, errors.New(errors.ErrCodeInternal,
+		return ds, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("DaemonSet %s/%s: no ready kubelet-plugin pods scheduled (%d/%d pods ready)",
 				namespace, ds.Name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled))
 	}
 	if ds.Status.NumberReady < ds.Status.DesiredNumberScheduled {
-		return ds.Name, errors.New(errors.ErrCodeInternal,
+		return ds, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("DaemonSet %s/%s: not healthy: %d/%d pods ready",
 				namespace, ds.Name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled))
 	}
 
-	return ds.Name, nil
+	return ds, nil
 }
 
 // recipeDeclaresRDMAFabric reports whether a network-operator ComponentRef
@@ -1644,10 +1687,10 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, e
 			// on top (pkg/validator/v1/job_plan.go), so an exhausted never-ready
 			// poll (every RDMA node cordoned for maintenance, or a rollout slower
 			// than the budget) has margin to unwind and reach the terminal emit
-			// before the Job's SIGKILL. parseExtraSentinels keeps the LAST valid
-			// sentinel, so a clean exit's terminal emit wins and this floor is
-			// the disclosure of record only on the rarer path where the process
-			// is still killed before reaching it.
+			// before the Job's SIGKILL. Sentinels merge key-wise with later
+			// values winning, so a clean exit's terminal emit overwrites this
+			// floor's counts, and the floor is the disclosure of record only
+			// when the process is still killed before reaching it.
 			// validated=0: nothing is certified mid-poll. Only the structured
 			// Extra is emitted eagerly (not the stdout enumeration) — the Extra is
 			// the piece that survives redaction into the signed bundle (#1951/
