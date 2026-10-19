@@ -590,7 +590,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "os",
-			Usage:    "Node OS family (ubuntu, rhel, cos, amazonlinux, ol, talos). Selects the per-OS pod configuration and service collector backend. Talos skips systemd hostPath mounts and uses the Kubernetes-API service backend.",
+			Usage:    "Node OS family (ubuntu, rhel, cos, amazonlinux, ol, talos, sles). Selects the per-OS pod configuration and service collector backend. Talos skips systemd hostPath mounts and uses the Kubernetes-API service backend.",
 			Sources:  cli.EnvVars("AICR_OS"),
 			Category: catAgentDeployment,
 		},

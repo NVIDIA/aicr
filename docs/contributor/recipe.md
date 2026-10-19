@@ -186,7 +186,7 @@ Criteria fields (see `pkg/recipe/criteria.go` `type Criteria`):
 | `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s`, `mk8s` |
 | `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `b300`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200` |
 | `intent` | `CriteriaIntentType` | `any` or empty | `training`, `inference` |
-| `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos` |
+| `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `sles` |
 | `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `kueue`, `nim`, `runai`, `slurm` |
 | `nodes` | int | `0` | any positive int |
 
@@ -341,7 +341,7 @@ spec:
   componentRefs: []   # optional
 ```
 
-Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-amazonlinux`,
+Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-amazonlinux`, `os-sles`,
 `platform-inference`, `platform-kubeflow`, `gpu-operator-nvidia-driver-cr`,
 `nvsentinel-observability`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
@@ -349,7 +349,8 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-amazonlinux`,
 `nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
 `nvsentinel-health-events-analyzer`, `npd`.
 
-The OS-scoped mixins (`os-ubuntu`, `os-talos`, `os-amazonlinux`) are mutually exclusive:
+The OS-scoped mixins (`os-ubuntu`, `os-talos`, `os-amazonlinux`, `os-sles`) are
+mutually exclusive:
 an overlay composes at most one of them.
 
 **Mixin rules:**

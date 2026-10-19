@@ -966,7 +966,7 @@ components:
       description: GPU node operating system.
       schema:
         type: string
-        enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
+        enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, sles, any]
         default: any
     Platform:
       name: platform
@@ -1268,7 +1268,7 @@ components:
         os:
           type: string
           description: Operating system family
-          enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
+          enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, sles, any]
           example: ubuntu
         platform:
           type: string

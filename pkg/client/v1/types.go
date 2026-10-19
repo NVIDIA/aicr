@@ -256,7 +256,7 @@ type AgentConfig struct {
 //   - Service: Kubernetes service flavor (eks/gke/aks/oke/ocp/kind/lke/bcm/metal3/rke2/generic/k0s/mk8s).
 //   - Accelerator: GPU model identifier (h100/h200/b200/b300/gb200/gb300/a100/l40/l40s/rtx-pro-6000/vr200).
 //   - Intent: workload intent (training/inference).
-//   - OS: worker-node OS (ubuntu/rhel/cos/amazonlinux/talos/ol).
+//   - OS: worker-node OS (ubuntu/rhel/cos/amazonlinux/talos/ol/sles).
 //   - Platform: framework overlay (dynamo/kubeflow/kueue/nim/runai/slurm).
 //   - Nodes: worker-node count hint (0 = unspecified).
 //
@@ -353,7 +353,8 @@ type RecipeRequest struct {
 	Intent string
 
 	// OS is the worker-node operating system. Mapped to CriteriaOS.
-	// Supported values: "ubuntu", "rhel", "cos", "amazonlinux", "talos", "ol".
+	// Supported values: "ubuntu", "rhel", "cos", "amazonlinux", "talos", "ol",
+	// "sles".
 	// Empty means "unspecified" — recipe resolution will not select
 	// OS-pinned leaf overlays (e.g., h100-eks-ubuntu-training,
 	// h100-gke-cos-training) and will fall back to the OS-agnostic
