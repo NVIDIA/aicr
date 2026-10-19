@@ -31,7 +31,7 @@ import (
 func checkCRENCCLAllReduceBW(ctx *validators.Context) error {
 	constraint, found := findPerformanceConstraint(ctx, checkNameCRENCCLAllReduceBW)
 	if !found {
-		return validators.Skip(fmt.Sprintf("no %s constraint in recipe", checkNameCRENCCLAllReduceBW))
+		return validators.SkipWithReason(validators.SkipReasonNoConstraint, fmt.Sprintf("no %s constraint in recipe", checkNameCRENCCLAllReduceBW))
 	}
 	actual, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
 	return classifyNCCLAllReduceBWResult(checkNameCRENCCLAllReduceBW, constraint, actual, passed, err)
@@ -43,7 +43,7 @@ func validateCRENcclAllReduceBw(
 ) (actual string, passed bool, err error) {
 
 	if ctx.ValidationInput == nil {
-		return skipMsgNCCLNoInput, true, nil
+		return ncclSkip(skipMsgNCCLNoInput, validators.SkipReasonNoValidationInput), true, nil
 	}
 	service := ctx.ValidationInput.Criteria.Service
 	accelerator := ctx.ValidationInput.Criteria.Accelerator
@@ -57,7 +57,8 @@ func validateCRENcclAllReduceBw(
 
 	entry, qualified := lookupCREQualification(checkNameCRENCCLAllReduceBW, service, accelerator)
 	if !qualified {
-		return fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkNameCRENCCLAllReduceBW, service, accelerator), true, nil
+		return ncclSkip(fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkNameCRENCCLAllReduceBW, service, accelerator),
+			validators.SkipReasonUnsupportedTarget), true, nil
 	}
 
 	gpuConfig, err := determineGPUConfig(ctx, service, accelerator, ctx.NodeSelector)

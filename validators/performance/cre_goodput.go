@@ -32,10 +32,10 @@ import (
 func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 	constraint, found := findPerformanceConstraint(ctx, checkNameCRETrainingGoodput)
 	if !found {
-		return validators.Skip(fmt.Sprintf("no %s constraint in recipe", checkNameCRETrainingGoodput))
+		return validators.SkipWithReason(validators.SkipReasonNoConstraint, fmt.Sprintf("no %s constraint in recipe", checkNameCRETrainingGoodput))
 	}
 	if ctx.ValidationInput == nil {
-		return validators.Skip("no validation input")
+		return validators.SkipWithReason(validators.SkipReasonNoValidationInput, "no validation input")
 	}
 	// Before the qualification lookup, so a constraint the check cannot honor
 	// is reported rather than hidden behind a skip on an unqualified
@@ -51,7 +51,7 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 		ctx.ValidationInput.Criteria.Accelerator,
 	)
 	if !qualified {
-		return validators.Skip(fmt.Sprintf(
+		return validators.SkipWithReason(validators.SkipReasonUnsupportedTarget, fmt.Sprintf(
 			"%s is not qualified on %s × %s",
 			checkNameCRETrainingGoodput,
 			ctx.ValidationInput.Criteria.Service,

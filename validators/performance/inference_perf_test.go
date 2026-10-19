@@ -3355,6 +3355,25 @@ func TestNodeGPUCount(t *testing.T) {
 	}
 }
 
+func TestInferenceResultExtra(t *testing.T) {
+	got := inferenceResultExtra(&inferenceResult{
+		throughput:      5012.345,
+		ttftP99Ms:       187.06,
+		status:          "ok",
+		gpuCount:        4,
+		gpuCountPerNode: 8,
+	})
+	want := map[string]string{
+		validators.ExtraKeyThroughputTokPerSec: "5012.3",
+		validators.ExtraKeyTTFTP99Ms:           "187.1",
+		validators.ExtraKeyGPUsBenchmarked:     "4",
+		validators.ExtraKeyGPUsPerNode:         "8",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("inferenceResultExtra() = %v, want %v", got, want)
+	}
+}
+
 func TestScaledThroughputThreshold(t *testing.T) {
 	tests := []struct {
 		name            string

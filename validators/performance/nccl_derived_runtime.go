@@ -54,7 +54,7 @@ const (
 	// delivered wiring.
 	runtimeSourceDelivered ncclRuntimeSource = "delivered-artifact"
 
-	extraKeyRuntimeSource = "runtimeSource"
+	extraKeyRuntimeSource = validators.ExtraKeyRuntimeSource
 )
 
 // runsGKETCPXOChecks reports whether the GKE preflight and the per-worker
@@ -615,9 +615,7 @@ func finalizeRuntimeProvenance(plan *benchmarkRuntimePlan, applied *unstructured
 // runtimeSource).
 func emitRuntimeSource(source ncclRuntimeSource) {
 	fmt.Printf("Benchmark runtime source: %s\n", source)
-	if err := validators.EmitExtra(runtimeProvenanceExtra(&benchmarkRuntimePlan{source: source})); err != nil {
-		slog.Warn("failed to emit runtime source extra", "error", err)
-	}
+	validators.EmitExtraOrWarn(runtimeProvenanceExtra(&benchmarkRuntimePlan{source: source}))
 }
 
 // emitRuntimeProvenance publishes the derived-runtime audit record after the

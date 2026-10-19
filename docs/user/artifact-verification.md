@@ -305,18 +305,17 @@ command verifies it against the Sigstore trusted root, recomputes every
 manifest-listed payload file's sha256 against `manifest.json`, and surfaces the predicate's fingerprint, phase
 counts, and BOM info.
 
-Bundles are **minimized by default**: the published `snapshot.yaml` keeps only
+Bundles are **minimized by default**. The published `snapshot.yaml` keeps only
 an allowlisted set of fields and the CTRF reports omit per-test stdout/message,
 keeping sensitive operational detail (node names, provider instance IDs, the
 node label/taint set, OS tuning, raw container logs) out of the published
-artifact. A small allowlisted set of structured, low-cardinality per-test
-outcome fields (the CTRF `extra` object — coverage counts and skip-reason codes,
-never node names or IPs) is *preserved* so a signed bundle still shows e.g. a
-reduced-node pass; see [Structured evidence that survives
-redaction](../contributor/validator.md#structured-evidence-that-survives-redaction).
-The predicate records the applied policy in a `redaction` block, which
-`aicr evidence verify` surfaces. Minimal bundles self-verify exactly like full
-ones — the digests cover whatever bytes shipped. Pass `--full` to
+artifact. Each test's CTRF `extra` keeps only allowlisted counts, measurements,
+thresholds, versions, allocation modes, and skip-reason codes, never node names
+or IPs, and is omitted when none remain. See [Structured evidence that survives
+redaction](../contributor/validator.md#structured-evidence-that-survives-redaction)
+for the keys. The predicate records the applied policy in a `redaction` block,
+which `aicr evidence verify` surfaces. Minimal bundles self-verify exactly like
+full ones, because the digests cover whatever bytes shipped. Pass `--full` to
 `aicr validate --emit-attestation` to publish the raw payloads instead.
 
 The positional argument is auto-detected. Prefer the committed **pointer file**,

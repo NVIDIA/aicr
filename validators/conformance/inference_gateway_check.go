@@ -56,7 +56,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	// Skip if the recipe does not include agentgateway (inference gateway component).
 	// Training clusters typically don't have an inference gateway.
 	if !recipeHasComponent(ctx, "agentgateway") {
-		return validators.Skip("agentgateway not in recipe — inference gateway check applies to inference clusters only")
+		return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe, "agentgateway not in recipe. The inference gateway check applies to inference clusters only")
 	}
 
 	dynClient, err := getDynamicClient(ctx)

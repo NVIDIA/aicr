@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -31,7 +32,8 @@ func checkInferencePerf(ctx *validators.Context) error {
 	ttftConstraint, hasTTFT := findPerformanceConstraint(ctx, "inference-ttft-p99")
 
 	if !hasThroughput && !hasTTFT {
-		return validators.Skip("no inference-throughput or inference-ttft-p99 constraint in recipe")
+		return validators.SkipWithReason(validators.SkipReasonNoConstraint,
+			"no inference-throughput or inference-ttft-p99 constraint in recipe")
 	}
 
 	// Fail closed on a malformed AICR_INFERENCE_PERF_* tuning knob before any
@@ -61,6 +63,7 @@ func checkInferencePerf(ctx *validators.Context) error {
 	// wants the same treatment adopts the same prefix.
 	fmt.Printf("RESULT: Inference throughput: %.2f tokens/sec\n", result.throughput)
 	fmt.Printf("RESULT: Inference TTFT p99: %.2f ms\n", result.ttftP99Ms)
+	validators.EmitExtraOrWarn(inferenceResultExtra(result))
 
 	if hasThroughput {
 		// The inference-perf evaluator fixes the direction and enforces
@@ -85,6 +88,10 @@ func checkInferencePerf(ctx *validators.Context) error {
 		// the GPUs actually benchmarked so a healthy per-GPU result on a
 		// partially occupied node is not failed against a full-node number.
 		effectiveThreshold := scaledThroughputThreshold(threshold, result.gpuCount, result.gpuCountPerNode)
+		validators.EmitExtraOrWarn(map[string]string{
+			validators.ExtraKeyThroughputThreshold: validators.FormatDecimal(threshold),
+			validators.ExtraKeyScaledThreshold:     validators.FormatDecimal(effectiveThreshold),
+		})
 		if effectiveThreshold != threshold {
 			fmt.Printf("Throughput gate scaled to %d of %d node GPUs benchmarked: %.0f → %.0f tokens/sec\n",
 				result.gpuCount, result.gpuCountPerNode, threshold, effectiveThreshold)
@@ -112,6 +119,7 @@ func checkInferencePerf(ctx *validators.Context) error {
 		if parseErr != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid TTFT threshold", parseErr)
 		}
+		validators.EmitExtraOrWarn(map[string]string{validators.ExtraKeyTTFTThresholdMs: validators.FormatDecimal(threshold)})
 		// For latency, "<= threshold" means actual must be at or below threshold (+ 10% tolerance)
 		if result.ttftP99Ms > threshold*1.1 {
 			return errors.New(errors.ErrCodeInternal,
@@ -122,6 +130,17 @@ func checkInferencePerf(ctx *validators.Context) error {
 	}
 
 	return nil
+}
+
+// inferenceResultExtra returns the Extra for result's metrics and the GPU
+// counts they were measured on.
+func inferenceResultExtra(result *inferenceResult) map[string]string {
+	return map[string]string{
+		validators.ExtraKeyThroughputTokPerSec: validators.FormatDecimal(result.throughput),
+		validators.ExtraKeyTTFTP99Ms:           validators.FormatDecimal(result.ttftP99Ms),
+		validators.ExtraKeyGPUsBenchmarked:     strconv.Itoa(result.gpuCount),
+		validators.ExtraKeyGPUsPerNode:         strconv.Itoa(result.gpuCountPerNode),
+	}
 }
 
 // scaledThroughputThreshold scales a full-node throughput gate down to the GPU

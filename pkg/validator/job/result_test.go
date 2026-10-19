@@ -997,10 +997,22 @@ func TestParseExtraSentinels(t *testing.T) {
 			wantExtra:   nil,
 		},
 		{
-			name:        "multiple sentinels: last wins",
+			name:        "repeated key: later value wins",
 			logs:        p + `{"skipReason":"stale"}` + "\nwork\n" + p + `{"skipReason":"nodes-busy"}`,
 			wantCleaned: "work",
 			wantExtra:   map[string]string{"skipReason": "nodes-busy"},
+		},
+		{
+			name:        "distinct keys across sentinels are merged",
+			logs:        p + `{"runtimeSource":"cluster-capability"}` + "\nwork\n" + p + `{"achievedGbps":"305.4","workerNodes":"2"}`,
+			wantCleaned: "work",
+			wantExtra:   map[string]string{"runtimeSource": "cluster-capability", "achievedGbps": "305.4", "workerNodes": "2"},
+		},
+		{
+			name:        "partial overlap keeps earlier keys and updates repeated ones",
+			logs:        p + `{"nodesValidated":"0","nodesTotal":"2"}` + "\n" + p + `{"draReady":"8"}` + "\n" + p + `{"nodesValidated":"2","nodesTotal":"2"}`,
+			wantCleaned: "",
+			wantExtra:   map[string]string{"nodesValidated": "2", "nodesTotal": "2", "draReady": "8"},
 		},
 		{
 			name:        "valid then malformed: last valid payload is kept",
