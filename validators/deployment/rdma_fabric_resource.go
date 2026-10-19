@@ -28,18 +28,20 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// Upstream device-plugin default resource prefixes, applied when a
-// NicClusterPolicy config entry omits resourcePrefix. Pinned here so a
-// prefix-less config still derives the exact resource name the plugin will
-// advertise:
+// Resource prefixes applied when a manifest does not carry one:
 //   - k8s-rdma-shared-dev-plugin defaults to "rdma"
 //     (github.com/Mellanox/k8s-rdma-shared-dev-plugin, rdmaHcaResourcePrefix).
-//   - sriov-network-device-plugin defaults to "intel.com"
-//     (github.com/k8snetworkplumbingwg/sriov-network-device-plugin,
+//   - sriov-network-device-plugin inside a NicClusterPolicy defaults to
+//     "intel.com" (github.com/k8snetworkplumbingwg/sriov-network-device-plugin,
 //     resourcePrefix).
+//   - SriovNetworkNodePolicy resources are prefixed by the SR-IOV Network
+//     Operator, which the network-operator chart pins to "nvidia.com"
+//     (sriov-network-operator.operator.resourcePrefix); the policy itself
+//     carries only resourceName.
 const (
 	rdmaSharedDefaultResourcePrefix = "rdma"
 	sriovDefaultResourcePrefix      = "intel.com"
+	sriovOperatorResourcePrefix     = "nvidia.com"
 )
 
 // nicClusterPolicyDoc is the minimal NicClusterPolicy shape the fabric gate
@@ -65,95 +67,129 @@ type nicResourceEntry struct {
 	ResourceName   string `json:"resourceName"`
 }
 
-// rdmaFabricResource derives the extended-resource name the recipe's
-// NicClusterPolicy actually advertises, by rendering the ComponentRef's
-// NicClusterPolicy manifest(s) with the component's effective values and
-// reading the device-plugin config embedded in the policy spec
-// (rdmaSharedDevicePlugin on AKS "rdma/hca_shared_devices_a" and OKE GB200
-// "nvidia.com/mlnxnics"; sriovDevicePlugin on OKE L40S "nvidia.com/mlnxnics").
+// sriovNetworkNodePolicyDoc is the minimal SriovNetworkNodePolicy shape the
+// fabric gate needs: the resource the SR-IOV Network Operator's device plugin
+// advertises for the VFs the policy creates.
+type sriovNetworkNodePolicyDoc struct {
+	Kind string `json:"kind"`
+	Spec struct {
+		ResourceName string `json:"resourceName"`
+	} `json:"spec"`
+}
+
+// rdmaFabricResources derives the extended-resource names the recipe's fabric
+// actually advertises, by rendering the relevant manifests with each
+// component's effective values and reading the resource declarations:
+//   - the device-plugin config embedded in ncpRef's NicClusterPolicy spec
+//     (rdmaSharedDevicePlugin on AKS "rdma/hca_shared_devices_a" and OKE GB200
+//     "nvidia.com/mlnxnics"; sriovDevicePlugin on OKE L40S "nvidia.com/mlnxnics");
+//   - every SriovNetworkNodePolicy any component in refs attaches (NVKE GB200,
+//     one resource per IB rail), which the NicClusterPolicy does not mention
+//     because the SR-IOV Network Operator owns that device plugin.
 //
-// Deriving the resource from the manifest — instead of hardcoding a
+// Deriving the resources from the manifests — instead of hardcoding a
 // per-provider constant — keeps verifyRDMAFabricReady polling for exactly what
 // the recipe's own fabric will publish, so a new provider or an edited
 // resourceName can never reintroduce the poll-forever mismatch (#2356 review).
-// TestRDMAFabricResource_AKSPin pins the AKS manifest's parse to
+// TestRDMAFabricResources_RealManifests pins the AKS manifest's parse to
 // helper.AKSRdmaSharedResource so this parser and the NCCL consumer's constant
 // cannot drift.
 //
 // Fail-closed contract: any read, render, or parse failure is an error, and so
-// are a marker-matched manifest set that declares no device-plugin resource or
-// one that declares more than one distinct resource (the gate polls a single
-// uniform resource across the cohort). "Could not derive the fabric resource"
-// must never degrade into "skip the fabric gate".
-func rdmaFabricResource(goCtx context.Context, ref recipe.ComponentRef) (string, error) {
-	values, err := recipe.GetComponentValuesWithContext(goCtx, nil, &ref)
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to resolve effective values for component %s", ref.Name), err)
-	}
-	chartName := ref.Chart
-	if chartName == "" {
-		chartName = ref.Name
-	}
-	renderInput := manifest.RenderInput{
-		ComponentName: ref.Name,
-		Namespace:     ref.Namespace,
-		ChartName:     chartName,
-		ChartVersion:  ref.Version,
-		Values:        values,
-	}
-
+// is a marker-matched manifest set that declares no resource at all. "Could not
+// derive the fabric resource" must never degrade into "skip the fabric gate".
+// The result is sorted and de-duplicated; the gate polls each entry.
+func rdmaFabricResources(goCtx context.Context, ncpRef recipe.ComponentRef, refs []recipe.ComponentRef) ([]string, error) {
 	resources := map[string]struct{}{}
-	for _, path := range ref.ManifestFiles {
+
+	for _, path := range ncpRef.ManifestFiles {
 		if !strings.Contains(path, nicClusterPolicyManifestMarker) {
 			continue
 		}
-		select {
-		case <-goCtx.Done():
-			return "", errors.Wrap(errors.ErrCodeTimeout,
-				"deployment validation canceled while deriving the RDMA fabric resource", goCtx.Err())
-		default:
-		}
-		content, err := recipe.GetManifestContentWithContext(goCtx, nil, path)
+		rendered, err := renderComponentManifest(goCtx, ncpRef, path, "NicClusterPolicy")
 		if err != nil {
-			return "", errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to load NicClusterPolicy manifest %s for component %s", path, ref.Name), err)
-		}
-		rendered, rerr := manifest.Render(content, renderInput)
-		if rerr != nil {
-			return "", errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to render NicClusterPolicy manifest %s for component %s", path, ref.Name), rerr)
+			return nil, err
 		}
 		found, perr := nicClusterPolicyResources(rendered)
 		if perr != nil {
-			return "", errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to parse NicClusterPolicy manifest %s for component %s", path, ref.Name), perr)
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to parse NicClusterPolicy manifest %s for component %s", path, ncpRef.Name), perr)
 		}
 		for _, r := range found {
 			resources[r] = struct{}{}
 		}
 	}
 
-	switch len(resources) {
-	case 1:
-		for r := range resources {
-			return r, nil
+	for _, ref := range refs {
+		for _, path := range ref.ManifestFiles {
+			if !strings.Contains(path, sriovNodePolicyManifestMarker) {
+				continue
+			}
+			rendered, err := renderComponentManifest(goCtx, ref, path, "SriovNetworkNodePolicy")
+			if err != nil {
+				return nil, err
+			}
+			found, perr := sriovNodePolicyResources(rendered)
+			if perr != nil {
+				return nil, errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("failed to parse SriovNetworkNodePolicy manifest %s for component %s", path, ref.Name), perr)
+			}
+			for _, r := range found {
+				resources[r] = struct{}{}
+			}
 		}
-		panic("unreachable")
-	case 0:
-		return "", errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("component %s declares a NicClusterPolicy manifest but no device-plugin "+
-				"resource could be derived from it; the RDMA fabric readiness gate cannot run", ref.Name))
-	default:
-		names := make([]string, 0, len(resources))
-		for r := range resources {
-			names = append(names, r)
-		}
-		sort.Strings(names)
-		return "", errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("component %s declares multiple distinct RDMA fabric resources %v; "+
-				"the readiness gate polls a single uniform resource and cannot arbitrate", ref.Name, names))
 	}
+
+	if len(resources) == 0 {
+		return nil, errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("component %s declares a NicClusterPolicy manifest but no device-plugin "+
+				"resource could be derived from it or from any SriovNetworkNodePolicy manifest; "+
+				"the RDMA fabric readiness gate cannot run", ncpRef.Name))
+	}
+	out := make([]string, 0, len(resources))
+	for r := range resources {
+		out = append(out, r)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// renderComponentManifest loads one of ref's manifest files from the embedded
+// data provider and renders it with the component's effective values. kind
+// names the expected document in error messages only.
+func renderComponentManifest(goCtx context.Context, ref recipe.ComponentRef, path, kind string) ([]byte, error) {
+	select {
+	case <-goCtx.Done():
+		return nil, errors.Wrap(errors.ErrCodeTimeout,
+			"deployment validation canceled while deriving the RDMA fabric resource", goCtx.Err())
+	default:
+	}
+	values, err := recipe.GetComponentValuesWithContext(goCtx, nil, &ref)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to resolve effective values for component %s", ref.Name), err)
+	}
+	chartName := ref.Chart
+	if chartName == "" {
+		chartName = ref.Name
+	}
+	content, err := recipe.GetManifestContentWithContext(goCtx, nil, path)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to load %s manifest %s for component %s", kind, path, ref.Name), err)
+	}
+	rendered, err := manifest.Render(content, manifest.RenderInput{
+		ComponentName: ref.Name,
+		Namespace:     ref.Namespace,
+		ChartName:     chartName,
+		ChartVersion:  ref.Version,
+		Values:        values,
+	})
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to render %s manifest %s for component %s", kind, path, ref.Name), err)
+	}
+	return rendered, nil
 }
 
 // nicClusterPolicyResources extracts every "<prefix>/<name>" extended resource
@@ -205,6 +241,32 @@ func nicClusterPolicyResources(rendered []byte) ([]string, error) {
 				out = append(out, r)
 			}
 		}
+	}
+	return out, nil
+}
+
+// sriovNodePolicyResources extracts the "<prefix>/<name>" extended resource of
+// every SriovNetworkNodePolicy document in rendered manifest content. Other
+// documents (the IPPool and SriovIBNetwork that accompany a policy) are
+// skipped; a policy without resourceName is an error (fail closed).
+func sriovNodePolicyResources(rendered []byte) ([]string, error) {
+	var out []string
+	for _, doc := range strings.Split(string(rendered), "\n---") {
+		if strings.TrimSpace(doc) == "" {
+			continue
+		}
+		var pol sriovNetworkNodePolicyDoc
+		if err := yaml.Unmarshal([]byte(doc), &pol); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to decode manifest document", err)
+		}
+		if pol.Kind != "SriovNetworkNodePolicy" {
+			continue
+		}
+		if pol.Spec.ResourceName == "" {
+			return nil, errors.New(errors.ErrCodeInternal,
+				"SriovNetworkNodePolicy declares no resourceName")
+		}
+		out = append(out, sriovOperatorResourcePrefix+"/"+pol.Spec.ResourceName)
 	}
 	return out, nil
 }

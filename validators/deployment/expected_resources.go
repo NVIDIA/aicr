@@ -78,11 +78,18 @@ const (
 	// converging", not "no fabric". OCP wires a different component
 	// (network-operator-ocp) and manifest name and so does not match; kind/talos
 	// enable network-operator without this manifest and are likewise (correctly)
-	// not gated. The polled resource name is derived per recipe from the matched
-	// manifest itself (rdmaFabricResource), so the gate always waits for exactly
-	// what this recipe's fabric advertises; the RDMA node label lives in
+	// not gated. The polled resource names are derived per recipe from the
+	// matched manifest itself and from any SriovNetworkNodePolicy manifests
+	// (rdmaFabricResources), so the gate always waits for exactly what this
+	// recipe's fabric advertises; the RDMA node label lives in
 	// validators/helper (PCIMellanoxPresentLabel).
 	nicClusterPolicyManifestMarker = "nic-cluster-policy"
+
+	// sriovNodePolicyManifestMarker selects the manifest files, in any
+	// component, that may carry SriovNetworkNodePolicy documents for the SR-IOV
+	// Network Operator (recipes/components/sriov-ib-networks/manifests/ on NVKE).
+	// Those policies, not the NicClusterPolicy, name the per-rail VF resources.
+	sriovNodePolicyManifestMarker = "sriov"
 )
 
 // The nodewright operator component and the container env carrying its
@@ -686,16 +693,22 @@ func enabledGPUReadinessProbes(ctx *validators.Context, refs []recipe.ComponentR
 			component: networkOperatorComponent,
 			signal:    "RDMA fabric resource allocatable across the Mellanox cohort",
 			run: func() error {
-				// The polled resource is derived from the recipe's own
+				// The polled resources are derived from the recipe's own
 				// NicClusterPolicy manifest (rdma/hca_shared_devices_a on AKS,
-				// nvidia.com/mlnxnics on OKE) so the gate waits for exactly what
+				// nvidia.com/mlnxnics on OKE) and SriovNetworkNodePolicy manifests
+				// (one per IB rail on NVKE) so the gate waits for exactly what
 				// this recipe's fabric advertises. A derivation failure fails the
 				// gate closed — never "skip the fabric".
-				fabricResource, ferr := rdmaFabricResource(ctx.Ctx, ref)
+				fabricResources, ferr := rdmaFabricResources(ctx.Ctx, ref, refs)
 				if ferr != nil {
 					return ferr
 				}
-				return verifyRDMAFabricReady(ctx, fabricResource)
+				for _, fabricResource := range fabricResources {
+					if err := verifyRDMAFabricReady(ctx, fabricResource); err != nil {
+						return err
+					}
+				}
+				return nil
 			},
 		})
 	}
@@ -1622,9 +1635,9 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 	return false
 }
 
-// verifyRDMAFabricReady blocks the deployment gate until the network operator's
-// shared RDMA device (fabricResource, derived from the recipe's own
-// NicClusterPolicy manifest by rdmaFabricResource) is allocatable in a uniform,
+// verifyRDMAFabricReady blocks the deployment gate until one fabric resource
+// (fabricResource, derived from the recipe's own NicClusterPolicy and
+// SriovNetworkNodePolicy manifests by rdmaFabricResources) is allocatable in a uniform,
 // positive count across every Mellanox RDMA-capable GPU node, held continuously for the
 // stability window.
 //
