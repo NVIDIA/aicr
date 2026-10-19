@@ -38,7 +38,7 @@ transitions:
       Patch releases of fixes. The webhook's ClusterRole and ClusterRoleBinding
       are replaced under the release-scoped name slinky-slurm-operator-webhook,
       which Helm and Flux do in place; an Argo CD application without pruning
-      leaves the old slurm-operator-webhook pair behind, unused. Nothing to
-      change on upgrade.
+      leaves the old slurm-operator-webhook pair behind, redundant: every
+      grant it carries is also in the new role. Nothing to change on upgrade.
     references:
       - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.2/CHANGELOG/CHANGELOG-1.2.md

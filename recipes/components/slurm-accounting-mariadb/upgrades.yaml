@@ -22,8 +22,11 @@ transitions:
   # from starts at 26.3.0 to match the mariadb-operator record, whose 25.x
   # origins resolve to blocked. It reaches past 26.10.0 because the restart
   # comes from AICR's digest pin, not from the chart: under AICR's values the
-  # mariadb-cluster chart renders the same MariaDB from 26.6.0 through 26.10.1
-  # apart from its chart label.
+  # mariadb-cluster chart renders the same MariaDB from 26.6.0, the first
+  # release AICR shipped, through 26.10.1 apart from its chart label. A
+  # database first reconciled by operator 26.3.0 was given that release's
+  # default, docker-registry1.mariadb.com/library/mariadb:11.8.5, so from
+  # there the restart also changes the registry and the patch version.
   #
   # verdict is manual and carries no verifiedBy: no UAT lane or KWOK run has
   # exercised this transition.
@@ -57,21 +60,28 @@ transitions:
               re-run this component's install.sh (helm) or helmfile apply
               (helmfile).
             reason: >-
-              Renders spec.image with the digest-pinned 11.8.8 image. The
-              engine version does not change, only the image reference, but
-              the operator rolls the pod for any spec.image change.
+              Renders spec.image with the digest-pinned 11.8.8 image, and the
+              operator rolls the pod for any spec.image change. From 26.6.0
+              only the image reference changes; a database first reconciled by
+              operator 26.3.0 also moves from
+              docker-registry1.mariadb.com/library/mariadb:11.8.5 to the 11.8.8
+              patch release.
           - id: await-accounting-restart
             description: >-
-              Wait for the pod to run the pinned image, then for it to be
-              ready: `kubectl wait pod mariadb-0 -n slurm --timeout=10m
-              --for=jsonpath='{.spec.containers[?(@.name=="mariadb")].image}'=mariadb:11.8.8@sha256:24e76fcec8c003a0362d0dd53f4806e7e79458d7fdeaf47437760e19496f5a9c`,
+              Read the image the upgrade rendered,
+              `IMG=$(kubectl get mariadb mariadb -n slurm -o jsonpath='{.spec.image}')`,
+              wait for the pod to run it, then for it to be ready:
+              `kubectl wait pod mariadb-0 -n slurm --timeout=10m
+              --for=jsonpath='{.spec.containers[?(@.name=="mariadb")].image}'=$IMG`,
               then `kubectl wait pod mariadb-0 -n slurm --timeout=10m
               --for=condition=Ready`.
             reason: >-
-              The operator deletes and recreates mariadb-0 to change its
-              image, so a wait that starts while the pod is gone fails with
-              not found; rerun it. Ready on the new pod is when slurmdbd can
-              reach its database again.
+              Reading the target from the MariaDB keeps this wait right after
+              a later patch or digest update of the pinned image. The operator
+              deletes and recreates mariadb-0 to change its image, so a wait
+              that starts while the pod is gone fails with not found; rerun
+              it. Ready on the new pod is when slurmdbd can reach its database
+              again.
       - steps:
           - id: sync-after-operator
             description: >-
@@ -79,21 +89,28 @@ transitions:
               mariadb-operator-crds and mariadb-operator releases reach
               26.10.1.
             reason: >-
-              Renders spec.image with the digest-pinned 11.8.8 image. The
-              engine version does not change, only the image reference, but
-              the operator rolls the pod for any spec.image change.
+              Renders spec.image with the digest-pinned 11.8.8 image, and the
+              operator rolls the pod for any spec.image change. From 26.6.0
+              only the image reference changes; a database first reconciled by
+              operator 26.3.0 also moves from
+              docker-registry1.mariadb.com/library/mariadb:11.8.5 to the 11.8.8
+              patch release.
           - id: await-accounting-restart
             description: >-
-              Wait for the pod to run the pinned image, then for it to be
-              ready: `kubectl wait pod mariadb-0 -n slurm --timeout=10m
-              --for=jsonpath='{.spec.containers[?(@.name=="mariadb")].image}'=mariadb:11.8.8@sha256:24e76fcec8c003a0362d0dd53f4806e7e79458d7fdeaf47437760e19496f5a9c`,
+              Read the image the upgrade rendered,
+              `IMG=$(kubectl get mariadb mariadb -n slurm -o jsonpath='{.spec.image}')`,
+              wait for the pod to run it, then for it to be ready:
+              `kubectl wait pod mariadb-0 -n slurm --timeout=10m
+              --for=jsonpath='{.spec.containers[?(@.name=="mariadb")].image}'=$IMG`,
               then `kubectl wait pod mariadb-0 -n slurm --timeout=10m
               --for=condition=Ready`.
             reason: >-
-              The operator deletes and recreates mariadb-0 to change its
-              image, so a wait that starts while the pod is gone fails with
-              not found; rerun it. Ready on the new pod is when slurmdbd can
-              reach its database again.
+              Reading the target from the MariaDB keeps this wait right after
+              a later patch or digest update of the pinned image. The operator
+              deletes and recreates mariadb-0 to change its image, so a wait
+              that starts while the pod is gone fails with not found; rerun
+              it. Ready on the new pod is when slurmdbd can reach its database
+              again.
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#mariadb-operator-2630-or-2660-to-26101
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md

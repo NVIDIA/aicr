@@ -2380,7 +2380,10 @@ digest changes that resource's `spec.image` string, so the operator restarts the
 database pod once and slurmdbd loses its database for the length of that
 restart. Plan the bundle upgrade for a quiet window. The pod then runs the build
 the digest names, which can be a newer rebuild of `11.8.8` than the one it last
-pulled.
+pulled. A database first reconciled by operator `26.3.0`, which AICR never
+shipped, was given that release's default,
+`docker-registry1.mariadb.com/library/mariadb:11.8.5`, so it also moves registry
+and patch version.
 
 Existing `MariaDB` resources keep their image. The operator writes its default
 into `spec.image` the first time it reconciles a resource, so every resource it
