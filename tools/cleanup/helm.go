@@ -17,6 +17,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
@@ -30,16 +32,27 @@ type helmRelease struct {
 	Namespace string `json:"namespace"`
 }
 
+// legacyComponents maps component names no longer in the registry, whose
+// releases older installs still carry, to the reason.
+var legacyComponents = map[string]string{
+	"skyhook-operator":       "nodewright-operator's former name",
+	"skyhook-customizations": "nodewright-customizations' former name",
+}
+
 // ownedReleaseNames returns every Helm release name a bundle can install for
-// a registry component.
+// a registry or legacyComponents component.
 func ownedReleaseNames() (map[string]bool, error) {
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "load component registry", err)
 	}
-	names := map[string]bool{}
+	components := slices.Collect(maps.Keys(legacyComponents))
 	for _, c := range registry.Components {
-		for _, name := range bundleinfo.ComponentReleaseNames(c.Name) {
+		components = append(components, c.Name)
+	}
+	names := map[string]bool{}
+	for _, component := range components {
+		for _, name := range bundleinfo.ComponentReleaseNames(component) {
 			names[name] = true
 		}
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 type helmCall struct {
@@ -123,12 +124,25 @@ func TestOwnedReleaseNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ownedReleaseNames() error = %v", err)
 	}
-	for _, name := range []string{"gpu-operator", "gpu-operator-pre", "gpu-operator-post", "gpu-operator-readiness"} {
+	for _, name := range []string{"gpu-operator", "gpu-operator-pre", "gpu-operator-post", "gpu-operator-readiness", "skyhook-operator"} {
 		if !got[name] {
 			t.Errorf("ownedReleaseNames() is missing %q", name)
 		}
 	}
 	if got["team-app"] {
 		t.Error(`ownedReleaseNames() contains "team-app", which no component installs`)
+	}
+
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	for name, reason := range legacyComponents {
+		if reason == "" {
+			t.Errorf("legacyComponents[%q] has no reason", name)
+		}
+		if registry.Get(name) != nil {
+			t.Errorf("legacyComponents lists %q, which is still a registry component", name)
+		}
 	}
 }
